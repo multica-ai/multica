@@ -188,16 +188,16 @@ export function IssueDetailScreen({ navigation, route }: Props) {
 
   const comments = useMemo(
     () => timeline
-      .filter((entry) => entry.type === "comment")
-      .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+      .filter((entry: TimelineEntry) => entry.type === "comment")
+      .sort((a: TimelineEntry, b: TimelineEntry) => a.created_at.localeCompare(b.created_at)),
     [timeline],
   );
   const commentThreads = useMemo(() => buildCommentThreads(comments), [comments]);
   const commentRows = useMemo(() => buildCommentRows(commentThreads), [commentThreads]);
   const activities = useMemo(
     () => timeline
-      .filter((entry) => entry.type === "activity")
-      .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+      .filter((entry: TimelineEntry) => entry.type === "activity")
+      .sort((a: TimelineEntry, b: TimelineEntry) => a.created_at.localeCompare(b.created_at)),
     [timeline],
   );
   const renderSectionHeader = useCallback(({ section }: { section: DetailSection }) => (
@@ -722,7 +722,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       ? []
       : activities.length === 0
         ? [{ key: "timeline-empty", node: <Text style={styles.emptyText}>No activity yet</Text> }]
-        : activities.map((entry) => ({
+        : activities.map((entry: TimelineEntry) => ({
           key: entry.id,
           node: (
             <TimelineItem

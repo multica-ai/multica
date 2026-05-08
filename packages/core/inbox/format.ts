@@ -16,6 +16,8 @@ export const inboxTypeLabels: Record<InboxItemType, string> = {
   agent_blocked: "Agent blocked",
   agent_completed: "Agent completed",
   reaction_added: "Reacted",
+  quick_create_done: "Quick create completed",
+  quick_create_failed: "Quick create failed",
 };
 
 export function formatInboxTimeAgo(dateStr: string, now = Date.now()): string {

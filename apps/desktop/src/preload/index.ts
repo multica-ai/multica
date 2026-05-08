@@ -1,7 +1,74 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
+import type { RuntimeConfigResult } from "../shared/runtime-config";
+
+// Synchronously fetch app metadata from main at preload time so the renderer
+// can pass it into CoreProvider during the initial render — the alternative
+// (async ipc.invoke) would race the ApiClient construction in initCore and
+// the first few HTTP requests would go out without X-Client-Version/OS.
+function fetchAppInfo(): { version: string; os: "macos" | "windows" | "linux" | "unknown" } {
+  try {
+    const info = ipcRenderer.sendSync("app:get-info") as
+      | { version: string; os: "macos" | "windows" | "linux" | "unknown" }
+      | undefined;
+    if (info && typeof info.version === "string" && typeof info.os === "string") return info;
+  } catch {
+    // fall through
+  }
+  // Fallback: derive OS from process.platform; version unknown.
+  const p = process.platform;
+  const os: "macos" | "windows" | "linux" | "unknown" =
+    p === "darwin" ? "macos" : p === "win32" ? "windows" : p === "linux" ? "linux" : "unknown";
+  return { version: "unknown", os };
+}
+
+function fetchRuntimeConfig(): RuntimeConfigResult {
+  try {
+    const result = ipcRenderer.sendSync("runtime-config:get") as RuntimeConfigResult | undefined;
+    if (result && typeof result === "object" && "ok" in result) return result;
+  } catch (err) {
+    return {
+      ok: false,
+      error: {
+        message: err instanceof Error ? err.message : String(err),
+      },
+    };
+  }
+  return { ok: false, error: { message: "Runtime config unavailable" } };
+}
+
+const appInfo = fetchAppInfo();
+const runtimeConfig = fetchRuntimeConfig();
+
+// Read the OS-preferred locale that main injected via additionalArguments.
+// Zero IPC, zero blocking — process.argv is populated before preload runs.
+function fetchSystemLocale(): string {
+  const arg = process.argv.find((a) => a.startsWith("--multica-locale="));
+  return arg?.split("=")[1] ?? "en";
+}
+
+const systemLocale = fetchSystemLocale();
 
 const desktopAPI = {
+  /** App version + normalized OS. Read once at preload time so the renderer
+   *  can use it synchronously when initializing the API client. */
+  appInfo,
+  /** OS-preferred locale (BCP 47), passed from main via additionalArguments.
+   *  Used by the renderer's LocaleAdapter as the system-preference signal. */
+  systemLocale,
+  /** Subscribe to OS language changes detected after boot. The renderer
+   *  decides whether to act (no-op when the user has an explicit Settings
+   *  choice). Returns an unsubscribe function. */
+  onSystemLocaleChanged: (callback: (locale: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, locale: string) =>
+      callback(locale);
+    ipcRenderer.on("locale:system-changed", handler);
+    return () => {
+      ipcRenderer.removeListener("locale:system-changed", handler);
+    };
+  },
+  /** Validated runtime endpoint config, or a blocking config error. */
+  runtimeConfig,
   /** Listen for auth token delivered via deep link */
   onAuthToken: (callback: (token: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, token: string) =>
@@ -25,6 +92,50 @@ const desktopAPI = {
   /** Toggle immersive mode — hide macOS traffic lights for full-screen modals */
   setImmersiveMode: (immersive: boolean) =>
     ipcRenderer.invoke("window:setImmersive", immersive),
+  /**
+   * Show a native OS notification for a new inbox item. Fired from the
+   * renderer only when the app is unfocused — in-focus feedback is the
+   * inbox sidebar's unread styling. `slug`, `itemId`, and `issueKey` are
+   * all round-tripped on click: slug pins routing to the source workspace
+   * (the user may switch workspaces before clicking the banner), itemId
+   * lets the renderer mark the row read, issueKey maps to the inbox URL
+   * param.
+   */
+  showNotification: (payload: {
+    slug: string;
+    itemId: string;
+    issueKey: string;
+    title: string;
+    body: string;
+  }) => ipcRenderer.send("notification:show", payload),
+  /**
+   * Update the OS dock / taskbar unread badge. Pass 0 to clear. Values
+   * above 99 render as "99+" (capping is handled in the main process).
+   */
+  setUnreadBadge: (count: number) =>
+    ipcRenderer.send("badge:set", Math.max(0, Math.floor(count))),
+  /**
+   * Subscribe to "open this inbox row" requests sent by the main process
+   * when the user clicks an OS notification banner. Returns an unsubscribe
+   * function. The payload echoes the `slug`, `itemId`, and `issueKey` that
+   * were passed to `showNotification`.
+   */
+  onInboxOpen: (
+    callback: (payload: {
+      slug: string;
+      itemId: string;
+      issueKey: string;
+    }) => void,
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      payload: { slug: string; itemId: string; issueKey: string },
+    ) => callback(payload);
+    ipcRenderer.on("inbox:open", handler);
+    return () => {
+      ipcRenderer.removeListener("inbox:open", handler);
+    };
+  },
 };
 
 interface DaemonStatus {
@@ -76,6 +187,8 @@ const daemonAPI = {
     ipcRenderer.on("daemon:log-line", handler);
     return () => ipcRenderer.removeListener("daemon:log-line", handler);
   },
+  openLogFile: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("daemon:open-log-file"),
 };
 
 const updaterAPI = {

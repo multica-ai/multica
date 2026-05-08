@@ -25,7 +25,12 @@ func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 // OAuth callback pages still carry a legacy token in memory.
 //
 // Sets X-User-ID and X-User-Email headers on the request for downstream handlers.
-func Auth(queries *db.Queries) func(http.Handler) http.Handler {
+//
+// patCache is optional; when non-nil, PAT lookups are cached with a short
+// TTL (auth.AuthCacheTTL). On cache hit the middleware skips both the DB
+// SELECT and the last_used_at UPDATE — last_used_at is therefore refreshed
+// at most once per TTL window per token, not per request.
+func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			candidates := extractTokenCandidates(r)

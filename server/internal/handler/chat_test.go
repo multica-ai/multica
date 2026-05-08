@@ -76,6 +76,104 @@ func cleanupChatTestFixture(t *testing.T, sessionID string) {
 	}
 }
 
+// TestCreateChatSession_Error_PrivateAgentNotOwned verifies that creating a
+// chat session with a private agent owned by another user returns 403.
+func TestCreateChatSession_Error_PrivateAgentNotOwned(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	// Create another user who will own the private agent.
+	var otherUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Private Agent Owner', 'private-owner@multica.ai')
+		RETURNING id
+	`).Scan(&otherUserID); err != nil {
+		t.Fatalf("setup: create other user: %v", err)
+	}
+	otherUserIDStr := util.UUIDToString(util.ParseUUID(otherUserID))
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, util.ParseUUID(otherUserIDStr)) })
+
+	// Add them to the workspace.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, util.ParseUUID(testWorkspaceID), util.ParseUUID(otherUserIDStr)); err != nil {
+		t.Fatalf("setup: add other member: %v", err)
+	}
+
+	// Create a private agent owned by the other user.
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent_runtime WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+	`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("setup: get runtime: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config
+		)
+		VALUES ($1, 'Other Private Agent', '', 'cloud', '{}'::jsonb, $2, 'private', 1, $3, '', '{}'::jsonb, '[]'::jsonb, '{}'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, runtimeID, otherUserIDStr).Scan(&agentID); err != nil {
+		t.Fatalf("setup: create private agent: %v", err)
+	}
+	agentIDStr := util.UUIDToString(util.ParseUUID(agentID))
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, util.ParseUUID(agentIDStr)) })
+
+	// testUserID tries to create a chat session with the other user's private agent → 403
+	req := newRequest("POST", "/api/chat/sessions?workspace_id="+testWorkspaceID, map[string]any{
+		"agent_id": agentIDStr,
+		"title":    "should fail",
+	})
+	req = withWorkspaceContext(req, testWorkspaceID)
+
+	rr := httptest.NewRecorder()
+	testHandler.CreateChatSession(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestCreateChatSession_Success_OwnPrivateAgent verifies that creating a chat
+// session with your own private agent succeeds.
+func TestCreateChatSession_Success_OwnPrivateAgent(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	// Create a private agent owned by testUserID.
+	agentID := createHandlerTestAgent(t, "My Private Chat Agent", []byte("{}"))
+
+	req := newRequest("POST", "/api/chat/sessions?workspace_id="+testWorkspaceID, map[string]any{
+		"agent_id": agentID,
+		"title":    "my chat",
+	})
+	req = withWorkspaceContext(req, testWorkspaceID)
+
+	rr := httptest.NewRecorder()
+	testHandler.CreateChatSession(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Cleanup the session.
+	var resp map[string]any
+	json.NewDecoder(rr.Body).Decode(&resp)
+	if sid, ok := resp["id"].(string); ok {
+		t.Cleanup(func() {
+			testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, util.ParseUUID(sid))
+		})
+	}
+}
+
 // TestDeleteChatMessage_Success_DeleteUserMessage tests successful deletion of a user message by the creator.
 func TestDeleteChatMessage_Success_DeleteUserMessage(t *testing.T) {
 	t.Parallel()

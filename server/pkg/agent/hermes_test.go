@@ -48,6 +48,87 @@ func TestExtractACPSessionIDInvalidJSON(t *testing.T) {
 	}
 }
 
+// ── resolveResumedSessionID ──
+
+func TestResolveResumedSessionIDMatching(t *testing.T) {
+	t.Parallel()
+	// Server confirms our requested id — happy resume path. No change.
+	got, changed := resolveResumedSessionID(
+		"ses_alpha",
+		json.RawMessage(`{"sessionId":"ses_alpha"}`),
+	)
+	if got != "ses_alpha" {
+		t.Errorf("got %q, want ses_alpha", got)
+	}
+	if changed {
+		t.Errorf("changed: got true, want false")
+	}
+}
+
+func TestResolveResumedSessionIDDifferent(t *testing.T) {
+	t.Parallel()
+	// Server returned a different id — local state was lost and the
+	// server silently spun up a new session. We trust the server.
+	got, changed := resolveResumedSessionID(
+		"ses_alpha",
+		json.RawMessage(`{"sessionId":"ses_beta_new"}`),
+	)
+	if got != "ses_beta_new" {
+		t.Errorf("got %q, want ses_beta_new", got)
+	}
+	if !changed {
+		t.Errorf("changed: got false, want true")
+	}
+}
+
+func TestResolveResumedSessionIDEmptyResponse(t *testing.T) {
+	t.Parallel()
+	// Older / non-conforming server returns no sessionId — defensive
+	// fallback to the requested id. This preserves the legacy happy
+	// path; a stale id will eventually fail downstream and be retried
+	// via the daemon's session-resume fallback (daemon.go).
+	for _, body := range []string{
+		`{}`,
+		`{"sessionId":""}`,
+		`not json`,
+	} {
+		got, changed := resolveResumedSessionID(
+			"ses_alpha",
+			json.RawMessage(body),
+		)
+		if got != "ses_alpha" {
+			t.Errorf("body=%q: got %q, want ses_alpha", body, got)
+		}
+		if changed {
+			t.Errorf("body=%q: changed: got true, want false", body)
+		}
+	}
+}
+
+// ── buildHermesSessionParams ──
+
+func TestBuildHermesSessionParamsIncludesModel(t *testing.T) {
+	t.Parallel()
+	params := buildHermesSessionParams("/tmp/work", "gpt-4o")
+	if params["cwd"] != "/tmp/work" {
+		t.Errorf("cwd: got %v, want /tmp/work", params["cwd"])
+	}
+	if _, ok := params["mcpServers"]; !ok {
+		t.Error("mcpServers missing")
+	}
+	if got, ok := params["model"].(string); !ok || got != "gpt-4o" {
+		t.Errorf("model: got %v, want gpt-4o", params["model"])
+	}
+}
+
+func TestBuildHermesSessionParamsOmitsEmptyModel(t *testing.T) {
+	t.Parallel()
+	params := buildHermesSessionParams("/tmp/work", "")
+	if _, present := params["model"]; present {
+		t.Error("expected model key to be omitted when model is empty")
+	}
+}
+
 // ── hermesToolNameFromTitle ──
 
 func TestHermesToolNameFromTitle(t *testing.T) {
@@ -268,6 +349,70 @@ func TestHermesClientHandleAgentMessage(t *testing.T) {
 	}
 }
 
+func TestHermesClientHandleSessionNotificationAgentMessage(t *testing.T) {
+	t.Parallel()
+
+	var got Message
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onMessage: func(msg Message) {
+			got = msg
+		},
+	}
+
+	line := `{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_1","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"Hello from Kiro"}}}}`
+	c.handleLine(line)
+
+	if got.Type != MessageText {
+		t.Errorf("type: got %v, want MessageText", got.Type)
+	}
+	if got.Content != "Hello from Kiro" {
+		t.Errorf("content: got %q, want %q", got.Content, "Hello from Kiro")
+	}
+}
+
+// Regression for #1997: Hermes ACP can flush queued session updates from
+// the previous turn (history replay on session/resume, or chunks queued
+// before our session/prompt response is sent) before the current turn
+// actually starts. Until acceptNotification gates them out, those updates
+// were appended to output and re-sent to the UI, making the previous
+// answer appear duplicated alongside the new one. The Backend wires the
+// gate to a streamingCurrentTurn flag set just before session/prompt; here
+// we exercise the gate directly on hermesClient.
+func TestHermesClientAcceptNotificationGate(t *testing.T) {
+	t.Parallel()
+
+	var (
+		got    []Message
+		accept bool
+	)
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		acceptNotification: func(string) bool {
+			return accept
+		},
+		onMessage: func(msg Message) {
+			got = append(got, msg)
+		},
+	}
+
+	replay := `{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_1","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"history should be ignored"}}}}`
+	c.handleLine(replay)
+	if len(got) != 0 {
+		t.Fatalf("expected gate to drop replay before turn starts, got %+v", got)
+	}
+
+	accept = true
+	live := `{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_1","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"current"}}}}`
+	c.handleLine(live)
+	if len(got) != 1 {
+		t.Fatalf("expected current-turn update to pass the gate, got %+v", got)
+	}
+	if got[0].Content != "current" {
+		t.Fatalf("got content %q, want \"current\"", got[0].Content)
+	}
+}
+
 func TestHermesClientHandleAgentThought(t *testing.T) {
 	t.Parallel()
 
@@ -315,6 +460,62 @@ func TestHermesClientHandleToolCallStart(t *testing.T) {
 	}
 	if cmd, ok := got.Input["command"].(string); !ok || cmd != "ls -la" {
 		t.Errorf("input.command: got %v", got.Input["command"])
+	}
+}
+
+func TestHermesClientHandleSessionNotificationToolCall(t *testing.T) {
+	t.Parallel()
+
+	var got []Message
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onMessage: func(msg Message) {
+			got = append(got, msg)
+		},
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_1","update":{"type":"ToolCall","toolCallId":"tc-kiro","name":"Shell","status":"pending","parameters":{"command":"pwd"}}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_1","update":{"type":"ToolCallUpdate","toolCallId":"tc-kiro","status":"completed","name":"Shell","output":"/tmp/project\n"}}}`)
+
+	if len(got) != 2 {
+		t.Fatalf("expected [ToolUse, ToolResult], got %+v", got)
+	}
+	if got[0].Type != MessageToolUse {
+		t.Errorf("first message: got %v, want MessageToolUse", got[0].Type)
+	}
+	if got[0].Tool != "Shell" {
+		t.Errorf("first tool: got %q, want Shell", got[0].Tool)
+	}
+	if cmd, _ := got[0].Input["command"].(string); cmd != "pwd" {
+		t.Errorf("first input.command: got %v, want pwd", got[0].Input["command"])
+	}
+	if got[1].Type != MessageToolResult {
+		t.Errorf("second message: got %v, want MessageToolResult", got[1].Type)
+	}
+	if got[1].Output != "/tmp/project\n" {
+		t.Errorf("second output: got %q", got[1].Output)
+	}
+}
+
+func TestHermesClientHandleSessionNotificationTurnEnd(t *testing.T) {
+	t.Parallel()
+
+	var got hermesPromptResult
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onPromptDone: func(result hermesPromptResult) {
+			got = result
+		},
+	}
+
+	line := `{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_1","update":{"type":"TurnEnd","stopReason":"end_turn","usage":{"inputTokens":3,"outputTokens":4,"cachedReadTokens":1}}}}`
+	c.handleLine(line)
+
+	if got.stopReason != "end_turn" {
+		t.Errorf("stopReason: got %q, want end_turn", got.stopReason)
+	}
+	if got.usage.InputTokens != 3 || got.usage.OutputTokens != 4 || got.usage.CacheReadTokens != 1 {
+		t.Errorf("usage: got %+v", got.usage)
 	}
 }
 

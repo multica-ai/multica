@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
+import { useAuthStore } from "@multica/core/auth";
 import {
   workspaceKeys,
   workspaceListOptions,
@@ -12,10 +13,10 @@ import {
   resolvePostAuthDestination,
   useHasOnboarded,
 } from "@multica/core/paths";
-import { useAuthStore } from "@multica/core/auth";
 import { useNavigation } from "../navigation";
 import { useLogout } from "../auth";
 import { DragStrip } from "../platform";
+import { useT } from "../i18n";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -40,37 +41,17 @@ export interface InvitePageProps {
  * layered on by the desktop overlay; web just renders the page directly.
  */
 export function InvitePage({ invitationId, onBack }: InvitePageProps) {
+  const { t } = useT("invite");
   const { push } = useNavigation();
   const qc = useQueryClient();
-  const user = useAuthStore((s) => s.user);
-  const authLoading = useAuthStore((s) => s.isLoading);
   const [accepting, setAccepting] = useState(false);
   const [declining, setDeclining] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<"accepted" | "declined" | null>(null);
 
   const { data: invitation, isLoading, error: fetchError } = useQuery({
-    queryKey: ["invitation", invitationId, user?.id ?? "public"],
-    queryFn: async () => {
-      try {
-        const link = await api.validateInviteLink(invitationId);
-        return {
-          ...link,
-          invite_method: "link" as const,
-          invitee_email: "",
-          invitee_user_id: null,
-        };
-      } catch (linkError) {
-        if (!user) throw linkError;
-        const emailInvite = await api.getInvitation(invitationId);
-        return {
-          ...emailInvite,
-          invite_method: "email" as const,
-          max_uses: 1,
-          used_count: emailInvite.status === "pending" ? 0 : 1,
-        };
-      }
-    },
+    queryKey: ["invitation", invitationId],
+    queryFn: () => api.getInvitation(invitationId),
   });
 
   // Workspace list for the fallback "Go to dashboard" destinations. The invite
@@ -80,18 +61,16 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
   const fallbackDest = resolvePostAuthDestination(wsList, hasOnboarded);
 
   const handleAccept = async () => {
-    if (!user) {
-      push(`${paths.login()}?next=${encodeURIComponent(paths.invite(invitationId))}`);
-      return;
-    }
     setAccepting(true);
     setError(null);
     try {
-      if (invitation?.invite_method === "email") {
-        await api.acceptInvitation(invitationId);
-      } else {
-        await api.acceptInviteLink(invitationId);
-      }
+      await api.acceptInvitation(invitationId);
+      // Belt to the backend's braces: AcceptInvitation already sets
+      // onboarded_at inside the same transaction, but explicitly calling
+      // markOnboardingComplete + refreshMe here keeps local user state in
+      // sync immediately so downstream guards don't see stale `null`.
+      await api.markOnboardingComplete({ completion_path: "invite_accept" });
+      await useAuthStore.getState().refreshMe();
       setDone("accepted");
       // Fetch the refreshed workspace list so we know the joined workspace's slug.
       const nextList = await qc.fetchQuery({
@@ -107,14 +86,13 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
         : fallbackDest;
       setTimeout(() => push(dest), 1000);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to accept invitation");
+      setError(e instanceof Error ? e.message : t(($) => $.errors.accept_failed));
     } finally {
       setAccepting(false);
     }
   };
 
   const handleDecline = async () => {
-    if (invitation?.invite_method !== "email") return;
     setDeclining(true);
     setError(null);
     try {
@@ -122,13 +100,13 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
       setDone("declined");
       qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to decline invitation");
+      setError(e instanceof Error ? e.message : t(($) => $.errors.decline_failed));
     } finally {
       setDeclining(false);
     }
   };
 
-  if (isLoading || authLoading) {
+  if (isLoading) {
     return (
       <InviteShell onBack={onBack}>
         <Card className="w-full max-w-md">
@@ -151,12 +129,12 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <X className="h-6 w-6 text-muted-foreground" />
             </div>
-            <h2 className="text-lg font-semibold">Invitation not found</h2>
+            <h2 className="text-lg font-semibold">{t(($) => $.not_found.title)}</h2>
             <p className="text-sm text-muted-foreground text-center">
-              This invitation may have expired, been revoked, or doesn&apos;t belong to your account.
+              {t(($) => $.not_found.description)}
             </p>
             <Button variant="outline" onClick={() => push(fallbackDest)}>
-              Go to dashboard
+              {t(($) => $.not_found.go_to_dashboard)}
             </Button>
           </CardContent>
         </Card>
@@ -172,8 +150,12 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
               <Check className="h-6 w-6 text-primary" />
             </div>
-            <h2 className="text-lg font-semibold">You joined {invitation.workspace_name}!</h2>
-            <p className="text-sm text-muted-foreground">Redirecting to workspace...</p>
+            <h2 className="text-lg font-semibold">
+              {t(($) => $.accepted.title, { workspace_name: invitation.workspace_name })}
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              {t(($) => $.accepted.redirecting)}
+            </p>
           </CardContent>
         </Card>
       </InviteShell>
@@ -185,10 +167,10 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
       <InviteShell onBack={onBack}>
         <Card className="w-full max-w-md">
           <CardContent className="flex flex-col items-center gap-4 py-12">
-            <h2 className="text-lg font-semibold">Invitation declined</h2>
-            <p className="text-sm text-muted-foreground">You won&apos;t be added to this workspace.</p>
+            <h2 className="text-lg font-semibold">{t(($) => $.declined.title)}</h2>
+            <p className="text-sm text-muted-foreground">{t(($) => $.declined.description)}</p>
             <Button variant="outline" onClick={() => push(fallbackDest)}>
-              Go to dashboard
+              {t(($) => $.declined.go_to_dashboard)}
             </Button>
           </CardContent>
         </Card>
@@ -197,8 +179,6 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
   }
 
   const isExpired = invitation.status !== "pending";
-  const isLinkInvite = invitation.invite_method === "link";
-  const isLinkInvalid = isLinkInvite && invitation.status !== "valid";
   const isAlreadyHandled = invitation.status === "accepted" || invitation.status === "declined";
 
   return (
@@ -211,50 +191,44 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
 
           <div className="text-center space-y-2">
             <h2 className="text-xl font-semibold">
-              Join {invitation.workspace_name ?? "workspace"}
+              {t(($) => $.main.join_title, {
+                workspace_name: invitation.workspace_name ?? t(($) => $.main.fallback_workspace_name),
+              })}
             </h2>
             <p className="text-sm text-muted-foreground">
-              {invitation.inviter_name || invitation.inviter_email ? (
-                <>
-                  <strong>{invitation.inviter_name || invitation.inviter_email}</strong>{" "}
-                  invited you to join as {invitation.role === "admin" ? "an admin" : "a member"}.
-                </>
-              ) : (
-                <>You can join as {invitation.role === "admin" ? "an admin" : "a member"}.</>
-              )}
+              <strong>{invitation.inviter_name || invitation.inviter_email}</strong>{" "}
+              {invitation.role === "admin"
+                ? t(($) => $.main.invited_role_admin)
+                : t(($) => $.main.invited_role_member)}
             </p>
           </div>
 
           {isAlreadyHandled ? (
             <div className="text-sm text-muted-foreground">
-              This invitation has already been {invitation.status}.
+              {invitation.status === "accepted"
+                ? t(($) => $.main.already_handled_accepted)
+                : t(($) => $.main.already_handled_declined)}
             </div>
-          ) : isLinkInvalid ? (
+          ) : isExpired ? (
             <div className="text-sm text-muted-foreground">
-              This invite link is {invitation.status.replace("_", " ")}.
-            </div>
-          ) : !isLinkInvite && isExpired ? (
-            <div className="text-sm text-muted-foreground">
-              This invitation has expired.
+              {t(($) => $.main.expired)}
             </div>
           ) : (
             <div className="flex gap-3 w-full">
-              {!isLinkInvite && (
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={handleDecline}
-                  disabled={accepting || declining}
-                >
-                  {declining ? "Declining..." : "Decline"}
-                </Button>
-              )}
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={handleDecline}
+                disabled={accepting || declining}
+              >
+                {declining ? t(($) => $.main.declining) : t(($) => $.main.decline)}
+              </Button>
               <Button
                 className="flex-1"
                 onClick={handleAccept}
                 disabled={accepting || declining}
               >
-                {accepting ? "Joining..." : user ? "Accept & Join" : "Log in to join"}
+                {accepting ? t(($) => $.main.joining) : t(($) => $.main.accept)}
               </Button>
             </div>
           )}
@@ -280,8 +254,8 @@ function InviteShell({
   onBack?: () => void;
   children: ReactNode;
 }) {
+  const { t } = useT("invite");
   const logout = useLogout();
-  const user = useAuthStore((s) => s.user);
   return (
     <div className="relative flex min-h-svh flex-col bg-background">
       <DragStrip />
@@ -293,20 +267,18 @@ function InviteShell({
           onClick={onBack}
         >
           <ArrowLeft />
-          Back
+          {t(($) => $.header.back)}
         </Button>
       )}
-      {user && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="absolute top-16 right-12 text-muted-foreground hover:text-destructive"
-          onClick={logout}
-        >
-          <LogOut />
-          Log out
-        </Button>
-      )}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="absolute top-16 right-12 text-muted-foreground hover:text-destructive"
+        onClick={logout}
+      >
+        <LogOut />
+        {t(($) => $.header.log_out)}
+      </Button>
       <div className="flex flex-1 flex-col items-center justify-center px-6 pb-12">
         {children}
       </div>

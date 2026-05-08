@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -67,6 +69,13 @@ var agentTasksCmd = &cobra.Command{
 	RunE:  runAgentTasks,
 }
 
+var agentAvatarCmd = &cobra.Command{
+	Use:   "avatar <id>",
+	Short: "Upload an avatar image for an agent",
+	Args:  exactArgs(1),
+	RunE:  runAgentAvatar,
+}
+
 // Agent skills subcommands.
 
 var agentSkillsCmd = &cobra.Command{
@@ -96,6 +105,7 @@ func init() {
 	agentCmd.AddCommand(agentArchiveCmd)
 	agentCmd.AddCommand(agentRestoreCmd)
 	agentCmd.AddCommand(agentTasksCmd)
+	agentCmd.AddCommand(agentAvatarCmd)
 	agentCmd.AddCommand(agentSkillsCmd)
 
 	agentSkillsCmd.AddCommand(agentSkillsListCmd)
@@ -116,6 +126,9 @@ func init() {
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
 	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
 	agentCreateCmd.Flags().String("custom-args", "", "Custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
+	agentCreateCmd.Flags().String("custom-env", "", "Custom environment variables as JSON object, e.g. '{\"KEY\":\"value\"}'. Treated as secret material — never logged by the CLI, but values passed on the command line are visible to shell history and 'ps'; prefer --custom-env-stdin or --custom-env-file for real secrets. Pass '{}' to set an empty map.")
+	agentCreateCmd.Flags().Bool("custom-env-stdin", false, "Read the --custom-env JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --custom-env and --custom-env-file.")
+	agentCreateCmd.Flags().String("custom-env-file", "", "Read the --custom-env JSON object from a file path (suggested mode: 0600). Mutually exclusive with --custom-env and --custom-env-stdin.")
 	agentCreateCmd.Flags().String("visibility", "private", "Visibility: private or workspace")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -128,6 +141,9 @@ func init() {
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
 	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
 	agentUpdateCmd.Flags().String("custom-args", "", "New custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
+	agentUpdateCmd.Flags().String("custom-env", "", "New custom environment variables as JSON object, e.g. '{\"KEY\":\"value\"}'. Treated as secret material — never logged by the CLI, but values passed on the command line are visible to shell history and 'ps'; prefer --custom-env-stdin or --custom-env-file for real secrets. Pass '{}' to clear the map; omit the flag to leave it unchanged.")
+	agentUpdateCmd.Flags().Bool("custom-env-stdin", false, "Read the new --custom-env JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --custom-env and --custom-env-file.")
+	agentUpdateCmd.Flags().String("custom-env-file", "", "Read the new --custom-env JSON object from a file path (suggested mode: 0600). Mutually exclusive with --custom-env and --custom-env-stdin.")
 	agentUpdateCmd.Flags().String("visibility", "", "New visibility: private or workspace")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks")
@@ -141,6 +157,10 @@ func init() {
 
 	// agent tasks
 	agentTasksCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// agent avatar
+	agentAvatarCmd.Flags().String("file", "", "Path to the avatar image file (required)")
+	agentAvatarCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent skills list
 	agentSkillsListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -321,13 +341,14 @@ func runAgentGet(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, agent)
 	}
 
-	headers := []string{"ID", "NAME", "STATUS", "RUNTIME", "VISIBILITY", "DESCRIPTION"}
+	headers := []string{"ID", "NAME", "STATUS", "RUNTIME", "VISIBILITY", "AVATAR_URL", "DESCRIPTION"}
 	rows := [][]string{{
 		strVal(agent, "id"),
 		strVal(agent, "name"),
 		strVal(agent, "status"),
 		strVal(agent, "runtime_mode"),
 		strVal(agent, "visibility"),
+		strVal(agent, "avatar_url"),
 		strVal(agent, "description"),
 	}}
 	cli.PrintTable(os.Stdout, headers, rows)
@@ -369,11 +390,16 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if cmd.Flags().Changed("custom-args") {
 		v, _ := cmd.Flags().GetString("custom-args")
-		var ca []string
-		if err := json.Unmarshal([]byte(v), &ca); err != nil {
-			return fmt.Errorf("--custom-args must be a valid JSON array: %w", err)
+		ca, err := parseCustomArgs(v)
+		if err != nil {
+			return err
 		}
 		body["custom_args"] = ca
+	}
+	if ce, ok, err := resolveCustomEnv(cmd); err != nil {
+		return err
+	} else if ok {
+		body["custom_env"] = ce
 	}
 	if cmd.Flags().Changed("model") {
 		v, _ := cmd.Flags().GetString("model")
@@ -438,11 +464,16 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if cmd.Flags().Changed("custom-args") {
 		v, _ := cmd.Flags().GetString("custom-args")
-		var ca []string
-		if err := json.Unmarshal([]byte(v), &ca); err != nil {
-			return fmt.Errorf("--custom-args must be a valid JSON array: %w", err)
+		ca, err := parseCustomArgs(v)
+		if err != nil {
+			return err
 		}
 		body["custom_args"] = ca
+	}
+	if ce, ok, err := resolveCustomEnv(cmd); err != nil {
+		return err
+	} else if ok {
+		body["custom_env"] = ce
 	}
 	if cmd.Flags().Changed("model") {
 		v, _ := cmd.Flags().GetString("model")
@@ -462,7 +493,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --visibility, --status, or --max-concurrent-tasks")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --custom-env (or --custom-env-stdin, --custom-env-file), --visibility, --status, or --max-concurrent-tasks")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -561,6 +592,86 @@ func runAgentTasks(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runAgentAvatar(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	filePath, _ := cmd.Flags().GetString("file")
+	if filePath == "" {
+		return fmt.Errorf("--file is required")
+	}
+
+	// Validate file exists.
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return fmt.Errorf("file not found: %w", err)
+	}
+
+	// Validate extension.
+	ext := strings.ToLower(filepath.Ext(filePath))
+	validExts := map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true}
+	if !validExts[ext] {
+		return fmt.Errorf("unsupported file format %q: must be .png, .jpg, .jpeg, .gif, or .webp", ext)
+	}
+
+	// Client-side size guard: reject files > 5MB.
+	const maxSize = 5 << 20 // 5 MB
+	if info.Size() > maxSize {
+		return fmt.Errorf("file too large: %d bytes (max 5MB)", info.Size())
+	}
+
+	fileData, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("read file: %w", err)
+	}
+
+	// Defensive re-check: guard against TOCTOU race where the file
+	// was swapped between stat and read.
+	if len(fileData) > maxSize {
+		return fmt.Errorf("file too large: %d bytes (max 5MB)", len(fileData))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Agent existence pre-check.
+	var agent map[string]any
+	if err := client.GetJSON(ctx, "/api/agents/"+args[0], &agent); err != nil {
+		return fmt.Errorf("get agent: %w", err)
+	}
+
+	id, url, err := client.UploadFileWithURL(ctx, fileData, filePath)
+	if err != nil {
+		return fmt.Errorf("upload avatar: %w", err)
+	}
+
+	body := map[string]any{"avatar_url": url}
+	var result map[string]any
+	if err := client.PutJSON(ctx, "/api/agents/"+args[0], body, &result); err != nil {
+		return fmt.Errorf("update agent avatar: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, map[string]any{
+			"id":         id,
+			"agent_id":   args[0],
+			"avatar_url": url,
+		})
+	}
+
+	headers := []string{"ID", "AGENT_ID", "AVATAR_URL"}
+	rows := [][]string{{
+		id,
+		args[0],
+		url,
+	}}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Agent skills subcommands
 // ---------------------------------------------------------------------------
@@ -642,6 +753,112 @@ func runAgentSkillsSet(cmd *cobra.Command, args []string) error {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// parseCustomEnv parses the --custom-env flag value (a JSON object literal)
+// into a string map suitable for the request body. The clear-all signal is
+// the explicit JSON object "{}"; empty or whitespace-only input is rejected
+// because for the stdin/file channels it almost always means an upstream
+// failure (missing file, unset pipe, set -o pipefail off) rather than a
+// deliberate clear. Treating it as "clear" silently wipes secrets.
+//
+// The payload is treated as secret material: parse errors never wrap the
+// underlying json error, because json.SyntaxError / UnmarshalTypeError can
+// surface short fragments of the input on some malformed inputs.
+func parseCustomEnv(raw string) (map[string]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, fmt.Errorf("--custom-env: empty input; pass '{}' to clear")
+	}
+	var ce map[string]string
+	if err := json.Unmarshal([]byte(raw), &ce); err != nil {
+		return nil, fmt.Errorf("--custom-env must be a valid JSON object of string keys and string values")
+	}
+	if ce == nil {
+		ce = map[string]string{}
+	}
+	return ce, nil
+}
+
+// parseCustomArgs parses the --custom-args flag value (a JSON array of
+// CLI argument strings). The error message is content-free for the same
+// reason as parseCustomEnv: although custom_args is not a dedicated
+// secret channel today, it routinely carries values like "--api-key=…"
+// for runtime providers, and json.Unmarshal errors can echo short
+// fragments of malformed input.
+func parseCustomArgs(raw string) ([]string, error) {
+	var ca []string
+	if err := json.Unmarshal([]byte(raw), &ca); err != nil {
+		return nil, fmt.Errorf("--custom-args must be a valid JSON array of strings")
+	}
+	return ca, nil
+}
+
+// resolveCustomEnv collects the --custom-env, --custom-env-stdin, and
+// --custom-env-file flags and returns the parsed map, a bool indicating
+// whether the caller supplied any of them, and any error. The three input
+// channels are mutually exclusive so callers can't accidentally provide a
+// secret twice. Stdin and file inputs exist to keep secret material out of
+// shell history and 'ps' / /proc/<pid>/cmdline.
+func resolveCustomEnv(cmd *cobra.Command) (map[string]string, bool, error) {
+	inline := cmd.Flags().Changed("custom-env")
+	fromStdin, _ := cmd.Flags().GetBool("custom-env-stdin")
+	filePath, _ := cmd.Flags().GetString("custom-env-file")
+	// Note: an explicit --custom-env-file "" is honored as "the user asked
+	// for this channel with an empty path" and surfaces a real error below,
+	// rather than being silently swallowed.
+	fromFile := cmd.Flags().Changed("custom-env-file")
+
+	count := 0
+	if inline {
+		count++
+	}
+	if fromStdin {
+		count++
+	}
+	if fromFile {
+		count++
+	}
+	switch {
+	case count == 0:
+		return nil, false, nil
+	case count > 1:
+		return nil, false, fmt.Errorf("--custom-env, --custom-env-stdin, and --custom-env-file are mutually exclusive; pick one")
+	}
+
+	var raw string
+	switch {
+	case inline:
+		raw, _ = cmd.Flags().GetString("custom-env")
+	case fromStdin:
+		buf, err := io.ReadAll(cmd.InOrStdin())
+		if err != nil {
+			return nil, false, fmt.Errorf("read --custom-env-stdin: %w", err)
+		}
+		raw = string(buf)
+		if strings.TrimSpace(raw) == "" {
+			return nil, false, fmt.Errorf("--custom-env-stdin: empty input; pass '{}' to clear")
+		}
+	case fromFile:
+		if filePath == "" {
+			return nil, false, fmt.Errorf("--custom-env-file: path must not be empty")
+		}
+		buf, err := os.ReadFile(filePath)
+		if err != nil {
+			// Filesystem errors may include the path but not the contents —
+			// safe to surface via %w.
+			return nil, false, fmt.Errorf("read --custom-env-file: %w", err)
+		}
+		raw = string(buf)
+		if strings.TrimSpace(raw) == "" {
+			return nil, false, fmt.Errorf("--custom-env-file %q: empty contents; pass '{}' to clear", filePath)
+		}
+	}
+
+	ce, err := parseCustomEnv(raw)
+	if err != nil {
+		return nil, false, err
+	}
+	return ce, true, nil
+}
 
 func strVal(m map[string]any, key string) string {
 	v, ok := m[key]

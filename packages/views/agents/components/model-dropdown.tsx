@@ -12,6 +12,7 @@ import {
 } from "@multica/ui/components/ui/popover";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { useT } from "../../i18n";
 
 // ModelDropdown renders a searchable, creatable model picker for an agent.
 // It fetches the supported-model catalog from the selected runtime — the
@@ -33,6 +34,7 @@ export function ModelDropdown({
   onChange: (value: string) => void;
   disabled?: boolean;
 }) {
+  const { t } = useT("agents");
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -41,8 +43,12 @@ export function ModelDropdown({
   );
 
   const supported = modelsQuery.data?.supported ?? true;
-  const models = modelsQuery.data?.models ?? [];
-  const defaultModel = useMemo(() => models.find((m) => m.default), [models]);
+  // Stable reference for the model list — `?? []` would mint a fresh
+  // array each render and force every downstream useMemo to invalidate.
+  const models = useMemo(
+    () => modelsQuery.data?.models ?? [],
+    [modelsQuery.data],
+  );
   const grouped = useMemo(() => groupByProvider(models), [models]);
 
   // When the selected runtime reports it doesn't support per-agent
@@ -84,27 +90,21 @@ export function ModelDropdown({
   const triggerLabel =
     value ||
     (disabled
-      ? "Select a runtime first"
+      ? t(($) => $.model_dropdown.select_runtime_first)
       : runtimeOnline
-        ? defaultModel
-          ? `Default — ${defaultModel.label}`
-          : "Default (provider)"
-        : "Runtime offline — enter manually");
+        ? t(($) => $.model_dropdown.default_provider)
+        : t(($) => $.model_dropdown.runtime_offline_manual));
 
   if (!supported && !modelsQuery.isLoading) {
-    // Provider doesn't honour per-agent model selection — show a
-    // clearly-disabled state so the user knows why the control is
-    // inert. (Hermes reads its model from ~/.hermes/.env.)
     return (
       <div className="min-w-0">
-        <Label className="text-xs text-muted-foreground">Model</Label>
+        <Label className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
         <div className="mt-1.5 flex items-start gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
           <Info className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="min-w-0">
-            <div>Model selection is managed by this runtime.</div>
+            <div>{t(($) => $.model_dropdown.managed_by_runtime_title)}</div>
             <div className="mt-0.5 text-xs">
-              Configure the model on the runtime host (e.g. Hermes reads it
-              from its own config file).
+              {t(($) => $.model_dropdown.managed_by_runtime_hint)}
             </div>
           </div>
         </div>
@@ -115,9 +115,9 @@ export function ModelDropdown({
   return (
     <div className="min-w-0">
       <div className="flex items-center justify-between">
-        <Label className="text-xs text-muted-foreground">Model</Label>
+        <Label className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
         {modelsQuery.isError && (
-          <span className="text-xs text-muted-foreground">discovery failed</span>
+          <span className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.discovery_failed)}</span>
         )}
       </div>
       <Popover open={open} onOpenChange={setOpen}>
@@ -147,7 +147,7 @@ export function ModelDropdown({
           <div className="border-b border-border p-2">
             <Input
               autoFocus
-              placeholder="Search or type a model ID"
+              placeholder={t(($) => $.pickers.model_search_placeholder)}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="h-8"
@@ -157,7 +157,7 @@ export function ModelDropdown({
             {modelsQuery.isLoading && (
               <div className="flex items-center gap-2 px-3 py-6 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Discovering models…
+                {t(($) => $.pickers.model_discovering)}
               </div>
             )}
 
@@ -182,7 +182,7 @@ export function ModelDropdown({
                           <span className="truncate font-medium">{m.label}</span>
                           {m.default && (
                             <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
-                              default
+                              {t(($) => $.pickers.model_default_badge)}
                             </span>
                           )}
                         </div>
@@ -204,7 +204,7 @@ export function ModelDropdown({
               Object.keys(filtered).length === 0 &&
               !canCreate && (
                 <div className="px-3 py-6 text-center text-sm text-muted-foreground">
-                  No models available.
+                  {t(($) => $.pickers.model_empty_with_dot)}
                 </div>
               )}
 
@@ -215,7 +215,7 @@ export function ModelDropdown({
               >
                 <Plus className="h-4 w-4 shrink-0" />
                 <span className="truncate">
-                  Use “{trimmedSearch}”
+                  {t(($) => $.pickers.model_custom_use, { value: trimmedSearch })}
                 </span>
               </button>
             )}
@@ -225,7 +225,7 @@ export function ModelDropdown({
                 onClick={() => select("")}
                 className="mt-1 flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/50"
               >
-                Clear selection (use provider default)
+                {t(($) => $.model_dropdown.clear_full)}
               </button>
             )}
           </div>

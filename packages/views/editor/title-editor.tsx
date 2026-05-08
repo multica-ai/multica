@@ -8,6 +8,7 @@ import { Paragraph } from "@tiptap/extension-paragraph";
 import { Text } from "@tiptap/extension-text";
 import Placeholder from "@tiptap/extension-placeholder";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "../i18n";
 import "./title-editor.css";
 
 // ---------------------------------------------------------------------------
@@ -80,6 +81,7 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
     },
     ref,
   ) {
+    const { t } = useT("editor");
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
     const onChangeRef = useRef(onChange);
@@ -108,7 +110,7 @@ const TitleEditor = forwardRef<TitleEditorRef, TitleEditorProps>(
           class: cn("title-editor outline-none", className),
           role: "textbox",
           "aria-multiline": "false",
-          "aria-label": placeholderText || "Title",
+          "aria-label": placeholderText || t(($) => $.title_editor.title_aria_label),
         },
       },
       onUpdate: ({ editor: ed }) => {

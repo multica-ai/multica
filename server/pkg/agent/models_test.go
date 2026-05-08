@@ -27,6 +27,75 @@ func TestListModelsStaticProviders(t *testing.T) {
 	}
 }
 
+func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
+	// Gemini CLI has no `models list` subcommand, so we expose the
+	// CLI's own aliases (auto / pro / flash / flash-lite) plus
+	// explicit version pins including Gemini 3. Regression guard
+	// for multica-ai/multica#1503 — Gemini 3 must be selectable.
+	models := geminiStaticModels()
+	ids := map[string]Model{}
+	for _, m := range models {
+		ids[m.ID] = m
+	}
+	for _, want := range []string{
+		"auto", "auto-gemini-2.5",
+		"pro", "flash", "flash-lite",
+		"gemini-3-pro-preview", "gemini-3-flash-preview",
+		"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
+	} {
+		if _, ok := ids[want]; !ok {
+			t.Errorf("missing expected Gemini model %q in: %+v", want, models)
+		}
+	}
+	auto, ok := ids["auto"]
+	if !ok || !auto.Default {
+		t.Errorf("expected `auto` to be the default Gemini entry, got %+v", auto)
+	}
+	for _, m := range models {
+		if m.Provider != "google" {
+			t.Errorf("all Gemini entries must carry Provider=google, got %+v", m)
+		}
+	}
+}
+
+func TestCodexStaticModelsExposesGPT55(t *testing.T) {
+	// Codex CLI has no `models list` subcommand so the catalog is
+	// hand-maintained. Regression guard for multica-ai/multica#2009 —
+	// GPT-5.5 must be selectable, and the badge default must point at
+	// the latest release rather than lagging a version behind.
+	models := codexStaticModels()
+	ids := map[string]Model{}
+	for _, m := range models {
+		ids[m.ID] = m
+	}
+	for _, want := range []string{
+		"gpt-5.5", "gpt-5.5-mini",
+		"gpt-5.4", "gpt-5.4-mini",
+		"gpt-5.3-codex", "gpt-5",
+		"o3", "o3-mini",
+	} {
+		if _, ok := ids[want]; !ok {
+			t.Errorf("missing expected Codex model %q in: %+v", want, models)
+		}
+	}
+	latest, ok := ids["gpt-5.5"]
+	if !ok || !latest.Default {
+		t.Errorf("expected `gpt-5.5` to be the default Codex entry, got %+v", latest)
+	}
+	defaults := 0
+	for _, m := range models {
+		if m.Default {
+			defaults++
+		}
+		if m.Provider != "openai" {
+			t.Errorf("all Codex entries must carry Provider=openai, got %+v", m)
+		}
+	}
+	if defaults != 1 {
+		t.Errorf("expected exactly one default Codex entry, got %d", defaults)
+	}
+}
+
 func TestListModelsHermesWithoutBinary(t *testing.T) {
 	// With no `hermes` binary on PATH the discovery fast-paths to
 	// an empty list (the UI then falls back to creatable manual
@@ -41,6 +110,21 @@ func TestListModelsHermesWithoutBinary(t *testing.T) {
 	got, err := ListModels(ctx, "hermes", "/nonexistent/hermes")
 	if err != nil {
 		t.Fatalf("ListModels(hermes) error: %v", err)
+	}
+	if got == nil {
+		t.Error("expected non-nil slice even when binary is missing")
+	}
+}
+
+func TestListModelsKiroWithoutBinary(t *testing.T) {
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "kiro")
+	modelCacheMu.Unlock()
+
+	got, err := ListModels(ctx, "kiro", "/nonexistent/kiro-cli")
+	if err != nil {
+		t.Fatalf("ListModels(kiro) error: %v", err)
 	}
 	if got == nil {
 		t.Error("expected non-nil slice even when binary is missing")

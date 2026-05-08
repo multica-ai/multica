@@ -37,11 +37,23 @@ func (e SignupError) Error() string {
 var ErrSignupProhibited = SignupError{Message: "user registration is disabled on this self-hosted instance"}
 var ErrEmailNotAllowed = SignupError{Message: "email address or domain not allowed on this instance"}
 
+const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
+
+// supportedLanguages mirrors `SUPPORTED_LOCALES` in packages/core/i18n/types.ts.
+// Keep both lists in sync when adding a locale — the user-controlled `language`
+// field round-trips through GetMe back into i18n.changeLanguage(), so without
+// validation an arbitrary string would persist and echo to every device.
+var supportedLanguages = map[string]struct{}{
+	"en":      {},
+	"zh-Hans": {},
+}
+
 type UserResponse struct {
 	ID                      string          `json:"id"`
 	Name                    string          `json:"name"`
 	Email                   string          `json:"email"`
 	AvatarURL               *string         `json:"avatar_url"`
+	Language                *string         `json:"language"`
 	OnboardedAt             *string         `json:"onboarded_at"`
 	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
 	StarterContentState     *string         `json:"starter_content_state"`
@@ -62,6 +74,7 @@ func userToResponse(u db.User) UserResponse {
 		Name:                    u.Name,
 		Email:                   u.Email,
 		AvatarURL:               textToPtr(u.AvatarUrl),
+		Language:                textToPtr(u.Language),
 		OnboardedAt:             timestampToPtr(u.OnboardedAt),
 		OnboardingQuestionnaire: json.RawMessage(q),
 		StarterContentState:     textToPtr(u.StarterContentState),
@@ -91,6 +104,35 @@ func generateCode() (string, error) {
 	}
 	n := binary.BigEndian.Uint32(buf[:]) % 1000000
 	return fmt.Sprintf("%06d", n), nil
+}
+
+func isDevVerificationCode(code string) bool {
+	if isProductionEnv() {
+		return false
+	}
+
+	devCode := strings.TrimSpace(os.Getenv(devVerificationCodeEnv))
+	if !isSixDigitCode(devCode) {
+		return false
+	}
+
+	return subtle.ConstantTimeCompare([]byte(code), []byte(devCode)) == 1
+}
+
+func isProductionEnv() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production")
+}
+
+func isSixDigitCode(code string) bool {
+	if len(code) != 6 {
+		return false
+	}
+	for _, ch := range code {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Handler) issueJWT(user db.User) (string, error) {
@@ -329,8 +371,8 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isMasterCode := code == "888888" && os.Getenv("APP_ENV") != "production"
-	if !isMasterCode && subtle.ConstantTimeCompare([]byte(code), []byte(dbCode.Code)) != 1 {
+	isDevCode := isDevVerificationCode(code)
+	if !isDevCode && subtle.ConstantTimeCompare([]byte(code), []byte(dbCode.Code)) != 1 {
 		_ = h.Queries.IncrementVerificationCodeAttempts(r.Context(), dbCode.ID)
 		writeError(w, http.StatusBadRequest, "invalid or expired code")
 		return
@@ -436,6 +478,7 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 type UpdateMeRequest struct {
 	Name      *string `json:"name"`
 	AvatarURL *string `json:"avatar_url"`
+	Language  *string `json:"language"`
 }
 
 type GoogleLoginRequest struct {
@@ -669,6 +712,14 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AvatarURL != nil {
 		params.AvatarUrl = pgtype.Text{String: strings.TrimSpace(*req.AvatarURL), Valid: true}
+	}
+	if req.Language != nil {
+		lang := strings.TrimSpace(*req.Language)
+		if _, ok := supportedLanguages[lang]; !ok {
+			writeError(w, http.StatusBadRequest, "unsupported language")
+			return
+		}
+		params.Language = pgtype.Text{String: lang, Valid: true}
 	}
 
 	updatedUser, err := h.Queries.UpdateUser(r.Context(), params)

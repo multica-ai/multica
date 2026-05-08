@@ -44,6 +44,71 @@ func (q *Queries) GetRuntimeTaskHourlyActivity(ctx context.Context, runtimeID pg
 	return items, nil
 }
 
+const getRuntimeUsageByHour = `-- name: GetRuntimeUsageByHour :many
+SELECT
+    EXTRACT(HOUR FROM tu.created_at)::int AS hour,
+    tu.model,
+    SUM(tu.input_tokens)::bigint AS input_tokens,
+    SUM(tu.output_tokens)::bigint AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.runtime_id = $1
+  AND tu.created_at >= DATE_TRUNC('day', $2::timestamptz)
+GROUP BY EXTRACT(HOUR FROM tu.created_at), tu.model
+ORDER BY hour, tu.model
+`
+
+type GetRuntimeUsageByHourParams struct {
+	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	Since     pgtype.Timestamptz `json:"since"`
+}
+
+type GetRuntimeUsageByHourRow struct {
+	Hour             int32  `json:"hour"`
+	Model            string `json:"model"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	TaskCount        int32  `json:"task_count"`
+}
+
+// Per-(hour, model) token aggregates (hour ∈ 0..23) for a runtime since a
+// cutoff. Powers the "By hour" tab — shows when in the day this runtime is
+// doing real work, with model preserved for client-side cost calculation
+// (same reason as ListRuntimeUsageByAgent above). Hours with zero activity
+// are omitted; the client fills the 24-bucket axis.
+func (q *Queries) GetRuntimeUsageByHour(ctx context.Context, arg GetRuntimeUsageByHourParams) ([]GetRuntimeUsageByHourRow, error) {
+	rows, err := q.db.Query(ctx, getRuntimeUsageByHour, arg.RuntimeID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetRuntimeUsageByHourRow{}
+	for rows.Next() {
+		var i GetRuntimeUsageByHourRow
+		if err := rows.Scan(
+			&i.Hour,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRuntimeUsage = `-- name: ListRuntimeUsage :many
 SELECT
     DATE(tu.created_at) AS date,
@@ -97,6 +162,72 @@ func (q *Queries) ListRuntimeUsage(ctx context.Context, arg ListRuntimeUsagePara
 			&i.OutputTokens,
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRuntimeUsageByAgent = `-- name: ListRuntimeUsageByAgent :many
+SELECT
+    atq.agent_id,
+    tu.model,
+    SUM(tu.input_tokens)::bigint AS input_tokens,
+    SUM(tu.output_tokens)::bigint AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.runtime_id = $1
+  AND tu.created_at >= DATE_TRUNC('day', $2::timestamptz)
+GROUP BY atq.agent_id, tu.model
+ORDER BY atq.agent_id, tu.model
+`
+
+type ListRuntimeUsageByAgentParams struct {
+	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	Since     pgtype.Timestamptz `json:"since"`
+}
+
+type ListRuntimeUsageByAgentRow struct {
+	AgentID          pgtype.UUID `json:"agent_id"`
+	Model            string      `json:"model"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	TaskCount        int32       `json:"task_count"`
+}
+
+// Per-(agent, model) token aggregates for a runtime since a cutoff. Powers
+// the runtime-detail "Cost by agent" tab. task_usage only carries task_id,
+// so we join the queue to expose agent_id. The model dimension is kept on
+// purpose: cost is computed client-side from a per-model pricing table, so
+// collapsing models server-side would erase the information needed to do
+// that arithmetic. The client groups by agent_id and sums cost per agent.
+func (q *Queries) ListRuntimeUsageByAgent(ctx context.Context, arg ListRuntimeUsageByAgentParams) ([]ListRuntimeUsageByAgentRow, error) {
+	rows, err := q.db.Query(ctx, listRuntimeUsageByAgent, arg.RuntimeID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRuntimeUsageByAgentRow{}
+	for rows.Next() {
+		var i ListRuntimeUsageByAgentRow
+		if err := rows.Scan(
+			&i.AgentID,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.TaskCount,
 		); err != nil {
 			return nil, err
 		}

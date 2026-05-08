@@ -24,9 +24,13 @@ const (
 	notificationDispatchBatchSize = 20
 	dingTalkDeliveryMaxAttempts   = 3
 	emailDeliveryMaxAttempts      = 3
+	webhookDeliveryMaxAttempts    = 3
+	dingTalkMarkdownTitleLimit    = 80
+	dingTalkMarkdownTextLimit     = 1800
 )
 
 var dingtalkMentionLinkPattern = regexp.MustCompile(`\[@([^\]]+)\]\(mention://[^)]+\)`)
+var customWebhookSender = notifyutil.WebhookSender{}
 
 type dingtalkDeliveryPayload struct {
 	BindingID         string          `json:"binding_id"`
@@ -56,6 +60,11 @@ type emailDeliveryPayload struct {
 	BindingID         string          `json:"binding_id"`
 	Provider          string          `json:"provider"`
 	ExternalUserID    string          `json:"external_user_id"`
+	NotificationEvent json.RawMessage `json:"notification_event"`
+}
+
+type customWebhookDeliveryPayload struct {
+	WebhookEndpointID string          `json:"webhook_endpoint_id"`
 	NotificationEvent json.RawMessage `json:"notification_event"`
 }
 
@@ -109,6 +118,9 @@ func dispatchPendingNotificationDeliveries(ctx context.Context, queries *db.Quer
 		case "email":
 			dispatched++
 			processEmailDelivery(ctx, queries, emailSvc, delivery)
+		case "custom_webhook":
+			dispatched++
+			processCustomWebhookDelivery(ctx, queries, delivery)
 		}
 	}
 }
@@ -239,6 +251,169 @@ func processEmailDelivery(ctx context.Context, queries *db.Queries, emailSvc *se
 			"error", err,
 		)
 	}
+}
+
+func processCustomWebhookDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery) {
+	claimed, err := queries.ClaimNotificationDelivery(ctx, db.ClaimNotificationDeliveryParams{
+		ID:       delivery.ID,
+		Status:   "pending",
+		Status_2: "pending",
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return
+		}
+		slog.Warn("notification dispatcher: failed to claim custom webhook delivery",
+			"delivery_id", util.UUIDToString(delivery.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var payload customWebhookDeliveryPayload
+	if err := json.Unmarshal(claimed.PayloadSnapshot, &payload); err != nil {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("invalid custom webhook delivery payload"))
+		return
+	}
+	endpointID := strings.TrimSpace(payload.WebhookEndpointID)
+	if endpointID == "" && claimed.TargetType == "webhook_endpoint" {
+		endpointID = util.UUIDToString(claimed.TargetID)
+	}
+	if endpointID == "" {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("missing custom webhook endpoint id"))
+		return
+	}
+
+	parsedEndpointID, err := util.ParseUUID(endpointID)
+	if err != nil {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, fmt.Errorf("invalid endpoint id: %w", err))
+		return
+	}
+	endpoint, err := queries.GetNotificationWebhookEndpoint(ctx, parsedEndpointID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("custom webhook endpoint not found"))
+			return
+		}
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, err)
+		return
+	}
+	if !endpoint.Enabled {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("custom webhook endpoint is disabled"))
+		return
+	}
+
+	endpointURL, err := notifyutil.DecryptToken(endpoint.UrlEncrypted)
+	if err != nil {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("failed to decrypt custom webhook url"))
+		return
+	}
+	var eventPayload notificationEventPayload
+	if len(payload.NotificationEvent) > 0 {
+		if err := json.Unmarshal(payload.NotificationEvent, &eventPayload); err != nil {
+			finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, errors.New("invalid nested notification payload"))
+			return
+		}
+	}
+	event, err := queries.GetNotificationEvent(ctx, claimed.NotificationEventID)
+	if err != nil {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, err)
+		return
+	}
+
+	outbound, err := buildCustomWebhookPayload(claimed, event, eventPayload, endpoint.PayloadTemplate, endpoint.ContentPrefix)
+	if err != nil {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, err)
+		return
+	}
+	if err := customWebhookSender.SendJSON(ctx, endpointURL, "", outbound); err != nil {
+		finalizeFailedCustomWebhookDelivery(ctx, queries, claimed, err)
+		return
+	}
+
+	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
+		ID:        claimed.ID,
+		Status:    "sent",
+		LastError: pgtype.Text{},
+		SentAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	}); err != nil {
+		slog.Warn("notification dispatcher: failed to mark custom webhook delivery sent",
+			"delivery_id", util.UUIDToString(claimed.ID),
+			"error", err,
+		)
+	}
+}
+
+func buildCustomWebhookPayload(
+	delivery db.NotificationDelivery,
+	event db.NotificationEvent,
+	eventPayload notificationEventPayload,
+	payloadTemplate string,
+	contentPrefix string,
+) ([]byte, error) {
+	eventID := util.UUIDToString(delivery.NotificationEventID)
+	details := json.RawMessage(event.Details)
+	if len(details) == 0 {
+		details = json.RawMessage(`{}`)
+	}
+	title := firstValue(event.Title, eventPayload.Title)
+	body := firstValue(pgTextToString(event.Body), eventPayload.Body)
+	link := firstValue(pgTextToString(event.Link), eventPayload.Link)
+	defaultPayload := map[string]any{
+		"event_id":          eventID,
+		"delivery_id":       util.UUIDToString(delivery.ID),
+		"event_type":        firstValue(event.Type, eventPayload.Type),
+		"workspace_id":      util.UUIDToString(event.WorkspaceID),
+		"recipient_user_id": util.UUIDToString(event.RecipientUserID),
+		"title":             title,
+		"body":              body,
+		"link":              link,
+		"issue": map[string]any{
+			"id":         util.UUIDToPtr(event.IssueID),
+			"identifier": eventPayload.IssueIdentifier,
+		},
+		"comment": map[string]any{
+			"id": util.UUIDToPtr(event.CommentID),
+		},
+		"actor": map[string]any{
+			"type": util.TextToPtr(event.ActorType),
+			"id":   util.UUIDToPtr(event.ActorID),
+		},
+		"details":     details,
+		"occurred_at": delivery.CreatedAt.Time.UTC().Format(time.RFC3339),
+	}
+	return notifyutil.RenderWebhookPayload(
+		payloadTemplate,
+		notifyutil.BuildWebhookContent(title, body, link, contentPrefix),
+		defaultPayload,
+	)
+}
+
+func finalizeFailedCustomWebhookDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {
+	nextStatus := "pending"
+	if delivery.AttemptCount >= webhookDeliveryMaxAttempts {
+		nextStatus = "failed"
+	}
+
+	if _, err := queries.CompleteNotificationDelivery(ctx, db.CompleteNotificationDeliveryParams{
+		ID:        delivery.ID,
+		Status:    nextStatus,
+		LastError: util.StrToText(truncateError(dispatchErr)),
+		SentAt:    pgtype.Timestamptz{},
+	}); err != nil {
+		slog.Warn("notification dispatcher: failed to mark custom webhook delivery failure",
+			"delivery_id", util.UUIDToString(delivery.ID),
+			"error", err,
+		)
+		return
+	}
+
+	slog.Warn("notification dispatcher: custom webhook delivery failed",
+		"delivery_id", util.UUIDToString(delivery.ID),
+		"status", nextStatus,
+		"attempt_count", delivery.AttemptCount,
+		"error", dispatchErr,
+	)
 }
 
 func finalizeFailedEmailDelivery(ctx context.Context, queries *db.Queries, delivery db.NotificationDelivery, dispatchErr error) {
@@ -453,11 +628,9 @@ func buildDingTalkDeliveryMarkdown(event notificationEventPayload) notifyutil.Di
 	if actorName := strings.TrimSpace(event.ActorName); actorName != "" {
 		parts = append(parts, "**From**\n"+actorName)
 	}
-	if body != "" {
-		parts = append(parts, "**Message**\n"+body)
-	}
+	linkPart := ""
 	if link != "" {
-		parts = append(parts, "[Open In Multica]("+dingtalkExternalBrowserURL(link)+")")
+		linkPart = "[Open In Multica](" + dingtalkExternalBrowserURL(link) + ")"
 	}
 
 	cardTitle := title
@@ -466,9 +639,81 @@ func buildDingTalkDeliveryMarkdown(event notificationEventPayload) notifyutil.Di
 	}
 
 	return notifyutil.DingTalkMarkdownMessage{
-		Title: truncateDingTalkCardText(cardTitle, 80),
-		Text:  truncateDingTalkCardText(strings.Join(parts, "\n\n"), 1800),
+		Title: truncateDingTalkCardText(cardTitle, dingTalkMarkdownTitleLimit),
+		Text:  buildDingTalkMarkdownText(parts, body, linkPart, dingTalkMarkdownTextLimit),
 	}
+}
+
+func buildDingTalkMarkdownText(prefixParts []string, body, linkPart string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+
+	body = strings.TrimSpace(body)
+	linkPart = strings.TrimSpace(linkPart)
+	text := joinDingTalkMarkdownParts(prefixParts, body, linkPart)
+	if dingTalkRuneLen(text) <= limit {
+		return text
+	}
+
+	if body != "" {
+		low, high := 0, dingTalkRuneLen(body)
+		best := ""
+		for low <= high {
+			mid := (low + high) / 2
+			candidateBody := truncateDingTalkMessageSection(body, mid)
+			candidate := joinDingTalkMarkdownParts(prefixParts, candidateBody, linkPart)
+			if dingTalkRuneLen(candidate) <= limit {
+				best = candidate
+				low = mid + 1
+			} else {
+				high = mid - 1
+			}
+		}
+		if best != "" {
+			return best
+		}
+	}
+
+	return buildDingTalkMarkdownTextWithoutBody(prefixParts, linkPart, limit)
+}
+
+func joinDingTalkMarkdownParts(prefixParts []string, body, linkPart string) string {
+	parts := make([]string, 0, len(prefixParts)+2)
+	for _, part := range prefixParts {
+		if part = strings.TrimSpace(part); part != "" {
+			parts = append(parts, part)
+		}
+	}
+	if body = strings.TrimSpace(body); body != "" {
+		parts = append(parts, "**Message**\n"+body)
+	}
+	if linkPart = strings.TrimSpace(linkPart); linkPart != "" {
+		parts = append(parts, linkPart)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func buildDingTalkMarkdownTextWithoutBody(prefixParts []string, linkPart string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+
+	text := joinDingTalkMarkdownParts(prefixParts, "", linkPart)
+	if dingTalkRuneLen(text) <= limit || strings.TrimSpace(linkPart) == "" {
+		return truncateDingTalkCardText(text, limit)
+	}
+
+	for i := len(prefixParts); i >= 0; i-- {
+		candidate := joinDingTalkMarkdownParts(prefixParts[:i], "", linkPart)
+		if dingTalkRuneLen(candidate) <= limit {
+			return candidate
+		}
+	}
+
+	// Never truncate the generated action link. A too-long URL should fail
+	// explicitly instead of silently becoming a corrupted destination.
+	return strings.TrimSpace(linkPart)
 }
 
 func buildDingTalkIssueLabel(event notificationEventPayload) string {
@@ -499,6 +744,24 @@ func sanitizeDingTalkMessageText(raw string) string {
 	return strings.TrimSpace(dingtalkMentionLinkPattern.ReplaceAllString(text, "@$1"))
 }
 
+func truncateDingTalkMessageSection(text string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(strings.TrimSpace(text))
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	if limit <= 3 {
+		return strings.Repeat(".", limit)
+	}
+	truncated := strings.TrimSpace(string(runes[:limit-4]))
+	if truncated == "" {
+		return "..."
+	}
+	return truncated + "\n..."
+}
+
 func truncateDingTalkCardText(text string, limit int) string {
 	if limit <= 0 {
 		return ""
@@ -511,6 +774,10 @@ func truncateDingTalkCardText(text string, limit int) string {
 		return string(runes[:limit])
 	}
 	return string(runes[:limit-3]) + "..."
+}
+
+func dingTalkRuneLen(text string) int {
+	return len([]rune(text))
 }
 
 func truncateError(err error) string {
@@ -531,4 +798,11 @@ func firstValue(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func pgTextToString(value pgtype.Text) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
 }

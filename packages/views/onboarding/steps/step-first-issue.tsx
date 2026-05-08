@@ -4,7 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
-import { completeOnboarding } from "@multica/core/onboarding";
+import {
+  completeOnboarding,
+  type OnboardingCompletionPath,
+} from "@multica/core/onboarding";
+import { useT } from "../../i18n";
 
 /**
  * Step 5 — the final onboarding beat.
@@ -25,42 +29,51 @@ import { completeOnboarding } from "@multica/core/onboarding";
  */
 export function StepFirstIssue({
   onFinished,
+  completionPath,
 }: {
   /** Called after `onboarded_at` is set server-side. Parent handles
    *  navigation to the workspace landing page. */
   onFinished: () => void;
+  /** Which exit label the server should record on `onboarding_completed`.
+   *  Computed in the parent shell where runtime + waitlist state are
+   *  both in scope. */
+  completionPath: OnboardingCompletionPath;
 }) {
+  const { t } = useT("onboarding");
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const started = useRef(false);
   const onFinishedRef = useRef(onFinished);
   onFinishedRef.current = onFinished;
+  const completionPathRef = useRef(completionPath);
+  completionPathRef.current = completionPath;
 
   useEffect(() => {
     if (started.current) return;
     started.current = true;
     (async () => {
       try {
-        await completeOnboarding();
+        await completeOnboarding(completionPathRef.current);
         onFinishedRef.current();
       } catch (err) {
         setError(
-          err instanceof Error ? err.message : "Failed to finish onboarding",
+          err instanceof Error ? err.message : t(($) => $.errors.skip_failed),
         );
       }
     })();
-  }, []);
+  }, [t]);
 
   const retry = async () => {
     if (retrying) return;
     setRetrying(true);
     setError(null);
     try {
-      await completeOnboarding();
+      await completeOnboarding(completionPathRef.current);
       onFinishedRef.current();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Retry failed");
-      toast.error(err instanceof Error ? err.message : "Retry failed");
+      const msg = err instanceof Error ? err.message : t(($) => $.first_issue.retry_failed);
+      setError(msg);
+      toast.error(msg);
     } finally {
       setRetrying(false);
     }
@@ -74,13 +87,13 @@ export function StepFirstIssue({
         </div>
         <div className="flex flex-col gap-2">
           <h1 className="text-2xl font-semibold tracking-tight">
-            Something went wrong
+            {t(($) => $.first_issue.error_title)}
           </h1>
           <p className="text-sm text-muted-foreground">{error}</p>
         </div>
         <Button onClick={retry} disabled={retrying}>
           {retrying && <Loader2 className="h-4 w-4 animate-spin" />}
-          Retry
+          {t(($) => $.first_issue.retry)}
         </Button>
       </div>
     );
@@ -91,10 +104,10 @@ export function StepFirstIssue({
       <Loader2 className="h-10 w-10 animate-spin text-primary" />
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">
-          Finishing up
+          {t(($) => $.first_issue.finishing)}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Almost there — opening your workspace.
+          {t(($) => $.first_issue.opening)}
         </p>
       </div>
     </div>

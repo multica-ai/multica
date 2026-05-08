@@ -13,6 +13,7 @@ export interface IssueFilters {
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
+  labelFilters: string[];
 }
 
 /**
@@ -28,6 +29,7 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
     creatorFilters,
     projectFilters,
     includeNoProject,
+    labelFilters,
   } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
@@ -68,6 +70,11 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
       } else {
         return false;
       }
+    }
+
+    if (labelFilters.length > 0) {
+      const issueLabels = issue.labels?.map((l) => l.id) ?? [];
+      if (!labelFilters.some((id) => issueLabels.includes(id))) return false;
     }
 
     return true;

@@ -241,6 +241,29 @@ func (q *Queries) DeleteInviteLink(ctx context.Context, arg DeleteInviteLinkPara
 	return err
 }
 
+const expireStalePendingInvitations = `-- name: ExpireStalePendingInvitations :exec
+UPDATE workspace_invitation
+SET status = 'expired', updated_at = now()
+WHERE workspace_id = $1
+  AND invitee_email = $2
+  AND status = 'pending'
+  AND expires_at <= now()
+`
+
+type ExpireStalePendingInvitationsParams struct {
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	InviteeEmail pgtype.Text `json:"invitee_email"`
+}
+
+// Mark any past-due pending invitations for (workspace_id, invitee_email) as expired,
+// so the next CreateInvitation does not collide with the partial unique index
+// idx_invitation_unique_pending (which is WHERE status = 'pending' and cannot
+// itself reference now() in its predicate).
+func (q *Queries) ExpireStalePendingInvitations(ctx context.Context, arg ExpireStalePendingInvitationsParams) error {
+	_, err := q.db.Exec(ctx, expireStalePendingInvitations, arg.WorkspaceID, arg.InviteeEmail)
+	return err
+}
+
 const getInvitation = `-- name: GetInvitation :one
 SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invite_type, token_hash, max_uses, used_count, revoked_at, last_used_at, created_by_ip, created_by_user_agent FROM workspace_invitation
 WHERE id = $1
@@ -466,7 +489,7 @@ func (q *Queries) GetInviteLinkByTokenHashForUpdate(ctx context.Context, tokenHa
 
 const getPendingInvitationByEmail = `-- name: GetPendingInvitationByEmail :one
 SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invite_type, token_hash, max_uses, used_count, revoked_at, last_used_at, created_by_ip, created_by_user_agent FROM workspace_invitation
-WHERE workspace_id = $1 AND invite_type = 'email' AND invitee_email = $2 AND status = 'pending'
+WHERE workspace_id = $1 AND invite_type = 'email' AND invitee_email = $2 AND status = 'pending' AND expires_at > now()
 `
 
 type GetPendingInvitationByEmailParams struct {

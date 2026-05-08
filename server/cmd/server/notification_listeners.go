@@ -189,13 +189,32 @@ func recordMentionNotification(
 	actorName string,
 	details []byte,
 ) {
+	recordNotification(ctx, queries, e, recipientID, "mentioned", "info", issueID, commentID, title, body, link, issueIdentifier, actorName, details)
+}
+
+func recordNotification(
+	ctx context.Context,
+	queries *db.Queries,
+	e events.Event,
+	recipientID string,
+	eventType string,
+	severity string,
+	issueID string,
+	commentID string,
+	title string,
+	body string,
+	link string,
+	issueIdentifier string,
+	actorName string,
+	details []byte,
+) {
 	if len(details) == 0 {
 		details = emptyDetails
 	}
 
 	payloadSnapshot, err := json.Marshal(map[string]any{
-		"type":             "mentioned",
-		"severity":         "info",
+		"type":             eventType,
+		"severity":         severity,
 		"title":            title,
 		"body":             body,
 		"link":             link,
@@ -214,8 +233,8 @@ func recordMentionNotification(
 	event, err := queries.CreateNotificationEvent(ctx, db.CreateNotificationEventParams{
 		WorkspaceID:     parseUUID(e.WorkspaceID),
 		RecipientUserID: parseUUID(recipientID),
-		Type:            "mentioned",
-		Severity:        "info",
+		Type:            eventType,
+		Severity:        severity,
 		IssueID:         parseUUID(issueID),
 		CommentID:       parseUUID(commentID),
 		ActorType:       util.StrToText(e.ActorType),
@@ -226,10 +245,11 @@ func recordMentionNotification(
 		Details:         details,
 	})
 	if err != nil {
-		slog.Error("failed to create canonical mention notification",
+		slog.Error("failed to create canonical notification",
 			"recipient_id", recipientID,
 			"issue_id", issueID,
 			"comment_id", commentID,
+			"type", eventType,
 			"error", err,
 		)
 		return
@@ -252,8 +272,11 @@ func recordMentionNotification(
 		)
 	}
 
-	recordMentionDingTalkDelivery(ctx, queries, recipientID, event, payloadSnapshot)
-	recordMentionEmailDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+	if eventType == "mentioned" {
+		recordMentionDingTalkDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+		recordMentionEmailDelivery(ctx, queries, recipientID, event, payloadSnapshot)
+	}
+	recordCustomWebhookDeliveries(ctx, queries, recipientID, event, payloadSnapshot)
 }
 
 func recordMentionDingTalkDelivery(
@@ -421,12 +444,172 @@ func recordMentionEmailDelivery(
 		)
 	}
 }
+// parentBubbleNotifTypes is the allowlist of inbox notification types that
+// bubble up from a sub-issue to subscribers of its parent. Other event types
+// only notify subscribers of the sub-issue itself, to keep parent watchers'
+// inboxes focused on the signal that matters most: status transitions.
+var parentBubbleNotifTypes = map[string]bool{
+	"status_changed": true,
+}
+
+// notifTypeToGroup maps each InboxItemType to a user-configurable preference
+// group. Types not in this map are always delivered (not configurable).
+var notifTypeToGroup = map[string]string{
+	"issue_assigned":  "assignments",
+	"unassigned":      "assignments",
+	"assignee_changed": "assignments",
+	"status_changed":  "status_changes",
+	"new_comment":     "comments",
+	"mentioned":       "comments",
+	"priority_changed": "updates",
+	"due_date_changed": "updates",
+	"task_completed":  "agent_activity",
+	"task_failed":     "agent_activity",
+	"agent_blocked":   "agent_activity",
+	"agent_completed": "agent_activity",
+}
+
+// isNotifMuted returns true if the given notification type is muted for a user
+// based on their parsed preferences map.
+func isNotifMuted(prefs map[string]string, notifType string) bool {
+	group, ok := notifTypeToGroup[notifType]
+	if !ok {
+		return false // unconfigurable types are always delivered
+	}
+	return prefs[group] == "muted"
+}
+
+// loadUserPrefs loads notification preferences for a set of user IDs in a
+// workspace. Returns a map from user_id string to parsed preferences.
+func loadUserPrefs(
+	ctx context.Context,
+	queries *db.Queries,
+	workspaceID string,
+	userIDs []string,
+) map[string]map[string]string {
+	if len(userIDs) == 0 {
+		return nil
+	}
+
+	uuids := make([]pgtype.UUID, len(userIDs))
+	for i, id := range userIDs {
+		uuids[i] = parseUUID(id)
+	}
+
+	rows, err := queries.ListNotificationPreferencesByUsers(ctx, db.ListNotificationPreferencesByUsersParams{
+		WorkspaceID: parseUUID(workspaceID),
+		UserIds:     uuids,
+	})
+	if err != nil {
+		slog.Error("failed to load notification preferences", "error", err)
+		return nil
+	}
+
+	result := make(map[string]map[string]string, len(rows))
+	for _, row := range rows {
+		var prefs map[string]string
+		if err := json.Unmarshal(row.Preferences, &prefs); err != nil {
+			continue
+		}
+		result[util.UUIDToString(row.UserID)] = prefs
+	}
+	return result
+}
+
+func recordCustomWebhookDeliveries(
+	ctx context.Context,
+	queries *db.Queries,
+	recipientID string,
+	event db.NotificationEvent,
+	payloadSnapshot []byte,
+) {
+	preferenceEventType := customWebhookPreferenceEventType(event.Type)
+	if preferenceEventType == "" {
+		return
+	}
+
+	prefs, err := queries.ListNotificationChannelPreferencesByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load notification preferences for custom webhook delivery",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	enabled := false
+	for i := range prefs {
+		pref := &prefs[i]
+		if pref.Channel == "custom_webhook" && pref.EventType == preferenceEventType && pref.Enabled {
+			enabled = true
+			break
+		}
+	}
+	if !enabled {
+		return
+	}
+
+	endpoints, err := queries.ListEnabledNotificationWebhookEndpointsByUser(ctx, parseUUID(recipientID))
+	if err != nil {
+		slog.Error("failed to load custom webhook endpoints",
+			"recipient_id", recipientID,
+			"notification_event_id", util.UUIDToString(event.ID),
+			"error", err,
+		)
+		return
+	}
+
+	for _, endpoint := range endpoints {
+		payload := map[string]any{
+			"webhook_endpoint_id": util.UUIDToString(endpoint.ID),
+			"notification_event":  json.RawMessage(payloadSnapshot),
+		}
+		webhookPayload, err := json.Marshal(payload)
+		if err != nil {
+			webhookPayload = payloadSnapshot
+		}
+
+		if _, err := queries.CreateTargetedNotificationDelivery(ctx, db.CreateTargetedNotificationDeliveryParams{
+			NotificationEventID: event.ID,
+			Channel:             "custom_webhook",
+			TargetType:          "webhook_endpoint",
+			TargetID:            endpoint.ID,
+			Status:              "pending",
+			AttemptCount:        0,
+			LastError:           pgtype.Text{},
+			PayloadSnapshot:     webhookPayload,
+			SentAt:              pgtype.Timestamptz{},
+		}); err != nil {
+			slog.Error("failed to create custom webhook delivery record",
+				"notification_event_id", util.UUIDToString(event.ID),
+				"recipient_id", recipientID,
+				"webhook_endpoint_id", util.UUIDToString(endpoint.ID),
+				"error", err,
+			)
+		}
+	}
+}
+
+func customWebhookPreferenceEventType(notificationType string) string {
+	switch notificationType {
+	case "mentioned":
+		return "mentioned"
+	case "issue_assigned":
+		return "issue_assigned"
+	case "new_comment", "assignee_changed", "status_changed", "priority_changed", "due_date_changed", "task_failed":
+		return "subscribed_issue_updated"
+	default:
+		return ""
+	}
+}
 
 // notifySubscribers queries the subscriber table for an issue, excludes the
 // actor and any extra IDs, and creates inbox items for each remaining member
 // subscriber. Publishes an inbox:new event for each notification.
-// If the issue has a parent, parent issue subscribers are also notified
-// (deduplicated against direct subscribers).
+// If the issue has a parent and the notification type is in the bubble
+// allowlist, parent issue subscribers are also notified (deduplicated
+// against direct subscribers).
 func notifySubscribers(
 	ctx context.Context,
 	queries *db.Queries,
@@ -445,6 +628,11 @@ func notifySubscribers(
 	notified := notifyIssueSubscribers(ctx, queries, bus,
 		issueID, issueID, issueStatus, workspaceID, e, exclude,
 		notifType, severity, title, body, details)
+
+	// Only a small allowlist of event types bubbles to parent subscribers.
+	if !parentBubbleNotifTypes[notifType] {
+		return
+	}
 
 	// Also notify parent issue subscribers if this is a sub-issue.
 	issue, err := queries.GetIssue(ctx, parseUUID(issueID))
@@ -504,6 +692,15 @@ func notifyIssueSubscribers(
 		return notified
 	}
 
+	// Batch-load notification preferences for all member subscribers.
+	var memberIDs []string
+	for _, sub := range subs {
+		if sub.UserType == "member" {
+			memberIDs = append(memberIDs, util.UUIDToString(sub.UserID))
+		}
+	}
+	userPrefs := loadUserPrefs(ctx, queries, workspaceID, memberIDs)
+
 	for _, sub := range subs {
 		// Only notify member-type subscribers (not agents)
 		if sub.UserType != "member" {
@@ -519,6 +716,11 @@ func notifyIssueSubscribers(
 
 		// Skip any extra excluded IDs
 		if exclude[subID] {
+			continue
+		}
+
+		// Skip if this notification type is muted by the user
+		if prefs, ok := userPrefs[subID]; ok && isNotifMuted(prefs, notifType) {
 			continue
 		}
 
@@ -542,6 +744,9 @@ func notifyIssueSubscribers(
 		}
 
 		notified[subID] = true
+		notificationCtx := buildNotificationContext(ctx, queries, workspaceID, targetIssueID, "", "")
+		recordNotification(ctx, queries, e, subID, notifType, severity, targetIssueID, "", title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, "", details)
+
 		resp := inboxItemToResponse(item)
 		resp["issue_status"] = issueStatus
 		bus.Publish(events.Event{
@@ -579,6 +784,14 @@ func notifyDirect(
 		return
 	}
 
+	// Check notification preferences for member recipients.
+	if recipientType == "member" {
+		prefs := loadUserPrefs(ctx, queries, workspaceID, []string{recipientID})
+		if p, ok := prefs[recipientID]; ok && isNotifMuted(p, notifType) {
+			return
+		}
+	}
+
 	item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 		WorkspaceID:   parseUUID(workspaceID),
 		RecipientType: recipientType,
@@ -596,6 +809,11 @@ func notifyDirect(
 		slog.Error("direct notification creation failed",
 			"recipient_id", recipientID, "type", notifType, "error", err)
 		return
+	}
+
+	notificationCtx := buildNotificationContext(ctx, queries, workspaceID, issueID, "", "")
+	if recipientType == "member" {
+		recordNotification(ctx, queries, e, recipientID, notifType, severity, issueID, "", title, body, notificationCtx.Link, notificationCtx.IssueIdentifier, "", details)
 	}
 
 	resp := inboxItemToResponse(item)
@@ -664,6 +882,14 @@ func notifyMentionedMembers(
 
 	notificationCtx := buildNotificationContext(ctx, queries, e.WorkspaceID, issueID, commentID, appOrigin)
 	actorName := resolveNotificationActorName(ctx, queries, e.ActorType, e.ActorID)
+	// Batch-load notification preferences for all mention recipients.
+	var mentionUserIDs []string
+	for id := range recipientIDs {
+		if id != e.ActorID && !skip[id] {
+			mentionUserIDs = append(mentionUserIDs, id)
+		}
+	}
+	mentionPrefs := loadUserPrefs(context.Background(), queries, e.WorkspaceID, mentionUserIDs)
 
 	for id := range recipientIDs {
 		isExplicitSelfMention := id == e.ActorID && explicitRecipientIDs[id]
@@ -671,6 +897,10 @@ func notifyMentionedMembers(
 			continue
 		}
 		if id == e.ActorID && !explicitRecipientIDs[id] {
+			continue
+		}
+		// Skip if mentions/comments are muted by this user
+		if p, ok := mentionPrefs[id]; ok && isNotifMuted(p, "mentioned") {
 			continue
 		}
 		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
@@ -720,7 +950,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if !ok {
 			return
 		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
+		issue, ok := issueEventIssueFromPayload(payload["issue"])
 		if !ok {
 			return
 		}
@@ -756,7 +986,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if !ok {
 			return
 		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
+		issue, ok := issueEventIssueFromPayload(payload["issue"])
 		if !ok {
 			return
 		}

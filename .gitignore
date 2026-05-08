@@ -10,6 +10,7 @@ dist
 out
 build
 bin
+artifacts/
 dist-electron
 *.tsbuildinfo
 # ...except electron-builder's source resources dir, which holds tracked
@@ -63,6 +64,7 @@ apps/mobile/**/*.mobileprovision
 # local settings
 .claude/
 .tool-versions
+.deepseek/
 
 # feature tracking
 _features/
@@ -76,3 +78,4 @@ _features/
 server/server
 data/
 .kilo
+.idea

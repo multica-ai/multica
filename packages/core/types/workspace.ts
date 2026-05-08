@@ -2,7 +2,6 @@ export type MemberRole = "owner" | "admin" | "member";
 
 export interface WorkspaceRepo {
   url: string;
-  description: string;
 }
 
 export interface Workspace {
@@ -51,6 +50,8 @@ export interface User {
    * 'retry_after_error') can be added without churning this type.
    */
   starter_content_state: string | null;
+  /** Preferred UI language. null means "follow client/system". */
+  language: string | null;
   created_at: string;
   updated_at: string;
 }

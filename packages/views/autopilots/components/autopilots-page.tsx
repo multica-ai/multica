@@ -4,8 +4,6 @@ import { useState } from "react";
 import { Plus, Zap, Play, Pause, AlertCircle, Newspaper, GitPullRequest, Bug, BarChart3, Shield, FileSearch } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
-import { useCreateAutopilot, useCreateAutopilotTrigger } from "@multica/core/autopilots/mutations";
-import { agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -15,32 +13,25 @@ import { PageHeader } from "../../layout/page-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
-import { toast } from "sonner";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from "@multica/ui/components/ui/dialog";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@multica/ui/components/ui/select";
-import {
-  TriggerConfigSection,
-  getDefaultTriggerConfig,
-  toCronExpression,
-} from "./trigger-config";
-import type { TriggerConfig } from "./trigger-config";
-import type { Autopilot } from "@multica/core/types";
+import { AutopilotDialog } from "./autopilot-dialog";
+import type { Autopilot, AutopilotStatus, AutopilotExecutionMode } from "@multica/core/types";
 import type { TriggerFrequency } from "./trigger-config";
+import { useT } from "../../i18n";
+
+// Template-id keyed lookup for the i18n labels. Prompts stay raw English
+// because they're injected directly into the agent's task input — translating
+// them would also translate the agent's instructions.
+type TemplateId =
+  | "daily_news"
+  | "pr_review"
+  | "bug_triage"
+  | "weekly_progress"
+  | "dependency_audit"
+  | "documentation_check";
 
 interface AutopilotTemplate {
-  title: string;
+  id: TemplateId;
   prompt: string;
-  summary: string;
   icon: typeof Zap;
   frequency: TriggerFrequency;
   time: string;
@@ -48,8 +39,7 @@ interface AutopilotTemplate {
 
 const TEMPLATES: AutopilotTemplate[] = [
   {
-    title: "Daily news digest",
-    summary: "Search and summarize today's news for the team",
+    id: "daily_news",
     prompt: `1. Search the web for news and announcements published today only (strictly today's date)
 2. Filter for topics relevant to our team and industry
 3. For each item, write a short summary including: title, source, key takeaways
@@ -60,8 +50,7 @@ const TEMPLATES: AutopilotTemplate[] = [
     time: "09:00",
   },
   {
-    title: "PR review reminder",
-    summary: "Flag stale pull requests that need review",
+    id: "pr_review",
     prompt: `1. List all open pull requests in the repository
 2. Identify PRs that have been open for more than 24 hours without a review
 3. For each stale PR, note the author, age, and a one-line summary of the change
@@ -72,8 +61,7 @@ const TEMPLATES: AutopilotTemplate[] = [
     time: "10:00",
   },
   {
-    title: "Bug triage",
-    summary: "Assess and prioritize new bug reports",
+    id: "bug_triage",
     prompt: `1. List all issues with status "triage" or "backlog" that have not been prioritized
 2. For each issue, read the description and any attached logs or screenshots
 3. Assess severity (critical / high / medium / low) based on user impact and scope
@@ -84,8 +72,7 @@ const TEMPLATES: AutopilotTemplate[] = [
     time: "09:00",
   },
   {
-    title: "Weekly progress report",
-    summary: "Compile a weekly summary of team progress",
+    id: "weekly_progress",
     prompt: `1. Gather all issues completed (status "done") in the past 7 days
 2. Gather all issues currently in progress
 3. Identify any blocked issues and their blockers
@@ -97,8 +84,7 @@ const TEMPLATES: AutopilotTemplate[] = [
     time: "17:00",
   },
   {
-    title: "Dependency audit",
-    summary: "Scan for security vulnerabilities and outdated packages",
+    id: "dependency_audit",
     prompt: `1. Run dependency audit tools on the project (npm audit, go vuln check, etc.)
 2. Identify any packages with known security vulnerabilities
 3. List outdated packages that are more than 2 major versions behind
@@ -109,8 +95,7 @@ const TEMPLATES: AutopilotTemplate[] = [
     time: "08:00",
   },
   {
-    title: "Documentation check",
-    summary: "Review recent changes for documentation gaps",
+    id: "documentation_check",
     prompt: `1. List all code changes merged in the past 7 days (via git log)
 2. For each significant change, check if related documentation was updated
 3. Identify any new APIs, config options, or features missing documentation
@@ -122,220 +107,75 @@ const TEMPLATES: AutopilotTemplate[] = [
   },
 ];
 
-function formatRelativeDate(date: string): string {
-  const diff = Date.now() - new Date(date).getTime();
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  if (days < 1) return "Today";
-  if (days === 1) return "1d ago";
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
+// Hook returning a localized "1d ago / Today" formatter for the row's last_run cell.
+function useFormatRelativeDate(): (date: string) => string {
+  const { t } = useT("autopilots");
+  return (date: string) => {
+    const diff = Date.now() - new Date(date).getTime();
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    if (days < 1) return t(($) => $.relative_date.today);
+    if (days === 1) return t(($) => $.relative_date.one_day_ago);
+    if (days < 30) return t(($) => $.relative_date.days_ago, { count: days });
+    const months = Math.floor(days / 30);
+    return t(($) => $.relative_date.months_ago, { count: months });
+  };
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof Zap }> = {
-  active: { label: "Active", color: "text-emerald-500", icon: Play },
-  paused: { label: "Paused", color: "text-amber-500", icon: Pause },
-  archived: { label: "Archived", color: "text-muted-foreground", icon: AlertCircle },
-};
-
-const EXECUTION_MODE_LABELS: Record<string, string> = {
-  create_issue: "Create Issue",
-  run_only: "Run Only",
+const STATUS_VISUAL: Record<AutopilotStatus, { color: string; icon: typeof Zap }> = {
+  active: { color: "text-emerald-500", icon: Play },
+  paused: { color: "text-amber-500", icon: Pause },
+  archived: { color: "text-muted-foreground", icon: AlertCircle },
 };
 
 function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
+  const { t } = useT("autopilots");
   const { getActorName } = useActorName();
   const wsPaths = useWorkspacePaths();
-  const statusCfg = (STATUS_CONFIG[autopilot.status] ?? STATUS_CONFIG["active"])!;
-  const StatusIcon = statusCfg.icon;
+  const formatRelativeDate = useFormatRelativeDate();
+  const visual = STATUS_VISUAL[autopilot.status as AutopilotStatus] ?? STATUS_VISUAL.active;
+  const StatusIcon = visual.icon;
 
   return (
-    <div className="group/row flex h-11 items-center gap-2 px-5 text-sm transition-colors hover:bg-accent/40">
+    <div className="group/row flex flex-col gap-2 border-b px-4 py-3 text-sm transition-colors hover:bg-accent/40 sm:h-11 sm:flex-row sm:items-center sm:gap-2 sm:border-b-0 sm:px-5 sm:py-0">
       <AppLink
         href={wsPaths.autopilotDetail(autopilot.id)}
-        className="flex min-w-0 flex-1 items-center gap-2"
+        className="flex min-w-0 items-center gap-2 sm:flex-1"
       >
         <Zap className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate font-medium">{autopilot.title}</span>
       </AppLink>
 
-      {/* Agent */}
-      <span className="flex w-32 items-center gap-1.5 shrink-0">
-        <ActorAvatar actorType="agent" actorId={autopilot.assignee_id} size={18} />
-        <span className="truncate text-xs text-muted-foreground">
-          {getActorName("agent", autopilot.assignee_id)}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pl-6 text-xs sm:contents sm:pl-0">
+        {/* Agent */}
+        <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground sm:w-32 sm:shrink-0">
+          <ActorAvatar actorType="agent" actorId={autopilot.assignee_id} size={18} enableHoverCard showStatusDot />
+          <span className="truncate">
+            {getActorName("agent", autopilot.assignee_id)}
+          </span>
         </span>
-      </span>
 
-      {/* Mode */}
-      <span className="w-24 shrink-0 text-center text-xs text-muted-foreground">
-        {EXECUTION_MODE_LABELS[autopilot.execution_mode] ?? autopilot.execution_mode}
-      </span>
+        {/* Mode */}
+        <span className="text-muted-foreground sm:w-24 sm:shrink-0 sm:text-center">
+          {t(($) => $.execution_mode[autopilot.execution_mode as AutopilotExecutionMode])}
+        </span>
 
-      {/* Status */}
-      <span className={cn("flex w-20 items-center justify-center gap-1 shrink-0 text-xs", statusCfg.color)}>
-        <StatusIcon className="h-3 w-3" />
-        {statusCfg.label}
-      </span>
+        {/* Status */}
+        <span className={cn("flex items-center gap-1 sm:w-20 sm:shrink-0 sm:justify-center", visual.color)}>
+          <StatusIcon className="h-3 w-3" />
+          {t(($) => $.status[autopilot.status as AutopilotStatus])}
+        </span>
 
-      {/* Last run */}
-      <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-        {autopilot.last_run_at ? formatRelativeDate(autopilot.last_run_at) : "--"}
-      </span>
+        {/* Last run */}
+        <span className="text-muted-foreground tabular-nums sm:w-20 sm:shrink-0 sm:text-right">
+          {autopilot.last_run_at ? formatRelativeDate(autopilot.last_run_at) : t(($) => $.page.last_run_empty)}
+        </span>
+      </div>
     </div>
   );
 }
 
-function CreateAutopilotDialog({
-  open,
-  onOpenChange,
-  template,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  template?: AutopilotTemplate | null;
-}) {
-  const wsId = useWorkspaceId();
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const createAutopilot = useCreateAutopilot();
-  const createTrigger = useCreateAutopilotTrigger();
-
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [assigneeId, setAssigneeId] = useState("");
-  const [triggerConfig, setTriggerConfig] = useState<TriggerConfig>(getDefaultTriggerConfig);
-  const [submitting, setSubmitting] = useState(false);
-
-  // Apply template when it changes
-  const [appliedTemplate, setAppliedTemplate] = useState<AutopilotTemplate | null | undefined>(null);
-  if (template !== appliedTemplate && open) {
-    setAppliedTemplate(template);
-    if (template) {
-      setTitle(template.title);
-      setDescription(template.prompt);
-      setTriggerConfig({
-        ...getDefaultTriggerConfig(),
-        frequency: template.frequency,
-        time: template.time,
-      });
-    }
-  }
-
-  const activeAgents = agents.filter((a) => !a.archived_at);
-
-  const handleSubmit = async () => {
-    if (!title.trim() || !assigneeId || submitting) return;
-    setSubmitting(true);
-    try {
-      const autopilot = await createAutopilot.mutateAsync({
-        title: title.trim(),
-        description: description.trim() || undefined,
-        assignee_id: assigneeId,
-        execution_mode: "create_issue",
-      });
-
-      // Attach schedule trigger
-      try {
-        await createTrigger.mutateAsync({
-          autopilotId: autopilot.id,
-          kind: "schedule",
-          cron_expression: toCronExpression(triggerConfig),
-          timezone: triggerConfig.timezone,
-        });
-      } catch {
-        toast.error("Autopilot created, but trigger failed to save");
-      }
-
-      onOpenChange(false);
-      setTitle("");
-      setDescription("");
-      setAssigneeId("");
-      setTriggerConfig(getDefaultTriggerConfig());
-      toast.success("Autopilot created");
-    } catch {
-      toast.error("Failed to create autopilot");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogTitle>New Autopilot</DialogTitle>
-        <div className="space-y-5 pt-2">
-          {/* Name */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Name</label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Daily code review"
-              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
-              autoFocus
-            />
-          </div>
-
-          {/* Prompt */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Prompt</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Step-by-step instructions for the agent..."
-              rows={6}
-              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring resize-y"
-            />
-          </div>
-
-          {/* Agent */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Agent</label>
-            <Select value={assigneeId} onValueChange={(v) => v && setAssigneeId(v)}>
-              <SelectTrigger className="mt-1 w-full">
-                <SelectValue>
-                  {(value: string | null) => {
-                    if (!value) return "Select agent...";
-                    const agent = activeAgents.find((a) => a.id === value);
-                    return agent?.name ?? "Unknown Agent";
-                  }}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {activeAgents.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Schedule */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Schedule</label>
-            <div className="mt-2">
-              <TriggerConfigSection config={triggerConfig} onChange={setTriggerConfig} />
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || !assigneeId || submitting}>
-              {submitting ? "Creating..." : "Create"}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export function AutopilotsPage() {
+  const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
   const { data: autopilots = [], isLoading } = useQuery(autopilotListOptions(wsId));
   const [createOpen, setCreateOpen] = useState(false);
@@ -352,14 +192,14 @@ export function AutopilotsPage() {
       <PageHeader className="justify-between px-5">
         <div className="flex items-center gap-2">
           <Zap className="h-4 w-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">Autopilot</h1>
+          <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
           {!isLoading && autopilots.length > 0 && (
             <span className="text-xs text-muted-foreground tabular-nums">{autopilots.length}</span>
           )}
         </div>
         <Button size="sm" variant="outline" onClick={() => openCreate()}>
           <Plus className="h-3.5 w-3.5 mr-1" />
-          New autopilot
+          {t(($) => $.page.new_autopilot)}
         </Button>
       </PageHeader>
 
@@ -367,7 +207,7 @@ export function AutopilotsPage() {
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
           <>
-            <div className="sticky top-0 z-[1] flex h-8 items-center gap-2 border-b bg-muted/30 px-5">
+            <div className="sticky top-0 z-[1] hidden h-8 items-center gap-2 border-b bg-muted/30 px-5 sm:flex">
               <span className="shrink-0 w-4" />
               <Skeleton className="h-3 w-12 flex-1 max-w-[48px]" />
               <Skeleton className="h-3 w-12 shrink-0" />
@@ -375,33 +215,37 @@ export function AutopilotsPage() {
               <Skeleton className="h-3 w-10 shrink-0" />
               <Skeleton className="h-3 w-12 shrink-0" />
             </div>
-            <div className="p-5 pt-1 space-y-1">
+            <div className="space-y-2 p-4 sm:space-y-1 sm:p-5 sm:pt-1">
               {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-11 w-full" />
+                <Skeleton key={i} className="h-[72px] w-full sm:h-11" />
               ))}
             </div>
           </>
         ) : autopilots.length === 0 ? (
           <div className="flex flex-col items-center py-16 px-5">
             <Zap className="h-10 w-10 mb-3 text-muted-foreground opacity-30" />
-            <p className="text-sm text-muted-foreground">No autopilots yet</p>
+            <p className="text-sm text-muted-foreground">{t(($) => $.page.empty.title)}</p>
             <p className="text-xs text-muted-foreground mt-1 mb-6">
-              Schedule recurring tasks for your AI agents. Pick a template or start from scratch.
+              {t(($) => $.page.empty.hint)}
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 w-full max-w-3xl">
-              {TEMPLATES.map((t) => {
-                const Icon = t.icon;
+              {TEMPLATES.map((tpl) => {
+                const Icon = tpl.icon;
                 return (
                   <button
-                    key={t.title}
+                    key={tpl.id}
                     type="button"
                     className="flex items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent/40"
-                    onClick={() => openCreate(t)}
+                    onClick={() => openCreate(tpl)}
                   >
                     <Icon className="h-5 w-5 shrink-0 text-muted-foreground mt-0.5" />
                     <div className="min-w-0">
-                      <div className="text-sm font-medium">{t.title}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{t.summary}</div>
+                      <div className="text-sm font-medium">
+                        {t(($) => $.templates[tpl.id].title)}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                        {t(($) => $.templates[tpl.id].summary)}
+                      </div>
                     </div>
                   </button>
                 );
@@ -409,19 +253,19 @@ export function AutopilotsPage() {
             </div>
             <Button size="sm" variant="outline" className="mt-4" onClick={() => openCreate()}>
               <Plus className="h-3.5 w-3.5 mr-1" />
-              Start from scratch
+              {t(($) => $.page.start_blank)}
             </Button>
           </div>
         ) : (
           <>
             {/* Column headers */}
-            <div className="sticky top-0 z-[1] flex h-8 items-center gap-2 border-b bg-muted/30 px-5 text-xs font-medium text-muted-foreground">
+            <div className="sticky top-0 z-[1] hidden h-8 items-center gap-2 border-b bg-muted/30 px-5 text-xs font-medium text-muted-foreground sm:flex">
               <span className="shrink-0 w-4" />
-              <span className="min-w-0 flex-1">Name</span>
-              <span className="w-32 shrink-0">Agent</span>
-              <span className="w-24 text-center shrink-0">Mode</span>
-              <span className="w-20 text-center shrink-0">Status</span>
-              <span className="w-20 text-right shrink-0">Last run</span>
+              <span className="min-w-0 flex-1">{t(($) => $.page.table.name)}</span>
+              <span className="w-32 shrink-0">{t(($) => $.page.table.agent)}</span>
+              <span className="w-24 text-center shrink-0">{t(($) => $.page.table.mode)}</span>
+              <span className="w-20 text-center shrink-0">{t(($) => $.page.table.status)}</span>
+              <span className="w-20 text-right shrink-0">{t(($) => $.page.table.last_run)}</span>
             </div>
             {autopilots.map((autopilot) => (
               <AutopilotRow key={autopilot.id} autopilot={autopilot} />
@@ -430,7 +274,29 @@ export function AutopilotsPage() {
         )}
       </div>
 
-      <CreateAutopilotDialog open={createOpen} onOpenChange={setCreateOpen} template={selectedTemplate} />
+      {createOpen && (
+        <AutopilotDialog
+          mode="create"
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          initial={
+            selectedTemplate
+              ? {
+                  // Template title pulls from i18n so the user-visible default
+                  // matches their locale, while the prompt body stays raw EN
+                  // since it's injected directly into the agent task.
+                  title: t(($) => $.templates[selectedTemplate.id].title),
+                  description: selectedTemplate.prompt,
+                }
+              : undefined
+          }
+          initialTriggerConfig={
+            selectedTemplate
+              ? { frequency: selectedTemplate.frequency, time: selectedTemplate.time }
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 }

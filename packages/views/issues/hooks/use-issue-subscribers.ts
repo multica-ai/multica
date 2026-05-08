@@ -11,10 +11,10 @@ import { issueSubscribersOptions, issueKeys } from "@multica/core/issues/queries
 import { useToggleIssueSubscriber } from "@multica/core/issues/mutations";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 
-export function useIssueSubscribers(wsId: string, issueId: string, userId?: string) {
+export function useIssueSubscribers(issueId: string, userId?: string) {
   const qc = useQueryClient();
   const { data: subscribers = [], isLoading: loading } = useQuery(
-    issueSubscribersOptions(wsId, issueId),
+    issueSubscribersOptions(issueId),
   );
 
   const toggleMutation = useToggleIssueSubscriber(issueId);
@@ -22,8 +22,8 @@ export function useIssueSubscribers(wsId: string, issueId: string, userId?: stri
   // Reconnect recovery
   useWSReconnect(
     useCallback(() => {
-      qc.invalidateQueries({ queryKey: issueKeys.subscribers(wsId, issueId) });
-    }, [qc, wsId, issueId]),
+      qc.invalidateQueries({ queryKey: issueKeys.subscribers(issueId) });
+    }, [qc, issueId]),
   );
 
   // --- WS event handlers ---
@@ -35,7 +35,7 @@ export function useIssueSubscribers(wsId: string, issueId: string, userId?: stri
         const p = payload as SubscriberAddedPayload;
         if (p.issue_id !== issueId) return;
         qc.setQueryData<IssueSubscriber[]>(
-          issueKeys.subscribers(wsId, issueId),
+          issueKeys.subscribers(issueId),
           (old) => {
             if (!old) return old;
             if (
@@ -58,7 +58,7 @@ export function useIssueSubscribers(wsId: string, issueId: string, userId?: stri
           },
         );
       },
-      [qc, wsId, issueId],
+      [qc, issueId],
     ),
   );
 
@@ -69,7 +69,7 @@ export function useIssueSubscribers(wsId: string, issueId: string, userId?: stri
         const p = payload as SubscriberRemovedPayload;
         if (p.issue_id !== issueId) return;
         qc.setQueryData<IssueSubscriber[]>(
-          issueKeys.subscribers(wsId, issueId),
+          issueKeys.subscribers(issueId),
           (old) =>
             old?.filter(
               (s) =>
@@ -77,7 +77,7 @@ export function useIssueSubscribers(wsId: string, issueId: string, userId?: stri
             ),
         );
       },
-      [qc, wsId, issueId],
+      [qc, issueId],
     ),
   );
 

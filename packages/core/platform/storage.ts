@@ -14,6 +14,10 @@ const browserStorage: StorageAdapter = {
 let configuredStorage: StorageAdapter | null = null;
 
 export function setDefaultStorageAdapter(storage: StorageAdapter) {
+  if (storage === defaultStorage) {
+    configuredStorage = null;
+    return;
+  }
   configuredStorage = storage;
 }
 

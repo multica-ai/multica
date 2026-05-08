@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -11,13 +12,23 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// In-memory model-list request store
+// Model list request store
 // ---------------------------------------------------------------------------
 //
 // The server cannot call the daemon directly (the daemon is behind the user's
-// NAT and only polls the server). So "list models for this runtime" uses the
-// same pattern as PingStore: server creates a pending request, daemon pops it
-// on the next heartbeat, executes locally, and reports the result back.
+// NAT and only polls the server). So "list models for this runtime" uses a
+// pending-request pattern: a frontend POST creates a pending request, the
+// daemon pops it on the next heartbeat, executes locally, and reports the
+// result back.
+//
+// The store is the cross-cutting state for that flow. It MUST stay coherent
+// across API replicas — POST, heartbeat and poll can each land on a different
+// node, and they all need to see the same request lifecycle. The single-node
+// in-memory implementation is fine for self-hosted dev; multi-node deploys
+// (Multica Cloud) MUST use the Redis-backed implementation, otherwise the
+// pending request is invisible to whichever replica receives the next call
+// and the picker shows "No models available" (regression: see issue
+// review on multica-ai/multica#2009).
 
 // ModelListStatus represents the lifecycle of a model list request.
 type ModelListStatus string
@@ -35,15 +46,20 @@ const (
 // selection entirely (currently: hermes). The UI uses this to
 // disable its dropdown rather than silently accepting a value the
 // backend will drop.
+//
+// RunStartedAt is set when PopPending claims the request. It is
+// `json:"-"` because it's a server-side bookkeeping field — the UI only
+// needs Status / UpdatedAt to drive the polling loop.
 type ModelListRequest struct {
-	ID        string          `json:"id"`
-	RuntimeID string          `json:"runtime_id"`
-	Status    ModelListStatus `json:"status"`
-	Models    []ModelEntry    `json:"models,omitempty"`
-	Supported bool            `json:"supported"`
-	Error     string          `json:"error,omitempty"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	ID           string          `json:"id"`
+	RuntimeID    string          `json:"runtime_id"`
+	Status       ModelListStatus `json:"status"`
+	Models       []ModelEntry    `json:"models,omitempty"`
+	Supported    bool            `json:"supported"`
+	Error        string          `json:"error,omitempty"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+	RunStartedAt *time.Time      `json:"-"`
 }
 
 // ModelEntry mirrors agent.Model for the wire. `Default` tags the
@@ -57,28 +73,93 @@ type ModelEntry struct {
 	Default  bool   `json:"default,omitempty"`
 }
 
-// ModelListStore is a thread-safe in-memory store. Entries expire after 2 min
-// to bound memory use; the UI polls /requests/:id until status is terminal.
-type ModelListStore struct {
+const (
+	// modelListPendingTimeout bounds how long a pending request can sit in
+	// the store before the UI is told "daemon didn't pick this up".
+	modelListPendingTimeout = 30 * time.Second
+	// modelListRunningTimeout bounds how long a claimed (running) request
+	// can stay claimed before the UI is told "daemon picked this up but
+	// never reported a result". This matters when the heartbeat response
+	// carrying `pending_model_list` is lost in transit (e.g. HTTP client
+	// timeout after PopPending already mutated store state): without this
+	// transition the UI would keep polling a record that is stuck in
+	// `running` until retention sweeps it.
+	modelListRunningTimeout = 60 * time.Second
+	// modelListStoreRetention bounds how long any stored request lives in
+	// the backing store. The Redis backend uses it as a TTL; the in-memory
+	// backend GCs on Create. The window is deliberately wider than the
+	// running/pending timeouts so terminal records are still readable when
+	// the UI's last poll arrives.
+	modelListStoreRetention = 2 * time.Minute
+)
+
+// ModelListStore is the contract every backend (in-memory single-node,
+// Redis multi-node) must satisfy. Methods take a context so the Redis
+// implementation can honour the heartbeat-side timeout that gates a
+// slow shared store from stalling the rest of the heartbeat.
+type ModelListStore interface {
+	Create(ctx context.Context, runtimeID string) (*ModelListRequest, error)
+	Get(ctx context.Context, id string) (*ModelListRequest, error)
+	// HasPending is a cheap read-only probe used by the heartbeat hot path
+	// to gate the side-effecting PopPending. A spurious "true" is fine —
+	// PopPending handles "queue empty after probe" by returning nil.
+	HasPending(ctx context.Context, runtimeID string) (bool, error)
+	PopPending(ctx context.Context, runtimeID string) (*ModelListRequest, error)
+	Complete(ctx context.Context, id string, models []ModelEntry, supported bool) error
+	Fail(ctx context.Context, id string, errMsg string) error
+}
+
+// applyModelListTimeout transitions a request to ModelListTimeout when it has
+// been stuck in a non-terminal state past its threshold. Returns true when
+// the record was modified so callers can persist the change. The pending
+// threshold catches "daemon never picked this up"; the running threshold
+// catches "daemon picked it up but the result report was lost" — without
+// the running escape, only retention sweep ends the polling loop.
+func applyModelListTimeout(req *ModelListRequest, now time.Time) bool {
+	switch req.Status {
+	case ModelListPending:
+		if now.Sub(req.CreatedAt) > modelListPendingTimeout {
+			req.Status = ModelListTimeout
+			req.Error = "daemon did not respond within 30 seconds"
+			req.UpdatedAt = now
+			return true
+		}
+	case ModelListRunning:
+		if req.RunStartedAt != nil && now.Sub(*req.RunStartedAt) > modelListRunningTimeout {
+			req.Status = ModelListTimeout
+			req.Error = "daemon did not finish within 60 seconds"
+			req.UpdatedAt = now
+			return true
+		}
+	}
+	return false
+}
+
+// InMemoryModelListStore is the single-node implementation. Adequate for
+// self-hosted dev and the test suite, but unsafe in multi-node deploys
+// (each replica gets its own map and the pending request is invisible to
+// every replica that didn't receive the POST).
+type InMemoryModelListStore struct {
 	mu       sync.Mutex
 	requests map[string]*ModelListRequest
 }
 
-func NewModelListStore() *ModelListStore {
-	return &ModelListStore{requests: make(map[string]*ModelListRequest)}
+func NewInMemoryModelListStore() *InMemoryModelListStore {
+	return &InMemoryModelListStore{requests: make(map[string]*ModelListRequest)}
 }
 
-func (s *ModelListStore) Create(runtimeID string) *ModelListRequest {
+func (s *InMemoryModelListStore) Create(_ context.Context, runtimeID string) (*ModelListRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// Garbage-collect stale entries so the map can't grow unbounded.
 	for id, req := range s.requests {
-		if time.Since(req.CreatedAt) > 2*time.Minute {
+		if time.Since(req.CreatedAt) > modelListStoreRetention {
 			delete(s.requests, id)
 		}
 	}
 
+	now := time.Now()
 	req := &ModelListRequest{
 		ID:        randomID(),
 		RuntimeID: runtimeID,
@@ -86,36 +167,47 @@ func (s *ModelListStore) Create(runtimeID string) *ModelListRequest {
 		// Default to true; the daemon overrides this in the report
 		// for providers that don't support per-agent model selection.
 		Supported: true,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	s.requests[req.ID] = req
-	return req
+	return req, nil
 }
 
-func (s *ModelListStore) Get(id string) *ModelListRequest {
+func (s *InMemoryModelListStore) Get(_ context.Context, id string) (*ModelListRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	req, ok := s.requests[id]
 	if !ok {
-		return nil
+		return nil, nil
 	}
-	if req.Status == ModelListPending && time.Since(req.CreatedAt) > 30*time.Second {
-		req.Status = ModelListTimeout
-		req.Error = "daemon did not respond within 30 seconds"
-		req.UpdatedAt = time.Now()
-	}
-	return req
+	applyModelListTimeout(req, time.Now())
+	return req, nil
 }
 
-// PopPending returns and marks-running the oldest pending request for a runtime.
-func (s *ModelListStore) PopPending(runtimeID string) *ModelListRequest {
+func (s *InMemoryModelListStore) HasPending(_ context.Context, runtimeID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	for _, req := range s.requests {
+		applyModelListTimeout(req, now)
+		if req.RuntimeID == runtimeID && req.Status == ModelListPending {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *InMemoryModelListStore) PopPending(_ context.Context, runtimeID string) (*ModelListRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	var oldest *ModelListRequest
+	now := time.Now()
 	for _, req := range s.requests {
+		applyModelListTimeout(req, now)
 		if req.RuntimeID == runtimeID && req.Status == ModelListPending {
 			if oldest == nil || req.CreatedAt.Before(oldest.CreatedAt) {
 				oldest = req
@@ -124,12 +216,14 @@ func (s *ModelListStore) PopPending(runtimeID string) *ModelListRequest {
 	}
 	if oldest != nil {
 		oldest.Status = ModelListRunning
-		oldest.UpdatedAt = time.Now()
+		startedAt := now
+		oldest.RunStartedAt = &startedAt
+		oldest.UpdatedAt = now
 	}
-	return oldest
+	return oldest, nil
 }
 
-func (s *ModelListStore) Complete(id string, models []ModelEntry, supported bool) {
+func (s *InMemoryModelListStore) Complete(_ context.Context, id string, models []ModelEntry, supported bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -139,9 +233,10 @@ func (s *ModelListStore) Complete(id string, models []ModelEntry, supported bool
 		req.Supported = supported
 		req.UpdatedAt = time.Now()
 	}
+	return nil
 }
 
-func (s *ModelListStore) Fail(id string, errMsg string) {
+func (s *InMemoryModelListStore) Fail(_ context.Context, id string, errMsg string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -150,6 +245,11 @@ func (s *ModelListStore) Fail(id string, errMsg string) {
 		req.Error = errMsg
 		req.UpdatedAt = time.Now()
 	}
+	return nil
+}
+
+func modelListRequestTerminal(status ModelListStatus) bool {
+	return status == ModelListCompleted || status == ModelListFailed || status == ModelListTimeout
 }
 
 // ---------------------------------------------------------------------------
@@ -160,8 +260,12 @@ func (s *ModelListStore) Fail(id string, errMsg string) {
 // Called by the frontend; the daemon picks it up on its next heartbeat.
 func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return
+	}
 
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return
@@ -174,7 +278,11 @@ func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req := h.ModelListStore.Create(runtimeID)
+	req, err := h.ModelListStore.Create(r.Context(), uuidToString(rt.ID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to enqueue model list request: "+err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, req)
 }
 
@@ -182,7 +290,11 @@ func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetModelListRequest(w http.ResponseWriter, r *http.Request) {
 	requestID := chi.URLParam(r, "requestId")
 
-	req := h.ModelListStore.Get(requestID)
+	req, err := h.ModelListStore.Get(r.Context(), requestID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
+		return
+	}
 	if req == nil {
 		writeError(w, http.StatusNotFound, "request not found")
 		return
@@ -199,6 +311,24 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 	}
 
 	requestID := chi.URLParam(r, "requestId")
+
+	// Fetch first so we can ignore stale reports for already-terminal
+	// requests (e.g. the heartbeat response that triggered the daemon
+	// run was a retry, and the original report already landed).
+	existing, err := h.ModelListStore.Get(r.Context(), requestID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
+		return
+	}
+	if existing == nil || existing.RuntimeID != runtimeID {
+		writeError(w, http.StatusNotFound, "request not found")
+		return
+	}
+	if modelListRequestTerminal(existing.Status) {
+		slog.Debug("ignoring stale model list report", "runtime_id", runtimeID, "request_id", requestID, "status", existing.Status)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
 
 	var body struct {
 		Status    string       `json:"status"` // "completed" or "failed"
@@ -218,9 +348,21 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 		if body.Supported != nil {
 			supported = *body.Supported
 		}
-		h.ModelListStore.Complete(requestID, body.Models, supported)
+		if err := h.ModelListStore.Complete(r.Context(), requestID, body.Models, supported); err != nil {
+			// Surface the store failure as 5xx so the daemon can retry instead
+			// of swallowing the report (leaves the request stuck in running
+			// until the server-side timeout, which is exactly the "looks OK
+			// but nothing happens" class of bug we're trying to avoid).
+			slog.Error("ModelListStore Complete failed", "error", err, "request_id", requestID)
+			writeError(w, http.StatusInternalServerError, "failed to persist completion")
+			return
+		}
 	} else {
-		h.ModelListStore.Fail(requestID, body.Error)
+		if err := h.ModelListStore.Fail(r.Context(), requestID, body.Error); err != nil {
+			slog.Error("ModelListStore Fail failed", "error", err, "request_id", requestID)
+			writeError(w, http.StatusInternalServerError, "failed to persist failure")
+			return
+		}
 	}
 
 	slog.Debug("model list report", "runtime_id", runtimeID, "request_id", requestID, "status", body.Status, "count", len(body.Models))
