@@ -14,11 +14,18 @@ export type CerebroFlagKey =
   | "cerebro_channels"
   | "cerebro_web_push"
   | "cerebro_dashboard"
-  | "cerebro_inbox_row_actions";
+  | "cerebro_inbox_row_actions"
+  | "cerebro_voice_dictation_enabled"
+  | "cerebro_voice_output_enabled"
+  | "cerebro_voice_summary_enabled";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
- * All cerebro features default to enabled — opt-out, not opt-in.
+ *
+ * Most cerebro features default to enabled — opt-out, not opt-in. The voice
+ * toggles are the exception: they default to OFF until the cerebro-inference
+ * container is reachable and the user opts in. The user-facing settings UI
+ * groups the three voice flags under a single "Voice" section.
  */
 export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_access_control: true,
@@ -29,6 +36,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_web_push: true,
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
+  cerebro_voice_dictation_enabled: false,
+  cerebro_voice_output_enabled: false,
+  cerebro_voice_summary_enabled: false,
 };
 
 export interface CerebroFlagDefinition {
@@ -89,5 +99,23 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Inbox row actions",
     description:
       "Show the cerebro inbox row-actions surface: mute, mark-unread, hover menu, mobile swipe gestures, long-press menu, and the `e` keyboard shortcut.",
+  },
+  {
+    key: "cerebro_voice_dictation_enabled",
+    label: "Dictation",
+    description:
+      "Push-to-talk Whisper dictation (hviske-v3) in chat input and other text fields. Requires the cerebro-inference container.",
+  },
+  {
+    key: "cerebro_voice_output_enabled",
+    label: "Voice output",
+    description:
+      "Read assistant replies aloud in Danish via plapre-nano. Per-message read button + global voice mode.",
+  },
+  {
+    key: "cerebro_voice_summary_enabled",
+    label: "Voice summary",
+    description:
+      "When voice mode is on, summarise long replies into spoken-style Danish before reading them aloud. Reduces TTS latency on long answers and keeps the conversation natural in hands-free use.",
   },
 ];
