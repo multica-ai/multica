@@ -110,6 +110,14 @@ export function formatTokens(n: number): string {
   return n.toLocaleString();
 }
 
+type InputOutputCountable = Pick<RuntimeUsage, "input_tokens" | "output_tokens">;
+
+// Cache reads / writes stay visible in dedicated columns, but "token total"
+// in runtime analytics should reflect the core input/output volume only.
+export function countInputOutputTokens(usage: InputOutputCountable): number {
+  return usage.input_tokens + usage.output_tokens;
+}
+
 // ---------------------------------------------------------------------------
 // Cost estimation
 // ---------------------------------------------------------------------------
@@ -320,8 +328,7 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
 
     const modelName = u.model || u.provider;
     const m = modelMap.get(modelName) ?? { tokens: 0, cost: 0 };
-    m.tokens +=
-      u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens;
+    m.tokens += countInputOutputTokens(u);
     m.cost += estimateCost(u);
     modelMap.set(modelName, m);
   }
@@ -395,8 +402,7 @@ export function aggregateCostByAgent(rows: RuntimeUsageByAgent[]): CostByKey[] {
       cost: 0,
       taskCount: 0,
     };
-    entry.tokens +=
-      r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
+    entry.tokens += countInputOutputTokens(r);
     entry.cost += estimateCost(r);
     entry.taskCount += r.task_count;
     map.set(r.agent_id, entry);
@@ -411,8 +417,7 @@ export function aggregateCostByModel(rows: RuntimeUsage[]): CostByKey[] {
   for (const r of rows) {
     const key = r.model || r.provider || "unknown";
     const entry = map.get(key) ?? { key, tokens: 0, cost: 0, taskCount: 0 };
-    entry.tokens +=
-      r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
+    entry.tokens += countInputOutputTokens(r);
     entry.cost += estimateCost(r);
     map.set(key, entry);
   }
@@ -429,8 +434,7 @@ export function aggregateCostByHour(rows: RuntimeUsageByHour[]): CostByKey[] {
   for (const r of rows) {
     const entry = buckets.get(r.hour);
     if (!entry) continue;
-    entry.tokens +=
-      r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
+    entry.tokens += countInputOutputTokens(r);
     entry.cost += estimateCost(r);
     entry.taskCount += r.task_count;
   }

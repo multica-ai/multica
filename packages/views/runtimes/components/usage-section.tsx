@@ -120,8 +120,7 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
   const totals = computeTotals(filtered);
   const prevTotals = computeTotals(prevFiltered);
 
-  const tokensTotal =
-    totals.input + totals.output + totals.cacheRead + totals.cacheWrite;
+  const tokensTotal = totals.input + totals.output;
   const cacheableTokens = totals.input + totals.cacheRead;
   const cacheHitRate =
     cacheableTokens > 0 ? Math.round((totals.cacheRead / cacheableTokens) * 100) : 0;
@@ -686,4 +685,3 @@ function computeTotals(rows: RuntimeUsage[]): UsageTotals {
     { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheSavings: 0 },
   );
 }
-
