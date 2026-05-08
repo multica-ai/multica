@@ -4,7 +4,8 @@
     "new_project": "New project",
     "empty": "No projects yet",
     "empty_archived": "No archived projects",
-    "create_first": "Create your first project"
+    "create_first": "Create your first project",
+    "archived_filter_badge": "Archived"
   },
   "table": {
     "name": "Name",
@@ -60,7 +61,10 @@
     "empty_issues_new_button": "New Issue",
     "toast_link_copied": "Link copied",
     "toast_project_deleted": "Project deleted",
-    "toast_move_issue_failed": "Failed to move issue"
+    "toast_move_issue_failed": "Failed to move issue",
+    "archived_banner": "Archived. Hidden from the projects list.",
+    "restore_action": "Restore project",
+    "archive_action": "Archive project"
   },
   "resources": {
     "section_header": "Resources",
@@ -74,7 +78,9 @@
     "toast_attached": "Repository attached",
     "toast_attach_failed": "Failed to attach",
     "toast_removed": "Resource removed",
-    "toast_remove_failed": "Failed to remove resource"
+    "toast_remove_failed": "Failed to remove resource",
+    "primary_badge": "Primary",
+    "primary_tooltip": "Primary repo — issues in this project default to working in this repo. To change, remove and re-add resources in the desired order."
   },
   "delete_dialog": {
     "title": "Delete project",

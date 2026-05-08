@@ -215,9 +215,9 @@ function ResourceRow({
         {isPrimary && (
           <span
             className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary"
-            title="Primary repo — issues in this project default to working in this repo. To change, remove and re-add resources in the desired order."
+            title={t(($) => $.resources.primary_tooltip)}
           >
-            Primary
+            {t(($) => $.resources.primary_badge)}
           </span>
         )}
         <button

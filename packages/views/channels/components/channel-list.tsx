@@ -8,6 +8,7 @@ import { useRequiredWorkspaceSlug, paths } from "@multica/core/paths";
 import { channelsListOptions, channelMembersOptions } from "@multica/core/channels";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { AppLink } from "../../navigation";
+import { useT } from "../../i18n";
 import { Button } from "@multica/ui/components/ui/button";
 import { Hash, Lock, MessageCircle, Plus, Bot } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
@@ -49,14 +50,22 @@ function rowIcon(c: Channel) {
  * to a placeholder when memberships haven't loaded yet — render flickers
  * for ~50ms on first paint, which is acceptable for a sidebar.
  */
+interface DMLabels {
+  fallback: string;
+  notesToSelf: string;
+  unknownMember: string;
+  unknownAgent: string;
+}
+
 function dmDisplayName(
   selfUserId: string | null,
   members: ChannelMembership[],
   workspaceMembers: Map<string, MemberWithUser>,
   agents: Map<string, Agent>,
+  labels: DMLabels,
 ): { label: string; type: "member" | "agent" | "self" | "unknown"; avatarUrl?: string | null } {
   if (members.length === 0) {
-    return { label: "Direct message", type: "unknown" };
+    return { label: labels.fallback, type: "unknown" };
   }
   // The "other" participant is anyone in the membership set who isn't the
   // current user. For self-DMs (DM where the only participant is you) we
@@ -65,19 +74,19 @@ function dmDisplayName(
     (m) => !(m.member_type === "member" && m.member_id === selfUserId),
   );
   if (others.length === 0) {
-    return { label: "Notes to self", type: "self" };
+    return { label: labels.notesToSelf, type: "self" };
   }
   const o = others[0]!;
   if (o.member_type === "member") {
     const wm = workspaceMembers.get(o.member_id);
     return {
-      label: wm?.name || wm?.email || "Unknown member",
+      label: wm?.name || wm?.email || labels.unknownMember,
       type: "member",
       avatarUrl: wm?.avatar_url,
     };
   }
   const a = agents.get(o.member_id);
-  return { label: a?.name || "Unknown agent", type: "agent" };
+  return { label: a?.name || labels.unknownAgent, type: "agent" };
 }
 
 /**
@@ -92,9 +101,16 @@ export function ChannelList({
   onCreateDM,
   enabled,
 }: ChannelListProps) {
+  const { t } = useT("channels");
   const wsId = useWorkspaceId();
   const slug = useRequiredWorkspaceSlug();
   const selfUserId = useAuthStore((s) => s.user?.id ?? null);
+  const dmLabels: DMLabels = {
+    fallback: t(($) => $.dm.fallback_label),
+    notesToSelf: t(($) => $.dm.notes_to_self),
+    unknownMember: t(($) => $.dm.unknown_member),
+    unknownAgent: t(($) => $.dm.unknown_agent),
+  };
   const { data: channels = [], isLoading } = useQuery(channelsListOptions(wsId, enabled));
   const { data: workspaceMembers = [] } = useQuery(memberListOptions(wsId));
   const { data: workspaceAgents = [] } = useQuery(agentListOptions(wsId));
@@ -122,34 +138,42 @@ export function ChannelList({
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-muted/20">
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        <span className="text-sm font-semibold text-foreground">Channels</span>
+        <span className="text-sm font-semibold text-foreground">{t(($) => $.list.section_title)}</span>
       </div>
       <div className="flex-1 overflow-y-auto py-2">
         {isLoading ? (
-          <div className="px-3 py-2 text-sm text-muted-foreground">Loading…</div>
+          <div className="px-3 py-2 text-sm text-muted-foreground">{t(($) => $.list.loading)}</div>
         ) : (
           <>
-            <SectionHeader title="Channels" onAdd={onCreateChannel} addLabel="Create channel" />
+            <SectionHeader
+              title={t(($) => $.list.section_label_channels)}
+              onAdd={onCreateChannel}
+              addLabel={t(($) => $.list.create_channel)}
+            />
             {publicChannels.length > 0 ? (
               <ChannelRows channels={publicChannels} activeId={activeChannelId} slug={slug} />
             ) : (
-              <EmptyHint text="No public channels yet" />
+              <EmptyHint text={t(($) => $.list.empty_public)} />
             )}
 
             {privateChannels.length > 0 && (
               <>
-                <SectionHeader title="Private" />
+                <SectionHeader title={t(($) => $.list.section_label_private)} />
                 <ChannelRows channels={privateChannels} activeId={activeChannelId} slug={slug} />
               </>
             )}
 
-            <SectionHeader title="Direct messages" onAdd={onCreateDM} addLabel="New direct message" />
+            <SectionHeader
+              title={t(($) => $.list.section_label_dms)}
+              onAdd={onCreateDM}
+              addLabel={t(($) => $.list.new_dm)}
+            />
             {dms.length > 0 ? (
               <ul className="flex flex-col gap-px">
                 {dms.map((c, i) => {
                   const memQuery = dmMembersResults[i];
                   const mems = memQuery?.data ?? [];
-                  const info = dmDisplayName(selfUserId, mems, memberById, agentById);
+                  const info = dmDisplayName(selfUserId, mems, memberById, agentById, dmLabels);
                   const isActive = c.id === activeChannelId;
                   const unread = c.unread_count > 0 && !isActive;
                   return (
@@ -165,14 +189,14 @@ export function ChannelList({
                       >
                         <DMAvatar info={info} />
                         <span className="flex-1 truncate">{info.label}</span>
-                        {unread ? <UnreadBadge count={c.unread_count} /> : null}
+                        {unread ? <UnreadBadge count={c.unread_count} unreadAriaLabel={t(($) => $.list.unread_aria, { count: c.unread_count })} /> : null}
                       </AppLink>
                     </li>
                   );
                 })}
               </ul>
             ) : (
-              <EmptyHint text="No direct messages yet" />
+              <EmptyHint text={t(($) => $.list.empty_dms)} />
             )}
           </>
         )}
@@ -219,6 +243,7 @@ interface ChannelRowsProps {
 }
 
 function ChannelRows({ channels, activeId, slug }: ChannelRowsProps) {
+  const { t } = useT("channels");
   return (
     <ul className="flex flex-col gap-px">
       {channels.map((c) => {
@@ -239,7 +264,12 @@ function ChannelRows({ channels, activeId, slug }: ChannelRowsProps) {
             >
               <Icon className="h-4 w-4 shrink-0" />
               <span className="flex-1 truncate">{label}</span>
-              {unread ? <UnreadBadge count={c.unread_count} /> : null}
+              {unread ? (
+                <UnreadBadge
+                  count={c.unread_count}
+                  unreadAriaLabel={t(($) => $.list.unread_aria, { count: c.unread_count })}
+                />
+              ) : null}
             </AppLink>
           </li>
         );
@@ -248,12 +278,12 @@ function ChannelRows({ channels, activeId, slug }: ChannelRowsProps) {
   );
 }
 
-function UnreadBadge({ count }: { count: number }) {
+function UnreadBadge({ count, unreadAriaLabel }: { count: number; unreadAriaLabel: string }) {
   // Cap visible count at 99+ so wide channel names don't get squeezed.
   const text = count > 99 ? "99+" : String(count);
   return (
     <span
-      aria-label={`${count} unread`}
+      aria-label={unreadAriaLabel}
       className="ml-auto inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-none text-primary-foreground"
     >
       {text}

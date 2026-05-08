@@ -35,6 +35,7 @@ import type { Channel } from "@multica/core/types";
 import { MembersPanel } from "./members-panel";
 import { ChannelSettingsDialog } from "./channel-settings-dialog";
 import { ChannelSearch } from "./channel-search";
+import { useT } from "../../i18n";
 
 interface ChannelHeaderProps {
   channel: Channel;
@@ -60,6 +61,7 @@ function channelIcon(channel: Channel) {
  * per ChannelService.Create).
  */
 export function ChannelHeader({ channel, enabled }: ChannelHeaderProps) {
+  const { t } = useT("channels");
   const Icon = channelIcon(channel);
   const wsId = useWorkspaceId();
   const slug = useRequiredWorkspaceSlug();
@@ -80,24 +82,28 @@ export function ChannelHeader({ channel, enabled }: ChannelHeaderProps) {
       (m) => !(m.member_type === "member" && m.member_id === selfUserId),
     );
     if (others.length === 0) {
-      return { label: "Notes to self", type: "self" as const, avatarUrl: null as string | null };
+      return {
+        label: t(($) => $.dm.notes_to_self),
+        type: "self" as const,
+        avatarUrl: null as string | null,
+      };
     }
     const o = others[0]!;
     if (o.member_type === "member") {
       const wm = workspaceMembers.find((m) => m.user_id === o.member_id);
       return {
-        label: wm?.name || wm?.email || "Unknown member",
+        label: wm?.name || wm?.email || t(($) => $.dm.unknown_member),
         type: "member" as const,
         avatarUrl: wm?.avatar_url ?? null,
       };
     }
     const a = workspaceAgents.find((x) => x.id === o.member_id);
     return {
-      label: a?.name || "Unknown agent",
+      label: a?.name || t(($) => $.dm.unknown_agent),
       type: "agent" as const,
       avatarUrl: null,
     };
-  }, [channel.kind, members, selfUserId, workspaceMembers, workspaceAgents]);
+  }, [channel.kind, members, selfUserId, workspaceMembers, workspaceAgents, t]);
 
   const displayName = dmInfo?.label || channel.display_name || channel.name;
 
@@ -114,11 +120,11 @@ export function ChannelHeader({ channel, enabled }: ChannelHeaderProps) {
     setArchiveConfirmOpen(false);
     archiveMut.mutate(channel.id, {
       onSuccess: () => {
-        toast.success("Channel archived");
+        toast.success(t(($) => $.header.toast_archived));
         navigation.push(paths.workspace(slug).channels());
       },
       onError: (err: unknown) => {
-        toast.error(err instanceof Error ? err.message : "Failed to archive channel");
+        toast.error(err instanceof Error ? err.message : t(($) => $.header.toast_archive_failed));
       },
     });
   };
@@ -159,7 +165,7 @@ export function ChannelHeader({ channel, enabled }: ChannelHeaderProps) {
           variant="outline"
           size="sm"
           onClick={() => setMembersOpen(true)}
-          aria-label="Show members"
+          aria-label={t(($) => $.header.members_aria)}
         >
           <Users className="mr-2 h-4 w-4" />
           {members.length}
@@ -168,7 +174,7 @@ export function ChannelHeader({ channel, enabled }: ChannelHeaderProps) {
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button variant="outline" size="sm" aria-label="Channel actions">
+                <Button variant="outline" size="sm" aria-label={t(($) => $.header.actions_aria)}>
                   <MoreHorizontal className="h-4 w-4" />
                 </Button>
               }
@@ -176,14 +182,14 @@ export function ChannelHeader({ channel, enabled }: ChannelHeaderProps) {
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
                 <Settings className="mr-2 h-4 w-4" />
-                Channel settings
+                {t(($) => $.header.channel_settings)}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => setArchiveConfirmOpen(true)}
                 className="text-destructive focus:text-destructive"
               >
                 <Archive className="mr-2 h-4 w-4" />
-                Archive channel
+                {t(($) => $.header.archive_channel)}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -207,17 +213,14 @@ export function ChannelHeader({ channel, enabled }: ChannelHeaderProps) {
       <AlertDialog open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Archive this channel?</AlertDialogTitle>
+            <AlertDialogTitle>{t(($) => $.header.archive_confirm_title)}</AlertDialogTitle>
             <AlertDialogDescription>
-              The channel will disappear from the list and from search.
-              Historical messages and memberships are preserved — nothing
-              is deleted. An admin can reverse this from the database
-              (no restore UI yet).
+              {t(($) => $.header.archive_confirm_description)}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleArchive}>Archive</AlertDialogAction>
+            <AlertDialogCancel>{t(($) => $.header.archive_cancel)}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleArchive}>{t(($) => $.header.archive_confirm)}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

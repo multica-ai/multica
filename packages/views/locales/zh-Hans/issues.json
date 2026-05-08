@@ -76,7 +76,9 @@
   },
   "list": {
     "empty_status": "无 issue",
-    "add_issue_tooltip": "新建 issue"
+    "add_issue_tooltip": "新建 issue",
+    "orphan_subissue_in": "归属 {{identifier}}",
+    "orphan_subissue_title": "属于 {{identifier}} {{title}} 的子 issue"
   },
   "board": {
     "hidden_columns_label": "隐藏的列",

@@ -30,6 +30,7 @@ import type {
   ChannelMembership,
   MemberWithUser,
 } from "@multica/core/types";
+import { useT } from "../../i18n";
 
 interface MembersPanelProps {
   channel: Channel;
@@ -60,6 +61,7 @@ interface AddCandidate {
  * reappears via the query invalidation.
  */
 export function MembersPanel({ channel, open, onOpenChange, enabled }: MembersPanelProps) {
+  const { t } = useT("channels");
   const wsId = useWorkspaceId();
   const selfUserId = useAuthStore((s) => s.user?.id ?? null);
   const { data: members = [] } = useQuery(channelMembersOptions(channel.id, enabled));
@@ -74,11 +76,16 @@ export function MembersPanel({ channel, open, onOpenChange, enabled }: MembersPa
   // workspace member + agent lists. We fall back to a "Unknown …" row when
   // the join target is missing — happens when an agent has been archived
   // since being added, or a workspace member has left.
+  const unknownMember = t(($) => $.members_panel.unknown_member);
+  const unknownAgent = t(($) => $.members_panel.unknown_agent);
+  const agentSublabel = t(($) => $.members_panel.agent_sublabel);
   const memberRows = useMemo(() => {
     const memberMap = new Map(workspaceMembers.map((m) => [m.user_id, m]));
     const agentMap = new Map(workspaceAgents.map((a) => [a.id, a]));
-    return members.map((mem) => resolveMemberRow(mem, memberMap, agentMap));
-  }, [members, workspaceMembers, workspaceAgents]);
+    return members.map((mem) =>
+      resolveMemberRow(mem, memberMap, agentMap, { unknownMember, unknownAgent, agentSublabel }),
+    );
+  }, [members, workspaceMembers, workspaceAgents, unknownMember, unknownAgent, agentSublabel]);
 
   // Candidates for "Add member": every workspace member + active agent
   // that isn't already a member of this channel.
@@ -102,7 +109,7 @@ export function MembersPanel({ channel, open, onOpenChange, enabled }: MembersPa
         type: "agent",
         id: a.id,
         label: a.name,
-        sublabel: "agent",
+        sublabel: agentSublabel,
       });
     }
     if (!filter) return out;
@@ -112,7 +119,7 @@ export function MembersPanel({ channel, open, onOpenChange, enabled }: MembersPa
         c.label.toLowerCase().includes(needle) ||
         (c.sublabel && c.sublabel.toLowerCase().includes(needle)),
     );
-  }, [members, workspaceMembers, workspaceAgents, filter]);
+  }, [members, workspaceMembers, workspaceAgents, filter, agentSublabel]);
 
   const handleAdd = (c: AddCandidate) => {
     addMember.mutate({
@@ -135,17 +142,17 @@ export function MembersPanel({ channel, open, onOpenChange, enabled }: MembersPa
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent>
         <SheetHeader>
-          <SheetTitle>Members</SheetTitle>
+          <SheetTitle>{t(($) => $.members_panel.title)}</SheetTitle>
           <SheetDescription>
             {isDM
-              ? "Direct message participants. To talk to someone else, start a new DM."
-              : "Workspace members and agents in this channel."}
+              ? t(($) => $.members_panel.description_dm)
+              : t(($) => $.members_panel.description_channel)}
           </SheetDescription>
         </SheetHeader>
 
         <div className="px-4 pb-4">
           <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            In this channel ({memberRows.length})
+            {t(($) => $.members_panel.in_this_channel, { count: memberRows.length })}
           </h3>
           <ul className="flex flex-col gap-1">
             {memberRows.map((row) => {
@@ -162,11 +169,11 @@ export function MembersPanel({ channel, open, onOpenChange, enabled }: MembersPa
                         {row.label}
                       </span>
                       {isSelf ? (
-                        <span className="text-xs text-muted-foreground">you</span>
+                        <span className="text-xs text-muted-foreground">{t(($) => $.members_panel.you)}</span>
                       ) : null}
                     </div>
                     <div className="truncate text-xs text-muted-foreground">
-                      {row.role === "admin" ? "admin" : row.sublabel ?? ""}
+                      {row.role === "admin" ? t(($) => $.members_panel.admin) : row.sublabel ?? ""}
                     </div>
                   </div>
                   {!isDM && !isSelf && row.role !== "admin" ? (
@@ -175,7 +182,7 @@ export function MembersPanel({ channel, open, onOpenChange, enabled }: MembersPa
                       variant="ghost"
                       onClick={() => handleRemove(row.raw)}
                       disabled={removeMember.isPending}
-                      aria-label={`Remove ${row.label}`}
+                      aria-label={t(($) => $.members_panel.remove_aria, { name: row.label })}
                       className="h-7 w-7 p-0"
                     >
                       <X className="h-4 w-4" />
@@ -190,18 +197,18 @@ export function MembersPanel({ channel, open, onOpenChange, enabled }: MembersPa
         {!isDM && (
           <div className="border-t border-border px-4 py-4">
             <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <UserPlus className="h-3 w-3" /> Add to channel
+              <UserPlus className="h-3 w-3" /> {t(($) => $.members_panel.add_to_channel)}
             </div>
             <input
               type="text"
-              placeholder="Search workspace members and agents…"
+              placeholder={t(($) => $.members_panel.search_placeholder)}
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               className="mb-2 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
             {candidates.length === 0 ? (
               <p className="py-4 text-center text-xs text-muted-foreground">
-                {filter ? "No matches." : "Everyone is already in this channel."}
+                {filter ? t(($) => $.members_panel.no_matches) : t(($) => $.members_panel.everyone_added)}
               </p>
             ) : (
               <ul className="flex flex-col gap-1">
@@ -246,17 +253,24 @@ interface ResolvedMemberRow {
   raw: ChannelMembership;
 }
 
+interface ResolverLabels {
+  unknownMember: string;
+  unknownAgent: string;
+  agentSublabel: string;
+}
+
 function resolveMemberRow(
   mem: ChannelMembership,
   memberMap: Map<string, MemberWithUser>,
   agentMap: Map<string, Agent>,
+  labels: ResolverLabels,
 ): ResolvedMemberRow {
   if (mem.member_type === "member") {
     const m = memberMap.get(mem.member_id);
     return {
       type: "member",
       id: mem.member_id,
-      label: m?.name || m?.email || "Unknown member",
+      label: m?.name || m?.email || labels.unknownMember,
       sublabel: m?.email,
       avatarUrl: m?.avatar_url,
       role: mem.role,
@@ -267,8 +281,8 @@ function resolveMemberRow(
   return {
     type: "agent",
     id: mem.member_id,
-    label: a?.name || "Unknown agent",
-    sublabel: "agent",
+    label: a?.name || labels.unknownAgent,
+    sublabel: labels.agentSublabel,
     role: mem.role,
     raw: mem,
   };

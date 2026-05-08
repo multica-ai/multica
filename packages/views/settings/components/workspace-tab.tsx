@@ -277,17 +277,17 @@ export function WorkspaceTab() {
              * excluded from the picker.
              */}
             <div>
-              <Label className="text-xs text-muted-foreground">Orchestrator agent</Label>
+              <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.orchestrator_label)}</Label>
               <Select
                 value={orchestratorAgentId}
                 onValueChange={(v) => { if (v) setOrchestratorAgentId(v); }}
                 disabled={!canManageWorkspace}
               >
                 <SelectTrigger className="mt-1 w-full">
-                  <SelectValue placeholder="No orchestrator (default)" />
+                  <SelectValue placeholder={t(($) => $.workspace.orchestrator_placeholder)} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={ORCHESTRATOR_NONE}>No orchestrator</SelectItem>
+                  <SelectItem value={ORCHESTRATOR_NONE}>{t(($) => $.workspace.orchestrator_none)}</SelectItem>
                   {activeAgents.map((a) => (
                     <SelectItem key={a.id} value={a.id}>
                       {a.name}
@@ -296,10 +296,7 @@ export function WorkspaceTab() {
                 </SelectContent>
               </Select>
               <p className="mt-1 text-xs text-muted-foreground">
-                Optional. When set, this agent gets woken on every agent-authored issue
-                comment to coordinate the workflow — acknowledge completion, reassign,
-                change status, or notify a human. Leave as &quot;No orchestrator&quot; to
-                keep the current behavior (only the assigned agent is woken).
+                {t(($) => $.workspace.orchestrator_hint)}
               </p>
             </div>
             <div className="flex items-center justify-end gap-2 pt-1">
@@ -330,7 +327,7 @@ export function WorkspaceTab() {
         <section className="space-y-4">
           <div className="flex items-center gap-2">
             <MessageCircle className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">Channels</h2>
+            <h2 className="text-sm font-semibold">{t(($) => $.channels.section_title)}</h2>
           </div>
           <Card>
             <CardContent className="space-y-3">
@@ -447,6 +444,7 @@ interface ChannelsSettingsProps {
  * we follow the same convention rather than introducing a one-off hook.
  */
 function ChannelsSettings({ workspace }: ChannelsSettingsProps) {
+  const { t } = useT("settings");
   const qc = useQueryClient();
   const [enabled, setEnabled] = useState(workspace.channels_enabled);
   const [pending, setPending] = useState(false);
@@ -468,10 +466,10 @@ function ChannelsSettings({ workspace }: ChannelsSettingsProps) {
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((w) => (w.id === updated.id ? updated : w)),
       );
-      toast.success(next ? "Channels enabled" : "Channels disabled");
+      toast.success(next ? t(($) => $.channels.toast_enabled) : t(($) => $.channels.toast_disabled));
     } catch (e) {
       setEnabled(!next);
-      toast.error(e instanceof Error ? e.message : "Failed to update channels setting");
+      toast.error(e instanceof Error ? e.message : t(($) => $.channels.toast_toggle_failed));
     } finally {
       setPending(false);
     }
@@ -481,18 +479,16 @@ function ChannelsSettings({ workspace }: ChannelsSettingsProps) {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-medium">Enable Channels</p>
+          <p className="text-sm font-medium">{t(($) => $.channels.enable_label)}</p>
           <p className="text-xs text-muted-foreground">
-            Multi-participant chat alongside the issue board, with public
-            channels, private channels, and direct messages. When off, the
-            sidebar entry hides and Channels endpoints return 404.
+            {t(($) => $.channels.enable_description)}
           </p>
         </div>
         <Switch
           checked={enabled}
           onCheckedChange={handleToggle}
           disabled={pending}
-          aria-label="Enable Channels"
+          aria-label={t(($) => $.channels.enable_aria)}
         />
       </div>
       {enabled && <RetentionSettings workspace={workspace} />}
@@ -519,6 +515,7 @@ interface RetentionSettingsProps {
  * just show the warning unconditionally when going forever→finite.
  */
 function RetentionSettings({ workspace }: RetentionSettingsProps) {
+  const { t } = useT("settings");
   const qc = useQueryClient();
   const initialForever = workspace.channel_retention_days == null;
   const initialDays = workspace.channel_retention_days ?? 90;
@@ -557,9 +554,9 @@ function RetentionSettings({ workspace }: RetentionSettingsProps) {
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((w) => (w.id === updated.id ? updated : w)),
       );
-      toast.success("Retention setting saved");
+      toast.success(t(($) => $.channels.retention_toast_saved));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save retention setting");
+      toast.error(e instanceof Error ? e.message : t(($) => $.channels.retention_toast_save_failed));
     } finally {
       setSaving(false);
     }
@@ -567,10 +564,9 @@ function RetentionSettings({ workspace }: RetentionSettingsProps) {
 
   return (
     <div className="space-y-2 border-t border-border pt-3">
-      <div className="text-sm font-medium">Message retention</div>
+      <div className="text-sm font-medium">{t(($) => $.channels.retention_title)}</div>
       <p className="text-xs text-muted-foreground">
-        Messages older than this are hidden from view. Default: 90 days.
-        Per-channel overrides take precedence.
+        {t(($) => $.channels.retention_description)}
       </p>
       <label className="flex items-center gap-2 text-sm">
         <input
@@ -579,7 +575,7 @@ function RetentionSettings({ workspace }: RetentionSettingsProps) {
           onChange={(e) => setForever(e.target.checked)}
           disabled={saving}
         />
-        Retain messages forever
+        {t(($) => $.channels.retain_forever)}
       </label>
       {!forever && (
         <div className="flex items-center gap-2">
@@ -594,23 +590,23 @@ function RetentionSettings({ workspace }: RetentionSettingsProps) {
             disabled={saving}
             className="w-24"
           />
-          <span className="text-xs text-muted-foreground">days</span>
+          <span className="text-xs text-muted-foreground">{t(($) => $.channels.days)}</span>
         </div>
       )}
       {!daysValid && (
         <p className="text-xs text-destructive" role="alert">
-          Retention must be between 1 and 3650 days.
+          {t(($) => $.channels.retention_invalid)}
         </p>
       )}
       {transitioningToFinite && (
         <p className="text-xs text-muted-foreground">
-          Heads up: existing messages older than {Number.isFinite(days) ? days : 0} days will be hidden after the next cleanup run.
+          {t(($) => $.channels.retention_warning, { days: Number.isFinite(days) ? days : 0 })}
         </p>
       )}
       <div>
         <Button size="sm" onClick={handleSave} disabled={!dirty || !daysValid || saving}>
           <Save className="h-3 w-3" />
-          {saving ? "Saving…" : "Save"}
+          {saving ? t(($) => $.channels.retention_saving) : t(($) => $.channels.retention_save)}
         </Button>
       </div>
     </div>

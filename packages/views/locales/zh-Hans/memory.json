@@ -1,0 +1,41 @@
+{
+  "page": {
+    "title": "记忆",
+    "new_artifact": "新建条目",
+    "search_placeholder": "搜索记忆...",
+    "filter_all": "全部",
+    "empty_search": "没有匹配的条目",
+    "empty_default": "还没有记忆条目",
+    "create_first": "创建第一个条目"
+  },
+  "detail": {
+    "back": "记忆",
+    "archived_badge": "已归档",
+    "restore": "恢复",
+    "archive": "归档",
+    "delete_forever": "彻底删除",
+    "untitled": "未命名",
+    "content_placeholder": "开始写作...",
+    "updated_on": "更新于 {{date}}",
+    "delete_confirm": "确定要彻底删除该条目吗？此操作不可撤销。",
+    "toast_archived": "已归档",
+    "toast_restored": "已恢复",
+    "toast_deleted": "已删除",
+    "toast_archive_failed": "归档失败",
+    "toast_restore_failed": "恢复失败",
+    "toast_delete_failed": "删除失败",
+    "toast_update_title_failed": "更新标题失败",
+    "toast_save_content_failed": "保存内容失败"
+  },
+  "create_modal": {
+    "title": "新建记忆条目",
+    "breadcrumb_new": "新建{{kind}}",
+    "close_tooltip": "关闭",
+    "title_placeholder": "标题",
+    "content_placeholder": "开始写作...（支持 Markdown）",
+    "creating": "创建中...",
+    "create": "创建",
+    "toast_created": "已创建",
+    "toast_create_failed": "创建条目失败"
+  }
+}

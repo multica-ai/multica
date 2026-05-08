@@ -15,6 +15,7 @@ import { channelSearchOptions } from "@multica/core/channels";
 import { useNavigation } from "../../navigation";
 import { useRequiredWorkspaceSlug, paths } from "@multica/core/paths";
 import type { ChannelSearchHit } from "@multica/core/types";
+import { useT } from "../../i18n";
 
 interface ChannelSearchProps {
   /** When set, search is scoped to this channel only. Header passes
@@ -34,6 +35,7 @@ interface ChannelSearchProps {
  * require it and the bare snippet is readable enough.
  */
 export function ChannelSearch({ channelId, enabled }: ChannelSearchProps) {
+  const { t } = useT("channels");
   const wsId = useWorkspaceId();
   const slug = useRequiredWorkspaceSlug();
   const navigation = useNavigation();
@@ -54,9 +56,9 @@ export function ChannelSearch({ channelId, enabled }: ChannelSearchProps) {
   );
 
   const placeholder = useMemo(() => {
-    if (channelId) return "Search this channel…";
-    return "Search channels…";
-  }, [channelId]);
+    if (channelId) return t(($) => $.search.placeholder_channel);
+    return t(($) => $.search.placeholder_global);
+  }, [channelId, t]);
 
   const handleNavigate = (hit: ChannelSearchHit) => {
     setOpen(false);
@@ -72,7 +74,7 @@ export function ChannelSearch({ channelId, enabled }: ChannelSearchProps) {
           <Button
             size="sm"
             variant="outline"
-            aria-label="Search messages"
+            aria-label={t(($) => $.search.trigger_aria)}
             className="gap-2"
             onClick={() => {
               setOpen(true);
@@ -81,7 +83,7 @@ export function ChannelSearch({ channelId, enabled }: ChannelSearchProps) {
             }}
           >
             <Search className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Search</span>
+            <span className="hidden sm:inline">{t(($) => $.search.trigger_label)}</span>
           </Button>
         }
       />
@@ -98,14 +100,14 @@ export function ChannelSearch({ channelId, enabled }: ChannelSearchProps) {
         <div className="max-h-96 overflow-y-auto">
           {!debouncedQ ? (
             <p className="p-4 text-sm text-muted-foreground">
-              Start typing to search.
+              {t(($) => $.search.hint_start)}
             </p>
           ) : isFetching && hits.length === 0 ? (
-            <p className="p-4 text-sm text-muted-foreground">Searching…</p>
+            <p className="p-4 text-sm text-muted-foreground">{t(($) => $.search.hint_loading)}</p>
           ) : hits.length === 0 ? (
-            <p className="p-4 text-sm text-muted-foreground">No matches.</p>
+            <p className="p-4 text-sm text-muted-foreground">{t(($) => $.search.hint_empty)}</p>
           ) : (
-            <ul role="listbox" aria-label="Search results">
+            <ul role="listbox" aria-label={t(($) => $.search.results_aria)}>
               {hits.map((hit) => (
                 <li key={hit.id}>
                   <button
@@ -125,7 +127,7 @@ export function ChannelSearch({ channelId, enabled }: ChannelSearchProps) {
                       )}
                       <span>
                         {hit.channel_kind === "dm"
-                          ? "Direct message"
+                          ? t(($) => $.search.dm_label)
                           : hit.channel_display_name || hit.channel_name}
                       </span>
                     </div>

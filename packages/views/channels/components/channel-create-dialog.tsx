@@ -15,6 +15,7 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useCreateChannel } from "@multica/core/channels";
 import { useNavigation } from "../../navigation";
 import { useRequiredWorkspaceSlug, paths } from "@multica/core/paths";
+import { useT } from "../../i18n";
 
 interface ChannelCreateDialogProps {
   open: boolean;
@@ -30,6 +31,7 @@ interface ChannelCreateDialogProps {
  * "General Chat" as having uppercase + whitespace.
  */
 export function ChannelCreateDialog({ open, onOpenChange }: ChannelCreateDialogProps) {
+  const { t } = useT("channels");
   const slug = useRequiredWorkspaceSlug();
   const navigation = useNavigation();
   const [name, setName] = useState("");
@@ -56,7 +58,7 @@ export function ChannelCreateDialog({ open, onOpenChange }: ChannelCreateDialogP
     e.preventDefault();
     setError(null);
     if (!sanitizedName) {
-      setError("Name is required");
+      setError(t(($) => $.create_dialog.name_required));
       return;
     }
     startTransition(() => {
@@ -73,7 +75,7 @@ export function ChannelCreateDialog({ open, onOpenChange }: ChannelCreateDialogP
             navigation.push(paths.workspace(slug).channelDetail(channel.id));
           },
           onError: (err: unknown) => {
-            const msg = err instanceof Error ? err.message : "Failed to create channel";
+            const msg = err instanceof Error ? err.message : t(($) => $.create_dialog.submit_failed);
             setError(msg);
           },
         },
@@ -85,19 +87,17 @@ export function ChannelCreateDialog({ open, onOpenChange }: ChannelCreateDialogP
     <Dialog open={open} onOpenChange={(v) => (v ? onOpenChange(true) : handleClose())}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create channel</DialogTitle>
+          <DialogTitle>{t(($) => $.create_dialog.title)}</DialogTitle>
           <DialogDescription>
-            Channels are where teammates and agents talk. Public channels are
-            visible to everyone in the workspace; private channels are
-            invitation-only.
+            {t(($) => $.create_dialog.description)}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="channel-name">Name</Label>
+            <Label htmlFor="channel-name">{t(($) => $.create_dialog.name_label)}</Label>
             <Input
               id="channel-name"
-              placeholder="e.g. design-reviews"
+              placeholder={t(($) => $.create_dialog.name_placeholder)}
               value={name}
               onChange={(e) => setName(e.target.value)}
               autoFocus
@@ -105,32 +105,33 @@ export function ChannelCreateDialog({ open, onOpenChange }: ChannelCreateDialogP
             />
             {sanitizedName && sanitizedName !== name && (
               <p className="text-xs text-muted-foreground">
-                Will be saved as: <code className="font-mono">{sanitizedName}</code>
+                {t(($) => $.create_dialog.saved_as)}{" "}
+                <code className="font-mono">{sanitizedName}</code>
               </p>
             )}
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="channel-display">Display name (optional)</Label>
+            <Label htmlFor="channel-display">{t(($) => $.create_dialog.display_label)}</Label>
             <Input
               id="channel-display"
-              placeholder="Design reviews"
+              placeholder={t(($) => $.create_dialog.display_placeholder)}
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               maxLength={120}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="channel-desc">Description (optional)</Label>
+            <Label htmlFor="channel-desc">{t(($) => $.create_dialog.description_label)}</Label>
             <Textarea
               id="channel-desc"
-              placeholder="What this channel is for"
+              placeholder={t(($) => $.create_dialog.description_placeholder)}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
             />
           </div>
           <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">Visibility</legend>
+            <legend className="text-sm font-medium">{t(($) => $.create_dialog.visibility_label)}</legend>
             <label className="flex items-start gap-2 text-sm">
               <input
                 type="radio"
@@ -141,9 +142,9 @@ export function ChannelCreateDialog({ open, onOpenChange }: ChannelCreateDialogP
                 className="mt-0.5"
               />
               <span>
-                <span className="font-medium">Public</span>
+                <span className="font-medium">{t(($) => $.create_dialog.public_label)}</span>
                 <span className="block text-muted-foreground">
-                  Anyone in the workspace can find and join.
+                  {t(($) => $.create_dialog.public_hint)}
                 </span>
               </span>
             </label>
@@ -157,9 +158,9 @@ export function ChannelCreateDialog({ open, onOpenChange }: ChannelCreateDialogP
                 className="mt-0.5"
               />
               <span>
-                <span className="font-medium">Private</span>
+                <span className="font-medium">{t(($) => $.create_dialog.private_label)}</span>
                 <span className="block text-muted-foreground">
-                  Only invited members can see this channel.
+                  {t(($) => $.create_dialog.private_hint)}
                 </span>
               </span>
             </label>
@@ -171,10 +172,10 @@ export function ChannelCreateDialog({ open, onOpenChange }: ChannelCreateDialogP
           )}
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={handleClose} disabled={createMut.isPending}>
-              Cancel
+              {t(($) => $.create_dialog.cancel)}
             </Button>
             <Button type="submit" disabled={!sanitizedName || createMut.isPending || isPending}>
-              {createMut.isPending ? "Creating…" : "Create"}
+              {createMut.isPending ? t(($) => $.create_dialog.creating) : t(($) => $.create_dialog.create)}
             </Button>
           </div>
         </form>

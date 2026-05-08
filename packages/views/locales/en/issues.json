@@ -77,7 +77,9 @@
   },
   "list": {
     "empty_status": "No issues",
-    "add_issue_tooltip": "Add issue"
+    "add_issue_tooltip": "Add issue",
+    "orphan_subissue_in": "in {{identifier}}",
+    "orphan_subissue_title": "Sub-issue of {{identifier}} {{title}}"
   },
   "board": {
     "hidden_columns_label": "Hidden columns",

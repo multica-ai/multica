@@ -1,0 +1,41 @@
+{
+  "page": {
+    "title": "Memory",
+    "new_artifact": "New artifact",
+    "search_placeholder": "Search memory...",
+    "filter_all": "All",
+    "empty_search": "No artifacts match your search",
+    "empty_default": "No memory artifacts yet",
+    "create_first": "Create your first artifact"
+  },
+  "detail": {
+    "back": "Memory",
+    "archived_badge": "Archived",
+    "restore": "Restore",
+    "archive": "Archive",
+    "delete_forever": "Delete forever",
+    "untitled": "Untitled",
+    "content_placeholder": "Start writing...",
+    "updated_on": "Updated {{date}}",
+    "delete_confirm": "Permanently delete this artifact? This cannot be undone.",
+    "toast_archived": "Archived",
+    "toast_restored": "Restored",
+    "toast_deleted": "Deleted",
+    "toast_archive_failed": "Failed to archive",
+    "toast_restore_failed": "Failed to restore",
+    "toast_delete_failed": "Failed to delete",
+    "toast_update_title_failed": "Failed to update title",
+    "toast_save_content_failed": "Failed to save content"
+  },
+  "create_modal": {
+    "title": "New Memory Artifact",
+    "breadcrumb_new": "New {{kind}}",
+    "close_tooltip": "Close",
+    "title_placeholder": "Title",
+    "content_placeholder": "Start writing... (markdown supported)",
+    "creating": "Creating...",
+    "create": "Create",
+    "toast_created": "Created",
+    "toast_create_failed": "Failed to create artifact"
+  }
+}

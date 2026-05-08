@@ -20,6 +20,7 @@ import { PageHeader } from "../../layout/page-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "../../i18n";
 
 // Same relative-time helper as projects/issues — kept inline rather than
 // shared because the bar for promoting it to a util is "third caller."
@@ -101,6 +102,7 @@ function MemoryRow({ artifact }: { artifact: MemoryArtifact }) {
 }
 
 export function MemoryPage() {
+  const { t } = useT("memory");
   const wsId = useWorkspaceId();
   const [kindFilter, setKindFilter] = useState<MemoryArtifactKind | "all">("all");
   const [searchInput, setSearchInput] = useState("");
@@ -138,7 +140,7 @@ export function MemoryPage() {
       <PageHeader className="justify-between px-5">
         <div className="flex items-center gap-2">
           <BookOpen className="h-4 w-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">Memory</h1>
+          <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
           {!isLoading && artifacts.length > 0 && (
             <span className="text-xs text-muted-foreground tabular-nums">
               {artifacts.length}
@@ -147,7 +149,7 @@ export function MemoryPage() {
         </div>
         <Button size="sm" variant="outline" onClick={openCreate}>
           <Plus className="h-3.5 w-3.5 mr-1" />
-          New artifact
+          {t(($) => $.page.new_artifact)}
         </Button>
       </PageHeader>
 
@@ -160,7 +162,7 @@ export function MemoryPage() {
             active={kindFilter === "all"}
             onClick={() => setKindFilter("all")}
           >
-            All
+            {t(($) => $.page.filter_all)}
           </KindPill>
           {MEMORY_KINDS.map((k) => (
             <KindPill
@@ -176,7 +178,7 @@ export function MemoryPage() {
           <SearchIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           <input
             type="text"
-            placeholder="Search memory..."
+            placeholder={t(($) => $.page.search_placeholder)}
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             className="flex-1 min-w-0 bg-transparent text-sm placeholder:text-muted-foreground outline-none"
@@ -196,12 +198,12 @@ export function MemoryPage() {
             <BookOpen className="h-10 w-10 mb-3 opacity-30" />
             <p className="text-sm">
               {isSearching
-                ? "No artifacts match your search"
-                : "No memory artifacts yet"}
+                ? t(($) => $.page.empty_search)
+                : t(($) => $.page.empty_default)}
             </p>
             {!isSearching && (
               <Button size="sm" variant="outline" className="mt-3" onClick={openCreate}>
-                Create your first artifact
+                {t(($) => $.page.create_first)}
               </Button>
             )}
           </div>

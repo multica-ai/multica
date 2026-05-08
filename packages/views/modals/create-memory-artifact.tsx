@@ -12,11 +12,13 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { ContentEditor, type ContentEditorRef, TitleEditor } from "../editor";
 import { useNavigation } from "../navigation";
+import { useT } from "../i18n";
 
 // Smaller-surface modal than CreateProjectModal — memory artifacts only
 // require kind + title + content. Tags / anchor / parent_id are deferred
 // to the detail page edit flow; this modal is the minimum viable create.
 export function CreateMemoryArtifactModal({ onClose }: { onClose: () => void }) {
+  const { t } = useT("memory");
   const router = useNavigation();
   const workspace = useCurrentWorkspace();
   const wsPaths = useWorkspacePaths();
@@ -38,10 +40,10 @@ export function CreateMemoryArtifactModal({ onClose }: { onClose: () => void }) 
         content: contentRef.current?.getMarkdown() ?? "",
       });
       onClose();
-      toast.success("Created");
+      toast.success(t(($) => $.create_modal.toast_created));
       router.push(wsPaths.memoryDetail(created.id));
     } catch {
-      toast.error("Failed to create artifact");
+      toast.error(t(($) => $.create_modal.toast_create_failed));
     } finally {
       setSubmitting(false);
     }
@@ -57,13 +59,15 @@ export function CreateMemoryArtifactModal({ onClose }: { onClose: () => void }) 
           "!max-w-2xl !w-full !h-96",
         )}
       >
-        <DialogTitle className="sr-only">New Memory Artifact</DialogTitle>
+        <DialogTitle className="sr-only">{t(($) => $.create_modal.title)}</DialogTitle>
 
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-muted-foreground">{workspace?.name}</span>
             <ChevronRight className="size-3 text-muted-foreground/50" />
-            <span className="font-medium">New {MEMORY_KIND_LABELS[kind].toLowerCase()}</span>
+            <span className="font-medium">
+              {t(($) => $.create_modal.breadcrumb_new, { kind: MEMORY_KIND_LABELS[kind].toLowerCase() })}
+            </span>
           </div>
           <Tooltip>
             <TooltipTrigger
@@ -76,7 +80,7 @@ export function CreateMemoryArtifactModal({ onClose }: { onClose: () => void }) 
                 </button>
               }
             />
-            <TooltipContent side="bottom">Close</TooltipContent>
+            <TooltipContent side="bottom">{t(($) => $.create_modal.close_tooltip)}</TooltipContent>
           </Tooltip>
         </div>
 
@@ -103,7 +107,7 @@ export function CreateMemoryArtifactModal({ onClose }: { onClose: () => void }) 
         <div className="px-5 pb-2 shrink-0">
           <TitleEditor
             autoFocus
-            placeholder="Title"
+            placeholder={t(($) => $.create_modal.title_placeholder)}
             className="text-lg font-semibold"
             onChange={setTitle}
             onSubmit={handleSubmit}
@@ -113,7 +117,7 @@ export function CreateMemoryArtifactModal({ onClose }: { onClose: () => void }) 
         <div className="flex-1 min-h-0 overflow-y-auto px-5">
           <ContentEditor
             ref={contentRef}
-            placeholder="Start writing... (markdown supported)"
+            placeholder={t(($) => $.create_modal.content_placeholder)}
             debounceMs={500}
           />
         </div>
@@ -124,7 +128,7 @@ export function CreateMemoryArtifactModal({ onClose }: { onClose: () => void }) 
             onClick={handleSubmit}
             disabled={!title.trim() || submitting}
           >
-            {submitting ? "Creating..." : "Create"}
+            {submitting ? t(($) => $.create_modal.creating) : t(($) => $.create_modal.create)}
           </Button>
         </div>
       </DialogContent>

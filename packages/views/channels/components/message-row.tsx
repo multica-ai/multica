@@ -30,6 +30,7 @@ import { toast } from "sonner";
 import type { ChannelMessage, MemberWithUser, Agent } from "@multica/core/types";
 import { MessageReactions } from "./message-reactions";
 import { MessageAttachments } from "./message-attachments";
+import { useT } from "../../i18n";
 
 interface MessageRowProps {
   message: ChannelMessage;
@@ -48,11 +49,11 @@ interface MessageRowProps {
   isGroupContinuation?: boolean;
 }
 
-function authorName(props: MessageRowProps): string {
+function authorName(props: MessageRowProps, fallbacks: { unknownAgent: string; unknownMember: string }): string {
   if (props.message.author_type === "agent") {
-    return props.agent?.name ?? "Unknown agent";
+    return props.agent?.name ?? fallbacks.unknownAgent;
   }
-  return props.member?.name ?? "Unknown member";
+  return props.member?.name ?? fallbacks.unknownMember;
 }
 
 function authorInitial(name: string): string {
@@ -79,9 +80,13 @@ function formatTime(iso: string): string {
  * UI.
  */
 export function MessageRow(props: MessageRowProps) {
+  const { t } = useT("channels");
   const { message, channelId, onOpenThread, disableReplyAction } = props;
   const isAgent = message.author_type === "agent";
-  const name = authorName(props);
+  const name = authorName(props, {
+    unknownAgent: t(($) => $.messages.unknown_agent),
+    unknownMember: t(($) => $.messages.unknown_member),
+  });
   const selfUserId = useAuthStore((s) => s.user?.id ?? null);
 
   const isOwnMessage =
@@ -94,7 +99,7 @@ export function MessageRow(props: MessageRowProps) {
   if (message.deleted_at) {
     return (
       <div className="px-4 py-0.5 text-sm italic text-muted-foreground">
-        [message deleted]
+        {t(($) => $.messages.deleted_placeholder)}
       </div>
     );
   }
@@ -129,6 +134,7 @@ function MessageRowBody({
   disableReplyAction,
   isGroupContinuation,
 }: MessageRowBodyProps) {
+  const { t } = useT("channels");
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const editorRef = useRef<ContentEditorRef>(null);
@@ -147,7 +153,7 @@ function MessageRowBody({
     const next = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (next == null) return;
     if (next === "") {
-      toast.error("Message can't be empty");
+      toast.error(t(($) => $.messages.empty_save_error));
       return;
     }
     if (next === message.content) {
@@ -162,7 +168,7 @@ function MessageRowBody({
           setEditing(false);
         },
         onError: (err) => {
-          toast.error(err instanceof Error ? err.message : "Failed to save edit");
+          toast.error(err instanceof Error ? err.message : t(($) => $.messages.save_edit_failed));
         },
       },
     );
@@ -172,7 +178,7 @@ function MessageRowBody({
     deleteMut.mutate(message.id, {
       onSuccess: () => setConfirmDelete(false),
       onError: (err) => {
-        toast.error(err instanceof Error ? err.message : "Failed to delete message");
+        toast.error(err instanceof Error ? err.message : t(($) => $.messages.delete_failed));
       },
     });
   };
@@ -194,10 +200,10 @@ function MessageRowBody({
           variant="ghost"
           className="h-6 px-2 text-xs text-muted-foreground"
           onClick={() => onOpenThread(message.id)}
-          aria-label="Reply in thread"
+          aria-label={t(($) => $.messages.reply_aria)}
         >
           <MessageSquareReply className="mr-1 h-3 w-3" />
-          Reply
+          {t(($) => $.messages.reply)}
         </Button>
       ) : null}
       {isOwnMessage ? (
@@ -208,7 +214,7 @@ function MessageRowBody({
                 size="sm"
                 variant="ghost"
                 className="h-6 w-6 p-0 text-muted-foreground"
-                aria-label="Message actions"
+                aria-label={t(($) => $.messages.actions_aria)}
               >
                 <MoreHorizontal className="h-3.5 w-3.5" />
               </Button>
@@ -217,14 +223,14 @@ function MessageRowBody({
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => setEditing(true)}>
               <Pencil className="mr-2 h-3.5 w-3.5" />
-              Edit
+              {t(($) => $.messages.edit)}
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => setConfirmDelete(true)}
               className="text-destructive focus:text-destructive"
             >
               <Trash2 className="mr-2 h-3.5 w-3.5" />
-              Delete
+              {t(($) => $.messages.delete)}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -257,20 +263,20 @@ function MessageRowBody({
             <div className="flex items-baseline gap-2">
               <span className="text-sm font-medium text-foreground">{name}</span>
               {isAgent ? (
-                <span className="text-xs text-muted-foreground">agent</span>
+                <span className="text-xs text-muted-foreground">{t(($) => $.messages.agent_label)}</span>
               ) : null}
               <span className="text-xs text-muted-foreground">
                 {formatTime(message.created_at)}
               </span>
               {message.edited_at ? (
-                <span className="text-xs text-muted-foreground">(edited)</span>
+                <span className="text-xs text-muted-foreground">{t(($) => $.messages.edited)}</span>
               ) : null}
             </div>
           ) : message.edited_at ? (
             // No header on continuations, but still surface "(edited)"
             // somewhere — small inline marker after the body keeps it
             // discoverable without cluttering the row.
-            <span className="ml-1 align-middle text-[10px] text-muted-foreground">(edited)</span>
+            <span className="ml-1 align-middle text-[10px] text-muted-foreground">{t(($) => $.messages.edited)}</span>
           ) : null}
           {editing ? (
             <div className="mt-1 space-y-2">
@@ -289,10 +295,10 @@ function MessageRowBody({
                   onClick={() => setEditing(false)}
                   disabled={updateMut.isPending}
                 >
-                  Cancel
+                  {t(($) => $.messages.cancel)}
                 </Button>
                 <Button size="sm" onClick={handleSaveEdit} disabled={updateMut.isPending}>
-                  {updateMut.isPending ? "Saving…" : "Save"}
+                  {updateMut.isPending ? t(($) => $.messages.saving) : t(($) => $.messages.save)}
                 </Button>
               </div>
             </div>
@@ -323,8 +329,7 @@ function MessageRowBody({
               className="mt-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               <MessageSquareReply className="h-3 w-3" />
-              {message.thread_reply_count}{" "}
-              {message.thread_reply_count === 1 ? "reply" : "replies"}
+              {t(($) => $.messages.reply_count, { count: message.thread_reply_count })}
             </button>
           ) : null}
         </div>
@@ -339,20 +344,19 @@ function MessageRowBody({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this message?</AlertDialogTitle>
+            <AlertDialogTitle>{t(($) => $.messages.delete_confirm_title)}</AlertDialogTitle>
             <AlertDialogDescription>
-              The message will be replaced with a "[message deleted]" placeholder.
-              Replies under it will still be visible.
+              {t(($) => $.messages.delete_confirm_description)}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleteMut.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleteMut.isPending}>{t(($) => $.messages.delete_cancel)}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirmDelete}
               disabled={deleteMut.isPending}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {deleteMut.isPending ? "Deleting…" : "Delete"}
+              {deleteMut.isPending ? t(($) => $.messages.deleting) : t(($) => $.messages.delete_confirm)}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

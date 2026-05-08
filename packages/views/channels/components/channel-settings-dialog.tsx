@@ -15,6 +15,7 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useUpdateChannel } from "@multica/core/channels";
 import { toast } from "sonner";
 import type { Channel } from "@multica/core/types";
+import { useT } from "../../i18n";
 
 interface ChannelSettingsDialogProps {
   channel: Channel;
@@ -51,6 +52,7 @@ export function ChannelSettingsDialog({
   open,
   onOpenChange,
 }: ChannelSettingsDialogProps) {
+  const { t } = useT("channels");
   const [displayName, setDisplayName] = useState(channel.display_name);
   const [description, setDescription] = useState(channel.description);
   const [retentionMode, setRetentionMode] = useState<"inherit" | "custom">(
@@ -99,10 +101,10 @@ export function ChannelSettingsDialog({
         retention_days: retentionMode === "custom" ? retentionDays : null,
         retention_days_set: true,
       });
-      toast.success("Channel settings saved");
+      toast.success(t(($) => $.settings_dialog.toast_saved));
       onOpenChange(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save channel settings");
+      toast.error(e instanceof Error ? e.message : t(($) => $.settings_dialog.toast_save_failed));
     } finally {
       setSaving(false);
     }
@@ -111,18 +113,18 @@ export function ChannelSettingsDialog({
   // Effective retention shown in the "inherit" helper text — what messages
   // will actually be subject to retention if the admin picks "inherit".
   const effectiveLabel = workspaceRetentionDays
-    ? `${workspaceRetentionDays} days`
-    : "retain forever";
+    ? t(($) => $.settings_dialog.days_n, { count: workspaceRetentionDays })
+    : t(($) => $.settings_dialog.retain_forever);
 
   return (
     <Dialog open={open} onOpenChange={(v) => (v ? onOpenChange(true) : close())}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Channel settings</DialogTitle>
+          <DialogTitle>{t(($) => $.settings_dialog.title)}</DialogTitle>
           <DialogDescription>
             {channel.kind === "dm"
-              ? "DM settings are limited — DM membership is fixed at creation."
-              : "Edit display name, description, and retention. Channel admins only."}
+              ? t(($) => $.settings_dialog.description_dm)
+              : t(($) => $.settings_dialog.description_channel)}
           </DialogDescription>
         </DialogHeader>
 
@@ -135,7 +137,7 @@ export function ChannelSettingsDialog({
             className="space-y-4"
           >
             <div className="space-y-1.5">
-              <Label htmlFor="settings-display-name">Display name</Label>
+              <Label htmlFor="settings-display-name">{t(($) => $.settings_dialog.display_label)}</Label>
               <Input
                 id="settings-display-name"
                 value={displayName}
@@ -145,7 +147,7 @@ export function ChannelSettingsDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="settings-description">Description</Label>
+              <Label htmlFor="settings-description">{t(($) => $.settings_dialog.description_label)}</Label>
               <Textarea
                 id="settings-description"
                 value={description}
@@ -155,7 +157,7 @@ export function ChannelSettingsDialog({
               />
             </div>
             <fieldset className="space-y-2">
-              <legend className="text-sm font-medium">Message retention</legend>
+              <legend className="text-sm font-medium">{t(($) => $.settings_dialog.retention_label)}</legend>
               <label className="flex items-start gap-2 text-sm">
                 <input
                   type="radio"
@@ -166,9 +168,9 @@ export function ChannelSettingsDialog({
                   disabled={saving}
                 />
                 <span>
-                  <span className="font-medium">Use workspace default</span>
+                  <span className="font-medium">{t(($) => $.settings_dialog.use_workspace_default)}</span>
                   <span className="block text-muted-foreground">
-                    Currently: {effectiveLabel}.
+                    {t(($) => $.settings_dialog.currently, { label: effectiveLabel })}
                   </span>
                 </span>
               </label>
@@ -182,7 +184,7 @@ export function ChannelSettingsDialog({
                   disabled={saving}
                 />
                 <span className="flex-1">
-                  <span className="font-medium">Custom for this channel</span>
+                  <span className="font-medium">{t(($) => $.settings_dialog.custom_for_channel)}</span>
                   {retentionMode === "custom" && (
                     <span className="mt-1 flex items-center gap-2">
                       <Input
@@ -194,23 +196,23 @@ export function ChannelSettingsDialog({
                         disabled={saving}
                         className="w-24"
                       />
-                      <span className="text-xs text-muted-foreground">days (1–3650)</span>
+                      <span className="text-xs text-muted-foreground">{t(($) => $.settings_dialog.days_range)}</span>
                     </span>
                   )}
                 </span>
               </label>
               {!customValid && (
                 <p className="text-xs text-destructive" role="alert">
-                  Retention must be an integer between 1 and 3650 days.
+                  {t(($) => $.settings_dialog.retention_invalid)}
                 </p>
               )}
             </fieldset>
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={close} disabled={saving}>
-                Cancel
+                {t(($) => $.settings_dialog.cancel)}
               </Button>
               <Button type="submit" disabled={!dirty || !customValid || saving}>
-                {saving ? "Saving…" : "Save"}
+                {saving ? t(($) => $.settings_dialog.saving) : t(($) => $.settings_dialog.save)}
               </Button>
             </div>
           </form>
