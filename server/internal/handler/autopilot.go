@@ -666,11 +666,17 @@ func (h *Handler) ListAutopilotRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	total, err := h.Queries.CountAutopilotRuns(r.Context(), autopilot.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count runs")
+		return
+	}
+
 	resp := make([]AutopilotRunResponse, len(runs))
 	for i, run := range runs {
 		resp[i] = runToResponse(run)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"runs": resp, "total": len(resp)})
+	writeJSON(w, http.StatusOK, map[string]any{"runs": resp, "total": total})
 }
 
 // ── Manual trigger ──────────────────────────────────────────────────────────

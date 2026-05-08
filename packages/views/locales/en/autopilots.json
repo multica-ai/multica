@@ -95,7 +95,13 @@
   },
   "run": {
     "issue_linked": "Issue linked",
-    "view_log": "View execution log"
+    "view_log": "View execution log",
+    "completed_at": "Completed",
+    "duration": "Duration",
+    "output_summary": "Output",
+    "pr_link": "Pull Request",
+    "session_id": "Session",
+    "no_output": "No output"
   },
   "trigger_row": {
     "disabled_badge": "Disabled",
