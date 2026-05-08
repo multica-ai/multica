@@ -208,5 +208,22 @@
         "description": "Create and work on issues"
       }
     }
+  },
+  "connection": {
+    "title": "Connection details",
+    "description": "Paste these into the CLI, the MCP server, or any other client. Pair with a personal access token from above.",
+    "api_url_label": "API base URL",
+    "workspace_id_label": "Workspace ID",
+    "workspace_name_label": "Workspace name",
+    "copy_tooltip": "Copy",
+    "unavailable": "unavailable"
+  },
+  "mcp": {
+    "title": "Model Context Protocol",
+    "description": "The Multica binary ships an MCP server (`multica mcp-stdio`). Configure your AI client to launch it with the env vars below — no separate install needed.",
+    "claude_code_heading": "Claude Code",
+    "claude_desktop_heading": "Claude Desktop",
+    "claude_desktop_description": "Add to ~/Library/Application Support/Claude/claude_desktop_config.json (macOS) and restart the app.",
+    "security_note": "Security: the MCP server runs locally and acts on behalf of whoever owns the token. Treat it like a password and revoke if it leaks. Mutating tools (issue create/update, channel post, autopilot trigger) all run with your account's permissions — there is no separate MCP-only scope."
   }
 }
