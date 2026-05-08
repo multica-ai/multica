@@ -278,8 +278,9 @@ describe("SearchCommand", () => {
     expect(useSearchStore.getState().open).toBe(false);
   });
 
-  it("shows New Issue / New Project under Commands and triggers the modal store", async () => {
+  it("opens manual New Issue from the command palette and preserves project context", async () => {
     const user = userEvent.setup();
+    mockPathname.current = "/ws-test/projects/project-1";
     renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
@@ -300,7 +301,9 @@ describe("SearchCommand", () => {
     );
     await user.click(newIssue);
 
-    expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue");
+    expect(mockOpenModal).toHaveBeenCalledWith("create-issue", {
+      project_id: "project-1",
+    });
     expect(useSearchStore.getState().open).toBe(false);
   });
 

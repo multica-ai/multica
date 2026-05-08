@@ -124,6 +124,11 @@ interface SearchResults {
   projects: SearchProjectResult[];
 }
 
+function getCreateIssueModalData(pathname: string) {
+  const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
+  return projectMatch ? { project_id: projectMatch[1] } : undefined;
+}
+
 export function SearchCommand() {
   const { t } = useT("search");
   const navPages: NavPage[] = [
@@ -203,7 +208,12 @@ export function SearchCommand() {
         icon: Plus,
         keywords: ["new", "issue", "create", "add"],
         onSelect: () => {
-          useModalStore.getState().open("quick-create-issue");
+          const data = getCreateIssueModalData(pathname);
+          if (data) {
+            useModalStore.getState().open("create-issue", data);
+          } else {
+            useModalStore.getState().open("create-issue");
+          }
           setOpen(false);
         },
       },
