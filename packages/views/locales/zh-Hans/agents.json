@@ -360,6 +360,8 @@
     "you_label": "（你）",
     "sheet_title": "Agent 默认配置",
     "sheet_desc": "配置默认 Agent 设置",
-    "duplicate_action": "复制为我的"
+    "duplicate_action": "复制为我的",
+    "badge_label": "默认",
+    "other_user_desc": "该用户的默认Agent配置"
   }
 }

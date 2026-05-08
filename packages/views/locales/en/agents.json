@@ -368,6 +368,8 @@
     "you_label": "(you)",
     "sheet_title": "Agent Defaults",
     "sheet_desc": "Configure default agent settings",
-    "duplicate_action": "Duplicate to Mine"
+    "duplicate_action": "Duplicate to Mine",
+    "badge_label": "Default",
+    "other_user_desc": "This user's default agent config"
   }
 }
