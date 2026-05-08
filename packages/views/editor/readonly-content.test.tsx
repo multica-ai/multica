@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 
+const pushSpy = vi.fn();
+const openInNewTabSpy = vi.fn();
+
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/test/issues/${id}`,
@@ -9,12 +12,25 @@ vi.mock("@multica/core/paths", () => ({
 }));
 
 vi.mock("../navigation", () => ({
-  useNavigation: () => ({ push: vi.fn(), openInNewTab: vi.fn() }),
+  useNavigation: () => ({ push: pushSpy, openInNewTab: openInNewTabSpy }),
 }));
 
 vi.mock("../issues/components/issue-mention-card", () => ({
   IssueMentionCard: ({ issueId, fallbackLabel }: { issueId: string; fallbackLabel?: string }) => (
-    <span data-testid="issue-mention-card">{fallbackLabel ?? issueId}</span>
+    <a
+      data-testid="issue-mention-card"
+      href={`/test/issues/${issueId}`}
+      onClick={(event) => {
+        event.preventDefault();
+        if (event.metaKey || event.ctrlKey || event.shiftKey) {
+          openInNewTabSpy(`/test/issues/${issueId}`);
+          return;
+        }
+        pushSpy(`/test/issues/${issueId}`);
+      }}
+    >
+      {fallbackLabel ?? issueId}
+    </a>
   ),
 }));
 
@@ -110,6 +126,18 @@ describe("ReadonlyContent line breaks", () => {
   it("renders a blank-line gap as separate paragraphs", () => {
     const { container } = render(<ReadonlyContent content={"para one\n\npara two"} />);
     expect(container.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("lets issue mentions meta-click open a single new-tab target by issue id", () => {
+    const { getByTestId } = render(
+      <ReadonlyContent content={"See [MUL-42](mention://issue/uuid-123)"} />,
+    );
+
+    fireEvent.click(getByTestId("issue-mention-card"), { metaKey: true });
+
+    expect(openInNewTabSpy).toHaveBeenCalledTimes(1);
+    expect(openInNewTabSpy).toHaveBeenCalledWith("/test/issues/uuid-123");
+    expect(pushSpy).not.toHaveBeenCalled();
   });
 });
 
