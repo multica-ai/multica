@@ -6,6 +6,8 @@ import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
 import {
   Archive,
+  ArrowDownToLine,
+  ArrowUpToLine,
   Calendar,
   ChevronDown,
   ChevronLeft,
@@ -231,6 +233,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const scrollToTop = useCallback(() => {
+    scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+  const scrollToBottom = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+  }, []);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const didHighlightRef = useRef<string | null>(null);
 
@@ -733,6 +743,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </PageHeader>
 
         {/* Content — scrollable */}
+        <div className="flex flex-1 min-h-0">
         <div ref={scrollContainerRef} className="relative flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
           <TitleEditor
@@ -1138,6 +1149,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
           </div>
         </div>
+        </div>
+        {!isMobile && (
+          <div className="pointer-events-none hidden w-12 shrink-0 justify-center md:flex">
+            <div className="sticky top-[calc(50%+48px)] -translate-y-1/2 self-start">
+              <div className="pointer-events-auto flex flex-col gap-1.5 rounded-lg border border-border/60 bg-background/70 p-1 shadow-xs backdrop-blur supports-[backdrop-filter]:bg-background/60">
+                <Button type="button" variant="ghost" size="icon-sm" className="h-8 w-8 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={scrollToTop} aria-label="Scroll to top">
+                  <ArrowUpToLine className="h-4 w-4" />
+                </Button>
+                <Button type="button" variant="ghost" size="icon-sm" className="h-8 w-8 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={scrollToBottom} aria-label="Scroll to comments">
+                  <ArrowDownToLine className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
         </div>
       </div>
   );
