@@ -8,6 +8,7 @@ import type { MarkedStyles } from "react-native-marked";
 
 export const COLOR = {
   foreground: "hsl(240 10% 4%)",
+  primary: "hsl(240 6% 10%)",
   mutedForeground: "hsl(240 4% 46%)",
   muted: "hsl(240 5% 96%)",
   border: "hsl(240 6% 90%)",

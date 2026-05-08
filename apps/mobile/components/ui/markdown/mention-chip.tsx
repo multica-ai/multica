@@ -7,36 +7,29 @@ import { COLOR } from "./theme";
 // markdown to trigger agent tasks (when type='agent'), so wire format must
 // be preserved verbatim — only display style is mobile-specific.
 //
-// Visual hierarchy on mobile:
-// - agent: brand-foreground on brand background (chip) — agents trigger tasks,
-//   needs to stand out so users SEE what they @-ed
-// - member / issue / all: brand color text, slightly bold — subtle inline ref
-
+// PARITY (see apps/mobile/CLAUDE.md): visual matches web's `.mention` rule
+// at packages/views/editor/content-editor.css:451 — primary color, semibold,
+// no background fill. Web does NOT differentiate by type for member/agent/
+// all; Agent identity is communicated via the comment author's avatar +
+// "Agent" label, not via mention color.
+//
+// Issue mentions on web get a richer `<IssueChip>` (status icon + identifier
+// + title). Mobile renders them as plain mention text for now — porting the
+// chip needs cache lookups + status rendering, tracked separately.
 export function MentionChip({
-  type,
   label,
 }: {
   type: "member" | "agent" | "issue" | "all" | string;
   label: string;
 }) {
-  if (type === "agent") {
-    return (
-      <Text
-        style={{
-          color: COLOR.brandForeground,
-          backgroundColor: COLOR.brand,
-          fontWeight: "600",
-          paddingHorizontal: 6,
-          paddingVertical: 1,
-          borderRadius: 4,
-          overflow: "hidden",
-        }}
-      >
-        {label}
-      </Text>
-    );
-  }
   return (
-    <Text style={{ color: COLOR.brand, fontWeight: "500" }}>{label}</Text>
+    <Text
+      style={{
+        color: COLOR.primary,
+        fontWeight: "600",
+      }}
+    >
+      {label}
+    </Text>
   );
 }
