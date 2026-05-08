@@ -9,7 +9,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { WSClient } from "../api/ws-client";
+import { WSClient, type WSConnectionState } from "../api/ws-client";
 import type { WSEventType, StorageAdapter } from "../types";
 import type { ClientIdentity } from "../platform/types";
 import type { StoreApi, UseBoundStore } from "zustand";
@@ -26,6 +26,13 @@ type EventHandler = (payload: unknown, actorId?: string) => void;
 interface WSContextValue {
   subscribe: (event: WSEventType, handler: EventHandler) => () => void;
   onReconnect: (callback: () => void) => () => void;
+  /**
+   * Current WS connection state. Use via `useWSConnectionState()`. Returns
+   * "connecting" before the WS provider has a client (e.g. pre-auth, or
+   * between workspace switches).
+   */
+  getConnectionState: () => WSConnectionState;
+  subscribeConnectionState: (fn: () => void) => () => void;
 }
 
 const WSContext = createContext<WSContextValue | null>(null);
@@ -136,8 +143,30 @@ export function WSProvider({
     [wsClient],
   );
 
+  const getConnectionState = useCallback((): WSConnectionState => {
+    return wsClient?.getConnectionState() ?? "connecting";
+  }, [wsClient]);
+
+  const subscribeConnectionState = useCallback(
+    (fn: () => void) => {
+      if (!wsClient) return () => {};
+      // The hook receives a void-returning notifier (useSyncExternalStore
+      // contract); the underlying handler delivers the new state, but we
+      // discard it because the hook re-reads via getSnapshot.
+      return wsClient.onConnectionStateChange(() => fn());
+    },
+    [wsClient],
+  );
+
   return (
-    <WSContext.Provider value={{ subscribe, onReconnect: onReconnectCb }}>
+    <WSContext.Provider
+      value={{
+        subscribe,
+        onReconnect: onReconnectCb,
+        getConnectionState,
+        subscribeConnectionState,
+      }}
+    >
       {children}
     </WSContext.Provider>
   );
@@ -147,4 +176,23 @@ export function useWS() {
   const ctx = useContext(WSContext);
   if (!ctx) throw new Error("useWS must be used within WSProvider");
   return ctx;
+}
+
+/**
+ * Returns the current WS connection state, re-rendering on every change.
+ * "connecting" is the safe default — the UI should NOT show a disconnected
+ * indicator immediately on this state, only after a grace window (the WS
+ * client doesn't flip to "reconnecting" until it has been "open" at least
+ * once, so this state is also entered briefly on initial connect).
+ *
+ * SSR snapshot is "connecting" because the WS provider only renders client-
+ * side under CoreProvider. Using this hook outside WSProvider throws.
+ */
+export function useWSConnectionState(): WSConnectionState {
+  const { getConnectionState, subscribeConnectionState } = useWS();
+  return useSyncExternalStore(
+    subscribeConnectionState,
+    getConnectionState,
+    () => "connecting",
+  );
 }
