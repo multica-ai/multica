@@ -237,6 +237,28 @@ function invalidateActiveProfile(): void {
   activeProfile = null;
 }
 
+/**
+ * Resolves a ready-to-run invocation of the bundled `multica` CLI for
+ * features outside the daemon-manager (e.g. `issue:takeOver`). Returns the
+ * binary path, the `--profile <name>` args needed to talk to the same
+ * server the renderer is using, and the env (PATH-fixed + the
+ * MULTICA_LAUNCHED_BY marker). Returns `null` when no CLI binary could be
+ * resolved — the caller surfaces that as a user-visible error.
+ */
+export async function resolveCliInvocation(): Promise<
+  | { bin: string; profileArgs: string[]; env: NodeJS.ProcessEnv }
+  | null
+> {
+  const bin = await resolveCliBinary();
+  if (!bin) return null;
+  const active = await ensureActiveProfile();
+  return {
+    bin,
+    profileArgs: profileArgs(active),
+    env: desktopSpawnEnv(),
+  };
+}
+
 async function fetchHealth(): Promise<DaemonStatus> {
   // While the CLI is being downloaded or has permanently failed, short-circuit
   // polling — there's nothing to probe yet and /health calls would just return

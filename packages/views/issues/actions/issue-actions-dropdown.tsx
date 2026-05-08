@@ -12,6 +12,7 @@ import {
   IssueActionsMenuItems,
   dropdownPrimitives,
 } from "./issue-actions-menu-items";
+import { useTakeOver } from "./use-take-over";
 
 interface IssueActionsDropdownProps {
   issue: Issue;
@@ -20,6 +21,12 @@ interface IssueActionsDropdownProps {
   align?: "start" | "end" | "center";
   /** If set, navigate here after the issue is deleted. */
   onDeletedNavigateTo?: string;
+  /**
+   * Enable the desktop-only "Take Over Locally" item. The dropdown still
+   * decides per-issue visibility based on the run history; this flag only
+   * gates the data-fetch (board/list rows pass false to skip the round-trip).
+   */
+  enableTakeOver?: boolean;
 }
 
 export function IssueActionsDropdown({
@@ -27,8 +34,10 @@ export function IssueActionsDropdown({
   trigger,
   align = "end",
   onDeletedNavigateTo,
+  enableTakeOver = false,
 }: IssueActionsDropdownProps) {
   const actions = useIssueActions(issue);
+  const takeOver = useTakeOver(issue.id, { enabled: enableTakeOver });
   return (
     <DropdownMenu>
       <DropdownMenuTrigger render={trigger} />
@@ -38,6 +47,7 @@ export function IssueActionsDropdown({
           actions={actions}
           primitives={dropdownPrimitives}
           onDeletedNavigateTo={onDeletedNavigateTo}
+          onTakeOverLocally={takeOver.visible ? takeOver.takeOver : undefined}
         />
       </DropdownMenuContent>
     </DropdownMenu>

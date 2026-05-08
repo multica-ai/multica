@@ -13,6 +13,7 @@ import {
   Pin,
   PinOff,
   Plus,
+  Terminal,
   Trash2,
   UserMinus,
 } from "lucide-react";
@@ -80,6 +81,13 @@ interface IssueActionsMenuItemsProps {
   primitives: MenuPrimitives;
   /** If set, navigate here after the issue is deleted (used by the detail page). */
   onDeletedNavigateTo?: string;
+  /**
+   * Desktop-only "Take Over Locally" entry. The dropdown wrapper resolves
+   * visibility (desktop + at least one resumable run) and only passes the
+   * handler when the row should appear. Web builds and surfaces that don't
+   * opt in (board/list rows) get `undefined` and skip the row entirely.
+   */
+  onTakeOverLocally?: () => void;
 }
 
 export function IssueActionsMenuItems({
@@ -87,6 +95,7 @@ export function IssueActionsMenuItems({
   actions,
   primitives: P,
   onDeletedNavigateTo,
+  onTakeOverLocally,
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const {
@@ -279,6 +288,12 @@ export function IssueActionsMenuItems({
         <FolderOpen className="h-3.5 w-3.5" />
         {t(($) => $.actions.copy_workdir_path)}
       </P.Item>
+      {onTakeOverLocally && (
+        <P.Item onClick={onTakeOverLocally}>
+          <Terminal className="h-3.5 w-3.5" />
+          Take over locally
+        </P.Item>
+      )}
 
       <P.Separator />
 
