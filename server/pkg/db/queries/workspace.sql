@@ -34,5 +34,10 @@ UPDATE workspace SET issue_counter = issue_counter + 1
 WHERE id = $1
 RETURNING issue_counter;
 
+-- name: IncrementIssueCounterBy :one
+UPDATE workspace SET issue_counter = issue_counter + sqlc.arg('amount')
+WHERE id = sqlc.arg('id')
+RETURNING issue_counter;
+
 -- name: DeleteWorkspace :exec
 DELETE FROM workspace WHERE id = $1;

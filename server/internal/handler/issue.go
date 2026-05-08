@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -1657,6 +1658,585 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 // Batch operations
 // ---------------------------------------------------------------------------
+
+const (
+	defaultBatchIssueCreateLimit = 1000
+	batchIssueCreateLimitEnv     = "MULTICA_BATCH_ISSUE_CREATE_LIMIT"
+)
+
+type BatchCreateIssuesRequest struct {
+	Issues             []BatchCreateIssueInput `json:"issues"`
+	ValidateOnly       bool                    `json:"validate_only"`
+	ConfirmBatchCreate bool                    `json:"confirm_batch_create"`
+}
+
+type BatchCreateIssueInput struct {
+	Title        string  `json:"title"`
+	Description  *string `json:"description"`
+	Status       *string `json:"status"`
+	AssigneeType *string `json:"assignee_type"`
+	AssigneeID   *string `json:"assignee_id"`
+	ProjectID    *string `json:"project_id"`
+
+	decodeValid bool
+}
+
+type BatchCreateIssueRowError struct {
+	Row     int    `json:"row"`
+	Field   string `json:"field"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type BatchCreateIssueValidationRow struct {
+	Row                  int     `json:"row"`
+	Title                string  `json:"title"`
+	Status               string  `json:"status"`
+	AssigneeType         *string `json:"assignee_type"`
+	AssigneeID           *string `json:"assignee_id"`
+	ProjectID            *string `json:"project_id"`
+	WillEnqueueAgentTask bool    `json:"will_enqueue_agent_task"`
+}
+
+type BatchCreateIssueWarning struct {
+	Row     int    `json:"row"`
+	IssueID string `json:"issue_id,omitempty"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type BatchCreateIssuesResponse struct {
+	Valid          bool                            `json:"valid"`
+	Limit          int                             `json:"limit,omitempty"`
+	RowCount       int                             `json:"row_count"`
+	AgentTaskCount int                             `json:"agent_task_count"`
+	Rows           []BatchCreateIssueValidationRow `json:"rows,omitempty"`
+	Errors         []BatchCreateIssueRowError      `json:"errors,omitempty"`
+	Created        int                             `json:"created,omitempty"`
+	Issues         []IssueResponse                 `json:"issues,omitempty"`
+	Warnings       []BatchCreateIssueWarning       `json:"warnings,omitempty"`
+}
+
+type batchCreateIssueCandidate struct {
+	Row                  int
+	Title                string
+	Description          pgtype.Text
+	Status               string
+	AssigneeType         pgtype.Text
+	AssigneeID           pgtype.UUID
+	ProjectID            pgtype.UUID
+	WillEnqueueAgentTask bool
+}
+
+type batchCreateIssuesValidation struct {
+	candidates     []batchCreateIssueCandidate
+	rows           []BatchCreateIssueValidationRow
+	errors         []BatchCreateIssueRowError
+	agentTaskCount int
+}
+
+func batchIssueCreateLimit() int {
+	raw := strings.TrimSpace(os.Getenv(batchIssueCreateLimitEnv))
+	if raw == "" {
+		return defaultBatchIssueCreateLimit
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit <= 0 {
+		slog.Warn("invalid batch issue create limit; using default", "env", batchIssueCreateLimitEnv, "value", raw, "default", defaultBatchIssueCreateLimit)
+		return defaultBatchIssueCreateLimit
+	}
+	return limit
+}
+
+func (h *Handler) BatchCreateIssues(w http.ResponseWriter, r *http.Request) {
+	limit := batchIssueCreateLimit()
+	req, decodeErrors, err := decodeBatchCreateIssuesRequest(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	creatorID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	validation := h.validateBatchCreateIssues(r, req, decodeErrors, wsUUID, workspaceID, limit)
+	if len(validation.errors) > 0 {
+		writeJSON(w, http.StatusBadRequest, BatchCreateIssuesResponse{
+			Valid:          false,
+			Limit:          limit,
+			RowCount:       len(req.Issues),
+			AgentTaskCount: validation.agentTaskCount,
+			Errors:         validation.errors,
+		})
+		return
+	}
+
+	if req.ValidateOnly {
+		writeJSON(w, http.StatusOK, BatchCreateIssuesResponse{
+			Valid:          true,
+			Limit:          limit,
+			RowCount:       len(validation.candidates),
+			AgentTaskCount: validation.agentTaskCount,
+			Rows:           validation.rows,
+		})
+		return
+	}
+
+	if !req.ConfirmBatchCreate {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":            "confirmation_required",
+			"message":          "Batch issue creation requires explicit confirmation.",
+			"row_count":        len(validation.candidates),
+			"agent_task_count": validation.agentTaskCount,
+		})
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create issues")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	qtx := h.Queries.WithTx(tx)
+	finalNumber, err := qtx.IncrementIssueCounterBy(r.Context(), db.IncrementIssueCounterByParams{
+		ID:     wsUUID,
+		Amount: int32(len(validation.candidates)),
+	})
+	if err != nil {
+		slog.Warn("increment issue counter by batch failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "count", len(validation.candidates))...)
+		writeError(w, http.StatusInternalServerError, "failed to create issues")
+		return
+	}
+	firstNumber := finalNumber - int32(len(validation.candidates)) + 1
+
+	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
+	creatorUUID := parseUUID(actualCreatorID)
+	createdIssues := make([]db.Issue, 0, len(validation.candidates))
+	for i, row := range validation.candidates {
+		issue, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
+			WorkspaceID:   wsUUID,
+			Title:         row.Title,
+			Description:   row.Description,
+			Status:        row.Status,
+			Priority:      "none",
+			AssigneeType:  row.AssigneeType,
+			AssigneeID:    row.AssigneeID,
+			CreatorType:   creatorType,
+			CreatorID:     creatorUUID,
+			ParentIssueID: pgtype.UUID{},
+			Position:      0,
+			DueDate:       pgtype.Timestamptz{},
+			Number:        firstNumber + int32(i),
+			ProjectID:     row.ProjectID,
+		})
+		if err != nil {
+			slog.Warn("batch create issue row failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "row", row.Row)...)
+			writeError(w, http.StatusInternalServerError, "failed to create issues")
+			return
+		}
+		createdIssues = append(createdIssues, issue)
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create issues")
+		return
+	}
+
+	prefix := h.getIssuePrefix(r.Context(), wsUUID)
+	responses := make([]IssueResponse, 0, len(createdIssues))
+	warnings := []BatchCreateIssueWarning{}
+	for i, issue := range createdIssues {
+		resp := issueToResponse(issue, prefix)
+		responses = append(responses, resp)
+		h.publish(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp})
+
+		if validation.candidates[i].WillEnqueueAgentTask {
+			if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue); err != nil {
+				slog.Warn("batch create issue task enqueue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID), "row", validation.candidates[i].Row)...)
+				warnings = append(warnings, BatchCreateIssueWarning{
+					Row:     validation.candidates[i].Row,
+					IssueID: uuidToString(issue.ID),
+					Code:    "agent_task_enqueue_failed",
+					Message: "Issue was created, but the agent task could not be enqueued.",
+				})
+			}
+		}
+	}
+
+	slog.Info("batch issues created", append(logger.RequestAttrs(r), "workspace_id", workspaceID, "count", len(createdIssues), "agent_task_count", validation.agentTaskCount, "warning_count", len(warnings))...)
+	writeJSON(w, http.StatusCreated, BatchCreateIssuesResponse{
+		Valid:          true,
+		Created:        len(createdIssues),
+		RowCount:       len(createdIssues),
+		AgentTaskCount: validation.agentTaskCount,
+		Issues:         responses,
+		Warnings:       warnings,
+	})
+}
+
+func decodeBatchCreateIssuesRequest(body io.Reader) (BatchCreateIssuesRequest, []BatchCreateIssueRowError, error) {
+	var top map[string]json.RawMessage
+	dec := json.NewDecoder(body)
+	if err := dec.Decode(&top); err != nil {
+		return BatchCreateIssuesRequest{}, nil, errors.New("invalid request body")
+	}
+	if top == nil {
+		return BatchCreateIssuesRequest{}, nil, errors.New("request body must be a JSON object")
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return BatchCreateIssuesRequest{}, nil, errors.New("request body must contain a single JSON object")
+	}
+
+	var req BatchCreateIssuesRequest
+	for key := range top {
+		switch key {
+		case "issues", "validate_only", "confirm_batch_create":
+		default:
+			return BatchCreateIssuesRequest{}, nil, fmt.Errorf("unknown field %q", key)
+		}
+	}
+
+	if raw, ok := top["validate_only"]; ok && !isJSONNull(raw) {
+		if err := json.Unmarshal(raw, &req.ValidateOnly); err != nil {
+			return BatchCreateIssuesRequest{}, nil, errors.New("validate_only must be a boolean")
+		}
+	}
+	if raw, ok := top["confirm_batch_create"]; ok && !isJSONNull(raw) {
+		if err := json.Unmarshal(raw, &req.ConfirmBatchCreate); err != nil {
+			return BatchCreateIssuesRequest{}, nil, errors.New("confirm_batch_create must be a boolean")
+		}
+	}
+
+	rawIssues, ok := top["issues"]
+	if !ok || isJSONNull(rawIssues) {
+		return req, nil, nil
+	}
+	var rows []json.RawMessage
+	if err := json.Unmarshal(rawIssues, &rows); err != nil {
+		return BatchCreateIssuesRequest{}, nil, errors.New("issues must be an array")
+	}
+
+	req.Issues = make([]BatchCreateIssueInput, 0, len(rows))
+	var rowErrors []BatchCreateIssueRowError
+	for i, raw := range rows {
+		input, errs := decodeBatchCreateIssueInput(i+1, raw)
+		req.Issues = append(req.Issues, input)
+		rowErrors = append(rowErrors, errs...)
+	}
+	return req, rowErrors, nil
+}
+
+func decodeBatchCreateIssueInput(row int, raw json.RawMessage) (BatchCreateIssueInput, []BatchCreateIssueRowError) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return BatchCreateIssueInput{decodeValid: false}, []BatchCreateIssueRowError{{
+			Row:     row,
+			Field:   "issues",
+			Code:    "invalid_row",
+			Message: "Each issue row must be a JSON object.",
+		}}
+	}
+
+	input := BatchCreateIssueInput{decodeValid: true}
+	var errs []BatchCreateIssueRowError
+	for key := range fields {
+		switch key {
+		case "title", "description", "status", "assignee_type", "assignee_id", "project_id":
+		default:
+			input.decodeValid = false
+			errs = append(errs, BatchCreateIssueRowError{
+				Row:     row,
+				Field:   key,
+				Code:    "unsupported_field",
+				Message: fmt.Sprintf("%s is not supported for batch issue creation", key),
+			})
+		}
+	}
+
+	if value, present, ok := decodeOptionalJSONString(fields["title"]); !ok {
+		input.decodeValid = false
+		errs = append(errs, batchInvalidTypeError(row, "title"))
+	} else if present {
+		input.Title = value
+	}
+	if value, present, ok := decodeOptionalJSONString(fields["description"]); !ok {
+		input.decodeValid = false
+		errs = append(errs, batchInvalidTypeError(row, "description"))
+	} else if present {
+		input.Description = &value
+	}
+	if value, present, ok := decodeOptionalJSONString(fields["status"]); !ok {
+		input.decodeValid = false
+		errs = append(errs, batchInvalidTypeError(row, "status"))
+	} else if present {
+		input.Status = &value
+	}
+	if value, present, ok := decodeOptionalJSONString(fields["assignee_type"]); !ok {
+		input.decodeValid = false
+		errs = append(errs, batchInvalidTypeError(row, "assignee_type"))
+	} else if present {
+		input.AssigneeType = &value
+	}
+	if value, present, ok := decodeOptionalJSONString(fields["assignee_id"]); !ok {
+		input.decodeValid = false
+		errs = append(errs, batchInvalidTypeError(row, "assignee_id"))
+	} else if present {
+		input.AssigneeID = &value
+	}
+	if value, present, ok := decodeOptionalJSONString(fields["project_id"]); !ok {
+		input.decodeValid = false
+		errs = append(errs, batchInvalidTypeError(row, "project_id"))
+	} else if present {
+		input.ProjectID = &value
+	}
+
+	return input, errs
+}
+
+func decodeOptionalJSONString(raw json.RawMessage) (string, bool, bool) {
+	if raw == nil || isJSONNull(raw) {
+		return "", false, true
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", true, false
+	}
+	return value, true, true
+}
+
+func isJSONNull(raw json.RawMessage) bool {
+	return strings.TrimSpace(string(raw)) == "null"
+}
+
+func batchInvalidTypeError(row int, field string) BatchCreateIssueRowError {
+	return BatchCreateIssueRowError{
+		Row:     row,
+		Field:   field,
+		Code:    "invalid_type",
+		Message: field + " must be a string",
+	}
+}
+
+func (h *Handler) validateBatchCreateIssues(r *http.Request, req BatchCreateIssuesRequest, decodeErrors []BatchCreateIssueRowError, wsUUID pgtype.UUID, workspaceID string, limit int) batchCreateIssuesValidation {
+	out := batchCreateIssuesValidation{errors: append([]BatchCreateIssueRowError{}, decodeErrors...)}
+	if len(req.Issues) == 0 {
+		out.errors = append(out.errors, BatchCreateIssueRowError{
+			Row:     0,
+			Field:   "issues",
+			Code:    "required",
+			Message: "issues must be a non-empty array",
+		})
+		return out
+	}
+	if len(req.Issues) > limit {
+		out.errors = append(out.errors, BatchCreateIssueRowError{
+			Row:     0,
+			Field:   "issues",
+			Code:    "row_limit_exceeded",
+			Message: fmt.Sprintf("issues must contain at most %d rows", limit),
+		})
+		return out
+	}
+
+	invalidDecodeRows := map[int]bool{}
+	for _, err := range decodeErrors {
+		if err.Row > 0 {
+			invalidDecodeRows[err.Row] = true
+		}
+	}
+
+	for i, input := range req.Issues {
+		rowNum := i + 1
+		if invalidDecodeRows[rowNum] || !input.decodeValid {
+			continue
+		}
+		before := len(out.errors)
+
+		title := strings.TrimSpace(input.Title)
+		if title == "" {
+			out.errors = append(out.errors, BatchCreateIssueRowError{
+				Row:     rowNum,
+				Field:   "title",
+				Code:    "required",
+				Message: "title is required",
+			})
+		}
+
+		status := "todo"
+		if input.Status != nil {
+			trimmed := strings.TrimSpace(*input.Status)
+			if trimmed != "" {
+				status = trimmed
+			}
+		}
+		if !isValidIssueStatus(status) {
+			out.errors = append(out.errors, BatchCreateIssueRowError{
+				Row:     rowNum,
+				Field:   "status",
+				Code:    "invalid_status",
+				Message: "status must be one of backlog, todo, in_progress, in_review, done, blocked, or cancelled",
+			})
+		}
+
+		var assigneeType pgtype.Text
+		var assigneeID pgtype.UUID
+		assigneeTypeRaw := ""
+		assigneeIDRaw := ""
+		if input.AssigneeType != nil {
+			assigneeTypeRaw = strings.TrimSpace(*input.AssigneeType)
+		}
+		if input.AssigneeID != nil {
+			assigneeIDRaw = strings.TrimSpace(*input.AssigneeID)
+		}
+		hasAssigneeType := assigneeTypeRaw != ""
+		hasAssigneeID := assigneeIDRaw != ""
+		if hasAssigneeType != hasAssigneeID {
+			field := "assignee_id"
+			if !hasAssigneeType {
+				field = "assignee_type"
+			}
+			out.errors = append(out.errors, BatchCreateIssueRowError{
+				Row:     rowNum,
+				Field:   field,
+				Code:    "assignee_pair_required",
+				Message: "assignee_type and assignee_id must be provided together",
+			})
+		}
+		if hasAssigneeType {
+			assigneeType = pgtype.Text{String: assigneeTypeRaw, Valid: true}
+		}
+		if hasAssigneeID {
+			id, err := util.ParseUUID(assigneeIDRaw)
+			if err != nil {
+				out.errors = append(out.errors, BatchCreateIssueRowError{
+					Row:     rowNum,
+					Field:   "assignee_id",
+					Code:    "invalid_uuid",
+					Message: "assignee_id must be a valid UUID",
+				})
+			} else {
+				assigneeID = id
+			}
+		}
+		if hasAssigneeType && hasAssigneeID && assigneeID.Valid {
+			if statusCode, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); statusCode != 0 {
+				out.errors = append(out.errors, BatchCreateIssueRowError{
+					Row:     rowNum,
+					Field:   batchAssigneeErrorField(msg),
+					Code:    batchAssigneeErrorCode(statusCode, msg),
+					Message: msg,
+				})
+			}
+		}
+
+		var projectID pgtype.UUID
+		if input.ProjectID != nil {
+			projectIDRaw := strings.TrimSpace(*input.ProjectID)
+			if projectIDRaw != "" {
+				id, err := util.ParseUUID(projectIDRaw)
+				if err != nil {
+					out.errors = append(out.errors, BatchCreateIssueRowError{
+						Row:     rowNum,
+						Field:   "project_id",
+						Code:    "invalid_uuid",
+						Message: "project_id must be a valid UUID",
+					})
+				} else if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+					ID:          id,
+					WorkspaceID: wsUUID,
+				}); err != nil {
+					out.errors = append(out.errors, BatchCreateIssueRowError{
+						Row:     rowNum,
+						Field:   "project_id",
+						Code:    "project_not_found",
+						Message: "project_id does not refer to a project in this workspace",
+					})
+				} else {
+					projectID = id
+				}
+			}
+		}
+
+		if len(out.errors) > before {
+			continue
+		}
+
+		willEnqueue := h.shouldEnqueueAgentTask(r.Context(), db.Issue{
+			WorkspaceID:  wsUUID,
+			Status:       status,
+			AssigneeType: assigneeType,
+			AssigneeID:   assigneeID,
+		})
+		if willEnqueue {
+			out.agentTaskCount++
+		}
+		candidate := batchCreateIssueCandidate{
+			Row:                  rowNum,
+			Title:                title,
+			Description:          ptrToText(input.Description),
+			Status:               status,
+			AssigneeType:         assigneeType,
+			AssigneeID:           assigneeID,
+			ProjectID:            projectID,
+			WillEnqueueAgentTask: willEnqueue,
+		}
+		out.candidates = append(out.candidates, candidate)
+		out.rows = append(out.rows, BatchCreateIssueValidationRow{
+			Row:                  rowNum,
+			Title:                title,
+			Status:               status,
+			AssigneeType:         textToPtr(assigneeType),
+			AssigneeID:           uuidToPtr(assigneeID),
+			ProjectID:            uuidToPtr(projectID),
+			WillEnqueueAgentTask: willEnqueue,
+		})
+	}
+
+	return out
+}
+
+func isValidIssueStatus(status string) bool {
+	switch status {
+	case "backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
+func batchAssigneeErrorField(msg string) string {
+	if strings.Contains(msg, "assignee_type") {
+		return "assignee_type"
+	}
+	return "assignee_id"
+}
+
+func batchAssigneeErrorCode(statusCode int, msg string) string {
+	switch {
+	case strings.Contains(msg, "provided together"):
+		return "assignee_pair_required"
+	case strings.Contains(msg, "archived"):
+		return "assignee_archived"
+	case statusCode == http.StatusForbidden || strings.Contains(msg, "private"):
+		return "assignee_forbidden"
+	case strings.Contains(msg, "must be 'member' or 'agent'"):
+		return "invalid_assignee_type"
+	case strings.Contains(msg, "does not refer"):
+		return "assignee_not_found"
+	default:
+		return "invalid_assignee"
+	}
+}
 
 type BatchUpdateIssuesRequest struct {
 	IssueIDs []string           `json:"issue_ids"`

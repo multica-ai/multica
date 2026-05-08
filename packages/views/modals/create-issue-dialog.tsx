@@ -9,6 +9,7 @@ import {
 } from "@multica/core/issues/stores/create-mode-store";
 import { AgentCreatePanel } from "./quick-create-issue";
 import { ManualCreatePanel, manualDialogContentClass } from "./create-issue";
+import { BatchCreateIssuePanel, batchDialogContentClass } from "./batch-create-issue";
 
 /**
  * Shell that owns the single `<Dialog>` AND `<DialogContent>` for the
@@ -46,9 +47,10 @@ export function CreateIssueDialog({
   const [isExpanded, setIsExpanded] = useState(false);
   const [backlogHintIssueId, setBacklogHintIssueId] = useState<string | null>(null);
 
-  const switchTo = (next: CreateMode) => (carry?: Record<string, unknown> | null) => {
+  const switchTo = (next: CreateMode, carry?: Record<string, unknown> | null) => {
     setLastMode(next);
     setPanelData(carry ?? null);
+    setBacklogHintIssueId(null);
     setMode(next);
   };
 
@@ -65,6 +67,8 @@ export function CreateIssueDialog({
           // uses the same easing.
           "!transition-all !duration-300 !ease-out",
         )
+      : mode === "batch"
+        ? batchDialogContentClass
       : manualDialogContentClass(isExpanded, backlogHintIssueId);
 
   return (
@@ -77,13 +81,22 @@ export function CreateIssueDialog({
         {mode === "agent" ? (
           <AgentCreatePanel
             onClose={onClose}
-            onSwitchMode={switchTo("manual")}
+            mode={mode}
+            onSwitchMode={switchTo}
+            data={panelData}
+          />
+        ) : mode === "batch" ? (
+          <BatchCreateIssuePanel
+            onClose={onClose}
+            mode={mode}
+            onSwitchMode={switchTo}
             data={panelData}
           />
         ) : (
           <ManualCreatePanel
             onClose={onClose}
-            onSwitchMode={switchTo("agent")}
+            mode={mode}
+            onSwitchMode={switchTo}
             data={panelData}
             isExpanded={isExpanded}
             setIsExpanded={setIsExpanded}

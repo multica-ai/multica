@@ -9,6 +9,7 @@ const mockSetPrompt = vi.hoisted(() => vi.fn());
 const mockClearPrompt = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
+const mockSetLastProjectId = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 
 const mockQuickCreateStore = {
@@ -63,6 +64,16 @@ vi.mock("@multica/core/workspace/queries", () => ({
 vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
   useQuickCreateStore: (selector?: (state: typeof mockQuickCreateStore) => unknown) =>
     (selector ? selector(mockQuickCreateStore) : mockQuickCreateStore),
+}));
+
+vi.mock("@multica/core/issues/stores/draft-store", () => ({
+  useIssueDraftStore: Object.assign(
+    (selector?: (state: { setDraft: () => void; setLastProjectId: typeof mockSetLastProjectId }) => unknown) => {
+      const state = { setDraft: vi.fn(), setLastProjectId: mockSetLastProjectId };
+      return selector ? selector(state) : state;
+    },
+    { getState: () => ({ setDraft: vi.fn(), setLastProjectId: mockSetLastProjectId }) },
+  ),
 }));
 
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({

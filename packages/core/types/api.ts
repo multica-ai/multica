@@ -16,6 +16,63 @@ export interface CreateIssueRequest {
   attachment_ids?: string[];
 }
 
+export interface QuickCreateIssueRequest {
+  agent_id: string;
+  prompt: string;
+  project_id?: string;
+}
+
+export interface BatchCreateIssueInput {
+  title: string;
+  description?: string;
+  status?: IssueStatus;
+  assignee_type?: IssueAssigneeType;
+  assignee_id?: string;
+  project_id?: string;
+}
+
+export interface BatchCreateIssuesRequest {
+  issues: BatchCreateIssueInput[];
+  validate_only?: boolean;
+  confirm_batch_create?: boolean;
+}
+
+export interface BatchCreateIssueRowError {
+  row: number;
+  field: string;
+  code: string;
+  message: string;
+}
+
+export interface BatchCreateIssueValidationRow {
+  row: number;
+  title: string;
+  status: IssueStatus;
+  assignee_type: IssueAssigneeType | null;
+  assignee_id: string | null;
+  project_id: string | null;
+  will_enqueue_agent_task: boolean;
+}
+
+export interface BatchCreateIssueWarning {
+  row: number;
+  issue_id?: string;
+  code: string;
+  message: string;
+}
+
+export interface BatchCreateIssuesResponse {
+  valid: boolean;
+  limit?: number;
+  row_count: number;
+  agent_task_count: number;
+  rows?: BatchCreateIssueValidationRow[];
+  errors?: BatchCreateIssueRowError[];
+  created?: number;
+  issues?: Issue[];
+  warnings?: BatchCreateIssueWarning[];
+}
+
 export interface UpdateIssueRequest {
   title?: string;
   description?: string;

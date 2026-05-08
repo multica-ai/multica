@@ -420,9 +420,27 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     },
   });
 
+  const openCreateIssueForLastMode = useCallback(() => {
+    const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
+    const data = projectMatch ? { project_id: projectMatch[1] } : undefined;
+    const lastMode = useCreateModeStore.getState().lastMode;
+    switch (lastMode) {
+      case "manual":
+        useModalStore.getState().open("create-issue", data);
+        break;
+      case "batch":
+        useModalStore.getState().open("batch-create-issue", data);
+        break;
+      case "agent":
+      default:
+        useModalStore.getState().open("quick-create-issue", data);
+        break;
+    }
+  }, [pathname]);
+
   // Global "C" shortcut: opens whichever create mode the user landed on last
-  // (agent vs manual), persisted in useCreateModeStore. The mode switch lives
-  // inside both modal footers so users can flip without remembering which
+  // (agent, manual, or batch), persisted in useCreateModeStore. The mode switch lives
+  // inside the create dialog so users can flip without remembering which
   // shortcut goes where — `c` always means "open the create flow I prefer".
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -437,20 +455,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
       if (isEditable) return;
       if (useModalStore.getState().modal) return;
       e.preventDefault();
-      const lastMode = useCreateModeStore.getState().lastMode;
-      if (lastMode === "manual") {
-        // Auto-fill project when on a project detail page (manual form only —
-        // agent mode lets the agent infer project from the prompt).
-        const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
-        const data = projectMatch ? { project_id: projectMatch[1] } : undefined;
-        useModalStore.getState().open("create-issue", data);
-      } else {
-        useModalStore.getState().open("quick-create-issue");
-      }
+      openCreateIssueForLastMode();
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [pathname]);
+  }, [openCreateIssueForLastMode]);
 
   return (
       <Sidebar variant="inset">
@@ -584,7 +593,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarMenuItem>
               <SidebarMenuButton
                 className="text-muted-foreground"
-                onClick={() => useModalStore.getState().open("quick-create-issue")}
+                onClick={openCreateIssueForLastMode}
               >
                 <span className="relative">
                   <SquarePen />

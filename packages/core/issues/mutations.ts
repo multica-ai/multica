@@ -16,11 +16,13 @@ import {
 } from "./cache-helpers";
 import { useWorkspaceId } from "../hooks";
 import { useRecentIssuesStore } from "./stores";
+import { projectKeys } from "../projects/queries";
 import type { Issue, IssueReaction, IssueStatus } from "../types";
 import type {
+  BatchCreateIssuesRequest,
   CreateIssueRequest,
-  UpdateIssueRequest,
   ListIssuesCache,
+  UpdateIssueRequest,
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import {
@@ -257,6 +259,21 @@ export function useBatchUpdateIssues() {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+    },
+  });
+}
+
+export function useBatchCreateIssues() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data: BatchCreateIssuesRequest) => api.batchCreateIssues(data),
+    onSuccess: (resp) => {
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      if (resp.issues?.some((issue) => issue.project_id)) {
+        qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+      }
     },
   });
 }
