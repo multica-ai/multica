@@ -1309,6 +1309,88 @@ func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
 	}
 }
 
+// fetchAgentCustomEnv returns the agent's custom_env as raw JSON.
+func fetchAgentCustomEnv(t *testing.T, agentID string) []byte {
+	t.Helper()
+	var ce []byte
+	if err := testPool.QueryRow(context.Background(), `SELECT custom_env FROM agent WHERE id = $1`, agentID).Scan(&ce); err != nil {
+		t.Fatalf("failed to load agent custom_env: %v", err)
+	}
+	return ce
+}
+
+// seedHandlerTestAgentCustomEnv overwrites custom_env directly in the DB
+// so tests can start from a known non-empty state.
+func seedHandlerTestAgentCustomEnv(t *testing.T, agentID string, raw string) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent SET custom_env = $1::jsonb WHERE id = $2`, raw, agentID); err != nil {
+		t.Fatalf("failed to seed agent custom_env: %v", err)
+	}
+}
+
+// TestUpdateAgentCustomEnvEmptyMapWithoutClearFlagIsNoOp guards the
+// defensive UI safety check: a request body with `"custom_env": {}` and
+// no `clear_custom_env` flag must NOT wipe stored variables. Browser
+// forms that don't expose the field were echoing back default empty
+// state on save and silently destroying agent secrets.
+func TestUpdateAgentCustomEnvEmptyMapWithoutClearFlagIsNoOp(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler CustomEnv Empty NoOp", nil)
+	seedHandlerTestAgentCustomEnv(t, agentID, `{"CLAUDE_CONFIG_DIR":"/home/multica/.claude/agent-1"}`)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"custom_env": map[string]string{},
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	assertJSONEqual(t, fetchAgentCustomEnv(t, agentID), `{"CLAUDE_CONFIG_DIR":"/home/multica/.claude/agent-1"}`)
+}
+
+// TestUpdateAgentCustomEnvEmptyMapWithClearFlagWipes verifies the
+// explicit-clear escape hatch still works when an operator really does
+// want to remove all variables.
+func TestUpdateAgentCustomEnvEmptyMapWithClearFlagWipes(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler CustomEnv Empty Clear", nil)
+	seedHandlerTestAgentCustomEnv(t, agentID, `{"SECRET":"abc"}`)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"custom_env":       map[string]string{},
+		"clear_custom_env": true,
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	assertJSONEqual(t, fetchAgentCustomEnv(t, agentID), `{}`)
+}
+
+// TestUpdateAgentCustomEnvNonEmptyMapUpdates ensures the regular update
+// path is untouched: a non-empty map replaces the stored value
+// regardless of clear_custom_env.
+func TestUpdateAgentCustomEnvNonEmptyMapUpdates(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler CustomEnv Update", nil)
+	seedHandlerTestAgentCustomEnv(t, agentID, `{"OLD":"v1"}`)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"custom_env": map[string]string{"NEW": "v2"},
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	assertJSONEqual(t, fetchAgentCustomEnv(t, agentID), `{"NEW":"v2"}`)
+}
+
 func TestWorkspaceCRUD(t *testing.T) {
 	// List workspaces
 	w := httptest.NewRecorder()

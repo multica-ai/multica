@@ -467,6 +467,13 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	} else if ok {
 		body["custom_env"] = ce
+		if len(ce) == 0 {
+			// The server treats an empty map as a no-op unless paired with
+			// this explicit clear flag, to defend against browser clients
+			// that echo the field back with default state. Setting it here
+			// preserves the CLI's documented "{} to clear" contract.
+			body["clear_custom_env"] = true
+		}
 	}
 	if cmd.Flags().Changed("model") {
 		v, _ := cmd.Flags().GetString("model")

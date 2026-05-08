@@ -108,7 +108,8 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 // TestParseCustomEnv covers the --custom-env flag parser used by both
 // `agent create` and `agent update`. The flag accepts a JSON object of
 // string keys and values; the only clear signal is the explicit "{}"
-// (server treats a non-nil empty map on update as a clear). Empty or
+// (the CLI pairs an empty map with clear_custom_env=true on update so
+// the server honors it as a wipe — see runAgentUpdate). Empty or
 // whitespace-only input must error — that path nearly always means an
 // upstream failure rather than a deliberate clear, especially via the
 // stdin/file channels.
@@ -177,7 +178,7 @@ func TestParseCustomEnv(t *testing.T) {
 				t.Fatalf("parseCustomEnv(%q): unexpected error: %v", tc.raw, err)
 			}
 			if got == nil {
-				t.Fatalf("parseCustomEnv(%q): result must be non-nil (empty map, not nil) so the server treats it as clear", tc.raw)
+				t.Fatalf("parseCustomEnv(%q): result must be non-nil (empty map, not nil) so the CLI can pair it with clear_custom_env=true and have the server honor the wipe", tc.raw)
 			}
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("parseCustomEnv(%q) = %v, want %v", tc.raw, got, tc.want)

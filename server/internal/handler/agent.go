@@ -523,19 +523,25 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateAgentRequest struct {
-	Name               *string            `json:"name"`
-	Description        *string            `json:"description"`
-	Instructions       *string            `json:"instructions"`
-	AvatarURL          *string            `json:"avatar_url"`
-	RuntimeID          *string            `json:"runtime_id"`
-	RuntimeConfig      any                `json:"runtime_config"`
-	CustomEnv          *map[string]string `json:"custom_env"`
-	CustomArgs         *[]string          `json:"custom_args"`
-	McpConfig          *json.RawMessage   `json:"mcp_config"`
-	Visibility         *string            `json:"visibility"`
-	Status             *string            `json:"status"`
-	MaxConcurrentTasks *int32             `json:"max_concurrent_tasks"`
-	Model              *string            `json:"model"`
+	Name          *string            `json:"name"`
+	Description   *string            `json:"description"`
+	Instructions  *string            `json:"instructions"`
+	AvatarURL     *string            `json:"avatar_url"`
+	RuntimeID     *string            `json:"runtime_id"`
+	RuntimeConfig any                `json:"runtime_config"`
+	CustomEnv     *map[string]string `json:"custom_env"`
+	// ClearCustomEnv must be set to true alongside an empty CustomEnv map
+	// to actually wipe stored variables. Sending `"custom_env": {}` without
+	// this flag is a no-op — a defensive guard against clients (especially
+	// browser forms) that echo the field back with default empty state and
+	// would otherwise silently destroy agent secrets.
+	ClearCustomEnv     *bool            `json:"clear_custom_env"`
+	CustomArgs         *[]string        `json:"custom_args"`
+	McpConfig          *json.RawMessage `json:"mcp_config"`
+	Visibility         *string          `json:"visibility"`
+	Status             *string          `json:"status"`
+	MaxConcurrentTasks *int32           `json:"max_concurrent_tasks"`
+	Model              *string          `json:"model"`
 }
 
 // canViewAgentEnv checks whether the requesting user is allowed to see the
@@ -629,8 +635,13 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.RuntimeConfig = rc
 	}
 	if req.CustomEnv != nil {
-		ce, _ := json.Marshal(*req.CustomEnv)
-		params.CustomEnv = ce
+		explicitClear := req.ClearCustomEnv != nil && *req.ClearCustomEnv
+		if len(*req.CustomEnv) > 0 || explicitClear {
+			ce, _ := json.Marshal(*req.CustomEnv)
+			params.CustomEnv = ce
+		}
+		// else: empty map without explicit clear flag is a no-op (see
+		// UpdateAgentRequest.ClearCustomEnv comment).
 	}
 	if req.CustomArgs != nil {
 		ca, _ := json.Marshal(*req.CustomArgs)
