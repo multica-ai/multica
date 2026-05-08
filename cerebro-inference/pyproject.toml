@@ -1,0 +1,48 @@
+[project]
+name = "multica-inference"
+version = "0.1.0"
+description = "Multica self-hosted inference container — TTS (plapre-nano) and STT (hviske-v3)."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.115,<1.0",
+  "uvicorn[standard]>=0.32,<1.0",
+  "pydantic>=2.9,<3.0",
+  "pydantic-settings>=2.6,<3.0",
+  "huggingface_hub>=0.26,<1.0",
+  "numpy>=2.0,<3.0",
+  # torch + transformers are pinned in Dockerfile (need cu121 index for GPU build).
+  # Keeping them out of pyproject so `uv sync` on a CPU dev box works without
+  # pulling the multi-GB CUDA wheel.
+]
+
+[project.optional-dependencies]
+gpu = [
+  "torch>=2.5,<3.0",
+  "transformers>=4.46,<5.0",
+  "safetensors>=0.4,<1.0",
+  "soundfile>=0.12,<1.0",
+]
+dev = [
+  "pytest>=8.3,<9.0",
+  "pytest-asyncio>=0.24,<1.0",
+  "httpx>=0.27,<1.0",
+  "ruff>=0.7,<1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]

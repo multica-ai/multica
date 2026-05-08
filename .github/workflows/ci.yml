@@ -89,6 +89,34 @@ jobs:
       - name: Test
         run: cd server && go test ./...
 
+  cerebro-inference:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cerebro-inference
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: cerebro-inference/pyproject.toml
+
+      # Skip the GPU extras (torch/transformers, multi-GB) — mock-mode tests
+      # only need the base FastAPI deps. The real model loaders are exercised
+      # by deploy verification, not CI.
+      - name: Install deps
+        run: pip install -e '.[dev]'
+
+      - name: Lint
+        run: ruff check app tests scripts
+
+      - name: Test
+        run: pytest -q
+
   upstream-zone-guard:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
