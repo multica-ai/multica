@@ -160,6 +160,19 @@ export const DEFAULT_CHANNEL_TRANSPORT: Record<Channel, ChannelTransport> = {
   mail: { digest: "daily" },
 };
 
+// Read the master "send a mobile push for everything that lands in inbox"
+// toggle out of the preferences blob. When true, the server resolves mobile
+// routing by mirroring the inbox channel's per-key resolution — see
+// `resolveChannelChoice` in server/cmd/server/notification_routing.go (the
+// JEH-737 master toggle). Mirror of the JSON path
+// `preferences.notifications.notify_all_mobile_inbox`.
+export function getNotifyAllMobileInbox(
+  prefs: Record<string, unknown> | undefined,
+): boolean {
+  const notif = (prefs?.notifications ?? {}) as Record<string, unknown>;
+  return notif.notify_all_mobile_inbox === true;
+}
+
 // Pull a user's per-channel choice out of the preferences blob, falling
 // back to the per-channel default when missing or invalid.
 export function getChannelChoice(

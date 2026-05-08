@@ -24,6 +24,7 @@ import {
   getAutoSubscribe,
   getChannelChoice,
   getChannelTransport,
+  getNotifyAllMobileInbox,
   type RoutingKey,
   type AutoSubscribeReason,
 } from "@multica/cerebro-notifications/core";
@@ -234,6 +235,7 @@ export function NotificationsTab() {
   const [savingTransport, setSavingTransport] = useState<string | null>(null);
   const [savingAutoSub, setSavingAutoSub] =
     useState<AutoSubscribeReason | null>(null);
+  const [savingNotifyAllMobile, setSavingNotifyAllMobile] = useState(false);
   // CEREBRO-PATCH(web-push-flag-gate): drop the Mobile (Web Push) channel row when disabled
   const webPushEnabled = useFeatureFlag("cerebro_web_push");
   const channelMeta = webPushEnabled
@@ -325,6 +327,33 @@ export function NotificationsTab() {
     }
   };
 
+  const handleNotifyAllMobileToggle = async (next: boolean) => {
+    if (!user) return;
+    setSavingNotifyAllMobile(true);
+    try {
+      const notifBlock =
+        ((user.preferences?.notifications as Record<string, unknown>) ?? {});
+      const updated = await api.updateMyPreferences({
+        notifications: {
+          ...notifBlock,
+          notify_all_mobile_inbox: next,
+        },
+      });
+      setUser(updated);
+      if (next) {
+        toast.success(
+          "Mobile push will now fire for everything in your inbox. Make sure Push notifications are turned on below.",
+        );
+      }
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Failed to update preference",
+      );
+    } finally {
+      setSavingNotifyAllMobile(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <section className="space-y-3">
@@ -358,11 +387,65 @@ export function NotificationsTab() {
           savingTransport={savingTransport}
           onToggle={handleChannelToggle}
           onTransportToggle={handleTransportToggle}
+          extras={
+            meta.channel === "mobile" ? (
+              <>
+                <NotifyAllMobileInboxCard
+                  user={user}
+                  saving={savingNotifyAllMobile}
+                  onChange={handleNotifyAllMobileToggle}
+                />
+                <PushNotificationsSection />
+              </>
+            ) : null
+          }
         />
       ))}
-
-      <PushNotificationsSection />
     </div>
+  );
+}
+
+interface NotifyAllMobileInboxCardProps {
+  user: ReturnType<typeof useAuthStore.getState>["user"];
+  saving: boolean;
+  onChange: (next: boolean) => void | Promise<void>;
+}
+
+// Master toggle: when ON, the server fires a Web Push for every event that
+// lands in the recipient's inbox, regardless of the per-key mobile prefs in
+// the matrix above. JEH-737 — paired visually with the "Push notifications"
+// device subscribe section so users see the two pieces (turn on the device,
+// turn on "everything") together.
+function NotifyAllMobileInboxCard({
+  user,
+  saving,
+  onChange,
+}: NotifyAllMobileInboxCardProps) {
+  const checked = getNotifyAllMobileInbox(
+    user?.preferences as Record<string, unknown> | undefined,
+  );
+  return (
+    <Card>
+      <CardContent className="px-4 py-3">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <Label className="text-sm font-medium">
+              Send mobile push for everything in my inbox
+            </Label>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Overrides the per-event toggles above for the Mobile channel —
+              every inbox item also fires a Web Push. Turn this on if you'd
+              rather not curate the matrix.
+            </p>
+          </div>
+          <Switch
+            checked={checked}
+            disabled={saving || !user}
+            onCheckedChange={(next) => void onChange(next)}
+          />
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -438,6 +521,10 @@ interface ChannelSectionProps {
     field: keyof ChannelTransport,
     next: boolean,
   ) => void | Promise<void>;
+  // Rendered after the per-event matrix and inside the same section block.
+  // Used by the Mobile channel to pair its master toggle + device subscribe
+  // controls under the same heading.
+  extras?: React.ReactNode;
 }
 
 function ChannelSection({
@@ -447,6 +534,7 @@ function ChannelSection({
   savingTransport,
   onToggle,
   onTransportToggle,
+  extras,
 }: ChannelSectionProps) {
   const transport = getChannelTransport(
     user?.preferences as Record<string, unknown> | undefined,
@@ -553,6 +641,8 @@ function ChannelSection({
           ))}
         </CardContent>
       </Card>
+
+      {extras}
     </section>
   );
 }

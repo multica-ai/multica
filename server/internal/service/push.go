@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
@@ -18,10 +19,14 @@ import (
 // PushService delivers Web Push notifications to subscribed devices.
 //
 // VAPID keys are read once from VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY env vars.
-// Subject (mailto: or https URL identifying the app) comes from VAPID_SUBJECT,
-// defaulting to mailto:noreply@multica.ai. If the keys aren't set, the service
-// is disabled — Send is a no-op and the public key endpoint reports "not
-// configured" so the frontend hides the subscribe UI.
+// Subject (mailto: address or https URL identifying the app) comes from
+// VAPID_SUBJECT, defaulting to "noreply@multica.ai". The webpush-go library
+// auto-prepends "mailto:" to any non-https subject, so we store the value
+// without the prefix and rely on normalizeVAPIDSubject to strip it back off
+// of env values that included it — otherwise Apple rejects the JWT (JEH-563).
+// If the keys aren't set, the service is disabled — Send is a no-op and the
+// public key endpoint reports "not configured" so the frontend hides the
+// subscribe UI.
 type PushService struct {
 	queries    *db.Queries
 	publicKey  string
@@ -38,10 +43,9 @@ type PushService struct {
 func NewPushService(queries *db.Queries) *PushService {
 	pub := os.Getenv("VAPID_PUBLIC_KEY")
 	priv := os.Getenv("VAPID_PRIVATE_KEY")
-	subj := os.Getenv("VAPID_SUBJECT")
-	if subj == "" {
-		subj = "mailto:noreply@multica.ai"
-	}
+	// CEREBRO-PATCH(vapid-mailto-fix): normalise subject so webpush-go's
+	// auto-prepend doesn't yield `mailto:mailto:...` (Apple 403). See JEH-563.
+	subj := normalizeVAPIDSubject(os.Getenv("VAPID_SUBJECT"))
 
 	enabled := pub != "" && priv != ""
 	if !enabled {
@@ -212,4 +216,21 @@ func endpointShort(ep string) string {
 		return ep
 	}
 	return ep[:32] + "…"
+}
+
+// normalizeVAPIDSubject prepares the VAPID subject string for webpush-go.
+//
+// webpush-go v1.4.0 unconditionally prepends "mailto:" to any subject that
+// does not start with "https:", without checking whether one is already
+// there — so a value like "mailto:foo@bar.com" becomes
+// "mailto:mailto:foo@bar.com" in the JWT and Apple rejects the push with
+// 403 BadJwtToken (see JEH-563). We strip a leading "mailto:" so the
+// library's rewrite is idempotent. https URLs are preserved untouched.
+//
+// CEREBRO-PATCH(vapid-mailto-fix): see JEH-563 for the upstream bug context.
+func normalizeVAPIDSubject(s string) string {
+	if s == "" {
+		return "noreply@multica.ai"
+	}
+	return strings.TrimPrefix(s, "mailto:")
 }

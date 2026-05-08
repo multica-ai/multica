@@ -250,6 +250,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `multica-cli-cerebro-cmds` | server/cmd/multica/main.go | 3 | Cerebro CLI command wiring |
 | `new-workspace-page-cerebro` | packages/views/workspace/new-workspace-page.tsx | 3 | New-workspace page cerebro additions |
 | `notification-routing-test-cerebro` | server/cmd/server/notification_routing_test.go | 520 | Server cmd additions |
+| `notify-all-mobile-inbox` | server/cmd/server/notification_routing.go<br>server/cmd/server/notification_routing_test.go | 8 | JEH-737 master toggle: when `preferences.notifications.notify_all_mobile_inbox` is true, mobile channel resolution mirrors the inbox channel for the same key so every inbox item also fires a Web Push without curating the per-key matrix. |
+| `push-deep-link` | server/cmd/server/notification_listeners.go<br>server/cmd/server/notification_routing_test.go | 30 | Web Push payload `URL` now includes the workspace slug (`/<slug>/inbox?issue=<id>`) so tapping the notification deep-links to the inbox row that triggered it; old `/?issue=<id>` lost the query through the landing-page redirect. JEH-737. |
 | `notifications-handler` | server/internal/handler/notifications.go | 134 | Notification handler additions |
 | `orphan-task-test` | server/internal/handler/daemon_test.go | 0 | Cerebro orphan-task test additions |
 | `page-header-cerebro` | packages/views/layout/page-header.tsx | 1 | Layout cerebro additions |
@@ -318,6 +320,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `user-preferences-handler` | server/internal/handler/user_preferences.go<br>server/internal/handler/user_preferences_test.go | 252 | User preferences API |
 | `user-profile-handler` | server/internal/handler/user_profile.go | 193 | User profile API (cerebro feature) |
 | `util-pgx-cerebro` | server/internal/util/pgx.go | 14 | PGX util additions |
+| `vapid-mailto-fix` | server/internal/service/push.go<br>server/internal/service/push_test.go | 4 | Strip `mailto:` prefix from `VAPID_SUBJECT` so webpush-go's auto-prepend doesn't yield `mailto:mailto:...` (Apple 403 BadJwtToken). JEH-563. Should be upstreamed. |
 | `views-package-cerebro-deps` | packages/views/package.json | 7 | Package.json cerebro export/dependency additions |
 | `work-session-handler` | server/internal/handler/work_session.go | 364 | Work-session API (cerebro feature) |
 | `workspace-handler-cerebro` | server/internal/handler/workspace.go | 27 | Server handler additions |

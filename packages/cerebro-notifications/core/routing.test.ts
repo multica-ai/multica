@@ -5,6 +5,7 @@ import {
   DEFAULT_CHANNEL_TRANSPORT,
   getChannelChoice,
   getChannelTransport,
+  getNotifyAllMobileInbox,
 } from "./routing";
 
 describe("getChannelChoice", () => {
@@ -96,5 +97,38 @@ describe("CHANNELS / DEFAULT_CHANNEL_CHOICES coverage", () => {
       const defaults = DEFAULT_CHANNEL_CHOICES[channel];
       expect(Object.keys(defaults).length).toBe(12);
     }
+  });
+});
+
+describe("getNotifyAllMobileInbox", () => {
+  test("returns false when prefs are missing", () => {
+    expect(getNotifyAllMobileInbox(undefined)).toBe(false);
+    expect(getNotifyAllMobileInbox({})).toBe(false);
+  });
+
+  test("returns false when notifications block is missing", () => {
+    expect(getNotifyAllMobileInbox({ other: 1 })).toBe(false);
+  });
+
+  test("returns false when toggle is unset, false, or non-boolean", () => {
+    expect(getNotifyAllMobileInbox({ notifications: {} })).toBe(false);
+    expect(
+      getNotifyAllMobileInbox({
+        notifications: { notify_all_mobile_inbox: false },
+      }),
+    ).toBe(false);
+    expect(
+      getNotifyAllMobileInbox({
+        notifications: { notify_all_mobile_inbox: "true" },
+      }),
+    ).toBe(false);
+  });
+
+  test("returns true only for the literal boolean true", () => {
+    expect(
+      getNotifyAllMobileInbox({
+        notifications: { notify_all_mobile_inbox: true },
+      }),
+    ).toBe(true);
   });
 });

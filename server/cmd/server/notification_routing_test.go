@@ -148,6 +148,46 @@ func TestTruncateForPush(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(push-deep-link): integration coverage for the deep-link URL
+// stamped on Web Push payloads. The inbox page matches `?issue=<UUID>`
+// against `inbox_item.issue_id`, so the URL must include the workspace
+// slug to land on the right inbox page.
+func TestPushDeepLinkURL_BuildsWorkspacePath(t *testing.T) {
+	queries := db.New(testPool)
+	const issueID = "00000000-0000-0000-0000-0000000000aa"
+
+	got := pushDeepLinkURL(context.Background(), queries, testWorkspaceID, issueID)
+	want := "/" + integrationTestWorkspaceSlug + "/inbox?issue=" + issueID
+	if got != want {
+		t.Errorf("pushDeepLinkURL = %q, want %q", got, want)
+	}
+}
+
+func TestPushDeepLinkURL_FallsBackOnInvalidWorkspace(t *testing.T) {
+	queries := db.New(testPool)
+	const issueID = "00000000-0000-0000-0000-0000000000aa"
+
+	got := pushDeepLinkURL(context.Background(), queries, "not-a-uuid", issueID)
+	want := "/?issue=" + issueID
+	if got != want {
+		t.Errorf("invalid workspace fallback: pushDeepLinkURL = %q, want %q", got, want)
+	}
+}
+
+func TestPushDeepLinkURL_FallsBackOnMissingWorkspace(t *testing.T) {
+	queries := db.New(testPool)
+	const (
+		missingWS = "11111111-1111-1111-1111-111111111111"
+		issueID   = "00000000-0000-0000-0000-0000000000aa"
+	)
+
+	got := pushDeepLinkURL(context.Background(), queries, missingWS, issueID)
+	want := "/?issue=" + issueID
+	if got != want {
+		t.Errorf("missing workspace fallback: pushDeepLinkURL = %q, want %q", got, want)
+	}
+}
+
 // ----------- channel-first resolver tests ------------
 
 func TestResolveChannelChoice_DefaultsWhenNoPrefs(t *testing.T) {
@@ -234,6 +274,112 @@ func TestResolveChannelChoice_InvalidValueFallsBackToDefault(t *testing.T) {
 	got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelMobile, "mentioned")
 	if !got {
 		t.Errorf("invalid mobile.mentioned override should fall back to default (true), got false")
+	}
+}
+
+// CEREBRO-PATCH(notify-all-mobile-inbox): regression coverage for the JEH-737
+// master toggle resolver path; mirrors the server-side mirror behaviour.
+//
+// TestResolveChannelChoice_NotifyAllMobileInbox covers the master toggle that
+// makes mobile push mirror inbox routing — the JEH-737 "send me a push for
+// everything that lands in inbox" UX. Mobile resolution must follow inbox
+// (defaults + overrides), and other channels must be untouched.
+func TestResolveChannelChoice_NotifyAllMobileInbox(t *testing.T) {
+	queries := db.New(testPool)
+	t.Cleanup(func() { clearUserPrefs(t, testUserID) })
+
+	// Compose a prefs blob with the master toggle ON, an inbox.new_comment
+	// override flipped off (default would be off too — we set it explicitly
+	// to assert the inbox-mirror reads our block), an inbox.assignee_changed
+	// override flipped on (default off, so this proves the mirror picks up
+	// user overrides not just defaults), and a mobile.issue_assigned=off
+	// override that should be IGNORED while the master toggle is on.
+	blob := map[string]any{
+		"notifications": map[string]any{
+			"notify_all_mobile_inbox": true,
+			"inbox": map[string]any{
+				"new_comment":      "off",
+				"assignee_changed": "on",
+			},
+			"mobile": map[string]any{
+				"issue_assigned": "off",
+			},
+		},
+	}
+	raw, err := json.Marshal(blob)
+	if err != nil {
+		t.Fatalf("marshal prefs: %v", err)
+	}
+	if _, err := testPool.Exec(
+		context.Background(),
+		`UPDATE "user" SET preferences = $1::jsonb WHERE id = $2`,
+		raw, testUserID,
+	); err != nil {
+		t.Fatalf("set prefs: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		channel string
+		key     string
+		want    bool
+	}{
+		// mobile.issue_assigned: master ON → mirrors inbox.issue_assigned (default true).
+		// User's own mobile.issue_assigned=off override is bypassed.
+		{"mobile mirrors inbox default", channelMobile, "issue_assigned", true},
+		// mobile.new_comment: master ON → mirrors inbox.new_comment (override off).
+		{"mobile honours inbox override", channelMobile, "new_comment", false},
+		// mobile.assignee_changed: master ON → mirrors inbox override (on, even though default is off).
+		{"mobile picks up inbox override that flips default", channelMobile, "assignee_changed", true},
+		// mobile.task_failed: master ON → mirrors inbox.task_failed default (true).
+		{"mobile uses inbox default for untouched key", channelMobile, "task_failed", true},
+		// notifications channel unaffected by master toggle.
+		{"notifications channel unaffected", channelNotifications, "new_comment", true},
+		// inbox channel itself reads its own block as before.
+		{"inbox unchanged by master toggle", channelInbox, "issue_assigned", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveChannelChoice(context.Background(), queries, "member", testUserID, tc.channel, tc.key)
+			if got != tc.want {
+				t.Errorf("resolveChannelChoice(%q, %q) = %v, want %v", tc.channel, tc.key, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestResolveChannelChoice_NotifyAllMobileInboxOff covers the case where the
+// master toggle is explicitly false — per-key mobile prefs should apply as
+// they did before, with no inbox-mirror behaviour.
+func TestResolveChannelChoice_NotifyAllMobileInboxOff(t *testing.T) {
+	queries := db.New(testPool)
+	t.Cleanup(func() { clearUserPrefs(t, testUserID) })
+
+	blob := map[string]any{
+		"notifications": map[string]any{
+			"notify_all_mobile_inbox": false,
+			"inbox": map[string]any{
+				"new_comment": "on", // would have made mobile fire if mirror was active
+			},
+			"mobile": map[string]any{
+				"issue_assigned": "off", // own override should win
+			},
+		},
+	}
+	raw, _ := json.Marshal(blob)
+	if _, err := testPool.Exec(
+		context.Background(),
+		`UPDATE "user" SET preferences = $1::jsonb WHERE id = $2`,
+		raw, testUserID,
+	); err != nil {
+		t.Fatalf("set prefs: %v", err)
+	}
+
+	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelMobile, "new_comment"); got {
+		t.Errorf("master off: mobile.new_comment should follow mobile default (false), got true")
+	}
+	if got := resolveChannelChoice(context.Background(), queries, "member", testUserID, channelMobile, "issue_assigned"); got {
+		t.Errorf("master off: mobile.issue_assigned override (off) should win, got true")
 	}
 }
 

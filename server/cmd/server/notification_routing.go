@@ -136,6 +136,12 @@ var defaultChannelTransport = map[string]channelTransport{
 //
 // Agents have no preferences; they receive everything on the inbox channel
 // only (matches existing resolveRoute behavior for non-members).
+//
+// Master toggle: when `preferences.notifications.notify_all_mobile_inbox` is
+// true, the mobile channel mirrors the inbox channel's resolution for the
+// same key — every event that lands in inbox also fires a Web Push,
+// regardless of per-key mobile prefs. Implements JEH-737. Other channels
+// are unaffected.
 func resolveChannelChoice(
 	ctx context.Context,
 	queries *db.Queries,
@@ -161,6 +167,24 @@ func resolveChannelChoice(
 		return channelDefault(channel, key)
 	}
 
+	// CEREBRO-PATCH(notify-all-mobile-inbox): JEH-737 master toggle — when set,
+	// the mobile channel mirrors inbox routing for the same key, so every
+	// inbox event also fires a Web Push without curating the per-key matrix.
+	if channel == channelMobile {
+		if notifyAll, _ := notifBlock["notify_all_mobile_inbox"].(bool); notifyAll {
+			return resolveChannelChoiceFromBlock(notifBlock, channelInbox, key)
+		}
+	}
+
+	return resolveChannelChoiceFromBlock(notifBlock, channel, key)
+}
+
+// resolveChannelChoiceFromBlock applies the same on/off lookup as
+// resolveChannelChoice but starts from an already-unmarshalled
+// notifications block, so we can re-resolve a different channel without
+// re-fetching prefs from the DB. Used by the notify_all_mobile_inbox
+// shortcut to mirror inbox resolution onto mobile.
+func resolveChannelChoiceFromBlock(notifBlock map[string]any, channel, key string) bool {
 	channelBlock, _ := notifBlock[channel].(map[string]any)
 	if channelBlock == nil {
 		return channelDefault(channel, key)

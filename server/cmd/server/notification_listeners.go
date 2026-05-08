@@ -51,7 +51,13 @@ func truncateForPush(s string, max int) string {
 // Badge and Silent are derived from the recipient's mobile-channel transport
 // preferences (notifications.channels.mobile.{badge,sound}) so the icon
 // counter and notification sound respect the per-user "Visning" toggles.
-func pushItemToMember(ctx context.Context, queries *db.Queries, recipientType, recipientID, issueID, notifType, title, body string) {
+//
+// CEREBRO-PATCH(push-deep-link): URL is built as `/<slug>/inbox?issue=<id>`
+// when the workspace lookup succeeds, so tapping the notification opens the
+// inbox with the right item selected. JEH-737. Falls back to `/?issue=…`
+// if the lookup fails — that path doesn't deep-link (the landing-page
+// redirect drops query params) but is no worse than the previous behaviour.
+func pushItemToMember(ctx context.Context, queries *db.Queries, recipientType, recipientID, workspaceID, issueID, notifType, title, body string) {
 	if pushNotifier == nil || !pushNotifier.Enabled() {
 		return
 	}
@@ -62,13 +68,37 @@ func pushItemToMember(ctx context.Context, queries *db.Queries, recipientType, r
 	pushNotifier.SendToUser(ctx, recipientID, service.Payload{
 		Title:   truncateForPush(title, pushTitleMaxRunes),
 		Body:    truncateForPush(body, pushBodyMaxRunes),
-		URL:     "/?issue=" + issueID,
+		URL:     pushDeepLinkURL(ctx, queries, workspaceID, issueID),
 		Tag:     "issue:" + issueID,
 		IssueID: issueID,
 		Type:    notifType,
 		Badge:   transport.Badge,
 		Silent:  !transport.Sound,
 	})
+}
+
+// pushDeepLinkURL resolves the workspace slug from workspaceID and returns a
+// deep link of the form `/<slug>/inbox?issue=<issueID>` so a tap on the
+// notification lands on the inbox row that triggered it. The inbox page
+// matches `?issue=<value>` against the inbox item's `issue_id` (UUID), so
+// the issue UUID we already have is the right value to stamp.
+//
+// On lookup failure we fall back to `/?issue=<issueID>` rather than dropping
+// the push — the landing page won't preserve the query through its
+// post-auth redirect, but the user still ends up logged in and can find the
+// item manually.
+//
+// CEREBRO-PATCH(push-deep-link): see JEH-737 conversation.
+func pushDeepLinkURL(ctx context.Context, queries *db.Queries, workspaceID, issueID string) string {
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return "/?issue=" + issueID
+	}
+	ws, err := queries.GetWorkspace(ctx, wsUUID)
+	if err != nil || ws.Slug == "" {
+		return "/?issue=" + issueID
+	}
+	return "/" + ws.Slug + "/inbox?issue=" + issueID
 }
 
 // inboxItemDraft holds the fields needed to create one inbox item. Used by
@@ -129,7 +159,7 @@ func dispatchToMember(
 	// notifications page — push is a bell-ring on top of an existing item,
 	// not a standalone notification.
 	if created && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelMobile, key) {
-		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.IssueID, d.NotifType, d.Title, d.Body)
+		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.WorkspaceID, d.IssueID, d.NotifType, d.Title, d.Body)
 	}
 
 	// Desktop banner fires under the same "must have a real item to open"
