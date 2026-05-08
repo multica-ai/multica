@@ -549,7 +549,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
         </button>
         {detailsOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
-          <PropRow label={t(($) => $.detail.prop_id)} interactive={false}>
+          <PropRow label={t(($) => $.detail.prop_id)}>
             <span className="text-muted-foreground tabular-nums">{issue.identifier}</span>
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_created_by)}>
