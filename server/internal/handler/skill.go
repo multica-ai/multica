@@ -1185,8 +1185,8 @@ func (h *Handler) BatchImportSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var created []SkillWithFilesResponse
-	var skipped []string
+	created := make([]SkillWithFilesResponse, 0)
+	skipped := make([]string, 0)
 
 	for _, s := range req.Skills {
 		if s.Name == "" {
