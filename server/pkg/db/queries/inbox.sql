@@ -49,8 +49,39 @@ UPDATE inbox_item SET archived = true
 WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false;
 
 -- name: ArchiveAllReadInbox :execrows
-UPDATE inbox_item SET archived = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND read = true AND archived = false;
+-- Archive all inbox items belonging to "representatives" whose newest non-archived item
+-- is read. A group is an issue (when issue_id is set) or a single standalone
+-- item (when issue_id is NULL). This matches the inbox UI's dedup-by-issue
+-- semantic: the list shows one row per issue keyed on the newest non-archived
+-- inbox_item, so "Archive all read" should archive entire issues that the user
+-- sees as read. Per-row archiving (the previous behavior) hid the read row but
+-- exposed older unread siblings, flipping the issue from "read" to "unread"
+-- in the list (PUL-39).
+WITH representatives AS (
+  SELECT DISTINCT ON (COALESCE(issue_id, id))
+    issue_id,
+    id AS representative_id,
+    read AS representative_read
+  FROM inbox_item
+  WHERE workspace_id = $1
+    AND recipient_type = 'member'
+    AND recipient_id = $2
+    AND archived = false
+  ORDER BY COALESCE(issue_id, id), created_at DESC
+)
+UPDATE inbox_item AS i SET archived = true
+WHERE i.workspace_id = $1
+  AND i.recipient_type = 'member'
+  AND i.recipient_id = $2
+  AND i.archived = false
+  AND (
+    (i.issue_id IS NOT NULL AND i.issue_id IN (
+      SELECT r.issue_id FROM representatives r WHERE r.representative_read = true AND r.issue_id IS NOT NULL
+    ))
+    OR (i.issue_id IS NULL AND i.id IN (
+      SELECT r.representative_id FROM representatives r WHERE r.representative_read = true AND r.issue_id IS NULL
+    ))
+  );
 
 -- name: ArchiveCompletedInbox :execrows
 UPDATE inbox_item i SET archived = true
