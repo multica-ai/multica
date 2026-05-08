@@ -1,11 +1,17 @@
+// CEREBRO-PATCH(channels-rename-participants): editable channel title + participants side-panel (JEH-700)
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Archive, Hash, MessageSquare, Pin, PinOff } from "lucide-react";
+import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { channelDetailOptions, useMarkChannelRead } from "@multica/core/channels";
+import {
+  channelDetailOptions,
+  useMarkChannelRead,
+  useUpdateChannel,
+} from "@multica/core/channels";
 import { inboxListOptions } from "@multica/core/inbox/queries";
 import { useArchiveInbox } from "@multica/core/inbox/mutations";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
@@ -17,7 +23,9 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { AvatarGroup } from "@multica/ui/components/ui/avatar";
+import { Input } from "@multica/ui/components/ui/input";
 import { useChannelDisplay } from "./use-channel-display";
+import { ParticipantsPanel } from "./participants-panel";
 
 interface ChannelDetailProps {
   channelId: string;
@@ -86,6 +94,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
 
+  const [participantsOpen, setParticipantsOpen] = useState(false);
+
   const archiveInbox = useArchiveInbox();
   const handleArchive = () => {
     // Channels archive by archiving the inbox row pointing at them. If the
@@ -113,14 +123,16 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
       <header className="flex shrink-0 flex-col gap-1 border-b px-4 py-3">
         <div className="flex items-center gap-2">
           <ChannelHeaderIcon channel={channel} />
-          <div className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
-            {display.isChannel && (
-              <Hash className="size-3.5 shrink-0 text-muted-foreground" />
-            )}
-            <span className="truncate">{display.title}</span>
-          </div>
+          <ChannelTitle channel={channel} display={display} />
           {display.otherParticipants.length > 0 && (
-            <ParticipantStack participants={display.otherParticipants} />
+            <button
+              type="button"
+              onClick={() => setParticipantsOpen(true)}
+              aria-label="Open participants"
+              className="rounded p-0.5 hover:bg-accent/60 cursor-pointer"
+            >
+              <ParticipantStack participants={display.otherParticipants} />
+            </button>
           )}
           <div className="ml-auto flex items-center gap-1">
             <Tooltip>
@@ -210,7 +222,96 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
             chat-like; entering one should land the caret in the input. */}
         <CommentInput issueId={channelId} onSubmit={submitComment} autoFocus />
       </div>
+
+      <ParticipantsPanel
+        channel={channel}
+        open={participantsOpen}
+        onOpenChange={setParticipantsOpen}
+      />
     </div>
+  );
+}
+
+interface ChannelTitleProps {
+  channel: Channel;
+  display: ReturnType<typeof useChannelDisplay>;
+}
+
+// DMs derive their title from the peer name, so they aren't renameable. Only
+// kind='channel' surfaces the inline edit affordance.
+function ChannelTitle({ channel, display }: ChannelTitleProps) {
+  const updateChannel = useUpdateChannel();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(channel.title);
+
+  useEffect(() => {
+    if (!editing) setValue(channel.title);
+  }, [channel.title, editing]);
+
+  if (!display.isChannel) {
+    return (
+      <div className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
+        <span className="truncate">{display.title}</span>
+      </div>
+    );
+  }
+
+  const commit = () => {
+    const next = value.trim();
+    setEditing(false);
+    if (!next || next === channel.title) {
+      setValue(channel.title);
+      return;
+    }
+    updateChannel.mutate(
+      { id: channel.id, title: next },
+      {
+        onError: (err) => {
+          toast.error(
+            err instanceof Error ? err.message : "Failed to rename channel",
+          );
+          setValue(channel.title);
+        },
+      },
+    );
+  };
+
+  if (editing) {
+    return (
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-medium">
+        <Hash className="size-3.5 shrink-0 text-muted-foreground" />
+        <Input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              setValue(channel.title);
+              setEditing(false);
+            }
+          }}
+          className="h-7 max-w-[16rem] py-0 text-sm"
+          aria-label="Channel name"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      className="flex min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-sm font-medium hover:bg-accent/60 cursor-pointer"
+      aria-label="Rename channel"
+    >
+      <Hash className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="truncate">{display.title}</span>
+    </button>
   );
 }
 

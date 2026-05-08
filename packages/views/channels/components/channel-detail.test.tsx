@@ -7,6 +7,8 @@ const mockArchive = vi.hoisted(() => vi.fn());
 const mockMarkChannelRead = vi.hoisted(() => vi.fn());
 const mockCreatePin = vi.hoisted(() => vi.fn());
 const mockDeletePin = vi.hoisted(() => vi.fn());
+const mockUpdateChannel = vi.hoisted(() => vi.fn());
+const mockToggleParticipant = vi.hoisted(() => vi.fn());
 const pinListData = vi.hoisted(() => ({ items: [] as Array<{ item_type: string; item_id: string }> }));
 
 vi.mock("@multica/core/auth", () => ({
@@ -32,6 +34,8 @@ vi.mock("@multica/core/channels", () => ({
     queryFn: () => Promise.resolve(undefined),
   }),
   useMarkChannelRead: () => ({ mutate: mockMarkChannelRead }),
+  useUpdateChannel: () => ({ mutate: mockUpdateChannel }),
+  useToggleChannelParticipant: () => ({ mutate: mockToggleParticipant }),
 }));
 
 vi.mock("@multica/core/inbox/queries", () => ({
@@ -108,6 +112,18 @@ vi.mock("@multica/ui/components/ui/skeleton", () => ({
 vi.mock("@multica/ui/components/ui/avatar", () => ({
   AvatarGroup: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="avatar-group">{children}</div>
+  ),
+}));
+
+vi.mock("@multica/ui/components/ui/input", () => ({
+  Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
+}));
+
+// ParticipantsPanel renders a Sheet + AlertDialog tree we don't need in this
+// test — stub it to a passive observer of the open prop.
+vi.mock("./participants-panel", () => ({
+  ParticipantsPanel: ({ open }: { open: boolean }) => (
+    <div data-testid="participants-panel" data-open={open ? "1" : "0"} />
   ),
 }));
 
@@ -233,5 +249,50 @@ describe("ChannelDetail thread header", () => {
   it("does not call mark-channel-read when unread_count is 0", () => {
     render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
     expect(mockMarkChannelRead).not.toHaveBeenCalled();
+  });
+
+  it("opens the participants panel when the participant stack is clicked", async () => {
+    const user = userEvent.setup();
+    render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
+    expect(screen.getByTestId("participants-panel")).toHaveAttribute(
+      "data-open",
+      "0",
+    );
+    await user.click(screen.getByLabelText("Open participants"));
+    expect(screen.getByTestId("participants-panel")).toHaveAttribute(
+      "data-open",
+      "1",
+    );
+  });
+
+  it("renames a channel when the title is clicked, edited and submitted", async () => {
+    mockUpdateChannel.mockClear();
+    const user = userEvent.setup();
+    render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
+    await user.click(screen.getByLabelText("Rename channel"));
+    const input = screen.getByLabelText("Channel name") as HTMLInputElement;
+    await user.clear(input);
+    await user.type(input, "new-growth{Enter}");
+    expect(mockUpdateChannel).toHaveBeenCalledWith(
+      { id: "c1", title: "new-growth" },
+      expect.any(Object),
+    );
+  });
+
+  it("does not call rename when the title is unchanged or empty", async () => {
+    mockUpdateChannel.mockClear();
+    const user = userEvent.setup();
+    render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
+    await user.click(screen.getByLabelText("Rename channel"));
+    const input = screen.getByLabelText("Channel name") as HTMLInputElement;
+    // Submit unchanged value — no mutation.
+    await user.type(input, "{Enter}");
+    expect(mockUpdateChannel).not.toHaveBeenCalled();
+  });
+
+  it("does not show a renameable title for DMs", () => {
+    const dm: Channel = { ...baseChannel, kind: "dm", title: "alice" };
+    render(<ChannelDetail channelId="c1" initialChannel={dm} />);
+    expect(screen.queryByLabelText("Rename channel")).not.toBeInTheDocument();
   });
 });

@@ -225,6 +225,13 @@ describe("NewMessageModal", () => {
     expect(screen.getByText("Alice")).toBeInTheDocument();
   });
 
+  it("shows a 1-on-1 hint on the DM tab so users see the constraint", () => {
+    render(<NewMessageModal open onClose={() => {}} defaultTab="dm" />);
+    expect(
+      screen.getByText("DMs are 1-on-1 — create a channel for groups."),
+    ).toBeInTheDocument();
+  });
+
   it("excludes the current user from the people list", () => {
     render(<NewMessageModal open onClose={() => {}} defaultTab="dm" />);
     expect(screen.queryByText("Me")).not.toBeInTheDocument();

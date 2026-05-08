@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(channels-dm-gate-hint): show "DMs are 1-on-1" gate hint on DM tab (JEH-700)
 "use client";
 
 import { useMemo, useState } from "react";
@@ -209,7 +210,11 @@ export function NewMessageModal({
             />
           </TabsContent>
 
-          <TabsContent value="dm" className="px-4 pt-1 pb-0" />
+          <TabsContent value="dm" className="px-4 pt-1 pb-0">
+            <p className="pb-1 text-xs text-muted-foreground">
+              DMs are 1-on-1 — create a channel for groups.
+            </p>
+          </TabsContent>
 
           <div className="px-4 pb-2">
             {selected.length > 0 && (

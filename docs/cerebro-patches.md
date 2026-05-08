@@ -89,6 +89,12 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `chat-status-line` | packages/views/chat/components/chat-status-line.tsx | 93 | Chat view cerebro additions (MCP onboarding, status, archive) |
 | `chat-tool-summary` | packages/views/chat/components/tool-summary.ts | 35 | Chat view cerebro additions (MCP onboarding, status, archive) |
 | `chat-window-cerebro` | packages/views/chat/components/chat-window.tsx | 7 | Chat view cerebro additions (MCP onboarding, status, archive) |
+| `channels-components-participants-panel` | packages/views/channels/components/index.ts | 1 | JEH-700 — re-exports new ParticipantsPanel side-panel component |
+| `channels-dm-gate-hint` | packages/views/channels/components/new-message-modal.tsx | 4 | JEH-700 — DM tab hint "DMs are 1-on-1 — create a channel for groups" so users see the constraint before submitting |
+| `channels-index-rename-participants` | packages/core/channels/index.ts | 3 | JEH-700 — re-exports useUpdateChannel + useToggleChannelParticipant |
+| `channels-mutations` | packages/core/channels/mutations.ts | 130 | JEH-700 — useUpdateChannel (rename) + useToggleChannelParticipant (subscribe/unsubscribe) with optimistic cache updates for channel detail/list |
+| `channels-participants-panel` | packages/views/channels/components/participants-panel.tsx | 280 | JEH-700 — Sheet-based side panel listing channel participants with remove (confirm dialog) + add picker; reuses canAssignAgent + ActorAvatar |
+| `channels-rename-participants` | packages/views/channels/components/channel-detail.tsx | 110 | JEH-700 — inline-editable channel title (kind='channel' only) + clickable participant stack opening the ParticipantsPanel sheet |
 | `claude-stderr-tail-tests` | server/pkg/agent/claude_test.go | 0 | Claude stderr-tail diagnostic tests |
 | `cli-attachments` | server/internal/cli/client.go | 0 | Cerebro modification (see file for details) |
 | `comment-card-cerebro` | packages/views/issues/components/comment-card.tsx | 42 | Comment cerebro additions (replies, attachments, reactions) |
