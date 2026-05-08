@@ -359,6 +359,7 @@
     "section_label": "Agent 默认配置",
     "you_label": "（你）",
     "sheet_title": "Agent 默认配置",
-    "sheet_desc": "配置默认 Agent 设置"
+    "sheet_desc": "配置默认 Agent 设置",
+    "duplicate_action": "复制为我的"
   }
 }
