@@ -394,6 +394,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
   }, [requestedCommentId, timeline.length]);
 
+  useEffect(() => {
+    if (!issue) return;
+    const match = router.pathname.match(/\/issues\/([^/?#]+)/);
+    if (!match) return;
+    const currentPathId = decodeURIComponent(match[1] ?? "");
+    if (currentPathId !== issueId || issueId === issue.identifier) return;
+
+    const canonicalPath = paths.issueDetail(issue.identifier);
+    const query = router.searchParams.toString();
+    router.replace(query ? `${canonicalPath}?${query}` : canonicalPath);
+  }, [issue, issueId, paths, router]);
+
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
@@ -632,6 +644,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
+            <span className="shrink-0 text-muted-foreground">
+              {issue.identifier}
+            </span>
+            <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
             <span className="truncate font-medium text-foreground">
               {issue.title}
             </span>
