@@ -87,6 +87,7 @@ export function IssueActionsMenuItems({
     members,
     agents,
     isPinned,
+    canDelete,
     updateField,
     togglePin,
     copyLink,
@@ -266,6 +267,7 @@ export function IssueActionsMenuItems({
 
       <P.Separator />
 
+      {canDelete && (
       <P.Item
         variant="destructive"
         onClick={() => openDeleteConfirm({ onDeletedNavigateTo })}
@@ -273,6 +275,7 @@ export function IssueActionsMenuItems({
         <Trash2 className="h-3.5 w-3.5" />
         {t(($) => $.actions.delete_issue)}
       </P.Item>
+      )}
     </>
   );
 }

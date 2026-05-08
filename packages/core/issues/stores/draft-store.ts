@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { IssueStatus, IssuePriority, IssueAssigneeType } from "../../types";
+import type { IssueAssigneeType, IssueStatus, IssuePriority } from "../../types";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
@@ -26,14 +26,8 @@ const EMPTY_DRAFT: IssueDraft = {
 
 interface IssueDraftStore {
   draft: IssueDraft;
-  // Last assignee picked at submit time. Persisted across drafts so the
-  // create-issue modal can prefill the picker with the user's most recent
-  // choice instead of always opening with no assignee.
-  lastAssigneeType?: IssueAssigneeType;
-  lastAssigneeId?: string;
   setDraft: (patch: Partial<IssueDraft>) => void;
   clearDraft: () => void;
-  setLastAssignee: (type?: IssueAssigneeType, id?: string) => void;
   hasDraft: () => boolean;
 }
 
@@ -41,20 +35,9 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
   persist(
     (set, get) => ({
       draft: { ...EMPTY_DRAFT },
-      lastAssigneeType: undefined,
-      lastAssigneeId: undefined,
       setDraft: (patch) =>
         set((s) => ({ draft: { ...s.draft, ...patch } })),
-      clearDraft: () =>
-        set((s) => ({
-          draft: {
-            ...EMPTY_DRAFT,
-            assigneeType: s.lastAssigneeType,
-            assigneeId: s.lastAssigneeId,
-          },
-        })),
-      setLastAssignee: (type, id) =>
-        set({ lastAssigneeType: type, lastAssigneeId: id }),
+      clearDraft: () => set({ draft: { ...EMPTY_DRAFT } }),
       hasDraft: () => {
         const { draft } = get();
         return !!(draft.title || draft.description);
@@ -62,6 +45,16 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
     }),
     {
       name: "multica_issue_draft",
+      version: 2,
+      migrate: (persistedState) => {
+        const state = (persistedState as { draft?: Partial<IssueDraft> } | undefined) ?? {};
+        const draft = { ...EMPTY_DRAFT, ...(state.draft ?? {}) };
+        if (!draft.title && !draft.description) {
+          draft.assigneeType = undefined;
+          draft.assigneeId = undefined;
+        }
+        return { draft };
+      },
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
     },
   ),

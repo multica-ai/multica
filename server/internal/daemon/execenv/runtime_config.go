@@ -62,7 +62,7 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error 
 	switch provider {
 	case "claude":
 		return os.WriteFile(filepath.Join(workDir, "CLAUDE.md"), []byte(content), 0o644)
-	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "deepseek":
+	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI":
 		return os.WriteFile(filepath.Join(workDir, "AGENTS.md"), []byte(content), 0o644)
 	case "gemini":
 		return os.WriteFile(filepath.Join(workDir, "GEMINI.md"), []byte(content), 0o644)
@@ -273,7 +273,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		case "claude":
 			// Claude discovers skills natively from .claude/skills/ — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "deepseek":
+		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI":
 			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, Kiro, and DeepSeek discover skills natively from their respective paths — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
 		case "gemini", "hermes":
@@ -330,6 +330,19 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- On CLI failure, exit with the CLI error as the only output. The platform translates that into a `quick_create_failed` inbox item carrying the original prompt for the user.\n")
 	default:
 		b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
+		b.WriteString("### Formatting Rules\n\n")
+		b.WriteString("All agent output (comments and issue updates) **must** use well-structured Markdown:\n\n")
+		b.WriteString("- Use headings (`##`, `###`) to organize sections\n")
+		b.WriteString("- Use bullet lists or numbered lists for multiple items\n")
+		b.WriteString("- Use code blocks (` ``` `) for code snippets, commands, and file paths\n")
+		b.WriteString("- Use bold (`**text**`) for emphasis on key terms\n")
+		b.WriteString("- Use blockquotes (`>`) for referencing other content\n")
+		b.WriteString("- Do NOT output raw HTML — use Markdown syntax only\n")
+		b.WriteString("- Do NOT mix plain text with unformatted lists — always use proper Markdown list syntax\n\n")
+		b.WriteString("### Issue Description Updates\n\n")
+		b.WriteString("When updating an issue description (via `multica issue update --description`), the platform automatically annotates each update with the author and timestamp. ")
+		b.WriteString("Simply provide the content — attribution is handled server-side.\n\n")
+		b.WriteString("### Comment Style\n\n")
 		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
 		b.WriteString("Good: \"Fixed the login redirect. PR: https://...\"\n")
 		b.WriteString("Bad: \"1. Read the issue 2. Found the bug in auth.go 3. Created branch 4. ...\"\n")

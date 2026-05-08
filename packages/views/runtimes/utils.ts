@@ -3,6 +3,7 @@ import type {
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
 } from "@multica/core/types";
+export { isCliVersionNewer as isVersionNewer } from "@multica/core/runtimes";
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -76,28 +77,6 @@ const ARCH_LABEL: Record<string, string> = {
   arm: "arm",
 };
 
-// Strip leading "v" from version strings — GitHub releases ship `v0.2.17`,
-// daemon metadata reports `0.2.15`; normalising lets us compare both.
-function stripVersionPrefix(v: string): string {
-  return v.replace(/^v/, "");
-}
-
-// True iff `latest` is strictly newer than `current` by dotted-numeric
-// comparison. Non-numeric / missing segments compare as 0 ("0.2" < "0.2.1").
-// Used by the runtime-list CLI column to decide whether to surface the ↑
-// marker; same logic also lives inline in update-section.tsx for now.
-export function isVersionNewer(latest: string, current: string): boolean {
-  const l = stripVersionPrefix(latest).split(".").map(Number);
-  const c = stripVersionPrefix(current).split(".").map(Number);
-  for (let i = 0; i < Math.max(l.length, c.length); i++) {
-    const lv = l[i] ?? 0;
-    const cv = c[i] ?? 0;
-    if (lv > cv) return true;
-    if (lv < cv) return false;
-  }
-  return false;
-}
-
 export function formatTokens(n: number): string {
   if (n >= 1_000_000) {
     const m = n / 1_000_000;
@@ -108,6 +87,14 @@ export function formatTokens(n: number): string {
     return k % 1 < 0.05 ? `${Math.round(k)}K` : `${k.toFixed(1)}K`;
   }
   return n.toLocaleString();
+}
+
+type InputOutputCountable = Pick<RuntimeUsage, "input_tokens" | "output_tokens">;
+
+// Cache reads / writes stay visible in dedicated columns, but "token total"
+// in runtime analytics should reflect the core input/output volume only.
+export function countInputOutputTokens(usage: InputOutputCountable): number {
+  return usage.input_tokens + usage.output_tokens;
 }
 
 // ---------------------------------------------------------------------------
@@ -320,8 +307,7 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
 
     const modelName = u.model || u.provider;
     const m = modelMap.get(modelName) ?? { tokens: 0, cost: 0 };
-    m.tokens +=
-      u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens;
+    m.tokens += countInputOutputTokens(u);
     m.cost += estimateCost(u);
     modelMap.set(modelName, m);
   }
@@ -395,8 +381,7 @@ export function aggregateCostByAgent(rows: RuntimeUsageByAgent[]): CostByKey[] {
       cost: 0,
       taskCount: 0,
     };
-    entry.tokens +=
-      r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
+    entry.tokens += countInputOutputTokens(r);
     entry.cost += estimateCost(r);
     entry.taskCount += r.task_count;
     map.set(r.agent_id, entry);
@@ -411,8 +396,7 @@ export function aggregateCostByModel(rows: RuntimeUsage[]): CostByKey[] {
   for (const r of rows) {
     const key = r.model || r.provider || "unknown";
     const entry = map.get(key) ?? { key, tokens: 0, cost: 0, taskCount: 0 };
-    entry.tokens +=
-      r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
+    entry.tokens += countInputOutputTokens(r);
     entry.cost += estimateCost(r);
     map.set(key, entry);
   }
@@ -429,8 +413,7 @@ export function aggregateCostByHour(rows: RuntimeUsageByHour[]): CostByKey[] {
   for (const r of rows) {
     const entry = buckets.get(r.hour);
     if (!entry) continue;
-    entry.tokens +=
-      r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
+    entry.tokens += countInputOutputTokens(r);
     entry.cost += estimateCost(r);
     entry.taskCount += r.task_count;
   }

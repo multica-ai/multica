@@ -6,12 +6,15 @@ import {
   ArrowLeft,
   ArrowUpDown,
   Bot,
+  Globe,
   Plus,
   Search,
+  Sliders,
+  Settings2,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import type { Agent, AgentRuntime, CreateAgentRequest } from "@multica/core/types";
+import type { Agent, AgentRuntime, CreateAgentRequest, AgentDefaultsWithUser } from "@multica/core/types";
 import {
   type AgentAvailability,
   agentRunCounts30dOptions,
@@ -40,11 +43,24 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { DataTable } from "@multica/ui/components/ui/data-table";
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+  SheetDescription,
+} from "@multica/ui/components/ui/sheet";
+import { toast } from "sonner";
 import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig, availabilityOrder } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { type AgentRow, createAgentColumns } from "./agent-columns";
+import {
+  PersonalDefaultsDetail,
+  SystemDefaultsDetail,
+  OtherDefaultsDetail,
+} from "./defaults-detail";
+import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 
 // Filter axes:
@@ -108,6 +124,7 @@ export function AgentsPage() {
     useState<AvailabilityFilter>("all");
   const [sort, setSort] = useState<SortKey>("recent");
   const [search, setSearch] = useState("");
+  const [workspaceOnly, setWorkspaceOnly] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   // When set, the Create dialog opens pre-populated with this agent's
   // config — driven by the row-level "Duplicate" action. We keep this
@@ -116,6 +133,27 @@ export function AgentsPage() {
   const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
     null,
   );
+
+  // ── Agent Defaults state ──────────────────────────────────────────────
+  type DefaultsSheet = "personal" | "system" | { configId: string; defaults: AgentDefaultsWithUser } | null;
+  const [defaultsSheet, setDefaultsSheet] = useState<DefaultsSheet>(null);
+
+  const { data: allDefaults = [] } = useQuery({
+    queryKey: ["workspaces", wsId, "all-agent-defaults"],
+    queryFn: () => api.listAllAgentDefaults(wsId),
+    enabled: scope === "all",
+  });
+
+  const handleDuplicateDefaults = async (configId: string) => {
+    try {
+      await api.duplicateAgentDefaults(wsId, configId);
+      qc.invalidateQueries({ queryKey: ["workspaces", wsId, "personal-agent-defaults"] });
+      toast.success("Defaults duplicated to your personal config");
+      setDefaultsSheet(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to duplicate defaults");
+    }
+  };
 
   const runtimesById = useMemo(() => {
     const m = new Map<string, AgentRuntime>();
@@ -184,10 +222,21 @@ export function AgentsPage() {
     return visibleInView.filter((a) => a.owner_id === currentUser.id);
   }, [visibleInView, scope, currentUser, view]);
 
+  // Layer 2 — workspace-only toggle. When active in the "all" scope,
+  // hides personal-visibility agents so only workspace-shared ones remain.
+  // Skipped in Archived view — that view has no toggle to undo it, so
+  // applying it would silently hide private archived agents.
+  const afterWorkspaceFilter = useMemo(() => {
+    if (view === "active" && scope === "all" && workspaceOnly) {
+      return inScope.filter((a) => a.visibility === "workspace");
+    }
+    return inScope;
+  }, [inScope, scope, workspaceOnly, view]);
+
   // Final cut — availability chip + search.
   const filteredAgents = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return inScope.filter((a) => {
+    return afterWorkspaceFilter.filter((a) => {
       // Availability chip filter only applies to the Active view —
       // archived agents have no presence to match against.
       if (view === "active" && availabilityFilter !== "all") {
@@ -204,25 +253,25 @@ export function AgentsPage() {
       }
       return true;
     });
-  }, [inScope, view, availabilityFilter, presenceMap, search]);
+  }, [afterWorkspaceFilter, view, availabilityFilter, presenceMap, search]);
 
   // Per-availability counts for the chip badges. Computed against
-  // `inScope` (ignoring the availability filter itself) so the numbers
-  // reflect "if I clicked this chip, this many agents would match"
-  // rather than collapsing to 0 for the unselected chips.
+  // `afterWorkspaceFilter` (ignoring the availability filter itself) so
+  // the numbers reflect "if I clicked this chip, this many agents would
+  // match" rather than collapsing to 0 for the unselected chips.
   const availabilityCounts = useMemo(() => {
     const counts: Record<AgentAvailability, number> = {
       online: 0,
       unstable: 0,
       offline: 0,
     };
-    for (const a of inScope) {
+    for (const a of afterWorkspaceFilter) {
       const detail = presenceMap.get(a.id);
       if (!detail) continue;
       counts[detail.availability] += 1;
     }
     return counts;
-  }, [inScope, presenceMap]);
+  }, [afterWorkspaceFilter, presenceMap]);
 
   const sortedAgents = useMemo(() => {
     const xs = [...filteredAgents];
@@ -401,6 +450,7 @@ export function AgentsPage() {
   }
 
   const showEmpty = totalActiveCount === 0 && archivedCount === 0;
+  const defaultsRowsVisible = view === "active";
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -422,12 +472,14 @@ export function AgentsPage() {
                   scope={scope}
                   setScope={setScope}
                   scopeCounts={scopeCounts}
+                  workspaceOnly={workspaceOnly}
+                  setWorkspaceOnly={setWorkspaceOnly}
                   sort={sort}
                   setSort={setSort}
                   search={search}
                   setSearch={setSearch}
                   visibleCount={sortedAgents.length}
-                  totalCount={inScope.length}
+                  totalCount={afterWorkspaceFilter.length}
                   archivedCount={archivedCount}
                   onShowArchived={() => setView("archived")}
                 />
@@ -435,7 +487,7 @@ export function AgentsPage() {
                   value={availabilityFilter}
                   onChange={setAvailabilityFilter}
                   counts={availabilityCounts}
-                  totalCount={inScope.length}
+                  totalCount={afterWorkspaceFilter.length}
                 />
               </>
             ) : (
@@ -447,13 +499,25 @@ export function AgentsPage() {
               />
             )}
 
-            {sortedAgents.length === 0 ? (
-              <NoMatches view={view} search={search} scope={scope} />
+            {sortedAgents.length === 0 && !defaultsRowsVisible ? (
+              <NoMatches view={view} search={search} scope={scope} workspaceOnly={workspaceOnly} />
             ) : (
               <DataTable
                 table={table}
                 onRowClick={(row) =>
                   navigation.push(paths.agentDetail(row.original.agent.id))
+                }
+                prependRows={
+                  defaultsRowsVisible ? (
+                    <DefaultsInlineRows
+                      scope={scope}
+                      allDefaults={allDefaults}
+                      currentUserId={currentUser?.id ?? null}
+                      onOpenPersonal={() => setDefaultsSheet("personal")}
+                      onOpenSystem={() => setDefaultsSheet("system")}
+                      onOpenOther={(d) => setDefaultsSheet({ configId: d.id!, defaults: d })}
+                    />
+                  ) : undefined
                 }
               />
             )}
@@ -475,6 +539,139 @@ export function AgentsPage() {
           onCreate={handleCreate}
         />
       )}
+
+      {/* ── Agent Defaults sheet ───────────────────────────────── */}
+      <Sheet
+        open={defaultsSheet !== null}
+        onOpenChange={(open) => { if (!open) setDefaultsSheet(null); }}
+      >
+        <SheetContent side="right" className="data-[side=right]:sm:max-w-3xl p-0">
+          <SheetTitle className="sr-only">{t(($) => $.defaults.sheet_title)}</SheetTitle>
+          <SheetDescription className="sr-only">{t(($) => $.defaults.sheet_desc)}</SheetDescription>
+          {defaultsSheet === "personal" && <PersonalDefaultsDetail />}
+          {defaultsSheet === "system" && <SystemDefaultsDetail readOnly={!isWorkspaceAdmin} />}
+          {defaultsSheet !== null && typeof defaultsSheet === "object" && (
+            <OtherDefaultsDetail
+              defaults={defaultsSheet.defaults}
+              onDuplicate={() => handleDuplicateDefaults(defaultsSheet.configId)}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Defaults inline rows — rendered inside the DataTable scroll container as
+// pinned pseudo-rows. Mine scope: Personal + System. All scope: System +
+// all users' defaults (with owner marked).
+// ---------------------------------------------------------------------------
+
+function DefaultsInlineRows({
+  scope,
+  allDefaults,
+  currentUserId,
+  onOpenPersonal,
+  onOpenSystem,
+  onOpenOther,
+}: {
+  scope: Scope;
+  allDefaults: AgentDefaultsWithUser[];
+  currentUserId: string | null;
+  onOpenPersonal: () => void;
+  onOpenSystem: () => void;
+  onOpenOther: (d: AgentDefaultsWithUser) => void;
+}) {
+  const { t } = useT("agents");
+
+  if (scope === "mine") {
+    return (
+      <div className="border-b">
+        <button
+          type="button"
+          onClick={onOpenPersonal}
+          className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
+        >
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-blue-500/10">
+            <Sliders className="h-3.5 w-3.5 text-blue-500" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <span className="text-sm font-medium">{t(($) => $.defaults.personal_title)}</span>
+            <span className="ml-2 text-xs text-muted-foreground">{t(($) => $.defaults.personal_desc)}</span>
+          </div>
+          <span className="shrink-0 rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+            {t(($) => $.defaults.badge_label)}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={onOpenSystem}
+          className="flex w-full items-center gap-3 border-t px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
+        >
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-amber-500/10">
+            <Settings2 className="h-3.5 w-3.5 text-amber-500" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <span className="text-sm font-medium">{t(($) => $.defaults.system_title)}</span>
+            <span className="ml-2 text-xs text-muted-foreground">{t(($) => $.defaults.system_desc)}</span>
+          </div>
+          <span className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+            {t(($) => $.defaults.badge_label)}
+          </span>
+        </button>
+      </div>
+    );
+  }
+
+  // "All" scope: show system defaults + all users' defaults
+  if (allDefaults.length === 0) return null;
+
+  return (
+    <div className="border-b">
+      <button
+        type="button"
+        onClick={onOpenSystem}
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
+      >
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-amber-500/10">
+          <Settings2 className="h-3.5 w-3.5 text-amber-500" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <span className="text-sm font-medium">{t(($) => $.defaults.system_title)}</span>
+          <span className="ml-2 text-xs text-muted-foreground">{t(($) => $.defaults.system_desc)}</span>
+        </div>
+        <span className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+          {t(($) => $.defaults.badge_label)}
+        </span>
+      </button>
+      {allDefaults.map((d) => {
+        const isMine = d.user_id === currentUserId;
+        return (
+          <button
+            key={d.id}
+            type="button"
+            onClick={() => (isMine ? onOpenPersonal() : onOpenOther(d))}
+            className="flex w-full items-center gap-3 border-t px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
+          >
+            <ActorAvatar actorType="member" actorId={d.user_id} size={28} className="shrink-0 rounded-md" />
+            <div className="min-w-0 flex-1">
+              <span className="text-sm font-medium truncate">{d.user_name}</span>
+              {isMine && (
+                <span className="ml-1.5 rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground">
+                  {t(($) => $.defaults.you_label)}
+                </span>
+              )}
+              <span className="ml-2 text-xs text-muted-foreground">
+                {isMine ? t(($) => $.defaults.personal_desc) : t(($) => $.defaults.other_user_desc)}
+              </span>
+            </div>
+            <span className="shrink-0 rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+              {t(($) => $.defaults.badge_label)}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -566,6 +763,8 @@ function ActiveToolbarRow({
   scope,
   setScope,
   scopeCounts,
+  workspaceOnly,
+  setWorkspaceOnly,
   sort,
   setSort,
   search,
@@ -578,6 +777,8 @@ function ActiveToolbarRow({
   scope: Scope;
   setScope: (v: Scope) => void;
   scopeCounts: { all: number; mine: number };
+  workspaceOnly: boolean;
+  setWorkspaceOnly: (v: boolean) => void;
   sort: SortKey;
   setSort: (v: SortKey) => void;
   search: string;
@@ -600,6 +801,16 @@ function ActiveToolbarRow({
         />
       </div>
       <ScopeSegment scope={scope} setScope={setScope} counts={scopeCounts} />
+      {scope === "all" && (
+        <Button
+          variant={workspaceOnly ? "secondary" : "ghost"}
+          size="icon-sm"
+          onClick={() => setWorkspaceOnly(!workspaceOnly)}
+          title={workspaceOnly ? t(($) => $.workspace_filter.show_all) : t(($) => $.workspace_filter.show_workspace)}
+        >
+          <Globe className={workspaceOnly ? "text-foreground" : "text-muted-foreground"} />
+        </Button>
+      )}
       <div className="ml-auto flex items-center gap-3">
         {archivedCount > 0 && (
           <button
@@ -858,20 +1069,24 @@ function NoMatches({
   view,
   search,
   scope,
+  workspaceOnly,
 }: {
   view: View;
   search: string;
   scope: Scope;
+  workspaceOnly: boolean;
 }) {
   const { t } = useT("agents");
   const hasSearch = search.length > 0;
-  const hasFilter = scope === "mine";
+  const hasFilter = scope === "mine" || workspaceOnly;
 
   let body: string;
   if (view === "archived") {
     body = hasSearch
       ? t(($) => $.no_matches.search_archived, { query: search })
       : t(($) => $.no_matches.no_archived);
+  } else if (workspaceOnly && !hasSearch) {
+    body = t(($) => $.no_matches.no_workspace_agents);
   } else if (hasSearch) {
     body = hasFilter
       ? t(($) => $.no_matches.search_active_filtered, { query: search })

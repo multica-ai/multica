@@ -2194,3 +2194,39 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		}
 	})
 }
+
+func TestRuntimeConfigContainsFormattingRules(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:   "test-issue-id",
+		AgentName: "TestAgent",
+		AgentID:   "agent-uuid-123",
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("failed to read CLAUDE.md: %v", err)
+	}
+
+	s := string(content)
+	for _, want := range []string{
+		"### Formatting Rules",
+		"well-structured Markdown",
+		"Use headings",
+		"Use code blocks",
+		"Do NOT output raw HTML",
+		"### Issue Description Updates",
+		"automatically annotates each update",
+		"### Comment Style",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing formatting instruction: %q", want)
+		}
+	}
+}

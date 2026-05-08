@@ -1329,6 +1329,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
 
+	// Resolve actor identity early so it can be reused for both description
+	// attribution and the event publish — avoids a duplicate GetAgent query.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
 		ID:            prevIssue.ID,
@@ -1344,7 +1348,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
 	}
 	if req.Description != nil {
-		params.Description = pgtype.Text{String: *req.Description, Valid: true}
+		// Annotate description with actor attribution when content is appended.
+		newDesc := annotateDescriptionUpdate(
+			prevIssue.Description.String,
+			*req.Description,
+			h.actorDisplayName(r.Context(), actorType, actorID, userID),
+		)
+		params.Description = pgtype.Text{String: newDesc, Valid: true}
 	}
 	if req.Status != nil {
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
@@ -1469,9 +1479,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	prevDueDate := timestampToPtr(prevIssue.DueDate)
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
-
-	// Determine actor identity: agent (via X-Agent-ID header) or member.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 		"issue":               resp,
@@ -1626,10 +1633,31 @@ func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool
 	return true
 }
 
+// canManageIssue checks whether the current user can delete an issue.
+// Only the issue creator or workspace owner/admin can delete an issue.
+func (h *Handler) canManageIssue(w http.ResponseWriter, r *http.Request, issue db.Issue) bool {
+	wsID := uuidToString(issue.WorkspaceID)
+	member, ok := h.requireWorkspaceRole(w, r, wsID, "issue not found", "owner", "admin", "member")
+	if !ok {
+		return false
+	}
+	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	isCreator := uuidToString(issue.CreatorID) == requestUserID(r)
+	if !isAdmin && !isCreator {
+		writeError(w, http.StatusForbidden, "only the issue creator can delete this issue")
+		return false
+	}
+	return true
+}
+
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
 	if !ok {
+		return
+	}
+
+	if !h.canManageIssue(w, r, issue) {
 		return
 	}
 
@@ -1934,6 +1962,9 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	member, memberOk := ctxMember(r.Context())
+	isAdmin := memberOk && roleAllowed(member.Role, "owner", "admin")
+
 	deleted := 0
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
@@ -1945,6 +1976,12 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: wsUUID,
 		})
 		if err != nil {
+			continue
+		}
+
+		// Only the issue creator or workspace admin can delete.
+		if !isAdmin && uuidToString(issue.CreatorID) != userID {
+			slog.Warn("batch delete skipped: not issue creator", "issue_id", issueID, "user_id", userID)
 			continue
 		}
 
@@ -2060,4 +2097,52 @@ func (h *Handler) ClearIssueHistory(w http.ResponseWriter, r *http.Request) {
 		"tasks_deleted":    resp.TasksDeleted,
 	})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// annotateDescriptionUpdate injects an attribution divider when the new
+// description extends the old one (i.e. content was appended). If the
+// update is a full replacement or the description was empty before, the
+// new content is returned unchanged — the activity log already tracks
+// the author of the change.
+func annotateDescriptionUpdate(oldDesc, newDesc, actorName string) string {
+	oldTrimmed := strings.TrimRight(oldDesc, " \t\n\r")
+	newTrimmed := strings.TrimRight(newDesc, " \t\n\r")
+
+	// No previous content or descriptions are identical — nothing to annotate.
+	if oldTrimmed == "" || oldTrimmed == newTrimmed {
+		return newDesc
+	}
+
+	// Detect append: new description starts with the old content.
+	if !strings.HasPrefix(newTrimmed, oldTrimmed) {
+		return newDesc // Full replacement — cannot insert attribution at boundary.
+	}
+
+	// Extract the appended portion (everything after the old prefix).
+	appended := newTrimmed[len(oldTrimmed):]
+	if strings.TrimSpace(appended) == "" {
+		return newDesc // Only whitespace was appended — skip annotation.
+	}
+
+	// Build the attribution divider.
+	ts := time.Now().UTC().Format("2006-01-02 15:04")
+	attribution := fmt.Sprintf("\n\n---\n*✏️ Updated by %s — %s (UTC)*\n", actorName, ts)
+
+	return oldTrimmed + attribution + appended
+}
+
+// actorDisplayName returns a human-readable name for the given actor.
+// Accepts already-resolved actorType/actorID to avoid redundant DB queries
+// (the caller typically has these from resolveActor).
+func (h *Handler) actorDisplayName(ctx context.Context, actorType, actorID, userID string) string {
+	if actorType == "agent" {
+		if agent, err := h.Queries.GetAgent(ctx, parseUUID(actorID)); err == nil {
+			return agent.Name
+		}
+		return "Agent"
+	}
+	if user, err := h.Queries.GetUser(ctx, parseUUID(userID)); err == nil && user.Name != "" {
+		return user.Name
+	}
+	return "Member"
 }

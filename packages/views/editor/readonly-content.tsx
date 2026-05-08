@@ -34,8 +34,7 @@ import { toHtml } from "hast-util-to-html";
 import { Maximize2, Download, Link as LinkIcon, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
-import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
-import { useNavigation } from "../navigation";
+import { useWorkspaceSlug } from "@multica/core/paths";
 import { useT } from "../i18n";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { ImageLightbox } from "./extensions/image-view";
@@ -230,27 +229,7 @@ function urlTransform(url: string): string {
 // ---------------------------------------------------------------------------
 
 function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
-  const { push, openInNewTab } = useNavigation();
-  const p = useWorkspacePaths();
-  const path = p.issueDetail(label ?? issueId);
-  return (
-    <span
-      className="inline align-middle"
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.metaKey || e.ctrlKey || e.shiftKey) {
-          if (openInNewTab) {
-            openInNewTab(path, label);
-          }
-          return;
-        }
-        push(path);
-      }}
-    >
-      <IssueMentionCard issueId={issueId} fallbackLabel={label} />
-    </span>
-  );
+  return <IssueMentionCard issueId={issueId} fallbackLabel={label} />;
 }
 
 // Named component so it can call useWorkspaceSlug() — arrow function inlined

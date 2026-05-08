@@ -1,25 +1,35 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
-  Loader2,
-  Save,
-  Plus,
-  Trash2,
+  BookOpenText,
+  Copy,
   Eye,
   EyeOff,
   FileText,
   KeyRound,
-  Terminal,
-  BookOpenText,
+  Loader2,
+  Lock,
+  Plus,
+  Save,
   Settings2,
   Sliders,
-  Copy,
+  Terminal,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@multica/core/api";
@@ -30,7 +40,11 @@ import {
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import type { AgentDefaultsWithUser } from "@multica/core/types";
+import { ContentEditor } from "../../editor/content-editor";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { useT } from "../../i18n";
+
+// ─── Types & helpers ────────────────────────────────────────────────────────
 
 interface AgentDefaultsConfig {
   instructions?: string;
@@ -82,103 +96,451 @@ function entriesToArgs(entries: ArgEntry[]): string[] {
 const personalDefaultsKey = (wsId: string) =>
   ["workspaces", wsId, "personal-agent-defaults"] as const;
 
-// ─── Detail tab definitions ────────────────────────────────────────────────
+// ─── Tab definitions ────────────────────────────────────────────────────────
 
 type DefaultsTab = "instructions" | "env" | "custom_args" | "skills";
 
-const defaultsTabs: { id: DefaultsTab; label: string; icon: typeof FileText }[] = [
-  { id: "instructions", label: "Instructions", icon: FileText },
-  { id: "env", label: "Environment", icon: KeyRound },
-  { id: "custom_args", label: "Custom Args", icon: Terminal },
-  { id: "skills", label: "Skills", icon: BookOpenText },
+const TAB_LABEL_KEY: Record<DefaultsTab, "instructions" | "environment" | "custom_args" | "skills"> = {
+  instructions: "instructions",
+  env: "environment",
+  custom_args: "custom_args",
+  skills: "skills",
+};
+
+const defaultsTabs: {
+  id: DefaultsTab;
+  icon: typeof FileText;
+}[] = [
+  { id: "instructions", icon: FileText },
+  { id: "env", icon: KeyRound },
+  { id: "custom_args", icon: Terminal },
+  { id: "skills", icon: BookOpenText },
 ];
 
-// ─── Shared form component ─────────────────────────────────────────────────
+// ─── Tab content wrapper (matches agent-overview-pane TabContent) ───────────
 
-function DefaultsForm({
-  config,
+function TabContent({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mx-auto flex h-full max-w-2xl flex-col p-4 md:p-6">{children}</div>
+  );
+}
+
+// ─── Instructions tab ──────────────────────────────────────────────────────
+
+function DefaultsInstructionsTab({
+  value: initialValue,
   readOnly,
   saving,
   onSave,
+  onDirtyChange,
 }: {
-  config: AgentDefaultsConfig;
+  value: string;
   readOnly: boolean;
   saving: boolean;
-  onSave: (cfg: AgentDefaultsConfig) => void;
+  onSave: (instructions: string) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
-  const wsId = useWorkspaceId();
-  const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
+  const { t } = useT("agents");
+  const [value, setValue] = useState(initialValue);
+  const isDirty = value !== initialValue;
 
-  const [instructions, setInstructions] = useState(config.instructions ?? "");
-  const [envEntries, setEnvEntries] = useState<EnvEntry[]>(
-    envMapToEntries(config.custom_env ?? {}),
-  );
-  const [argEntries, setArgEntries] = useState<ArgEntry[]>(
-    argsToEntries(config.custom_args ?? []),
-  );
-  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(
-    new Set(config.skills ?? []),
-  );
-  const [activeTab, setActiveTab] = useState<DefaultsTab>("instructions");
-
-  // Sync when config changes externally
   useEffect(() => {
-    setInstructions(config.instructions ?? "");
-    setEnvEntries(envMapToEntries(config.custom_env ?? {}));
-    setArgEntries(argsToEntries(config.custom_args ?? []));
-    setSelectedSkills(new Set(config.skills ?? []));
-  }, [config]);
+    setValue(initialValue);
+  }, [initialValue]);
 
-  const buildConfig = useCallback((): AgentDefaultsConfig => {
-    const cfg: AgentDefaultsConfig = {};
-    const instr = instructions.trim();
-    if (instr) cfg.instructions = instr;
-    const env = entriesToEnvMap(envEntries);
-    if (Object.keys(env).length > 0) cfg.custom_env = env;
-    const args = entriesToArgs(argEntries);
-    if (args.length > 0) cfg.custom_args = args;
-    if (selectedSkills.size > 0) cfg.skills = Array.from(selectedSkills);
-    return cfg;
-  }, [instructions, envEntries, argEntries, selectedSkills]);
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
-  const isDirty = useCallback(() => {
-    const normalize = (c: AgentDefaultsConfig) => {
-      const n: AgentDefaultsConfig = {};
-      if (c.instructions) n.instructions = c.instructions;
-      if (c.custom_env && Object.keys(c.custom_env).length > 0) n.custom_env = c.custom_env;
-      if (c.custom_args && c.custom_args.length > 0) n.custom_args = c.custom_args;
-      if (c.skills && c.skills.length > 0) n.skills = c.skills;
-      return n;
-    };
-    return JSON.stringify(normalize(buildConfig())) !== JSON.stringify(normalize(config));
-  }, [buildConfig, config]);
+  return (
+    <div className="flex h-full flex-col gap-4">
+      <p className="text-xs text-muted-foreground">
+        {t(($) => $.tab_body.instructions.intro)}
+      </p>
+
+      {readOnly ? (
+        <div className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-muted/50 px-4 py-3">
+          <pre className="whitespace-pre-wrap font-mono text-sm text-muted-foreground">
+            {value || t(($) => $.tab_body.instructions.placeholder)}
+          </pre>
+        </div>
+      ) : (
+        <>
+          <div className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input">
+            <ContentEditor
+              key="defaults-instructions"
+              defaultValue={value}
+              onUpdate={setValue}
+              placeholder={t(($) => $.tab_body.instructions.placeholder)}
+              debounceMs={150}
+              disableMentions
+              className="min-h-full"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-3">
+            {isDirty && (
+              <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
+            )}
+            <Button
+              size="sm"
+              onClick={() => onSave(value)}
+              disabled={!isDirty || saving}
+            >
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Save className="h-3.5 w-3.5" />
+              )}
+              {t(($) => $.tab_body.common.save)}
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Environment tab ────────────────────────────────────────────────────────
+
+function DefaultsEnvTab({
+  env: originalEnv,
+  readOnly,
+  saving,
+  onSave,
+  onDirtyChange,
+}: {
+  env: Record<string, string>;
+  readOnly: boolean;
+  saving: boolean;
+  onSave: (env: Record<string, string>) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
+  const { t } = useT("agents");
+  const [envEntries, setEnvEntries] = useState<EnvEntry[]>(
+    envMapToEntries(originalEnv),
+  );
+
+  useEffect(() => {
+    setEnvEntries(envMapToEntries(originalEnv));
+  }, [originalEnv]);
+
+  const currentEnvMap = entriesToEnvMap(envEntries);
+  const dirty = JSON.stringify(currentEnvMap) !== JSON.stringify(originalEnv);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  const addEnvEntry = () => {
+    setEnvEntries([
+      ...envEntries,
+      { id: nextEnvId++, key: "", value: "", visible: true },
+    ]);
+  };
+
+  const removeEnvEntry = (index: number) => {
+    setEnvEntries(envEntries.filter((_, i) => i !== index));
+  };
+
+  const updateEnvEntry = (index: number, field: "key" | "value", val: string) => {
+    setEnvEntries(
+      envEntries.map((entry, i) =>
+        i === index ? { ...entry, [field]: val } : entry,
+      ),
+    );
+  };
+
+  const toggleEnvVisibility = (index: number) => {
+    setEnvEntries(
+      envEntries.map((entry, i) =>
+        i === index ? { ...entry, visible: !entry.visible } : entry,
+      ),
+    );
+  };
 
   const handleSave = () => {
     const keys = envEntries.filter((e) => e.key.trim()).map((e) => e.key.trim());
     if (new Set(keys).size < keys.length) {
-      toast.error("Duplicate environment variable keys");
+      toast.error(t(($) => $.tab_body.env.duplicate_keys_toast));
       return;
     }
-    onSave(buildConfig());
+    onSave(currentEnvMap);
   };
 
-  // Env helpers
-  const addEnvEntry = () => setEnvEntries([...envEntries, { id: nextEnvId++, key: "", value: "", visible: true }]);
-  const removeEnvEntry = (i: number) => setEnvEntries(envEntries.filter((_, idx) => idx !== i));
-  const updateEnvEntry = (i: number, field: "key" | "value", val: string) =>
-    setEnvEntries(envEntries.map((e, idx) => (idx === i ? { ...e, [field]: val } : e)));
-  const toggleEnvVisibility = (i: number) =>
-    setEnvEntries(envEntries.map((e, idx) => (idx === i ? { ...e, visible: !e.visible } : e)));
+  if (readOnly) {
+    return (
+      <div className="space-y-4">
+        <p className="text-xs text-muted-foreground">
+          {t(($) => $.tab_body.env.intro_readonly)}
+        </p>
+        {envEntries.length > 0 ? (
+          <div className="space-y-2">
+            {envEntries.map((entry) => (
+              <div key={entry.id} className="flex items-center gap-2">
+                <Input
+                  value={entry.key}
+                  readOnly
+                  className="w-[40%] bg-muted font-mono text-xs"
+                />
+                <div className="relative flex-1">
+                  <Input
+                    type="password"
+                    value="****"
+                    readOnly
+                    className="bg-muted pr-8 font-mono text-xs"
+                  />
+                  <Lock className="absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs italic text-muted-foreground">
+            {t(($) => $.tab_body.env.empty_readonly)}
+          </p>
+        )}
+      </div>
+    );
+  }
 
-  // Arg helpers
-  const addArgEntry = () => setArgEntries([...argEntries, { id: nextArgId++, value: "" }]);
-  const removeArgEntry = (i: number) => setArgEntries(argEntries.filter((_, idx) => idx !== i));
-  const updateArgEntry = (i: number, value: string) =>
-    setArgEntries(argEntries.map((e, idx) => (idx === i ? { ...e, value } : e)));
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          {t(($) => $.tab_body.env.intro_prefix)}
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+            {"ANTHROPIC_API_KEY"}
+          </code>
+          {t(($) => $.tab_body.env.intro_separator)}
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+            {"ANTHROPIC_BASE_URL"}
+          </code>
+          {t(($) => $.tab_body.env.intro_suffix)}
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={addEnvEntry}
+          className="shrink-0"
+        >
+          <Plus className="h-3 w-3" />
+          {t(($) => $.tab_body.common.add)}
+        </Button>
+      </div>
 
-  // Skill toggle
+      {envEntries.length > 0 && (
+        <div className="space-y-2">
+          {envEntries.map((entry, index) => (
+            <div key={entry.id} className="flex items-center gap-2">
+              <Input
+                value={entry.key}
+                onChange={(e) => updateEnvEntry(index, "key", e.target.value)}
+                placeholder={t(($) => $.tab_body.env.key_placeholder)}
+                className="w-[40%] font-mono text-xs"
+              />
+              <div className="relative flex-1">
+                <Input
+                  type={entry.visible ? "text" : "password"}
+                  value={entry.value}
+                  onChange={(e) => updateEnvEntry(index, "value", e.target.value)}
+                  placeholder={t(($) => $.tab_body.env.value_placeholder)}
+                  className="pr-8 font-mono text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleEnvVisibility(index)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  aria-label={entry.visible ? t(($) => $.tab_body.env.hide_value_aria) : t(($) => $.tab_body.env.show_value_aria)}
+                >
+                  {entry.visible ? (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => removeEnvEntry(index)}
+                className="text-muted-foreground hover:text-destructive"
+                aria-label={t(($) => $.tab_body.env.remove_aria)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-center justify-end gap-3">
+        {dirty && (
+          <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
+        )}
+        <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
+          {saving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Save className="h-3.5 w-3.5" />
+          )}
+          {t(($) => $.tab_body.common.save)}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Custom Args tab ────────────────────────────────────────────────────────
+
+function DefaultsCustomArgsTab({
+  args: originalArgs,
+  readOnly,
+  saving,
+  onSave,
+  onDirtyChange,
+}: {
+  args: string[];
+  readOnly: boolean;
+  saving: boolean;
+  onSave: (args: string[]) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
+  const { t } = useT("agents");
+  const [entries, setEntries] = useState<ArgEntry[]>(
+    argsToEntries(originalArgs),
+  );
+
+  useEffect(() => {
+    setEntries(argsToEntries(originalArgs));
+  }, [originalArgs]);
+
+  const currentArgs = entriesToArgs(entries);
+  const dirty = JSON.stringify(currentArgs) !== JSON.stringify(originalArgs);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  const addEntry = () => {
+    setEntries([...entries, { id: nextArgId++, value: "" }]);
+  };
+
+  const removeEntry = (index: number) => {
+    setEntries(entries.filter((_, i) => i !== index));
+  };
+
+  const updateEntry = (index: number, value: string) => {
+    setEntries(
+      entries.map((entry, i) => (i === index ? { ...entry, value } : entry)),
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          {t(($) => $.tab_body.custom_args.intro)}
+        </p>
+        {!readOnly && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addEntry}
+            className="shrink-0"
+          >
+            <Plus className="h-3 w-3" />
+            {t(($) => $.tab_body.common.add)}
+          </Button>
+        )}
+      </div>
+
+      {entries.length > 0 && (
+        <div className="space-y-2">
+          {entries.map((entry, index) => (
+            <div key={entry.id} className="flex items-center gap-2">
+              <Input
+                value={entry.value}
+                onChange={(e) => { if (!readOnly) updateEntry(index, e.target.value); }}
+                readOnly={readOnly}
+                placeholder={t(($) => $.tab_body.custom_args.input_placeholder)}
+                className={`flex-1 font-mono text-xs ${readOnly ? "bg-muted/50" : ""}`}
+              />
+              {!readOnly && (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => removeEntry(index)}
+                  className="text-muted-foreground hover:text-destructive"
+                  aria-label={t(($) => $.tab_body.custom_args.remove_aria)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {entries.length === 0 && readOnly && (
+        <p className="text-xs text-muted-foreground italic">
+          {t(($) => $.tab_body.custom_args.intro)}
+        </p>
+      )}
+
+      {!readOnly && (
+        <div className="flex items-center justify-end gap-3">
+          {dirty && (
+            <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
+          )}
+          <Button onClick={() => onSave(currentArgs)} disabled={!dirty || saving} size="sm">
+            {saving ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Save className="h-3.5 w-3.5" />
+            )}
+            {t(($) => $.tab_body.common.save)}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Skills tab ─────────────────────────────────────────────────────────────
+
+function DefaultsSkillsTab({
+  selectedSkillIds,
+  readOnly,
+  saving,
+  onSave,
+  onDirtyChange,
+}: {
+  selectedSkillIds: string[];
+  readOnly: boolean;
+  saving: boolean;
+  onSave: (skills: string[]) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
+  const { t } = useT("agents");
+  const wsId = useWorkspaceId();
+  const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
+
+  const [selected, setSelected] = useState<Set<string>>(new Set(selectedSkillIds));
+
+  useEffect(() => {
+    setSelected(new Set(selectedSkillIds));
+  }, [selectedSkillIds]);
+
+  const dirty = JSON.stringify([...selected].sort()) !== JSON.stringify([...selectedSkillIds].sort());
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
   const toggleSkill = (skillId: string) => {
-    setSelectedSkills((prev) => {
+    setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(skillId)) next.delete(skillId);
       else next.add(skillId);
@@ -187,208 +549,197 @@ function DefaultsForm({
   };
 
   return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        {t(($) => $.tab_body.skills.intro)}
+      </p>
+
+      {workspaceSkills.length > 0 ? (
+        <ul className="space-y-1.5">
+          {workspaceSkills.map((skill) => (
+            <li
+              key={skill.id}
+              className={`flex items-center gap-2.5 rounded-md border px-3 py-2 ${
+                !readOnly ? "cursor-pointer hover:bg-accent/50" : ""
+              }`}
+              onClick={() => { if (!readOnly) toggleSkill(skill.id); }}
+            >
+              <Checkbox
+                checked={selected.has(skill.id)}
+                onCheckedChange={() => { if (!readOnly) toggleSkill(skill.id); }}
+                disabled={readOnly}
+              />
+              <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium">{skill.name}</div>
+                {skill.description && (
+                  <div className="truncate text-xs text-muted-foreground">
+                    {skill.description}
+                  </div>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
+          <FileText className="h-8 w-8 text-muted-foreground/40" />
+          <p className="mt-3 text-sm text-muted-foreground">
+            {t(($) => $.tab_body.skills.empty_title)}
+          </p>
+        </div>
+      )}
+
+      {!readOnly && (
+        <div className="flex items-center justify-end gap-3">
+          {dirty && (
+            <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
+          )}
+          <Button onClick={() => onSave(Array.from(selected))} disabled={!dirty || saving} size="sm">
+            {saving ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Save className="h-3.5 w-3.5" />
+            )}
+            {t(($) => $.tab_body.common.save)}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main form shell (tab bar + unsaved-changes guard) ──────────────────────
+
+function DefaultsForm({
+  config,
+  readOnly,
+  saving,
+  onSaveField,
+}: {
+  config: AgentDefaultsConfig;
+  readOnly: boolean;
+  saving: boolean;
+  onSaveField: (field: keyof AgentDefaultsConfig, value: unknown) => void;
+}) {
+  const { t } = useT("agents");
+  const [activeTab, setActiveTab] = useState<DefaultsTab>("instructions");
+  const [activeDirty, setActiveDirty] = useState(false);
+  const [pendingTab, setPendingTab] = useState<DefaultsTab | null>(null);
+
+  const requestTabChange = (next: DefaultsTab) => {
+    if (next === activeTab) return;
+    if (activeDirty) {
+      setPendingTab(next);
+      return;
+    }
+    setActiveTab(next);
+  };
+
+  const commitTabChange = () => {
+    if (pendingTab) {
+      setActiveTab(pendingTab);
+      setActiveDirty(false);
+      setPendingTab(null);
+    }
+  };
+
+  return (
     <>
-      {/* Tab bar */}
-      <div className="flex border-b px-6">
+      {/* Tab bar — matches agent-overview-pane */}
+      <div className="flex shrink-0 items-center gap-0 overflow-x-auto border-b px-2 md:px-4">
         {defaultsTabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
+            type="button"
+            onClick={() => requestTabChange(tab.id)}
+            className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
               activeTab === tab.id
-                ? "border-primary text-foreground"
+                ? "border-foreground text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
             <tab.icon className="h-3.5 w-3.5" />
-            {tab.label}
+            {t(($) => $.tabs[TAB_LABEL_KEY[tab.id]])}
           </button>
         ))}
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {activeTab === "instructions" && (
-          <div className="space-y-4">
-            <div>
-              <Label className="text-sm font-medium">Instructions</Label>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Default instructions applied to all agents.
-              </p>
-            </div>
-            <textarea
-              value={instructions}
-              onChange={(e) => { if (!readOnly) setInstructions(e.target.value); }}
+          <TabContent>
+            <DefaultsInstructionsTab
+              value={config.instructions ?? ""}
               readOnly={readOnly}
-              placeholder={readOnly ? "No default instructions set" : "Add default instructions for all agents..."}
-              className={`w-full min-h-[300px] rounded-md border bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y ${readOnly ? "cursor-default bg-muted/50" : ""}`}
+              saving={saving}
+              onSave={(v) => onSaveField("instructions", v)}
+              onDirtyChange={setActiveDirty}
             />
-          </div>
+          </TabContent>
         )}
-
         {activeTab === "env" && (
-          <div className="max-w-lg space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <Label className="text-sm font-medium">Environment Variables</Label>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Default environment variables merged into every agent&apos;s environment.
-                </p>
-              </div>
-              {!readOnly && (
-                <Button variant="outline" size="sm" onClick={addEnvEntry} className="h-7 gap-1 text-xs">
-                  <Plus className="h-3 w-3" />
-                  Add
-                </Button>
-              )}
-            </div>
-            {envEntries.length > 0 ? (
-              <div className="space-y-2">
-                {envEntries.map((entry, index) => (
-                  <div key={entry.id} className="flex items-center gap-2">
-                    <Input
-                      value={entry.key}
-                      onChange={(e) => updateEnvEntry(index, "key", e.target.value)}
-                      readOnly={readOnly}
-                      placeholder="KEY"
-                      className={`w-[40%] font-mono text-xs ${readOnly ? "bg-muted/50" : ""}`}
-                    />
-                    <div className="relative flex-1">
-                      <Input
-                        type={entry.visible ? "text" : "password"}
-                        value={readOnly ? "****" : entry.value}
-                        onChange={(e) => updateEnvEntry(index, "value", e.target.value)}
-                        readOnly={readOnly}
-                        placeholder="value"
-                        className={`pr-8 font-mono text-xs ${readOnly ? "bg-muted/50" : ""}`}
-                      />
-                      {!readOnly && (
-                        <button
-                          type="button"
-                          onClick={() => toggleEnvVisibility(index)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                        >
-                          {entry.visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                        </button>
-                      )}
-                    </div>
-                    {!readOnly && (
-                      <button
-                        type="button"
-                        onClick={() => removeEnvEntry(index)}
-                        className="shrink-0 text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground italic">No environment variables configured.</p>
-            )}
-          </div>
+          <TabContent>
+            <DefaultsEnvTab
+              env={config.custom_env ?? {}}
+              readOnly={readOnly}
+              saving={saving}
+              onSave={(v) => onSaveField("custom_env", v)}
+              onDirtyChange={setActiveDirty}
+            />
+          </TabContent>
         )}
-
         {activeTab === "custom_args" && (
-          <div className="max-w-lg space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <Label className="text-sm font-medium">Custom Arguments</Label>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Default CLI arguments appended to every agent&apos;s launch command.
-                </p>
-              </div>
-              {!readOnly && (
-                <Button variant="outline" size="sm" onClick={addArgEntry} className="h-7 gap-1 text-xs">
-                  <Plus className="h-3 w-3" />
-                  Add
-                </Button>
-              )}
-            </div>
-            {argEntries.length > 0 ? (
-              <div className="space-y-2">
-                {argEntries.map((entry, index) => (
-                  <div key={entry.id} className="flex items-center gap-2">
-                    <Input
-                      value={entry.value}
-                      onChange={(e) => { if (!readOnly) updateArgEntry(index, e.target.value); }}
-                      readOnly={readOnly}
-                      placeholder="--flag value"
-                      className={`flex-1 font-mono text-xs ${readOnly ? "bg-muted/50" : ""}`}
-                    />
-                    {!readOnly && (
-                      <button
-                        type="button"
-                        onClick={() => removeArgEntry(index)}
-                        className="shrink-0 text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground italic">No custom arguments configured.</p>
-            )}
-          </div>
+          <TabContent>
+            <DefaultsCustomArgsTab
+              args={config.custom_args ?? []}
+              readOnly={readOnly}
+              saving={saving}
+              onSave={(v) => onSaveField("custom_args", v)}
+              onDirtyChange={setActiveDirty}
+            />
+          </TabContent>
         )}
-
         {activeTab === "skills" && (
-          <div className="space-y-4">
-            <div>
-              <Label className="text-sm font-medium">Skills</Label>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Default skills assigned to all agents.
-              </p>
-            </div>
-            {workspaceSkills.length > 0 ? (
-              <div className="space-y-2">
-                {workspaceSkills.map((skill) => (
-                  <label
-                    key={skill.id}
-                    className={`flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors ${
-                      !readOnly ? "cursor-pointer hover:bg-accent/50" : "cursor-default"
-                    }`}
-                  >
-                    <Checkbox
-                      checked={selectedSkills.has(skill.id)}
-                      onCheckedChange={() => { if (!readOnly) toggleSkill(skill.id); }}
-                      disabled={readOnly}
-                    />
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-                      <FileText className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium">{skill.name}</div>
-                      {skill.description && (
-                        <div className="text-xs text-muted-foreground truncate">{skill.description}</div>
-                      )}
-                    </div>
-                  </label>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground italic">No workspace skills available.</p>
-            )}
-          </div>
-        )}
-
-        {/* Save button */}
-        {!readOnly && (
-          <div className="mt-6">
-            <Button onClick={handleSave} disabled={!isDirty() || saving} size="sm">
-              {saving ? (
-                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-              ) : (
-                <Save className="h-3.5 w-3.5 mr-1.5" />
-              )}
-              Save
-            </Button>
-          </div>
+          <TabContent>
+            <DefaultsSkillsTab
+              selectedSkillIds={config.skills ?? []}
+              readOnly={readOnly}
+              saving={saving}
+              onSave={(v) => onSaveField("skills", v)}
+              onDirtyChange={setActiveDirty}
+            />
+          </TabContent>
         )}
       </div>
+
+      {/* Unsaved-changes guard */}
+      {pendingTab !== null && (
+        <AlertDialog
+          open
+          onOpenChange={(v) => {
+            if (!v) setPendingTab(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t(($) => $.tabs.discard_dialog_title)}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t(($) => $.tabs.discard_dialog_description)}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t(($) => $.tabs.discard_keep)}</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={commitTabChange}
+              >
+                {t(($) => $.tabs.discard_confirm)}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </>
   );
 }
@@ -396,6 +747,7 @@ function DefaultsForm({
 // ─── Personal Defaults Detail ───────────────────────────────────────────────
 
 export function PersonalDefaultsDetail() {
+  const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const [saving, setSaving] = useState(false);
@@ -405,23 +757,27 @@ export function PersonalDefaultsDetail() {
     queryFn: () => api.getPersonalAgentDefaults(wsId),
   });
 
-  const config = (personalDefaults?.config ?? {}) as AgentDefaultsConfig;
+  const config = useMemo(
+    () => (personalDefaults?.config ?? {}) as AgentDefaultsConfig,
+    [personalDefaults?.config],
+  );
 
-  const handleSave = async (cfg: AgentDefaultsConfig) => {
+  const handleSaveField = useCallback(async (field: keyof AgentDefaultsConfig, value: unknown) => {
     setSaving(true);
     try {
-      await api.updatePersonalAgentDefaults(wsId, cfg as Record<string, unknown>);
+      const newConfig = { ...config, [field]: value };
+      await api.updatePersonalAgentDefaults(wsId, newConfig as Record<string, unknown>);
       qc.invalidateQueries({ queryKey: personalDefaultsKey(wsId) });
-      toast.success("Personal agent defaults saved");
+      toast.success(t(($) => $.tab_body.env.saved_toast));
     } catch (e) {
       const msg = e instanceof ApiError ? e.message
         : e instanceof Error ? e.message
-        : "Failed to save personal agent defaults";
+        : t(($) => $.tab_body.env.save_failed_toast);
       toast.error(msg);
     } finally {
       setSaving(false);
     }
-  };
+  }, [config, wsId, qc, t]);
 
   if (isLoading) {
     return (
@@ -439,40 +795,45 @@ export function PersonalDefaultsDetail() {
           <Sliders className="h-4 w-4 text-blue-500" />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold">Personal Defaults</h2>
+          <h2 className="text-sm font-semibold">{t(($) => $.defaults.personal_title)}</h2>
         </div>
       </div>
-      <DefaultsForm config={config} readOnly={false} saving={saving} onSave={handleSave} />
+      <DefaultsForm config={config} readOnly={false} saving={saving} onSaveField={handleSaveField} />
     </div>
   );
 }
 
 // ─── System Defaults Detail ─────────────────────────────────────────────────
 
-export function SystemDefaultsDetail() {
+export function SystemDefaultsDetail({ readOnly = false }: { readOnly?: boolean } = {}) {
+  const { t } = useT("agents");
   const workspace = useCurrentWorkspace();
   const qc = useQueryClient();
   const [saving, setSaving] = useState(false);
 
-  const agentDefaults = (workspace?.settings?.agent_defaults ?? {}) as AgentDefaultsConfig;
+  const agentDefaults = useMemo(
+    () => (workspace?.settings?.agent_defaults ?? {}) as AgentDefaultsConfig,
+    [workspace?.settings?.agent_defaults],
+  );
 
-  const handleSave = async (cfg: AgentDefaultsConfig) => {
+  const handleSaveField = useCallback(async (field: keyof AgentDefaultsConfig, value: unknown) => {
     if (!workspace) return;
     setSaving(true);
     try {
-      const newSettings = { ...workspace.settings, agent_defaults: cfg };
+      const newDefaults = { ...agentDefaults, [field]: value };
+      const newSettings = { ...workspace.settings, agent_defaults: newDefaults };
       await api.updateWorkspace(workspace.id, { settings: newSettings });
       qc.invalidateQueries({ queryKey: workspaceKeys.list() });
-      toast.success("System agent defaults saved");
+      toast.success(t(($) => $.tab_body.env.saved_toast));
     } catch (e) {
       const msg = e instanceof ApiError ? e.message
         : e instanceof Error ? e.message
-        : "Failed to save system agent defaults";
+        : t(($) => $.tab_body.env.save_failed_toast);
       toast.error(msg);
     } finally {
       setSaving(false);
     }
-  };
+  }, [workspace, agentDefaults, qc, t]);
 
   return (
     <div className="flex h-full flex-col">
@@ -482,10 +843,10 @@ export function SystemDefaultsDetail() {
           <Settings2 className="h-4 w-4 text-amber-500" />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold">System Defaults</h2>
+          <h2 className="text-sm font-semibold">{t(($) => $.defaults.system_title)}</h2>
         </div>
       </div>
-      <DefaultsForm config={agentDefaults} readOnly={false} saving={saving} onSave={handleSave} />
+      <DefaultsForm config={agentDefaults} readOnly={readOnly} saving={saving} onSaveField={handleSaveField} />
     </div>
   );
 }
@@ -499,6 +860,7 @@ export function OtherDefaultsDetail({
   defaults: AgentDefaultsWithUser;
   onDuplicate: () => void;
 }) {
+  const { t } = useT("agents");
   const config = (defaults.config ?? {}) as AgentDefaultsConfig;
 
   return (
@@ -507,14 +869,15 @@ export function OtherDefaultsDetail({
       <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
         <ActorAvatar actorType="member" actorId={defaults.user_id} size={28} className="rounded-md" />
         <div className="min-w-0 flex-1">
+          {/* eslint-disable-next-line i18next/no-literal-string */}
           <h2 className="text-sm font-semibold truncate">{defaults.user_name}&apos;s Defaults</h2>
         </div>
         <Button variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={onDuplicate}>
           <Copy className="h-3 w-3" />
-          Duplicate to Mine
+          {t(($) => $.defaults.duplicate_action)}
         </Button>
       </div>
-      <DefaultsForm config={config} readOnly={true} saving={false} onSave={() => {}} />
+      <DefaultsForm config={config} readOnly={true} saving={false} onSaveField={() => {}} />
     </div>
   );
 }

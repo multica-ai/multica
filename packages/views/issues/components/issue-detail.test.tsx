@@ -6,6 +6,9 @@ import type { Issue, TimelineEntry } from "@multica/core/types";
 
 const mockNavigationPush = vi.hoisted(() => vi.fn());
 const mockNavigationReplace = vi.hoisted(() => vi.fn());
+const mockNavigationSearchParams = vi.hoisted(() => ({
+  current: new URLSearchParams(),
+}));
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
@@ -108,7 +111,7 @@ vi.mock("../../navigation", () => ({
     push: mockNavigationPush,
     replace: mockNavigationReplace,
     pathname: "/issues/issue-1",
-    searchParams: new URLSearchParams(),
+    searchParams: mockNavigationSearchParams.current,
     getShareableUrl: undefined,
   }),
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
@@ -433,6 +436,7 @@ describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockViewport.isMobile = false;
+    mockNavigationSearchParams.current = new URLSearchParams();
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
     // Cursor-paginated timeline endpoint returns a TimelinePage. The DESC
@@ -584,6 +588,21 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
+  });
+
+  it("anchors the initial timeline fetch on the comment from URL search params", async () => {
+    mockNavigationSearchParams.current = new URLSearchParams({
+      comment: "comment-2",
+    });
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(mockApiObj.listTimeline).toHaveBeenCalledWith("issue-1", {
+        mode: "around",
+        id: "comment-2",
+      });
+    });
   });
 
   it("sends empty description when editor is cleared", async () => {

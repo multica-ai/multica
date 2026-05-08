@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { api } from "@multica/core/api";
+import { isCliVersionNewer } from "@multica/core/runtimes";
 import type { RuntimeUpdateStatus } from "@multica/core/types";
 import { useT } from "../../i18n";
 
@@ -34,22 +35,6 @@ async function fetchLatestVersion(): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-function stripV(v: string): string {
-  return v.replace(/^v/, "");
-}
-
-function isNewer(latest: string, current: string): boolean {
-  const l = stripV(latest).split(".").map(Number);
-  const c = stripV(current).split(".").map(Number);
-  for (let i = 0; i < Math.max(l.length, c.length); i++) {
-    const lv = l[i] ?? 0;
-    const cv = c[i] ?? 0;
-    if (lv > cv) return true;
-    if (lv < cv) return false;
-  }
-  return false;
 }
 
 const statusConfig: Record<
@@ -122,7 +107,7 @@ export function UpdateSection({
 
   useEffect(() => {
     if (!updating || !targetVersion || !currentVersion) return;
-    if (!isNewer(targetVersion, currentVersion)) {
+    if (!isCliVersionNewer(targetVersion, currentVersion)) {
       markCompleted(`Updated to ${targetVersion}`);
     }
   }, [currentVersion, markCompleted, targetVersion, updating]);
@@ -172,7 +157,7 @@ export function UpdateSection({
   const hasUpdate =
     currentVersion &&
     latestVersion &&
-    isNewer(latestVersion, currentVersion);
+    isCliVersionNewer(latestVersion, currentVersion);
 
   const config = status ? statusConfig[status] : null;
   const Icon = config?.icon;
