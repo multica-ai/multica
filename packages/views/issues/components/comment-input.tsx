@@ -72,6 +72,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           onUploadFile={handleUpload}
           debounceMs={100}
           currentIssueId={issueId}
+          submitOnEnter
         />
       </div>
       <div className="absolute bottom-1 right-1.5 flex items-center gap-1">

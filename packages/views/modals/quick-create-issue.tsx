@@ -365,6 +365,7 @@ export function AgentCreatePanel({
             onUploadFile={handleUploadFile}
             onSubmit={submit}
             debounceMs={150}
+            submitOnEnter
           />
           {isDragOver && <FileDropOverlay />}
         </div>
