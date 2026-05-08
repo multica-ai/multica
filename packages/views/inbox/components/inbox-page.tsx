@@ -28,6 +28,7 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useInboxKeyboardShortcuts, CerebroSwipeArchive } from "@multica/cerebro-inbox";
 import { useInboxViewStore, INBOX_VIEW_OPTIONS, type InboxView } from "@multica/core/inbox";
 import { channelListOptions } from "@multica/core/channels";
+import { useChatStore } from "@multica/core/chat";
 import { ChannelDetail, NewMessageModal } from "../../channels";
 import { IssueDetail } from "../../issues/components";
 import { useNavigation } from "../../navigation";
@@ -45,7 +46,6 @@ import {
   Bot,
   ChevronRight,
   ChevronDown,
-  MessageSquarePlus,
 } from "lucide-react";
 import type { Channel, InboxItem, InboxItemType } from "@multica/core/types";
 import {
@@ -470,33 +470,22 @@ export function InboxPage() {
         )}
       </div>
       <div className="flex items-center gap-1">
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="text-muted-foreground"
-                title="New message"
-              />
-            }
-          >
-            <Plus className="h-4 w-4" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-auto">
-            {channelsEnabled && (
-              <DropdownMenuItem onClick={() => setShowNewMessage(true)}>
-                <MessageSquarePlus className="h-4 w-4" />
-                New message…
-                <span className="ml-2 text-xs text-muted-foreground">⌘⇧M</span>
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem onClick={handleNewChat}>
-              <Bot className="h-4 w-4" />
-              Chat with agent
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* CEREBRO-PATCH(inbox-plus-direct): JEH-718 — '+' opens the unified
+         * actor picker directly. The picker dispatches single-agent taps to
+         * the chat flow, removing the need for a "New message" / "Chat with
+         * agent" dropdown. When channels are disabled the button falls back
+         * to the legacy chat-with-agent path. */}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground"
+          title={channelsEnabled ? "New message" : "Chat with agent"}
+          onClick={() =>
+            channelsEnabled ? setShowNewMessage(true) : handleNewChat()
+          }
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -1071,6 +1060,10 @@ export function InboxPage() {
           open={showNewMessage}
           onClose={() => setShowNewMessage(false)}
           onCreated={(channel) => setSelectedKey("issue", channel.id)}
+          onAgentChatStarted={(agentId) => {
+            useChatStore.getState().setSelectedAgentId(agentId);
+            setSelectedKey("chat", "new-chat");
+          }}
         />
       </>
     );
