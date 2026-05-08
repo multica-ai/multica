@@ -299,9 +299,6 @@ func discoverPiModels(ctx context.Context, executablePath string) ([]Model, erro
 	return parsePiModels(text), nil
 }
 
-// parsePiModels accepts the `pi --list-models` output and extracts
-// model IDs. Pi's format uses `provider:model` rows; we normalize to
-// the same `provider/model` form as opencode for UI consistency.
 func parsePiModels(output string) []Model {
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -312,15 +309,22 @@ func parsePiModels(output string) []Model {
 		if line == "" {
 			continue
 		}
-		first := strings.Fields(line)
-		if len(first) == 0 {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
 			continue
 		}
-		id := first[0]
-		if !strings.ContainsAny(id, ":/") {
+		first := fields[0]
+		if strings.EqualFold(first, "provider") {
 			continue
 		}
-		// Normalize ":" to "/" since pi uses colon but opencode/UI uses slash.
+		var id string
+		if strings.ContainsAny(first, ":/") {
+			id = first
+		} else if len(fields) >= 2 {
+			id = first + "/" + fields[1]
+		} else {
+			continue
+		}
 		id = strings.Replace(id, ":", "/", 1)
 		if seen[id] {
 			continue
