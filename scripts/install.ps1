@@ -164,9 +164,11 @@ function Get-WindowsCliArch {
 }
 
 function Get-InstalledCliVersion {
+    param([string]$Command = "multica")
+
     try {
-        $firstLine = multica version 2>$null | Select-Object -First 1
-        if ("$firstLine" -match '\b(v?\d+(?:\.\d+)+)\b') {
+        $firstLine = & $Command version 2>$null | Select-Object -First 1
+        if ("$firstLine" -match '\b(v?\d+\.\d+\.\d+(?:-\d+(?:-[0-9A-Za-z.-]+)?)?)\b') {
             $version = $Matches[1]
             if ($version -notlike 'v*') {
                 $version = "v$version"
@@ -176,6 +178,50 @@ function Get-InstalledCliVersion {
     } catch {}
 
     return $null
+}
+
+function ConvertFrom-CliVersion {
+    param([string]$Version)
+
+    if (-not $Version) {
+        return $null
+    }
+
+    $trimmed = $Version.Trim()
+    if ($trimmed -notmatch '^v?(\d+)\.(\d+)\.(\d+)(?:-(\d+)(?:-[0-9A-Za-z.-]+)?)?$') {
+        return $null
+    }
+
+    [pscustomobject]@{
+        Major   = [int]$Matches[1]
+        Minor   = [int]$Matches[2]
+        Patch   = [int]$Matches[3]
+        Commits = if ($Matches[4]) { [int]$Matches[4] } else { 0 }
+    }
+}
+
+function Test-CliVersionAtLeast {
+    param(
+        [string]$Current,
+        [string]$Latest
+    )
+
+    $currentVersion = ConvertFrom-CliVersion $Current
+    $latestVersion = ConvertFrom-CliVersion $Latest
+    if (-not $currentVersion -or -not $latestVersion) {
+        return $false
+    }
+
+    foreach ($part in @("Major", "Minor", "Patch", "Commits")) {
+        if ($currentVersion.$part -gt $latestVersion.$part) {
+            return $true
+        }
+        if ($currentVersion.$part -lt $latestVersion.$part) {
+            return $false
+        }
+    }
+
+    return $true
 }
 
 # ---------------------------------------------------------------------------
@@ -363,21 +409,12 @@ function Install-Cli {
     }
 
     if (Test-ManagedInstall) {
-        $currentVer = (& $CliBinPath version 2>$null) -replace '.*?(v[\d.]+).*','$1'
+        $currentVer = Get-InstalledCliVersion -Command $CliBinPath
         $manifest = Get-UpdateManifest
         $latestVer = if ($manifest) { $manifest.version } else { $null }
 
-        $currentCmp = if ($currentVer) { $currentVer -replace '^v','' } else { $null }
-        $latestCmp = if ($latestVer) { $latestVer -replace '^v','' } else { $null }
-
-        $isUpToDate = $currentCmp -and -not $latestCmp
-        if (-not $isUpToDate) {
-            try {
-                $isUpToDate = $currentCmp -and $latestCmp -and ([System.Version]$currentCmp -ge [System.Version]$latestCmp)
-            } catch {
-                $isUpToDate = $currentCmp -and $latestCmp -and ($currentCmp -eq $latestCmp)
-            }
-        }
+        $isUpToDate = $latestVer -and (Test-CliVersionAtLeast $currentVer $latestVer)
+        if (-not $latestVer) { $isUpToDate = $true }
 
         if ($isUpToDate) {
             Write-Ok "Multica CLI is up to date ($currentVer)"
@@ -387,7 +424,7 @@ function Install-Cli {
         Write-Info "Multica CLI $currentVer installed, latest is $latestVer - upgrading..."
         Install-CliBinary
 
-        $newVer = (& $CliBinPath version 2>$null) -replace '.*?(v[\d.]+).*','$1'
+        $newVer = Get-InstalledCliVersion -Command $CliBinPath
         Write-Ok "Multica CLI upgraded ($currentVer -> $newVer)"
         return
     }
