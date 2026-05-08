@@ -114,7 +114,9 @@ function ReplyInput({
             />
           </div>
         </div>
-        <div className="absolute bottom-0 right-0 flex items-center gap-1">
+        {/* CEREBRO-PATCH(file-upload-button-api): wider mobile gap + new
+            onAttach/onEmbed prop API on FileUploadButton (popup picker). */}
+        <div className="absolute bottom-0 right-0 flex items-center gap-2 sm:gap-1">
           <Tooltip>
             <TooltipTrigger
               render={
@@ -134,8 +136,8 @@ function ReplyInput({
           </Tooltip>
           <FileUploadButton
             size="sm"
-            onSelect={(file) => editorRef.current?.uploadFile(file)}
-            onEmbedImage={(file) => editorRef.current?.uploadFile(file, { embedImage: true })}
+            onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
+            onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
           />
           <button
             type="button"

@@ -120,8 +120,9 @@ function createComponents(
       const dataType = node?.properties?.dataType as string | undefined
       if (dataType === 'fileCard') {
         const rawHref = (node?.properties?.dataHref as string) || ''
-        // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
-        const href = /^https?:\/\//i.test(rawHref) ? rawHref : ''
+        // CEREBRO-PATCH(file-card-relative-url): allow same-origin paths starting with `/`
+        // Only allow http(s) or same-origin to block javascript: and other dangerous schemes.
+        const href = /^(https?:\/\/|\/)/i.test(rawHref) ? rawHref : ''
         const filename = (node?.properties?.dataFilename as string) || ''
         return (
           <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">

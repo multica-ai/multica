@@ -537,9 +537,11 @@ export function ManualCreatePanel({
             {/* Footer */}
             <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-h-7 items-center gap-2">
+                {/* CEREBRO-PATCH(file-upload-button-api): new onAttach/onEmbed
+                    prop API on FileUploadButton (popup picker). */}
                 <FileUploadButton
-                  onSelect={(file) => descEditorRef.current?.uploadFile(file)}
-                  onEmbedImage={(file) => descEditorRef.current?.uploadFile(file, { embedImage: true })}
+                  onAttach={(files) => files.forEach((f) => descEditorRef.current?.uploadFile(f))}
+                  onEmbed={(files) => files.forEach((f) => descEditorRef.current?.uploadFile(f, { embedImage: true }))}
                 />
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">

@@ -1381,10 +1381,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   onToggle={handleToggleIssueReaction}
                   getActorName={getActorName}
                 />
+                {/* CEREBRO-PATCH(file-upload-button-api): new onAttach/onEmbed
+                    prop API on FileUploadButton (popup picker). */}
                 <FileUploadButton
                   size="sm"
-                  onSelect={(file) => descEditorRef.current?.uploadFile(file)}
-                  onEmbedImage={(file) => descEditorRef.current?.uploadFile(file, { embedImage: true })}
+                  onAttach={(files) => files.forEach((f) => descEditorRef.current?.uploadFile(f))}
+                  onEmbed={(files) => files.forEach((f) => descEditorRef.current?.uploadFile(f, { embedImage: true }))}
                 />
               </div>
               {descDragOver && <FileDropOverlay />}

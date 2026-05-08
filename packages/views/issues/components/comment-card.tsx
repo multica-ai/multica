@@ -288,10 +288,12 @@ function CommentRow({
             />
           </div>
           <div className="flex items-center justify-between mt-2">
+            {/* CEREBRO-PATCH(file-upload-button-api): new onAttach/onEmbed
+                prop API on FileUploadButton (popup picker). */}
             <FileUploadButton
               size="sm"
-              onSelect={(file) => editEditorRef.current?.uploadFile(file)}
-              onEmbedImage={(file) => editEditorRef.current?.uploadFile(file, { embedImage: true })}
+              onAttach={(files) => files.forEach((f) => editEditorRef.current?.uploadFile(f))}
+              onEmbed={(files) => files.forEach((f) => editEditorRef.current?.uploadFile(f, { embedImage: true }))}
             />
             <div className="flex items-center gap-2">
               <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
@@ -513,10 +515,12 @@ function CommentCardImpl({
                   />
                 </div>
                 <div className="flex items-center justify-between mt-2">
+                  {/* CEREBRO-PATCH(file-upload-button-api): new
+                      onAttach/onEmbed prop API on FileUploadButton. */}
                   <FileUploadButton
                     size="sm"
-                    onSelect={(file) => editEditorRef.current?.uploadFile(file)}
-                    onEmbedImage={(file) => editEditorRef.current?.uploadFile(file, { embedImage: true })}
+                    onAttach={(files) => files.forEach((f) => editEditorRef.current?.uploadFile(f))}
+                    onEmbed={(files) => files.forEach((f) => editEditorRef.current?.uploadFile(f, { embedImage: true }))}
                   />
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>

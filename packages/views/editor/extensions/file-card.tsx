@@ -174,7 +174,8 @@ export const FileCardExtension = Node.create({
       return src.search(/^!file\[/m);
     },
     tokenize(src: string) {
-      const match = src.match(/^!file\[([^\]]*)\]\((https?:\/\/[^)]+)\)/);
+      // CEREBRO-PATCH(file-card-relative-url): accept relative `/uploads/…`
+      const match = src.match(/^!file\[([^\]]*)\]\((https?:\/\/[^)]+|\/[^)]+)\)/);
       if (!match) return undefined;
       return {
         type: "fileCard",

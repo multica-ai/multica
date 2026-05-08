@@ -376,10 +376,13 @@ export function AgentCreatePanel({
         {/* Footer */}
         <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-h-7 items-center gap-2">
+            {/* CEREBRO-PATCH(file-upload-button-api): new onAttach/onEmbed
+                prop API on FileUploadButton (popup picker). */}
             <FileUploadButton
               size="sm"
               disabled={uploading}
-              onSelect={(file) => editorRef.current?.uploadFile(file)}
+              onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
+              onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
             />
             {keepOpen && sentCount > 0 && (
               <span className="text-xs text-emerald-600 dark:text-emerald-400">

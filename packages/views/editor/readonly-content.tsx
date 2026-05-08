@@ -311,8 +311,10 @@ function FileCardDiv({
     return <div {...props}>{children}</div>;
   }
   const rawHref = (node?.properties?.dataHref as string) || "";
-  // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
-  const href = /^https?:\/\//i.test(rawHref) ? rawHref : "";
+  // CEREBRO-PATCH(file-card-relative-url): accept same-origin paths starting
+  // with `/` so chat uploads (relative `/uploads/…`) render correctly.
+  // Only allow http(s) or same-origin to block javascript: and other schemes.
+  const href = /^(https?:\/\/|\/)/i.test(rawHref) ? rawHref : "";
   const filename = (node?.properties?.dataFilename as string) || "";
   const attachmentId = (node?.properties?.dataAttachmentId as string) || "";
   // We don't have content_type for inline file cards — fall back to filename

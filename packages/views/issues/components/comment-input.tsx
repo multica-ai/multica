@@ -103,7 +103,9 @@ function CommentInput({ issueId, onSubmit, autoFocus = false }: CommentInputProp
           submitOnEnter={submitOnEnter}
         />
       </div>
-      <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
+      {/* CEREBRO-PATCH(file-upload-button-api): wider mobile gap + new
+          onAttach/onEmbed prop API on FileUploadButton (popup picker). */}
+      <div className="absolute bottom-1 right-1.5 flex items-center gap-2 sm:gap-1">
         <Tooltip>
           <TooltipTrigger
             render={
@@ -123,8 +125,8 @@ function CommentInput({ issueId, onSubmit, autoFocus = false }: CommentInputProp
         </Tooltip>
         <FileUploadButton
           size="sm"
-          onSelect={(file) => editorRef.current?.uploadFile(file)}
-          onEmbedImage={(file) => editorRef.current?.uploadFile(file, { embedImage: true })}
+          onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
+          onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
         />
         <Button
           size="icon-sm"

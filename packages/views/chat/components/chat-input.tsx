@@ -205,12 +205,14 @@ export function ChatInput({
             {leftAdornment}
           </div>
         )}
-        <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
+        {/* CEREBRO-PATCH(file-upload-button-api): wider mobile gap + new
+            onAttach/onEmbed prop API on FileUploadButton (popup picker). */}
+        <div className="absolute bottom-1 right-1.5 flex items-center gap-2 sm:gap-1">
           <FileUploadButton
             size="sm"
             disabled={!!disabled}
-            onSelect={(file) => editorRef.current?.uploadFile(file)}
-            onEmbedImage={(file) => editorRef.current?.uploadFile(file, { embedImage: true })}
+            onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
+            onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
           />
           {rightAdornment}
           {isRunning && onStop && (
