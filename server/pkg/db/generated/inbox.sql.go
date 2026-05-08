@@ -30,8 +30,31 @@ func (q *Queries) ArchiveAllInbox(ctx context.Context, arg ArchiveAllInboxParams
 }
 
 const archiveAllReadInbox = `-- name: ArchiveAllReadInbox :execrows
-UPDATE inbox_item SET archived = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND read = true AND archived = false
+WITH representatives AS (
+  SELECT DISTINCT ON (COALESCE(issue_id, id))
+    issue_id,
+    id AS representative_id,
+    read AS representative_read
+  FROM inbox_item
+  WHERE workspace_id = $1
+    AND recipient_type = 'member'
+    AND recipient_id = $2
+    AND archived = false
+  ORDER BY COALESCE(issue_id, id), created_at DESC
+)
+UPDATE inbox_item AS i SET archived = true
+WHERE i.workspace_id = $1
+  AND i.recipient_type = 'member'
+  AND i.recipient_id = $2
+  AND i.archived = false
+  AND (
+    (i.issue_id IS NOT NULL AND i.issue_id IN (
+      SELECT r.issue_id FROM representatives r WHERE r.representative_read = true AND r.issue_id IS NOT NULL
+    ))
+    OR (i.issue_id IS NULL AND i.id IN (
+      SELECT r.representative_id FROM representatives r WHERE r.representative_read = true AND r.issue_id IS NULL
+    ))
+  )
 `
 
 type ArchiveAllReadInboxParams struct {

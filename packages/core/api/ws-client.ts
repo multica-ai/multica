@@ -13,6 +13,22 @@ export interface WSClientIdentity {
   os?: string;
 }
 
+/**
+ * Connection state observable by the UI.
+ *
+ *   "connecting"   — initial connect attempt, no successful connection yet
+ *   "open"         — authenticated and receiving events
+ *   "reconnecting" — was open, lost the socket, waiting to retry
+ *
+ * "reconnecting" is the state the UI surfaces as a "Disconnected" indicator
+ * after a grace window. We deliberately don't expose a "closed" terminal —
+ * the client always retries on close, so as far as observers are concerned
+ * the lifecycle is connecting → open → reconnecting → open → ...
+ */
+export type WSConnectionState = "connecting" | "open" | "reconnecting";
+
+type StateChangeHandler = (state: WSConnectionState) => void;
+
 export class WSClient {
   private ws: WebSocket | null = null;
   private baseUrl: string;
@@ -26,6 +42,8 @@ export class WSClient {
   private onReconnectCallbacks = new Set<() => void>();
   private anyHandlers = new Set<(msg: WSMessage) => void>();
   private logger: Logger;
+  private state: WSConnectionState = "connecting";
+  private stateChangeHandlers = new Set<StateChangeHandler>();
 
   constructor(
     url: string,
@@ -94,6 +112,11 @@ export class WSClient {
 
     this.ws.onclose = () => {
       this.logger.warn("disconnected, reconnecting in 3s");
+      // Only flip to "reconnecting" if we had reached "open" at some point —
+      // a close before the first auth_ack stays as "connecting" so the UI
+      // doesn't briefly flash a disconnected indicator during the initial
+      // handshake on a slow network.
+      if (this.hasConnectedBefore) this.setState("reconnecting");
       this.reconnectTimer = setTimeout(() => this.connect(), 3000);
     };
 
@@ -115,6 +138,35 @@ export class WSClient {
       }
     }
     this.hasConnectedBefore = true;
+    this.setState("open");
+  }
+
+  private setState(next: WSConnectionState) {
+    if (this.state === next) return;
+    this.state = next;
+    for (const fn of this.stateChangeHandlers) {
+      try {
+        fn(next);
+      } catch {
+        // ignore state-change handler errors
+      }
+    }
+  }
+
+  /** Current connection state. Surfaced to the UI for a "Reconnecting…" indicator. */
+  getConnectionState(): WSConnectionState {
+    return this.state;
+  }
+
+  /**
+   * Subscribe to connection state changes. Returns an unsubscribe function.
+   * Designed for `useSyncExternalStore` so the UI re-renders on state flips.
+   */
+  onConnectionStateChange(fn: StateChangeHandler): () => void {
+    this.stateChangeHandlers.add(fn);
+    return () => {
+      this.stateChangeHandlers.delete(fn);
+    };
   }
 
   disconnect() {
@@ -133,6 +185,8 @@ export class WSClient {
     this.handlers.clear();
     this.anyHandlers.clear();
     this.onReconnectCallbacks.clear();
+    this.stateChangeHandlers.clear();
+    this.state = "connecting";
   }
 
   on(event: WSEventType, handler: EventHandler) {

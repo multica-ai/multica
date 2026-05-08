@@ -50,6 +50,12 @@ function createTitleKeymap(opts: {
     addKeyboardShortcuts() {
       return {
         Enter: ({ editor }) => {
+          // IME guard — Chinese pinyin / Japanese kana / Korean hangul IMEs
+          // commit a multi-key composition with Enter. Submitting on that
+          // keypress fires the form before the user has finished typing.
+          // Mirrors the guard in submit-shortcut.ts and the conditions
+          // pinned by isImeComposing in @multica/core/utils.
+          if (editor.view.composing) return false;
           opts.onSubmitRef.current?.();
           editor.commands.blur();
           return true;
