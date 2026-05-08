@@ -4,5 +4,5 @@ kind: Kustomization
 namespace: agentfarm
 
 resources:
-  - ../../../base/agentrunner/
-  - external-secret.yaml
+  - service-account.yaml
+  - deployment.yaml
