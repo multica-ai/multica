@@ -110,13 +110,18 @@ validate_version() {
 
 resolve_version() {
   if [[ -n "${CLI_VERSION:-}" ]]; then
-    VERSION_RAW="$(trim "$CLI_VERSION")"
     VERSION_SOURCE="CLI_VERSION"
+  else
+    VERSION_SOURCE="git-derived CLI version"
+  fi
+
+  VERSION_RAW="$(bash "${SCRIPT_DIR}/derive-cli-version.sh")"
+  if [[ -n "$VERSION_RAW" ]]; then
     return
   fi
 
-  VERSION_RAW="$(git -C "$REPO_ROOT" describe --tags --always --dirty 2>/dev/null || true)"
-  VERSION_SOURCE="git describe"
+  VERSION_RAW="dev"
+  VERSION_SOURCE="fallback"
 }
 
 target_supported() {

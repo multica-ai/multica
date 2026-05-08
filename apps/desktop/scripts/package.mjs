@@ -110,7 +110,7 @@ export function normalizeGitVersion(raw) {
 }
 
 function deriveVersion() {
-  return normalizeGitVersion(sh("git describe --tags --always --dirty"));
+  return normalizeGitVersion(sh("bash scripts/derive-cli-version.sh"));
 }
 
 function uniqueOrdered(values) {
