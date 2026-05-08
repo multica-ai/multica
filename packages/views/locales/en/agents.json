@@ -358,5 +358,15 @@
   "workspace_filter": {
     "show_all": "Show all agents",
     "show_workspace": "Show workspace agents only"
+  },
+  "defaults": {
+    "personal_title": "Personal Defaults",
+    "personal_desc": "Your default agent config",
+    "system_title": "System Defaults",
+    "system_desc": "Workspace-wide defaults",
+    "section_label": "Agent Defaults",
+    "you_label": "(you)",
+    "sheet_title": "Agent Defaults",
+    "sheet_desc": "Configure default agent settings"
   }
 }
