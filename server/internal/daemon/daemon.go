@@ -1582,6 +1582,15 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 	return meta, true
 }
 
+func providerNeedsInlineSystemPrompt(provider string) bool {
+	switch provider {
+	case "openclaw", "hermes":
+		return true
+	default:
+		return false
+	}
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
@@ -1803,13 +1812,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
 	}
-	// openclaw loads its bootstrap files (AGENTS.md, SOUL.md, ...) from its own
-	// workspace dir rather than the task workdir, so the AGENTS.md written by
-	// execenv.InjectRuntimeConfig is never read. Pass agent instructions inline
-	// via SystemPrompt so the backend can prepend them to the --message payload.
-	// Other providers already surface instructions through their runtime config
-	// file and don't need this.
-	if provider == "openclaw" {
+	// Some providers do not reliably load the per-task runtime config files we
+	// write into the task workdir:
+	//   - openclaw loads bootstrap files (AGENTS.md, SOUL.md, ...) from its own
+	//     workspace dir rather than the task workdir.
+	//   - hermes is driven through ACP and starts from a long-lived Hermes home;
+	//     deployments that cross a wrapper/container boundary can miss the
+	//     task-workdir AGENTS.md even when the prompt itself is delivered.
+	// Pass Multica-defined identity/persona instructions inline so the backend
+	// can prepend them to the turn payload instead of relying only on file
+	// discovery.
+	if providerNeedsInlineSystemPrompt(provider) {
 		execOpts.SystemPrompt = instructions
 	}
 

@@ -177,6 +177,29 @@ func TestNewTaskSlotSemaphoreReturnsStableSlotIndexes(t *testing.T) {
 	}
 }
 
+func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		provider string
+		want     bool
+	}{
+		{provider: "openclaw", want: true},
+		{provider: "hermes", want: true},
+		{provider: "codex", want: false},
+		{provider: "claude", want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Parallel()
+			if got := providerNeedsInlineSystemPrompt(tc.provider); got != tc.want {
+				t.Fatalf("providerNeedsInlineSystemPrompt(%q) = %v, want %v", tc.provider, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestBuildPromptContainsIssueID(t *testing.T) {
 	t.Parallel()
 
