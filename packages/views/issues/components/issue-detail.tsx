@@ -1314,7 +1314,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         {/* Content — scrollable. The relative wrapper anchors the
             jump-to-latest pill to the viewport rather than the scroll content. */}
         <div className="relative flex-1 min-h-0">
-        <div ref={scrollContainerRef} className="absolute inset-0 overflow-y-auto">
+        {/* CEREBRO-PATCH(issue-detail-mobile-overflow-x): overflow-y:auto promotes overflow-x:visible to auto by spec, so wide markdown content (e.g. nowrap tables) made the scroll container scroll the description horizontally on mobile. Pin overflow-x to hidden so wide blocks scroll inside their own wrapper instead (JEH-707). */}
+        <div ref={scrollContainerRef} className="absolute inset-0 overflow-y-auto overflow-x-hidden">
         <div className="mx-auto w-full max-w-4xl px-3 sm:px-6 md:px-8 py-4 sm:py-6 md:py-8">
           {/* For chat threads (channels + DMs) the title and topic are
               rendered in the channel-header bar above. The main content

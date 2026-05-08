@@ -213,6 +213,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `install-runtime-script` | server/internal/handler/install_runtime.sh<br>server/internal/handler/install_runtime_embed.go | 236 | Runtime-setup token + install script (cerebro feature) |
 | `invite-page-cerebro` | packages/views/invite/invite-page.tsx | 3 | Invite-page additions |
 | `issue-detail-cerebro-extras` | packages/views/issues/components/issue-detail.tsx | 129 | Issue-view cerebro additions |
+| `issue-detail-mobile-overflow-x` | packages/views/issues/components/issue-detail.tsx | 1 | JEH-707 — the issue-body scroll container is `absolute inset-0 overflow-y-auto`; CSS spec promotes overflow-x:visible to auto when overflow-y is non-visible, so wide markdown content (e.g. nowrap tables) made the description scroll horizontally on mobile instead of staying inside the table wrapper. Pinning `overflow-x: hidden` lets the inner `.tableWrapper { overflow-x: auto }` provide the only horizontal scroll, matching desktop behaviour. |
 | `issue-handler` | server/internal/handler/issue.go | 51 | Server handler additions |
 | `issues-header-cerebro` | packages/views/issues/components/issues-header.tsx | 29 | Issue-view cerebro additions |
 | `issues-page-cerebro` | packages/views/issues/components/issues-page.tsx | 29 | Issue-view cerebro additions |
