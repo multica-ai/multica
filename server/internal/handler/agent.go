@@ -163,6 +163,8 @@ type AgentTaskResponse struct {
 	TriggerCommentID        *string               `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
 	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
 	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
+	// CEREBRO-PATCH(task-title-builder): short generated headline for inline channel row, inbox, AgentLiveCard, Tasks list. Distinct from TriggerSummary (verbatim snapshot).
+	Title                   *string               `json:"title,omitempty"`
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
@@ -230,6 +232,8 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 		TriggerSummary:   textToPtr(t.TriggerSummary),
+		// CEREBRO-PATCH(task-title-builder): surface generated title to clients.
+		Title: textToPtr(t.Title),
 		// Surface task source so the UI can distinguish issue-linked tasks
 		// from chat-spawned or autopilot-spawned ones; all three may arrive
 		// with issue_id = "" once a task has no linked issue.

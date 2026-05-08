@@ -1,0 +1,28 @@
+{
+  "name": "@multica/cerebro-channels",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@multica/core": "workspace:*",
+    "@multica/views": "workspace:*"
+  },
+  "peerDependencies": {
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "sonner": "^2.0.7"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -94,6 +94,19 @@ export interface AgentTask {
    */
   trigger_summary?: string;
   /**
+   * Short, human-readable headline for what the agent is doing on this
+   * task — generated at enqueue time by the cerebro agent_title package
+   * (LLM if ANTHROPIC_API_KEY is set, else a heuristic of the comment).
+   * Distinct from `trigger_summary` (verbatim snapshot for provenance):
+   * `title` is curated for display in the inline channel "agent thinking"
+   * row, the inbox, AgentLiveCard, and the Tasks list — places that
+   * previously showed only the issue/channel title and so couldn't tell
+   * "Summary of CAC week 18" apart from "Lookup #firtal-test inventory".
+   * Falls back to issue/channel title when comment is empty or
+   * generation fails — see CEREBRO-PATCH(task-title-builder).
+   */
+  title?: string;
+  /**
    * Server-computed source discriminator used by the activity row to label
    * tasks that have no linked issue (so e.g. quick-create tasks render
    * with a meaningful title instead of falling through to "Untracked").

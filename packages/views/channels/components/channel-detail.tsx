@@ -28,6 +28,8 @@ import { useChannelDisplay } from "./use-channel-display";
 import { ParticipantsPanel } from "./participants-panel";
 // CEREBRO-PATCH(channel-detail-listeners): JEH-699 — listeners popover.
 import { ChannelListenersPanel } from "./channel-listeners-panel";
+// CEREBRO-PATCH(channel-agent-inline-row): JEH-698 inline "agent is working" row mounted between the comment stream and CommentInput.
+import { ChannelAgentInlineRow } from "@multica/cerebro-channels";
 
 interface ChannelDetailProps {
   channelId: string;
@@ -220,6 +222,14 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
         ))}
       </div>
 
+      {/* JEH-698: inline "agent is working" rows sit between the comment
+          stream and the input, so when a member triggers an agent via
+          @mention or comment they see the task spin up immediately
+          (avatar + "Lando is working: <generated title>" + Stop) instead
+          of waiting blindly for the reply to land. */}
+      <div className="shrink-0 px-4 pt-2 empty:hidden">
+        <ChannelAgentInlineRow channelId={channelId} />
+      </div>
       <div className="shrink-0 border-t px-4 py-3">
         {/* CEREBRO-PATCH(input-autofocus): JEH-756 — channels & DMs are
             chat-like; entering one should land the caret in the input. */}

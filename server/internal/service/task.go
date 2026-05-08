@@ -14,6 +14,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	// CEREBRO-PATCH(task-title-builder): cerebro-owned LLM title generator.
+	"github.com/multica-ai/multica/server/internal/cerebro/agent_title"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mention"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -41,6 +43,11 @@ type TaskService struct {
 	// goes through the DB. Wired in router.go from the shared Redis
 	// client.
 	EmptyClaim *EmptyClaimCache
+	// CEREBRO-PATCH(task-title-builder): builds the short human-readable
+	// task title shown in the inline channel "agent thinking" row, the
+	// inbox, AgentLiveCard and the Tasks list. Best-effort — see the
+	// agent_title package for the LLM-or-heuristic fallback chain.
+	TitleBuilder *agent_title.Builder
 }
 
 type TaskWakeupNotifier interface {
@@ -97,12 +104,37 @@ func (s *TaskService) buildCommentTriggerSummary(ctx context.Context, commentID 
 	return pgtype.Text{String: summary, Valid: true}
 }
 
+// CEREBRO-PATCH(task-title-builder): generate the short display title
+// for a comment-triggered task. Falls back to fallbackTitle (the issue
+// or channel title) when the comment is empty or the LLM call fails. A
+// nil TitleBuilder disables generation entirely so tests / call sites
+// that don't want LLM behaviour can opt out.
+func (s *TaskService) buildTaskTitle(ctx context.Context, commentID pgtype.UUID, fallbackTitle string) pgtype.Text {
+	if s.TitleBuilder == nil {
+		return pgtype.Text{}
+	}
+	var commentContent string
+	if commentID.Valid {
+		if c, err := s.Queries.GetComment(ctx, commentID); err == nil {
+			commentContent = c.Content
+		}
+	}
+	title := s.TitleBuilder.Build(ctx, commentContent, fallbackTitle)
+	if title == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: title, Valid: true}
+}
+
 func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.Bus, wakeups ...TaskWakeupNotifier) *TaskService {
 	var wakeup TaskWakeupNotifier
 	if len(wakeups) > 0 {
 		wakeup = wakeups[0]
 	}
-	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup}
+	// CEREBRO-PATCH(task-title-builder): default builder; reads
+	// ANTHROPIC_API_KEY at construction time. Always non-nil so callers
+	// don't need a guard.
+	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup, TitleBuilder: agent_title.New()}
 }
 
 // EnqueueTaskForIssue creates a queued task for an agent-assigned issue.
@@ -149,12 +181,14 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 	}
 
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
-		AgentID:           issue.AssigneeID,
-		RuntimeID:         agent.RuntimeID,
-		IssueID:           issue.ID,
-		Priority:          priorityToInt(issue.Priority),
-		TriggerCommentID:  triggerCommentID,
-		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
+		AgentID:          issue.AssigneeID,
+		RuntimeID:        agent.RuntimeID,
+		IssueID:          issue.ID,
+		Priority:         priorityToInt(issue.Priority),
+		TriggerCommentID: triggerCommentID,
+		TriggerSummary:   s.buildCommentTriggerSummary(ctx, triggerCommentID),
+		// CEREBRO-PATCH(task-title-builder): short display title for inline channel row, inbox, AgentLiveCard, Tasks list.
+		Title:             s.buildTaskTitle(ctx, triggerCommentID, issue.Title),
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 	})
 	if err != nil {
@@ -208,6 +242,8 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 		Priority:         priorityToInt(issue.Priority),
 		TriggerCommentID: triggerCommentID,
 		TriggerSummary:   s.buildCommentTriggerSummary(ctx, triggerCommentID),
+		// CEREBRO-PATCH(task-title-builder): short display title for mention-triggered tasks.
+		Title: s.buildTaskTitle(ctx, triggerCommentID, issue.Title),
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)

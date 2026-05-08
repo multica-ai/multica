@@ -229,6 +229,11 @@ function useTriggerText(task: AgentTask): string {
       : t(($) => $.execution_log.trigger_retry_prefix)
     : "";
 
+  // CEREBRO-PATCH(task-title-builder): prefer the curated short title over
+  // the verbatim comment snapshot — both are useful, but title reads better
+  // in a one-line row and the tooltip / detail view still surfaces the full
+  // trigger_summary for provenance.
+  if (task.title) return retryPrefix + task.title;
   if (task.trigger_summary) return retryPrefix + task.trigger_summary;
   if (isRetry) {
     return task.attempt && task.attempt > 1

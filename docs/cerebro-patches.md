@@ -99,6 +99,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `core-channels-listen-q` | packages/core/channels/queries.ts | 11 | JEH-699 — channelAgentSettingsOptions query factory |
 | `core-types-channel-listen` | packages/core/types/channel.ts | 13 | JEH-699 — ChannelAgentListenMode + response/setting shapes |
 | `core-types-index-channel-listen` | packages/core/types/index.ts | 3 | JEH-699 — re-export listen-mode types |
+| `channel-agent-inline-row` | packages/views/channels/components/channel-detail.tsx | 2 | JEH-698 — mount `<ChannelAgentInlineRow />` (from `@multica/cerebro-channels`) between the comment stream and `CommentInput`. Component itself lives in cerebro-zone; this marker is for the import + JSX in upstream-zone `channel-detail.tsx` |
 | `channel-detail-listeners` | packages/views/channels/components/channel-detail.tsx | 2 | JEH-699 — render Listeners popover in channel header |
 | `channel-listeners-panel` | packages/views/channels/components/channel-listeners-panel.tsx | 3 | JEH-699 — net-new Listeners popover (Switch per agent) |
 | `chat-handler-chat` | server/internal/handler/chat.go | 87 | Chat handler additions (cancel/coalesce/attachment) |
@@ -316,6 +317,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `settings-page-cerebro` | packages/views/settings/components/settings-page.tsx | 119 | Settings page cerebro additions |
 | `setup-jwt-handler` | server/internal/handler/setup_jwt_test.go | 12 | JWT setup helper additions |
 | `sqlc-agent` | server/pkg/db/queries/agent.sql | 19 | Cerebro sqlc query additions |
+| `sqlc-agent-task-title` | server/pkg/db/queries/agent.sql | 3 | JEH-698 — `title` column on agent_task_queue + INSERT param. Curated short display label generated at enqueue time, distinct from `trigger_summary` (verbatim provenance) |
 | `sqlc-artifact` | server/pkg/db/queries/artifact.sql | 114 | Cerebro sqlc query additions |
 | `sqlc-artifact-folder` | server/pkg/db/queries/artifact_folder.sql | 36 | Cerebro sqlc query additions |
 | `sqlc-attachment` | server/pkg/db/queries/attachment.sql | 12 | Cerebro sqlc query additions |
@@ -337,6 +339,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `sqlc-work-session` | server/pkg/db/queries/work_session.sql | 60 | Cerebro sqlc query additions |
 | `sqlc-workspace-pause` | server/pkg/db/queries/workspace_pause.sql | 38 | Cerebro sqlc query additions |
 | `subscriber-listeners` | server/cmd/server/subscriber_listeners_test.go<br>server/cmd/server/subscriber_listeners.go | 315 | Subscriber-listener additions |
+| `task-title-builder` | server/internal/service/task.go<br>server/internal/handler/agent.go<br>packages/core/types/agent.ts<br>packages/views/issues/components/agent-live-card.tsx<br>packages/views/issues/components/execution-log-section.tsx<br>packages/views/agents/components/tabs/activity-tab.tsx | 22 | JEH-698 — wires the cerebro `agent_title` package into the upstream task-enqueue path and surfaces the generated title in AgentLiveCard, the Tasks list, and the execution log. Title-builder lives in `server/internal/cerebro/agent_title/`; these markers cover the upstream-zone integration sites |
 | `task-token-handler` | server/internal/handler/task_token_test.go | 164 | Task-token API |
 | `ui-button-cerebro` | packages/ui/components/ui/button.tsx | 5 | Cerebro UI primitive additions |
 | `ui-hook-use-sticky-bottom` | packages/ui/hooks/use-sticky-bottom.ts | 133 | Cerebro UI primitive additions |

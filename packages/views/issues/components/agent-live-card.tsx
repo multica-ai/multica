@@ -316,7 +316,14 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
         )}
         <div className="flex items-center gap-1.5 text-xs min-w-0">
           <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
-          <span className="font-medium text-foreground truncate">{t(($) => $.agent_live.is_working, { name: agentName })}</span>
+          <span className="font-medium text-foreground shrink-0">{t(($) => $.agent_live.is_working, { name: agentName })}</span>
+          {/* CEREBRO-PATCH(task-title-builder): show generated task title so users
+              can tell "Summary of CAC week 18" apart from "Lookup inventory" — both
+              of which would otherwise just say "Lando is working" with the issue
+              title only visible at the page header. */}
+          {task.title && (
+            <span className="text-foreground truncate" title={task.title}>{task.title}</span>
+          )}
           <span className="text-muted-foreground tabular-nums shrink-0">{elapsed}</span>
           {toolCount > 0 && (
             <span className="text-muted-foreground shrink-0">{t(($) => $.agent_live.tool_count, { count: toolCount })}</span>

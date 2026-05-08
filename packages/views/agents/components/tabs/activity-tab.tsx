@@ -464,17 +464,21 @@ function TaskRow({
               {issue.identifier}
             </span>
           )}
-          {task.trigger_summary ? (
-            // Hover surfaces "why this task ran" — the snapshot lets the
-            // agent-side row stay anchored on issue.title (the
-            // identification axis here) while still letting the user
-            // dwell to see the trigger context. Same pattern as
-            // GitHub Actions surfacing the commit message on hover.
+          {/* CEREBRO-PATCH(task-title-builder): prefer the per-task title
+              when set so the row labels what the agent is doing on this
+              task, not just which issue it's running against — fixes
+              tasks-list rows that previously all read "#firtal-test"
+              regardless of the actual prompt. Falls back to issue title
+              when title is unset (legacy / non-comment-triggered tasks).
+              When present, trigger_summary still surfaces in the tooltip
+              for provenance. */}
+          {task.title || task.trigger_summary ? (
             <Tooltip>
               <TooltipTrigger
                 render={
                   <span className="truncate text-sm">
-                    {issue?.title ??
+                    {task.title ??
+                      issue?.title ??
                       (hasIssue
                         ? t(($) => $.tab_body.activity.issue_short_fallback, { prefix: task.issue_id.slice(0, 8) })
                         : (sourceFallback ?? t(($) => $.tab_body.activity.source_untracked)))}
@@ -486,7 +490,7 @@ function TaskRow({
                   {t(($) => $.tab_body.activity.triggered_by)}
                 </div>
                 <div className="mt-0.5 whitespace-pre-wrap text-xs">
-                  {task.trigger_summary}
+                  {task.trigger_summary ?? task.title}
                 </div>
               </TooltipContent>
             </Tooltip>

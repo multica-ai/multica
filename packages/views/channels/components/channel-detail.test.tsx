@@ -145,6 +145,19 @@ vi.mock("@multica/ui/components/ui/tooltip", () => ({
   ),
 }));
 
+// ChannelAgentInlineRow subscribes to WS events and calls api.getActiveTasksForIssue.
+// Tests focus on the thread header + archive plumbing, so stub both out.
+vi.mock("@multica/core/realtime", () => ({
+  useWSEvent: vi.fn(),
+  useWSReconnect: vi.fn(),
+}));
+vi.mock("@multica/core/api", () => ({
+  api: {
+    getActiveTasksForIssue: vi.fn(() => Promise.resolve({ tasks: [] })),
+    cancelTask: vi.fn(),
+  },
+}));
+
 import { ChannelDetail } from "./channel-detail";
 
 const baseChannel: Channel = {

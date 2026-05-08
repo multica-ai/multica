@@ -103,6 +103,7 @@ type AgentTaskQueue struct {
 	LastHeartbeatAt   pgtype.Timestamptz `json:"last_heartbeat_at"`
 	TriggerSummary    pgtype.Text        `json:"trigger_summary"`
 	ForceFreshSession bool               `json:"force_fresh_session"`
+	Title             pgtype.Text        `json:"title"`
 }
 
 type Artifact struct {
