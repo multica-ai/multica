@@ -26,6 +26,12 @@ import (
 // server refresh.
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
 
+var (
+	isBrewInstall        = cli.IsBrewInstall
+	getBrewPrefix        = cli.GetBrewPrefix
+	matchKnownBrewPrefix = cli.MatchKnownBrewPrefix
+)
+
 // workspaceState tracks registered runtimes for a single workspace.
 //
 // allowedRepoURLs covers the workspace-level repo bindings; it gets rebuilt on
@@ -1157,9 +1163,19 @@ func (d *Daemon) triggerRestart() {
 		d.logger.Error("could not resolve executable path for restart", "error", err)
 		return
 	}
-	// Only resolve symlinks for non-brew installs. Brew uses a symlink that
-	// points to the latest Cellar version, so we must preserve it.
-	if !cli.IsBrewInstall() {
+	// On Linux, os.Executable() reads /proc/self/exe, which the kernel resolves
+	// to the Cellar path. brew cleanup deletes that path after upgrade, so we
+	// must use the stable <brew-prefix>/bin/multica symlink instead.
+	if isBrewInstall() {
+		if brewPrefix := getBrewPrefix(); brewPrefix != "" {
+			newBin = filepath.Join(brewPrefix, "bin", "multica")
+		} else if prefix := matchKnownBrewPrefix(newBin); prefix != "" {
+			newBin = filepath.Join(prefix, "bin", "multica")
+		} else {
+			d.logger.Warn("brew install detected but prefix could not be resolved; restart may fail",
+				"executable", newBin)
+		}
+	} else {
 		if resolved, err := filepath.EvalSymlinks(newBin); err == nil {
 			newBin = resolved
 		}
