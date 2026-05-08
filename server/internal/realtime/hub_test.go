@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -49,6 +50,9 @@ func newTestHub(t *testing.T) (*Hub, *httptest.Server) {
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		HandleWebSocket(hub, mc, nil, nil, w, r)
 	})
+	mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {
+		HandleEventStream(hub, mc, nil, nil, w, r)
+	})
 	server := httptest.NewServer(mux)
 	return hub, server
 }
@@ -86,6 +90,81 @@ func totalClients(hub *Hub) int {
 	hub.mu.RLock()
 	defer hub.mu.RUnlock()
 	return len(hub.clients)
+}
+
+func connectSSE(t *testing.T, server *httptest.Server) (*http.Response, *bufio.Reader) {
+	t.Helper()
+	token := makeTestToken(t)
+	sseURL := server.URL + "/sse?workspace_id=" + testWorkspaceID
+	req, err := http.NewRequest(http.MethodGet, sseURL, nil)
+	if err != nil {
+		t.Fatalf("new SSE request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatalf("connect SSE: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		t.Fatalf("SSE status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/event-stream") {
+		resp.Body.Close()
+		t.Fatalf("Content-Type = %q, want text/event-stream", got)
+	}
+	return resp, bufio.NewReader(resp.Body)
+}
+
+func readSSEData(t *testing.T, reader *bufio.Reader) string {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read SSE line: %v", err)
+		}
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "data: ") {
+			return strings.TrimPrefix(line, "data: ")
+		}
+	}
+	t.Fatalf("timed out waiting for SSE data")
+	return ""
+}
+
+func TestHub_EventStreamBroadcastToWorkspace(t *testing.T) {
+	hub, server := newTestHub(t)
+	defer server.Close()
+
+	resp, reader := connectSSE(t, server)
+	defer resp.Body.Close()
+
+	if data := readSSEData(t, reader); !strings.Contains(data, "auth_ack") {
+		t.Fatalf("expected initial auth_ack event, got %s", data)
+	}
+
+	msg := []byte(`{"type":"issue:created","data":"test"}`)
+	hub.BroadcastToWorkspace(testWorkspaceID, msg)
+
+	if data := readSSEData(t, reader); data != string(msg) {
+		t.Fatalf("expected SSE message %s, got %s", msg, data)
+	}
+}
+
+func TestHub_EventStreamRequiresAuth(t *testing.T) {
+	_, server := newTestHub(t)
+	defer server.Close()
+
+	resp, err := server.Client().Get(server.URL + "/sse?workspace_id=" + testWorkspaceID)
+	if err != nil {
+		t.Fatalf("GET /sse: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
 }
 
 func TestHub_ClientRegistration(t *testing.T) {
@@ -228,86 +307,86 @@ func TestHub_MultipleBroadcasts(t *testing.T) {
 // headers on WS upgrades, so this query-param channel is the only way to
 // preserve the same observability dimensions HTTP clients get via X-Client-*.
 func TestHandleWebSocket_ClientIdentityFromQuery(t *testing.T) {
-var buf bytes.Buffer
-var mu sync.Mutex
-handler := slog.NewJSONHandler(&lockedWriter{w: &buf, mu: &mu}, &slog.HandlerOptions{Level: slog.LevelDebug})
-prevDefault := slog.Default()
-slog.SetDefault(slog.New(handler))
-t.Cleanup(func() { slog.SetDefault(prevDefault) })
+	var buf bytes.Buffer
+	var mu sync.Mutex
+	handler := slog.NewJSONHandler(&lockedWriter{w: &buf, mu: &mu}, &slog.HandlerOptions{Level: slog.LevelDebug})
+	prevDefault := slog.Default()
+	slog.SetDefault(slog.New(handler))
+	t.Cleanup(func() { slog.SetDefault(prevDefault) })
 
-_, server := newTestHub(t)
-defer server.Close()
+	_, server := newTestHub(t)
+	defer server.Close()
 
-token := makeTestToken(t)
-wsURL := "ws" + strings.TrimPrefix(server.URL, "http") +
-"/ws?workspace_id=" + testWorkspaceID +
-"&client_platform=desktop&client_version=1.2.3&client_os=macos"
-conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-if err != nil {
-t.Fatalf("dial: %v", err)
-}
-defer conn.Close()
+	token := makeTestToken(t)
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") +
+		"/ws?workspace_id=" + testWorkspaceID +
+		"&client_platform=desktop&client_version=1.2.3&client_os=macos"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
 
-authMsg, _ := json.Marshal(map[string]any{
-"type":    "auth",
-"payload": map[string]string{"token": token},
-})
-if err := conn.WriteMessage(websocket.TextMessage, authMsg); err != nil {
-t.Fatalf("write auth: %v", err)
-}
-conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-if _, _, err := conn.ReadMessage(); err != nil {
-t.Fatalf("read auth_ack: %v", err)
-}
+	authMsg, _ := json.Marshal(map[string]any{
+		"type":    "auth",
+		"payload": map[string]string{"token": token},
+	})
+	if err := conn.WriteMessage(websocket.TextMessage, authMsg); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("read auth_ack: %v", err)
+	}
 
-// Wait briefly for the "websocket connected" log line to be flushed.
-deadline := time.Now().Add(2 * time.Second)
-var found map[string]any
-for time.Now().Before(deadline) {
-mu.Lock()
-raw := buf.String()
-mu.Unlock()
-for _, line := range strings.Split(raw, "\n") {
-if line == "" {
-continue
-}
-var entry map[string]any
-if err := json.Unmarshal([]byte(line), &entry); err != nil {
-continue
-}
-if msg, _ := entry["msg"].(string); msg == "websocket connected" {
-found = entry
-break
-}
-}
-if found != nil {
-break
-}
-time.Sleep(20 * time.Millisecond)
-}
+	// Wait briefly for the "websocket connected" log line to be flushed.
+	deadline := time.Now().Add(2 * time.Second)
+	var found map[string]any
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		raw := buf.String()
+		mu.Unlock()
+		for _, line := range strings.Split(raw, "\n") {
+			if line == "" {
+				continue
+			}
+			var entry map[string]any
+			if err := json.Unmarshal([]byte(line), &entry); err != nil {
+				continue
+			}
+			if msg, _ := entry["msg"].(string); msg == "websocket connected" {
+				found = entry
+				break
+			}
+		}
+		if found != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 
-if found == nil {
-t.Fatalf("did not observe \"websocket connected\" log entry; buffered logs:\n%s", buf.String())
-}
-if got, _ := found["client_platform"].(string); got != "desktop" {
-t.Errorf("client_platform = %q, want %q", got, "desktop")
-}
-if got, _ := found["client_version"].(string); got != "1.2.3" {
-t.Errorf("client_version = %q, want %q", got, "1.2.3")
-}
-if got, _ := found["client_os"].(string); got != "macos" {
-t.Errorf("client_os = %q, want %q", got, "macos")
-}
+	if found == nil {
+		t.Fatalf("did not observe \"websocket connected\" log entry; buffered logs:\n%s", buf.String())
+	}
+	if got, _ := found["client_platform"].(string); got != "desktop" {
+		t.Errorf("client_platform = %q, want %q", got, "desktop")
+	}
+	if got, _ := found["client_version"].(string); got != "1.2.3" {
+		t.Errorf("client_version = %q, want %q", got, "1.2.3")
+	}
+	if got, _ := found["client_os"].(string); got != "macos" {
+		t.Errorf("client_os = %q, want %q", got, "macos")
+	}
 }
 
 // lockedWriter is a thread-safe writer used to capture concurrent slog output.
 type lockedWriter struct {
-w  *bytes.Buffer
-mu *sync.Mutex
+	w  *bytes.Buffer
+	mu *sync.Mutex
 }
 
 func (l *lockedWriter) Write(p []byte) (int, error) {
-l.mu.Lock()
-defer l.mu.Unlock()
-return l.w.Write(p)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }

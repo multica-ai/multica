@@ -6,6 +6,7 @@ import { WSClient } from "./ws-client";
 // upgrade URL construction, which is what carries client identity.
 class FakeWebSocket {
   static lastUrl: string | null = null;
+  static instances: FakeWebSocket[] = [];
   // Fields read by WSClient.connect()/disconnect(), all no-op here.
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
@@ -14,6 +15,7 @@ class FakeWebSocket {
   readyState = 0;
   constructor(url: string) {
     FakeWebSocket.lastUrl = url;
+    FakeWebSocket.instances.push(this);
   }
   close() {}
   send() {}
@@ -22,6 +24,7 @@ class FakeWebSocket {
 describe("WSClient", () => {
   beforeEach(() => {
     FakeWebSocket.lastUrl = null;
+    FakeWebSocket.instances = [];
     vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
   });
 
@@ -68,5 +71,89 @@ describe("WSClient", () => {
     expect(url.searchParams.get("client_platform")).toBe("cli");
     expect(url.searchParams.has("client_version")).toBe(false);
     expect(url.searchParams.has("client_os")).toBe(false);
+  });
+
+  it("falls back to an authenticated HTTP SSE stream when the initial WebSocket closes before auth", async () => {
+    const fetchMock = vi.fn(() => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ws = new WSClient("wss://api.example.test/ws", {
+      identity: { platform: "web" },
+    });
+    ws.setAuth("secret-token", "acme");
+    ws.connect();
+
+    FakeWebSocket.instances[0]!.onclose?.();
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [
+      string,
+      RequestInit,
+    ];
+    const sseURL = new URL(url);
+    expect(sseURL.protocol).toBe("https:");
+    expect(sseURL.pathname).toBe("/sse");
+    expect(sseURL.searchParams.get("workspace_slug")).toBe("acme");
+    expect(sseURL.searchParams.get("client_platform")).toBe("web");
+    expect(init.headers).toMatchObject({
+      Accept: "text/event-stream",
+      Authorization: "Bearer secret-token",
+    });
+    expect(init.credentials).toBe("same-origin");
+
+    ws.disconnect();
+  });
+
+  it("uses cookie credentials for the SSE fallback in cookie-auth mode", async () => {
+    const fetchMock = vi.fn(() => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ws = new WSClient("ws://api.example.test/ws", { cookieAuth: true });
+    ws.setAuth(null, "acme");
+    ws.connect();
+
+    FakeWebSocket.instances[0]!.onclose?.();
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [
+      string,
+      RequestInit,
+    ];
+    const sseURL = new URL(url);
+    expect(sseURL.protocol).toBe("http:");
+    expect(sseURL.pathname).toBe("/sse");
+    expect(init.headers).toMatchObject({ Accept: "text/event-stream" });
+    expect(init.headers).not.toHaveProperty("Authorization");
+    expect(init.credentials).toBe("include");
+
+    ws.disconnect();
+  });
+
+  it("warns instead of silently dropping sends while using receive-only SSE", async () => {
+    const fetchMock = vi.fn(() => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", fetchMock);
+    const warn = vi.fn();
+
+    const ws = new WSClient("wss://api.example.test/ws", {
+      logger: {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn,
+        error: vi.fn(),
+      },
+    });
+    ws.setAuth("secret-token", "acme");
+    ws.connect();
+
+    FakeWebSocket.instances[0]!.onclose?.();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    ws.send({ type: "subscribe", payload: {} } as never);
+    expect(warn).toHaveBeenCalledWith(
+      "cannot send realtime frame while using receive-only SSE fallback",
+      "subscribe",
+    );
+
+    ws.disconnect();
   });
 });

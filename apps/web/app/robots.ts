@@ -11,6 +11,7 @@ export default function robots(): MetadataRoute.Robots {
         disallow: [
           "/api/",
           "/ws",
+          "/sse",
           "/auth/",
           "/issues",
           "/board",

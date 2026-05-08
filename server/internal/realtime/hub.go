@@ -601,6 +601,35 @@ func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (st
 	return uid, ""
 }
 
+func bearerToken(r *http.Request) string {
+	authz := strings.TrimSpace(r.Header.Get("Authorization"))
+	if authz == "" {
+		return ""
+	}
+	parts := strings.SplitN(authz, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
+}
+
+func resolveWorkspaceID(r *http.Request, resolveSlug SlugResolver) (string, int, string) {
+	workspaceID := r.URL.Query().Get("workspace_id")
+	if workspaceID == "" {
+		if slug := r.URL.Query().Get("workspace_slug"); slug != "" && resolveSlug != nil {
+			resolved, err := resolveSlug(r.Context(), slug)
+			if err != nil {
+				return "", http.StatusNotFound, `{"error":"workspace not found"}`
+			}
+			workspaceID = resolved
+		}
+	}
+	if workspaceID == "" {
+		return "", http.StatusBadRequest, `{"error":"workspace_id or workspace_slug required"}`
+	}
+	return workspaceID, 0, ""
+}
+
 // firstMessageAuth reads the first WebSocket message expecting an auth payload.
 func firstMessageAuth(conn *websocket.Conn) (string, string) {
 	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
@@ -624,22 +653,117 @@ func firstMessageAuth(conn *websocket.Conn) (string, string) {
 	return msg.Payload.Token, ""
 }
 
+// HandleEventStream opens an HTTP Server-Sent Events stream for clients that
+// cannot use WebSocket upgrades. It mirrors the WebSocket connection model:
+// cookie or Authorization Bearer auth, membership check, and automatic
+// workspace/user scope subscriptions.
+func HandleEventStream(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug SlugResolver, w http.ResponseWriter, r *http.Request) {
+	workspaceID, status, errMsg := resolveWorkspaceID(r, resolveSlug)
+	if errMsg != "" {
+		http.Error(w, errMsg, status)
+		return
+	}
+
+	var tokenStr string
+	if cookie, err := r.Cookie(auth.AuthCookieName); err == nil && cookie.Value != "" {
+		tokenStr = cookie.Value
+	} else {
+		tokenStr = bearerToken(r)
+	}
+	if tokenStr == "" {
+		http.Error(w, `{"error":"missing token"}`, http.StatusUnauthorized)
+		return
+	}
+
+	userID, errMsg := authenticateToken(tokenStr, pr, r.Context())
+	if errMsg != "" {
+		http.Error(w, errMsg, http.StatusUnauthorized)
+		return
+	}
+	if !mc.IsMember(r.Context(), userID, workspaceID) {
+		http.Error(w, `{"error":"not a member of this workspace"}`, http.StatusForbidden)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, `{"error":"streaming unsupported"}`, http.StatusInternalServerError)
+		return
+	}
+
+	header := w.Header()
+	header.Set("Content-Type", "text/event-stream; charset=utf-8")
+	header.Set("Cache-Control", "no-cache, no-transform")
+	header.Set("Connection", "keep-alive")
+	header.Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	client := &Client{
+		hub:         hub,
+		send:        make(chan []byte, 256),
+		userID:      userID,
+		workspaceID: workspaceID,
+	}
+	hub.register <- client
+	defer func() { hub.unregister <- client }()
+
+	clientPlatform := r.URL.Query().Get("client_platform")
+	clientVersion := r.URL.Query().Get("client_version")
+	clientOS := r.URL.Query().Get("client_os")
+	slog.Info("sse client connected",
+		"user_id", userID,
+		"workspace_id", workspaceID,
+		"client_platform", clientPlatform,
+		"client_version", clientVersion,
+		"client_os", clientOS,
+	)
+
+	writeSSE := func(data []byte) bool {
+		if _, err := w.Write([]byte("data: ")); err != nil {
+			return false
+		}
+		if _, err := w.Write(data); err != nil {
+			return false
+		}
+		if _, err := w.Write([]byte("\n\n")); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+
+	if !writeSSE([]byte(`{"type":"auth_ack"}`)) {
+		return
+	}
+
+	keepalive := time.NewTicker(25 * time.Second)
+	defer keepalive.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case msg, ok := <-client.send:
+			if !ok {
+				return
+			}
+			if !writeSSE(msg) {
+				return
+			}
+		case <-keepalive.C:
+			if _, err := w.Write([]byte(": keepalive\n\n")); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
 // HandleWebSocket upgrades an HTTP connection to WebSocket with cookie or
 // first-message auth.
 func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug SlugResolver, w http.ResponseWriter, r *http.Request) {
-	workspaceID := r.URL.Query().Get("workspace_id")
-	if workspaceID == "" {
-		if slug := r.URL.Query().Get("workspace_slug"); slug != "" && resolveSlug != nil {
-			resolved, err := resolveSlug(r.Context(), slug)
-			if err != nil {
-				http.Error(w, `{"error":"workspace not found"}`, http.StatusNotFound)
-				return
-			}
-			workspaceID = resolved
-		}
-	}
-	if workspaceID == "" {
-		http.Error(w, `{"error":"workspace_id or workspace_slug required"}`, http.StatusBadRequest)
+	workspaceID, status, errMsg := resolveWorkspaceID(r, resolveSlug)
+	if errMsg != "" {
+		http.Error(w, errMsg, status)
 		return
 	}
 
