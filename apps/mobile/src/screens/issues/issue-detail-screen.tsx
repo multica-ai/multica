@@ -25,6 +25,7 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MoreHorizontal } from "lucide-react-native";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
 import {
@@ -81,6 +82,7 @@ import {
 import { TaskMessageRow } from "./task-transcript-components";
 
 type Props = NativeStackScreenProps<RootStackParamList, "IssueDetail">;
+type IssuePropertiesProps = NativeStackScreenProps<RootStackParamList, "IssueProperties">;
 type ReactionLike = Pick<Reaction | IssueReaction, "actor_id" | "actor_type" | "emoji">;
 type DocumentPickerModule = typeof import("expo-document-picker");
 declare const require: (moduleName: string) => unknown;
@@ -158,12 +160,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     () => allIssues.map(issueToMentionTarget),
     [allIssues],
   );
-  const { data: parentIssue, isLoading: parentIssueLoading } = useOptionalIssueDetail(
-    workspace.id,
-    issue?.parent_issue_id,
-  );
-  const { data: children = [] } = useChildIssues(workspace.id, issueId);
-  const { data: childProgress } = useChildIssueProgress(workspace.id);
   const { data: attachments = [], refetch: refetchAttachments } = useIssueAttachments(workspace.id, issueId);
   const { data: issueReactions = [] } = useIssueReactions(workspace.id, issueId);
   const {
@@ -174,7 +170,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const { data: taskRuns = [] } = useIssueTaskRuns(workspace.id, issueId);
   const { data: timelineData } = useIssueTimelineEntries(workspace.id, issueId);
   const timeline = Array.isArray(timelineData) ? timelineData : [];
-  const updateIssue = useUpdateIssue();
   const createComment = useCreateComment(issueId);
   const updateComment = useUpdateComment(issueId);
   const deleteComment = useDeleteComment(issueId);
@@ -188,7 +183,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [commentError, setCommentError] = useState<string | null>(null);
-  const [metadataOpen, setMetadataOpen] = useState(false);
+  const [issueMenuOpen, setIssueMenuOpen] = useState(false);
   const [commentSheetOpen, setCommentSheetOpen] = useState(false);
   const [commentsCollapsed, setCommentsCollapsed] = useState(false);
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
@@ -217,16 +212,6 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const renderSectionHeader = useCallback(({ section }: { section: DetailSection }) => (
     section.title ? <StickySectionHeader section={section} /> : null
   ), []);
-
-  const changeStatus = useCallback(async (status: IssueStatus) => {
-    if (!issue || status === issue.status) return;
-    await updateIssue.mutateAsync({ id: issue.id, status });
-  }, [issue, updateIssue]);
-
-  const changePriority = useCallback(async (priority: IssuePriority) => {
-    if (!issue || priority === issue.priority) return;
-    await updateIssue.mutateAsync({ id: issue.id, priority });
-  }, [issue, updateIssue]);
 
   const openCommentComposer = useCallback(() => {
     setReplyTargetId(null);
@@ -567,122 +552,9 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       ),
     },
     {
-      key: "properties",
-      node: (
-        <View style={styles.card}>
-          <Pressable
-            onPress={() => setMetadataOpen((open) => !open)}
-            style={styles.metadataHeader}
-          >
-            <View style={styles.metadataTitleGroup}>
-              <Text style={styles.sectionTitle}>Properties</Text>
-              <Text style={styles.metadataSummary}>
-                {STATUS_CONFIG[issue.status].label} / {PRIORITY_CONFIG[issue.priority].label}
-              </Text>
-            </View>
-            <Text style={styles.metadataToggle}>{metadataOpen ? "Hide" : "Show"}</Text>
-          </Pressable>
-          {metadataOpen ? (
-            <View style={styles.metadataBody}>
-              <Property label="Status">
-                <OptionRow>
-                  {ALL_STATUSES.map((status) => (
-                    <Chip
-                      active={issue.status === status}
-                      key={status}
-                      label={STATUS_CONFIG[status].label}
-                      onPress={() => void changeStatus(status)}
-                    />
-                  ))}
-                </OptionRow>
-              </Property>
-              <Property label="Priority">
-                <OptionRow>
-                  {PRIORITY_ORDER.map((priority) => (
-                    <Chip
-                      active={issue.priority === priority}
-                      key={priority}
-                      label={PRIORITY_CONFIG[priority].label}
-                      onPress={() => void changePriority(priority)}
-                    />
-                  ))}
-                </OptionRow>
-              </Property>
-              <Property label="Assignee">
-                <Text style={styles.value}>
-                  {issue.assignee_type && issue.assignee_id
-                    ? getActorName(issue.assignee_type, issue.assignee_id)
-                    : "Unassigned"}
-                </Text>
-              </Property>
-              <Property label="Creator">
-                <Text style={styles.value}>
-                  {getActorName(issue.creator_type, issue.creator_id)}
-                </Text>
-              </Property>
-              <Property label="Due date">
-                <Text style={styles.value}>{formatDate(issue.due_date)}</Text>
-              </Property>
-            </View>
-          ) : null}
-        </View>
-      ),
-    },
-    ...(issue.parent_issue_id
-      ? [{
-          key: "parent",
-          node: (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Parent issue</Text>
-              <Pressable
-                disabled={!parentIssue}
-                onPress={() => navigation.push("IssueDetail", { issueId: issue.parent_issue_id! })}
-                style={styles.childRow}
-              >
-                {parentIssue ? (
-                  <>
-                    <Text style={styles.childIdentifier}>{parentIssue.identifier}</Text>
-                    <Text style={styles.childTitle}>{parentIssue.title}</Text>
-                  </>
-                ) : (
-                  <Text style={styles.attachmentMeta}>
-                    {parentIssueLoading ? "Loading parent issue..." : "Unable to load parent issue"}
-                  </Text>
-                )}
-              </Pressable>
-            </View>
-          ),
-        }]
-      : []),
-    ...(children.length > 0
-      ? [{
-          key: "children",
-          node: (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Child issues</Text>
-              {children.map((child) => (
-                <Pressable
-                  key={child.id}
-                  onPress={() => navigation.push("IssueDetail", { issueId: child.id })}
-                  style={styles.childRow}
-                >
-                  <Text style={styles.childIdentifier}>{child.identifier}</Text>
-                  <Text style={styles.childTitle}>{child.title}</Text>
-                  {childProgress?.get(child.id) ? (
-                    <Text style={styles.attachmentMeta}>
-                      {childProgress.get(child.id)?.done}/{childProgress.get(child.id)?.total} child issues done
-                    </Text>
-                  ) : null}
-                </Pressable>
-              ))}
-            </View>
-          ),
-        }]
-      : []),
-    {
       key: "attachments",
       node: (
-        <View style={styles.section}>
+        <View style={[styles.section, styles.sectionSeparated]}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Attachments</Text>
             <View style={styles.inlineActions}>
@@ -709,19 +581,11 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     }];
   }, [
     attachments,
-    changePriority,
-    changeStatus,
-    childProgress,
-    children,
-    getActorName,
     handleIssueReaction,
     issue,
     issueReactions,
-    metadataOpen,
     navigation,
     openAttachmentPreview,
-    parentIssue,
-    parentIssueLoading,
     pickDocument,
     pickImage,
     uploadError,
@@ -734,10 +598,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     const items: DetailListItem[] = commentError
       ? [{ key: "comments-error", node: <Text style={styles.errorText}>{commentError}</Text> }]
       : [];
-    if (comments.length === 0) {
-      items.push({ key: "comments-empty", node: <Text style={styles.emptyText}>No comments yet</Text> });
-      return items;
-    }
+    if (comments.length === 0) return items;
     items.push(...commentRows);
     return items;
   }, [commentError, commentRows, comments.length, commentsCollapsed]);
@@ -745,9 +606,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const timelineItems = useMemo<DetailListItem[]>(() => (
     timelineCollapsed
       ? []
-      : activities.length === 0
-        ? [{ key: "timeline-empty", node: <Text style={styles.emptyText}>No activity yet</Text> }]
-        : activities.map((entry: TimelineEntry) => ({
+      : activities.map((entry: TimelineEntry) => ({
           key: entry.id,
           node: (
             <TimelineItem
@@ -760,17 +619,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
 
   const transcriptItems = useMemo<DetailListItem[]>(() => (
     taskRuns.length === 0
-      ? [
-        {
-          key: "agent-transcript-empty",
-          node: (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Agent transcript</Text>
-              <Text style={styles.emptyText}>No agent runs yet</Text>
-            </View>
-          ),
-        },
-      ]
+      ? []
       : taskRuns.map((task, taskIndex) => ({
         key: `task-${task.id}`,
         node: (
@@ -789,28 +638,54 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const toggleTimelineCollapsed = useCallback(() => {
     setTimelineCollapsed((collapsed) => !collapsed);
   }, []);
+  const openIssueProperties = useCallback(() => {
+    setIssueMenuOpen(false);
+    navigation.navigate("IssueProperties", { issueId });
+  }, [issueId, navigation]);
+  const openCreateChildIssue = useCallback(() => {
+    if (!issue) return;
+    setIssueMenuOpen(false);
+    navigation.navigate("CreateIssue", {
+      parentIssueId: issue.id,
+      parentIssueIdentifier: issue.identifier,
+    });
+  }, [issue, navigation]);
 
-  const sections = useMemo<DetailSection[]>(() => [
-    { key: "overview", data: overviewItems },
-    {
-      key: "comments",
-      title: "Comments",
-      count: comments.length,
-      collapsed: commentsCollapsed,
-      onToggle: toggleCommentsCollapsed,
-      data: commentItems,
-    },
-    {
-      key: "timeline",
-      title: "Timeline",
-      count: activities.length,
-      collapsed: timelineCollapsed,
-      onToggle: toggleTimelineCollapsed,
-      data: timelineItems,
-    },
-    { key: "transcript", data: transcriptItems },
-  ], [
+  const sections = useMemo<DetailSection[]>(() => {
+    const nextSections: DetailSection[] = [
+      { key: "overview", data: overviewItems },
+    ];
+
+    if (comments.length > 0 || commentError) {
+      nextSections.push({
+        key: "comments",
+        title: "Comments",
+        count: comments.length,
+        collapsed: commentsCollapsed,
+        onToggle: toggleCommentsCollapsed,
+        data: commentItems,
+      });
+    }
+
+    if (activities.length > 0) {
+      nextSections.push({
+        key: "timeline",
+        title: "Timeline",
+        count: activities.length,
+        collapsed: timelineCollapsed,
+        onToggle: toggleTimelineCollapsed,
+        data: timelineItems,
+      });
+    }
+
+    if (transcriptItems.length > 0) {
+      nextSections.push({ key: "transcript", data: transcriptItems });
+    }
+
+    return nextSections;
+  }, [
     activities.length,
+    commentError,
     commentItems,
     comments.length,
     commentsCollapsed,
@@ -827,7 +702,25 @@ export function IssueDetailScreen({ navigation, route }: Props) {
 
   return (
     <Screen padded={false} safeArea={false}>
-      <ScreenTitleBar onBack={() => navigation.goBack()} title={issue.identifier} />
+      <ScreenTitleBar
+        onBack={() => navigation.goBack()}
+        right={(
+          <HeaderIconButton
+            label="Issue actions"
+            onPress={() => setIssueMenuOpen(true)}
+          >
+            <MoreHorizontal color={colors.foreground} size={20} />
+          </HeaderIconButton>
+        )}
+        title={issue.identifier}
+      />
+      <IssueActionsMenu
+        onClose={() => setIssueMenuOpen(false)}
+        onCreateChildIssue={openCreateChildIssue}
+        onOpenProperties={openIssueProperties}
+        open={issueMenuOpen}
+        topInset={insets.top}
+      />
       {liveTasks.length > 0 ? (
         <IssueLiveAgentCard
           cancellingTaskIds={cancellingTaskIds}
@@ -905,6 +798,183 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         preview={attachmentPreview}
       />
     </Screen>
+  );
+}
+
+export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProps) {
+  const { issueId } = route.params;
+  const insets = useSafeAreaInsets();
+  const { workspace } = useMobileWorkspace();
+  const { getActorName } = useActorName();
+  const { data: issue, isError, isLoading } = useIssueDetail(workspace.id, issueId);
+  const { data: parentIssue, isLoading: parentIssueLoading } = useOptionalIssueDetail(
+    workspace.id,
+    issue?.parent_issue_id,
+  );
+  const { data: children = [] } = useChildIssues(workspace.id, issueId);
+  const { data: childProgress } = useChildIssueProgress(workspace.id);
+  const updateIssue = useUpdateIssue();
+
+  const changeStatus = useCallback(async (status: IssueStatus) => {
+    if (!issue || status === issue.status) return;
+    await updateIssue.mutateAsync({ id: issue.id, status });
+  }, [issue, updateIssue]);
+
+  const changePriority = useCallback(async (priority: IssuePriority) => {
+    if (!issue || priority === issue.priority) return;
+    await updateIssue.mutateAsync({ id: issue.id, priority });
+  }, [issue, updateIssue]);
+
+  if (isLoading) return <LoadingState />;
+  if (isError || !issue) return <EmptyState title="Unable to load issue properties" />;
+
+  return (
+    <Screen padded={false} safeArea={false}>
+      <ScreenTitleBar onBack={() => navigation.goBack()} title={`${issue.identifier}属性`} />
+      <ScrollView
+        contentContainerStyle={[
+          styles.propertiesContent,
+          { paddingBottom: Math.max(insets.bottom, spacing.lg) },
+        ]}
+      >
+        <View style={styles.propertiesBlock}>
+          <View style={styles.propertiesBlockHeader}>
+            <Text style={styles.propertiesBlockTitle}>Properties</Text>
+            <Text style={styles.metadataSummary}>
+              {STATUS_CONFIG[issue.status].label} / {PRIORITY_CONFIG[issue.priority].label}
+            </Text>
+          </View>
+          <View style={styles.metadataBody}>
+            <Property label="Status">
+              <OptionRow>
+                {ALL_STATUSES.map((status) => (
+                  <Chip
+                    active={issue.status === status}
+                    key={status}
+                    label={STATUS_CONFIG[status].label}
+                    onPress={() => void changeStatus(status)}
+                  />
+                ))}
+              </OptionRow>
+            </Property>
+            <Property label="Priority">
+              <OptionRow>
+                {PRIORITY_ORDER.map((priority) => (
+                  <Chip
+                    active={issue.priority === priority}
+                    key={priority}
+                    label={PRIORITY_CONFIG[priority].label}
+                    onPress={() => void changePriority(priority)}
+                  />
+                ))}
+              </OptionRow>
+            </Property>
+            <Property label="Assignee">
+              <Text style={styles.value}>
+                {issue.assignee_type && issue.assignee_id
+                  ? getActorName(issue.assignee_type, issue.assignee_id)
+                  : "Unassigned"}
+              </Text>
+            </Property>
+            <Property label="Creator">
+              <Text style={styles.value}>
+                {getActorName(issue.creator_type, issue.creator_id)}
+              </Text>
+            </Property>
+            <Property label="Due date">
+              <Text style={styles.value}>{formatDate(issue.due_date)}</Text>
+            </Property>
+          </View>
+        </View>
+
+        {issue.parent_issue_id ? (
+          <View style={styles.propertiesBlock}>
+            <View style={styles.propertiesBlockHeader}>
+              <Text style={styles.propertiesBlockTitle}>Parent issue</Text>
+            </View>
+            <Pressable
+              disabled={!parentIssue}
+              onPress={() => navigation.push("IssueDetail", { issueId: issue.parent_issue_id! })}
+              style={({ pressed }) => [
+                styles.childRow,
+                pressed && parentIssue && styles.buttonPressed,
+              ]}
+            >
+              {parentIssue ? (
+                <>
+                  <Text style={styles.childIdentifier}>{parentIssue.identifier}</Text>
+                  <Text style={styles.childTitle}>{parentIssue.title}</Text>
+                </>
+              ) : (
+                <Text style={styles.attachmentMeta}>
+                  {parentIssueLoading ? "Loading parent issue..." : "Unable to load parent issue"}
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        ) : null}
+
+        {children.length > 0 ? (
+          <View style={styles.propertiesBlock}>
+            <View style={styles.propertiesBlockHeader}>
+              <Text style={styles.propertiesBlockTitle}>Child issues</Text>
+              <Text style={styles.stickySectionCount}>{children.length}</Text>
+            </View>
+            <View style={styles.relationList}>
+              {children.map((child) => (
+                <Pressable
+                  key={child.id}
+                  onPress={() => navigation.push("IssueDetail", { issueId: child.id })}
+                  style={({ pressed }) => [
+                    styles.childRow,
+                    pressed && styles.buttonPressed,
+                  ]}
+                >
+                  <Text style={styles.childIdentifier}>{child.identifier}</Text>
+                  <Text style={styles.childTitle}>{child.title}</Text>
+                  {childProgress?.get(child.id) ? (
+                    <Text style={styles.attachmentMeta}>
+                      {childProgress.get(child.id)?.done}/{childProgress.get(child.id)?.total} child issues done
+                    </Text>
+                  ) : null}
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
+      </ScrollView>
+    </Screen>
+  );
+}
+
+function IssueActionsMenu({
+  onClose,
+  onCreateChildIssue,
+  onOpenProperties,
+  open,
+  topInset,
+}: {
+  onClose: () => void;
+  onCreateChildIssue: () => void;
+  onOpenProperties: () => void;
+  open: boolean;
+  topInset: number;
+}) {
+  if (!open) return null;
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible>
+      <View style={styles.menuModalOverlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[
+          styles.commentDropdown,
+          styles.issueActionsDropdown,
+          { top: Math.max(topInset, spacing.sm) + 44 },
+        ]}>
+          <DropdownItem label="属性" onPress={onOpenProperties} />
+          <DropdownItem label="创建子 Issue" onPress={onCreateChildIssue} />
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1414,7 +1484,7 @@ function ThreadReplyFooter({
   return (
     <View style={styles.threadReplyFooter}>
       <Pressable
-        accessibilityLabel="Reply in thread"
+        accessibilityLabel="Reply"
         accessibilityRole="button"
         onPress={onReply}
         style={({ pressed }) => [
@@ -1422,7 +1492,7 @@ function ThreadReplyFooter({
           pressed && styles.buttonPressed,
         ]}
       >
-        <Text style={styles.threadReplyButtonText}>Reply in thread</Text>
+        <Text style={styles.threadReplyButtonText}>Reply</Text>
       </Pressable>
     </View>
   );
@@ -1721,7 +1791,9 @@ function HeaderIconButton({
         pressed && !disabled && styles.buttonPressed,
       ]}
     >
-      <Text style={styles.headerIconButtonText}>{children}</Text>
+      {typeof children === "string" || typeof children === "number" ? (
+        <Text style={styles.headerIconButtonText}>{children}</Text>
+      ) : children}
     </Pressable>
   );
 }
@@ -2245,18 +2317,27 @@ function formatActivity(
 
 const styles = StyleSheet.create({
   content: {
-    gap: spacing.lg,
+    gap: spacing.xl,
     padding: spacing.lg,
     paddingBottom: 96,
   },
   contentEditingComment: {
     paddingBottom: 240,
   },
+  propertiesContent: {
+    gap: spacing.lg,
+    padding: spacing.lg,
+  },
   keyboardAvoidingContent: {
     flex: 1,
   },
   section: {
     gap: spacing.sm,
+  },
+  sectionSeparated: {
+    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: spacing.lg,
   },
   sectionHeader: {
     alignItems: "center",
@@ -2269,6 +2350,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderBottomColor: colors.border,
     borderBottomWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
     gap: spacing.md,
     justifyContent: "space-between",
@@ -2310,7 +2393,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
-  card: {
+  propertiesBlock: {
     backgroundColor: colors.card,
     borderColor: colors.border,
     borderRadius: radii.md,
@@ -2318,17 +2401,24 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     padding: spacing.md,
   },
-  property: {
-    gap: spacing.xs,
-  },
-  metadataHeader: {
+  propertiesBlockHeader: {
     alignItems: "center",
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
-    gap: spacing.md,
+    gap: spacing.sm,
     justifyContent: "space-between",
+    marginHorizontal: -spacing.md,
+    paddingBottom: spacing.md,
+    paddingHorizontal: spacing.md,
   },
-  metadataTitleGroup: {
+  propertiesBlockTitle: {
+    color: colors.foreground,
     flex: 1,
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  property: {
     gap: spacing.xs,
   },
   metadataSummary: {
@@ -2400,6 +2490,9 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontSize: 14,
     fontWeight: "500",
+  },
+  relationList: {
+    gap: spacing.sm,
   },
   timelineItem: {
     backgroundColor: colors.card,
@@ -2536,6 +2629,11 @@ const styles = StyleSheet.create({
     right: "auto",
     top: "auto",
     zIndex: 20,
+  },
+  issueActionsDropdown: {
+    minWidth: 156,
+    position: "absolute",
+    right: spacing.lg,
   },
   menuModalOverlay: {
     flex: 1,

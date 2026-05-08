@@ -16,6 +16,7 @@ export const linking = {
         },
       },
       IssueDetail: "issues/:issueId",
+      IssueProperties: "issues/:issueId/properties",
       IssueTaskTranscript: "issues/:issueId/runs/:taskId",
       Search: "search",
       Runtimes: "runtimes",

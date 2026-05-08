@@ -37,10 +37,13 @@ type Props = NativeStackScreenProps<RootStackParamList, "CreateIssue">;
 type DocumentPickerModule = typeof import("expo-document-picker");
 declare const require: (moduleName: string) => unknown;
 
-export function CreateIssueScreen({ navigation }: Props) {
+export function CreateIssueScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const createIssue = useCreateIssue();
   const { workspace } = useMobileWorkspace();
+  const parentIssueId = route.params?.parentIssueId;
+  const parentIssueIdentifier = route.params?.parentIssueIdentifier;
+  const isChildIssue = Boolean(parentIssueId);
   const mentionTargets = useWorkspaceMentionTargets(workspace.id);
   const { data: projects = [] } = useProjectList(workspace.id);
   const [title, setTitle] = useState("");
@@ -95,6 +98,7 @@ export function CreateIssueScreen({ navigation }: Props) {
         assignee_type: assignee?.type,
         assignee_id: assignee?.id,
         due_date: trimmedDueDate || undefined,
+        parent_issue_id: parentIssueId,
         project_id: projectId ?? undefined,
         attachment_ids: uploadedAttachmentIds.length > 0 ? uploadedAttachmentIds : undefined,
       });
@@ -167,7 +171,10 @@ export function CreateIssueScreen({ navigation }: Props) {
 
   return (
     <Screen padded={false} safeArea={false}>
-      <ScreenTitleBar onBack={() => navigation.goBack()} title="New issue" />
+      <ScreenTitleBar
+        onBack={() => navigation.goBack()}
+        title={isChildIssue ? "New child issue" : "New issue"}
+      />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.keyboardAvoiding}
@@ -180,6 +187,12 @@ export function CreateIssueScreen({ navigation }: Props) {
           keyboardShouldPersistTaps="handled"
         >
           <Text style={styles.workspaceName}>{workspace.name}</Text>
+          {isChildIssue && parentIssueIdentifier ? (
+            <View style={styles.parentBanner}>
+              <Text style={styles.parentBannerLabel}>Parent</Text>
+              <Text numberOfLines={1} style={styles.parentBannerValue}>{parentIssueIdentifier}</Text>
+            </View>
+          ) : null}
           <TextInput
             autoFocus
             onChangeText={setTitle}
@@ -260,7 +273,9 @@ export function CreateIssueScreen({ navigation }: Props) {
           </OptionGroup>
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <Button disabled={!title.trim() || createIssue.isPending || uploading} onPress={() => void submit()}>
-            {createIssue.isPending || uploading ? "Creating..." : "Create issue"}
+            {createIssue.isPending || uploading
+              ? "Creating..."
+              : isChildIssue ? "Create child issue" : "Create issue"}
           </Button>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -853,6 +868,28 @@ const styles = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 12,
     fontWeight: "500",
+  },
+  parentBanner: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  parentBannerLabel: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  parentBannerValue: {
+    color: colors.foreground,
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
   },
   titleInput: {
     color: colors.foreground,
