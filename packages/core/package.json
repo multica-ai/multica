@@ -18,6 +18,7 @@
     "./config": "./config/index.ts",
     "./auth": "./auth/index.ts",
     "./workspace": "./workspace/index.ts",
+    "./workspace/mentions": "./workspace/mentions.ts",
     "./workspace/queries": "./workspace/queries.ts",
     "./workspace/mutations": "./workspace/mutations.ts",
     "./workspace/hooks": "./workspace/hooks.ts",

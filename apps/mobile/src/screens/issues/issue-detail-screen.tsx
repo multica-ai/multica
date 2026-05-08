@@ -19,6 +19,7 @@ import {
   type GestureResponderEvent,
   type NativeSyntheticEvent,
   type TextInputProps,
+  type TextInputKeyPressEventData,
   type TextInputSelectionChangeEventData,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
@@ -39,6 +40,7 @@ import {
   useChildIssues,
   useIssueAttachments,
   useIssueDetail,
+  useIssueList,
   useOptionalIssueDetail,
   useIssueReactions,
   useIssueTaskRuns,
@@ -51,6 +53,10 @@ import {
   useWorkspaceMentionTargets,
   type WorkspaceMentionTarget,
 } from "@multica/core/workspace/hooks";
+import {
+  issueToMentionTarget,
+  mergeMentionTargets,
+} from "@multica/core/workspace/mentions";
 import type {
   AgentTask,
   Attachment,
@@ -106,7 +112,9 @@ type AttachmentPreviewState = {
 };
 
 const DEFAULT_REACTIONS = ["👍", "👀", "🎉", "❤️"];
-const MAX_MENTION_SUGGESTIONS = 8;
+const MAX_MENTION_SUGGESTIONS = 20;
+const SERVER_ISSUE_SEARCH_LIMIT = 20;
+const SERVER_SEARCH_DEBOUNCE_MS = 150;
 const TEXT_PREVIEW_MAX_BYTES = 1_000_000;
 
 function useKeyboardHeight(enabled: boolean) {
@@ -145,6 +153,11 @@ export function IssueDetailScreen({ navigation, route }: Props) {
   const { getActorName } = useActorName();
   const mentionTargets = useWorkspaceMentionTargets(workspace.id);
   const { data: issue, isError, isLoading } = useIssueDetail(workspace.id, issueId);
+  const { data: allIssues = [] } = useIssueList(workspace.id);
+  const issueMentionTargets = useMemo(
+    () => allIssues.map(issueToMentionTarget),
+    [allIssues],
+  );
   const { data: parentIssue, isLoading: parentIssueLoading } = useOptionalIssueDetail(
     workspace.id,
     issue?.parent_issue_id,
@@ -159,7 +172,8 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     cancelTask: cancelLiveTask,
   } = useLiveIssueTasks(workspace.id, issueId);
   const { data: taskRuns = [] } = useIssueTaskRuns(workspace.id, issueId);
-  const { data: timeline = [] } = useIssueTimelineEntries(workspace.id, issueId);
+  const { data: timelineData } = useIssueTimelineEntries(workspace.id, issueId);
+  const timeline = Array.isArray(timelineData) ? timelineData : [];
   const updateIssue = useUpdateIssue();
   const createComment = useCreateComment(issueId);
   const updateComment = useUpdateComment(issueId);
@@ -499,9 +513,13 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         onSaveEdit={(commentId) => void saveCommentEdit(commentId)}
         onStartEdit={startCommentEdit}
         onCopyComment={(content) => void copyCommentContent(content)}
+        onIssueMentionPress={(targetIssueId) => {
+          navigation.push("IssueDetail", { issueId: targetIssueId });
+        }}
         resolveActorName={getActorName}
         userId={userId}
         mentionTargets={mentionTargets}
+        issueMentionTargets={issueMentionTargets}
         variant={item.kind === "root" ? "threadRoot" : "reply"}
         isLastReply={item.kind === "reply" ? item.isLastReply : false}
       />
@@ -512,6 +530,8 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     getActorName,
     handleCommentReaction,
     mentionTargets,
+    issueMentionTargets,
+    navigation,
     openAttachmentPreview,
     openReplyComposer,
     copyCommentContent,
@@ -529,7 +549,12 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         <View style={styles.section}>
           <Text style={styles.issueBodyTitle}>{issue.title}</Text>
           {issue.description ? (
-            <Text style={styles.description}>{issue.description}</Text>
+            <MarkdownText
+              content={issue.description}
+              onIssueMentionPress={(targetIssueId) => {
+                navigation.push("IssueDetail", { issueId: targetIssueId });
+              }}
+            />
           ) : (
             <Text style={styles.emptyText}>No description</Text>
           )}
@@ -869,6 +894,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         uploading={uploading}
         attachments={commentAttachments}
         mentionTargets={mentionTargets}
+        issueMentionTargets={issueMentionTargets}
         placeholder={replyTargetId ? "Reply in thread" : "Add a comment"}
         submitLabel={replyTargetId ? "Send reply" : "Send"}
         title={replyTargetId ? "Reply in thread" : "Add a comment"}
@@ -887,6 +913,7 @@ function CommentSheet({
   bottomInset,
   comment,
   createPending,
+  issueMentionTargets,
   mentionTargets,
   onChangeComment,
   onClose,
@@ -905,6 +932,7 @@ function CommentSheet({
   bottomInset: number;
   comment: string;
   createPending: boolean;
+  issueMentionTargets: WorkspaceMentionTarget[];
   mentionTargets: WorkspaceMentionTarget[];
   onChangeComment: (content: string) => void;
   onClose: () => void;
@@ -951,6 +979,7 @@ function CommentSheet({
           </View>
           <MentionTextInput
             autoFocus
+            issueMentionTargets={issueMentionTargets}
             mentionTargets={mentionTargets}
             multiline
             onChangeText={onChangeComment}
@@ -1007,23 +1036,120 @@ function StickySectionHeader({ section }: { section: DetailSection }) {
 }
 
 function MentionTextInput({
+  issueMentionTargets = [],
   mentionTargets,
   onChangeText,
+  onKeyPress,
   onSelectionChange,
   value,
   ...props
 }: TextInputProps & {
+  issueMentionTargets?: WorkspaceMentionTarget[];
   mentionTargets: WorkspaceMentionTarget[];
   onChangeText: (text: string) => void;
   value: string;
 }) {
   const [selection, setSelection] = useState({ start: value.length, end: value.length });
   const mentionQuery = getActiveMentionQuery(value, selection.start);
+  const normalizedQuery = mentionQuery?.query.trim() ?? "";
+  const [serverIssueTargets, setServerIssueTargets] = useState<WorkspaceMentionTarget[]>([]);
+  const [searchedIssueQuery, setSearchedIssueQuery] = useState("");
+  const [isSearchingIssues, setIsSearchingIssues] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  useEffect(() => {
+    setServerIssueTargets([]);
+    setSearchedIssueQuery("");
+
+    if (!normalizedQuery) {
+      setIsSearchingIssues(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+    setIsSearchingIssues(true);
+
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await api.searchIssues({
+            q: normalizedQuery,
+            limit: SERVER_ISSUE_SEARCH_LIMIT,
+            include_closed: true,
+            signal: controller.signal,
+          });
+          if (!cancelled && !controller.signal.aborted) {
+            setServerIssueTargets(res.issues.map(issueToMentionTarget));
+          }
+        } catch {
+          // Keep local suggestions when search is aborted or unavailable.
+        } finally {
+          if (!cancelled && !controller.signal.aborted) {
+            setSearchedIssueQuery(normalizedQuery);
+            setIsSearchingIssues(false);
+          }
+        }
+      })();
+    }, SERVER_SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [normalizedQuery]);
+
   const suggestions = useMemo(
-    () => filterMentionTargets(mentionTargets, mentionQuery?.query ?? ""),
-    [mentionQuery?.query, mentionTargets],
+    () => {
+      const issueTargets = mergeMentionTargets(
+        filterMentionTargets(issueMentionTargets, normalizedQuery),
+        searchedIssueQuery === normalizedQuery ? serverIssueTargets : [],
+      );
+      return mergeMentionTargets(
+        filterMentionTargets(mentionTargets, normalizedQuery),
+        issueTargets,
+      ).slice(0, MAX_MENTION_SUGGESTIONS);
+    },
+    [
+      issueMentionTargets,
+      mentionTargets,
+      normalizedQuery,
+      searchedIssueQuery,
+      serverIssueTargets,
+    ],
   );
-  const showSuggestions = Boolean(mentionQuery && suggestions.length > 0);
+  const showSuggestions = Boolean(mentionQuery);
+  const isWaitingForServer =
+    normalizedQuery !== "" &&
+    (isSearchingIssues || searchedIssueQuery !== normalizedQuery);
+  const selectedTarget = suggestions[selectedIndex];
+  const selectedKey = selectedTarget ? mentionTargetKey(selectedTarget) : null;
+
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [normalizedQuery, suggestions.length]);
+
+  function handleKeyPress(event: NativeSyntheticEvent<TextInputKeyPressEventData>) {
+    if (showSuggestions && suggestions.length > 0) {
+      if (event.nativeEvent.key === "ArrowUp") {
+        setSelectedIndex((index) => (index + suggestions.length - 1) % suggestions.length);
+        return;
+      }
+      if (event.nativeEvent.key === "ArrowDown") {
+        setSelectedIndex((index) => (index + 1) % suggestions.length);
+        return;
+      }
+      if (event.nativeEvent.key === "Enter") {
+        const target = suggestions[selectedIndex];
+        if (target) {
+          insertMention(target);
+          return;
+        }
+      }
+    }
+    onKeyPress?.(event);
+  }
 
   function handleSelectionChange(
     event: NativeSyntheticEvent<TextInputSelectionChangeEventData>,
@@ -1046,6 +1172,7 @@ function MentionTextInput({
       <TextInput
         {...props}
         onChangeText={onChangeText}
+        onKeyPress={handleKeyPress}
         onSelectionChange={handleSelectionChange}
         selection={selection}
         value={value}
@@ -1056,29 +1183,95 @@ function MentionTextInput({
           nestedScrollEnabled
           style={styles.mentionSuggestions}
         >
-          {suggestions.map((target) => (
-            <Pressable
-              key={`${target.type}-${target.id}`}
-              onPress={() => insertMention(target)}
-              style={styles.mentionSuggestionRow}
-            >
-              <View style={styles.mentionAvatar}>
-                <Text style={styles.mentionAvatarText}>{target.type === "agent" ? "A" : "@"}</Text>
-              </View>
-              <View style={styles.mentionSuggestionTextGroup}>
-                <Text numberOfLines={1} style={styles.mentionSuggestionName}>
-                  {target.label}
-                </Text>
-                <Text style={styles.mentionSuggestionType}>
-                  {target.type === "agent" ? "Agent" : target.type === "all" ? "All members" : "Member"}
-                </Text>
-              </View>
-            </Pressable>
-          ))}
+          {suggestions.length > 0 ? (
+            <>
+              <MentionSuggestionGroup
+                items={suggestions.filter((target) => target.type !== "issue")}
+                label="Users"
+                onSelect={insertMention}
+                selectedKey={selectedKey}
+              />
+              <MentionSuggestionGroup
+                items={suggestions.filter((target) => target.type === "issue")}
+                label="Issues"
+                onSelect={insertMention}
+                selectedKey={selectedKey}
+              />
+            </>
+          ) : (
+            <Text style={styles.mentionEmptyText}>
+              {isWaitingForServer ? "Searching..." : "No results"}
+            </Text>
+          )}
         </ScrollView>
       ) : null}
     </View>
   );
+}
+
+function MentionSuggestionGroup({
+  items,
+  label,
+  onSelect,
+  selectedKey,
+}: {
+  items: WorkspaceMentionTarget[];
+  label: string;
+  onSelect: (target: WorkspaceMentionTarget) => void;
+  selectedKey: string | null;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <View>
+      <Text style={styles.mentionGroupLabel}>{label}</Text>
+      {items.map((target) => {
+        const isClosedIssue = target.status === "done" || target.status === "cancelled";
+        const selected = mentionTargetKey(target) === selectedKey;
+        return (
+          <Pressable
+            key={`${target.type}-${target.id}`}
+            onPress={() => onSelect(target)}
+            style={[
+              styles.mentionSuggestionRow,
+              selected && styles.mentionSuggestionRowSelected,
+            ]}
+          >
+            <View style={styles.mentionAvatar}>
+              <Text style={styles.mentionAvatarText}>
+                {target.type === "issue" ? "#" : target.type === "agent" ? "A" : "@"}
+              </Text>
+            </View>
+            <View style={styles.mentionSuggestionTextGroup}>
+              <Text
+                numberOfLines={1}
+                style={[
+                  styles.mentionSuggestionName,
+                  isClosedIssue && styles.mentionSuggestionClosed,
+                ]}
+              >
+                {target.label}
+              </Text>
+              <Text
+                numberOfLines={1}
+                style={[
+                  styles.mentionSuggestionType,
+                  isClosedIssue && styles.mentionSuggestionClosed,
+                ]}
+              >
+                {target.type === "issue"
+                  ? target.description ?? "Issue"
+                  : target.type === "agent" ? "Agent" : target.type === "all" ? "All members" : "Member"}
+              </Text>
+            </View>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function mentionTargetKey(target: WorkspaceMentionTarget) {
+  return `${target.type}:${target.id}`;
 }
 
 function getActiveMentionQuery(text: string, cursor: number) {
@@ -1097,12 +1290,18 @@ function filterMentionTargets(targets: WorkspaceMentionTarget[], query: string) 
   return targets
     .filter((target) => {
       if (!q) return true;
-      return target.label.toLowerCase().includes(q);
+      return (
+        target.label.toLowerCase().includes(q) ||
+        target.description?.toLowerCase().includes(q)
+      );
     })
     .slice(0, MAX_MENTION_SUGGESTIONS);
 }
 
 function formatMentionMarkdown(target: WorkspaceMentionTarget) {
+  if (target.type === "issue") {
+    return `[${target.label}](mention://${target.type}/${target.id})`;
+  }
   const label = target.type === "all" ? "@All members" : `@${target.label}`;
   return `[${label}](mention://${target.type}/${target.id})`;
 }
@@ -1239,12 +1438,14 @@ const TimelineItem = memo(function TimelineItem({
   onCopyComment,
   onDelete,
   onOpenAttachment,
+  onIssueMentionPress,
   onReply,
   onSaveEdit,
   onStartEdit,
   onToggleReaction,
   resolveActorName,
   userId,
+  issueMentionTargets,
   mentionTargets,
   variant = "card",
 }: {
@@ -1256,12 +1457,14 @@ const TimelineItem = memo(function TimelineItem({
   onCopyComment?: (content: string) => void;
   onDelete?: (commentId: string) => void;
   onOpenAttachment?: (attachment: Attachment) => void;
+  onIssueMentionPress?: (issueId: string) => void;
   onReply?: (commentId: string) => void;
   onSaveEdit?: (commentId: string) => void;
   onStartEdit?: (commentId: string, content: string) => void;
   onToggleReaction?: (entry: TimelineEntry, emoji: string) => void;
   resolveActorName: (type: string, id: string) => string;
   userId?: string;
+  issueMentionTargets?: WorkspaceMentionTarget[];
   mentionTargets?: WorkspaceMentionTarget[];
   variant?: "card" | "threadRoot" | "reply";
   isLastReply?: boolean;
@@ -1437,6 +1640,7 @@ const TimelineItem = memo(function TimelineItem({
         <View style={styles.editBox}>
           <MentionTextInput
             autoFocus
+            issueMentionTargets={issueMentionTargets ?? []}
             mentionTargets={mentionTargets ?? []}
             multiline
             onChangeText={onChangeEdit ?? (() => {})}
@@ -1455,7 +1659,10 @@ const TimelineItem = memo(function TimelineItem({
           </View>
         </View>
       ) : entry.type === "comment" ? (
-        <MarkdownText content={entry.content ?? ""} />
+        <MarkdownText
+          content={entry.content ?? ""}
+          onIssueMentionPress={onIssueMentionPress}
+        />
       ) : (
         <Text style={styles.timelineBody}>{body}</Text>
       )}
@@ -2094,11 +2301,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     lineHeight: 24,
   },
-  description: {
-    color: colors.foreground,
-    fontSize: 14,
-    lineHeight: 20,
-  },
   emptyText: {
     color: colors.mutedForeground,
     fontSize: 14,
@@ -2376,6 +2578,20 @@ const styles = StyleSheet.create({
     maxHeight: 224,
     overflow: "hidden",
   },
+  mentionEmptyText: {
+    color: colors.mutedForeground,
+    fontSize: 13,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  mentionGroupLabel: {
+    color: colors.mutedForeground,
+    fontSize: 11,
+    fontWeight: "600",
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    textTransform: "uppercase",
+  },
   mentionSuggestionRow: {
     alignItems: "center",
     flexDirection: "row",
@@ -2383,6 +2599,9 @@ const styles = StyleSheet.create({
     minHeight: 48,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+  },
+  mentionSuggestionRowSelected: {
+    backgroundColor: colors.muted,
   },
   mentionAvatar: {
     alignItems: "center",
@@ -2409,6 +2628,10 @@ const styles = StyleSheet.create({
   mentionSuggestionType: {
     color: colors.mutedForeground,
     fontSize: 12,
+  },
+  mentionSuggestionClosed: {
+    opacity: 0.55,
+    textDecorationLine: "line-through",
   },
   attachmentList: {
     gap: spacing.sm,

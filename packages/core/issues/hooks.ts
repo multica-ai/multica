@@ -13,6 +13,7 @@ import {
   taskMessagesOptions,
 } from "./queries";
 import { api } from "../api";
+import type { TimelineEntry } from "../types";
 export { useLiveIssueTasks, type LiveIssueTask } from "./live-tasks";
 
 export function useIssueList(workspaceId: string) {
@@ -66,8 +67,9 @@ export function useIssueTimelineEntries(_workspaceId: string, issueId: string) {
     queryKey: issueKeys.timeline(issueId),
     queryFn: async () => {
       const page = await api.listTimeline(issueId);
-      return page.entries;
+      return Array.isArray(page.entries) ? page.entries : [];
     },
+    select: (entries): TimelineEntry[] => (Array.isArray(entries) ? entries : []),
     enabled: !!issueId,
   });
 }

@@ -1,0 +1,105 @@
+import { canAssignAgentToIssue } from "../permissions";
+import type {
+  Agent,
+  Issue,
+  IssueStatus,
+  MemberRole,
+  MemberWithUser,
+  MentionFrequencyEntry,
+} from "../types";
+
+export type WorkspaceMentionTarget = {
+  id: string;
+  label: string;
+  type: "all" | "member" | "agent" | "issue";
+  description?: string;
+  status?: IssueStatus;
+};
+
+export type MentionPermissionContext = {
+  userId: string | null;
+  role: MemberRole | null;
+};
+
+export function buildWorkspaceMentionTargets(
+  members: MemberWithUser[],
+  agents: Agent[],
+  ctx: MentionPermissionContext,
+): WorkspaceMentionTarget[] {
+  return [
+    { id: "all", label: "All members", type: "all" },
+    ...members.map((member) => ({
+      id: member.user_id,
+      label: member.name,
+      type: "member" as const,
+    })),
+    ...agents
+      .filter(
+        (agent) =>
+          !agent.archived_at &&
+          canAssignAgentToIssue(agent, ctx).allowed,
+      )
+      .map((agent) => ({
+        id: agent.id,
+        label: agent.name,
+        type: "agent" as const,
+      })),
+  ];
+}
+
+export function issueToMentionTarget(
+  issue: Pick<Issue, "id" | "identifier" | "title" | "status">,
+): WorkspaceMentionTarget {
+  return {
+    id: issue.id,
+    label: issue.identifier,
+    type: "issue",
+    description: issue.title,
+    status: issue.status,
+  };
+}
+
+export function mergeMentionTargets(
+  ...groups: WorkspaceMentionTarget[][]
+): WorkspaceMentionTarget[] {
+  const seen = new Set<string>();
+  const merged: WorkspaceMentionTarget[] = [];
+  for (const group of groups) {
+    for (const item of group) {
+      const key = `${item.type}:${item.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+  }
+  return merged;
+}
+
+export function sortMentionTargetsByFrequency(
+  targets: WorkspaceMentionTarget[],
+  frequency: MentionFrequencyEntry[],
+): WorkspaceMentionTarget[] {
+  const rank = new Map(
+    frequency.map((entry) => [
+      `${entry.actor_type}:${entry.actor_id}`,
+      {
+        frequency: entry.frequency,
+        lastMentionedAt: Date.parse(entry.last_mentioned_at) || 0,
+      },
+    ]),
+  );
+
+  return [...targets].sort((a, b) => {
+    const aRank = rank.get(`${a.type}:${a.id}`);
+    const bRank = rank.get(`${b.type}:${b.id}`);
+    if (aRank || bRank) {
+      if (!aRank) return 1;
+      if (!bRank) return -1;
+      if (bRank.frequency !== aRank.frequency) {
+        return bRank.frequency - aRank.frequency;
+      }
+      return bRank.lastMentionedAt - aRank.lastMentionedAt;
+    }
+    return a.label.localeCompare(b.label);
+  });
+}

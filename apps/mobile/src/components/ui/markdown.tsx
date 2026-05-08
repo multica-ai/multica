@@ -1,6 +1,7 @@
 import { memo, useMemo } from "react";
 import { Linking, StyleSheet, Text, View } from "react-native";
 import { colors, radii, spacing } from "../../theme/tokens";
+import { tokenizeInline } from "./markdown-tokenize";
 
 type MarkdownBlock =
   | { type: "code"; content: string }
@@ -9,27 +10,37 @@ type MarkdownBlock =
   | { type: "list"; ordered: boolean; items: string[] }
   | { type: "paragraph"; content: string };
 
-type InlineToken =
-  | { type: "text"; content: string }
-  | { type: "code"; content: string }
-  | { type: "bold"; content: string }
-  | { type: "italic"; content: string }
-  | { type: "mention"; content: string }
-  | { type: "link"; content: string; href: string };
+type MarkdownTextProps = {
+  content: string;
+  onIssueMentionPress?: (issueId: string) => void;
+};
 
-export const MarkdownText = memo(function MarkdownText({ content }: { content: string }) {
+export const MarkdownText = memo(function MarkdownText({
+  content,
+  onIssueMentionPress,
+}: MarkdownTextProps) {
   const blocks = useMemo(() => parseMarkdownBlocks(content), [content]);
 
   return (
     <View style={styles.root}>
       {blocks.map((block, index) => (
-        <MarkdownBlockView block={block} key={`${block.type}-${index}`} />
+        <MarkdownBlockView
+          block={block}
+          key={`${block.type}-${index}`}
+          onIssueMentionPress={onIssueMentionPress}
+        />
       ))}
     </View>
   );
 });
 
-function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
+function MarkdownBlockView({
+  block,
+  onIssueMentionPress,
+}: {
+  block: MarkdownBlock;
+  onIssueMentionPress?: (issueId: string) => void;
+}) {
   switch (block.type) {
     case "code":
       return (
@@ -40,13 +51,15 @@ function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
     case "heading":
       return (
         <Text style={[styles.text, styles.heading, block.level >= 3 && styles.smallHeading]}>
-          {renderInline(block.content)}
+          {renderInline(block.content, onIssueMentionPress)}
         </Text>
       );
     case "quote":
       return (
         <View style={styles.quote}>
-          <Text style={[styles.text, styles.quoteText]}>{renderInline(block.content)}</Text>
+          <Text style={[styles.text, styles.quoteText]}>
+            {renderInline(block.content, onIssueMentionPress)}
+          </Text>
         </View>
       );
     case "list":
@@ -57,13 +70,15 @@ function MarkdownBlockView({ block }: { block: MarkdownBlock }) {
               <Text style={styles.listMarker}>
                 {block.ordered ? `${index + 1}.` : "•"}
               </Text>
-              <Text style={[styles.text, styles.listText]}>{renderInline(item)}</Text>
+              <Text style={[styles.text, styles.listText]}>
+                {renderInline(item, onIssueMentionPress)}
+              </Text>
             </View>
           ))}
         </View>
       );
     case "paragraph":
-      return <Text style={styles.text}>{renderInline(block.content)}</Text>;
+      return <Text style={styles.text}>{renderInline(block.content, onIssueMentionPress)}</Text>;
   }
 }
 
@@ -157,7 +172,7 @@ function parseMarkdownBlocks(content: string): MarkdownBlock[] {
   return blocks;
 }
 
-function renderInline(content: string) {
+function renderInline(content: string, onIssueMentionPress?: (issueId: string) => void) {
   return tokenizeInline(content).map((token, index) => {
     switch (token.type) {
       case "code":
@@ -169,13 +184,13 @@ function renderInline(content: string) {
       case "bold":
         return (
           <Text key={index} style={styles.bold}>
-            {renderInline(token.content)}
+            {renderInline(token.content, onIssueMentionPress)}
           </Text>
         );
       case "italic":
         return (
           <Text key={index} style={styles.italic}>
-            {renderInline(token.content)}
+            {renderInline(token.content, onIssueMentionPress)}
           </Text>
         );
       case "link":
@@ -185,12 +200,20 @@ function renderInline(content: string) {
             onPress={() => void Linking.openURL(token.href)}
             style={styles.link}
           >
-            {renderInline(token.content)}
+            {renderInline(token.content, onIssueMentionPress)}
           </Text>
         );
       case "mention":
         return (
-          <Text key={index} style={styles.mention}>
+          <Text
+            key={index}
+            onPress={
+              token.mentionType === "issue" && onIssueMentionPress
+                ? () => onIssueMentionPress(token.mentionId)
+                : undefined
+            }
+            style={[styles.mention, token.mentionType === "issue" && styles.issueMention]}
+          >
             {token.content}
           </Text>
         );
@@ -198,70 +221,6 @@ function renderInline(content: string) {
         return token.content;
     }
   });
-}
-
-function tokenizeInline(content: string): InlineToken[] {
-  const tokens: InlineToken[] = [];
-  let index = 0;
-
-  while (index < content.length) {
-    const rest = content.slice(index);
-    const codeEnd = rest.startsWith("`") ? rest.indexOf("`", 1) : -1;
-    if (codeEnd > 0) {
-      tokens.push({ type: "code", content: rest.slice(1, codeEnd) });
-      index += codeEnd + 1;
-      continue;
-    }
-
-    const linkMatch = rest.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/);
-    if (linkMatch) {
-      tokens.push({
-        type: "link",
-        content: linkMatch[1] ?? "",
-        href: linkMatch[2] ?? "",
-      });
-      index += linkMatch[0].length;
-      continue;
-    }
-
-    const mentionMatch = rest.match(/^\[(@?[^\]]+)\]\(mention:\/\/(?:all|member|agent)\/[^)\s]+\)/);
-    if (mentionMatch) {
-      tokens.push({ type: "mention", content: mentionMatch[1] ?? "" });
-      index += mentionMatch[0].length;
-      continue;
-    }
-
-    if (rest.startsWith("**")) {
-      const end = rest.indexOf("**", 2);
-      if (end > 1) {
-        tokens.push({ type: "bold", content: rest.slice(2, end) });
-        index += end + 2;
-        continue;
-      }
-    }
-
-    if (rest.startsWith("*")) {
-      const end = rest.indexOf("*", 1);
-      if (end > 0) {
-        tokens.push({ type: "italic", content: rest.slice(1, end) });
-        index += end + 1;
-        continue;
-      }
-    }
-
-    const nextSpecial = findNextSpecial(content, index + 1);
-    tokens.push({ type: "text", content: content.slice(index, nextSpecial) });
-    index = nextSpecial;
-  }
-
-  return tokens;
-}
-
-function findNextSpecial(content: string, start: number) {
-  const positions = ["`", "[", "*"]
-    .map((char) => content.indexOf(char, start))
-    .filter((position) => position >= 0);
-  return positions.length > 0 ? Math.min(...positions) : content.length;
 }
 
 const styles = StyleSheet.create({
@@ -297,6 +256,9 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     color: colors.info,
     fontWeight: "600",
+  },
+  issueMention: {
+    textDecorationLine: "underline",
   },
   inlineCode: {
     backgroundColor: colors.muted,
