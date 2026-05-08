@@ -5,7 +5,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type PointerEvent,
   type ReactNode,
 } from "react";
 import {
@@ -40,7 +39,7 @@ import {
   DIRECTION_DECIDE_PX,
   LEFT_PANEL_REVEAL_PX,
   LONG_PRESS_MS,
-  VERTICAL_DOMINANCE_RATIO,
+  SWIPE_INTENT_PX,
   commitThresholdPx,
 } from "../swipe-thresholds";
 
@@ -253,15 +252,8 @@ function MobileRowActions({
   strings,
 }: MobileProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const startX = useRef<number | null>(null);
-  const startY = useRef<number | null>(null);
-  // null until the gesture has moved past DIRECTION_DECIDE_PX in either
-  // axis — at which point we lock the dominant direction so subsequent
-  // movement can't flip mid-gesture.
-  const lockedDirRef = useRef<"horizontal" | "vertical" | null>(null);
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // offsetX is mirrored in a ref so the pointerup handler reads the live
-  // gesture distance (closure capture from setState lags by one render).
+  // offsetX is mirrored in a ref so the touchend handler reads the live
+  // gesture distance synchronously without waiting for a React render.
   const offsetXRef = useRef(0);
   const [offsetX, setOffsetXState] = useState(0);
   const setOffsetX = useCallback((v: number) => {
@@ -270,14 +262,29 @@ function MobileRowActions({
   }, []);
   const [revealed, setRevealed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // Set true at the moment a swipe-right archive (or swipe-left reveal)
-  // commits, so the click event the browser synthesises after the touch
-  // sequence is swallowed by the parent shell <button> (otherwise the row's
-  // onClick fires and we navigate to the issue right after archiving it).
+  // Tracks whether the gesture is still in flight so the transform effect
+  // can decide whether to apply a snap-back transition on release.
+  const gestureActiveRef = useRef(false);
+  // Set true after touchend if any meaningful horizontal motion happened
+  // (commit OR partial swipe). The synthetic click that mobile Safari
+  // dispatches after the touch sequence is then swallowed by the parent
+  // shell's capture-phase click listener so the row's onClick (navigation)
+  // doesn't fire on a swipe attempt.
   const swipeJustCompletedRef = useRef(false);
 
+  // Stable refs for callbacks so the touch-event effect doesn't have to
+  // re-attach listeners on every render — listener re-attachment in the
+  // middle of a gesture would lose the in-flight closure state.
+  const onArchiveRef = useRef(onArchive);
+  const onDrawerOpenRef = useRef(setDrawerOpen);
+  useEffect(() => {
+    onArchiveRef.current = onArchive;
+    onDrawerOpenRef.current = setDrawerOpen;
+  });
+
   // Apply the offset transform to the parent row so the user sees the row
-  // visually follow the finger.
+  // visually follow the finger. Snap-back animates only when the gesture
+  // has ended (gestureActiveRef = false).
   useEffect(() => {
     const row = containerRef.current?.parentElement;
     if (!row) return;
@@ -287,14 +294,125 @@ function MobileRowActions({
       const x = revealed && offsetX === 0 ? -LEFT_PANEL_REVEAL_PX : offsetX;
       row.style.transform = `translateX(${x}px)`;
     }
-    row.style.transition = startX.current === null ? "transform 200ms" : "";
+    row.style.transition = gestureActiveRef.current ? "" : "transform 200ms";
   }, [offsetX, revealed]);
 
-  // Capture-phase click listener on the parent shell <button>: when a swipe
-  // just committed, the synthetic click fired by the browser after touchend
-  // is intercepted here and prevented from triggering the row's onClick
-  // (navigation). Without this, swipe-right "archives + navigates", which
-  // looks to the user like the gesture didn't work.
+  // Native TouchEvent listeners with `passive: false` so we can call
+  // `preventDefault()` on touchmove once the gesture is horizontal. Without
+  // this, iOS Safari hands the gesture off to native scroll mid-swipe and
+  // pointer/touch events stop firing — the "on/off" symptom in v3.
+  useEffect(() => {
+    const overlay = containerRef.current;
+    if (!overlay) return;
+
+    let startX = 0;
+    let startY = 0;
+    let direction: "horizontal" | "vertical" | null = null;
+    let active = false;
+    let longPressId: ReturnType<typeof setTimeout> | null = null;
+
+    const cancelLong = () => {
+      if (longPressId !== null) {
+        clearTimeout(longPressId);
+        longPressId = null;
+      }
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0]!;
+      startX = t.clientX;
+      startY = t.clientY;
+      direction = null;
+      active = true;
+      gestureActiveRef.current = true;
+      longPressId = setTimeout(() => {
+        onDrawerOpenRef.current(true);
+        active = false;
+        gestureActiveRef.current = false;
+      }, LONG_PRESS_MS);
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!active || e.touches.length !== 1) return;
+      const t = e.touches[0]!;
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      const adx = Math.abs(dx);
+      const ady = Math.abs(dy);
+
+      if (direction === null) {
+        if (adx < DIRECTION_DECIDE_PX && ady < DIRECTION_DECIDE_PX) return;
+        // Pick the dominant axis. Whichever has the larger delta wins —
+        // simpler and more inclusive than the v3 1.5× ratio, which made
+        // natural-arc swipes occasionally lock to vertical.
+        direction = adx > ady ? "horizontal" : "vertical";
+        cancelLong();
+        if (direction === "vertical") {
+          active = false;
+          gestureActiveRef.current = false;
+          return;
+        }
+      }
+      if (direction !== "horizontal") return;
+
+      // Critical: claim the gesture so the browser doesn't take it for
+      // native vertical scroll. Listener is registered with passive:false
+      // (see addEventListener call below) so this actually works.
+      e.preventDefault();
+      offsetXRef.current = dx;
+      setOffsetX(dx);
+    };
+
+    const onTouchEnd = () => {
+      cancelLong();
+      const wasHorizontal = direction === "horizontal";
+      direction = null;
+      active = false;
+      gestureActiveRef.current = false;
+      if (!wasHorizontal) return;
+
+      const live = offsetXRef.current;
+      const rowWidth = overlay.parentElement?.clientWidth ?? 360;
+      const commitPx = commitThresholdPx(rowWidth);
+
+      // Suppress the synthetic click after any meaningful horizontal
+      // motion, even if the swipe didn't reach the commit threshold —
+      // otherwise a partial swipe that springs back navigates the user
+      // into the issue, which feels like the gesture didn't work at all.
+      if (Math.abs(live) > SWIPE_INTENT_PX) {
+        swipeJustCompletedRef.current = true;
+      }
+
+      if (live >= commitPx) {
+        setOffsetX(0);
+        setRevealed(false);
+        onArchiveRef.current();
+      } else if (live <= -commitPx) {
+        setOffsetX(0);
+        setRevealed(true);
+      } else {
+        setOffsetX(0);
+      }
+    };
+
+    overlay.addEventListener("touchstart", onTouchStart, { passive: false });
+    overlay.addEventListener("touchmove", onTouchMove, { passive: false });
+    overlay.addEventListener("touchend", onTouchEnd);
+    overlay.addEventListener("touchcancel", onTouchEnd);
+    return () => {
+      cancelLong();
+      overlay.removeEventListener("touchstart", onTouchStart);
+      overlay.removeEventListener("touchmove", onTouchMove);
+      overlay.removeEventListener("touchend", onTouchEnd);
+      overlay.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, [setOffsetX]);
+
+  // Capture-phase click listener on the parent shell <button>: when a
+  // meaningful swipe just happened, the synthetic click fired by the
+  // browser after touchend is intercepted here and prevented from firing
+  // the row's onClick (navigation).
   useEffect(() => {
     const node = containerRef.current?.parentElement;
     if (!node) return;
@@ -309,87 +427,10 @@ function MobileRowActions({
     return () => node.removeEventListener("click", handler, true);
   }, []);
 
-  const cancelLongPress = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  }, []);
-
-  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
-    if (e.pointerType !== "touch") return;
-    startX.current = e.clientX;
-    startY.current = e.clientY;
-    lockedDirRef.current = null;
-    longPressTimer.current = setTimeout(() => {
-      setDrawerOpen(true);
-      startX.current = null; // disable swipe once long-press fires
-    }, LONG_PRESS_MS);
-  };
-
-  const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (startX.current === null) return;
-    const dx = e.clientX - startX.current;
-    const dy = e.clientY - (startY.current ?? 0);
-    const adx = Math.abs(dx);
-    const ady = Math.abs(dy);
-
-    // Direction lock — pick once movement is past the decision zone. Bail
-    // to vertical only when |dy| is clearly dominant (1.5×); a casual
-    // horizontal swipe naturally has small dy, and the previous "any
-    // dy>dx" check let arc-y dominance stick the row.
-    if (lockedDirRef.current === null) {
-      if (adx < DIRECTION_DECIDE_PX && ady < DIRECTION_DECIDE_PX) return;
-      if (ady > adx * VERTICAL_DOMINANCE_RATIO) {
-        cancelLongPress();
-        startX.current = null;
-        lockedDirRef.current = "vertical";
-        setOffsetX(0);
-        return;
-      }
-      lockedDirRef.current = "horizontal";
-    }
-    if (lockedDirRef.current !== "horizontal") return;
-    cancelLongPress();
-
-    // Row follows the finger directly — Gmail mobile pattern. No deadzone
-    // (the direction lock above already prevents accidental tracking) and
-    // no premature cap on the right side.
-    setOffsetX(dx);
-  };
-
-  const onPointerUp = () => {
-    cancelLongPress();
-    if (startX.current === null) {
-      // Long-press fired or pointer was cancelled.
-      lockedDirRef.current = null;
-      return;
-    }
-    startX.current = null;
-    lockedDirRef.current = null;
-    const live = offsetXRef.current;
-    const rowWidth = containerRef.current?.parentElement?.clientWidth ?? 360;
-    const commitPx = commitThresholdPx(rowWidth);
-    if (live >= commitPx) {
-      swipeJustCompletedRef.current = true;
-      setOffsetX(0);
-      setRevealed(false);
-      onArchive();
-      return;
-    }
-    if (live <= -commitPx) {
-      swipeJustCompletedRef.current = true;
-      setOffsetX(0);
-      setRevealed(true);
-      return;
-    }
-    setOffsetX(0);
-  };
-
   const closePanel = useCallback(() => {
     setRevealed(false);
     setOffsetX(0);
-  }, []);
+  }, [setOffsetX]);
 
   // Tap-outside closes the revealed panel.
   useEffect(() => {
@@ -464,12 +505,9 @@ function MobileRowActions({
       <div
         ref={containerRef}
         className="absolute inset-0 sm:hidden"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        // Don't swallow taps — only swipes apply transforms. The wrapper button
-        // still receives onClick for navigation.
+        // touch-action: pan-y lets vertical scroll work natively, while we
+        // claim horizontal gestures via preventDefault in the touchmove
+        // listener attached in useEffect above.
         style={{ touchAction: "pan-y" }}
       />
       {archiveBg}
@@ -567,24 +605,35 @@ function IconButton({
 
 /**
  * Swipe-only cerebro variant for inbox rows that aren't issue items —
- * channels and DMs. The full row-actions surface is item-specific (mute /
- * mark-unread keyed off `inbox_item.id`), but archive applies uniformly to
- * any row in the inbox queue, so this slimmer component gives channel rows
- * the same swipe-right ergonomics without dragging in the rest of the menu.
+ * channels, DMs, chat sessions. The full row-actions surface is item-
+ * specific (mute / mark-unread keyed off `inbox_item.id`), but archive
+ * applies uniformly to any row in the inbox queue, so this slimmer
+ * component gives those rows the same swipe-right ergonomics without
+ * dragging in the rest of the menu.
  *
  * Renders:
- * - Desktop: hover-only archive icon (matches the upstream simple icon)
- * - Mobile: full-row touch overlay; swipe-right ≥80px archives on release
- *
- * Reuses the same click-suppression pattern as `MobileRowActions` so the
- * swipe gesture doesn't leak through to the parent row's onClick navigate.
+ * - Mobile: full-row touch overlay; swipe-right past commit threshold
+ *   archives on release.
+ * - Desktop: hover-only archive icon by default. Pass `hideOnDesktop`
+ *   when the host row already has its own archive button (e.g. chat
+ *   sessions in the inbox sidebar) — we render `null` to avoid two
+ *   archive icons stacking.
  */
-export function CerebroSwipeArchive({ onArchive }: { onArchive: () => void }) {
+export function CerebroSwipeArchive({
+  onArchive,
+  hideOnDesktop,
+}: {
+  onArchive: () => void;
+  /** Skip the desktop hover-icon fallback. Use when the host row already
+   *  renders its own archive control on desktop. */
+  hideOnDesktop?: boolean;
+}) {
   const enabled = useFeatureFlag("cerebro_inbox_row_actions");
   const isMobile = useIsMobile();
   const strings = useCerebroInboxStrings();
 
   if (!enabled || !isMobile) {
+    if (hideOnDesktop) return null;
     return <SimpleArchiveButton onArchive={onArchive} />;
   }
 
@@ -599,16 +648,21 @@ function SwipeArchiveOnly({
   strings: ReturnType<typeof useCerebroInboxStrings>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const startX = useRef<number | null>(null);
-  const startY = useRef<number | null>(null);
-  const lockedDirRef = useRef<"horizontal" | "vertical" | null>(null);
   const offsetXRef = useRef(0);
   const [offsetX, setOffsetXState] = useState(0);
   const setOffsetX = useCallback((v: number) => {
     offsetXRef.current = v;
     setOffsetXState(v);
   }, []);
+  const gestureActiveRef = useRef(false);
   const swipeJustCompletedRef = useRef(false);
+
+  // Stable ref for the archive callback so the touch effect doesn't re-
+  // attach listeners every render.
+  const onArchiveRef = useRef(onArchive);
+  useEffect(() => {
+    onArchiveRef.current = onArchive;
+  });
 
   useEffect(() => {
     const row = containerRef.current?.parentElement;
@@ -618,7 +672,7 @@ function SwipeArchiveOnly({
     } else {
       row.style.transform = `translateX(${offsetX}px)`;
     }
-    row.style.transition = startX.current === null ? "transform 200ms" : "";
+    row.style.transition = gestureActiveRef.current ? "" : "transform 200ms";
   }, [offsetX]);
 
   useEffect(() => {
@@ -635,63 +689,92 @@ function SwipeArchiveOnly({
     return () => node.removeEventListener("click", handler, true);
   }, []);
 
-  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
-    if (e.pointerType !== "touch") return;
-    startX.current = e.clientX;
-    startY.current = e.clientY;
-    lockedDirRef.current = null;
-  };
+  // Native TouchEvent listeners with passive:false — same pattern as
+  // MobileRowActions. preventDefault() once horizontal locks the gesture
+  // so iOS Safari doesn't take it over for native scroll mid-swipe.
+  useEffect(() => {
+    const overlay = containerRef.current;
+    if (!overlay) return;
 
-  const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
-    if (startX.current === null) return;
-    const dx = e.clientX - startX.current;
-    const dy = e.clientY - (startY.current ?? 0);
-    const adx = Math.abs(dx);
-    const ady = Math.abs(dy);
+    let startX = 0;
+    let startY = 0;
+    let direction: "horizontal" | "vertical" | null = null;
+    let active = false;
 
-    if (lockedDirRef.current === null) {
-      if (adx < DIRECTION_DECIDE_PX && ady < DIRECTION_DECIDE_PX) return;
-      if (ady > adx * VERTICAL_DOMINANCE_RATIO) {
-        startX.current = null;
-        lockedDirRef.current = "vertical";
-        setOffsetX(0);
-        return;
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0]!;
+      startX = t.clientX;
+      startY = t.clientY;
+      direction = null;
+      active = true;
+      gestureActiveRef.current = true;
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!active || e.touches.length !== 1) return;
+      const t = e.touches[0]!;
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      const adx = Math.abs(dx);
+      const ady = Math.abs(dy);
+
+      if (direction === null) {
+        if (adx < DIRECTION_DECIDE_PX && ady < DIRECTION_DECIDE_PX) return;
+        direction = adx > ady ? "horizontal" : "vertical";
+        if (direction === "vertical") {
+          active = false;
+          gestureActiveRef.current = false;
+          return;
+        }
       }
-      lockedDirRef.current = "horizontal";
-    }
-    if (lockedDirRef.current !== "horizontal") return;
+      if (direction !== "horizontal") return;
 
-    // Channel rows only archive (right swipe). Negatives clamped to 0 so
-    // the row doesn't flop to the left where there's no action panel.
-    setOffsetX(Math.max(0, dx));
-  };
+      e.preventDefault();
+      // Channel rows only archive (right swipe). Negatives clamped to 0
+      // so the row can't flop left into nothing.
+      const live = Math.max(0, dx);
+      offsetXRef.current = live;
+      setOffsetX(live);
+    };
 
-  const onPointerUp = () => {
-    if (startX.current === null) {
-      lockedDirRef.current = null;
-      return;
-    }
-    startX.current = null;
-    lockedDirRef.current = null;
-    const rowWidth = containerRef.current?.parentElement?.clientWidth ?? 360;
-    if (offsetXRef.current >= commitThresholdPx(rowWidth)) {
-      swipeJustCompletedRef.current = true;
-      setOffsetX(0);
-      onArchive();
-      return;
-    }
-    setOffsetX(0);
-  };
+    const onTouchEnd = () => {
+      const wasHorizontal = direction === "horizontal";
+      direction = null;
+      active = false;
+      gestureActiveRef.current = false;
+      if (!wasHorizontal) return;
+
+      const live = offsetXRef.current;
+      const rowWidth = overlay.parentElement?.clientWidth ?? 360;
+      if (live > SWIPE_INTENT_PX) {
+        swipeJustCompletedRef.current = true;
+      }
+      if (live >= commitThresholdPx(rowWidth)) {
+        setOffsetX(0);
+        onArchiveRef.current();
+      } else {
+        setOffsetX(0);
+      }
+    };
+
+    overlay.addEventListener("touchstart", onTouchStart, { passive: false });
+    overlay.addEventListener("touchmove", onTouchMove, { passive: false });
+    overlay.addEventListener("touchend", onTouchEnd);
+    overlay.addEventListener("touchcancel", onTouchEnd);
+    return () => {
+      overlay.removeEventListener("touchstart", onTouchStart);
+      overlay.removeEventListener("touchmove", onTouchMove);
+      overlay.removeEventListener("touchend", onTouchEnd);
+      overlay.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, [setOffsetX]);
 
   return (
     <>
       <div
         ref={containerRef}
         className="absolute inset-0 sm:hidden"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
         style={{ touchAction: "pan-y" }}
       />
       {offsetX > 0 && (

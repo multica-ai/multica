@@ -25,7 +25,7 @@ import {
 // CEREBRO-PATCH(channels-flag-gate): hide channel/dm view options + new-message when feature is disabled
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 // CEREBRO-PATCH(inbox-keyboard-shortcuts): cerebro keyboard shortcuts (e = archive)
-import { useInboxKeyboardShortcuts } from "@multica/cerebro-inbox";
+import { useInboxKeyboardShortcuts, CerebroSwipeArchive } from "@multica/cerebro-inbox";
 import { useInboxViewStore, INBOX_VIEW_OPTIONS, type InboxView } from "@multica/core/inbox";
 import { channelListOptions } from "@multica/core/channels";
 import { ChannelDetail, NewMessageModal } from "../../channels";
@@ -671,7 +671,9 @@ export function InboxPage() {
       return (
         <div
           key={`chat:${session.id}`}
-          className={`group/chat flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-accent/50 ${
+          // CEREBRO-PATCH(inbox-chat-row-swipe): `relative` is required so the
+          // cerebro swipe overlay (absolute inset-0) covers the row.
+          className={`group/chat relative flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-accent/50 ${
             session.id === selectedKey ? "bg-accent" : ""
           }`}
           onClick={() => setSelectedKey("chat", session.id)}
@@ -710,6 +712,13 @@ export function InboxPage() {
           >
             <Archive className="size-4 sm:size-3" />
           </button>
+          {/* CEREBRO-PATCH(inbox-chat-row-swipe): swipe-right archives chat
+              sessions, matching issue/channel rows. hideOnDesktop avoids
+              stacking with the existing hover archive button above. */}
+          <CerebroSwipeArchive
+            hideOnDesktop
+            onArchive={() => handleArchiveChat(session.id)}
+          />
         </div>
       );
     }

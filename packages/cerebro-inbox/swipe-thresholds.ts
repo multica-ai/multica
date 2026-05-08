@@ -2,47 +2,44 @@
  * Tunable parameters for the cerebro inbox swipe gesture.
  *
  * Iteration log:
- *  - v1: fixed 80px commit (~20% of 414px row) — too sensitive; drift during
- *        a vertical scroll could fire archive.
- *  - v2: 30% commit + 12px deadzone + tight direction-lock — too restrictive
- *        in the other direction. The deadzone made the row stop tracking the
- *        finger early ("kan kun swipe lidt"), and the direction-lock often
+ *  - v1: fixed 80px commit (~20% of 414px row) — too sensitive; horizontal
+ *        drift during a vertical scroll fired archive accidentally.
+ *  - v2: 30% commit + 12px deadzone + tight direction-lock — too restrictive;
+ *        the deadzone made the row stop tracking the finger, and the lock
  *        bailed to vertical when natural finger arc made dy briefly exceed
- *        dx in the first 8px.
- *  - v3 (current): match Gmail's mobile pattern — row follows the finger
- *        directly with no deadzone, and a "full swipe" (50% of row width)
- *        commits the action on release. Direction-lock only bails when
- *        vertical motion is clearly dominant (dy > 1.5 × dx).
+ *        dx in the first 8 px ("kan kun swipe lidt").
+ *  - v3: 50% commit, no deadzone, dominance ratio 1.5× — Gmail-style on
+ *        paper, but iOS Safari hijacked the gesture: PointerEvents stopped
+ *        firing when the browser committed to native vertical scroll mid-
+ *        gesture, giving an "on/off" feel where the row sometimes tracked
+ *        and sometimes didn't.
+ *  - v4 (current): native TouchEvent listeners with `{ passive: false }` so
+ *        we can `preventDefault()` once the gesture is horizontal — the
+ *        textbook fix for iOS Safari's pointer-handoff. Commit dropped to
+ *        35% to match Gmail's actual feel; click is also suppressed on any
+ *        meaningful swipe attempt (>16 px), not just on commit, so a tiny
+ *        swipe that springs back doesn't navigate the user into the issue.
  *
  * Sources:
- *  - Gmail mobile inbox swipe (Android/iOS): row tracks finger across full
- *    row, commit on release at ~50%.
- *  - Material 3 swipe-to-dismiss: positional threshold 25–30% (we sit
- *    slightly above so destructive archives need real intent).
- *  - iOS Mail swipe: row tracks finger; "full swipe" commits at >50% width.
+ *  - "Pointer events vs touch events for swipe" — react-swipeable's README
+ *    enumerates the same iOS hijack we hit and uses passive:false touch.
+ *  - Gmail mobile: row tracks finger; archive commits at ~30–40% width.
+ *  - Material 3 swipe-to-dismiss positional threshold — 25–30%.
  */
 
-/** Commit threshold as a fraction of row width — full-ish swipe like Gmail. */
-export const SWIPE_COMMIT_FRACTION = 0.5;
-export const SWIPE_COMMIT_MIN_PX = 120;
-export const SWIPE_COMMIT_MAX_PX = 260;
+export const SWIPE_COMMIT_FRACTION = 0.35;
+export const SWIPE_COMMIT_MIN_PX = 80;
+export const SWIPE_COMMIT_MAX_PX = 200;
 
-/**
- * Total movement (Pythagorean) before we decide which axis dominates. Below
- * this, neither axis is locked — we wait for clearer intent. The number is
- * small (8 px) so the row begins tracking the finger almost immediately
- * once the user is clearly swiping.
- */
+/** Pixels of finger travel that count as "the user tried to swipe" — used
+ * to suppress the synthetic click after touchend even when the swipe didn't
+ * cross the commit threshold. Without this, a tiny swipe that springs back
+ * would still trigger the row's onClick and navigate the user away. */
+export const SWIPE_INTENT_PX = 16;
+
+/** Total movement before we decide which axis dominates. Below this, we
+ * wait — the very first sample of a touch is noisy. */
 export const DIRECTION_DECIDE_PX = 8;
-
-/**
- * Vertical-dominance ratio. We only bail to vertical scroll if |dy| is at
- * least this many times |dx|. A pure horizontal swipe naturally has small
- * dy from finger arc; the previous "any dy>dx" check let arc-y dominance
- * win on the first sample and stuck the row on screen. 1.5× lets a swipe
- * stay horizontal even with mild drift.
- */
-export const VERTICAL_DOMINANCE_RATIO = 1.5;
 
 /** Long-press duration before the action drawer opens. */
 export const LONG_PRESS_MS = 500;
@@ -51,15 +48,13 @@ export const LONG_PRESS_MS = 500;
 export const LEFT_PANEL_REVEAL_PX = 144;
 
 /**
- * Commit threshold (px) needed to fire the archive / panel-reveal action
- * for a row of the given width. 50% of the row, clamped to [120, 260] px
- * so the gesture is meaningful on small phones and doesn't require
- * crossing the entire screen on tablets.
+ * Commit threshold (px) needed to fire archive / panel-reveal for a row of
+ * the given width. 35% with a [80, 200] clamp:
  *
- *   iPhone SE (320px) -> 160 px (50%)
- *   iPhone Pro (414px) -> 207 px (50%)
- *   iPhone 16 Pro Max (430px) -> 215 px (50%)
- *   iPad split-view (~600px) -> 260 px (43%, hits clamp cap)
+ *   iPhone SE (320 px) → 112 px (35%)
+ *   iPhone Pro (414 px) → 145 px (35%)
+ *   iPhone 16 Pro Max (430 px) → 151 px (35%)
+ *   iPad split-view (~600 px) → 200 px (clamp cap, ~33%)
  */
 export function commitThresholdPx(rowWidth: number): number {
   const target = rowWidth * SWIPE_COMMIT_FRACTION;

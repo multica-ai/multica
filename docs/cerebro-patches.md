@@ -205,6 +205,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `file-handler-file` | server/internal/handler/file.go | 117 | File handler additions |
 | `handler-cerebro-routes` | server/internal/handler/handler.go | 37 | Server handler additions |
 | `inbox-chat-panel` | packages/views/inbox/components/inbox-chat-panel.tsx | 298 | Inbox view additions |
+| `inbox-chat-row-swipe` | packages/views/inbox/components/inbox-page.tsx | 4 | Mount cerebro swipe-archive on chat session rows so they match issue/channel swipe behavior (JEH-663) |
 | `inbox-folder-handler` | server/internal/handler/inbox_folder.go | 413 | Inbox-folder server handler (cerebro-only feature) |
 | `inbox-keyboard-shortcuts` | packages/views/inbox/components/inbox-page.tsx | 4 | Mounts cerebro `e` = archive shortcut for the inbox page (JEH-663) |
 | `inbox-list-item-cerebro` | packages/views/inbox/components/inbox-list-item.tsx | 17 | Inbox view additions |
