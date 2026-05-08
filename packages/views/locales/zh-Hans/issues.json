@@ -99,6 +99,7 @@
     "section_parent_issue": "父 issue",
     "section_details": "详情",
     "section_token_usage": "Token 用量",
+    "prop_id": "ID",
     "prop_status": "状态",
     "prop_priority": "优先级",
     "prop_assignee": "负责人",

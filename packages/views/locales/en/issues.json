@@ -100,6 +100,7 @@
     "section_parent_issue": "Parent issue",
     "section_details": "Details",
     "section_token_usage": "Token usage",
+    "prop_id": "ID",
     "prop_status": "Status",
     "prop_priority": "Priority",
     "prop_assignee": "Assignee",
