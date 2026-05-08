@@ -1633,10 +1633,31 @@ func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool
 	return true
 }
 
+// canManageIssue checks whether the current user can delete an issue.
+// Only the issue creator or workspace owner/admin can delete an issue.
+func (h *Handler) canManageIssue(w http.ResponseWriter, r *http.Request, issue db.Issue) bool {
+	wsID := uuidToString(issue.WorkspaceID)
+	member, ok := h.requireWorkspaceRole(w, r, wsID, "issue not found", "owner", "admin", "member")
+	if !ok {
+		return false
+	}
+	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	isCreator := uuidToString(issue.CreatorID) == requestUserID(r)
+	if !isAdmin && !isCreator {
+		writeError(w, http.StatusForbidden, "only the issue creator can delete this issue")
+		return false
+	}
+	return true
+}
+
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
 	if !ok {
+		return
+	}
+
+	if !h.canManageIssue(w, r, issue) {
 		return
 	}
 
@@ -1941,6 +1962,9 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	member, memberOk := ctxMember(r.Context())
+	isAdmin := memberOk && roleAllowed(member.Role, "owner", "admin")
+
 	deleted := 0
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
@@ -1952,6 +1976,12 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: wsUUID,
 		})
 		if err != nil {
+			continue
+		}
+
+		// Only the issue creator or workspace admin can delete.
+		if !isAdmin && uuidToString(issue.CreatorID) != userID {
+			slog.Warn("batch delete skipped: not issue creator", "issue_id", issueID, "user_id", userID)
 			continue
 		}
 

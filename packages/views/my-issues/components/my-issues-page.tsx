@@ -203,7 +203,7 @@ export function MyIssuesPage() {
             )}
           </div>
         )}
-        {viewMode === "list" && <BatchActionToolbar />}
+        {viewMode === "list" && <BatchActionToolbar issues={myIssues} />}
       </ViewStoreProvider>
     </div>
   );
