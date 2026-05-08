@@ -147,6 +147,34 @@ func buildChatPrompt(task Task) string {
 	return b.String()
 }
 
+// buildGatewayChatPrompt includes an explicit transcript because the managed
+// HTTP gateway is stateless from the daemon's perspective and cannot resume a
+// provider-local CLI session.
+// CEREBRO-PATCH(daemon-prompt-firtal-gateway-chat): synthesize transcript prompts for stateless managed gateway chat.
+func buildGatewayChatPrompt(task Task) string {
+	if len(task.ChatHistory) == 0 {
+		return buildChatPrompt(task)
+	}
+
+	var b strings.Builder
+	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
+	b.WriteString("Answer the user's latest unresponded message in the conversation below. Use the earlier messages only as context.\n")
+	if len(task.ChatMessages) > 1 {
+		b.WriteString("The user sent multiple unresponded messages at the end of the transcript; address all of them in one reply.\n")
+	}
+	b.WriteString("Respond only with the assistant message.\n\n")
+	b.WriteString("Conversation transcript (oldest first):\n")
+	for _, msg := range task.ChatHistory {
+		role := strings.TrimSpace(msg.Role)
+		content := strings.TrimSpace(msg.Content)
+		if role == "" || content == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "%s: %s\n", role, content)
+	}
+	return b.String()
+}
+
 // buildAutopilotPrompt constructs a prompt for run_only autopilot tasks.
 func buildAutopilotPrompt(task Task) string {
 	var b strings.Builder

@@ -1315,6 +1315,23 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.PriorWorkDir = prior.WorkDir.String
 				}
 			}
+			if history, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil {
+				const chatHistoryLimit = 30
+				if len(history) > chatHistoryLimit {
+					history = history[len(history)-chatHistoryLimit:]
+				}
+				for _, m := range history {
+					role := strings.TrimSpace(m.Role)
+					content := strings.TrimSpace(m.Content)
+					if role == "" || content == "" {
+						continue
+					}
+					resp.ChatHistory = append(resp.ChatHistory, ChatHistoryMessage{
+						Role:    role,
+						Content: content,
+					})
+				}
+			}
 			// Load every user message that hasn't yet been answered by an
 			// assistant turn, in chronological order. Coalescing on enqueue
 			// means a single queued task may need to absorb multiple user
@@ -1445,7 +1462,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp.TaskToken = token
-
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
@@ -1612,6 +1628,8 @@ type TaskUsagePayload struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	// CEREBRO-PATCH(handler-daemon-firtal-gateway-usage-cost): accept exact spend from managed gateway runtimes.
+	CostCents int64 `json:"cost_cents"`
 }
 
 func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
@@ -1664,12 +1682,15 @@ func (h *Handler) recordBudgetSpend(ctx context.Context, workspaceID string, tas
 	if workspaceID == "" {
 		return
 	}
-	cents := pricing.ComputeCents(u.Model, pricing.Usage{
-		InputTokens:      u.InputTokens,
-		OutputTokens:     u.OutputTokens,
-		CacheReadTokens:  u.CacheReadTokens,
-		CacheWriteTokens: u.CacheWriteTokens,
-	})
+	cents := u.CostCents
+	if cents <= 0 {
+		cents = pricing.ComputeCents(u.Model, pricing.Usage{
+			InputTokens:      u.InputTokens,
+			OutputTokens:     u.OutputTokens,
+			CacheReadTokens:  u.CacheReadTokens,
+			CacheWriteTokens: u.CacheWriteTokens,
+		})
+	}
 	if cents <= 0 {
 		return
 	}

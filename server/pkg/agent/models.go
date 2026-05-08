@@ -91,6 +91,11 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenclawAgents(ctx, executablePath)
 		})
+	// CEREBRO-PATCH(agent-models-firtal-gateway): discover managed gateway models over HTTP.
+	case firtalGatewayProvider:
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverFirtalGatewayModels(ctx)
+		})
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
 	}

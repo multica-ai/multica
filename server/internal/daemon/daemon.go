@@ -1726,6 +1726,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// task completion and passed back via PriorWorkDir on the next claim.
 
 	prompt := BuildPrompt(task)
+	if provider == "firtal-gateway" && task.ChatSessionID != "" {
+		prompt = buildGatewayChatPrompt(task)
+	}
 
 	// Pass scope-limited credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo
@@ -1850,11 +1853,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	// openclaw loads its bootstrap files (AGENTS.md, SOUL.md, ...) from its own
 	// workspace dir rather than the task workdir, so the AGENTS.md written by
-	// execenv.InjectRuntimeConfig is never read. Pass agent instructions inline
-	// via SystemPrompt so the backend can prepend them to the --message payload.
-	// Other providers already surface instructions through their runtime config
-	// file and don't need this.
-	if provider == "openclaw" {
+	// execenv.InjectRuntimeConfig is never read. firtal-gateway is an HTTP
+	// backend with no local runtime config reader. Pass agent instructions inline
+	// for both.
+	if provider == "openclaw" || provider == "firtal-gateway" {
 		execOpts.SystemPrompt = instructions
 	}
 
@@ -1890,9 +1892,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Convert agent usage map to task usage entries.
 	var usageEntries []TaskUsageEntry
 	for model, u := range result.Usage {
-		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
+		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 && u.CostCents == 0 {
 			continue
 		}
+		// CEREBRO-PATCH(daemon-daemon-firtal-gateway-usage-cost): include exact managed gateway spend when reported.
 		usageEntries = append(usageEntries, TaskUsageEntry{
 			Provider:         provider,
 			Model:            model,
@@ -1900,6 +1903,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			OutputTokens:     u.OutputTokens,
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
+			CostCents:        u.CostCents,
 		})
 	}
 
@@ -2222,6 +2226,7 @@ func mergeUsage(a, b map[string]agent.TokenUsage) map[string]agent.TokenUsage {
 		existing.OutputTokens += u.OutputTokens
 		existing.CacheReadTokens += u.CacheReadTokens
 		existing.CacheWriteTokens += u.CacheWriteTokens
+		existing.CostCents += u.CostCents
 		merged[model] = existing
 	}
 	return merged

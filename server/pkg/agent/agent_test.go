@@ -38,6 +38,18 @@ func TestNewReturnsCopilotBackend(t *testing.T) {
 	}
 }
 
+func TestNewReturnsFirtalGatewayBackend(t *testing.T) {
+	t.Parallel()
+	// CEREBRO-PATCH(agent-firtal-gateway-tests): factory coverage for managed gateway backend registration.
+	b, err := New("firtal-gateway", Config{})
+	if err != nil {
+		t.Fatalf("New(firtal-gateway) error: %v", err)
+	}
+	if _, ok := b.(*firtalGatewayBackend); !ok {
+		t.Fatalf("expected *firtalGatewayBackend, got %T", b)
+	}
+}
+
 func TestNewRejectsUnknownType(t *testing.T) {
 	t.Parallel()
 	_, err := New("gpt", Config{})
@@ -72,7 +84,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
 		"claude", "codex", "copilot", "cursor", "gemini",
-		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
+		"firtal-gateway", "hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {

@@ -51,7 +51,7 @@ type Config struct {
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, firtal-gateway
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
@@ -184,8 +184,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_KIRO_MODEL")),
 		}
 	}
+	if entry, ok, err := firtalGatewayAgentEntry(); err != nil {
+		return Config{}, err
+	} else if ok {
+		agents["firtal-gateway"] = entry
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent runtime found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli on PATH, or configure FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL and FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -423,6 +428,65 @@ func patternsFromEnv(name string, defaults []string) []string {
 		out = append(out, p)
 	}
 	return out
+}
+
+func firtalGatewayAgentEntry() (AgentEntry, bool, error) {
+	// CEREBRO-PATCH(daemon-config-firtal-gateway): register managed gateway runtime from central credentials.
+	enabled, explicit := boolFromEnv("MULTICA_FIRTAL_GATEWAY_ENABLED")
+	if explicit && !enabled {
+		return AgentEntry{}, false, nil
+	}
+
+	baseURL := firstNonEmptyEnv(
+		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
+		"FIRTAL_AE_GATEWAY_URL",
+		"FIRTAL_DATA_REGISTRY_URL",
+	)
+	apiKey := firstNonEmptyEnv(
+		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY",
+		"FIRTAL_AE_GATEWAY_KEY",
+		"FIRTAL_DATA_REGISTRY_API_KEY",
+	)
+	if !explicit && (baseURL == "" || apiKey == "") {
+		return AgentEntry{}, false, nil
+	}
+	if baseURL == "" {
+		return AgentEntry{}, false, fmt.Errorf("MULTICA_FIRTAL_GATEWAY_ENABLED is true but FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL is not set")
+	}
+	if apiKey == "" {
+		return AgentEntry{}, false, fmt.Errorf("MULTICA_FIRTAL_GATEWAY_ENABLED is true but FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY is not set")
+	}
+
+	return AgentEntry{
+		Path: "",
+		Model: firstNonEmptyEnv(
+			"FIRTAL_DATA_REGISTRY_AI_MODEL",
+			"FIRTAL_AE_GATEWAY_MODEL",
+		),
+	}, true, nil
+}
+
+func boolFromEnv(name string) (bool, bool) {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	switch raw {
+	case "":
+		return false, false
+	case "1", "true", "yes", "on":
+		return true, true
+	case "0", "false", "no", "off":
+		return false, true
+	default:
+		return false, true
+	}
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func shellArgsFromEnv(name string) ([]string, error) {

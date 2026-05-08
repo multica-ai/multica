@@ -32,39 +32,45 @@ type ProjectResourceData struct {
 	Label        string          `json:"label,omitempty"`
 }
 
+type ChatHistoryMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
-	ID                      string                `json:"id"`
-	AgentID                 string                `json:"agent_id"`
-	RuntimeID               string                `json:"runtime_id"`
-	IssueID                 string                `json:"issue_id"`
-	WorkspaceID             string                `json:"workspace_id"`
-	Agent                   *AgentData            `json:"agent,omitempty"`
-	Repos                   []RepoData            `json:"repos,omitempty"`
-	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
-	ProjectTitle            string                `json:"project_title,omitempty"`     // human-readable project title for context injection
-	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // project-scoped resources to expose to the agent
-	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
-	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
-	TriggerCommentID        string                `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
-	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
-	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind for the triggering comment
-	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
-	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
+	ID                    string                `json:"id"`
+	AgentID               string                `json:"agent_id"`
+	RuntimeID             string                `json:"runtime_id"`
+	IssueID               string                `json:"issue_id"`
+	WorkspaceID           string                `json:"workspace_id"`
+	Agent                 *AgentData            `json:"agent,omitempty"`
+	Repos                 []RepoData            `json:"repos,omitempty"`
+	ProjectID             string                `json:"project_id,omitempty"`              // issue's project, when present
+	ProjectTitle          string                `json:"project_title,omitempty"`           // human-readable project title for context injection
+	ProjectResources      []ProjectResourceData `json:"project_resources,omitempty"`       // project-scoped resources to expose to the agent
+	PriorSessionID        string                `json:"prior_session_id,omitempty"`        // Claude session ID from a previous task on this issue
+	PriorWorkDir          string                `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on this issue
+	TriggerCommentID      string                `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
+	TriggerCommentContent string                `json:"trigger_comment_content,omitempty"` // content of the triggering comment
+	TriggerAuthorType     string                `json:"trigger_author_type,omitempty"`     // "agent" or "member" — author kind for the triggering comment
+	TriggerAuthorName     string                `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
+	ChatSessionID         string                `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
 	// CEREBRO-PATCH(daemon-task-chat-messages): cerebro accumulates a list of
 	// user messages newer than the last assistant reply (oldest first) so the
 	// daemon can build a prompt covering bursts; ChatMessage stays for
 	// backwards compat with pre-JEH-330 daemons.
-	ChatMessages            []string              `json:"chat_messages,omitempty"`             // user messages newer than the last assistant reply (oldest first)
-	ChatMessage             string                `json:"chat_message,omitempty"`              // user message content for chat tasks
-	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot run_only tasks
-	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this run
-	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context
-	AutopilotDescription    string                `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
-	AutopilotSource         string                `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
-	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
-	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	ChatHistory             []ChatHistoryMessage `json:"chat_history,omitempty"`              // capped chat transcript for stateless managed HTTP runtimes
+	ChatMessages            []string             `json:"chat_messages,omitempty"`             // user messages newer than the last assistant reply (oldest first)
+	ChatMessage             string               `json:"chat_message,omitempty"`              // user message content for chat tasks
+	AutopilotRunID          string               `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot run_only tasks
+	AutopilotID             string               `json:"autopilot_id,omitempty"`              // autopilot that spawned this run
+	AutopilotTitle          string               `json:"autopilot_title,omitempty"`           // autopilot title used as task context
+	AutopilotDescription    string               `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
+	AutopilotSource         string               `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
+	AutopilotTriggerPayload json.RawMessage      `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
+	QuickCreatePrompt       string               `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	// CEREBRO-PATCH(daemon-task-user-profile-prompt): compiled per-user
 	// communication prompt (JEH-304).
 	UserProfilePrompt string `json:"user_profile_prompt,omitempty"`
@@ -92,7 +98,7 @@ type AgentData struct {
 	CustomEnv    map[string]string `json:"custom_env,omitempty"`
 	CustomArgs   []string          `json:"custom_args,omitempty"`
 	McpConfig    json.RawMessage   `json:"mcp_config,omitempty"`
-	Model string `json:"model,omitempty"`
+	Model        string            `json:"model,omitempty"`
 	// CEREBRO-PATCH(daemon-agent-sandbox-allowlist): admin-set list of
 	// additional outbound hosts (host:port) that this specific agent is
 	// allowed to reach when the macOS sandbox is enabled. Merged on top of
@@ -121,6 +127,8 @@ type TaskUsageEntry struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	// CEREBRO-PATCH(daemon-types-firtal-gateway-usage-cost): forward exact gateway spend to the server rollup.
+	CostCents int64 `json:"cost_cents,omitempty"`
 }
 
 // TaskResult is the outcome of executing a task.

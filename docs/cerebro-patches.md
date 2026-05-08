@@ -8,10 +8,11 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 
 ## Summary
 
-- **Unique patch names:** 273
+- **Unique patch names:** 288 (273 baseline + 15 PR #118 markers)
 - **Files marked (including chunks 4-8 pre-existing markers):** 298
 - **Files newly marked in chunk 11:** 280 (chunk-11 scope)
 - **Total marker lines added in chunk 11:** ~280 (one comment line per file)
+- **Marker lines added in PR #118:** 16 (managed Firtal Gateway runtime scope)
 - **Total fork-vs-upstream `+` lines (chunk-11 scope, across 280 files):** 22,170
 - **Phase 4 target for cerebro-mod lines:** ≤200 (escalation threshold: >300)
 
@@ -42,6 +43,11 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `account-tab-cerebro` | packages/views/settings/components/account-tab.tsx | 3 | Settings page cerebro additions |
 | `add-runtime-dialog` | packages/views/runtimes/components/add-runtime-dialog.tsx | 217 | Runtime view cerebro additions |
 | `agent-cerebro` | server/pkg/agent/agent.go | 4 | Cerebro additions to agent runtime |
+| `agent-firtal-gateway-runtime` | server/pkg/agent/firtal_gateway.go<br>server/pkg/agent/agent.go | 407 | Managed Firtal Data Registry AI Gateway HTTP backend and provider registration (PR #118) |
+| `agent-firtal-gateway-tests` | server/pkg/agent/firtal_gateway_test.go<br>server/pkg/agent/agent_test.go | 165 | Request/response, usage/cost, model discovery, and backend factory coverage for the managed gateway runtime |
+| `agent-firtal-gateway-usage-cost` | server/pkg/agent/agent.go | 1 | Preserve gateway-reported `cost_cents` alongside token usage so downstream budget rollups can use the exact managed-runtime spend |
+| `agent-models-firtal-gateway` | server/pkg/agent/models.go | 5 | Include managed gateway model discovery in the runtime model-list API |
+| `agent-codex-semantic-inactivity-test` | server/pkg/agent/codex_test.go | 3 | Make semantic-inactivity progress tests scheduler-tolerant while still verifying real inactivity timeouts |
 | `agent-claude-cerebro` | server/pkg/agent/claude.go | 123 | Cerebro additions to agent runtime |
 | `agent-copilot-cerebro` | server/pkg/agent/copilot.go | 13 | Cerebro additions to agent runtime |
 | `agent-cursor-cerebro` | server/pkg/agent/cursor.go | 13 | Cerebro additions to agent runtime |
@@ -55,6 +61,10 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `agent-sandbox-macos-seatbelt-test` | server/pkg/agent/sandbox/macos_seatbelt_test.go | 397 | Cerebro sandbox/seatbelt additions for macOS agent runtime |
 | `agent-sandbox-macos-test` | server/pkg/agent/sandbox/macos_test.go | 417 | Cerebro sandbox/seatbelt additions for macOS agent runtime |
 | `agent-transcript-dialog` | packages/views/issues/components/agent-transcript-dialog.tsx | 1 | Cerebro additions to agent runtime |
+| `handler-agent-firtal-gateway-chat-history` | server/internal/handler/agent.go | 49 | Add bounded chat transcript to daemon claim responses for stateless managed HTTP runtimes |
+| `handler-chat-coalesce-firtal-gateway` | server/internal/handler/chat_coalesce_test.go | 11 | Regression coverage for the chat transcript payload used by the managed gateway runtime |
+| `handler-daemon-firtal-gateway-usage-cost` | server/internal/handler/daemon.go | 28 | Accept exact gateway `cost_cents` in task usage reports and use it for live budget rollups |
+| `runtime-provider-logo-firtal-gateway` | packages/views/runtimes/components/provider-logo.tsx | 4 | Show managed gateway runtimes with the cloud provider icon |
 | `agents-page-cerebro-extras` | packages/views/agents/components/agents-page.tsx | 131 | Agents page/tabs cerebro extras |
 | `agents-tasks-tab` | packages/views/agents/components/tabs/tasks-tab.tsx | 35 | Agents page/tabs cerebro extras |
 | `app-sidebar-cerebro` | packages/views/layout/app-sidebar.tsx | 142 | Layout cerebro additions |
@@ -162,15 +172,21 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `create-project-modal-cerebro` | packages/views/modals/create-project.tsx | 22 | Create-project modal additions |
 | `daemon-client` | server/internal/daemon/client.go | 6 | Daemon additions (sandbox/prompt/types) |
 | `daemon-config` | server/internal/cerebro/runtime/config.go<br>server/internal/daemon/config.go | 0 | Daemon additions (sandbox/prompt/types) |
+| `daemon-config-firtal-gateway` | server/internal/daemon/config.go | 66 | Register the managed gateway runtime from central URL/key/model environment variables |
+| `daemon-config-test-firtal-gateway` | server/internal/daemon/config_test.go | 31 | Tests for explicit and inferred managed gateway runtime registration |
 | `daemon-daemon` | server/internal/daemon/daemon.go | 31 | Daemon additions (sandbox/prompt/types) |
+| `daemon-daemon-firtal-gateway-usage-cost` | server/internal/daemon/daemon.go | 11 | Include exact gateway spend when converting backend usage into task usage reports |
+| `daemon-daemon-test-timing` | server/internal/daemon/daemon_test.go | 39 | Scheduler-tolerant polling assertion for cancellation watcher tests |
 | `daemon-execenv` | server/internal/daemon/execenv/execenv.go | 1 | Daemon additions (sandbox/prompt/types) |
 | `daemon-handler` | server/internal/handler/daemon.go | 270 | Daemon additions (sandbox/prompt/types) |
 | `daemon-prompt` | server/internal/daemon/prompt.go | 17 | Daemon additions (sandbox/prompt/types) |
+| `daemon-prompt-firtal-gateway-chat` | server/internal/daemon/prompt.go | 28 | Build explicit transcript prompts for stateless managed HTTP chat tasks |
 | `daemon-prompt-test` | server/internal/daemon/prompt_test.go | 66 | Daemon additions (sandbox/prompt/types) |
 | `daemon-runtime-config` | server/internal/daemon/execenv/runtime_config.go | 20 | Daemon additions (sandbox/prompt/types) |
 | `daemon-sandbox` | server/internal/daemon/sandbox.go | 147 | Daemon additions (sandbox/prompt/types) |
 | `daemon-sandbox-test` | server/internal/daemon/sandbox_test.go | 183 | Daemon additions (sandbox/prompt/types) |
 | `daemon-types` | server/internal/daemon/types.go | 23 | Daemon additions (sandbox/prompt/types) |
+| `daemon-types-firtal-gateway-usage-cost` | server/internal/daemon/types.go | 35 | Forward exact managed gateway spend in daemon task usage payloads |
 | `dashboard-layout-cerebro` | packages/views/layout/dashboard-layout.tsx | 1 | Layout cerebro additions |
 | `docs-index-cerebro` | packages/views/docs/index.ts | 1 | Docs page additions |
 | `editor-css-cerebro` | packages/views/editor/content-editor.css | 12 | Editor additions |

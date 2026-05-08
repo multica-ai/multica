@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -77,6 +78,8 @@ type TokenUsage struct {
 	OutputTokens     int64
 	CacheReadTokens  int64
 	CacheWriteTokens int64
+	// CEREBRO-PATCH(agent-firtal-gateway-usage-cost): preserve gateway-reported spend for managed HTTP runtimes.
+	CostCents int64
 }
 
 // Result is the final outcome after an agent session completes.
@@ -101,7 +104,7 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro".
+// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "firtal-gateway".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -130,13 +133,19 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &kimiBackend{cfg: cfg}, nil
 	case "kiro":
 		return &kiroBackend{cfg: cfg}, nil
+	// CEREBRO-PATCH(agent-firtal-gateway-runtime): register the managed Data Registry AI Gateway backend.
+	case firtalGatewayProvider:
+		return &firtalGatewayBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, firtal-gateway)", agentType)
 	}
 }
 
 // DetectVersion runs the agent CLI with --version and returns the output.
 func DetectVersion(ctx context.Context, executablePath string) (string, error) {
+	if strings.TrimSpace(executablePath) == "" {
+		return "managed-http", nil
+	}
 	return detectCLIVersion(ctx, executablePath)
 }
 
@@ -147,17 +156,18 @@ func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 // environment variables are deliberately omitted so the string is a hint
 // about *what* users are extending, not a dump of the full command line.
 var launchHeaders = map[string]string{
-	"claude":   "claude (stream-json)",
-	"codex":    "codex app-server",
-	"copilot":  "copilot (json)",
-	"cursor":   "cursor-agent (stream-json)",
-	"gemini":   "gemini (stream-json)",
-	"hermes":   "hermes acp",
-	"openclaw": "openclaw agent (json)",
-	"opencode": "opencode run (json)",
-	"pi":       "pi (json mode)",
-	"kimi":     "kimi acp",
-	"kiro":     "kiro-cli acp",
+	"claude":              "claude (stream-json)",
+	"codex":               "codex app-server",
+	"copilot":             "copilot (json)",
+	"cursor":              "cursor-agent (stream-json)",
+	firtalGatewayProvider: "Firtal Data Registry AI Gateway (HTTP)",
+	"gemini":              "gemini (stream-json)",
+	"hermes":              "hermes acp",
+	"openclaw":            "openclaw agent (json)",
+	"opencode":            "opencode run (json)",
+	"pi":                  "pi (json mode)",
+	"kimi":                "kimi acp",
+	"kiro":                "kiro-cli acp",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

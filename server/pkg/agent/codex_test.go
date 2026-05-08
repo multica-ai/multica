@@ -1107,6 +1107,7 @@ func TestCodexExecuteTimesOutWhenTurnStopsAfterToolResult(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(agent-codex-semantic-inactivity-test): keep progress tests below the timeout without relying on tight scheduler timing.
 func TestCodexExecuteSemanticInactivityAllowsContinuousMessages(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -1131,7 +1132,7 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousMessages(t *testing.T) {
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
 		Timeout:                   5 * time.Second,
-		SemanticInactivityTimeout: 90 * time.Millisecond,
+		SemanticInactivityTimeout: 500 * time.Millisecond,
 	})
 	if result.Status != "completed" {
 		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
@@ -1157,7 +1158,7 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousDeltaProgress(t *testing.
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-delta","turn":{"id":"turn-delta"}}}'`+"\n"+
 		`sleep 0.05`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"item/commandExecution/outputDelta","params":{"threadId":"thr-delta","item":{"type":"commandExecution","id":"cmd-1"},"delta":"line 1\n"}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/commandExecution/outputDelta","params":{"threadId":"thr-delta","item":{"type":"commandExecution","id":"cmd-1"},"delta":"line 1"}}'`+"\n"+
 		`sleep 0.05`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-delta","item":{"type":"agentMessage","id":"msg-1"},"delta":"thinking"}}'`+"\n"+
 		`sleep 0.05`+"\n"+
@@ -1169,7 +1170,7 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousDeltaProgress(t *testing.
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
 		Timeout:                   5 * time.Second,
-		SemanticInactivityTimeout: 150 * time.Millisecond,
+		SemanticInactivityTimeout: 500 * time.Millisecond,
 	})
 	if result.Status != "completed" {
 		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)

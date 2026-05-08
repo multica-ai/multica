@@ -135,43 +135,50 @@ type ProjectResourceData struct {
 	Label        string          `json:"label,omitempty"`
 }
 
+// CEREBRO-PATCH(handler-agent-firtal-gateway-chat-history): expose bounded transcript to stateless managed HTTP runtimes.
+type ChatHistoryMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 type AgentTaskResponse struct {
-	ID                      string                `json:"id"`
-	AgentID                 string                `json:"agent_id"`
-	RuntimeID               string                `json:"runtime_id"`
-	IssueID                 string                `json:"issue_id"`
-	WorkspaceID             string                `json:"workspace_id"`
-	Status                  string                `json:"status"`
-	Priority                int32                 `json:"priority"`
-	DispatchedAt            *string               `json:"dispatched_at"`
-	StartedAt               *string               `json:"started_at"`
-	CompletedAt             *string               `json:"completed_at"`
-	Result                  any                   `json:"result"`
-	Error                   *string               `json:"error"`
-	FailureReason           string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
-	Attempt                 int32                 `json:"attempt"`
-	MaxAttempts             int32                 `json:"max_attempts"`
-	ParentTaskID            *string               `json:"parent_task_id,omitempty"`
-	Agent                   *TaskAgentData        `json:"agent,omitempty"`
-	Repos                   []RepoData            `json:"repos,omitempty"`
-	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
-	ProjectTitle            string                `json:"project_title,omitempty"`     // for surfacing in agent context
-	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
-	CreatedAt               string                `json:"created_at"`
-	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
-	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
-	TriggerCommentID        *string               `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
-	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
-	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
+	ID                    string                `json:"id"`
+	AgentID               string                `json:"agent_id"`
+	RuntimeID             string                `json:"runtime_id"`
+	IssueID               string                `json:"issue_id"`
+	WorkspaceID           string                `json:"workspace_id"`
+	Status                string                `json:"status"`
+	Priority              int32                 `json:"priority"`
+	DispatchedAt          *string               `json:"dispatched_at"`
+	StartedAt             *string               `json:"started_at"`
+	CompletedAt           *string               `json:"completed_at"`
+	Result                any                   `json:"result"`
+	Error                 *string               `json:"error"`
+	FailureReason         string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt               int32                 `json:"attempt"`
+	MaxAttempts           int32                 `json:"max_attempts"`
+	ParentTaskID          *string               `json:"parent_task_id,omitempty"`
+	Agent                 *TaskAgentData        `json:"agent,omitempty"`
+	Repos                 []RepoData            `json:"repos,omitempty"`
+	ProjectID             string                `json:"project_id,omitempty"`        // issue's project, when present
+	ProjectTitle          string                `json:"project_title,omitempty"`     // for surfacing in agent context
+	ProjectResources      []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
+	CreatedAt             string                `json:"created_at"`
+	PriorSessionID        string                `json:"prior_session_id,omitempty"`        // session ID from a previous task on same issue
+	PriorWorkDir          string                `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on same issue
+	TriggerCommentID      *string               `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
+	TriggerCommentContent string                `json:"trigger_comment_content,omitempty"` // content of the triggering comment
+	TriggerSummary        *string               `json:"trigger_summary,omitempty"`         // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
 	// CEREBRO-PATCH(task-title-builder): short generated headline for inline channel row, inbox, AgentLiveCard, Tasks list. Distinct from TriggerSummary (verbatim snapshot).
-	Title                   *string               `json:"title,omitempty"`
-	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
-	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
-	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
-	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks (also: legacy single-message field for daemons pre-JEH-330)
+	Title                 *string               `json:"title,omitempty"`
+	TriggerAuthorType     string                `json:"trigger_author_type,omitempty"` // "agent" or "member" — author kind of the triggering comment
+	TriggerAuthorName     string                `json:"trigger_author_name,omitempty"` // display name of the triggering comment author
+	ChatSessionID         string                `json:"chat_session_id,omitempty"`     // non-empty for chat tasks
+	ChatMessage           string                `json:"chat_message,omitempty"`        // user message for chat tasks (also: legacy single-message field for daemons pre-JEH-330)
 	// CEREBRO-PATCH(agent-task-cerebro-fields): cerebro-only daemon fields.
-	ChatMessages      []string `json:"chat_messages,omitempty"`       // user messages newer than the last assistant reply (oldest first)
-	UserProfilePrompt string   `json:"user_profile_prompt,omitempty"` // compiled per-user communication prompt (JEH-304)
+	ChatHistory       []ChatHistoryMessage `json:"chat_history,omitempty"`        // capped chat transcript for stateless managed HTTP runtimes
+	ChatMessages      []string             `json:"chat_messages,omitempty"`       // user messages newer than the last assistant reply (oldest first)
+	UserProfilePrompt string               `json:"user_profile_prompt,omitempty"` // compiled per-user communication prompt (JEH-304)
 	// TaskToken is a short-lived per-task token (mtt_ prefix) the daemon
 	// injects as MULTICA_TOKEN for the spawned agent process. Scoped to
 	// the task's issue/agent/workspace so an exfiltrated token cannot be
@@ -180,15 +187,15 @@ type AgentTaskResponse struct {
 	// SandboxEnabled is the per-runtime sandbox override (JEH-418), copied
 	// from agent_runtime.sandbox_enabled at claim time so the daemon picks
 	// up changes without restarting. nil = inherit daemon's env-var default.
-	SandboxEnabled          *bool                 `json:"sandbox_enabled,omitempty"`
-	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
-	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
-	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context
-	AutopilotDescription    string                `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
-	AutopilotSource         string                `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
-	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
-	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
-	Kind                    string                `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	SandboxEnabled          *bool           `json:"sandbox_enabled,omitempty"`
+	AutopilotRunID          string          `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
+	AutopilotID             string          `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
+	AutopilotTitle          string          `json:"autopilot_title,omitempty"`           // autopilot title used as task context
+	AutopilotDescription    string          `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
+	AutopilotSource         string          `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
+	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
+	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	Kind                    string          `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon

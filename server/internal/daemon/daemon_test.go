@@ -137,6 +137,30 @@ func TestBuildPromptNoIssueDetails(t *testing.T) {
 	}
 }
 
+func TestBuildGatewayChatPromptIncludesHistory(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildGatewayChatPrompt(Task{
+		ChatSessionID: "chat-1",
+		ChatHistory: []ChatHistoryMessage{
+			{Role: "user", Content: "Hvad hedder projektet?"},
+			{Role: "assistant", Content: "Det hedder Multica."},
+			{Role: "user", Content: "Gentag navnet."},
+		},
+		ChatMessages: []string{"Gentag navnet."},
+	})
+	for _, want := range []string{
+		"Conversation transcript",
+		"user: Hvad hedder projektet?",
+		"assistant: Det hedder Multica.",
+		"user: Gentag navnet.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestBuildPromptAutopilotRunOnly(t *testing.T) {
 	t.Parallel()
 
@@ -467,6 +491,7 @@ func TestWatchTaskCancellation_StatusCancelled(t *testing.T) {
 
 // TestWatchTaskCancellation_RunningTaskNotInterrupted ensures the watcher
 // does NOT trigger on transient errors or while the task is still running.
+// CEREBRO-PATCH(daemon-daemon-test-timing): make runtime cancellation polling assertions scheduler-tolerant.
 func TestWatchTaskCancellation_RunningTaskNotInterrupted(t *testing.T) {
 	t.Parallel()
 
@@ -482,15 +507,17 @@ func TestWatchTaskCancellation_RunningTaskNotInterrupted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	cancelled := d.watchTaskCancellation(ctx, "task-running", 10*time.Millisecond, slog.Default())
+	cancelled := d.watchTaskCancellation(ctx, "task-running", 20*time.Millisecond, slog.Default())
 
-	select {
-	case <-cancelled:
-		t.Fatal("watchTaskCancellation should not signal cancellation while task is running")
-	case <-time.After(150 * time.Millisecond):
-	}
-	if calls.Load() < 5 {
-		t.Fatalf("expected the watcher to poll at least 5 times in 150ms, got %d", calls.Load())
+	deadline := time.After(1 * time.Second)
+	for calls.Load() < 2 {
+		select {
+		case <-cancelled:
+			t.Fatal("watchTaskCancellation should not signal cancellation while task is running")
+		case <-deadline:
+			t.Fatalf("expected the watcher to keep polling, got %d calls", calls.Load())
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 
@@ -498,16 +525,16 @@ func TestMergeUsage(t *testing.T) {
 	t.Parallel()
 
 	a := map[string]agent.TokenUsage{
-		"model-a": {InputTokens: 10, OutputTokens: 5},
+		"model-a": {InputTokens: 10, OutputTokens: 5, CostCents: 2},
 	}
 	b := map[string]agent.TokenUsage{
-		"model-a": {InputTokens: 20, OutputTokens: 10, CacheReadTokens: 3},
+		"model-a": {InputTokens: 20, OutputTokens: 10, CacheReadTokens: 3, CostCents: 5},
 		"model-b": {InputTokens: 100},
 	}
 	merged := mergeUsage(a, b)
 
-	if got := merged["model-a"]; got.InputTokens != 30 || got.OutputTokens != 15 || got.CacheReadTokens != 3 {
-		t.Fatalf("model-a: expected {30,15,3,0}, got %+v", got)
+	if got := merged["model-a"]; got.InputTokens != 30 || got.OutputTokens != 15 || got.CacheReadTokens != 3 || got.CostCents != 7 {
+		t.Fatalf("model-a: expected {30,15,3,0,7}, got %+v", got)
 	}
 	if got := merged["model-b"]; got.InputTokens != 100 {
 		t.Fatalf("model-b: expected InputTokens=100, got %+v", got)

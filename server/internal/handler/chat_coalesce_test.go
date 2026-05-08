@@ -308,6 +308,11 @@ func TestClaimTask_PopulatesBackwardsCompatChatMessage(t *testing.T) {
 		Task *struct {
 			ChatMessage  string   `json:"chat_message"`
 			ChatMessages []string `json:"chat_messages"`
+			// CEREBRO-PATCH(handler-chat-coalesce-firtal-gateway): assert transcript payload for stateless gateway claims.
+			ChatHistory []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"chat_history"`
 		} `json:"task"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
@@ -322,6 +327,12 @@ func TestClaimTask_PopulatesBackwardsCompatChatMessage(t *testing.T) {
 	if resp.Task.ChatMessage != "second message" {
 		t.Fatalf("ChatMessage backwards-compat field: expected %q (latest user msg), got %q",
 			"second message", resp.Task.ChatMessage)
+	}
+	if len(resp.Task.ChatHistory) != 2 {
+		t.Fatalf("ChatHistory: expected 2 entries, got %d", len(resp.Task.ChatHistory))
+	}
+	if resp.Task.ChatHistory[0].Role != "user" || resp.Task.ChatHistory[0].Content != "first message" {
+		t.Fatalf("ChatHistory first = %#v", resp.Task.ChatHistory[0])
 	}
 }
 

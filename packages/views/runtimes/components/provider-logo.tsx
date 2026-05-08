@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { Monitor } from "lucide-react";
+import { Cloud, Monitor } from "lucide-react";
 
 // Claude (Anthropic) — official mark, sourced from Bootstrap Icons (bi-claude)
 function ClaudeLogo({ className }: { className: string }) {
@@ -193,6 +193,9 @@ export function ProviderLogo({
       return <KimiLogo className={className} />;
     case "kiro":
       return <KiroLogo className={className} />;
+    // CEREBRO-PATCH(runtime-provider-logo-firtal-gateway): render managed gateway runtimes as cloud providers.
+    case "firtal-gateway":
+      return <Cloud className={className} />;
     default:
       return <Monitor className={className} />;
   }
