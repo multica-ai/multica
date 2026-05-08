@@ -23,7 +23,6 @@ const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockSetDraft = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
-const mockSetLastAssignee = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
@@ -39,11 +38,8 @@ const mockDraftStore = {
     assigneeId: undefined,
     dueDate: null,
   },
-  lastAssigneeType: undefined,
-  lastAssigneeId: undefined,
   setDraft: mockSetDraft,
   clearDraft: mockClearDraft,
-  setLastAssignee: mockSetLastAssignee,
 };
 
 const mockQuickCreateStore = {
@@ -262,6 +258,15 @@ describe("CreateIssueModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuickCreateStore.keepOpen = false;
+    mockDraftStore.draft = {
+      title: "",
+      description: "",
+      status: "todo",
+      priority: "none",
+      assigneeType: undefined,
+      assigneeId: undefined,
+      dueDate: null,
+    };
     mockSetKeepOpen.mockImplementation((v: boolean) => {
       mockQuickCreateStore.keepOpen = v;
     });
@@ -297,7 +302,6 @@ describe("CreateIssueModal", () => {
       });
     });
 
-    expect(mockSetLastAssignee).toHaveBeenCalledWith(undefined, undefined);
     expect(mockClearDraft).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
     expect(mockToastCustom).toHaveBeenCalledTimes(1);
@@ -321,6 +325,8 @@ describe("CreateIssueModal", () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     mockQuickCreateStore.keepOpen = true;
+    mockDraftStore.draft.assigneeType = "member";
+    mockDraftStore.draft.assigneeId = "alice";
 
     renderModal(<CreateIssueModal onClose={onClose} />);
 
@@ -334,8 +340,8 @@ describe("CreateIssueModal", () => {
         description: "Description to clear",
         status: "todo",
         priority: "none",
-        assignee_type: undefined,
-        assignee_id: undefined,
+        assignee_type: "member",
+        assignee_id: "alice",
         due_date: undefined,
         attachment_ids: undefined,
         parent_issue_id: undefined,

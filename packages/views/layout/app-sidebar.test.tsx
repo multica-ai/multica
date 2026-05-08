@@ -1,11 +1,13 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { detail, deletePin, pins } = vi.hoisted(() => ({
+const { detail, deletePin, pins, pathname, openModal } = vi.hoisted(() => ({
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
   deletePin: vi.fn(),
+  openModal: vi.fn(),
+  pathname: { current: "/acme/issues" },
   pins: {
     current: [
       {
@@ -43,7 +45,13 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   SidebarGroupLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SidebarMenuButton: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
+  SidebarMenuButton: ({
+    children,
+    onClick,
+  }: {
+    children: React.ReactNode;
+    onClick?: () => void;
+  }) => <button type="button" onClick={onClick}>{children}</button>,
   SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarRail: () => null,
 }));
@@ -71,7 +79,7 @@ vi.mock("../auth", () => ({ useLogout: () => vi.fn() }));
 vi.mock("../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
 vi.mock("../navigation", () => ({
   AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
-  useNavigation: () => ({ pathname: "/acme/issues", push: vi.fn() }),
+  useNavigation: () => ({ pathname: pathname.current, push: vi.fn() }),
 }));
 vi.mock("../projects/components/project-icon", () => ({ ProjectIcon: () => <span /> }));
 vi.mock("../workspace/workspace-avatar", () => ({ WorkspaceAvatar: () => <span /> }));
@@ -100,9 +108,8 @@ vi.mock("@multica/core/paths", () => ({
 vi.mock("@multica/core/api", async (importOriginal) => ({ ...(await importOriginal<typeof import("@multica/core/api")>()), api: {} }));
 vi.mock("@multica/core/inbox/queries", () => ({ deduplicateInboxItems: (items: unknown[]) => items, inboxKeys: { list: () => ["inbox"] } }));
 vi.mock("@multica/core/issues/queries", () => ({ issueDetailOptions: () => ({ queryKey: ["issue"] }) }));
-vi.mock("@multica/core/issues/stores/create-mode-store", () => ({ useCreateModeStore: { getState: () => ({ lastMode: "agent" }) } }));
 vi.mock("@multica/core/issues/stores/draft-store", () => ({ useIssueDraftStore: () => false }));
-vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: vi.fn() }) } }));
+vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: openModal }) } }));
 vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: deletePin }), useReorderPins: () => ({ mutate: vi.fn() }) }));
 vi.mock("@multica/core/pins/queries", () => ({ pinListOptions: () => ({ queryKey: ["pins"] }) }));
 vi.mock("@multica/core/projects/queries", () => ({ projectDetailOptions: () => ({ queryKey: ["project"] }) }));
@@ -126,6 +133,8 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
 describe("PinRow", () => {
   beforeEach(() => {
     deletePin.mockReset();
+    openModal.mockReset();
+    pathname.current = "/acme/issues";
     detail.current = { isPending: false, isError: false, data: null, error: null };
   });
 
@@ -145,5 +154,18 @@ describe("PinRow", () => {
     detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
     render(<AppSidebar />);
     expect(await screen.findByText("MUL-123 Keep this pin")).toBeInTheDocument();
+  });
+
+  it("opens manual create issue with project prefill on the global shortcut", () => {
+    pathname.current = "/acme/projects/project-1";
+    render(<AppSidebar />);
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "c" }));
+    });
+
+    expect(openModal).toHaveBeenCalledWith("create-issue", {
+      project_id: "project-1",
+    });
   });
 });

@@ -86,7 +86,6 @@ export function ManualCreatePanel({
   const draft = useIssueDraftStore((s) => s.draft);
   const setDraft = useIssueDraftStore((s) => s.setDraft);
   const clearDraft = useIssueDraftStore((s) => s.clearDraft);
-  const setLastAssignee = useIssueDraftStore((s) => s.setLastAssignee);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
@@ -149,6 +148,8 @@ export function ManualCreatePanel({
     setTitle("");
     setStatus("todo");
     setPriority("none");
+    setAssigneeType(undefined);
+    setAssigneeId(undefined);
     setDueDate(null);
     setProjectId(undefined);
     setParentIssueId(undefined);
@@ -159,8 +160,8 @@ export function ManualCreatePanel({
       description: "",
       status: "todo",
       priority: "none",
-      assigneeType,
-      assigneeId,
+      assigneeType: undefined,
+      assigneeId: undefined,
       dueDate: null,
     });
     descEditorRef.current?.clearContent();
@@ -209,7 +210,6 @@ export function ManualCreatePanel({
         }
       }
 
-      setLastAssignee(assigneeType, assigneeId);
       setLastMode("manual");
       clearDraft();
       const shouldShowBacklogHint =
