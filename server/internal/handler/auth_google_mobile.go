@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	"google.golang.org/api/idtoken"
 )
@@ -18,8 +19,35 @@ type googleIDTokenPayload struct {
 	Picture string
 }
 
+var (
+	googleIDTokenValidatorOnce sync.Once
+	googleIDTokenValidatorVal  *idtoken.Validator
+	googleIDTokenValidatorErr  error
+)
+
+func googleIDTokenValidator(ctx context.Context) (*idtoken.Validator, error) {
+	googleIDTokenValidatorOnce.Do(func() {
+		googleIDTokenValidatorVal, googleIDTokenValidatorErr = idtoken.NewValidator(
+			ctx,
+			idtoken.WithHTTPClient(googleHTTPClient()),
+		)
+	})
+	return googleIDTokenValidatorVal, googleIDTokenValidatorErr
+}
+
+func resetGoogleIDTokenValidator() {
+	googleIDTokenValidatorOnce = sync.Once{}
+	googleIDTokenValidatorVal = nil
+	googleIDTokenValidatorErr = nil
+}
+
 var validateGoogleIDToken = func(ctx context.Context, idToken, audience string) (googleIDTokenPayload, error) {
-	payload, err := idtoken.Validate(ctx, idToken, audience)
+	validator, err := googleIDTokenValidator(ctx)
+	if err != nil {
+		return googleIDTokenPayload{}, err
+	}
+
+	payload, err := validator.Validate(ctx, idToken, audience)
 	if err != nil {
 		return googleIDTokenPayload{}, err
 	}
