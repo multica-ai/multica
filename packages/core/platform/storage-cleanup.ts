@@ -17,6 +17,7 @@ const WORKSPACE_SCOPED_KEYS = [
   "multica:chat:drafts",
   "multica:chat:expanded",
   "multica_navigation",
+  "multica_channel_favorites", // CEREBRO-PATCH(channel-favorites-storage): per-workspace pinned actors for new-message picker
   "cerebro_feature_flags", // CEREBRO-PATCH(feature-flags-storage): cerebro-fork persist key
 ];
 

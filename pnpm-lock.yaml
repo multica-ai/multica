@@ -735,9 +735,6 @@ importers:
       '@multica/core':
         specifier: workspace:*
         version: link:../core
-      '@multica/views':
-        specifier: workspace:*
-        version: link:../views
       lucide-react:
         specifier: 'catalog:'
         version: 1.0.1(react@19.2.3)
@@ -747,6 +744,9 @@ importers:
       sonner:
         specifier: ^2.0.7
         version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      zustand:
+        specifier: 'catalog:'
+        version: 5.0.12(@types/react@19.2.14)(immer@11.1.4)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
     devDependencies:
       '@multica/tsconfig':
         specifier: workspace:*
@@ -1506,6 +1506,9 @@ importers:
       '@floating-ui/dom':
         specifier: ^1.7.6
         version: 1.7.6
+      '@multica/cerebro-channels':
+        specifier: workspace:*
+        version: link:../cerebro-channels
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags

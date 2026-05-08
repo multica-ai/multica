@@ -126,12 +126,13 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `chat-status-line` | packages/views/chat/components/chat-status-line.tsx | 93 | Chat view cerebro additions (MCP onboarding, status, archive) |
 | `chat-tool-summary` | packages/views/chat/components/tool-summary.ts | 35 | Chat view cerebro additions (MCP onboarding, status, archive) |
 | `chat-window-cerebro` | packages/views/chat/components/chat-window.tsx | 7 | Chat view cerebro additions (MCP onboarding, status, archive) |
+| `channel-favorites-storage` | packages/core/platform/storage-cleanup.ts | 1 | JEH-718 — registers `multica_channel_favorites` as a workspace-scoped storage key so it is cleared on logout/workspace deletion |
 | `channels-components-participants-panel` | packages/views/channels/components/index.ts | 1 | JEH-700 — re-exports new ParticipantsPanel side-panel component |
-| `channels-dm-gate-hint` | packages/views/channels/components/new-message-modal.tsx | 4 | JEH-700 — DM tab hint "DMs are 1-on-1 — create a channel for groups" so users see the constraint before submitting |
 | `channels-index-rename-participants` | packages/core/channels/index.ts | 3 | JEH-700 — re-exports useUpdateChannel + useToggleChannelParticipant |
 | `channels-mutations` | packages/core/channels/mutations.ts | 130 | JEH-700 — useUpdateChannel (rename) + useToggleChannelParticipant (subscribe/unsubscribe) with optimistic cache updates for channel detail/list |
 | `channels-participants-panel` | packages/views/channels/components/participants-panel.tsx | 280 | JEH-700 — Sheet-based side panel listing channel participants with remove (confirm dialog) + add picker; reuses canAssignAgent + ActorAvatar |
 | `channels-rename-participants` | packages/views/channels/components/channel-detail.tsx | 110 | JEH-700 — inline-editable channel title (kind='channel' only) + clickable participant stack opening the ParticipantsPanel sheet |
+| `channels-favorites-cycle-break` | packages/views/channels/components/channel-detail.tsx | 1 | JEH-718 — inject ActorAvatar into ChannelAgentInlineRow so cerebro-channels does not need an @multica/views dependency (would close a turbo task cycle once views imports favorites-store from cerebro-channels) |
 | `claude-stderr-tail-tests` | server/pkg/agent/claude_test.go | 0 | Claude stderr-tail diagnostic tests |
 | `cli-attachments` | server/internal/cli/client.go | 0 | Cerebro modification (see file for details) |
 | `comment-card-cerebro` | packages/views/issues/components/comment-card.tsx | 42 | Comment cerebro additions (replies, attachments, reactions) |
@@ -291,6 +292,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `migration-idempotent-059-task-tokens` | server/migrations/059_task_tokens.down.sql<br>server/migrations/059_task_tokens.up.sql | 20 | Adds `IF NOT EXISTS` / `IF EXISTS` clauses for idempotent migration replay |
 | `migration-idempotent-060-runtime-sandbox-enabled` | server/migrations/060_runtime_sandbox_enabled.down.sql<br>server/migrations/060_runtime_sandbox_enabled.up.sql | 8 | Adds `IF NOT EXISTS` / `IF EXISTS` clauses for idempotent migration replay |
 | `multica-cli-cerebro-cmds` | server/cmd/multica/main.go | 3 | Cerebro CLI command wiring |
+| `new-message-modal-redesign` | packages/views/channels/components/new-message-modal.tsx | (full rewrite) | JEH-718 — replaces the DM/Channel-tabbed picker with a single actor list (members + agents) supporting multiselect, live search, comma-separated default channel name, and per-workspace pinned favorites (favorites store lives in `@multica/cerebro-channels`). Subsumes the prior `channels-dm-gate-hint` patch (DM tab removed) |
 | `new-workspace-page-cerebro` | packages/views/workspace/new-workspace-page.tsx | 3 | New-workspace page cerebro additions |
 | `notification-routing-test-cerebro` | server/cmd/server/notification_routing_test.go | 520 | Server cmd additions |
 | `notify-all-mobile-inbox` | server/cmd/server/notification_routing.go<br>server/cmd/server/notification_routing_test.go | 8 | JEH-737 master toggle: when `preferences.notifications.notify_all_mobile_inbox` is true, mobile channel resolution mirrors the inbox channel for the same key so every inbox item also fires a Web Push without curating the per-key matrix. |

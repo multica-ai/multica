@@ -11,13 +11,13 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@multica/core": "workspace:*",
-    "@multica/views": "workspace:*"
+    "@multica/core": "workspace:*"
   },
   "peerDependencies": {
     "lucide-react": "catalog:",
     "react": "catalog:",
-    "sonner": "^2.0.7"
+    "sonner": "^2.0.7",
+    "zustand": "catalog:"
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",

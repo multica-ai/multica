@@ -1,5 +1,5 @@
 {
-  "_comment": "CEREBRO-PATCH(views-package-cerebro-deps): adds cerebro-* package deps + new exports for cerebro views",
+  "_comment": "CEREBRO-PATCH(views-package-cerebro-deps): adds cerebro-* package deps (incl. cerebro-channels — JEH-718) + new exports for cerebro views",
   "name": "@multica/views",
   "version": "0.0.0",
   "private": true,
@@ -57,6 +57,7 @@
     "@floating-ui/dom": "^1.7.6",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
+    "@multica/cerebro-channels": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-inbox": "workspace:*",
     "@tiptap/core": "^3.22.1",

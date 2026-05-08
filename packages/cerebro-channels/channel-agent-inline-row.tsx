@@ -16,20 +16,31 @@
 // the channel comment stream itself is the agent's transcript — the
 // agent's reply lands as a comment.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
 import { Loader2, Square } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import type { AgentTask } from "@multica/core/types/agent";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { ActorAvatar } from "@multica/views/common/actor-avatar";
+
+// Avatar component is injected by the consumer (views/channels) so cerebro-channels
+// stays free of an `@multica/views` dependency — that direction would close a
+// cycle once views imports favorites-store from cerebro-channels.
+type AvatarComponent = ComponentType<{
+  actorType: "agent" | "member";
+  actorId: string;
+  size?: number;
+  enableHoverCard?: boolean;
+  showStatusDot?: boolean;
+}>;
 
 interface ChannelAgentInlineRowProps {
   channelId: string;
+  AvatarComponent: AvatarComponent;
 }
 
-export function ChannelAgentInlineRow({ channelId }: ChannelAgentInlineRowProps) {
+export function ChannelAgentInlineRow({ channelId, AvatarComponent }: ChannelAgentInlineRowProps) {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const reconcileSeq = useRef(0);
   const mountedRef = useRef(true);
@@ -103,7 +114,12 @@ export function ChannelAgentInlineRow({ channelId }: ChannelAgentInlineRowProps)
   return (
     <div className="space-y-1.5">
       {tasks.map((task) => (
-        <ChannelAgentRow key={task.id} task={task} channelId={channelId} />
+        <ChannelAgentRow
+          key={task.id}
+          task={task}
+          channelId={channelId}
+          AvatarComponent={AvatarComponent}
+        />
       ))}
     </div>
   );
@@ -126,9 +142,10 @@ function formatElapsed(startedAt: string | null | undefined, fallback: string): 
 interface ChannelAgentRowProps {
   task: AgentTask;
   channelId: string;
+  AvatarComponent: AvatarComponent;
 }
 
-function ChannelAgentRow({ task, channelId }: ChannelAgentRowProps) {
+function ChannelAgentRow({ task, channelId, AvatarComponent }: ChannelAgentRowProps) {
   const { getActorName } = useActorName();
   const agentName = task.agent_id ? getActorName("agent", task.agent_id) : "Agent";
   const [elapsed, setElapsed] = useState("");
@@ -161,7 +178,7 @@ function ChannelAgentRow({ task, channelId }: ChannelAgentRowProps) {
     <div className="rounded-lg border border-info/20 bg-info/5">
       <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground">
         {task.agent_id ? (
-          <ActorAvatar
+          <AvatarComponent
             actorType="agent"
             actorId={task.agent_id}
             size={20}

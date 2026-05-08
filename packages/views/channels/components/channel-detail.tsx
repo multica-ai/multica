@@ -228,7 +228,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
           (avatar + "Lando is working: <generated title>" + Stop) instead
           of waiting blindly for the reply to land. */}
       <div className="shrink-0 px-4 pt-2 empty:hidden">
-        <ChannelAgentInlineRow channelId={channelId} />
+        {/* CEREBRO-PATCH(channels-favorites-cycle-break): inject ActorAvatar so cerebro-channels stays free of an @multica/views dep (JEH-718). */}
+        <ChannelAgentInlineRow channelId={channelId} AvatarComponent={ActorAvatar} />
       </div>
       <div className="shrink-0 border-t px-4 py-3">
         {/* CEREBRO-PATCH(input-autofocus): JEH-756 — channels & DMs are
