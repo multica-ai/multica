@@ -40,20 +40,31 @@ var (
 // gate for staging or production users running stale stable releases.
 var devDescribeRe = regexp.MustCompile(`^v?\d+\.\d+\.\d+-\d+-g[0-9a-fA-F]+`)
 
+// isBareDevVersion matches the literal "dev" fallback. main.go defaults
+// `version = "dev"` when ldflags are not passed (e.g. `go build ./cmd/multica`
+// without `make build`) and the Makefile's `git describe ... || echo dev`
+// fallback fires the same string when run outside a git checkout. Both produce
+// a daemon that's *ahead* of every tagged release, not behind — the same
+// intent as devDescribeRe — so we let it through. Without this, users who
+// build from source via the simplest `go build` invocation get a confusing
+// "doesn't report a CLI version" wall in the agent-create UI.
+func isBareDevVersion(s string) bool { return s == "dev" }
+
 // CheckMinCLIVersion returns nil when `detected` parses as ≥ minimum. Returns
 // ErrCLIVersionMissing for empty or unparsable input, and ErrCLIVersionTooOld
 // when parsable but below the minimum. The caller can check for these
 // sentinel errors with errors.Is to drive the response shape.
 //
-// Dev-built daemons (git-describe shape) always pass — the version string
-// itself is the shared signal, so the modal pre-check and this server gate
-// agree by construction without needing to compare separate env flags.
+// Dev-built daemons (git-describe shape OR the bare "dev" fallback) always
+// pass — the version string itself is the shared signal, so the modal
+// pre-check and this server gate agree by construction without needing to
+// compare separate env flags.
 func CheckMinCLIVersion(detected string) error {
 	d := strings.TrimSpace(detected)
 	if d == "" {
 		return ErrCLIVersionMissing
 	}
-	if devDescribeRe.MatchString(d) {
+	if devDescribeRe.MatchString(d) || isBareDevVersion(d) {
 		return nil
 	}
 	parsed, err := parseSemver(d)

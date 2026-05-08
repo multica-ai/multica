@@ -32,6 +32,15 @@ const SEMVER_RE = /v?(\d+)\.(\d+)\.(\d+)/;
 // the gate for staging or production users running stale stable releases.
 const DEV_DESCRIBE_RE = /^v?\d+\.\d+\.\d+-\d+-g[0-9a-fA-F]+/;
 
+// The bare `"dev"` fallback. `main.go` defaults `version = "dev"` when ldflags
+// aren't passed (e.g. `go build ./cmd/multica` without `make build`), and the
+// Makefile's `git describe ... || echo dev` fallback emits the same string
+// when run outside a git checkout. Both produce a daemon that's *ahead* of
+// every tagged release — same intent as DEV_DESCRIBE_RE — so we accept it,
+// otherwise the simplest `go build` workflow trips the agent-create gate with
+// a confusing "doesn't report a CLI version" message.
+const BARE_DEV = "dev";
+
 function parseSemver(raw: string): [number, number, number] | null {
   const m = SEMVER_RE.exec(raw.trim());
   if (!m) return null;
@@ -53,7 +62,7 @@ function lessThan(a: [number, number, number], b: [number, number, number]) {
  */
 export function checkQuickCreateCliVersion(detected: string | undefined | null): CliVersionCheck {
   const current = (detected ?? "").trim();
-  if (DEV_DESCRIBE_RE.test(current)) {
+  if (DEV_DESCRIBE_RE.test(current) || current === BARE_DEV) {
     return { state: "ok", current, min: MIN_QUICK_CREATE_CLI_VERSION };
   }
   const parsed = current ? parseSemver(current) : null;

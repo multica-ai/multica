@@ -66,6 +66,10 @@ func TestCheckMinCLIVersion(t *testing.T) {
 		{"git-describe dev build past old tag", "v0.2.15-235-gdaf0e935", nil},
 		{"git-describe dirty dev build", "v0.2.15-235-gdaf0e935-dirty", nil},
 		{"git-describe dev build past current tag", "v0.2.20-3-gabc1234", nil},
+		// Bare "dev" — main.go default when ldflags aren't passed (plain `go
+		// build ./cmd/multica`) or when `make build` runs outside a git
+		// checkout. Treated the same as a git-describe shape: dev = ahead.
+		{"bare dev fallback", "dev", nil},
 	}
 	for _, tt := range tests {
 		err := CheckMinCLIVersion(tt.input)
