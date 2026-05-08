@@ -13,6 +13,7 @@ COPY packages/ui/package.json packages/ui/
 COPY packages/views/package.json packages/views/
 COPY packages/tsconfig/package.json packages/tsconfig/
 COPY packages/eslint-config/package.json packages/eslint-config/
+COPY packages/mcp/package.json packages/mcp/
 
 RUN pnpm install --frozen-lockfile
 
@@ -42,6 +43,15 @@ ENV REMOTE_API_URL=$REMOTE_API_URL
 ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
 ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 ENV STANDALONE=true
+
+# Build the MCP server first and stage it as a downloadable static asset
+# under the web app's public/ directory. Next.js' standalone output ships
+# public/ as-is, so this produces /multica-mcp.js on the served frontend
+# and lets users grab the server with a single curl from the settings UI
+# instead of having to clone the repo and pnpm-build themselves.
+RUN pnpm --filter @multica/mcp build && \
+    mkdir -p apps/web/public && \
+    cp packages/mcp/dist/index.js apps/web/public/multica-mcp.js
 
 # Build the web app (standalone output for minimal runtime)
 RUN pnpm --filter @multica/web build

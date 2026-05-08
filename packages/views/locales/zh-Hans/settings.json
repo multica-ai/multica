@@ -208,5 +208,22 @@
         "description": "创建并处理 issue"
       }
     }
+  },
+  "connection": {
+    "title": "连接信息",
+    "description": "把下方内容粘贴到 CLI、MCP 服务器或其他客户端中,搭配上方的 personal access token 使用。",
+    "api_url_label": "API 基础 URL",
+    "workspace_id_label": "工作区 ID",
+    "workspace_name_label": "工作区名称",
+    "copy_tooltip": "复制",
+    "unavailable": "不可用"
+  },
+  "mcp": {
+    "title": "Model Context Protocol",
+    "description": "Multica 二进制内置 MCP 服务器(`multica mcp-stdio`)。把下面的配置粘贴到 AI 客户端,使用对应环境变量启动即可,无需安装其他组件。",
+    "claude_code_heading": "Claude Code",
+    "claude_desktop_heading": "Claude Desktop",
+    "claude_desktop_description": "添加到 ~/Library/Application Support/Claude/claude_desktop_config.json(macOS),然后重启应用。",
+    "security_note": "安全提示:MCP 服务器在本地运行,以 token 持有者的身份执行操作。请像保护密码一样保护 token,泄露后立即撤销。可写工具(创建/更新 issue、发频道消息、触发 autopilot)都使用账户的完整权限,没有独立的 MCP 范围。"
   }
 }
