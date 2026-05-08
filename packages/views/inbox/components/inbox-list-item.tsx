@@ -4,8 +4,8 @@
 
 import { StatusIcon } from "../../issues/components";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { Archive, Hash, MessagesSquare } from "lucide-react";
-import { CerebroInboxRowActions } from "@multica/cerebro-inbox"; // CEREBRO-PATCH(inbox-row-actions-mount)
+import { Hash, MessagesSquare } from "lucide-react";
+import { CerebroInboxRowActions, CerebroSwipeArchive } from "@multica/cerebro-inbox"; // CEREBRO-PATCH(inbox-row-actions-mount)
 import { AvatarGroup } from "@multica/ui/components/ui/avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { Channel, ChannelMember, InboxItem } from "@multica/core/types";
@@ -55,7 +55,6 @@ function InboxListItemShell({
   children,
   cerebroItem, // CEREBRO-PATCH(inbox-row-actions-mount)
 }: InboxListItemBaseProps) {
-  const { t } = useT("inbox");
   return (
     <button
       onClick={onClick}
@@ -72,29 +71,12 @@ function InboxListItemShell({
       {children}
       {/* CEREBRO-PATCH(inbox-row-actions-mount): full row-actions surface
           (mute / mark-unread, hover menu, mobile swipe + long-press) for
-          issue inbox rows. Channel/DM rows pass no cerebroItem and keep the
-          simple hover-only archive icon below. */}
+          issue inbox rows; swipe-archive-only variant for channel/DM rows
+          (no per-row mute/unread state, but the archive gesture applies). */}
       {cerebroItem ? (
         <CerebroInboxRowActions item={cerebroItem} onArchive={onArchive} />
       ) : (
-        <span
-          role="button"
-          tabIndex={-1}
-          title={t(($) => $.list.archive_tooltip)}
-          onClick={(e) => {
-            e.stopPropagation();
-            onArchive();
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.stopPropagation();
-              onArchive();
-            }
-          }}
-          className="absolute right-2 top-1/2 -translate-y-1/2 hidden h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground sm:group-hover:inline-flex"
-        >
-          <Archive className="h-3.5 w-3.5" />
-        </span>
+        <CerebroSwipeArchive onArchive={onArchive} />
       )}
     </button>
   );

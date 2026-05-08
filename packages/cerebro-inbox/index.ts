@@ -5,7 +5,10 @@
 // (JEH-650, migration 9012). The package is now home to the cerebro-only
 // row-actions surface (mute, mark-unread, hover menu, swipe gestures, long-
 // press) and its supporting hooks.
-export { CerebroInboxRowActions } from "./components/cerebro-inbox-row-actions";
+export {
+  CerebroInboxRowActions,
+  CerebroSwipeArchive,
+} from "./components/cerebro-inbox-row-actions";
 export { useInboxKeyboardShortcuts } from "./use-inbox-keyboard-shortcuts";
 export {
   useMuteInbox,

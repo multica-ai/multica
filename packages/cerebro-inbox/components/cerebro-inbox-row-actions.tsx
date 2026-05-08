@@ -36,10 +36,14 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useMuteInbox, useUnmuteInbox, useMarkInboxUnread } from "../mutations";
 import { isMuted, nextLocalEightAm } from "../mute-time";
 import { useCerebroInboxStrings } from "../strings";
-
-const SWIPE_COMMIT_PX = 80;
-const LEFT_PANEL_REVEAL_PX = 144;
-const LONG_PRESS_MS = 500;
+import {
+  DIRECTION_DECIDE_PX,
+  HORIZONTAL_DEADZONE_PX,
+  LEFT_PANEL_REVEAL_PX,
+  LONG_PRESS_MS,
+  VERTICAL_BAIL_PX,
+  commitThresholdPx,
+} from "../swipe-thresholds";
 
 interface Props {
   item: InboxItem;
@@ -178,10 +182,14 @@ function DesktopRowActions({ menuItems, onArchive, strings }: DesktopProps) {
         </IconButton>
 
         <DropdownMenu open={hoverMenuOpen} onOpenChange={setHoverMenuOpen}>
+          {/* role=button span (not <button>) so the trigger nests cleanly
+              inside the parent InboxListItemShell <button>, which otherwise
+              produces invalid HTML and unstable click delivery on mobile. */}
           <DropdownMenuTrigger
             render={(props) => (
-              <button
-                type="button"
+              <span
+                role="button"
+                tabIndex={-1}
                 aria-label={strings.more_actions}
                 title={strings.more_actions}
                 {...props}
@@ -191,7 +199,7 @@ function DesktopRowActions({ menuItems, onArchive, strings }: DesktopProps) {
                 )}
               >
                 <MoreHorizontal className="size-3.5" />
-              </button>
+              </span>
             )}
           />
           <DropdownMenuContent align="end" className="min-w-44">
@@ -248,10 +256,26 @@ function MobileRowActions({
   const containerRef = useRef<HTMLDivElement>(null);
   const startX = useRef<number | null>(null);
   const startY = useRef<number | null>(null);
+  // null until the gesture has moved past DIRECTION_DECIDE_PX in either
+  // axis — at which point we lock the dominant direction so subsequent
+  // movement can't flip mid-gesture.
+  const lockedDirRef = useRef<"horizontal" | "vertical" | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [offsetX, setOffsetX] = useState(0);
+  // offsetX is mirrored in a ref so the pointerup handler reads the live
+  // gesture distance (closure capture from setState lags by one render).
+  const offsetXRef = useRef(0);
+  const [offsetX, setOffsetXState] = useState(0);
+  const setOffsetX = useCallback((v: number) => {
+    offsetXRef.current = v;
+    setOffsetXState(v);
+  }, []);
   const [revealed, setRevealed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Set true at the moment a swipe-right archive (or swipe-left reveal)
+  // commits, so the click event the browser synthesises after the touch
+  // sequence is swallowed by the parent shell <button> (otherwise the row's
+  // onClick fires and we navigate to the issue right after archiving it).
+  const swipeJustCompletedRef = useRef(false);
 
   // Apply the offset transform to the parent row so the user sees the row
   // visually follow the finger.
@@ -267,6 +291,25 @@ function MobileRowActions({
     row.style.transition = startX.current === null ? "transform 200ms" : "";
   }, [offsetX, revealed]);
 
+  // Capture-phase click listener on the parent shell <button>: when a swipe
+  // just committed, the synthetic click fired by the browser after touchend
+  // is intercepted here and prevented from triggering the row's onClick
+  // (navigation). Without this, swipe-right "archives + navigates", which
+  // looks to the user like the gesture didn't work.
+  useEffect(() => {
+    const node = containerRef.current?.parentElement;
+    if (!node) return;
+    const handler = (e: MouseEvent) => {
+      if (swipeJustCompletedRef.current) {
+        swipeJustCompletedRef.current = false;
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    };
+    node.addEventListener("click", handler, true);
+    return () => node.removeEventListener("click", handler, true);
+  }, []);
+
   const cancelLongPress = useCallback(() => {
     if (longPressTimer.current) {
       clearTimeout(longPressTimer.current);
@@ -278,6 +321,7 @@ function MobileRowActions({
     if (e.pointerType !== "touch") return;
     startX.current = e.clientX;
     startY.current = e.clientY;
+    lockedDirRef.current = null;
     longPressTimer.current = setTimeout(() => {
       setDrawerOpen(true);
       startX.current = null; // disable swipe once long-press fires
@@ -288,16 +332,40 @@ function MobileRowActions({
     if (startX.current === null) return;
     const dx = e.clientX - startX.current;
     const dy = e.clientY - (startY.current ?? 0);
-    if (Math.abs(dy) > 24 && Math.abs(dy) > Math.abs(dx)) {
-      // Vertical scroll wins; bow out.
-      cancelLongPress();
-      startX.current = null;
-      setOffsetX(0);
-      return;
+    const adx = Math.abs(dx);
+    const ady = Math.abs(dy);
+
+    // Direction lock — pick once movement is past the decision zone.
+    if (lockedDirRef.current === null) {
+      if (adx < DIRECTION_DECIDE_PX && ady < DIRECTION_DECIDE_PX) return;
+      if (ady > adx && ady > VERTICAL_BAIL_PX) {
+        // Vertical scroll wins; bail and let the browser take over.
+        cancelLongPress();
+        startX.current = null;
+        lockedDirRef.current = "vertical";
+        setOffsetX(0);
+        return;
+      }
+      lockedDirRef.current = "horizontal";
     }
-    if (Math.abs(dx) > 8) cancelLongPress();
+
+    if (lockedDirRef.current !== "horizontal") return;
+    cancelLongPress();
+
+    // Apply a deadzone so the first ~12px doesn't visibly move the row —
+    // small touch jitter shouldn't drag it. Past the deadzone, subtract it
+    // so the row tracks the finger naturally from there.
+    const adjusted =
+      dx > HORIZONTAL_DEADZONE_PX
+        ? dx - HORIZONTAL_DEADZONE_PX
+        : dx < -HORIZONTAL_DEADZONE_PX
+          ? dx + HORIZONTAL_DEADZONE_PX
+          : 0;
     // Clamp: right-swipe up to row width, left-swipe up to panel width.
-    const clamped = Math.max(-LEFT_PANEL_REVEAL_PX - 16, Math.min(dx, 240));
+    const clamped = Math.max(
+      -LEFT_PANEL_REVEAL_PX - 16,
+      Math.min(adjusted, 240),
+    );
     setOffsetX(clamped);
   };
 
@@ -305,16 +373,23 @@ function MobileRowActions({
     cancelLongPress();
     if (startX.current === null) {
       // Long-press fired or pointer was cancelled.
+      lockedDirRef.current = null;
       return;
     }
     startX.current = null;
-    if (offsetX >= SWIPE_COMMIT_PX) {
+    lockedDirRef.current = null;
+    const live = offsetXRef.current;
+    const rowWidth = containerRef.current?.parentElement?.clientWidth ?? 360;
+    const commitPx = commitThresholdPx(rowWidth);
+    if (live >= commitPx) {
+      swipeJustCompletedRef.current = true;
       setOffsetX(0);
       setRevealed(false);
       onArchive();
       return;
     }
-    if (offsetX <= -SWIPE_COMMIT_PX) {
+    if (live <= -commitPx) {
+      swipeJustCompletedRef.current = true;
       setOffsetX(0);
       setRevealed(true);
       return;
@@ -362,8 +437,9 @@ function MobileRowActions({
       style={{ width: revealed ? LEFT_PANEL_REVEAL_PX : Math.max(-offsetX, 0) }}
       aria-hidden={!revealed}
     >
-      <button
-        type="button"
+      <span
+        role="button"
+        tabIndex={-1}
         onClick={(e) => {
           e.stopPropagation();
           closePanel();
@@ -377,9 +453,10 @@ function MobileRowActions({
           <MailWarning className="size-4" />
         )}
         <span>{unread ? strings.mark_read : strings.mark_unread}</span>
-      </button>
-      <button
-        type="button"
+      </span>
+      <span
+        role="button"
+        tabIndex={-1}
         onClick={(e) => {
           e.stopPropagation();
           closePanel();
@@ -389,7 +466,7 @@ function MobileRowActions({
       >
         {muted ? <BellRing className="size-4" /> : <BellOff className="size-4" />}
         <span>{muted ? strings.unmute : strings.mute}</span>
-      </button>
+      </span>
     </div>
   );
 
@@ -471,11 +548,23 @@ function MenuItems({
 function IconButton({
   children,
   className,
+  onClick,
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+}: React.HTMLAttributes<HTMLSpanElement>) {
+  // role=button span (not <button>) — the inbox row shell wraps the whole
+  // row in a <button>, and a real <button> nested inside another <button>
+  // is invalid HTML and produces unstable click delivery on mobile Safari.
   return (
-    <button
-      type="button"
+    <span
+      role="button"
+      tabIndex={-1}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.stopPropagation();
+          (onClick as ((e: React.SyntheticEvent) => void) | undefined)?.(e);
+        }
+      }}
       className={cn(
         "flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
         className,
@@ -483,7 +572,152 @@ function IconButton({
       {...props}
     >
       {children}
-    </button>
+    </span>
+  );
+}
+
+/**
+ * Swipe-only cerebro variant for inbox rows that aren't issue items —
+ * channels and DMs. The full row-actions surface is item-specific (mute /
+ * mark-unread keyed off `inbox_item.id`), but archive applies uniformly to
+ * any row in the inbox queue, so this slimmer component gives channel rows
+ * the same swipe-right ergonomics without dragging in the rest of the menu.
+ *
+ * Renders:
+ * - Desktop: hover-only archive icon (matches the upstream simple icon)
+ * - Mobile: full-row touch overlay; swipe-right ≥80px archives on release
+ *
+ * Reuses the same click-suppression pattern as `MobileRowActions` so the
+ * swipe gesture doesn't leak through to the parent row's onClick navigate.
+ */
+export function CerebroSwipeArchive({ onArchive }: { onArchive: () => void }) {
+  const enabled = useFeatureFlag("cerebro_inbox_row_actions");
+  const isMobile = useIsMobile();
+  const strings = useCerebroInboxStrings();
+
+  if (!enabled || !isMobile) {
+    return <SimpleArchiveButton onArchive={onArchive} />;
+  }
+
+  return <SwipeArchiveOnly onArchive={onArchive} strings={strings} />;
+}
+
+function SwipeArchiveOnly({
+  onArchive,
+  strings,
+}: {
+  onArchive: () => void;
+  strings: ReturnType<typeof useCerebroInboxStrings>;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const startX = useRef<number | null>(null);
+  const startY = useRef<number | null>(null);
+  const lockedDirRef = useRef<"horizontal" | "vertical" | null>(null);
+  const offsetXRef = useRef(0);
+  const [offsetX, setOffsetXState] = useState(0);
+  const setOffsetX = useCallback((v: number) => {
+    offsetXRef.current = v;
+    setOffsetXState(v);
+  }, []);
+  const swipeJustCompletedRef = useRef(false);
+
+  useEffect(() => {
+    const row = containerRef.current?.parentElement;
+    if (!row) return;
+    if (offsetX === 0) {
+      row.style.transform = "";
+    } else {
+      row.style.transform = `translateX(${offsetX}px)`;
+    }
+    row.style.transition = startX.current === null ? "transform 200ms" : "";
+  }, [offsetX]);
+
+  useEffect(() => {
+    const node = containerRef.current?.parentElement;
+    if (!node) return;
+    const handler = (e: MouseEvent) => {
+      if (swipeJustCompletedRef.current) {
+        swipeJustCompletedRef.current = false;
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    };
+    node.addEventListener("click", handler, true);
+    return () => node.removeEventListener("click", handler, true);
+  }, []);
+
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== "touch") return;
+    startX.current = e.clientX;
+    startY.current = e.clientY;
+    lockedDirRef.current = null;
+  };
+
+  const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    if (startX.current === null) return;
+    const dx = e.clientX - startX.current;
+    const dy = e.clientY - (startY.current ?? 0);
+    const adx = Math.abs(dx);
+    const ady = Math.abs(dy);
+
+    if (lockedDirRef.current === null) {
+      if (adx < DIRECTION_DECIDE_PX && ady < DIRECTION_DECIDE_PX) return;
+      if (ady > adx && ady > VERTICAL_BAIL_PX) {
+        startX.current = null;
+        lockedDirRef.current = "vertical";
+        setOffsetX(0);
+        return;
+      }
+      lockedDirRef.current = "horizontal";
+    }
+    if (lockedDirRef.current !== "horizontal") return;
+
+    // Right-only with deadzone — channel rows can only archive, can't reveal
+    // a left-side panel.
+    const adjusted = dx > HORIZONTAL_DEADZONE_PX ? dx - HORIZONTAL_DEADZONE_PX : 0;
+    setOffsetX(Math.max(0, Math.min(adjusted, 240)));
+  };
+
+  const onPointerUp = () => {
+    if (startX.current === null) {
+      lockedDirRef.current = null;
+      return;
+    }
+    startX.current = null;
+    lockedDirRef.current = null;
+    const rowWidth = containerRef.current?.parentElement?.clientWidth ?? 360;
+    if (offsetXRef.current >= commitThresholdPx(rowWidth)) {
+      swipeJustCompletedRef.current = true;
+      setOffsetX(0);
+      onArchive();
+      return;
+    }
+    setOffsetX(0);
+  };
+
+  return (
+    <>
+      <div
+        ref={containerRef}
+        className="absolute inset-0 sm:hidden"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        style={{ touchAction: "pan-y" }}
+      />
+      {offsetX > 0 && (
+        <div
+          className="absolute inset-y-0 left-0 flex items-center justify-start gap-2 bg-destructive px-4 text-destructive-foreground"
+          style={{ width: Math.max(offsetX, 0) }}
+          aria-hidden
+        >
+          <Archive className="size-4" />
+          <span className="text-xs font-medium">{strings.swipe_archive}</span>
+        </div>
+      )}
+      <SimpleArchiveButton onArchive={onArchive} />
+    </>
   );
 }
 
