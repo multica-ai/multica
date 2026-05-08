@@ -66,6 +66,17 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `auth-jwt` | server/internal/auth/jwt.go | 45 | Auth additions (master-code, JWT) |
 | `auth-jwt-test` | server/internal/auth/jwt_test.go | 65 | Auth additions (master-code, JWT) |
 | `auth-master-code-handler` | server/internal/handler/auth_master_code_test.go | 69 | Auth additions (master-code, JWT) |
+| `autopilot-cerebro` | server/internal/handler/autopilot_cerebro.go | 130 | Scope visibility helpers (workspace/personal/group) for the upstream autopilot handler — JEH-724 |
+| `autopilot-scope-create` | server/internal/handler/autopilot.go | 6 | Apply scope/owner_user_id/group_id after CreateAutopilot — JEH-724 |
+| `autopilot-scope-create-req` | server/internal/handler/autopilot.go | 4 | Scope fields on CreateAutopilotRequest — JEH-724 |
+| `autopilot-scope-delete` | server/internal/handler/autopilot.go | 4 | Edit-permission check on Delete — JEH-724 |
+| `autopilot-scope-get` | server/internal/handler/autopilot.go | 4 | Visibility check on Get — JEH-724 |
+| `autopilot-scope-import` | server/internal/handler/autopilot.go | 2 | Import access helper for scope checks — JEH-724 |
+| `autopilot-scope-list` | server/internal/handler/autopilot.go | 5 | Scope-aware list filters by visibility — JEH-724 |
+| `autopilot-scope-response` | server/internal/handler/autopilot.go | 5 | scope/owner_user_id/group_id on AutopilotResponse — JEH-724 |
+| `autopilot-scope-response-fields` | server/internal/handler/autopilot.go | 4 | scope columns wired into autopilotToResponse — JEH-724 |
+| `autopilot-scope-trigger` | server/internal/handler/autopilot.go | 4 | Trigger-permission check on TriggerAutopilot — JEH-724 |
+| `autopilot-scope-update` | server/internal/handler/autopilot.go | 4 | Edit-permission check on Update — JEH-724 |
 | `autopilots-autopilot-detail-page` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | Autopilots cerebro additions |
 | `batch-action-toolbar-cerebro` | packages/views/issues/components/batch-action-toolbar.tsx | 1 | Issues board/list view cerebro additions |
 | `board-column-cerebro` | packages/views/issues/components/board-column.tsx | 4 | Issues board/list view cerebro additions |
@@ -308,6 +319,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `sqlc-artifact` | server/pkg/db/queries/artifact.sql | 114 | Cerebro sqlc query additions |
 | `sqlc-artifact-folder` | server/pkg/db/queries/artifact_folder.sql | 36 | Cerebro sqlc query additions |
 | `sqlc-attachment` | server/pkg/db/queries/attachment.sql | 12 | Cerebro sqlc query additions |
+| `sqlc-autopilot-scope` | server/pkg/db/queries/autopilot.sql | 30 | Scope-aware ListAutopilotsForUser + SetAutopilotScope (JEH-724) |
 | `sqlc-budget` | server/pkg/db/queries/budget.sql | 42 | Cerebro sqlc query additions |
 | `sqlc-cerebro-package` | server/sqlc.yaml | 0 | Adds cerebro sqlc package config |
 | `sqlc-chat` | server/pkg/db/queries/chat.sql | 41 | Cerebro sqlc query additions |

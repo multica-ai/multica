@@ -234,3 +234,36 @@ UPDATE autopilot
 SET status = 'paused', updated_at = now()
 WHERE id = $1 AND status = 'active'
 RETURNING *;
+
+-- =====================
+-- CEREBRO-PATCH(sqlc-autopilot-scope): scoped autopilots (JEH-724).
+-- workspace = visible to all; personal = owner only; group = members + admin.
+-- Group membership is resolved by the caller (cerebro_group_member, JEH-721)
+-- and passed in via user_group_ids so this query stays decoupled from that
+-- table's eventual shape.
+-- =====================
+
+-- name: ListAutopilotsForUser :many
+SELECT * FROM autopilot
+WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
+  AND (
+        scope = 'workspace'
+     OR (scope = 'personal' AND owner_user_id = sqlc.arg('user_id')::uuid)
+     OR (scope = 'group'    AND (
+            group_id = ANY(sqlc.arg('user_group_ids')::uuid[])
+         OR sqlc.arg('is_admin')::boolean
+        ))
+  )
+ORDER BY created_at DESC;
+
+-- name: SetAutopilotScope :exec
+-- Applied right after CreateAutopilot when the requester picks a non-workspace
+-- scope. Kept as a separate UPDATE so the upstream CreateAutopilot signature
+-- stays untouched.
+UPDATE autopilot
+SET scope         = sqlc.arg('scope')::text,
+    owner_user_id = sqlc.narg('owner_user_id'),
+    group_id      = sqlc.narg('group_id'),
+    updated_at    = now()
+WHERE id = sqlc.arg('id')::uuid;

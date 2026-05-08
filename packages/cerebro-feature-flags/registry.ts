@@ -17,7 +17,8 @@ export type CerebroFlagKey =
   | "cerebro_inbox_row_actions"
   | "cerebro_voice_dictation_enabled"
   | "cerebro_voice_output_enabled"
-  | "cerebro_voice_summary_enabled";
+  | "cerebro_voice_summary_enabled"
+  | "cerebro_autopilot_scopes";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -39,6 +40,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_voice_dictation_enabled: false,
   cerebro_voice_output_enabled: false,
   cerebro_voice_summary_enabled: false,
+  cerebro_autopilot_scopes: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -117,5 +119,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Voice summary",
     description:
       "When voice mode is on, summarise long replies into spoken-style Danish before reading them aloud. Reduces TTS latency on long answers and keeps the conversation natural in hands-free use.",
+  },
+  {
+    key: "cerebro_autopilot_scopes",
+    label: "Autopilot scopes",
+    description:
+      "Enable scoped autopilots (workspace, personal, group) — gated visibility on top of the workspace-wide default.",
   },
 ];

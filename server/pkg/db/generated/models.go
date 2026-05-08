@@ -164,6 +164,9 @@ type Autopilot struct {
 	LastRunAt          pgtype.Timestamptz `json:"last_run_at"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	Scope              string             `json:"scope"`
+	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
+	GroupID            pgtype.UUID        `json:"group_id"`
 }
 
 type AutopilotRun struct {

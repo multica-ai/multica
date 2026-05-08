@@ -9,6 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	// CEREBRO-PATCH(autopilot-scope-import): scope visibility helper (JEH-724).
+	"github.com/multica-ai/multica/server/internal/cerebro/access"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -35,6 +37,11 @@ type AutopilotResponse struct {
 	LastRunAt          *string `json:"last_run_at"`
 	CreatedAt          string  `json:"created_at"`
 	UpdatedAt          string  `json:"updated_at"`
+	// CEREBRO-PATCH(autopilot-scope-response): scope columns surfaced in the
+	// API response (JEH-724). Backfilled rows return scope="workspace".
+	Scope       string  `json:"scope"`
+	OwnerUserID *string `json:"owner_user_id"`
+	GroupID     *string `json:"group_id"`
 }
 
 type AutopilotTriggerResponse struct {
@@ -85,6 +92,10 @@ func autopilotToResponse(a db.Autopilot) AutopilotResponse {
 		LastRunAt:          timestampToPtr(a.LastRunAt),
 		CreatedAt:          timestampToString(a.CreatedAt),
 		UpdatedAt:          timestampToString(a.UpdatedAt),
+		// CEREBRO-PATCH(autopilot-scope-response-fields): scope columns from JEH-724.
+		Scope:       a.Scope,
+		OwnerUserID: uuidToPtr(a.OwnerUserID),
+		GroupID:     uuidToPtr(a.GroupID),
 	}
 }
 
@@ -139,6 +150,10 @@ type CreateAutopilotRequest struct {
 	AssigneeID         string  `json:"assignee_id"`
 	ExecutionMode      string  `json:"execution_mode"`
 	IssueTitleTemplate *string `json:"issue_title_template"`
+	// CEREBRO-PATCH(autopilot-scope-create-req): optional scope fields (JEH-724).
+	Scope       *string `json:"scope"`
+	OwnerUserID *string `json:"owner_user_id"`
+	GroupID     *string `json:"group_id"`
 }
 
 type UpdateAutopilotRequest struct {
@@ -174,10 +189,12 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 		statusFilter = pgtype.Text{String: s, Valid: true}
 	}
 
-	autopilots, err := h.Queries.ListAutopilots(r.Context(), db.ListAutopilotsParams{
-		WorkspaceID: parseUUID(workspaceID),
-		Status:      statusFilter,
-	})
+	// CEREBRO-PATCH(autopilot-scope-list): scope-aware list filters by visibility (JEH-724).
+	viewer, ok := h.cerebroAutopilotViewer(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	autopilots, err := access.ListForUser(r.Context(), h.Queries, parseUUID(workspaceID), viewer, statusFilter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list autopilots")
 		return
@@ -196,6 +213,10 @@ func (h *Handler) GetAutopilot(w http.ResponseWriter, r *http.Request) {
 
 	autopilot, ok := h.loadAutopilotInWorkspace(w, r, id, workspaceID)
 	if !ok {
+		return
+	}
+	// CEREBRO-PATCH(autopilot-scope-get): visibility check before returning (JEH-724).
+	if !h.cerebroAutopilotVisible(w, r, workspaceID, autopilot) {
 		return
 	}
 
@@ -302,6 +323,13 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CEREBRO-PATCH(autopilot-scope-create): apply scope after the row exists (JEH-724).
+	if updated, ok := h.cerebroApplyScopeOnCreate(w, r, autopilot, &req, parseUUID(userID)); ok {
+		autopilot = updated
+	} else {
+		return
+	}
+
 	resp := autopilotToResponse(autopilot)
 	h.publish(protocol.EventAutopilotCreated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
 	writeJSON(w, http.StatusCreated, resp)
@@ -313,6 +341,10 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 
 	prev, ok := h.loadAutopilotInWorkspace(w, r, id, workspaceID)
 	if !ok {
+		return
+	}
+	// CEREBRO-PATCH(autopilot-scope-update): edit-permission check (JEH-724).
+	if !h.cerebroAutopilotEditable(w, r, workspaceID, prev) {
 		return
 	}
 
@@ -396,11 +428,16 @@ func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.Queries.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
+	prev, err := h.Queries.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
 		ID:          idUUID,
 		WorkspaceID: wsUUID,
-	}); err != nil {
+	})
+	if err != nil {
 		writeError(w, http.StatusNotFound, "autopilot not found")
+		return
+	}
+	// CEREBRO-PATCH(autopilot-scope-delete): edit-permission check (JEH-724).
+	if !h.cerebroAutopilotEditable(w, r, workspaceID, prev) {
 		return
 	}
 
@@ -681,6 +718,10 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 
 	autopilot, ok := h.loadAutopilotInWorkspace(w, r, id, workspaceID)
 	if !ok {
+		return
+	}
+	// CEREBRO-PATCH(autopilot-scope-trigger): trigger-permission check (JEH-724).
+	if !h.cerebroAutopilotTriggerable(w, r, workspaceID, autopilot) {
 		return
 	}
 	if autopilot.Status != "active" {
