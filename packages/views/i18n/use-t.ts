@@ -6,4 +6,4 @@ import "./resources-types";
 
 // Project alias for react-i18next's useTranslation hook.
 // Use the selector form when calling: t($ => $.signin.title)
-export { useTranslation as useT } from "react-i18next";
+export { useT } from "@multica/core/i18n/react";

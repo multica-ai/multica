@@ -54,7 +54,10 @@
     "preview": "预览 {{filename}}",
     "download": "下载 {{filename}}",
     "preview_loading": "正在加载预览...",
-    "preview_failed": "加载预览失败"
+    "preview_failed": "加载预览失败",
+    "enter_full_screen": "进入全屏",
+    "exit_full_screen": "退出全屏",
+    "close_preview": "关闭预览"
   },
   "title_editor": {
     "title_aria_label": "标题"

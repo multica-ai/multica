@@ -152,7 +152,116 @@ describe("ReadonlyContent file cards", () => {
     );
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("Generated markdown body");
+    expect(screen.getByTestId("markdown-preview-shell")).toBeInTheDocument();
+    expect(screen.getByTestId("markdown-preview-drag-handle")).toHaveTextContent(
+      "permission-config-design.md",
+    );
     expect(screen.getByTestId("markdown-preview-scroll")).toHaveClass("overflow-y-auto");
+    expect(
+      screen.getByRole("button", { name: "Enter full screen" }),
+    ).toBeInTheDocument();
+  });
+
+  it("toggles markdown previews between windowed and full-screen modes", async () => {
+    previewAttachmentMarkdown.mockResolvedValue("# Preview title");
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ReadonlyContent content="!file[fullscreen.md](https://cdn.example.com/fullscreen.md)" />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview fullscreen.md" }));
+
+    await waitFor(() =>
+      expect(previewAttachmentMarkdown).toHaveBeenCalledWith(
+        "https://cdn.example.com/fullscreen.md",
+      ),
+    );
+
+    expect(await screen.findByTestId("markdown-preview-shell")).toHaveAttribute("data-fullscreen", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Enter full screen" }));
+    expect(await screen.findByTestId("markdown-preview-shell")).toHaveAttribute("data-fullscreen", "true");
+    expect(
+      screen.getByRole("button", { name: "Exit full screen" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Exit full screen" }));
+    expect(await screen.findByTestId("markdown-preview-shell")).toHaveAttribute("data-fullscreen", "false");
+    expect(
+      screen.getByRole("button", { name: "Enter full screen" }),
+    ).toBeInTheDocument();
+  });
+
+  it("fills narrow viewports without overflowing in full-screen mode", async () => {
+    previewAttachmentMarkdown.mockResolvedValue("# Preview title");
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(320);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(480);
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ReadonlyContent content="!file[fullscreen-narrow.md](https://cdn.example.com/fullscreen-narrow.md)" />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview fullscreen-narrow.md" }));
+
+    await waitFor(() =>
+      expect(previewAttachmentMarkdown).toHaveBeenCalledWith(
+        "https://cdn.example.com/fullscreen-narrow.md",
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Enter full screen" }));
+
+    const shell = await screen.findByTestId("markdown-preview-shell");
+    expect(shell).toHaveAttribute("data-fullscreen", "true");
+    expect(shell).toHaveStyle({ width: "320px", height: "480px" });
+    expect(shell.style.transform.replace(/\s/g, "")).toContain("translate(0px,0px)");
+  });
+
+  it("resets markdown preview chrome after closing", async () => {
+    previewAttachmentMarkdown.mockResolvedValue("# Preview title");
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ReadonlyContent content="!file[reset.md](https://cdn.example.com/reset.md)" />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview reset.md" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Enter full screen" }));
+    const shell = await screen.findByTestId("markdown-preview-shell");
+    expect(shell).toHaveAttribute("data-fullscreen", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preview reset.md" }));
+
+    expect(await screen.findByTestId("markdown-preview-shell")).toHaveAttribute("data-fullscreen", "false");
+    expect(screen.getByRole("button", { name: "Enter full screen" })).toBeInTheDocument();
+  });
+
+  it("keeps initial markdown previews inside narrow viewports", async () => {
+    previewAttachmentMarkdown.mockResolvedValue("# Preview title");
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(390);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(520);
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ReadonlyContent content="!file[narrow.md](https://cdn.example.com/narrow.md)" />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview narrow.md" }));
+
+    await waitFor(() =>
+      expect(previewAttachmentMarkdown).toHaveBeenCalledWith("https://cdn.example.com/narrow.md"),
+    );
+
+    const shell = await screen.findByTestId("markdown-preview-shell");
+    expect(shell).toHaveStyle({ width: "358px" });
   });
 
   it("previews relative markdown file cards", async () => {

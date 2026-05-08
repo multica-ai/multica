@@ -95,6 +95,8 @@ vi.mock("@multica/ui/components/ui/collapsible", () => ({
 
 vi.mock("@multica/ui/components/ui/dialog", () => ({
   Dialog: ({ children, open }: { children: ReactNode; open: boolean }) => (open ? <div>{children}</div> : null),
+  DialogClose: ({ children, render }: { children: ReactNode; render?: ReactNode }) =>
+    render ? <button type="button">{children}</button> : <button type="button">{children}</button>,
   DialogContent: ({ children }: { children: ReactNode }) => <div role="dialog">{children}</div>,
   DialogHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,

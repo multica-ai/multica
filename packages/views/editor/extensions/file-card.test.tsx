@@ -80,6 +80,13 @@ describe("FileCardView", () => {
       expect(previewAttachmentMarkdown).toHaveBeenCalledWith("https://cdn.example.com/permission-config-design.md"),
     );
     expect(await screen.findByRole("dialog")).toHaveTextContent("Generated markdown body");
+    expect(screen.getByTestId("markdown-preview-shell")).toBeInTheDocument();
+    expect(screen.getByTestId("markdown-preview-drag-handle")).toHaveTextContent(
+      "permission-config-design.md",
+    );
+    expect(
+      screen.getByRole("button", { name: "Enter full screen" }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("markdown-preview-scroll")).toHaveClass("overflow-y-auto");
   });
 

@@ -54,7 +54,10 @@
     "preview": "Preview {{filename}}",
     "download": "Download {{filename}}",
     "preview_loading": "Loading preview...",
-    "preview_failed": "Failed to load preview"
+    "preview_failed": "Failed to load preview",
+    "enter_full_screen": "Enter full screen",
+    "exit_full_screen": "Exit full screen",
+    "close_preview": "Close preview"
   },
   "title_editor": {
     "title_aria_label": "Title"
