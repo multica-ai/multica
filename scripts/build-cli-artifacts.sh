@@ -2,15 +2,20 @@
 set -euo pipefail
 
 # Build release archives for the Multica CLI across supported desktop/server
-# platforms. Archives are written to artifacts/cli/ using the update/installer
-# naming convention:
+# platforms. Archives are written to artifacts/cli/releases/ using the
+# update/installer naming convention:
 #   multica-cli-<version>-<goos>-<goarch>.<tar.gz|zip>
+#
+# The release manifest is written to artifacts/cli/manifest.json.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 SERVER_DIR="${REPO_ROOT}/server"
 VERSION_FILE="${CLI_VERSION_FILE:-${REPO_ROOT}/release/cli-version.txt}"
 OUT_DIR="${CLI_ARTIFACTS_DIR:-${REPO_ROOT}/artifacts/cli}"
+RELEASES_DIR="${OUT_DIR}/releases"
+MANIFEST_FILE="${OUT_DIR}/manifest.json"
+DOWNLOAD_BASE_URL="${CLI_DOWNLOAD_BASE_URL:-https://multica.obs.cn-east-3.myhuaweicloud.com/cli/releases}"
 
 DEFAULT_TARGETS=(
   "darwin/amd64"
@@ -71,6 +76,31 @@ sha256_file() {
   fi
 }
 
+file_size() {
+  local file="$1"
+  if stat -c '%s' "$file" >/dev/null 2>&1; then
+    stat -c '%s' "$file"
+  else
+    stat -f '%z' "$file"
+  fi
+}
+
+validate_download_base_url() {
+  local value="$1"
+  if [[ "$value" =~ [\"\\[:cntrl:]] ]]; then
+    fail "CLI_DOWNLOAD_BASE_URL must not contain quotes, backslashes, or control characters"
+  fi
+}
+
+download_url_for() {
+  local archive_name="$1"
+  if [[ -z "$DOWNLOAD_BASE_URL" ]]; then
+    printf 'releases/%s' "$archive_name"
+  else
+    printf '%s/%s' "${DOWNLOAD_BASE_URL%/}" "$archive_name"
+  fi
+}
+
 validate_version() {
   local version="$1"
   if [[ ! "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
@@ -93,6 +123,7 @@ target_supported() {
 need_cmd go
 need_cmd tar
 need_cmd zip
+validate_download_base_url "$DOWNLOAD_BASE_URL"
 
 [[ -f "$VERSION_FILE" ]] || fail "version file not found: ${VERSION_FILE}"
 VERSION_RAW="$(trim "$(tr -d '\r\n' < "$VERSION_FILE")")"
@@ -110,21 +141,24 @@ if [[ -n "${MULTICA_CLI_TARGETS:-}" ]]; then
   read -r -a TARGETS <<< "${MULTICA_CLI_TARGETS}"
 fi
 
-mkdir -p "$OUT_DIR"
+mkdir -p "$RELEASES_DIR"
 TMP_DIR="$(mktemp -d)"
 cleanup() {
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
 
-CHECKSUMS_FILE="${OUT_DIR}/checksums.txt"
+CHECKSUMS_FILE="${RELEASES_DIR}/checksums.txt"
 : > "$CHECKSUMS_FILE"
+ASSET_ROWS=()
 
 printf 'Building Multica CLI artifacts\n'
 printf '  version:   %s\n' "$VERSION_RAW"
 printf '  commit:    %s\n' "$COMMIT"
 printf '  date:      %s\n' "$DATE"
 printf '  output:    %s\n' "$OUT_DIR"
+printf '  releases:  %s\n' "$RELEASES_DIR"
+printf '  manifest:  %s\n' "$MANIFEST_FILE"
 printf '\n'
 
 for target in "${TARGETS[@]}"; do
@@ -137,7 +171,7 @@ for target in "${TARGETS[@]}"; do
   bin_name="$(binary_name "$goos")"
   ext="$(archive_ext "$goos")"
   archive_name="multica-cli-${ARCHIVE_VERSION}-${goos}-${goarch}.${ext}"
-  archive_path="${OUT_DIR}/${archive_name}"
+  archive_path="${RELEASES_DIR}/${archive_name}"
   stage_dir="${TMP_DIR}/${goos}-${goarch}"
 
   mkdir -p "$stage_dir"
@@ -162,8 +196,37 @@ for target in "${TARGETS[@]}"; do
   fi
 
   checksum="$(sha256_file "$archive_path")"
+  size="$(file_size "$archive_path")"
+  download_url="$(download_url_for "$archive_name")"
   printf '%s  %s\n' "$checksum" "$archive_name" >> "$CHECKSUMS_FILE"
+  ASSET_ROWS+=("${goos}|${goarch}|${archive_name}|${download_url}|${checksum}|${size}")
   printf '    wrote %s\n' "$archive_path"
 done
 
-printf '\nDone. Checksums: %s\n' "$CHECKSUMS_FILE"
+{
+  printf '{\n'
+  printf '  "version": "%s",\n' "$VERSION_RAW"
+  printf '  "commit": "%s",\n' "$COMMIT"
+  printf '  "date": "%s",\n' "$DATE"
+  printf '  "assets": [\n'
+  for i in "${!ASSET_ROWS[@]}"; do
+    IFS='|' read -r goos goarch archive_name download_url checksum size <<< "${ASSET_ROWS[$i]}"
+    printf '    {\n'
+    printf '      "os": "%s",\n' "$goos"
+    printf '      "arch": "%s",\n' "$goarch"
+    printf '      "filename": "%s",\n' "$archive_name"
+    printf '      "download_url": "%s",\n' "$download_url"
+    printf '      "checksum": "%s",\n' "$checksum"
+    printf '      "size": %s\n' "$size"
+    if [[ "$i" -lt $((${#ASSET_ROWS[@]} - 1)) ]]; then
+      printf '    },\n'
+    else
+      printf '    }\n'
+    fi
+  done
+  printf '  ]\n'
+  printf '}\n'
+} > "$MANIFEST_FILE"
+
+printf '\nDone. Manifest: %s\n' "$MANIFEST_FILE"
+printf 'Done. Checksums: %s\n' "$CHECKSUMS_FILE"
