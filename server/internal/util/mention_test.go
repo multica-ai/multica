@@ -80,6 +80,53 @@ func TestParseMentions(t *testing.T) {
 	}
 }
 
+func TestBroadcastMentions(t *testing.T) {
+	tests := []struct {
+		name        string
+		content     string
+		wantMention Mention
+		wantTag     string
+	}{
+		{
+			name:        "broadcast all agents",
+			content:     "[@@](mention://broadcast/all) everyone",
+			wantMention: Mention{Type: "broadcast", ID: "all"},
+			wantTag:     "",
+		},
+		{
+			name:        "broadcast tag-scoped",
+			content:     "[@@coding](mention://broadcast/coding) please review",
+			wantMention: Mention{Type: "broadcast", ID: "coding"},
+			wantTag:     "coding",
+		},
+		{
+			name:        "broadcast with hyphenated tag",
+			content:     "[@@on-call](mention://broadcast/on-call) incident",
+			wantMention: Mention{Type: "broadcast", ID: "on-call"},
+			wantTag:     "on-call",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseMentions(tt.content)
+			if len(got) != 1 {
+				t.Fatalf("ParseMentions() returned %d mentions, want 1\ngot: %+v", len(got), got)
+			}
+			m := got[0]
+			if m.Type != tt.wantMention.Type || m.ID != tt.wantMention.ID {
+				t.Errorf("mention = %+v, want %+v", m, tt.wantMention)
+			}
+			if !m.IsBroadcast() {
+				t.Errorf("IsBroadcast() = false, want true")
+			}
+			if tag := m.BroadcastTag(); tag != tt.wantTag {
+				t.Errorf("BroadcastTag() = %q, want %q", tag, tt.wantTag)
+			}
+		})
+	}
+}
+
 func TestHasMentionAll(t *testing.T) {
 	tests := []struct {
 		name     string

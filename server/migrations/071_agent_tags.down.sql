@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS agent_to_tag;
+DROP TABLE IF EXISTS agent_tag;

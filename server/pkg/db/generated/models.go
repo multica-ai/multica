@@ -66,6 +66,18 @@ type AgentSkill struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type AgentTag struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type AgentToTag struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	TagID   pgtype.UUID `json:"tag_id"`
+}
+
 type AgentTaskQueue struct {
 	ID                pgtype.UUID        `json:"id"`
 	AgentID           pgtype.UUID        `json:"agent_id"`

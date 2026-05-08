@@ -967,3 +967,240 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 
 	writeJSON(w, http.StatusOK, resp)
 }
+
+// ---------------------------------------------------------------------------
+// Agent tag management
+// ---------------------------------------------------------------------------
+
+type AgentTagResponse struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	CreatedAt   string `json:"created_at"`
+}
+
+func agentTagToResponse(t db.AgentTag) AgentTagResponse {
+	return AgentTagResponse{
+		ID:          uuidToString(t.ID),
+		WorkspaceID: uuidToString(t.WorkspaceID),
+		Name:        t.Name,
+		CreatedAt:   timestampToString(t.CreatedAt),
+	}
+}
+
+func (h *Handler) ListAgentTags(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	tags, err := h.Queries.ListAgentTags(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list agent tags")
+		return
+	}
+	resp := make([]AgentTagResponse, len(tags))
+	for i, t := range tags {
+		resp[i] = agentTagToResponse(t)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+type CreateAgentTagRequest struct {
+	Name string `json:"name"`
+}
+
+func (h *Handler) CreateAgentTag(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "not found", "owner", "admin"); !ok {
+		return
+	}
+	var req CreateAgentTagRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	tag, err := h.Queries.CreateAgentTag(r.Context(), db.CreateAgentTagParams{
+		WorkspaceID: wsUUID,
+		Name:        req.Name,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create agent tag")
+		return
+	}
+	writeJSON(w, http.StatusCreated, agentTagToResponse(tag))
+}
+
+func (h *Handler) DeleteAgentTag(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "not found", "owner", "admin"); !ok {
+		return
+	}
+	tagID := chi.URLParam(r, "id")
+	tagUUID, ok := parseUUIDOrBadRequest(w, tagID, "tag id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	if _, err := h.Queries.DeleteAgentTag(r.Context(), db.DeleteAgentTagParams{
+		ID:          tagUUID,
+		WorkspaceID: wsUUID,
+	}); err != nil {
+		writeError(w, http.StatusNotFound, "agent tag not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) ListAgentTagsForAgent(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+	wsID := uuidToString(agent.WorkspaceID)
+	wsUUID, ok := parseUUIDOrBadRequest(w, wsID, "workspace id")
+	if !ok {
+		return
+	}
+	tags, err := h.Queries.ListTagsByAgent(r.Context(), db.ListTagsByAgentParams{
+		AgentID:     agent.ID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list agent tags")
+		return
+	}
+	resp := make([]AgentTagResponse, len(tags))
+	for i, t := range tags {
+		resp[i] = agentTagToResponse(t)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// AddTagToAgentRequest accepts either a tag_id (UUID) or a tag_name (string).
+// When tag_name is provided the tag is created if it does not yet exist in
+// the workspace, mirroring the ergonomics of label assignment.
+type AddTagToAgentRequest struct {
+	TagID   string `json:"tag_id"`
+	TagName string `json:"tag_name"`
+}
+
+func (h *Handler) AddTagToAgent(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageAgent(w, r, agent) {
+		return
+	}
+	var req AddTagToAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.TagID == "" && req.TagName == "" {
+		writeError(w, http.StatusBadRequest, "tag_id or tag_name is required")
+		return
+	}
+	wsID := uuidToString(agent.WorkspaceID)
+	wsUUID, ok := parseUUIDOrBadRequest(w, wsID, "workspace id")
+	if !ok {
+		return
+	}
+
+	var tagUUID pgtype.UUID
+	if req.TagID != "" {
+		tagUUID, ok = parseUUIDOrBadRequest(w, req.TagID, "tag_id")
+		if !ok {
+			return
+		}
+	} else {
+		// Look up or create the tag by name.
+		existing, err := h.Queries.GetAgentTagByName(r.Context(), db.GetAgentTagByNameParams{
+			WorkspaceID: wsUUID,
+			Name:        req.TagName,
+		})
+		if err != nil {
+			// Tag does not exist — create it.
+			created, createErr := h.Queries.CreateAgentTag(r.Context(), db.CreateAgentTagParams{
+				WorkspaceID: wsUUID,
+				Name:        req.TagName,
+			})
+			if createErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to create agent tag")
+				return
+			}
+			tagUUID = created.ID
+		} else {
+			tagUUID = existing.ID
+		}
+	}
+
+	if err := h.Queries.AddTagToAgent(r.Context(), db.AddTagToAgentParams{
+		AgentID:     agent.ID,
+		TagID:       tagUUID,
+		WorkspaceID: wsUUID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to add tag to agent")
+		return
+	}
+	tags, err := h.Queries.ListTagsByAgent(r.Context(), db.ListTagsByAgentParams{
+		AgentID:     agent.ID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list agent tags")
+		return
+	}
+	resp := make([]AgentTagResponse, len(tags))
+	for i, t := range tags {
+		resp[i] = agentTagToResponse(t)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) RemoveTagFromAgent(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageAgent(w, r, agent) {
+		return
+	}
+	tagID := chi.URLParam(r, "tagId")
+	tagUUID, ok := parseUUIDOrBadRequest(w, tagID, "tag id")
+	if !ok {
+		return
+	}
+	wsID := uuidToString(agent.WorkspaceID)
+	wsUUID, ok := parseUUIDOrBadRequest(w, wsID, "workspace id")
+	if !ok {
+		return
+	}
+	if err := h.Queries.RemoveTagFromAgent(r.Context(), db.RemoveTagFromAgentParams{
+		AgentID:     agent.ID,
+		TagID:       tagUUID,
+		WorkspaceID: wsUUID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to remove tag from agent")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

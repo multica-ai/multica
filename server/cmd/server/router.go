@@ -483,7 +483,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/tasks", h.ListAgentTasks)
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
+					r.Get("/tags", h.ListAgentTagsForAgent)
+					r.Post("/tags", h.AddTagToAgent)
+					r.Delete("/tags/{tagId}", h.RemoveTagFromAgent)
 				})
+			})
+
+			// Agent tags (workspace-level CRUD)
+			r.Route("/api/agent-tags", func(r chi.Router) {
+				r.Get("/", h.ListAgentTags)
+				r.Post("/", h.CreateAgentTag)
+				r.Delete("/{id}", h.DeleteAgentTag)
 			})
 
 			// Skills
