@@ -81,6 +81,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `chat-handler-chat-attachment-test` | server/internal/handler/chat_attachment_test.go | 263 | Chat handler additions (cancel/coalesce/attachment) |
 | `chat-handler-chat-cancel-test` | server/internal/handler/chat_cancel_test.go | 154 | Chat handler additions (cancel/coalesce/attachment) |
 | `chat-handler-chat-coalesce-test` | server/internal/handler/chat_coalesce_test.go | 335 | Chat handler additions (cancel/coalesce/attachment) |
+| `chat-handler-chat-complete-test` | server/internal/handler/chat_complete_test.go | 116 | JEH-720 — regression guard for the duplicate assistant chat_message bug in CompleteTask |
+| `chat-collapse-dup-assistant` | server/internal/service/task.go | 6 | JEH-720 — collapse the post-tx assistant chat_message insert into the in-tx one so completing chat tasks no longer races with the WS broadcast |
 | `chat-handler-chat-test` | server/internal/handler/chat_test.go | 247 | Chat handler additions (cancel/coalesce/attachment) |
 | `chat-index-cerebro` | packages/views/chat/index.ts | 0 | Chat view cerebro additions (MCP onboarding, status, archive) |
 | `chat-input-mcp-onboarding` | packages/views/chat/components/chat-input.tsx | 53 | Chat view cerebro additions (MCP onboarding, status, archive) |

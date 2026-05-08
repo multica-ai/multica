@@ -781,11 +781,18 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			// queued successor task and stay unresponded so its claim
 			// picks them up.
 			if payload.Output != "" {
+				// CEREBRO-PATCH(chat-collapse-dup-assistant): collapse the post-tx assistant insert into this in-tx one to fix double-message races (JEH-720).
+				// Decode literal `\n` 4-char sequences emitted by Python/JSON-style
+				// agent stdout into real newlines so the chat panel renders paragraph
+				// breaks. Same contract as the issue-comment fallback below — see
+				// util.UnescapeBackslashEscapes.
+				body := util.UnescapeBackslashEscapes(payload.Output)
 				if _, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
 					ChatSessionID: t.ChatSessionID,
 					Role:          "assistant",
-					Content:       redact.Text(payload.Output),
+					Content:       redact.Text(body),
 					TaskID:        t.ID,
+					ElapsedMs:     computeChatElapsedMs(t),
 				}); err != nil {
 					return fmt.Errorf("create assistant chat message: %w", err)
 				}
@@ -877,33 +884,11 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		s.notifyQuickCreateCompleted(ctx, task, qc)
 	}
 
-	// For chat tasks, save assistant reply and broadcast chat:done. The
-	// resume pointer was already persisted inside the transaction above.
+	// For chat tasks, broadcast chat:done. The assistant reply, the
+	// responded_at marker, and the resume pointer were all persisted
+	// inside the transaction above so the message is on disk before we
+	// fire the WS event.
 	if task.ChatSessionID.Valid {
-		var payload protocol.TaskCompletedPayload
-		if err := json.Unmarshal(result, &payload); err == nil && payload.Output != "" {
-			// Same unescape as the issue-comment path above: literal `\n` from
-			// agent stdout becomes a real newline so the chat panel renders
-			// paragraph breaks instead of one wall of prose.
-			body := util.UnescapeBackslashEscapes(payload.Output)
-			if _, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
-				ChatSessionID: task.ChatSessionID,
-				Role:          "assistant",
-				Content:       redact.Text(body),
-				TaskID:        task.ID,
-				ElapsedMs:     computeChatElapsedMs(task),
-			}); err != nil {
-				slog.Error("failed to save assistant chat message", "task_id", util.UUIDToString(task.ID), "error", err)
-			} else {
-				// Event-driven unread: stamp unread_since on the first unread
-				// assistant message. No-op if the session already has unread.
-				// If the user is actively viewing the session, the frontend's
-				// auto-mark-read effect will clear this within a tick.
-				if err := s.Queries.SetUnreadSinceIfNull(ctx, task.ChatSessionID); err != nil {
-					slog.Warn("failed to set unread_since", "chat_session_id", util.UUIDToString(task.ChatSessionID), "error", err)
-				}
-			}
-		}
 		s.broadcastChatDone(ctx, task)
 	}
 
