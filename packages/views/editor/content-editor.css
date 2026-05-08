@@ -344,8 +344,11 @@
 .dark .rich-text-editor .hljs-deletion { color: oklch(0.7 0.18 25); }
 
 /* Tables */
+/* CEREBRO-PATCH(editor-mobile-table-overflow): wide tables must scroll inside the wrapper rather than push the page past the viewport on mobile (JEH-707). */
+.rich-text-editor { min-width: 0; max-width: 100%; }
 .rich-text-editor .tableWrapper {
   overflow-x: auto;
+  max-width: 100%;
   margin: 1rem 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
