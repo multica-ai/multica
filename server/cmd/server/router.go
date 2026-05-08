@@ -394,6 +394,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Webhooks (RFC #1964 — outbound HTTP webhooks on bus events)
+			r.Route("/api/webhooks", func(r chi.Router) {
+				r.Get("/", h.ListWebhookSubscriptions)
+				r.Post("/", h.CreateWebhookSubscription)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetWebhookSubscription)
+					r.Patch("/", h.UpdateWebhookSubscription)
+					r.Delete("/", h.DeleteWebhookSubscription)
+					r.Post("/rotate-secret", h.RotateWebhookSubscriptionSecret)
+					r.Post("/test", h.TestWebhookSubscription)
+					r.Get("/deliveries", h.ListWebhookDeliveries)
+				})
+			})
+
 			// Pins
 			r.Route("/api/pins", func(r chi.Router) {
 				r.Get("/", h.ListPins)

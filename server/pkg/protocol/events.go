@@ -100,6 +100,9 @@ const (
 	EventAutopilotRunStart = "autopilot:run_start"
 	EventAutopilotRunDone  = "autopilot:run_done"
 
+	// Webhook events (RFC #1964)
+	EventWebhookAutoPaused = "webhook:auto_paused"
+
 	// Daemon events
 	EventDaemonHeartbeat     = "daemon:heartbeat"
 	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"

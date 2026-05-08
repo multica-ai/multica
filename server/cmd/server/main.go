@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/webhook"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -301,6 +302,12 @@ func main() {
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
+
+	// RFC #1964: outbound webhook dispatcher subscribes to the bus, persists
+	// deliveries, and runs the per-workspace + retry-pump consumer goroutines.
+	webhookDispatcher := webhook.NewDispatcher(queries, bus)
+	webhookDispatcher.Start(sweepCtx)
+	defer webhookDispatcher.Stop()
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
 	// handler. Both the heartbeat write path (handler) and the sweeper read
