@@ -35,6 +35,15 @@
     "agents_group": "智能体",
     "no_results": "未找到结果"
   },
+  "sort": {
+    "sort_created": "创建时间",
+    "sort_updated": "更新时间",
+    "sort_title": "名称",
+    "sort_priority": "优先级",
+    "sort_status": "状态",
+    "ascending_title": "升序",
+    "descending_title": "降序"
+  },
   "relative_date": {
     "today": "今天",
     "one_day_ago": "1 天前",

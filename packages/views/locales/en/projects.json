@@ -35,6 +35,15 @@
     "agents_group": "Agents",
     "no_results": "No results"
   },
+  "sort": {
+    "sort_created": "Created date",
+    "sort_updated": "Updated date",
+    "sort_title": "Title",
+    "sort_priority": "Priority",
+    "sort_status": "Status",
+    "ascending_title": "Ascending",
+    "descending_title": "Descending"
+  },
   "relative_date": {
     "today": "Today",
     "one_day_ago": "1d ago",
