@@ -1,35 +1,48 @@
 /**
  * Tunable parameters for the cerebro inbox swipe gesture.
  *
- * The previous fixed 80px commit was ~20% of a 414px row — too sensitive
- * (small horizontal drift during a vertical scroll could fire archive).
+ * Iteration log:
+ *  - v1: fixed 80px commit (~20% of 414px row) — too sensitive; drift during
+ *        a vertical scroll could fire archive.
+ *  - v2: 30% commit + 12px deadzone + tight direction-lock — too restrictive
+ *        in the other direction. The deadzone made the row stop tracking the
+ *        finger early ("kan kun swipe lidt"), and the direction-lock often
+ *        bailed to vertical when natural finger arc made dy briefly exceed
+ *        dx in the first 8px.
+ *  - v3 (current): match Gmail's mobile pattern — row follows the finger
+ *        directly with no deadzone, and a "full swipe" (50% of row width)
+ *        commits the action on release. Direction-lock only bails when
+ *        vertical motion is clearly dominant (dy > 1.5 × dx).
  *
  * Sources:
- *  - Material 3 / Jetpack Compose `FractionalThreshold(0.3f)` — 30% of width
- *  - Material 3 swipe-to-dismiss positional threshold — 25%
- *  - iOS Mail "tap action" zone — ~30% of row
- *  - Wear OS swipe-to-dismiss edge — 20% (different context)
- *
- * Settled on 30% with a [100, 180] px clamp so the gesture stays consistent
- * across phone widths (iPhone SE 320px → 100px, iPhone 16 Pro Max 430px →
- * 129px, iPad split-view 600px row → 180px cap).
+ *  - Gmail mobile inbox swipe (Android/iOS): row tracks finger across full
+ *    row, commit on release at ~50%.
+ *  - Material 3 swipe-to-dismiss: positional threshold 25–30% (we sit
+ *    slightly above so destructive archives need real intent).
+ *  - iOS Mail swipe: row tracks finger; "full swipe" commits at >50% width.
  */
-export const SWIPE_COMMIT_FRACTION = 0.3;
-export const SWIPE_COMMIT_MIN_PX = 100;
-export const SWIPE_COMMIT_MAX_PX = 180;
 
-/** Pixels of finger travel before the row visibly starts moving. */
-export const HORIZONTAL_DEADZONE_PX = 12;
+/** Commit threshold as a fraction of row width — full-ish swipe like Gmail. */
+export const SWIPE_COMMIT_FRACTION = 0.5;
+export const SWIPE_COMMIT_MIN_PX = 120;
+export const SWIPE_COMMIT_MAX_PX = 260;
 
-/** Movement past this in either axis triggers the direction lock. */
+/**
+ * Total movement (Pythagorean) before we decide which axis dominates. Below
+ * this, neither axis is locked — we wait for clearer intent. The number is
+ * small (8 px) so the row begins tracking the finger almost immediately
+ * once the user is clearly swiping.
+ */
 export const DIRECTION_DECIDE_PX = 8;
 
 /**
- * Vertical-axis bail: if movement is dy-dominant AND past this, hand the
- * gesture back to the browser for native scroll. Stricter than the previous
- * |dy| > 24 (which allowed sloppy near-horizontal drifts to fire archive).
+ * Vertical-dominance ratio. We only bail to vertical scroll if |dy| is at
+ * least this many times |dx|. A pure horizontal swipe naturally has small
+ * dy from finger arc; the previous "any dy>dx" check let arc-y dominance
+ * win on the first sample and stuck the row on screen. 1.5× lets a swipe
+ * stay horizontal even with mild drift.
  */
-export const VERTICAL_BAIL_PX = 10;
+export const VERTICAL_DOMINANCE_RATIO = 1.5;
 
 /** Long-press duration before the action drawer opens. */
 export const LONG_PRESS_MS = 500;
@@ -38,10 +51,15 @@ export const LONG_PRESS_MS = 500;
 export const LEFT_PANEL_REVEAL_PX = 144;
 
 /**
- * Returns the commit threshold (in px of horizontal travel) needed to fire
- * the archive / panel-reveal action for a row of the given width. Clamped
- * so the gesture isn't trivially short on small phones or punishingly long
- * on tablets.
+ * Commit threshold (px) needed to fire the archive / panel-reveal action
+ * for a row of the given width. 50% of the row, clamped to [120, 260] px
+ * so the gesture is meaningful on small phones and doesn't require
+ * crossing the entire screen on tablets.
+ *
+ *   iPhone SE (320px) -> 160 px (50%)
+ *   iPhone Pro (414px) -> 207 px (50%)
+ *   iPhone 16 Pro Max (430px) -> 215 px (50%)
+ *   iPad split-view (~600px) -> 260 px (43%, hits clamp cap)
  */
 export function commitThresholdPx(rowWidth: number): number {
   const target = rowWidth * SWIPE_COMMIT_FRACTION;

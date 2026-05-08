@@ -38,10 +38,9 @@ import { isMuted, nextLocalEightAm } from "../mute-time";
 import { useCerebroInboxStrings } from "../strings";
 import {
   DIRECTION_DECIDE_PX,
-  HORIZONTAL_DEADZONE_PX,
   LEFT_PANEL_REVEAL_PX,
   LONG_PRESS_MS,
-  VERTICAL_BAIL_PX,
+  VERTICAL_DOMINANCE_RATIO,
   commitThresholdPx,
 } from "../swipe-thresholds";
 
@@ -335,11 +334,13 @@ function MobileRowActions({
     const adx = Math.abs(dx);
     const ady = Math.abs(dy);
 
-    // Direction lock — pick once movement is past the decision zone.
+    // Direction lock — pick once movement is past the decision zone. Bail
+    // to vertical only when |dy| is clearly dominant (1.5×); a casual
+    // horizontal swipe naturally has small dy, and the previous "any
+    // dy>dx" check let arc-y dominance stick the row.
     if (lockedDirRef.current === null) {
       if (adx < DIRECTION_DECIDE_PX && ady < DIRECTION_DECIDE_PX) return;
-      if (ady > adx && ady > VERTICAL_BAIL_PX) {
-        // Vertical scroll wins; bail and let the browser take over.
+      if (ady > adx * VERTICAL_DOMINANCE_RATIO) {
         cancelLongPress();
         startX.current = null;
         lockedDirRef.current = "vertical";
@@ -348,25 +349,13 @@ function MobileRowActions({
       }
       lockedDirRef.current = "horizontal";
     }
-
     if (lockedDirRef.current !== "horizontal") return;
     cancelLongPress();
 
-    // Apply a deadzone so the first ~12px doesn't visibly move the row —
-    // small touch jitter shouldn't drag it. Past the deadzone, subtract it
-    // so the row tracks the finger naturally from there.
-    const adjusted =
-      dx > HORIZONTAL_DEADZONE_PX
-        ? dx - HORIZONTAL_DEADZONE_PX
-        : dx < -HORIZONTAL_DEADZONE_PX
-          ? dx + HORIZONTAL_DEADZONE_PX
-          : 0;
-    // Clamp: right-swipe up to row width, left-swipe up to panel width.
-    const clamped = Math.max(
-      -LEFT_PANEL_REVEAL_PX - 16,
-      Math.min(adjusted, 240),
-    );
-    setOffsetX(clamped);
+    // Row follows the finger directly — Gmail mobile pattern. No deadzone
+    // (the direction lock above already prevents accidental tracking) and
+    // no premature cap on the right side.
+    setOffsetX(dx);
   };
 
   const onPointerUp = () => {
@@ -662,7 +651,7 @@ function SwipeArchiveOnly({
 
     if (lockedDirRef.current === null) {
       if (adx < DIRECTION_DECIDE_PX && ady < DIRECTION_DECIDE_PX) return;
-      if (ady > adx && ady > VERTICAL_BAIL_PX) {
+      if (ady > adx * VERTICAL_DOMINANCE_RATIO) {
         startX.current = null;
         lockedDirRef.current = "vertical";
         setOffsetX(0);
@@ -672,10 +661,9 @@ function SwipeArchiveOnly({
     }
     if (lockedDirRef.current !== "horizontal") return;
 
-    // Right-only with deadzone — channel rows can only archive, can't reveal
-    // a left-side panel.
-    const adjusted = dx > HORIZONTAL_DEADZONE_PX ? dx - HORIZONTAL_DEADZONE_PX : 0;
-    setOffsetX(Math.max(0, Math.min(adjusted, 240)));
+    // Channel rows only archive (right swipe). Negatives clamped to 0 so
+    // the row doesn't flop to the left where there's no action panel.
+    setOffsetX(Math.max(0, dx));
   };
 
   const onPointerUp = () => {

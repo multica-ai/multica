@@ -6,20 +6,20 @@ import {
 } from "./swipe-thresholds";
 
 describe("commitThresholdPx", () => {
-  it("returns 30% of width inside the clamp band", () => {
-    // 414px (iPhone Pro) -> 124.2 -> not clamped
-    expect(commitThresholdPx(414)).toBeCloseTo(124.2, 1);
-    // 430px (iPhone 16 Pro Max) -> 129
-    expect(commitThresholdPx(430)).toBeCloseTo(129, 1);
+  it("returns 50% of width inside the clamp band", () => {
+    // 414px (iPhone Pro) -> 207 -> not clamped
+    expect(commitThresholdPx(414)).toBe(207);
+    // 430px (iPhone 16 Pro Max) -> 215 -> not clamped
+    expect(commitThresholdPx(430)).toBe(215);
   });
 
   it("clamps to the minimum on small phones", () => {
-    // 320px (iPhone SE) -> 96, clamps to min 100
-    expect(commitThresholdPx(320)).toBe(SWIPE_COMMIT_MIN_PX);
+    // 200px hypothetical narrow row -> 100 -> clamps up to 120
+    expect(commitThresholdPx(200)).toBe(SWIPE_COMMIT_MIN_PX);
   });
 
   it("clamps to the maximum on tablets", () => {
-    // 800px (iPad portrait) -> 240, clamps to max 180
+    // 800px (iPad portrait) -> 400 -> clamps down to 260
     expect(commitThresholdPx(800)).toBe(SWIPE_COMMIT_MAX_PX);
   });
 
