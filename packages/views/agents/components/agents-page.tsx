@@ -511,7 +511,6 @@ export function AgentsPage() {
                   defaultsRowsVisible ? (
                     <DefaultsInlineRows
                       scope={scope}
-                      isAdmin={isWorkspaceAdmin}
                       allDefaults={allDefaults}
                       currentUserId={currentUser?.id ?? null}
                       onOpenPersonal={() => setDefaultsSheet("personal")}
@@ -546,11 +545,11 @@ export function AgentsPage() {
         open={defaultsSheet !== null}
         onOpenChange={(open) => { if (!open) setDefaultsSheet(null); }}
       >
-        <SheetContent side="right" className="sm:max-w-3xl p-0">
+        <SheetContent side="right" className="data-[side=right]:sm:max-w-3xl p-0">
           <SheetTitle className="sr-only">{t(($) => $.defaults.sheet_title)}</SheetTitle>
           <SheetDescription className="sr-only">{t(($) => $.defaults.sheet_desc)}</SheetDescription>
           {defaultsSheet === "personal" && <PersonalDefaultsDetail />}
-          {defaultsSheet === "system" && <SystemDefaultsDetail />}
+          {defaultsSheet === "system" && <SystemDefaultsDetail readOnly={!isWorkspaceAdmin} />}
           {defaultsSheet !== null && typeof defaultsSheet === "object" && (
             <OtherDefaultsDetail
               defaults={defaultsSheet.defaults}
@@ -565,13 +564,12 @@ export function AgentsPage() {
 
 // ---------------------------------------------------------------------------
 // Defaults inline rows — rendered inside the DataTable scroll container as
-// pinned pseudo-rows. Mine scope: Personal + System (admin). All scope:
-// shows every user's defaults (with owner marked).
+// pinned pseudo-rows. Mine scope: Personal + System. All scope: System +
+// all users' defaults (with owner marked).
 // ---------------------------------------------------------------------------
 
 function DefaultsInlineRows({
   scope,
-  isAdmin,
   allDefaults,
   currentUserId,
   onOpenPersonal,
@@ -579,7 +577,6 @@ function DefaultsInlineRows({
   onOpenOther,
 }: {
   scope: Scope;
-  isAdmin: boolean;
   allDefaults: AgentDefaultsWithUser[];
   currentUserId: string | null;
   onOpenPersonal: () => void;
@@ -607,38 +604,10 @@ function DefaultsInlineRows({
             {t(($) => $.defaults.badge_label)}
           </span>
         </button>
-        {isAdmin && (
-          <button
-            type="button"
-            onClick={onOpenSystem}
-            className="flex w-full items-center gap-3 border-t px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
-          >
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-amber-500/10">
-              <Settings2 className="h-3.5 w-3.5 text-amber-500" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <span className="text-sm font-medium">{t(($) => $.defaults.system_title)}</span>
-              <span className="ml-2 text-xs text-muted-foreground">{t(($) => $.defaults.system_desc)}</span>
-            </div>
-            <span className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
-              {t(($) => $.defaults.badge_label)}
-            </span>
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  // "All" scope: show system defaults + all users' defaults
-  if (allDefaults.length === 0 && !isAdmin) return null;
-
-  return (
-    <div className="border-b">
-      {isAdmin && (
         <button
           type="button"
           onClick={onOpenSystem}
-          className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
+          className="flex w-full items-center gap-3 border-t px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
         >
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-amber-500/10">
             <Settings2 className="h-3.5 w-3.5 text-amber-500" />
@@ -651,7 +620,31 @@ function DefaultsInlineRows({
             {t(($) => $.defaults.badge_label)}
           </span>
         </button>
-      )}
+      </div>
+    );
+  }
+
+  // "All" scope: show system defaults + all users' defaults
+  if (allDefaults.length === 0) return null;
+
+  return (
+    <div className="border-b">
+      <button
+        type="button"
+        onClick={onOpenSystem}
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
+      >
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-amber-500/10">
+          <Settings2 className="h-3.5 w-3.5 text-amber-500" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <span className="text-sm font-medium">{t(($) => $.defaults.system_title)}</span>
+          <span className="ml-2 text-xs text-muted-foreground">{t(($) => $.defaults.system_desc)}</span>
+        </div>
+        <span className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+          {t(($) => $.defaults.badge_label)}
+        </span>
+      </button>
       {allDefaults.map((d) => {
         const isMine = d.user_id === currentUserId;
         return (
@@ -669,7 +662,9 @@ function DefaultsInlineRows({
                   {t(($) => $.defaults.you_label)}
                 </span>
               )}
-              <span className="ml-2 text-xs text-muted-foreground">{t(($) => $.defaults.personal_desc)}</span>
+              <span className="ml-2 text-xs text-muted-foreground">
+                {isMine ? t(($) => $.defaults.personal_desc) : t(($) => $.defaults.other_user_desc)}
+              </span>
             </div>
             <span className="shrink-0 rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
               {t(($) => $.defaults.badge_label)}

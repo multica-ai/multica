@@ -805,7 +805,7 @@ export function PersonalDefaultsDetail() {
 
 // ─── System Defaults Detail ─────────────────────────────────────────────────
 
-export function SystemDefaultsDetail() {
+export function SystemDefaultsDetail({ readOnly = false }: { readOnly?: boolean } = {}) {
   const { t } = useT("agents");
   const workspace = useCurrentWorkspace();
   const qc = useQueryClient();
@@ -846,7 +846,7 @@ export function SystemDefaultsDetail() {
           <h2 className="text-sm font-semibold">{t(($) => $.defaults.system_title)}</h2>
         </div>
       </div>
-      <DefaultsForm config={agentDefaults} readOnly={false} saving={saving} onSaveField={handleSaveField} />
+      <DefaultsForm config={agentDefaults} readOnly={readOnly} saving={saving} onSaveField={handleSaveField} />
     </div>
   );
 }
