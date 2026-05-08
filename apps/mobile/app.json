@@ -3,7 +3,7 @@
     "name": "Multicam",
     "slug": "multicam",
     "scheme": "wujieai-multicam",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -18,7 +18,7 @@
     ],
     "android": {
       "package": "com.wujieai.multica",
-      "versionCode": 1,
+      "versionCode": 2,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#111111"
@@ -26,7 +26,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.wujieai.multica",
-      "buildNumber": "3",
+      "buildNumber": "4",
       "supportsTablet": false,
       "icon": "./assets/icon.png",
       "infoPlist": {
