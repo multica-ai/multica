@@ -4,7 +4,7 @@ import React from "react";
 import {
   User,
   SlidersHorizontal,
-  Key,
+  Plug,
   Settings,
   Users,
   FolderGit2,
@@ -29,7 +29,11 @@ const ACCOUNT_TAB_ICONS = {
   profile: User,
   preferences: SlidersHorizontal,
   notifications: Bell,
-  tokens: Key,
+  // Plug — the tab covers tokens, connection details, MCP setup, and the
+  // REST API reference. The whole "how this thing connects to other
+  // things" surface, not just tokens. Key was the older label-icon when
+  // the tab was tokens-only.
+  tokens: Plug,
 } as const;
 
 const WORKSPACE_TAB_KEYS = ["general", "repositories", "labs", "members"] as const;
