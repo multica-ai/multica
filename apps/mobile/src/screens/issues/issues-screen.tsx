@@ -1,9 +1,9 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { GestureResponderEvent } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { ChevronDown, Filter } from "lucide-react-native";
+import { ChevronDown, Filter, Menu, Plus, Search as SearchIcon } from "lucide-react-native";
 import { BOARD_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config/status";
 import { PRIORITY_CONFIG, PRIORITY_ORDER } from "@multica/core/issues/config/priority";
 import { useIssueList } from "@multica/core/issues/hooks";
@@ -19,6 +19,7 @@ import { useMemberList, useAgentList } from "@multica/core/workspace/hooks";
 import { useProjectList } from "@multica/core/projects/hooks";
 import type { Issue, IssuePriority, IssueStatus } from "@multica/core/types";
 import type { RootStackParamList } from "../../navigation/root-navigator";
+import { FloatingActionMenu } from "../../components/ui/floating-action-menu";
 import { EmptyState, LoadingState, Screen } from "../../components/ui/primitives";
 import { WorkspaceHeader } from "../../components/ui/workspace-header";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
@@ -29,6 +30,7 @@ export function IssuesScreen() {
   const { workspace } = useMobileWorkspace();
   const userId = useAuthStore((state) => state.user?.id);
   useRehydrateMobileIssuesFilters(userId);
+  const statusListRef = useRef<FlatList<IssueStatus>>(null);
   const [status, setStatus] = useState<IssueStatus>("todo");
   const [filterOpen, setFilterOpen] = useState(false);
   const {
@@ -91,6 +93,46 @@ export function IssuesScreen() {
     <Screen>
       <View style={styles.headerRow}>
         <WorkspaceHeader centered />
+      </View>
+      <View style={styles.statusToolbar}>
+        <FlatList
+          contentContainerStyle={styles.statusTabsContent}
+          data={BOARD_STATUSES}
+          horizontal
+          initialNumToRender={BOARD_STATUSES.length}
+          keyExtractor={(item) => item}
+          onScrollToIndexFailed={({ averageItemLength, index }) => {
+            statusListRef.current?.scrollToOffset({
+              animated: true,
+              offset: Math.max(0, averageItemLength * index),
+            });
+          }}
+          ref={statusListRef}
+          renderItem={({ item, index }) => (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setStatus(item);
+                statusListRef.current?.scrollToIndex({
+                  animated: true,
+                  index,
+                  viewPosition: 0.5,
+                });
+              }}
+              style={({ pressed }) => [
+                styles.statusTab,
+                item === status && styles.statusTabActive,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={[styles.statusText, item === status && styles.statusTextActive]}>
+                {STATUS_CONFIG[item].label}
+              </Text>
+            </Pressable>
+          )}
+          showsHorizontalScrollIndicator={false}
+          style={styles.statusTabsList}
+        />
         <Pressable
           accessibilityLabel="Filter issues"
           accessibilityRole="button"
@@ -98,28 +140,15 @@ export function IssuesScreen() {
             event.stopPropagation();
             setFilterOpen(true);
           }}
-          style={({ pressed }) => [styles.headerFilterButton, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.tabsFilterButton, pressed && styles.pressed]}
         >
           <Filter color={colors.foreground} size={18} strokeWidth={2} />
           {activeFilterCount > 0 ? (
-            <View style={styles.headerFilterBadge}>
-              <Text style={styles.headerFilterBadgeText}>{activeFilterCount}</Text>
+            <View style={styles.tabsFilterBadge}>
+              <Text style={styles.tabsFilterBadgeText}>{activeFilterCount}</Text>
             </View>
           ) : null}
         </Pressable>
-      </View>
-      <View style={styles.statusTabs}>
-        {BOARD_STATUSES.map((item) => (
-          <Pressable
-            key={item}
-            onPress={() => setStatus(item)}
-            style={[styles.statusTab, item === status && styles.statusTabActive]}
-          >
-            <Text style={[styles.statusText, item === status && styles.statusTextActive]}>
-              {STATUS_CONFIG[item].label}
-            </Text>
-          </Pressable>
-        ))}
       </View>
       {isLoading ? <LoadingState /> : null}
       {isError ? (
@@ -158,14 +187,23 @@ export function IssuesScreen() {
           )}
         />
       ) : null}
-      <Pressable
-        accessibilityLabel="Create issue"
-        accessibilityRole="button"
-        onPress={() => navigation.navigate("CreateIssue")}
-        style={({ pressed }) => [styles.floatingButton, pressed && styles.floatingButtonPressed]}
-      >
-        <Text style={styles.floatingButtonText}>+</Text>
-      </Pressable>
+      <FloatingActionMenu
+        mainIcon={<Menu color={colors.primaryForeground} size={25} strokeWidth={2.3} />}
+        actions={[
+          {
+            key: "create",
+            label: "New issue",
+            icon: <Plus color={colors.primaryForeground} size={21} strokeWidth={2.4} />,
+            onPress: () => navigation.navigate("CreateIssue"),
+          },
+          {
+            key: "search",
+            label: "Search",
+            icon: <SearchIcon color={colors.primaryForeground} size={20} strokeWidth={2.3} />,
+            onPress: () => navigation.navigate("Search"),
+          },
+        ]}
+      />
       <IssueFilterSheet
         agents={agents}
         includeNoAssignee={includeNoAssignee}
@@ -540,73 +578,25 @@ const styles = StyleSheet.create({
     position: "relative",
     zIndex: 100,
   },
-  headerFilterButton: {
+  statusToolbar: {
     alignItems: "center",
-    backgroundColor: colors.background,
-    borderRadius: radii.md,
-    elevation: 100,
-    height: 36,
-    justifyContent: "center",
-    position: "absolute",
-    right: 0,
-    top: 4,
-    width: 36,
-    zIndex: 1000,
-  },
-  headerFilterBadge: {
-    alignItems: "center",
-    backgroundColor: colors.primary,
-    borderRadius: 9,
-    height: 18,
-    justifyContent: "center",
-    minWidth: 18,
-    paddingHorizontal: 3,
-    position: "absolute",
-    right: 1,
-    top: 1,
-  },
-  headerFilterBadgeText: {
-    color: colors.primaryForeground,
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  floatingButton: {
-    alignItems: "center",
-    backgroundColor: colors.primary,
-    borderRadius: 28,
-    bottom: spacing.xl,
-    elevation: 8,
-    height: 56,
-    justifyContent: "center",
-    position: "absolute",
-    right: spacing.xl,
-    shadowColor: "#000000",
-    shadowOffset: { height: 4, width: 0 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    width: 56,
-    zIndex: 40,
-  },
-  floatingButtonPressed: {
-    opacity: 0.82,
-  },
-  floatingButtonText: {
-    color: colors.primaryForeground,
-    fontSize: 32,
-    fontWeight: "400",
-    lineHeight: 36,
-  },
-  statusTabs: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: spacing.sm,
     marginBottom: spacing.md,
+  },
+  statusTabsList: {
+    flex: 1,
+  },
+  statusTabsContent: {
+    gap: spacing.sm,
+    paddingRight: spacing.xs,
   },
   statusTab: {
     backgroundColor: colors.card,
     borderColor: colors.border,
     borderRadius: radii.md,
     borderWidth: StyleSheet.hairlineWidth,
+    flexShrink: 0,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
@@ -621,6 +611,34 @@ const styles = StyleSheet.create({
   },
   statusTextActive: {
     color: colors.primaryForeground,
+  },
+  tabsFilterButton: {
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexShrink: 0,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
+  },
+  tabsFilterBadge: {
+    alignItems: "center",
+    backgroundColor: colors.primary,
+    borderRadius: 9,
+    height: 18,
+    justifyContent: "center",
+    minWidth: 18,
+    paddingHorizontal: 3,
+    position: "absolute",
+    right: -5,
+    top: -5,
+  },
+  tabsFilterBadgeText: {
+    color: colors.primaryForeground,
+    fontSize: 10,
+    fontWeight: "700",
   },
   pressed: {
     opacity: 0.72,

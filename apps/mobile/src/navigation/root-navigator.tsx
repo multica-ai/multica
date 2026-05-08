@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Linking, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Linking, StyleSheet, View } from "react-native";
 import { NavigationIndependentTree } from "@react-navigation/core";
 import {
   NavigationContainer,
@@ -21,6 +21,7 @@ import { CreateIssueScreen } from "../screens/issues/create-issue-screen";
 import { IssueDetailScreen, IssuePropertiesScreen } from "../screens/issues/issue-detail-screen";
 import { IssueTaskTranscriptScreen } from "../screens/issues/issue-task-transcript-screen";
 import { IssuesScreen } from "../screens/issues/issues-screen";
+import { SearchScreen } from "../screens/issues/search-screen";
 import { InboxDetailScreen } from "../screens/mine/inbox-detail-screen";
 import { InboxScreen } from "../screens/mine/inbox-screen";
 import { AgentsScreen } from "../screens/mine/agents-screen";
@@ -222,15 +223,6 @@ function MainTabs() {
   );
 }
 
-function SearchScreen() {
-  return (
-    <Screen>
-      <Text style={styles.title}>Search</Text>
-      <Text style={styles.muted}>Issue and project search entry point.</Text>
-    </Screen>
-  );
-}
-
 const styles = StyleSheet.create({
   loading: {
     alignItems: "center",
@@ -245,17 +237,6 @@ const styles = StyleSheet.create({
   tabLabel: {
     fontSize: 12,
     fontWeight: "500",
-  },
-  title: {
-    color: colors.foreground,
-    fontSize: 20,
-    fontWeight: "500",
-    marginBottom: spacing.sm,
-  },
-  muted: {
-    color: colors.mutedForeground,
-    fontSize: 14,
-    lineHeight: 20,
   },
   errorState: {
     backgroundColor: colors.background,
