@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Archive, ChevronLeft } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 import {
   formatInboxDetailText,
   formatInboxTimeAgo,
@@ -24,6 +25,7 @@ import { colors, radii, spacing } from "../../theme/tokens";
 type Props = NativeStackScreenProps<RootStackParamList, "InboxDetail">;
 
 export function InboxDetailScreen({ navigation, route }: Props) {
+  const { t } = useTranslation();
   const { inboxItemId } = route.params;
   const { workspace } = useMobileWorkspace();
   const { getActorName } = useActorName();
@@ -46,7 +48,7 @@ export function InboxDetailScreen({ navigation, route }: Props) {
   if (isError) {
     return (
       <InboxDetailFrame navigation={navigation}>
-        <EmptyState title="Unable to load notification" />
+        <EmptyState title={t("inbox.unable_to_load_notification")} />
       </InboxDetailFrame>
     );
   }
@@ -54,8 +56,8 @@ export function InboxDetailScreen({ navigation, route }: Props) {
     return (
       <InboxDetailFrame navigation={navigation}>
         <EmptyState
-          detail="It may have been archived or removed."
-          title="Notification not found"
+          detail={t("inbox.notification_missing_detail")}
+          title={t("inbox.notification_not_found")}
         />
       </InboxDetailFrame>
     );
@@ -89,7 +91,7 @@ export function InboxDetailScreen({ navigation, route }: Props) {
         </View>
         <View style={styles.actions}>
           {item.issue_id ? (
-            <Button onPress={openIssue}>Open issue</Button>
+            <Button onPress={openIssue}>{t("inbox.open_issue")}</Button>
           ) : null}
           <Pressable
             accessibilityRole="button"
@@ -104,7 +106,7 @@ export function InboxDetailScreen({ navigation, route }: Props) {
             ]}
           >
             <Archive color={colors.foreground} size={16} />
-            <Text style={styles.archiveText}>Archive</Text>
+            <Text style={styles.archiveText}>{t("inbox.archive")}</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -119,18 +121,19 @@ function InboxDetailFrame({
   children: ReactNode;
   navigation: Props["navigation"];
 }) {
+  const { t } = useTranslation();
   return (
     <Screen padded={false}>
       <View style={styles.header}>
         <Pressable
-          accessibilityLabel="Back"
+          accessibilityLabel={t("common.go_back")}
           accessibilityRole="button"
           onPress={() => navigation.goBack()}
           style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
         >
           <ChevronLeft color={colors.foreground} size={22} />
         </Pressable>
-        <Text style={styles.headerTitle}>Notification</Text>
+        <Text style={styles.headerTitle}>{t("inbox.notification")}</Text>
         <View style={styles.iconButton} />
       </View>
       {children}

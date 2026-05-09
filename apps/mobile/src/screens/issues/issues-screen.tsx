@@ -3,9 +3,10 @@ import { ActivityIndicator, FlatList, Modal, Pressable, ScrollView, StyleSheet, 
 import type { GestureResponderEvent } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useTranslation } from "react-i18next";
 import { ChevronDown, Filter, Menu, Plus, Search as SearchIcon } from "lucide-react-native";
-import { BOARD_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config/status";
-import { PRIORITY_CONFIG, PRIORITY_ORDER } from "@multica/core/issues/config/priority";
+import { BOARD_STATUSES } from "@multica/core/issues/config/status";
+import { PRIORITY_ORDER } from "@multica/core/issues/config/priority";
 import { useIssueList } from "@multica/core/issues/hooks";
 import { useLoadMoreByStatusForWorkspace } from "@multica/core/issues/mutations";
 import {
@@ -22,10 +23,12 @@ import type { RootStackParamList } from "../../navigation/root-navigator";
 import { FloatingActionMenu } from "../../components/ui/floating-action-menu";
 import { EmptyState, LoadingState, Screen } from "../../components/ui/primitives";
 import { WorkspaceHeader } from "../../components/ui/workspace-header";
+import { formatIssuePriority, formatIssueStatus } from "../../i18n/format";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
 import { colors, radii, spacing } from "../../theme/tokens";
 
 export function IssuesScreen() {
+  const { t } = useTranslation();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { workspace } = useMobileWorkspace();
   const userId = useAuthStore((state) => state.user?.id);
@@ -126,7 +129,7 @@ export function IssuesScreen() {
               ]}
             >
               <Text style={[styles.statusText, item === status && styles.statusTextActive]}>
-                {STATUS_CONFIG[item].label}
+                {formatIssueStatus(t, item)}
               </Text>
             </Pressable>
           )}
@@ -134,7 +137,7 @@ export function IssuesScreen() {
           style={styles.statusTabsList}
         />
         <Pressable
-          accessibilityLabel="Filter issues"
+          accessibilityLabel={t("issues.filter")}
           accessibilityRole="button"
           onPress={(event: GestureResponderEvent) => {
             event.stopPropagation();
@@ -152,7 +155,7 @@ export function IssuesScreen() {
       </View>
       {isLoading ? <LoadingState /> : null}
       {isError ? (
-        <EmptyState detail="Pull to retry once the connection is available." title="Unable to load issues" />
+        <EmptyState detail={t("common.pull_to_retry")} title={t("issues.unable_to_load")} />
       ) : null}
       {!isLoading && !isError ? (
         <FlatList
@@ -192,13 +195,13 @@ export function IssuesScreen() {
         actions={[
           {
             key: "create",
-            label: "New issue",
+            label: t("issues.new_issue"),
             icon: <Plus color={colors.primaryForeground} size={21} strokeWidth={2.4} />,
             onPress: () => navigation.navigate("CreateIssue"),
           },
           {
             key: "search",
-            label: "Search",
+            label: t("common.search"),
             icon: <SearchIcon color={colors.primaryForeground} size={20} strokeWidth={2.3} />,
             onPress: () => navigation.navigate("Search"),
           },
@@ -255,17 +258,18 @@ function IssueListEmpty({
   hasFilters: boolean;
   onClear: () => void;
 }) {
-  if (!hasFilters) return <EmptyState title="No issues in this status" />;
+  const { t } = useTranslation();
+  if (!hasFilters) return <EmptyState title={t("issues.no_in_status")} />;
   return (
     <View style={styles.emptyFiltered}>
-      <Text style={styles.emptyTitle}>No matching issues</Text>
-      <Text style={styles.emptyDetail}>Try clearing filters or switch status.</Text>
+      <Text style={styles.emptyTitle}>{t("issues.no_matching")}</Text>
+      <Text style={styles.emptyDetail}>{t("issues.try_clear_filters")}</Text>
       <Pressable
         accessibilityRole="button"
         onPress={onClear}
         style={({ pressed }) => [styles.emptyClearButton, pressed && styles.pressed]}
       >
-        <Text style={styles.emptyClearText}>Clear filters</Text>
+        <Text style={styles.emptyClearText}>{t("issues.clear_filters")}</Text>
       </Pressable>
     </View>
   );
@@ -278,13 +282,14 @@ function IssueListFooter({
   hasMore: boolean;
   loading: boolean;
 }) {
+  const { t } = useTranslation();
   if (!hasMore && !loading) return null;
   return (
     <View style={styles.listFooter}>
       {loading ? (
         <>
           <ActivityIndicator color={colors.mutedForeground} />
-          <Text style={styles.listFooterText}>Loading more...</Text>
+          <Text style={styles.listFooterText}>{t("issues.loading_more")}</Text>
         </>
       ) : null}
     </View>
@@ -308,6 +313,7 @@ function IssueFilterSheet({
   projects: Array<{ id: string; title: string }>;
   visible: boolean;
 }) {
+  const { t } = useTranslation();
   const priorityFilters = useMobileIssuesFilterStore((s) => s.priorityFilters);
   const assigneeFilters = useMobileIssuesFilterStore((s) => s.assigneeFilters);
   const creatorFilters = useMobileIssuesFilterStore((s) => s.creatorFilters);
@@ -338,16 +344,16 @@ function IssueFilterSheet({
         id: member.user_id,
         type: "member" as const,
         label: member.name,
-        meta: "Member",
+        meta: t("issues.member"),
       })),
       ...activeAgents.map((agent) => ({
         id: agent.id,
         type: "agent" as const,
         label: agent.name,
-        meta: "Agent",
+        meta: t("issues.agent"),
       })),
     ],
-    [activeAgents, members],
+    [activeAgents, members, t],
   );
   const projectOptions = useMemo(
     () => projects.map((project) => ({ id: project.id, label: project.title })),
@@ -359,17 +365,17 @@ function IssueFilterSheet({
       <Pressable style={styles.sheetBackdrop} onPress={onClose} />
       <View style={styles.sheet}>
         <View style={styles.sheetHeader}>
-          <Text style={styles.sheetTitle}>Filter issues</Text>
+          <Text style={styles.sheetTitle}>{t("issues.filter")}</Text>
           <Pressable accessibilityRole="button" onPress={onClose} style={styles.sheetDoneButton}>
-            <Text style={styles.sheetDoneText}>Done</Text>
+            <Text style={styles.sheetDoneText}>{t("common.done")}</Text>
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={styles.sheetContent}>
-          <FilterSection title="Priority">
+          <FilterSection title={t("issues.priority")}>
             {PRIORITY_ORDER.map((priority) => (
               <FilterOption
                 key={priority}
-                label={PRIORITY_CONFIG[priority].label}
+                label={formatIssuePriority(t, priority)}
                 onPress={() => togglePriorityFilter(priority)}
                 selected={priorityFilters.includes(priority)}
               />
@@ -377,52 +383,52 @@ function IssueFilterSheet({
           </FilterSection>
 
           <FilterDroplistSection
-            emptyLabel="Any assignee"
+            emptyLabel={t("issues.any_assignee")}
             footer={
               <FilterOption
-                label="No assignee"
+                label={t("issues.no_assignee")}
                 onPress={toggleNoAssignee}
                 selected={includeNoAssignee}
               />
             }
             options={assigneeOptions}
-            placeholder="Search assignees..."
+            placeholder={t("issues.search_assignees")}
             selectedKeys={assigneeSelectedKeys}
-            title="Assignee"
+            title={t("issues.assignee")}
             toKey={(value) => actorKey(value)}
             onToggle={(value) => toggleAssigneeFilter({ type: value.type, id: value.id })}
           />
 
           <FilterDroplistSection
-            emptyLabel="Any creator"
+            emptyLabel={t("issues.any_creator")}
             options={assigneeOptions}
-            placeholder="Search creators..."
+            placeholder={t("issues.search_creators")}
             selectedKeys={creatorSelectedKeys}
-            title="Creator"
+            title={t("issues.creator")}
             toKey={(value) => actorKey(value)}
             onToggle={(value) => toggleCreatorFilter({ type: value.type, id: value.id })}
           />
 
           <FilterDroplistSection
-            emptyLabel="Any project"
+            emptyLabel={t("issues.any_project")}
             footer={
               <FilterOption
-                label="No project"
+                label={t("issues.no_project")}
                 onPress={toggleNoProject}
                 selected={includeNoProject}
               />
             }
             options={projectOptions}
-            placeholder="Search projects..."
+            placeholder={t("issues.search_projects")}
             selectedKeys={projectSelectedKeys}
-            title="Project"
+            title={t("issues.project")}
             toKey={(value) => value.id}
             onToggle={(value) => toggleProjectFilter(value.id)}
           />
         </ScrollView>
         <View style={styles.sheetFooter}>
           <Pressable accessibilityRole="button" onPress={clearFilters} style={styles.resetButton}>
-            <Text style={styles.resetButtonText}>Reset</Text>
+            <Text style={styles.resetButtonText}>{t("common.reset")}</Text>
           </Pressable>
         </View>
       </View>
@@ -458,6 +464,7 @@ function FilterDroplistSection<T extends { id: string; label: string; meta?: str
   toKey: (value: T) => string;
   onToggle: (value: T) => void;
 }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState("");
   const visibleOptions = useMemo(() => {
@@ -469,9 +476,7 @@ function FilterDroplistSection<T extends { id: string; label: string; meta?: str
       return aSelected ? -1 : 1;
     });
   }, [options, query, selectedKeys, toKey]);
-  const summary = selectedKeys.size > 0
-    ? `${selectedKeys.size} selected`
-    : emptyLabel;
+  const summary = selectedKeys.size > 0 ? String(selectedKeys.size) : emptyLabel;
 
   return (
     <View style={styles.filterSection}>
@@ -518,7 +523,7 @@ function FilterDroplistSection<T extends { id: string; label: string; meta?: str
               );
             })
           ) : (
-            <Text style={styles.noResultsText}>No results</Text>
+            <Text style={styles.noResultsText}>{t("common.no_results")}</Text>
           )}
         </View>
       ) : null}

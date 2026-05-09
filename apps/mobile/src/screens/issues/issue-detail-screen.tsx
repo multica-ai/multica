@@ -26,6 +26,7 @@ import * as ImagePicker from "expo-image-picker";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MoreHorizontal } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
 import {
@@ -48,7 +49,7 @@ import {
   useIssueTimelineEntries,
   useLiveIssueTasks,
 } from "@multica/core/issues/hooks";
-import { ALL_STATUSES, PRIORITY_CONFIG, PRIORITY_ORDER, STATUS_CONFIG } from "@multica/core/issues/config";
+import { ALL_STATUSES, PRIORITY_ORDER } from "@multica/core/issues/config";
 import {
   useActorName,
   useWorkspaceMentionTargets,
@@ -80,6 +81,11 @@ import {
   type DraftCommentAttachment,
 } from "./comment-attachment-drafts";
 import { TaskMessageRow } from "./task-transcript-components";
+import {
+  formatAgentTaskStatus,
+  formatIssuePriority,
+  formatIssueStatus,
+} from "../../i18n/format";
 
 type Props = NativeStackScreenProps<RootStackParamList, "IssueDetail">;
 type IssuePropertiesProps = NativeStackScreenProps<RootStackParamList, "IssueProperties">;
@@ -112,6 +118,7 @@ type AttachmentPreviewState = {
   error?: string;
   loading?: boolean;
 };
+type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 const DEFAULT_REACTIONS = ["👍", "👀", "🎉", "❤️"];
 const MAX_MENTION_SUGGESTIONS = 20;
@@ -149,6 +156,7 @@ function useKeyboardHeight(enabled: boolean) {
 
 export function IssueDetailScreen({ navigation, route }: Props) {
   const { issueId } = route.params;
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const userId = useAuthStore((state) => state.user?.id);
   const { workspace } = useMobileWorkspace();
@@ -255,13 +263,13 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       setCommentSheetOpen(false);
     } catch (err) {
       await Promise.allSettled(uploadedAttachments.map((attachment) => api.deleteAttachment(attachment.id)));
-      setUploadError(err instanceof Error ? err.message : "Unable to send comment");
-      setCommentError(err instanceof Error ? err.message : "Unable to send comment");
+      setUploadError(err instanceof Error ? err.message : t("issues.unable_to_send_comment"));
+      setCommentError(err instanceof Error ? err.message : t("issues.unable_to_send_comment"));
       await refetchAttachments();
     } finally {
       setUploading(false);
     }
-  }, [comment, commentAttachments, createComment, issueId, refetchAttachments, replyTargetId, uploading]);
+  }, [comment, commentAttachments, createComment, issueId, refetchAttachments, replyTargetId, t, uploading]);
 
   const saveCommentEdit = useCallback(async (commentId: string) => {
     const content = editingContent.trim();
@@ -272,9 +280,9 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       setEditingCommentId(null);
       setEditingContent("");
     } catch (err) {
-      setCommentError(err instanceof Error ? err.message : "Unable to save comment");
+      setCommentError(err instanceof Error ? err.message : t("issues.unable_to_save_comment"));
     }
-  }, [editingContent, updateComment]);
+  }, [editingContent, t, updateComment]);
 
   const removeComment = useCallback(async (commentId: string) => {
     if (deleteComment.isPending) return;
@@ -282,9 +290,9 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     try {
       await deleteComment.mutateAsync(commentId);
     } catch (err) {
-      setCommentError(err instanceof Error ? err.message : "Unable to delete comment");
+      setCommentError(err instanceof Error ? err.message : t("issues.unable_to_delete_comment"));
     }
-  }, [deleteComment]);
+  }, [deleteComment, t]);
 
   const closeCommentSheet = useCallback(() => {
     setCommentSheetOpen(false);
@@ -316,11 +324,11 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       await uploadMobileAsset(api, asset, { issueId });
       await refetchAttachments();
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Upload failed");
+      setUploadError(err instanceof Error ? err.message : t("issues.upload_failed"));
     } finally {
       setUploading(false);
     }
-  }, [addCommentAttachment, issueId, refetchAttachments]);
+  }, [addCommentAttachment, issueId, refetchAttachments, t]);
 
   const pickDocument = useCallback(async (target: "issue" | "comment") => {
     setUploadError(null);
@@ -329,7 +337,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     try {
       DocumentPicker = require("expo-document-picker") as DocumentPickerModule;
     } catch (err) {
-      setUploadError(formatDocumentPickerError(err));
+      setUploadError(formatDocumentPickerError(err, t));
       return;
     }
 
@@ -341,7 +349,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         base64: false,
       });
     } catch (err) {
-      setUploadError(formatDocumentPickerError(err));
+      setUploadError(formatDocumentPickerError(err, t));
       return;
     }
 
@@ -357,7 +365,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       },
       target,
     );
-  }, [uploadAttachment]);
+  }, [t, uploadAttachment]);
 
   const pickImage = useCallback(async (target: "issue" | "comment") => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -402,18 +410,18 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     try {
       Clipboard.setString(content);
     } catch (err) {
-      setCommentError(formatClipboardError(err));
+      setCommentError(formatClipboardError(err, t));
     }
-  }, []);
+  }, [t]);
 
   const stopLiveTask = useCallback(async (taskId: string) => {
     setLiveTaskError(null);
     try {
       await cancelLiveTask(taskId);
     } catch (err) {
-      setLiveTaskError(err instanceof Error ? err.message : "Unable to stop agent");
+      setLiveTaskError(err instanceof Error ? err.message : t("issues.unable_to_stop_agent"));
     }
-  }, [cancelLiveTask]);
+  }, [cancelLiveTask, t]);
 
   const closeAttachmentPreview = useCallback(() => {
     previewAbortRef.current?.abort();
@@ -438,7 +446,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     if (attachment.size_bytes > TEXT_PREVIEW_MAX_BYTES) {
       setAttachmentPreview({
         attachment,
-        error: "This file is too large to preview in the app.",
+        error: t("issues.file_too_large_preview"),
       });
       return;
     }
@@ -451,7 +459,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         signal: controller.signal,
       });
       if (!response.ok) {
-        throw new Error(`Unable to load preview (${response.status})`);
+        throw new Error(`${t("issues.unable_to_load_preview")} (${response.status})`);
       }
       const textContent = await response.text();
       if (controller.signal.aborted) return;
@@ -460,14 +468,14 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       if (controller.signal.aborted) return;
       setAttachmentPreview({
         attachment,
-        error: err instanceof Error ? err.message : "Unable to load preview",
+        error: err instanceof Error ? err.message : t("issues.unable_to_load_preview"),
       });
     } finally {
       if (previewAbortRef.current === controller) {
         previewAbortRef.current = null;
       }
     }
-  }, []);
+  }, [t]);
 
   const renderListItem = useCallback(({ item }: { item: DetailListItem }) => {
     if ("node" in item) return item.node;
@@ -541,7 +549,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
               }}
             />
           ) : (
-            <Text style={styles.emptyText}>No description</Text>
+            <Text style={styles.emptyText}>{t("issues.no_description")}</Text>
           )}
           <ReactionRow
             onToggle={handleIssueReaction}
@@ -556,21 +564,21 @@ export function IssueDetailScreen({ navigation, route }: Props) {
       node: (
         <View style={[styles.section, styles.sectionSeparated]}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Attachments</Text>
+            <Text style={styles.sectionTitle}>{t("issues.attachments")}</Text>
             <View style={styles.inlineActions}>
               <Button
                 disabled={uploading}
                 onPress={() => void pickImage("issue")}
                 variant="secondary"
               >
-                Image
+                {t("issues.image")}
               </Button>
               <Button
                 disabled={uploading}
                 onPress={() => void pickDocument("issue")}
                 variant="secondary"
               >
-                File
+                {t("issues.file")}
               </Button>
             </View>
           </View>
@@ -588,6 +596,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     openAttachmentPreview,
     pickDocument,
     pickImage,
+    t,
     uploadError,
     uploading,
     userId,
@@ -659,7 +668,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     if (comments.length > 0 || commentError) {
       nextSections.push({
         key: "comments",
-        title: "Comments",
+        title: t("issues.comments"),
         count: comments.length,
         collapsed: commentsCollapsed,
         onToggle: toggleCommentsCollapsed,
@@ -670,7 +679,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     if (activities.length > 0) {
       nextSections.push({
         key: "timeline",
-        title: "Timeline",
+        title: t("issues.timeline"),
         count: activities.length,
         collapsed: timelineCollapsed,
         onToggle: toggleTimelineCollapsed,
@@ -695,10 +704,11 @@ export function IssueDetailScreen({ navigation, route }: Props) {
     toggleCommentsCollapsed,
     toggleTimelineCollapsed,
     transcriptItems,
+    t,
   ]);
 
   if (isLoading) return <LoadingState />;
-  if (isError || !issue) return <EmptyState title="Unable to load issue" />;
+  if (isError || !issue) return <EmptyState title={t("issues.unable_to_load")} />;
 
   return (
     <Screen padded={false} safeArea={false}>
@@ -706,7 +716,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         onBack={() => navigation.goBack()}
         right={(
           <HeaderIconButton
-            label="Issue actions"
+            label={t("issues.issue_actions")}
             onPress={() => setIssueMenuOpen(true)}
           >
             <MoreHorizontal color={colors.foreground} size={20} />
@@ -755,7 +765,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
 
         {!editingCommentId ? (
           <Pressable
-            accessibilityLabel="Add a comment"
+            accessibilityLabel={t("issues.add_comment")}
             accessibilityRole="button"
             onPress={openCommentComposer}
             style={({ pressed }) => [
@@ -788,9 +798,9 @@ export function IssueDetailScreen({ navigation, route }: Props) {
         attachments={commentAttachments}
         mentionTargets={mentionTargets}
         issueMentionTargets={issueMentionTargets}
-        placeholder={replyTargetId ? "Reply in thread" : "Add a comment"}
-        submitLabel={replyTargetId ? "Send reply" : "Send"}
-        title={replyTargetId ? "Reply in thread" : "Add a comment"}
+        placeholder={replyTargetId ? t("issues.reply_in_thread") : t("issues.add_comment")}
+        submitLabel={replyTargetId ? t("issues.send_reply") : t("issues.send")}
+        title={replyTargetId ? t("issues.reply_in_thread") : t("issues.add_comment")}
       />
       <AttachmentPreviewModal
         onClose={closeAttachmentPreview}
@@ -803,6 +813,7 @@ export function IssueDetailScreen({ navigation, route }: Props) {
 
 export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProps) {
   const { issueId } = route.params;
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { workspace } = useMobileWorkspace();
   const { getActorName } = useActorName();
@@ -826,11 +837,11 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
   }, [issue, updateIssue]);
 
   if (isLoading) return <LoadingState />;
-  if (isError || !issue) return <EmptyState title="Unable to load issue properties" />;
+  if (isError || !issue) return <EmptyState title={t("issues.unable_to_load_properties")} />;
 
   return (
     <Screen padded={false} safeArea={false}>
-      <ScreenTitleBar onBack={() => navigation.goBack()} title={`${issue.identifier}属性`} />
+      <ScreenTitleBar onBack={() => navigation.goBack()} title={`${issue.identifier} ${t("issues.properties")}`} />
       <ScrollView
         contentContainerStyle={[
           styles.propertiesContent,
@@ -839,49 +850,49 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
       >
         <View style={styles.propertiesBlock}>
           <View style={styles.propertiesBlockHeader}>
-            <Text style={styles.propertiesBlockTitle}>Properties</Text>
+            <Text style={styles.propertiesBlockTitle}>{t("issues.properties")}</Text>
             <Text style={styles.metadataSummary}>
-              {STATUS_CONFIG[issue.status].label} / {PRIORITY_CONFIG[issue.priority].label}
+              {formatIssueStatus(t, issue.status)} / {formatIssuePriority(t, issue.priority)}
             </Text>
           </View>
           <View style={styles.metadataBody}>
-            <Property label="Status">
+            <Property label={t("issues.status")}>
               <OptionRow>
                 {ALL_STATUSES.map((status) => (
                   <Chip
                     active={issue.status === status}
                     key={status}
-                    label={STATUS_CONFIG[status].label}
+                    label={formatIssueStatus(t, status)}
                     onPress={() => void changeStatus(status)}
                   />
                 ))}
               </OptionRow>
             </Property>
-            <Property label="Priority">
+            <Property label={t("issues.priority")}>
               <OptionRow>
                 {PRIORITY_ORDER.map((priority) => (
                   <Chip
                     active={issue.priority === priority}
                     key={priority}
-                    label={PRIORITY_CONFIG[priority].label}
+                    label={formatIssuePriority(t, priority)}
                     onPress={() => void changePriority(priority)}
                   />
                 ))}
               </OptionRow>
             </Property>
-            <Property label="Assignee">
+            <Property label={t("issues.assignee")}>
               <Text style={styles.value}>
                 {issue.assignee_type && issue.assignee_id
                   ? getActorName(issue.assignee_type, issue.assignee_id)
-                  : "Unassigned"}
+                  : t("issues.unassigned")}
               </Text>
             </Property>
-            <Property label="Creator">
+            <Property label={t("issues.creator")}>
               <Text style={styles.value}>
                 {getActorName(issue.creator_type, issue.creator_id)}
               </Text>
             </Property>
-            <Property label="Due date">
+            <Property label={t("issues.due_date")}>
               <Text style={styles.value}>{formatDate(issue.due_date)}</Text>
             </Property>
           </View>
@@ -890,7 +901,7 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
         {issue.parent_issue_id ? (
           <View style={styles.propertiesBlock}>
             <View style={styles.propertiesBlockHeader}>
-              <Text style={styles.propertiesBlockTitle}>Parent issue</Text>
+              <Text style={styles.propertiesBlockTitle}>{t("issues.parent_issue")}</Text>
             </View>
             <Pressable
               disabled={!parentIssue}
@@ -907,7 +918,7 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
                 </>
               ) : (
                 <Text style={styles.attachmentMeta}>
-                  {parentIssueLoading ? "Loading parent issue..." : "Unable to load parent issue"}
+                  {parentIssueLoading ? t("issues.loading_parent_issue") : t("issues.unable_to_load_parent_issue")}
                 </Text>
               )}
             </Pressable>
@@ -917,7 +928,7 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
         {children.length > 0 ? (
           <View style={styles.propertiesBlock}>
             <View style={styles.propertiesBlockHeader}>
-              <Text style={styles.propertiesBlockTitle}>Child issues</Text>
+              <Text style={styles.propertiesBlockTitle}>{t("issues.child_issues")}</Text>
               <Text style={styles.stickySectionCount}>{children.length}</Text>
             </View>
             <View style={styles.relationList}>
@@ -934,7 +945,10 @@ export function IssuePropertiesScreen({ navigation, route }: IssuePropertiesProp
                   <Text style={styles.childTitle}>{child.title}</Text>
                   {childProgress?.get(child.id) ? (
                     <Text style={styles.attachmentMeta}>
-                      {childProgress.get(child.id)?.done}/{childProgress.get(child.id)?.total} child issues done
+                      {t("issues.child_progress", {
+                        done: childProgress.get(child.id)?.done,
+                        total: childProgress.get(child.id)?.total,
+                      })}
                     </Text>
                   ) : null}
                 </Pressable>
@@ -960,6 +974,7 @@ function IssueActionsMenu({
   open: boolean;
   topInset: number;
 }) {
+  const { t } = useTranslation();
   if (!open) return null;
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible>
@@ -970,8 +985,8 @@ function IssueActionsMenu({
           styles.issueActionsDropdown,
           { top: Math.max(topInset, spacing.sm) + 44 },
         ]}>
-          <DropdownItem label="属性" onPress={onOpenProperties} />
-          <DropdownItem label="创建子 Issue" onPress={onCreateChildIssue} />
+          <DropdownItem label={t("issues.action_properties")} onPress={onOpenProperties} />
+          <DropdownItem label={t("issues.create_child_action")} onPress={onCreateChildIssue} />
         </View>
       </View>
     </Modal>
@@ -1017,6 +1032,7 @@ function CommentSheet({
   uploadError: string | null;
   uploading: boolean;
 }) {
+  const { t } = useTranslation();
   const canSubmit = comment.trim().length > 0 && !createPending && !uploading;
   const keyboardHeight = useKeyboardHeight(open);
   const { height: windowHeight } = useWindowDimensions();
@@ -1044,7 +1060,7 @@ function CommentSheet({
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{title}</Text>
             <Button onPress={onClose} variant="ghost">
-              Close
+              {t("common.close")}
             </Button>
           </View>
           <MentionTextInput
@@ -1066,10 +1082,10 @@ function CommentSheet({
           <View style={styles.sheetActions}>
             <View style={styles.inlineActions}>
               <Button disabled={uploading} onPress={onPickImage} variant="secondary">
-                Image
+                {t("issues.image")}
               </Button>
               <Button disabled={uploading} onPress={onPickDocument} variant="secondary">
-                File
+                {t("issues.file")}
               </Button>
             </View>
             <Button disabled={!canSubmit} onPress={onSubmit}>
@@ -1083,6 +1099,7 @@ function CommentSheet({
 }
 
 function StickySectionHeader({ section }: { section: DetailSection }) {
+  const { t } = useTranslation();
   if (!section.title || !section.onToggle) return null;
 
   return (
@@ -1100,7 +1117,7 @@ function StickySectionHeader({ section }: { section: DetailSection }) {
           <Text style={styles.stickySectionCount}>{section.count}</Text>
         ) : null}
       </View>
-      <Text style={styles.metadataToggle}>{section.collapsed ? "Show" : "Hide"}</Text>
+      <Text style={styles.metadataToggle}>{section.collapsed ? t("issues.show") : t("issues.hide")}</Text>
     </Pressable>
   );
 }
@@ -1119,6 +1136,7 @@ function MentionTextInput({
   onChangeText: (text: string) => void;
   value: string;
 }) {
+  const { t } = useTranslation();
   const [selection, setSelection] = useState({ start: value.length, end: value.length });
   const mentionQuery = getActiveMentionQuery(value, selection.start);
   const normalizedQuery = mentionQuery?.query.trim() ?? "";
@@ -1257,20 +1275,20 @@ function MentionTextInput({
             <>
               <MentionSuggestionGroup
                 items={suggestions.filter((target) => target.type !== "issue")}
-                label="Users"
+                label={t("issues.users")}
                 onSelect={insertMention}
                 selectedKey={selectedKey}
               />
               <MentionSuggestionGroup
                 items={suggestions.filter((target) => target.type === "issue")}
-                label="Issues"
+                label={t("nav.issues")}
                 onSelect={insertMention}
                 selectedKey={selectedKey}
               />
             </>
           ) : (
             <Text style={styles.mentionEmptyText}>
-              {isWaitingForServer ? "Searching..." : "No results"}
+              {isWaitingForServer ? t("issues.searching") : t("common.no_results")}
             </Text>
           )}
         </ScrollView>
@@ -1290,6 +1308,7 @@ function MentionSuggestionGroup({
   onSelect: (target: WorkspaceMentionTarget) => void;
   selectedKey: string | null;
 }) {
+  const { t } = useTranslation();
   if (items.length === 0) return null;
   return (
     <View>
@@ -1329,8 +1348,8 @@ function MentionSuggestionGroup({
                 ]}
               >
                 {target.type === "issue"
-                  ? target.description ?? "Issue"
-                  : target.type === "agent" ? "Agent" : target.type === "all" ? "All members" : "Member"}
+                  ? target.description ?? t("issues.issue")
+                  : target.type === "agent" ? t("issues.agent") : target.type === "all" ? t("issues.all_members") : t("issues.member")}
               </Text>
             </View>
           </Pressable>
@@ -1481,10 +1500,11 @@ function ThreadReplyFooter({
 }: {
   onReply: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <View style={styles.threadReplyFooter}>
       <Pressable
-        accessibilityLabel="Reply"
+        accessibilityLabel={t("issues.reply")}
         accessibilityRole="button"
         onPress={onReply}
         style={({ pressed }) => [
@@ -1492,7 +1512,7 @@ function ThreadReplyFooter({
           pressed && styles.buttonPressed,
         ]}
       >
-        <Text style={styles.threadReplyButtonText}>Reply</Text>
+        <Text style={styles.threadReplyButtonText}>{t("issues.reply")}</Text>
       </Pressable>
     </View>
   );
@@ -1539,6 +1559,7 @@ const TimelineItem = memo(function TimelineItem({
   variant?: "card" | "threadRoot" | "reply";
   isLastReply?: boolean;
 }) {
+  const { t } = useTranslation();
   const actor = resolveActorName(entry.actor_type, entry.actor_id);
   const isOwnComment = entry.type === "comment" && entry.actor_type === "member" && entry.actor_id === userId;
   const isEditing = editingCommentId === entry.id;
@@ -1547,7 +1568,7 @@ const TimelineItem = memo(function TimelineItem({
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const body = entry.type === "comment"
     ? entry.content
-    : formatActivity(entry, resolveActorName);
+    : formatActivity(entry, resolveActorName, t);
   const isComment = entry.type === "comment";
   const hasCommentActions = isComment;
   const reactionSummary = useMemo(() => {
@@ -1585,7 +1606,7 @@ const TimelineItem = memo(function TimelineItem({
       <>
         {onReply ? (
           <DropdownItem
-            label="Reply"
+            label={t("issues.reply")}
             onPress={() => {
               onReply(entry.id);
               closeActionsMenu();
@@ -1593,7 +1614,7 @@ const TimelineItem = memo(function TimelineItem({
           />
         ) : null}
         <DropdownItem
-          label="Copy"
+          label={t("issues.copy")}
           onPress={() => {
             onCopyComment?.(entry.content ?? "");
             closeActionsMenu();
@@ -1602,7 +1623,7 @@ const TimelineItem = memo(function TimelineItem({
         {isOwnComment ? (
           <>
             <DropdownItem
-              label="Edit"
+              label={t("issues.edit")}
               onPress={() => {
                 onStartEdit?.(entry.id, entry.content ?? "");
                 closeActionsMenu();
@@ -1610,7 +1631,7 @@ const TimelineItem = memo(function TimelineItem({
             />
             <DropdownItem
               destructive
-              label="Delete"
+              label={t("issues.delete")}
               onPress={() => {
                 onDelete?.(entry.id);
                 closeActionsMenu();
@@ -1657,7 +1678,7 @@ const TimelineItem = memo(function TimelineItem({
             <View style={styles.commentHeaderButtonRow}>
               <HeaderIconButton
                 disabled={!userId}
-                label="React"
+                label={t("issues.react")}
                 onPress={() => {
                   setActionsMenuAnchor(null);
                   setOpenMenu((menu) => menu === "reactions" ? null : "reactions");
@@ -1666,7 +1687,7 @@ const TimelineItem = memo(function TimelineItem({
                 ☺
               </HeaderIconButton>
               <HeaderIconButton
-                label="Comment actions"
+                label={t("issues.issue_actions")}
                 disabled={!hasCommentActions}
                 onPress={(event) => {
                   if (openMenu === "actions") {
@@ -1718,13 +1739,13 @@ const TimelineItem = memo(function TimelineItem({
             value={editingContent ?? ""}
           />
           <View style={styles.inlineActions}>
-            <Button onPress={() => onSaveEdit?.(entry.id)}>Save</Button>
+            <Button onPress={() => onSaveEdit?.(entry.id)}>{t("common.save")}</Button>
             <Button onPress={() => {
               setOpenMenu(null);
               setActionsMenuAnchor(null);
               onCancelEdit?.();
             }} variant="secondary">
-              Cancel
+              {t("common.cancel")}
             </Button>
           </View>
         </View>
@@ -1831,9 +1852,10 @@ function AttachmentList({
   onRemove?: (attachmentId: string) => void;
   removingAttachmentId?: string | null;
 }) {
+  const { t } = useTranslation();
   if (attachments.length === 0) {
     if (compact) return null;
-    return <Text style={styles.emptyText}>No attachments yet</Text>;
+    return <Text style={styles.emptyText}>{t("issues.no_attachments")}</Text>;
   }
 
   return (
@@ -1850,12 +1872,12 @@ function AttachmentList({
           <View style={styles.attachmentContent}>
             <Text style={styles.attachmentName}>{attachment.filename}</Text>
             <Text style={styles.attachmentMeta}>
-              {formatBytes(attachment.size_bytes)} / {attachment.content_type || "file"} / {attachmentPreviewLabel(attachment)}
+              {formatBytes(attachment.size_bytes)} / {attachment.content_type || t("issues.file")} / {attachmentPreviewLabel(attachment, t)}
             </Text>
           </View>
           {onRemove ? (
             <Pressable
-              accessibilityLabel={`Remove ${attachment.filename}`}
+              accessibilityLabel={t("issues.remove_attachment", { name: attachment.filename })}
               accessibilityRole="button"
               disabled={removingAttachmentId === attachment.id}
               hitSlop={8}
@@ -1870,7 +1892,7 @@ function AttachmentList({
               ]}
             >
               <Text style={styles.attachmentRemoveText}>
-                {removingAttachmentId === attachment.id ? "..." : "Remove"}
+                {removingAttachmentId === attachment.id ? "..." : t("issues.remove")}
               </Text>
             </Pressable>
           ) : null}
@@ -1887,6 +1909,7 @@ function DraftAttachmentList({
   attachments: DraftCommentAttachment[];
   onRemove: (attachmentId: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <View style={styles.attachmentList}>
       {attachments.map((attachment) => (
@@ -1894,11 +1917,11 @@ function DraftAttachmentList({
           <View style={styles.attachmentContent}>
             <Text style={styles.attachmentName}>{attachment.name}</Text>
             <Text style={styles.attachmentMeta}>
-              {formatBytes(attachment.size ?? 0)} / {attachment.mimeType || "file"}
+              {formatBytes(attachment.size ?? 0)} / {attachment.mimeType || t("issues.file")}
             </Text>
           </View>
           <Pressable
-            accessibilityLabel={`Remove ${attachment.name}`}
+            accessibilityLabel={t("issues.remove_attachment", { name: attachment.name })}
             accessibilityRole="button"
             hitSlop={8}
             onPress={() => onRemove(attachment.id)}
@@ -1907,7 +1930,7 @@ function DraftAttachmentList({
               pressed && styles.buttonPressed,
             ]}
           >
-            <Text style={styles.attachmentRemoveText}>Remove</Text>
+            <Text style={styles.attachmentRemoveText}>{t("issues.remove")}</Text>
           </Pressable>
         </View>
       ))}
@@ -1924,6 +1947,7 @@ function AttachmentPreviewModal({
   open: boolean;
   preview: AttachmentPreviewState | null;
 }) {
+  const { t } = useTranslation();
   const attachment = preview?.attachment;
   const url = attachment ? attachment.download_url || attachment.url : "";
   const canPreviewImage = Boolean(attachment && isImageAttachment(attachment));
@@ -1935,21 +1959,21 @@ function AttachmentPreviewModal({
         <View style={styles.previewHeader}>
           <View style={styles.previewTitleGroup}>
             <Text numberOfLines={1} style={styles.previewTitle}>
-              {attachment?.filename ?? "Attachment"}
+              {attachment?.filename ?? t("issues.attachment")}
             </Text>
             {attachment ? (
               <Text style={styles.previewMeta}>
-                {formatBytes(attachment.size_bytes)} / {attachment.content_type || "file"}
+                {formatBytes(attachment.size_bytes)} / {attachment.content_type || t("issues.file")}
               </Text>
             ) : null}
           </View>
           {attachment ? (
             <View style={styles.previewActions}>
               <Button onPress={() => void Linking.openURL(url)} variant="secondary">
-                Open
+                {t("common.open")}
               </Button>
               <Button onPress={onClose} variant="ghost">
-                Close
+                {t("common.close")}
               </Button>
             </View>
           ) : null}
@@ -1964,12 +1988,12 @@ function AttachmentPreviewModal({
             preview?.loading ? (
               <View style={styles.previewCentered}>
                 <ActivityIndicator />
-                <Text style={styles.attachmentMeta}>Loading preview...</Text>
+                <Text style={styles.attachmentMeta}>{t("issues.loading_preview")}</Text>
               </View>
             ) : (
               <ScrollView contentContainerStyle={styles.previewTextContent}>
                 <Text selectable style={styles.previewText}>
-                  {preview?.error ?? preview?.textContent ?? "No preview available."}
+                  {preview?.error ?? preview?.textContent ?? t("issues.no_preview_available")}
                 </Text>
               </ScrollView>
             )
@@ -1977,12 +2001,12 @@ function AttachmentPreviewModal({
 
           {attachment && !canPreviewImage && !canPreviewText ? (
             <View style={styles.previewCentered}>
-              <Text style={styles.previewUnsupportedTitle}>Preview unavailable</Text>
+              <Text style={styles.previewUnsupportedTitle}>{t("issues.preview_unavailable")}</Text>
               <Text style={styles.previewUnsupportedBody}>
-                This file type cannot be displayed in the app yet.
+                {t("issues.preview_unsupported_body")}
               </Text>
               <Button onPress={() => void Linking.openURL(url)} variant="secondary">
-                Open externally
+                {t("issues.open_externally")}
               </Button>
             </View>
           ) : null}
@@ -1991,7 +2015,7 @@ function AttachmentPreviewModal({
             <View style={styles.previewCentered}>
               <Text style={styles.errorText}>{preview.error}</Text>
               <Button onPress={() => void Linking.openURL(url)} variant="secondary">
-                Open externally
+                {t("issues.open_externally")}
               </Button>
             </View>
           ) : null}
@@ -2014,6 +2038,7 @@ function IssueLiveAgentCard({
   onStop: (taskId: string) => void;
   tasks: Array<{ task: AgentTask; messages: TaskMessagePayload[] }>;
 }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const primary = tasks[0];
   if (!primary) return null;
@@ -2022,9 +2047,9 @@ function IssueLiveAgentCard({
   const toolCount = primary.messages.filter((message) => message.type === "tool_use").length;
   const extraCount = Math.max(0, tasks.length - 1);
   const statusText = [
-    error ? `Error: ${error}` : null,
-    toolCount > 0 ? `${toolCount} tools` : null,
-    extraCount > 0 ? `+${extraCount} more` : null,
+    error ? t("common.error_with_message", { message: error }) : null,
+    toolCount > 0 ? t("issues.tools_count", { count: toolCount }) : null,
+    extraCount > 0 ? t("issues.more_count", { count: extraCount }) : null,
   ].filter(Boolean).join(" · ");
 
   return (
@@ -2037,7 +2062,7 @@ function IssueLiveAgentCard({
         <ActivityIndicator color={colors.primary} size="small" />
         <View style={styles.liveCardTextGroup}>
           <Text numberOfLines={1} style={styles.liveCardTitle}>
-            {agentName} is working ·{" "}
+            {t("issues.agent_working", { name: agentName })} ·{" "}
             <LiveElapsed task={primary.task} />
             {statusText ? ` · ${statusText}` : ""}
           </Text>
@@ -2055,7 +2080,7 @@ function IssueLiveAgentCard({
           ]}
         >
           <Text style={styles.liveStopButtonText}>
-            {cancellingTaskIds.has(primary.task.id) ? "Stopping" : "Stop"}
+            {cancellingTaskIds.has(primary.task.id) ? t("issues.stopping") : t("issues.stop")}
           </Text>
         </Pressable>
       </Pressable>
@@ -2064,12 +2089,12 @@ function IssueLiveAgentCard({
         <View style={styles.liveModal}>
           <View style={styles.previewHeader}>
             <View style={styles.previewTitleGroup}>
-              <Text style={styles.previewTitle}>Agent live transcript</Text>
+              <Text style={styles.previewTitle}>{t("issues.agent_live_transcript")}</Text>
               <Text style={styles.previewMeta}>
-                {tasks.length === 1 ? "1 active run" : `${tasks.length} active runs`}
+                {tasks.length === 1 ? t("issues.active_run_one") : t("issues.active_run_other", { count: tasks.length })}
               </Text>
             </View>
-            <Button onPress={() => setExpanded(false)} variant="secondary">Close</Button>
+            <Button onPress={() => setExpanded(false)} variant="secondary">{t("common.close")}</Button>
           </View>
           <ScrollView contentContainerStyle={styles.liveModalContent}>
             {tasks.map(({ task, messages }, index) => (
@@ -2078,7 +2103,7 @@ function IssueLiveAgentCard({
                   <View style={styles.timelineActorGroup}>
                     <Text style={styles.timelineActor}>{getActorName("agent", task.agent_id)}</Text>
                     <Text style={styles.timelineDate}>
-                      <LiveElapsed task={task} /> · {task.status}
+                      <LiveElapsed task={task} /> · {formatAgentTaskStatus(t, task.status)}
                     </Text>
                   </View>
                   <Button
@@ -2086,12 +2111,12 @@ function IssueLiveAgentCard({
                     onPress={() => onStop(task.id)}
                     variant="secondary"
                   >
-                    {cancellingTaskIds.has(task.id) ? "Stopping" : "Stop"}
+                    {cancellingTaskIds.has(task.id) ? t("issues.stopping") : t("issues.stop")}
                   </Button>
                 </View>
                 {messages.length === 0 ? (
                   <Text style={styles.emptyText}>
-                    Live log is not available for this agent provider. Results will appear when the task completes.
+                    {t("issues.live_log_unavailable")}
                   </Text>
                 ) : (
                   messages.map((message) => (
@@ -2130,16 +2155,17 @@ const TaskRunHeader = memo(function TaskRunHeader({
   showTitle: boolean;
   task: AgentTask;
 }) {
+  const { t } = useTranslation();
   return (
     <Pressable
       accessibilityRole="button"
       onPress={onPress}
       style={({ pressed }) => [styles.taskCard, pressed && styles.buttonPressed]}
     >
-      {showTitle ? <Text style={styles.sectionTitle}>Agent transcript</Text> : null}
+      {showTitle ? <Text style={styles.sectionTitle}>{t("issues.agent_transcript")}</Text> : null}
       <View style={styles.timelineHeader}>
-        <Text style={styles.timelineActor}>Run {task.id.slice(0, 8)}</Text>
-        <Text style={styles.timelineDate}>{task.status}</Text>
+        <Text style={styles.timelineActor}>{t("issues.run_title", { id: task.id.slice(0, 8) })}</Text>
+        <Text style={styles.timelineDate}>{formatAgentTaskStatus(t, task.status)}</Text>
       </View>
       {task.error ? <Text style={styles.errorText}>{task.error}</Text> : null}
     </Pressable>
@@ -2253,65 +2279,74 @@ function isTextPreviewAttachment(attachment: Attachment) {
   return /\.(c|conf|cpp|css|csv|go|h|html|java|js|json|jsonl|log|md|py|rb|rs|sh|sql|ts|tsx|txt|xml|ya?ml)$/i.test(filename);
 }
 
-function attachmentPreviewLabel(attachment: Attachment) {
-  if (isImageAttachment(attachment)) return "tap to view";
-  if (isTextPreviewAttachment(attachment)) return "tap to preview";
-  return "tap to open";
+function attachmentPreviewLabel(attachment: Attachment, t: Translate) {
+  if (isImageAttachment(attachment)) return t("issues.tap_to_view");
+  if (isTextPreviewAttachment(attachment)) return t("issues.tap_to_preview");
+  return t("issues.tap_to_open");
 }
 
-function formatDocumentPickerError(err: unknown) {
+function formatDocumentPickerError(err: unknown, t: Translate) {
   const message = err instanceof Error ? err.message : String(err);
   if (message.includes("ExpoDocumentPicker")) {
-    return "File picker is unavailable in this app build. Rebuild and reinstall the mobile app so expo-document-picker is included.";
+    return t("issues.file_picker_rebuild");
   }
-  return message || "File picker unavailable";
+  return message || t("issues.file_picker_unavailable");
 }
 
-function formatClipboardError(err: unknown) {
+function formatClipboardError(err: unknown, t: Translate) {
   const message = err instanceof Error ? err.message : String(err);
-  return message || "Unable to copy comment";
+  return message || t("issues.unable_to_copy_comment");
 }
 
-function statusLabel(status: string) {
-  return STATUS_CONFIG[status as IssueStatus]?.label ?? status;
+function statusLabel(status: string, t: Translate) {
+  return formatIssueStatus(t, status as IssueStatus) ?? status;
 }
 
-function priorityLabel(priority: string) {
-  return PRIORITY_CONFIG[priority as IssuePriority]?.label ?? priority;
+function priorityLabel(priority: string, t: Translate) {
+  return formatIssuePriority(t, priority as IssuePriority) ?? priority;
 }
 
 function formatActivity(
   entry: TimelineEntry,
   resolveActorName: (type: string, id: string) => string,
+  t: Translate,
 ) {
   const details = (entry.details ?? {}) as Record<string, string>;
   switch (entry.action) {
     case "created":
-      return "created this issue";
+      return t("issues.activity_created");
     case "status_changed":
-      return `changed status from ${statusLabel(details.from ?? "?")} to ${statusLabel(details.to ?? "?")}`;
+      return t("issues.activity_status_changed", {
+        from: statusLabel(details.from ?? "?", t),
+        to: statusLabel(details.to ?? "?", t),
+      });
     case "priority_changed":
-      return `changed priority from ${priorityLabel(details.from ?? "?")} to ${priorityLabel(details.to ?? "?")}`;
+      return t("issues.activity_priority_changed", {
+        from: priorityLabel(details.from ?? "?", t),
+        to: priorityLabel(details.to ?? "?", t),
+      });
     case "assignee_changed": {
       const toName = details.to_id && details.to_type
         ? resolveActorName(details.to_type, details.to_id)
         : null;
-      if (toName) return `assigned to ${toName}`;
-      if (details.from_id && !details.to_id) return "removed assignee";
-      return "changed assignee";
+      if (toName) return t("issues.activity_assigned_to", { name: toName });
+      if (details.from_id && !details.to_id) return t("issues.activity_removed_assignee");
+      return t("issues.activity_changed_assignee");
     }
     case "due_date_changed":
-      return details.to ? `set due date to ${formatDate(details.to)}` : "removed due date";
+      return details.to
+        ? t("issues.activity_set_due_date", { date: formatDate(details.to) })
+        : t("issues.activity_removed_due_date");
     case "description_updated":
-      return "updated the description";
+      return t("issues.activity_description_updated");
     case "title_changed":
-      return "renamed this issue";
+      return t("issues.activity_title_changed");
     case "task_completed":
-      return "completed the task";
+      return t("issues.activity_task_completed");
     case "task_failed":
-      return "task failed";
+      return t("issues.activity_task_failed");
     default:
-      return entry.action ?? "updated this issue";
+      return entry.action ?? t("issues.activity_updated");
   }
 }
 

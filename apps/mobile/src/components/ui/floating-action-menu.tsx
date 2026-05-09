@@ -2,6 +2,7 @@ import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import type { GestureResponderEvent, LayoutChangeEvent } from "react-native";
 import { X } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 import { colors, spacing } from "../../theme/tokens";
 
 export type FloatingActionMenuAction = {
@@ -28,6 +29,7 @@ export function FloatingActionMenu({
   actions: FloatingActionMenuAction[];
   mainIcon: ReactNode;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
@@ -143,7 +145,7 @@ export function FloatingActionMenu({
     >
       {open ? (
         <Pressable
-          accessibilityLabel="Close quick actions"
+          accessibilityLabel={t("common.close_quick_actions")}
           accessibilityRole="button"
           onPress={close}
           style={styles.backdrop}
@@ -182,7 +184,7 @@ export function FloatingActionMenu({
         </View>
       ) : null}
       <View
-        accessibilityLabel={open ? "Close quick actions" : "Open quick actions"}
+        accessibilityLabel={open ? t("common.close_quick_actions") : t("common.open_quick_actions")}
         accessibilityRole="button"
         onResponderGrant={() => {
           measureContainer();

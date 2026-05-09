@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useTranslation } from "react-i18next";
 import { Archive, ChevronLeft, Inbox as InboxIcon } from "lucide-react-native";
 import {
   deduplicateInboxItems,
@@ -21,6 +22,7 @@ import { colors, radii, spacing } from "../../theme/tokens";
 type InboxNavigation = NativeStackNavigationProp<RootStackParamList>;
 
 export function InboxScreen() {
+  const { t } = useTranslation();
   const navigation = useNavigation<InboxNavigation>();
   const { workspace } = useMobileWorkspace();
   const { getActorName, getActorInitials } = useActorName();
@@ -53,7 +55,7 @@ export function InboxScreen() {
     <Screen padded={false}>
       <View style={styles.header}>
         <Pressable
-          accessibilityLabel="Back"
+          accessibilityLabel={t("common.go_back")}
           accessibilityRole="button"
           onPress={() => navigation.goBack()}
           style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
@@ -61,14 +63,14 @@ export function InboxScreen() {
           <ChevronLeft color={colors.foreground} size={22} />
         </Pressable>
         <View style={styles.headerTitleWrap}>
-          <Text style={styles.title}>Inbox</Text>
+          <Text style={styles.title}>{t("inbox.title")}</Text>
           {unreadCount > 0 ? <Text style={styles.count}>{unreadCount}</Text> : null}
         </View>
         <View style={styles.iconButton} />
       </View>
       {isLoading ? <LoadingState /> : null}
       {isError ? (
-        <EmptyState detail="Pull to retry once the connection is available." title="Unable to load inbox" />
+        <EmptyState detail={t("common.pull_to_retry")} title={t("inbox.unable_to_load")} />
       ) : null}
       {!isLoading && !isError ? (
         <FlatList
@@ -108,6 +110,7 @@ function InboxRow({
   onPress: () => void;
   subtitle: string;
 }) {
+  const { t } = useTranslation();
   const actorType = item.actor_type ?? item.recipient_type;
   const actorId = item.actor_id ?? item.recipient_id;
   const initials = getActorInitials(actorType, actorId);
@@ -140,7 +143,7 @@ function InboxRow({
           {formatInboxTimeAgo(item.created_at)}
         </Text>
         <Pressable
-          accessibilityLabel="Archive notification"
+          accessibilityLabel={t("inbox.archive_notification")}
           accessibilityRole="button"
           hitSlop={8}
           onPress={(event) => {
@@ -157,10 +160,11 @@ function InboxRow({
 }
 
 function InboxEmpty() {
+  const { t } = useTranslation();
   return (
     <View style={styles.empty}>
       <InboxIcon color={colors.mutedForeground} size={28} />
-      <Text style={styles.emptyTitle}>No notifications</Text>
+      <Text style={styles.emptyTitle}>{t("inbox.no_notifications")}</Text>
     </View>
   );
 }

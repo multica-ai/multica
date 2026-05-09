@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTranslation } from "react-i18next";
 import { ChevronLeft } from "lucide-react-native";
 import { colors, radii, spacing } from "../../theme/tokens";
 
@@ -14,12 +15,13 @@ export function ScreenTitleBar({
   title: string;
 }) {
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
 
   return (
     <View style={[styles.titleBar, { paddingTop: Math.max(insets.top, spacing.sm) }]}>
       <View style={styles.titleBarContent}>
         <Pressable
-          accessibilityLabel="Go back"
+          accessibilityLabel={t("common.go_back")}
           accessibilityRole="button"
           onPress={onBack}
           style={({ pressed }) => [

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useTranslation } from "react-i18next";
 import { useIssueTaskRuns, useTaskMessages } from "@multica/core/issues/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { EmptyState, LoadingState, Screen } from "../../components/ui/primitives";
@@ -13,6 +14,7 @@ import { TaskMessageRow } from "./task-transcript-components";
 type Props = NativeStackScreenProps<RootStackParamList, "IssueTaskTranscript">;
 
 export function IssueTaskTranscriptScreen({ navigation, route }: Props) {
+  const { t } = useTranslation();
   const { issueId, taskId } = route.params;
   const { workspace } = useMobileWorkspace();
   const { getActorName } = useActorName();
@@ -25,7 +27,7 @@ export function IssueTaskTranscriptScreen({ navigation, route }: Props) {
   );
 
   if (taskRunsLoading || isLoading) return <LoadingState />;
-  if (isError) return <EmptyState title="Unable to load transcript" />;
+  if (isError) return <EmptyState title={t("transcript.unable_to_load")} />;
 
   return (
     <Screen padded={false} safeArea={false}>
@@ -47,7 +49,7 @@ export function IssueTaskTranscriptScreen({ navigation, route }: Props) {
         </View>
 
         {messages.length === 0 ? (
-          <Text style={styles.emptyText}>No transcript messages</Text>
+          <Text style={styles.emptyText}>{t("transcript.empty_title")}</Text>
         ) : (
           messages.map((message) => (
             <TaskMessageRow key={`${taskId}-${message.seq}`} message={message} />

@@ -16,14 +16,16 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useTranslation } from "react-i18next";
 import { api } from "@multica/core/api";
-import { BOARD_STATUSES, PRIORITY_CONFIG, PRIORITY_ORDER, STATUS_CONFIG } from "@multica/core/issues/config";
+import { BOARD_STATUSES, PRIORITY_ORDER } from "@multica/core/issues/config";
 import { useCreateIssue } from "@multica/core/issues/mutations";
 import { useProjectList } from "@multica/core/projects/hooks";
 import { useWorkspaceMentionTargets } from "@multica/core/workspace/hooks";
 import type { IssueAssigneeType, IssuePriority, IssueStatus } from "@multica/core/types";
 import { Button, Screen } from "../../components/ui/primitives";
 import { ScreenTitleBar } from "../../components/ui/screen-title-bar";
+import { formatIssuePriority, formatIssueStatus } from "../../i18n/format";
 import type { RootStackParamList } from "../../navigation/root-navigator";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
 import { uploadMobileAsset, type MobileUploadAsset } from "../../platform/upload";
@@ -38,6 +40,7 @@ type DocumentPickerModule = typeof import("expo-document-picker");
 declare const require: (moduleName: string) => unknown;
 
 export function CreateIssueScreen({ navigation, route }: Props) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const createIssue = useCreateIssue();
   const { workspace } = useMobileWorkspace();
@@ -67,18 +70,18 @@ export function CreateIssueScreen({ navigation, route }: Props) {
     [mentionTargets],
   );
   const currentAssigneeLabel = assignee
-    ? assigneeOptions.find((item) => item.type === assignee.type && item.id === assignee.id)?.label ?? "Unknown"
-    : "Unassigned";
+    ? assigneeOptions.find((item) => item.type === assignee.type && item.id === assignee.id)?.label ?? t("common.unknown")
+    : t("issues.unassigned");
   const currentProjectLabel = projectId
-    ? projects.find((project) => project.id === projectId)?.title ?? "Unknown project"
-    : "No project";
+    ? projects.find((project) => project.id === projectId)?.title ?? t("issues.unknown_project")
+    : t("issues.no_project");
 
   async function submit() {
     const trimmedTitle = title.trim();
     const trimmedDueDate = dueDate.trim();
     if (!trimmedTitle || createIssue.isPending || uploading) return;
     if (trimmedDueDate && !isValidDateInput(trimmedDueDate)) {
-      setError("Due date must use YYYY-MM-DD.");
+      setError(t("issues.invalid_due_date"));
       return;
     }
 
@@ -105,7 +108,7 @@ export function CreateIssueScreen({ navigation, route }: Props) {
       navigation.replace("IssueDetail", { issueId: issue.id });
     } catch (err) {
       await Promise.allSettled(uploadedAttachmentIds.map((id) => api.deleteAttachment(id)));
-      setError(err instanceof Error ? err.message : "Unable to create issue");
+      setError(err instanceof Error ? err.message : t("issues.unable_to_create"));
     } finally {
       setUploading(false);
     }
@@ -125,7 +128,7 @@ export function CreateIssueScreen({ navigation, route }: Props) {
     try {
       DocumentPicker = require("expo-document-picker") as DocumentPickerModule;
     } catch (err) {
-      setError(formatDocumentPickerError(err));
+      setError(formatDocumentPickerError(err, t));
       return;
     }
 
@@ -137,7 +140,7 @@ export function CreateIssueScreen({ navigation, route }: Props) {
         base64: false,
       });
     } catch (err) {
-      setError(formatDocumentPickerError(err));
+      setError(formatDocumentPickerError(err, t));
       return;
     }
 
@@ -173,7 +176,7 @@ export function CreateIssueScreen({ navigation, route }: Props) {
     <Screen padded={false} safeArea={false}>
       <ScreenTitleBar
         onBack={() => navigation.goBack()}
-        title={isChildIssue ? "New child issue" : "New issue"}
+        title={isChildIssue ? t("issues.new_child_issue") : t("issues.new_issue")}
       />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -189,14 +192,14 @@ export function CreateIssueScreen({ navigation, route }: Props) {
           <Text style={styles.workspaceName}>{workspace.name}</Text>
           {isChildIssue && parentIssueIdentifier ? (
             <View style={styles.parentBanner}>
-              <Text style={styles.parentBannerLabel}>Parent</Text>
+              <Text style={styles.parentBannerLabel}>{t("issues.parent")}</Text>
               <Text numberOfLines={1} style={styles.parentBannerValue}>{parentIssueIdentifier}</Text>
             </View>
           ) : null}
           <TextInput
             autoFocus
             onChangeText={setTitle}
-            placeholder="Issue title"
+            placeholder={t("issues.title_placeholder")}
             placeholderTextColor={colors.mutedForeground}
             returnKeyType="next"
             style={styles.titleInput}
@@ -205,39 +208,39 @@ export function CreateIssueScreen({ navigation, route }: Props) {
           <TextInput
             multiline
             onChangeText={setDescription}
-            placeholder="Add description..."
+            placeholder={t("issues.description_placeholder")}
             placeholderTextColor={colors.mutedForeground}
             style={styles.descriptionInput}
             value={description}
           />
-          <OptionGroup label="Status">
+          <OptionGroup label={t("issues.status")}>
             {BOARD_STATUSES.map((item) => (
               <OptionChip
                 active={status === item}
                 key={item}
-                label={STATUS_CONFIG[item].label}
+                label={formatIssueStatus(t, item)}
                 onPress={() => setStatus(item)}
               />
             ))}
           </OptionGroup>
-          <OptionGroup label="Priority">
+          <OptionGroup label={t("issues.priority")}>
             {PRIORITY_ORDER.map((item) => (
               <OptionChip
                 active={priority === item}
                 key={item}
-                label={PRIORITY_CONFIG[item].label}
+                label={formatIssuePriority(t, item)}
                 onPress={() => setPriority(item)}
               />
             ))}
           </OptionGroup>
-          <OptionGroup label="Assignee">
+          <OptionGroup label={t("issues.assignee")}>
             <PickerTrigger
               label={currentAssigneeLabel}
               muted={!assignee}
               onPress={() => setAssigneePickerOpen(true)}
             />
           </OptionGroup>
-          <OptionGroup label="Due date">
+          <OptionGroup label={t("issues.due_date")}>
             <Pressable
               accessibilityRole="button"
               onPress={() => setDatePickerOpen(true)}
@@ -247,24 +250,24 @@ export function CreateIssueScreen({ navigation, route }: Props) {
               ]}
             >
               <Text style={[styles.datePickerTriggerText, !dueDate && styles.datePickerPlaceholder]}>
-                {dueDate ? formatDueDateLabel(dueDate) : "No due date"}
+                {dueDate ? formatDueDateLabel(dueDate) : t("issues.no_due_date")}
               </Text>
             </Pressable>
           </OptionGroup>
-          <OptionGroup label="Project">
+          <OptionGroup label={t("issues.project")}>
             <PickerTrigger
               label={currentProjectLabel}
               muted={!projectId}
               onPress={() => setProjectPickerOpen(true)}
             />
           </OptionGroup>
-          <OptionGroup label="Attachments">
+          <OptionGroup label={t("issues.attachments")}>
             <View style={styles.inlineActions}>
               <Button disabled={uploading} onPress={() => void pickImage()} variant="secondary">
-                Image
+                {t("issues.image")}
               </Button>
               <Button disabled={uploading} onPress={() => void pickDocument()} variant="secondary">
-                File
+                {t("issues.file")}
               </Button>
             </View>
             {attachments.length > 0 && (
@@ -274,8 +277,8 @@ export function CreateIssueScreen({ navigation, route }: Props) {
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <Button disabled={!title.trim() || createIssue.isPending || uploading} onPress={() => void submit()}>
             {createIssue.isPending || uploading
-              ? "Creating..."
-              : isChildIssue ? "Create child issue" : "Create issue"}
+              ? t("issues.creating")
+              : isChildIssue ? t("issues.create_child") : t("issues.create")}
           </Button>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -312,6 +315,7 @@ function PickerTrigger({
   muted?: boolean;
   onPress: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Pressable
       accessibilityRole="button"
@@ -324,7 +328,7 @@ function PickerTrigger({
       <Text numberOfLines={1} style={[styles.pickerTriggerText, muted && styles.pickerTriggerPlaceholder]}>
         {label}
       </Text>
-      <Text style={styles.pickerTriggerMeta}>Select</Text>
+      <Text style={styles.pickerTriggerMeta}>{t("issues.select")}</Text>
     </Pressable>
   );
 }
@@ -342,6 +346,7 @@ function AssigneePickerModal({
   open: boolean;
   options: Array<{ id: string; label: string; type: IssueAssigneeType }>;
 }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -350,7 +355,7 @@ function AssigneePickerModal({
 
   const filteredMembers = options.filter((item) => item.type === "member" && fuzzyMatch(item.label, query));
   const filteredAgents = options.filter((item) => item.type === "agent" && fuzzyMatch(item.label, query));
-  const showUnassigned = !query.trim() || fuzzyMatch("Unassigned", query) || fuzzyMatch("No assignee", query);
+  const showUnassigned = !query.trim() || fuzzyMatch(t("issues.unassigned"), query) || fuzzyMatch(t("issues.no_assignee"), query);
   const hasResults = showUnassigned || filteredMembers.length > 0 || filteredAgents.length > 0;
 
   function select(value: { type: IssueAssigneeType; id: string } | null) {
@@ -363,20 +368,20 @@ function AssigneePickerModal({
       onChangeQuery={setQuery}
       onClose={onClose}
       open={open}
-      placeholder="Assign to..."
+      placeholder={t("issues.assign_to")}
       query={query}
-      title="Assignee"
+      title={t("issues.assignee")}
     >
       {showUnassigned ? (
         <PickerRow
-          label="Unassigned"
+          label={t("issues.unassigned")}
           muted
           onPress={() => select(null)}
           selected={!assignee}
         />
       ) : null}
       {filteredMembers.length > 0 ? (
-        <PickerSection label="Members">
+        <PickerSection label={t("issues.members")}>
           {filteredMembers.map((item) => (
             <PickerRow
               key={`member-${item.id}`}
@@ -388,7 +393,7 @@ function AssigneePickerModal({
         </PickerSection>
       ) : null}
       {filteredAgents.length > 0 ? (
-        <PickerSection label="Agents">
+        <PickerSection label={t("issues.agents")}>
           {filteredAgents.map((item) => (
             <PickerRow
               key={`agent-${item.id}`}
@@ -399,7 +404,7 @@ function AssigneePickerModal({
           ))}
         </PickerSection>
       ) : null}
-      {!hasResults ? <Text style={styles.pickerEmpty}>No results</Text> : null}
+      {!hasResults ? <Text style={styles.pickerEmpty}>{t("common.no_results")}</Text> : null}
     </SearchPickerModal>
   );
 }
@@ -417,6 +422,7 @@ function ProjectPickerModal({
   projects: Array<{ id: string; title: string; icon: string | null }>;
   value: string | null;
 }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -426,7 +432,7 @@ function ProjectPickerModal({
   const filtered = projects.filter((project) =>
     fuzzyMatch(`${project.icon ?? ""} ${project.title}`, query),
   );
-  const showNoProject = !query.trim() || fuzzyMatch("No project", query);
+  const showNoProject = !query.trim() || fuzzyMatch(t("issues.no_project"), query);
   const hasResults = showNoProject || filtered.length > 0;
 
   function select(projectId: string | null) {
@@ -439,13 +445,13 @@ function ProjectPickerModal({
       onChangeQuery={setQuery}
       onClose={onClose}
       open={open}
-      placeholder="Filter projects..."
+      placeholder={t("issues.filter_projects")}
       query={query}
-      title="Project"
+      title={t("issues.project")}
     >
       {showNoProject ? (
         <PickerRow
-          label="No project"
+          label={t("issues.no_project")}
           muted
           onPress={() => select(null)}
           selected={!value}
@@ -459,7 +465,7 @@ function ProjectPickerModal({
           selected={value === project.id}
         />
       ))}
-      {!hasResults ? <Text style={styles.pickerEmpty}>No results</Text> : null}
+      {!hasResults ? <Text style={styles.pickerEmpty}>{t("common.no_results")}</Text> : null}
     </SearchPickerModal>
   );
 }
@@ -481,6 +487,7 @@ function SearchPickerModal({
   query: string;
   title: string;
 }) {
+  const { t } = useTranslation();
   const keyboardHeight = useKeyboardHeight();
   const { height: windowHeight } = useWindowDimensions();
   const maxSheetHeight = Math.max(
@@ -499,7 +506,7 @@ function SearchPickerModal({
           <View style={styles.searchPickerHeader}>
             <Text style={styles.searchPickerTitle}>{title}</Text>
             <Button onPress={onClose} variant="ghost">
-              Close
+              {t("common.close")}
             </Button>
           </View>
           <TextInput
@@ -600,6 +607,7 @@ function DraftAttachmentList({
   attachments: DraftCommentAttachment[];
   onRemove: (attachmentId: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <View style={styles.attachmentList}>
       {attachments.map((attachment) => (
@@ -611,7 +619,7 @@ function DraftAttachmentList({
             </Text>
           </View>
           <Pressable
-            accessibilityLabel={`Remove ${attachment.name}`}
+            accessibilityLabel={t("issues.remove_attachment", { name: attachment.name })}
             accessibilityRole="button"
             hitSlop={8}
             onPress={() => onRemove(attachment.id)}
@@ -620,7 +628,7 @@ function DraftAttachmentList({
               pressed && styles.optionChipPressed,
             ]}
           >
-            <Text style={styles.attachmentRemoveText}>Remove</Text>
+            <Text style={styles.attachmentRemoveText}>{t("issues.remove")}</Text>
           </Pressable>
         </View>
       ))}
@@ -639,6 +647,7 @@ function DatePickerModal({
   open: boolean;
   value: string;
 }) {
+  const { t } = useTranslation();
   const selectedDate = parseDateInput(value);
   const [visibleMonth, setVisibleMonth] = useState(() => selectedDate ?? startOfUtcMonth(new Date()));
   const days = useMemo(() => getCalendarDays(visibleMonth), [visibleMonth]);
@@ -667,11 +676,11 @@ function DatePickerModal({
         <View style={styles.datePickerCard}>
           <View style={styles.datePickerHeader}>
             <Button onPress={() => shiftMonth(-1)} variant="ghost">
-              Prev
+              {t("issues.prev")}
             </Button>
             <Text style={styles.datePickerTitle}>{formatMonthLabel(visibleMonth)}</Text>
             <Button onPress={() => shiftMonth(1)} variant="ghost">
-              Next
+              {t("issues.next")}
             </Button>
           </View>
           <View style={styles.weekdayRow}>
@@ -716,13 +725,13 @@ function DatePickerModal({
               }}
               variant="secondary"
             >
-              Clear
+              {t("issues.clear")}
             </Button>
             <Button onPress={() => selectDate(new Date())} variant="secondary">
-              Today
+              {t("issues.today")}
             </Button>
             <Button onPress={onClose} variant="ghost">
-              Close
+              {t("common.close")}
             </Button>
           </View>
         </View>
@@ -799,12 +808,12 @@ function formatBytes(bytes: number) {
   return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
 }
 
-function formatDocumentPickerError(err: unknown) {
+function formatDocumentPickerError(err: unknown, t: (key: string) => string) {
   const message = err instanceof Error ? err.message : String(err);
   if (message.includes("ExpoDocumentPicker")) {
-    return "Document picker is unavailable in this build.";
+    return t("issues.document_picker_unavailable");
   }
-  return message || "Unable to open file picker";
+  return message || t("issues.file_picker_unavailable");
 }
 
 function fuzzyMatch(value: string, query: string) {

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { GoogleSignin, statusCodes } from "@react-native-google-signin/google-signin";
+import { useTranslation } from "react-i18next";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useCoreQueryClient } from "@multica/core/provider";
@@ -18,6 +19,7 @@ type AuthConfig = {
 };
 
 export function LoginScreen() {
+  const { t } = useTranslation();
   const queryClient = useCoreQueryClient();
   const sendCode = useAuthStore((state) => state.sendCode);
   const verifyCode = useAuthStore((state) => state.verifyCode);
@@ -67,7 +69,7 @@ export function LoginScreen() {
       await sendCode(email.trim());
       setSent(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to send code");
+      setError(err instanceof Error ? err.message : t("auth.unable_to_send_code"));
     } finally {
       setSubmitting(false);
     }
@@ -81,7 +83,7 @@ export function LoginScreen() {
       queryClient.clear();
       await verifyCode(email.trim(), code.trim());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to verify code");
+      setError(err instanceof Error ? err.message : t("auth.unable_to_verify_code"));
     } finally {
       setSubmitting(false);
     }
@@ -102,7 +104,7 @@ export function LoginScreen() {
 
       const idToken = result.data.idToken;
       if (!idToken) {
-        throw new Error("Google did not return an ID token");
+        throw new Error(t("auth.missing_google_token"));
       }
 
       queryClient.clear();
@@ -115,10 +117,10 @@ export function LoginScreen() {
         return;
       }
       if (isGoogleSignInCode(err, statusCodes.PLAY_SERVICES_NOT_AVAILABLE)) {
-        setError("Google Play services are not available on this device");
+        setError(t("auth.google_play_unavailable"));
         return;
       }
-      setError(err instanceof Error ? err.message : "Unable to sign in with Google");
+      setError(err instanceof Error ? err.message : t("auth.unable_google_sign_in"));
     } finally {
       setSubmitting(false);
     }
@@ -132,7 +134,7 @@ export function LoginScreen() {
       <View style={styles.container}>
         <View style={styles.header}>
           <Heading>Multicam</Heading>
-          <Text style={styles.subtitle}>Sign in to your Multica workspace.</Text>
+          <Text style={styles.subtitle}>{t("auth.subtitle")}</Text>
         </View>
         {showEmailLogin ? (
           <>
@@ -141,7 +143,7 @@ export function LoginScreen() {
               autoComplete="email"
               keyboardType="email-address"
               onChangeText={setEmail}
-              placeholder="Email"
+              placeholder={t("auth.email")}
               value={email}
             />
             {sent ? (
@@ -149,7 +151,7 @@ export function LoginScreen() {
                 autoCapitalize="none"
                 keyboardType="number-pad"
                 onChangeText={setCode}
-                placeholder="Verification code"
+                placeholder={t("auth.verification_code")}
                 value={code}
               />
             ) : null}
@@ -157,7 +159,7 @@ export function LoginScreen() {
               disabled={submitting}
               onPress={sent ? handleVerifyCode : handleSendCode}
             >
-              {sent ? "Verify code" : "Send code"}
+              {sent ? t("auth.verify_code") : t("auth.send_code")}
             </Button>
           </>
         ) : null}
@@ -165,14 +167,14 @@ export function LoginScreen() {
           <View style={styles.oauthGroup}>
             <OAuthButton
               icon={<GoogleIcon />}
-              label="Continue with Google"
+              label={t("auth.continue_with_google")}
               disabled={submitting}
               onPress={() => void handleGoogleLogin()}
             />
           </View>
         ) : null}
         {!showEmailLogin && !showGoogle ? (
-          <Text style={styles.error}>No login methods are configured.</Text>
+          <Text style={styles.error}>{t("auth.no_login_methods")}</Text>
         ) : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>

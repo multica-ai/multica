@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useTranslation } from "react-i18next";
 import { api } from "@multica/core/api";
 import { useRuntimeList } from "@multica/core/runtimes/hooks";
 import { useMemberList } from "@multica/core/workspace/hooks";
@@ -32,16 +33,17 @@ import { ScreenTitleBar } from "../../components/ui/screen-title-bar";
 import type { RootStackParamList } from "../../navigation/root-navigator";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
 import { colors, radii, spacing } from "../../theme/tokens";
+import { formatRuntimeMode } from "../../i18n/format";
 
 type RuntimesNavigation = NativeStackNavigationProp<RootStackParamList>;
 
-function formatLastSeen(lastSeenAt: string | null): string {
-  if (!lastSeenAt) return "Never";
+function formatLastSeen(lastSeenAt: string | null, t: (key: string, options?: Record<string, unknown>) => string): string {
+  if (!lastSeenAt) return t("runtimes.never");
   const diff = Date.now() - new Date(lastSeenAt).getTime();
-  if (diff < 60_000) return "Just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return `${Math.floor(diff / 86_400_000)}d ago`;
+  if (diff < 60_000) return t("runtimes.just_now");
+  if (diff < 3_600_000) return t("runtimes.minutes_ago", { count: Math.floor(diff / 60_000) });
+  if (diff < 86_400_000) return t("runtimes.hours_ago", { count: Math.floor(diff / 3_600_000) });
+  return t("runtimes.days_ago", { count: Math.floor(diff / 86_400_000) });
 }
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
@@ -51,6 +53,7 @@ function getCliVersion(metadata: Record<string, unknown>): string | null {
 }
 
 export function RuntimesScreen() {
+  const { t } = useTranslation();
   const navigation = useNavigation<RuntimesNavigation>();
   const { workspace } = useMobileWorkspace();
   const {
@@ -64,15 +67,15 @@ export function RuntimesScreen() {
 
   const getOwnerName = useCallback(
     (ownerId: string | null) => {
-      if (!ownerId) return "Unknown";
-      return members.find((member) => member.user_id === ownerId)?.name ?? "Unknown";
+      if (!ownerId) return t("common.unknown");
+      return members.find((member) => member.user_id === ownerId)?.name ?? t("common.unknown");
     },
-    [members],
+    [members, t],
   );
 
   if (isLoading) return <LoadingState />;
   if (isError) {
-    return <EmptyState detail="Pull to retry once the connection is available." title="Unable to load runtimes" />;
+    return <EmptyState detail={t("common.pull_to_retry")} title={t("runtimes.unable_to_load")} />;
   }
 
   const onlineCount = runtimes.filter((runtime) => runtime.status === "online").length;
@@ -83,10 +86,10 @@ export function RuntimesScreen() {
         onBack={() => navigation.goBack()}
         right={
           <Text style={styles.subtitle}>
-            {onlineCount}/{runtimes.length} online
+            {t("runtimes.online_count", { online: onlineCount, total: runtimes.length })}
           </Text>
         }
-        title="Runtimes"
+        title={t("runtimes.title")}
       />
       <FlatList
         contentContainerStyle={styles.listContent}
@@ -94,8 +97,8 @@ export function RuntimesScreen() {
         keyExtractor={(runtime) => runtime.id}
         ListEmptyComponent={
           <EmptyState
-            detail="Run multica daemon start to register a local runtime."
-            title="No runtimes owned by you"
+            detail={t("runtimes.empty_detail")}
+            title={t("runtimes.empty_title")}
           />
         }
         onRefresh={refetch}
@@ -116,8 +119,9 @@ function RuntimeCard({
   runtime: AgentRuntime;
   ownerName: string;
 }) {
+  const { t } = useTranslation();
   const cliVersion =
-    runtime.runtime_mode === "local" ? getCliVersion(runtime.metadata) ?? "unknown" : "N/A";
+    runtime.runtime_mode === "local" ? getCliVersion(runtime.metadata) ?? t("common.unknown") : t("runtimes.not_applicable");
   const ModeIcon = runtime.runtime_mode === "cloud" ? Cloud : Monitor;
 
   return (
@@ -140,22 +144,22 @@ function RuntimeCard({
       <View style={styles.infoGrid}>
         <InfoCell
           icon={ModeIcon}
-          label="Runtime Mode"
-          value={runtime.runtime_mode}
+          label={t("runtimes.runtime_mode")}
+          value={formatRuntimeMode(t, runtime.runtime_mode)}
         />
-        <InfoCell icon={Bot} label="Provider" value={runtime.provider} />
+        <InfoCell icon={Bot} label={t("runtimes.provider")} value={runtime.provider} />
         <InfoCell
           icon={Clock}
-          label="Last Seen"
-          value={formatLastSeen(runtime.last_seen_at)}
+          label={t("runtimes.last_seen")}
+          value={formatLastSeen(runtime.last_seen_at, t)}
         />
-        <InfoCell icon={UserRound} label="Owner" value={ownerName} />
+        <InfoCell icon={UserRound} label={t("runtimes.owner")} value={ownerName} />
         <InfoCell
           icon={Smartphone}
-          label="Device"
-          value={runtime.device_info || "Unknown"}
+          label={t("runtimes.device")}
+          value={runtime.device_info || t("common.unknown")}
         />
-        <InfoCell icon={Server} label="CLI Version" value={cliVersion} />
+        <InfoCell icon={Server} label={t("runtimes.cli_version")} value={cliVersion} />
       </View>
 
       <ConnectionTest runtimeId={runtime.id} />
@@ -164,13 +168,14 @@ function RuntimeCard({
 }
 
 function StatusPill({ status }: { status: AgentRuntime["status"] }) {
+  const { t } = useTranslation();
   const online = status === "online";
   const Icon = online ? Wifi : WifiOff;
   return (
     <View style={[styles.statusPill, online ? styles.statusOnline : styles.statusOffline]}>
       <Icon color={online ? colors.success : colors.mutedForeground} size={13} />
       <Text style={[styles.statusText, online ? styles.statusTextOnline : styles.statusTextOffline]}>
-        {online ? "Online" : "Offline"}
+        {online ? t("runtimes.online") : t("runtimes.offline")}
       </Text>
     </View>
   );
@@ -199,6 +204,7 @@ function InfoCell({
 }
 
 function ConnectionTest({ runtimeId }: { runtimeId: string }) {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<RuntimePingStatus | null>(null);
   const [output, setOutput] = useState("");
   const [error, setError] = useState("");
@@ -235,7 +241,7 @@ function ConnectionTest({ runtimeId }: { runtimeId: string }) {
             setTesting(false);
             cleanup();
           } else if (result.status === "failed" || result.status === "timeout") {
-            setError(result.error ?? "Unknown error");
+            setError(result.error ?? t("runtimes.unknown_error"));
             setDurationMs(result.duration_ms ?? null);
             setTesting(false);
             cleanup();
@@ -246,19 +252,19 @@ function ConnectionTest({ runtimeId }: { runtimeId: string }) {
       }, 2000);
     } catch {
       setStatus("failed");
-      setError("Failed to initiate test");
+      setError(t("runtimes.failed_to_initiate"));
       setTesting(false);
     }
   };
 
-  const statusLabel = getPingStatusLabel(status);
+  const statusLabel = getPingStatusLabel(status, t);
   const StatusIcon =
     status === "completed" ? CheckCircle2 : status === "failed" || status === "timeout" ? XCircle : null;
 
   return (
     <View style={styles.connectionSection}>
       <View style={styles.connectionHeader}>
-        <Text style={styles.connectionTitle}>Connection Test</Text>
+        <Text style={styles.connectionTitle}>{t("runtimes.connection_test")}</Text>
         <Pressable
           accessibilityRole="button"
           disabled={testing}
@@ -274,7 +280,7 @@ function ConnectionTest({ runtimeId }: { runtimeId: string }) {
           ) : (
             <Play color={colors.foreground} size={14} />
           )}
-          <Text style={styles.testButtonText}>{testing ? "Testing" : "Test"}</Text>
+          <Text style={styles.testButtonText}>{testing ? t("runtimes.testing") : t("runtimes.test")}</Text>
         </Pressable>
       </View>
 
@@ -303,18 +309,18 @@ function ConnectionTest({ runtimeId }: { runtimeId: string }) {
   );
 }
 
-function getPingStatusLabel(status: RuntimePingStatus | null): string {
+function getPingStatusLabel(status: RuntimePingStatus | null, t: (key: string) => string): string {
   switch (status) {
     case "pending":
-      return "Waiting for daemon...";
+      return t("runtimes.waiting_for_daemon");
     case "running":
-      return "Running test...";
+      return t("runtimes.running_test");
     case "completed":
-      return "Connected";
+      return t("runtimes.connected");
     case "failed":
-      return "Failed";
+      return t("runtimes.failed");
     case "timeout":
-      return "Timeout";
+      return t("runtimes.timeout");
     default:
       return "";
   }

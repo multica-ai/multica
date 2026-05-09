@@ -1,6 +1,7 @@
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@multica/core/auth";
 import { useInboxList } from "@multica/core/inbox";
 import { Bot, Inbox, Server, Settings } from "lucide-react-native";
@@ -12,18 +13,19 @@ import { colors, radii, spacing } from "../../theme/tokens";
 type MineNavigation = NativeStackNavigationProp<RootStackParamList>;
 
 const readOnlyEntries = [
-  { label: "Runtimes", route: "Runtimes", icon: Server },
-  { label: "Agents", route: "Agents", icon: Bot },
-  { label: "Inbox", route: "Inbox", icon: Inbox },
-  { label: "Setting", route: "Setting", icon: Settings },
+  { labelKey: "mine.runtimes", route: "Runtimes", icon: Server },
+  { labelKey: "mine.agents", route: "Agents", icon: Bot },
+  { labelKey: "mine.inbox", route: "Inbox", icon: Inbox },
+  { labelKey: "mine.setting", route: "Setting", icon: Settings },
 ] as const satisfies ReadonlyArray<{
-  label: string;
+  labelKey: string;
   route: keyof Pick<RootStackParamList, "Runtimes" | "Agents" | "Inbox" | "Setting">;
   icon: typeof Server;
 }>;
 
 export function MineScreen() {
   const navigation = useNavigation<MineNavigation>();
+  const { t } = useTranslation();
   const { workspace } = useMobileWorkspace();
   const user = useAuthStore((state) => state.user);
   const { data: inboxItems = [] } = useInboxList(workspace.id);
@@ -56,7 +58,7 @@ export function MineScreen() {
           </View>
         </View>
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>More</Text>
+          <Text style={styles.sectionTitle}>{t("mine.more")}</Text>
           <View style={styles.entryRow}>
             {readOnlyEntries.slice(0, 4).map((entry) => {
               const Icon = entry.icon;
@@ -77,7 +79,7 @@ export function MineScreen() {
                     ) : null}
                   </View>
                   <Text numberOfLines={1} style={styles.entryLabel}>
-                    {entry.label}
+                    {t(entry.labelKey)}
                   </Text>
                 </Pressable>
               );

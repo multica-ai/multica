@@ -2,12 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { MessageSquare, Search as SearchIcon } from "lucide-react-native";
+import { useTranslation } from "react-i18next";
 import { api } from "@multica/core/api";
-import { STATUS_CONFIG } from "@multica/core/issues/config/status";
 import type { IssueStatus, SearchIssueResult } from "@multica/core/types";
 import type { RootStackParamList } from "../../navigation/root-navigator";
 import { EmptyState, Screen } from "../../components/ui/primitives";
 import { ScreenTitleBar } from "../../components/ui/screen-title-bar";
+import { formatIssueStatus } from "../../i18n/format";
 import { colors, radii, spacing } from "../../theme/tokens";
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -16,6 +17,7 @@ const SEARCH_LIMIT = 20;
 type Props = NativeStackScreenProps<RootStackParamList, "Search">;
 
 export function SearchScreen({ navigation }: Props) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchIssueResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -84,7 +86,7 @@ export function SearchScreen({ navigation }: Props) {
 
   return (
     <Screen padded={false} safeArea={false}>
-      <ScreenTitleBar onBack={() => navigation.goBack()} title="Search" />
+      <ScreenTitleBar onBack={() => navigation.goBack()} title={t("issues.search_title")} />
       <View style={styles.content}>
         <View style={styles.searchField}>
           <SearchIcon color={colors.mutedForeground} size={18} strokeWidth={2} />
@@ -94,7 +96,7 @@ export function SearchScreen({ navigation }: Props) {
             autoFocus
             clearButtonMode="while-editing"
             onChangeText={handleChangeText}
-            placeholder="Search issues..."
+            placeholder={t("issues.search_placeholder")}
             placeholderTextColor={colors.mutedForeground}
             returnKeyType="search"
             style={styles.searchInput}
@@ -104,15 +106,15 @@ export function SearchScreen({ navigation }: Props) {
         </View>
 
         {isError ? (
-          <EmptyState detail="Check your connection and try again." title="Unable to search issues" />
+          <EmptyState detail={t("common.check_connection")} title={t("issues.unable_to_search")} />
         ) : null}
 
         {!isError && !isLoading && hasSearched && results.length === 0 ? (
-          <EmptyState title="No matching issues" />
+          <EmptyState title={t("issues.no_matching")} />
         ) : null}
 
         {!isError && !hasSearched && !query.trim() ? (
-          <EmptyState detail="Search by issue title, description, identifier, or comment." title="Search issues" />
+          <EmptyState detail={t("issues.search_empty_detail")} title={t("issues.search_empty_title")} />
         ) : null}
 
         {!isError && results.length > 0 ? (
@@ -141,6 +143,7 @@ function SearchResultItem({
   issue: SearchIssueResult;
   onPress: () => void;
 }) {
+  const { t } = useTranslation();
   const statusColor = getStatusColor(issue.status);
 
   return (
@@ -156,7 +159,7 @@ function SearchResultItem({
       </View>
       <View style={styles.resultMetaRow}>
         <Text style={[styles.status, { color: statusColor }]}>
-          {STATUS_CONFIG[issue.status].label}
+          {formatIssueStatus(t, issue.status)}
         </Text>
         {issue.match_source === "comment" && issue.matched_snippet ? (
           <View style={styles.snippetRow}>

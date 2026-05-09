@@ -1,5 +1,6 @@
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useWorkspaceList } from "@multica/core/workspace/hooks";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import type { Workspace } from "@multica/core/types";
@@ -15,6 +16,7 @@ export function WorkspaceHeader({
   title?: string;
 }) {
   const { workspace, setWorkspace } = useMobileWorkspace();
+  const { t } = useTranslation();
   const { data: workspaces = [] } = useWorkspaceList();
   const [open, setOpen] = useState(false);
 
@@ -73,9 +75,9 @@ export function WorkspaceHeader({
       <Modal animationType="slide" onRequestClose={() => setOpen(false)} visible={open}>
         <View style={styles.modal}>
           <View style={styles.modalHeader}>
-            <Text style={styles.title}>Workspaces</Text>
+            <Text style={styles.title}>{t("common.workspaces")}</Text>
             <Button onPress={() => setOpen(false)} variant="ghost">
-              Close
+              {t("common.close")}
             </Button>
           </View>
           {workspaces.map((item) => (
