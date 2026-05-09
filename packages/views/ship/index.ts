@@ -25,3 +25,13 @@ export type {
   KanbanBuckets,
   ShipDeploySnapshot,
 } from "./hooks/use-pr-state";
+
+// Phase 3 — chip derivation + components
+export { derivePrChips } from "./hooks/use-pr-chips";
+export type {
+  PrChip,
+  PrChipVariant,
+  PrChipInputs,
+} from "./hooks/use-pr-chips";
+export { PrChipRow } from "./components/pr-chip-row";
+export { ChipButton } from "./components/chip-button";

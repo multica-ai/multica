@@ -7,6 +7,7 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -44,6 +45,16 @@ var (
 	// ErrInvalidRepoURL is returned by ParseRepoURL when the input doesn't
 	// look like https://github.com/owner/repo.
 	ErrInvalidRepoURL = errors.New("github: invalid repo url")
+	// ErrUnprocessable is returned for HTTP 422. GitHub's "unprocessable"
+	// covers a handful of write-side failures we want to surface as
+	// distinct from generic 400s — most importantly "PR is not mergeable"
+	// (the merge endpoint returns 405 historically and 422 today; we map
+	// both into this typed error so the caller doesn't have to care).
+	ErrUnprocessable = errors.New("github: unprocessable")
+	// ErrConflict is returned for HTTP 409. Used by the merge endpoint
+	// when the head SHA changed mid-flight and by the update-branch
+	// endpoint when there's nothing to update.
+	ErrConflict = errors.New("github: conflict")
 )
 
 // Client is a thin REST wrapper. Zero-config construction (NewClient)
@@ -196,20 +207,43 @@ func (c *Client) GetCombinedStatus(ctx context.Context, owner, repo, sha string)
 	return out.State, nil
 }
 
-// do executes a request against the GitHub API and decodes the body into
-// `target`. Centralized so all calls go through the same auth + error
-// translation path.
+// do is the GET/no-body shorthand that delegates to doWithBody. Kept as a
+// thin wrapper so existing read-only call sites don't need to thread a
+// nil body argument through.
 func (c *Client) do(ctx context.Context, method, path string, target any) error {
+	return c.doWithBody(ctx, method, path, nil, target)
+}
+
+// doWithBody executes a request against the GitHub API with an optional
+// JSON body. Centralized so all read AND write calls share auth +
+// error-translation behavior.
+//
+// reqBody, when non-nil, is JSON-marshaled and sent as the request body
+// with Content-Type: application/json. target, when non-nil, receives
+// the decoded response. Either may be nil — empty-response writes (e.g.
+// PUT /update-branch returning 202 No Content) pass nil for both.
+func (c *Client) doWithBody(ctx context.Context, method, path string, reqBody, target any) error {
 	base := c.BaseURL
 	if base == "" {
 		base = apiBase
 	}
-	req, err := http.NewRequestWithContext(ctx, method, base+path, nil)
+	var bodyReader io.Reader
+	if reqBody != nil {
+		buf, err := json.Marshal(reqBody)
+		if err != nil {
+			return fmt.Errorf("github: encode request body: %w", err)
+		}
+		bodyReader = bytes.NewReader(buf)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, base+path, bodyReader)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if reqBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
@@ -230,8 +264,8 @@ func (c *Client) do(ctx context.Context, method, path string, target any) error 
 	}
 
 	switch resp.StatusCode {
-	case http.StatusOK:
-		if target == nil {
+	case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent:
+		if target == nil || len(body) == 0 {
 			return nil
 		}
 		if err := json.Unmarshal(body, target); err != nil {
@@ -253,6 +287,19 @@ func (c *Client) do(ctx context.Context, method, path string, target any) error 
 			return ErrRateLimited
 		}
 		return ErrForbidden
+	case http.StatusConflict:
+		// Used by the merge endpoint for "head SHA mismatch" and by the
+		// update-branch endpoint for "branch is up to date / nothing to
+		// merge". Phase 3 surfaces this as a hint, not an error, so the
+		// chip can render "already up to date".
+		return fmt.Errorf("%w: %s", ErrConflict, truncate(body, 256))
+	case http.StatusMethodNotAllowed:
+		// GitHub's merge endpoint returns 405 (not 422) when the PR is not
+		// mergeable. Bucket it with 422 so the caller has one error to
+		// check for "couldn't merge for state-related reasons".
+		return fmt.Errorf("%w: %s", ErrUnprocessable, truncate(body, 256))
+	case http.StatusUnprocessableEntity:
+		return fmt.Errorf("%w: %s", ErrUnprocessable, truncate(body, 256))
 	default:
 		// Anything else is unexpected — pass through so the caller logs and
 		// the operator can debug from the response body.
@@ -268,4 +315,172 @@ func truncate(b []byte, n int) string {
 		return string(b)
 	}
 	return string(b[:n]) + "..."
+}
+
+// MergeResult is the response from PUT /repos/.../pulls/{n}/merge. We
+// only project the fields the chip surfaces back to the user — the merge
+// SHA + GitHub's natural-language message.
+type MergeResult struct {
+	SHA     string `json:"sha"`
+	Merged  bool   `json:"merged"`
+	Message string `json:"message"`
+}
+
+// mergePullRequestRequest is the payload PUT /pulls/{n}/merge accepts.
+// CommitMessage is intentionally empty: the chip just kicks the merge
+// and lets GitHub's default merge-commit message stand.
+type mergePullRequestRequest struct {
+	SHA           string `json:"sha,omitempty"`
+	MergeMethod   string `json:"merge_method,omitempty"`
+	CommitTitle   string `json:"commit_title,omitempty"`
+	CommitMessage string `json:"commit_message,omitempty"`
+}
+
+// MergePullRequest issues PUT /repos/{owner}/{repo}/pulls/{n}/merge.
+// Method is one of "merge", "squash", "rebase"; an empty string defaults
+// to "merge" (GitHub's documented default). When `sha` is non-empty
+// GitHub will refuse to merge if the head has moved — Phase 3 doesn't
+// require this guard but threading it through keeps the door open for
+// "merge only if SHA still equals X" automations later.
+//
+// Returns a typed ErrUnprocessable for the "PR not mergeable" case so
+// the handler can surface a 422.
+func (c *Client) MergePullRequest(ctx context.Context, owner, repo string, prNumber int, method, sha string) (*MergeResult, error) {
+	switch method {
+	case "", "merge", "squash", "rebase":
+	default:
+		return nil, fmt.Errorf("github: invalid merge method %q", method)
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge",
+		url.PathEscape(owner), url.PathEscape(repo), prNumber)
+	body := mergePullRequestRequest{MergeMethod: method, SHA: sha}
+	var out MergeResult
+	if err := c.doWithBody(ctx, "PUT", path, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// updatePullRequestBranchRequest is the body PUT /pulls/{n}/update-branch
+// accepts. expected_head_sha is the optimistic-concurrency guard — if
+// the head moved since we computed it, GitHub aborts the merge instead
+// of clobbering newer commits.
+type updatePullRequestBranchRequest struct {
+	ExpectedHeadSHA string `json:"expected_head_sha,omitempty"`
+}
+
+// UpdatePullRequestBranch triggers GitHub's "Update branch" action — it
+// merges the base branch into the head branch (NOT a true rebase; that
+// requires either client-side git work or the GraphQL `updatePullRequest`
+// with `updateMethod: REBASE`). We surface the merge-into variant as
+// "rebase_on_main" in Phase 3 because it's the available primitive for
+// non-stacked PRs and matches what most teams actually want when they
+// hit the chip.
+//
+// Returns nil on success (GitHub returns 202 No Content); ErrConflict
+// when the branch is already up to date.
+func (c *Client) UpdatePullRequestBranch(ctx context.Context, owner, repo string, prNumber int, expectedSHA string) error {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/update-branch",
+		url.PathEscape(owner), url.PathEscape(repo), prNumber)
+	body := updatePullRequestBranchRequest{ExpectedHeadSHA: expectedSHA}
+	return c.doWithBody(ctx, "PUT", path, body, nil)
+}
+
+// Comment mirrors GitHub's issue comment shape. Both review-side and
+// issue-side comments share the same response wire shape; we use issue
+// comments for the chip ("post a PR comment") because they show up in
+// the review timeline without needing diff coordinates.
+type Comment struct {
+	ID      int64  `json:"id"`
+	HTMLURL string `json:"html_url"`
+	Body    string `json:"body"`
+	User    User   `json:"user"`
+}
+
+// createCommentRequest is the body POST /issues/{n}/comments accepts.
+type createCommentRequest struct {
+	Body string `json:"body"`
+}
+
+// CreatePullRequestComment posts a comment on the PR conversation tab.
+// GitHub treats PRs as issues for comment purposes, so the path uses the
+// /issues/.../comments endpoint with the PR number — that's how every
+// "general" PR comment is written via the API.
+func (c *Client) CreatePullRequestComment(ctx context.Context, owner, repo string, prNumber int, body string) (*Comment, error) {
+	if strings.TrimSpace(body) == "" {
+		return nil, errors.New("github: comment body is empty")
+	}
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments",
+		url.PathEscape(owner), url.PathEscape(repo), prNumber)
+	var out Comment
+	if err := c.doWithBody(ctx, "POST", path, createCommentRequest{Body: body}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// dismissReviewRequest is the body PUT /reviews/{id}/dismissals accepts.
+type dismissReviewRequest struct {
+	Message string `json:"message"`
+	Event   string `json:"event,omitempty"`
+}
+
+// DismissPullRequestReview dismisses an existing review. Requires
+// repository "admin" permission on the GitHub side; the typed Forbidden
+// error lets the handler surface that distinction to the user.
+func (c *Client) DismissPullRequestReview(ctx context.Context, owner, repo string, prNumber int, reviewID int64, message string) error {
+	if strings.TrimSpace(message) == "" {
+		return errors.New("github: dismiss message is required")
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews/%d/dismissals",
+		url.PathEscape(owner), url.PathEscape(repo), prNumber, reviewID)
+	body := dismissReviewRequest{Message: message, Event: "DISMISS"}
+	return c.doWithBody(ctx, "PUT", path, body, nil)
+}
+
+// updatePullRequestRequest is the body PATCH /pulls/{n} accepts. We use
+// it only for state transitions (closing a stale PR) — re-titling or
+// changing the body should go through the dedicated UI flows.
+type updatePullRequestRequest struct {
+	State string `json:"state,omitempty"`
+}
+
+// ClosePullRequest closes the PR (without merging). The author's
+// authorization isn't enforced server-side here — the handler must
+// project-membership-gate before calling this.
+func (c *Client) ClosePullRequest(ctx context.Context, owner, repo string, prNumber int) error {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d",
+		url.PathEscape(owner), url.PathEscape(repo), prNumber)
+	body := updatePullRequestRequest{State: "closed"}
+	return c.doWithBody(ctx, "PATCH", path, body, nil)
+}
+
+// dispatchWorkflowRequest is the body POST /actions/workflows/{file}/dispatches
+// accepts. Inputs is a flat map of string keys/values — GitHub coerces
+// non-string types but our chip only ever forwards an environment_id
+// string so the simpler shape is fine.
+type dispatchWorkflowRequest struct {
+	Ref    string            `json:"ref"`
+	Inputs map[string]string `json:"inputs,omitempty"`
+}
+
+// DispatchWorkflow triggers a workflow_dispatch event on the named
+// workflow file. ref is the branch or tag name (NOT a SHA — GitHub
+// requires a ref label here). Returns nil on the standard 204 No Content
+// success path.
+//
+// The smoke-tests chip uses this; the workspace setting
+// `ship_hub_smoke_workflow` is the workflow file name (e.g.
+// "smoke-tests.yml"). The chip is hidden when the setting is empty.
+func (c *Client) DispatchWorkflow(ctx context.Context, owner, repo, workflowFile, ref string, inputs map[string]string) error {
+	if strings.TrimSpace(workflowFile) == "" {
+		return errors.New("github: workflow file is required")
+	}
+	if strings.TrimSpace(ref) == "" {
+		return errors.New("github: dispatch ref is required")
+	}
+	path := fmt.Sprintf("/repos/%s/%s/actions/workflows/%s/dispatches",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(workflowFile))
+	body := dispatchWorkflowRequest{Ref: ref, Inputs: inputs}
+	return c.doWithBody(ctx, "POST", path, body, nil)
 }

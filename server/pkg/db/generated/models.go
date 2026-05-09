@@ -705,6 +705,19 @@ type PullRequestReview struct {
 	SubmittedAt       pgtype.Timestamptz `json:"submitted_at"`
 }
 
+type ShipCardAction struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	PullRequestID pgtype.UUID        `json:"pull_request_id"`
+	ActorUserID   pgtype.UUID        `json:"actor_user_id"`
+	Action        string             `json:"action"`
+	Payload       []byte             `json:"payload"`
+	ResultStatus  string             `json:"result_status"`
+	ResultPayload []byte             `json:"result_payload"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
+}
+
 type Skill struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -825,6 +838,7 @@ type Workspace struct {
 	OrchestratorAgentID  pgtype.UUID        `json:"orchestrator_agent_id"`
 	ShipHubEnabled       bool               `json:"ship_hub_enabled"`
 	ShipHubWebhookSecret pgtype.Text        `json:"ship_hub_webhook_secret"`
+	ShipHubSmokeWorkflow pgtype.Text        `json:"ship_hub_smoke_workflow"`
 }
 
 type WorkspaceInvitation struct {

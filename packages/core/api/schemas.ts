@@ -267,6 +267,73 @@ export const EMPTY_LIST_SHIP_PROJECTS_RESPONSE = {
   projects: [],
 };
 
+// Phase 3 — POST /api/pull_requests/{id}/{action}.
+//
+// Every chip endpoint returns the same shape: a status discriminator plus
+// optional fields populated per-action (merge_sha for the merge chip,
+// agent_task_id for the async chips, comment for any chip that posts a
+// comment, error for the failed branch). We keep `status` as `z.string()`
+// rather than a strict union so a future server-side status (e.g. "queued")
+// renders as a generic in-flight state instead of crashing the chip.
+const ShipActionCommentSchema = z.object({
+  id: z.number().default(0),
+  html_url: z.string().default(""),
+  body: z.string().default(""),
+  user: z
+    .object({
+      login: z.string().default(""),
+      avatar_url: z.string().default(""),
+    })
+    .loose()
+    .optional(),
+}).loose();
+
+export const ActionResultSchema = z.object({
+  status: z.string().default("failed"),
+  action_id: z.string().default(""),
+  agent_task_id: z.string().nullable().optional(),
+  comment: ShipActionCommentSchema.nullable().optional(),
+  merge_sha: z.string().optional(),
+  error: z.string().optional(),
+}).loose();
+
+// Fallback used when an ActionResult fails schema validation. The chip code
+// checks `status === "succeeded" | "in_progress"` and falls through to the
+// failure toast otherwise — defaulting status to "failed" and shipping a
+// generic error string keeps the UX coherent rather than swallowing the
+// outcome silently.
+export const EMPTY_ACTION_RESULT = {
+  status: "failed",
+  action_id: "",
+  error: "Malformed response",
+};
+
+// Phase 3 audit-trail row. Mirrors `db.ShipCardAction` from the Go side. The
+// row is workspace-scoped and carries a result_status that mirrors
+// ActionResult.status. We keep payload/result_payload as `unknown` here
+// because they're opaque JSON blobs — the audit footer only needs the
+// action name + actor + timestamp to render its row.
+const ShipCardActionSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  pull_request_id: z.string().default(""),
+  actor_user_id: z.string().nullable().default(null),
+  action: z.string().default(""),
+  payload: z.unknown().nullable().optional(),
+  result_status: z.string().default(""),
+  result_payload: z.unknown().nullable().optional(),
+  created_at: z.string().default(""),
+  completed_at: z.string().nullable().default(null),
+}).loose();
+
+export const ListShipCardActionsResponseSchema = z.object({
+  actions: z.array(ShipCardActionSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_SHIP_CARD_ACTIONS_RESPONSE = {
+  actions: [],
+};
+
 // Phase 2 — POST /api/workspaces/{id}/ship_hub/regenerate_webhook_secret.
 // The plaintext `webhook_secret` is returned exactly once, mirroring the
 // PAT-create flow. We still parse with a lenient schema so a corrupted

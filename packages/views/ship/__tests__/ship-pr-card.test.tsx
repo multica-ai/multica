@@ -1,16 +1,29 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { RESOURCES } from "../../locales";
 import type { PullRequest } from "@multica/core/types";
 import { ShipPRCard } from "../components/ship-pr-card";
 
+// Phase 3 added a chip row inside ShipPRCard whose mutation hooks call
+// useWorkspaceId() and useQueryClient(). Mock the workspace id and supply
+// a real QueryClient so the card mounts cleanly.
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "ws-1",
+}));
+
 function I18nWrapper({ children }: { children: ReactNode }) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return (
-    <I18nProvider locale="en" resources={RESOURCES}>
-      {children}
-    </I18nProvider>
+    <QueryClientProvider client={qc}>
+      <I18nProvider locale="en" resources={RESOURCES}>
+        {children}
+      </I18nProvider>
+    </QueryClientProvider>
   );
 }
 

@@ -16,8 +16,8 @@ func TestMapDeploymentStatusState(t *testing.T) {
 		"pending":     db.DeployStatusPending,
 		"inactive":    db.DeployStatusRolledBack,
 		// Unknown values must NOT crash — the GitHub enum could grow.
-		"galactic":    db.DeployStatusPending,
-		"":            db.DeployStatusPending,
+		"galactic": db.DeployStatusPending,
+		"":         db.DeployStatusPending,
 	}
 	for input, want := range cases {
 		if got := mapDeploymentStatusState(input); got != want {
@@ -34,7 +34,7 @@ func TestMapStatusToConclusion(t *testing.T) {
 		"pending": "",
 		// Unknown / unset → empty (treated as "not yet conclusive" by
 		// the rollup so we don't lock in a wrong final status).
-		"weirdo":  "",
+		"weirdo": "",
 	}
 	for input, want := range cases {
 		if got := mapStatusToConclusion(input); got != want {

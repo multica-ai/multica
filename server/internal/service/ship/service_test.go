@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	gh "github.com/multica-ai/multica/server/pkg/github"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	gh "github.com/multica-ai/multica/server/pkg/github"
 )
 
 // fakeGithub implements GithubClient for the table-driven mapping tests
@@ -16,6 +16,14 @@ type fakeGithub struct {
 	responses []ghResponse
 	idx       int
 	requested []ghRequest
+	// Phase 3 — write-side hooks. Unset fields default to "no-op
+	// success" so existing Phase 1/2 tests don't have to wire them.
+	mergeFn         func(ctx context.Context, owner, repo string, prNumber int, method, sha string) (*gh.MergeResult, error)
+	updateBranchFn  func(ctx context.Context, owner, repo string, prNumber int, expectedSHA string) error
+	createCommentFn func(ctx context.Context, owner, repo string, prNumber int, body string) (*gh.Comment, error)
+	dismissReviewFn func(ctx context.Context, owner, repo string, prNumber int, reviewID int64, message string) error
+	closePRFn       func(ctx context.Context, owner, repo string, prNumber int) error
+	dispatchFn      func(ctx context.Context, owner, repo, workflowFile, ref string, inputs map[string]string) error
 }
 
 type ghResponse struct {
@@ -37,6 +45,48 @@ func (f *fakeGithub) ListPullRequests(_ context.Context, owner, repo string, opt
 	r := f.responses[f.idx]
 	f.idx++
 	return r.prs, r.err
+}
+
+func (f *fakeGithub) MergePullRequest(ctx context.Context, owner, repo string, prNumber int, method, sha string) (*gh.MergeResult, error) {
+	if f.mergeFn != nil {
+		return f.mergeFn(ctx, owner, repo, prNumber, method, sha)
+	}
+	return &gh.MergeResult{SHA: "deadbeef", Merged: true, Message: "ok"}, nil
+}
+
+func (f *fakeGithub) UpdatePullRequestBranch(ctx context.Context, owner, repo string, prNumber int, expectedSHA string) error {
+	if f.updateBranchFn != nil {
+		return f.updateBranchFn(ctx, owner, repo, prNumber, expectedSHA)
+	}
+	return nil
+}
+
+func (f *fakeGithub) CreatePullRequestComment(ctx context.Context, owner, repo string, prNumber int, body string) (*gh.Comment, error) {
+	if f.createCommentFn != nil {
+		return f.createCommentFn(ctx, owner, repo, prNumber, body)
+	}
+	return &gh.Comment{ID: 1, HTMLURL: "https://example.com/c/1", Body: body}, nil
+}
+
+func (f *fakeGithub) DismissPullRequestReview(ctx context.Context, owner, repo string, prNumber int, reviewID int64, message string) error {
+	if f.dismissReviewFn != nil {
+		return f.dismissReviewFn(ctx, owner, repo, prNumber, reviewID, message)
+	}
+	return nil
+}
+
+func (f *fakeGithub) ClosePullRequest(ctx context.Context, owner, repo string, prNumber int) error {
+	if f.closePRFn != nil {
+		return f.closePRFn(ctx, owner, repo, prNumber)
+	}
+	return nil
+}
+
+func (f *fakeGithub) DispatchWorkflow(ctx context.Context, owner, repo, workflowFile, ref string, inputs map[string]string) error {
+	if f.dispatchFn != nil {
+		return f.dispatchFn(ctx, owner, repo, workflowFile, ref, inputs)
+	}
+	return nil
 }
 
 func TestMapPRState(t *testing.T) {

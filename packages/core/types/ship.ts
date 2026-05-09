@@ -162,6 +162,98 @@ export interface ListDeploysResponse {
   total: number;
 }
 
+// --- Phase 3: card actions ("chips") -----------------------------------------
+
+/** Canonical action names (must match the strings the backend dispatches on —
+ * see server/internal/service/ship/actions.go). Treat the union as advisory:
+ * the chip dispatcher routes unknown strings to a no-op via the fallback
+ * branch, so a server-side rename never crashes the UI. */
+export type ShipCardActionName =
+  | "merge"
+  | "rebase_on_main"
+  | "comment"
+  | "dismiss_review"
+  | "diagnose_ci_failure"
+  | "summarize_review_feedback"
+  | "nudge_author"
+  | "run_smoke_tests"
+  | "close_as_stale";
+
+export type ShipCardActionStatus = "succeeded" | "failed" | "in_progress";
+
+/** GitHub comment shape echoed back by the comment + nudge + close_as_stale
+ * chips. The frontend uses it for the optimistic "comment posted" toast and
+ * (eventually) inline preview. Fields are loose-typed because the GitHub
+ * client may not populate every nested user field on every error path. */
+export interface ShipActionComment {
+  id: number;
+  html_url: string;
+  body: string;
+  user?: {
+    login: string;
+    avatar_url: string;
+  };
+}
+
+/** Result of every POST /api/pull_requests/{id}/{action}. Fields are
+ *  populated per-action; consult `status` to decide which branch to render. */
+export interface ActionResult {
+  status: ShipCardActionStatus | string;
+  action_id: string;
+  agent_task_id?: string | null;
+  comment?: ShipActionComment | null;
+  merge_sha?: string;
+  error?: string;
+}
+
+/** Audit-trail row backing the "recent actions" footer on PR cards. Mirrors
+ *  the `ship_card_action` table. */
+export interface ShipCardAction {
+  id: string;
+  workspace_id: string;
+  pull_request_id: string;
+  actor_user_id: string | null;
+  action: string;
+  payload?: unknown;
+  result_status: string;
+  result_payload?: unknown;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface ListShipCardActionsResponse {
+  actions: ShipCardAction[];
+}
+
+// --- Phase 3 request bodies (one per chip endpoint) -------------------------
+
+export interface MergePullRequestRequest {
+  /** Optional — server defaults to "merge" when omitted. */
+  method?: "merge" | "squash" | "rebase";
+}
+
+export interface CommentPullRequestRequest {
+  body: string;
+}
+
+export interface DismissPullRequestReviewRequest {
+  review_id: number;
+  message: string;
+}
+
+export interface NudgePullRequestAuthorRequest {
+  /** Optional — server uses a default polite-nudge string when omitted. */
+  message?: string;
+}
+
+export interface RunSmokeTestsRequest {
+  environment_id: string;
+}
+
+export interface ClosePullRequestAsStaleRequest {
+  reason?: string;
+}
+
 /** Response of POST /api/workspaces/{id}/ship_hub/regenerate_webhook_secret.
  * Mirrors the personal-access-token create flow: `webhook_secret` is the
  * PLAINTEXT value, returned exactly once. The UI must capture it from this

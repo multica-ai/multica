@@ -15,4 +15,16 @@ export {
   useRecentDeploys,
   useUpsertDeployEnvironment,
   useLogDeploy,
+  // Phase 3 chip mutations + recent-actions query
+  useMergePullRequest,
+  useRebasePullRequestOnMain,
+  useCommentOnPullRequest,
+  useDismissPullRequestReview,
+  useDiagnoseCIFailure,
+  useSummarizeReviewFeedback,
+  useNudgePullRequestAuthor,
+  useRunSmokeTests,
+  useClosePullRequestAsStale,
+  useShipCardActions,
+  shipCardActionsOptions,
 } from "./queries";

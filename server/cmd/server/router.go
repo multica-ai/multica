@@ -417,6 +417,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/deploy_environments/{id}/deploys", h.ListDeploys)
 			r.Post("/api/deploy_environments/{id}/deploys", h.LogDeploy)
 
+			// Ship Hub Phase 3 — card action chips. Each endpoint runs
+			// the workspace-member middleware (this block); per-action
+			// destructive checks (owner/admin) live inside the handler
+			// so the gate stays close to the action definition.
+			r.Post("/api/pull_requests/{id}/merge", h.MergePullRequest)
+			r.Post("/api/pull_requests/{id}/rebase_on_main", h.RebasePullRequestOnMain)
+			r.Post("/api/pull_requests/{id}/comment", h.CommentOnPullRequest)
+			r.Post("/api/pull_requests/{id}/dismiss_review", h.DismissPullRequestReview)
+			r.Post("/api/pull_requests/{id}/diagnose_ci_failure", h.DiagnoseCIFailure)
+			r.Post("/api/pull_requests/{id}/summarize_review_feedback", h.SummarizeReviewFeedback)
+			r.Post("/api/pull_requests/{id}/nudge_author", h.NudgeAuthor)
+			r.Post("/api/pull_requests/{id}/run_smoke_tests", h.RunSmokeTests)
+			r.Post("/api/pull_requests/{id}/close_as_stale", h.ClosePullRequestAsStale)
+
 			// Channels (multi-participant chat + DMs).
 			// Endpoints respond 404 when workspace.channels_enabled is FALSE
 			// — the gate lives inside each handler so the surface is invisible

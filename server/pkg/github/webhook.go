@@ -106,17 +106,17 @@ type CheckRunEvent struct {
 // nested inline so we can derive (pull_request, head_sha) without an
 // extra API call.
 type CheckRun struct {
-	ID          int64     `json:"id"`
-	Name        string    `json:"name"`
-	HeadSHA     string    `json:"head_sha"`
-	Status      string    `json:"status"`     // "queued" | "in_progress" | "completed"
-	Conclusion  string    `json:"conclusion"` // "" until status=completed
-	DetailsURL  string    `json:"details_url"`
-	HTMLURL     string    `json:"html_url"`
-	StartedAt   time.Time `json:"started_at"`
-	CompletedAt time.Time `json:"completed_at"`
+	ID           int64     `json:"id"`
+	Name         string    `json:"name"`
+	HeadSHA      string    `json:"head_sha"`
+	Status       string    `json:"status"`     // "queued" | "in_progress" | "completed"
+	Conclusion   string    `json:"conclusion"` // "" until status=completed
+	DetailsURL   string    `json:"details_url"`
+	HTMLURL      string    `json:"html_url"`
+	StartedAt    time.Time `json:"started_at"`
+	CompletedAt  time.Time `json:"completed_at"`
 	PullRequests []struct {
-		Number int    `json:"number"`
+		Number int `json:"number"`
 		Head   struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
@@ -176,7 +176,7 @@ type DeploymentStatus struct {
 // branch so the per-repo PR list refreshes without waiting on the
 // 5-minute reconciler.
 type PushEvent struct {
-	Ref        string     `json:"ref"`        // e.g. "refs/heads/main"
+	Ref        string     `json:"ref"` // e.g. "refs/heads/main"
 	Before     string     `json:"before"`
 	After      string     `json:"after"`
 	Repository Repository `json:"repository"`

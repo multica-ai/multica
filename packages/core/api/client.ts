@@ -113,6 +113,14 @@ import type {
   ListDeploysResponse,
   PullRequestState,
   WebhookSecretResponse,
+  ActionResult,
+  ListShipCardActionsResponse,
+  MergePullRequestRequest,
+  CommentPullRequestRequest,
+  DismissPullRequestReviewRequest,
+  NudgePullRequestAuthorRequest,
+  RunSmokeTestsRequest,
+  ClosePullRequestAsStaleRequest,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -137,6 +145,10 @@ import {
   EMPTY_LIST_DEPLOYS_RESPONSE,
   WebhookSecretResponseSchema,
   EMPTY_WEBHOOK_SECRET_RESPONSE,
+  ActionResultSchema,
+  EMPTY_ACTION_RESULT,
+  ListShipCardActionsResponseSchema,
+  EMPTY_LIST_SHIP_CARD_ACTIONS_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1675,6 +1687,88 @@ export class ApiClient {
       WebhookSecretResponseSchema,
       EMPTY_WEBHOOK_SECRET_RESPONSE,
       { endpoint: "POST /api/workspaces/:id/ship_hub/regenerate_webhook_secret" },
+    );
+  }
+
+  // Phase 3 — PR card chip actions. Each method maps one-to-one to a backend
+  // POST /api/pull_requests/{id}/{action} endpoint. Every response is parsed
+  // through ActionResultSchema so a malformed body downgrades to a generic
+  // failure rather than throwing into the chip's optimistic-update path
+  // (per CLAUDE.md "API Response Compatibility").
+  private async postPullRequestAction(
+    prId: string,
+    action: string,
+    body?: unknown,
+  ): Promise<ActionResult> {
+    const raw = await this.fetch<unknown>(`/api/pull_requests/${prId}/${action}`, {
+      method: "POST",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return parseWithFallback(raw, ActionResultSchema, EMPTY_ACTION_RESULT, {
+      endpoint: `POST /api/pull_requests/:id/${action}`,
+    });
+  }
+
+  async mergePullRequest(prId: string, body?: MergePullRequestRequest): Promise<ActionResult> {
+    return this.postPullRequestAction(prId, "merge", body ?? {});
+  }
+
+  async rebasePullRequestOnMain(prId: string): Promise<ActionResult> {
+    return this.postPullRequestAction(prId, "rebase_on_main");
+  }
+
+  async commentOnPullRequest(prId: string, body: CommentPullRequestRequest): Promise<ActionResult> {
+    return this.postPullRequestAction(prId, "comment", body);
+  }
+
+  async dismissPullRequestReview(
+    prId: string,
+    body: DismissPullRequestReviewRequest,
+  ): Promise<ActionResult> {
+    return this.postPullRequestAction(prId, "dismiss_review", body);
+  }
+
+  async diagnoseCIFailure(prId: string): Promise<ActionResult> {
+    return this.postPullRequestAction(prId, "diagnose_ci_failure");
+  }
+
+  async summarizeReviewFeedback(prId: string): Promise<ActionResult> {
+    return this.postPullRequestAction(prId, "summarize_review_feedback");
+  }
+
+  async nudgePullRequestAuthor(
+    prId: string,
+    body?: NudgePullRequestAuthorRequest,
+  ): Promise<ActionResult> {
+    return this.postPullRequestAction(prId, "nudge_author", body ?? {});
+  }
+
+  async runSmokeTests(prId: string, body: RunSmokeTestsRequest): Promise<ActionResult> {
+    return this.postPullRequestAction(prId, "run_smoke_tests", body);
+  }
+
+  async closePullRequestAsStale(
+    prId: string,
+    body?: ClosePullRequestAsStaleRequest,
+  ): Promise<ActionResult> {
+    return this.postPullRequestAction(prId, "close_as_stale", body ?? {});
+  }
+
+  // Phase 3 — recent-actions footer on the PR card. Today the backend has
+  // no list endpoint registered (only the per-action POST handlers); this
+  // method is implemented optimistically against
+  // GET /api/pull_requests/{id}/actions so the frontend hook is ready to
+  // light up the moment the backend lands the route. Until then the call
+  // 404s and parseWithFallback returns the empty list — the footer simply
+  // doesn't render. See packages/views/ship/hooks/use-ship-card-actions.ts
+  // for the consumer-side TODO.
+  async listShipCardActions(prId: string): Promise<ListShipCardActionsResponse> {
+    const raw = await this.fetch<unknown>(`/api/pull_requests/${prId}/actions`);
+    return parseWithFallback(
+      raw,
+      ListShipCardActionsResponseSchema,
+      EMPTY_LIST_SHIP_CARD_ACTIONS_RESPONSE,
+      { endpoint: "GET /api/pull_requests/:id/actions" },
     );
   }
 }

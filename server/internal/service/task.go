@@ -285,6 +285,31 @@ type ChannelMentionContext struct {
 // ChannelMentionContextType marks a task as a channel-mention job.
 const ChannelMentionContextType = "channel_mention"
 
+// ShipCardActionContext is the JSON payload stored on a Ship Hub card-
+// action task's context column. The chip handler enqueues one of these
+// when the user presses "diagnose CI failure" or "summarize review
+// feedback" — the daemon detects the variant via
+// context.type == "ship_card_action" and dispatches the right prompt
+// template based on `Action`.
+//
+// Recent reviews / failed checks aren't embedded here; the daemon
+// fetches them from the API at execution time so the data stays fresh
+// even if the task waits in the queue for a few seconds.
+type ShipCardActionContext struct {
+	Type          string `json:"type"`
+	Action        string `json:"action"` // "diagnose_ci_failure" | "summarize_review_feedback"
+	WorkspaceID   string `json:"workspace_id"`
+	ProjectID     string `json:"project_id"`
+	PullRequestID string `json:"pull_request_id"`
+	RepoURL       string `json:"repo_url"`
+	PRNumber      int    `json:"pr_number"`
+	HeadSHA       string `json:"head_sha"`
+	RequesterID   string `json:"requester_id"`
+}
+
+// ShipCardActionContextType marks a task as a Ship Hub card-action job.
+const ShipCardActionContextType = "ship_card_action"
+
 // EnqueueTaskForChannelMentionParams is the input shape for
 // EnqueueTaskForChannelMention. Pulled into a struct because the caller
 // (handler) already has these values to hand and packing them into an
@@ -445,6 +470,81 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 
 	slog.Info("chat task enqueued", "task_id", util.UUIDToString(task.ID), "chat_session_id", util.UUIDToString(chatSession.ID), "agent_id", util.UUIDToString(chatSession.AgentID))
 	// See EnqueueTaskForIssue for ordering rationale.
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.notifyTaskAvailable(task)
+	return task, nil
+}
+
+// EnqueueShipCardActionTaskParams is the input shape for
+// EnqueueShipCardActionTask. The struct exists for the same reason
+// EnqueueTaskForChannelMentionParams does — packing the call sites'
+// known values into one argument list four-deep risks silent-mismatch
+// bugs the next time someone reorders.
+type EnqueueShipCardActionTaskParams struct {
+	WorkspaceID   pgtype.UUID
+	AgentID       pgtype.UUID
+	ProjectID     pgtype.UUID
+	PullRequestID pgtype.UUID
+	RepoURL       string
+	PRNumber      int
+	HeadSHA       string
+	RequesterID   pgtype.UUID
+	Action        string // "diagnose_ci_failure" | "summarize_review_feedback"
+}
+
+// EnqueueShipCardActionTask creates a queued task for the orchestrator
+// agent to handle a Ship Hub chip press that needs LLM work. The task
+// has no issue / chat / autopilot link — context.type == "ship_card_action"
+// is the daemon's hint that this is the variant.
+//
+// Pre-validates that the agent is reachable so the chip can return 4xx
+// fast instead of queueing a task that will never claim. Mirrors
+// EnqueueTaskForChannelMention.
+func (s *TaskService) EnqueueShipCardActionTask(ctx context.Context, p EnqueueShipCardActionTaskParams) (db.AgentTaskQueue, error) {
+	agent, err := s.Queries.GetAgent(ctx, p.AgentID)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+
+	payload := ShipCardActionContext{
+		Type:          ShipCardActionContextType,
+		Action:        p.Action,
+		WorkspaceID:   util.UUIDToString(p.WorkspaceID),
+		ProjectID:     util.UUIDToString(p.ProjectID),
+		PullRequestID: util.UUIDToString(p.PullRequestID),
+		RepoURL:       p.RepoURL,
+		PRNumber:      p.PRNumber,
+		HeadSHA:       p.HeadSHA,
+		RequesterID:   util.UUIDToString(p.RequesterID),
+	}
+	contextJSON, err := json.Marshal(payload)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("marshal ship-card-action context: %w", err)
+	}
+
+	task, err := s.Queries.CreateShipCardActionTask(ctx, db.CreateShipCardActionTaskParams{
+		AgentID:   p.AgentID,
+		RuntimeID: agent.RuntimeID,
+		Priority:  priorityToInt("medium"),
+		Context:   contextJSON,
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("create ship-card-action task: %w", err)
+	}
+
+	slog.Info("ship-card-action task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"agent_id", util.UUIDToString(p.AgentID),
+		"action", p.Action,
+		"pull_request_id", util.UUIDToString(p.PullRequestID),
+	)
+	// Same ordering rationale as every other Enqueue* path.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.notifyTaskAvailable(task)
 	return task, nil

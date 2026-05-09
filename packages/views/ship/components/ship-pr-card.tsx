@@ -12,9 +12,14 @@ import type { PullRequest } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { deriveRiskHint } from "../hooks/use-pr-state";
+import { PrChipRow } from "./pr-chip-row";
 
 interface ShipPRCardProps {
   pr: PullRequest;
+  /** Project's staging environment, when configured. The chip row uses it
+   *  to decide whether to surface "Run smoke tests" for merged PRs whose
+   *  head SHA isn't yet on staging. */
+  stagingEnv?: { id: string; current_sha: string | null } | null;
 }
 
 function formatRelativeTime(iso: string, locale: string): string {
@@ -126,7 +131,7 @@ function ReviewBadge({ decision }: { decision: string }) {
   return null;
 }
 
-export function ShipPRCard({ pr }: ShipPRCardProps) {
+export function ShipPRCard({ pr, stagingEnv }: ShipPRCardProps) {
   const { t, i18n } = useT("ship");
   const risk = deriveRiskHint(pr);
 
@@ -229,6 +234,18 @@ export function ShipPRCard({ pr }: ShipPRCardProps) {
           when: formatRelativeTime(pr.pr_updated_at, i18n.language),
         })}
       </div>
+
+      {/* Phase 3 — smart action chips. Renders nothing when the PR doesn't
+          qualify for any chip (open + clean / merged + on staging). The
+          row swallows its own clicks so chip presses don't bubble up to
+          this anchor and navigate to GitHub.
+
+          TODO(ROA-139): Recent-actions footer. The audit-trail row would
+          render here below the chip row, sourced from
+          `useShipCardActions(pr.id)`. Skipped in v3 because the backend
+          list endpoint isn't registered yet — the hook is in place
+          (disabled by default) and ready to enable once the route lands. */}
+      <PrChipRow pr={pr} stagingEnv={stagingEnv ?? null} />
     </a>
   );
 }

@@ -60,6 +60,72 @@
     "risk_schema": "Touches schema",
     "risk_migration": "Has migration"
   },
+  "chips": {
+    "more_actions": "More actions",
+    "confirm_cancel": "Cancel",
+    "task_id_hint": "Agent task #{{id}}",
+    "toast_generic_failure": "Action failed",
+    "merge": {
+      "label": "Merge",
+      "toast_success": "Pull request merged",
+      "toast_in_progress": "Merging…",
+      "confirm_title": "Merge this pull request?",
+      "confirm_description": "Merging #{{number}} \"{{title}}\" will land it on the base branch and trigger any deploy hooks. This can't be undone here — only on GitHub.",
+      "confirm_action": "Merge"
+    },
+    "rebase_on_main": {
+      "label": "Rebase on main",
+      "toast_success": "Branch updated",
+      "toast_in_progress": "Updating branch…"
+    },
+    "diagnose_ci_failure": {
+      "label": "Diagnose CI failure",
+      "toast_success": "Diagnosis complete",
+      "toast_in_progress": "Agent is analyzing the failure"
+    },
+    "summarize_review_feedback": {
+      "label": "Summarize feedback",
+      "toast_success": "Summary posted",
+      "toast_in_progress": "Agent is reading review comments"
+    },
+    "nudge_author": {
+      "label": "Nudge author",
+      "toast_success": "Comment posted",
+      "toast_in_progress": "Posting nudge…"
+    },
+    "comment": {
+      "label": "Comment",
+      "toast_success": "Comment posted",
+      "toast_in_progress": "Posting comment…"
+    },
+    "dismiss_review": {
+      "label": "Dismiss review",
+      "toast_success": "Review dismissed",
+      "toast_in_progress": "Dismissing review…",
+      "confirm_title": "Dismiss this review?",
+      "confirm_description": "Dismissing the review on #{{number}} \"{{title}}\" removes its blocking effect. The reviewer will be notified.",
+      "confirm_action": "Dismiss review"
+    },
+    "run_smoke_tests": {
+      "label": "Run smoke tests",
+      "toast_success": "Smoke tests started",
+      "toast_in_progress": "Dispatching workflow…",
+      "confirm_title": "Run smoke tests for this PR?",
+      "confirm_description": "Triggers the configured smoke-test workflow against #{{number}} \"{{title}}\". The run uses GitHub Actions credits.",
+      "confirm_action": "Run smoke tests"
+    },
+    "close_as_stale": {
+      "label": "Close as stale",
+      "toast_success": "Pull request closed",
+      "toast_in_progress": "Closing pull request…",
+      "confirm_title": "Close this pull request as stale?",
+      "confirm_description": "Closing #{{number}} \"{{title}}\" leaves a courtesy comment for the author. They can reopen on GitHub.",
+      "confirm_action": "Close as stale"
+    }
+  },
+  "actions": {
+    "recent_actions_label": "Recent actions"
+  },
   "deploy_strip": {
     "header": "Deploys",
     "lane_staging": "Staging",

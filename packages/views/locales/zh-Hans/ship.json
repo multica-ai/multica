@@ -59,6 +59,72 @@
     "risk_schema": "涉及表结构",
     "risk_migration": "包含迁移"
   },
+  "chips": {
+    "more_actions": "更多操作",
+    "confirm_cancel": "取消",
+    "task_id_hint": "智能体任务 #{{id}}",
+    "toast_generic_failure": "操作失败",
+    "merge": {
+      "label": "合并",
+      "toast_success": "PR 已合并",
+      "toast_in_progress": "合并中…",
+      "confirm_title": "确定合并此 PR 吗？",
+      "confirm_description": "合并 #{{number}}「{{title}}」将把改动落到基础分支并触发部署。此操作无法在此撤销，仅可在 GitHub 上回退。",
+      "confirm_action": "合并"
+    },
+    "rebase_on_main": {
+      "label": "基于主分支变基",
+      "toast_success": "分支已更新",
+      "toast_in_progress": "更新分支中…"
+    },
+    "diagnose_ci_failure": {
+      "label": "诊断 CI 失败",
+      "toast_success": "诊断完成",
+      "toast_in_progress": "智能体正在分析失败原因"
+    },
+    "summarize_review_feedback": {
+      "label": "总结评审意见",
+      "toast_success": "总结已发布",
+      "toast_in_progress": "智能体正在阅读评审意见"
+    },
+    "nudge_author": {
+      "label": "提醒作者",
+      "toast_success": "评论已发布",
+      "toast_in_progress": "发布提醒中…"
+    },
+    "comment": {
+      "label": "评论",
+      "toast_success": "评论已发布",
+      "toast_in_progress": "发布评论中…"
+    },
+    "dismiss_review": {
+      "label": "忽略此评审",
+      "toast_success": "评审已忽略",
+      "toast_in_progress": "忽略评审中…",
+      "confirm_title": "确定忽略此评审吗？",
+      "confirm_description": "忽略 #{{number}}「{{title}}」上的评审会去除其阻断效果，评审人会收到通知。",
+      "confirm_action": "忽略评审"
+    },
+    "run_smoke_tests": {
+      "label": "运行冒烟测试",
+      "toast_success": "冒烟测试已启动",
+      "toast_in_progress": "正在派发流水线…",
+      "confirm_title": "为此 PR 运行冒烟测试？",
+      "confirm_description": "为 #{{number}}「{{title}}」触发已配置的冒烟测试流水线，会消耗 GitHub Actions 配额。",
+      "confirm_action": "运行冒烟测试"
+    },
+    "close_as_stale": {
+      "label": "标记为已过期",
+      "toast_success": "PR 已关闭",
+      "toast_in_progress": "关闭 PR 中…",
+      "confirm_title": "确定将此 PR 标记为已过期吗？",
+      "confirm_description": "关闭 #{{number}}「{{title}}」会留下提示评论，作者可在 GitHub 上重新打开。",
+      "confirm_action": "标记为已过期"
+    }
+  },
+  "actions": {
+    "recent_actions_label": "最近操作"
+  },
   "deploy_strip": {
     "header": "部署",
     "lane_staging": "预发",

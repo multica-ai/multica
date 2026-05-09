@@ -189,6 +189,13 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: shipKeys.all(wsId) });
       },
+      // Phase 3 — `ship:card_action` fires when a chip is pressed. The
+      // specific handler below narrows down to the affected PR; this prefix
+      // entry stays as the safety net for any future ship:* events we add.
+      ship: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: shipKeys.all(wsId) });
+      },
       // Powers the agent presence cache: any task lifecycle change
       // (dispatch / completed / failed / cancelled) refreshes the
       // workspace-wide agent-task-snapshot query so per-agent presence
@@ -264,6 +271,10 @@ export function useRealtimeSync(
       "deploy:started",
       "deploy:progress",
       "deploy:completed",
+      // Phase 3 — chip-action audit signal. Specific handler narrows
+      // invalidation to the affected PR's audit footer + the workspace's
+      // pull_requests prefix.
+      "ship:card_action",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -706,6 +717,24 @@ export function useRealtimeSync(
     const unsubDeployProgress = ws.on("deploy:progress", onDeployEvent);
     const unsubDeployCompleted = ws.on("deploy:completed", onDeployEvent);
 
+    // Phase 3 — `ship:card_action` payload carries pull_request_id + action
+    // + result. We invalidate the per-PR audit footer cache so the row
+    // updates in real time, plus the workspace's pull_requests prefix —
+    // a chip can change PR state (merge/close), and the WS payload doesn't
+    // include project_id, so we fall back to the workspace-prefixed
+    // invalidation. Bounded to the active workspace's ship surface.
+    const unsubShipCardAction = ws.on("ship:card_action", (p) => {
+      const payload = p as { pull_request_id?: string };
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      if (payload?.pull_request_id) {
+        qc.invalidateQueries({
+          queryKey: shipKeys.cardActions(wsId, payload.pull_request_id),
+        });
+      }
+      qc.invalidateQueries({ queryKey: shipKeys.allPullRequests(wsId) });
+    });
+
     const unsubChatDone = ws.on("chat:done", (p) => {
       const payload = p as ChatDonePayload;
       chatWsLogger.info("chat:done (global)", {
@@ -879,6 +908,7 @@ export function useRealtimeSync(
       unsubDeployStarted();
       unsubDeployProgress();
       unsubDeployCompleted();
+      unsubShipCardAction();
       unsubChatDone();
       unsubTaskQueued();
       unsubTaskDispatch();

@@ -13,16 +13,27 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	gh "github.com/multica-ai/multica/server/pkg/github"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	gh "github.com/multica-ai/multica/server/pkg/github"
 )
 
 // GithubClient is the slice of *gh.Client the service needs. Defining the
 // interface here (rather than depending on the concrete type) keeps tests
 // from needing an httptest server when they only want to assert on
 // upsert behavior.
+//
+// Phase 3 added the write-side methods. The interface is intentionally a
+// subset of *gh.Client's surface — adding a new endpoint requires
+// updating both the concrete type and this interface, which is the
+// price for the test ergonomics.
 type GithubClient interface {
 	ListPullRequests(ctx context.Context, owner, repo string, opts gh.ListOptions) ([]gh.PullRequest, error)
+	MergePullRequest(ctx context.Context, owner, repo string, prNumber int, method, sha string) (*gh.MergeResult, error)
+	UpdatePullRequestBranch(ctx context.Context, owner, repo string, prNumber int, expectedSHA string) error
+	CreatePullRequestComment(ctx context.Context, owner, repo string, prNumber int, body string) (*gh.Comment, error)
+	DismissPullRequestReview(ctx context.Context, owner, repo string, prNumber int, reviewID int64, message string) error
+	ClosePullRequest(ctx context.Context, owner, repo string, prNumber int) error
+	DispatchWorkflow(ctx context.Context, owner, repo, workflowFile, ref string, inputs map[string]string) error
 }
 
 // Service is the Ship Hub entry point. Construct one per workspace token
@@ -225,7 +236,7 @@ func mapMergeable(m *bool) pgtype.Text {
 }
 
 // textOrEmpty returns a Valid=true pgtype.Text even for empty strings.
-// Most of these columns are NOT NULL DEFAULT '' on the DB side, so we
+// Most of these columns are NOT NULL DEFAULT ” on the DB side, so we
 // always want to write the actual string.
 func textOrEmpty(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: true}

@@ -5,6 +5,14 @@ import type {
   CreateDeployEnvironmentRequest,
   LogDeployRequest,
   PullRequestState,
+  PullRequest,
+  ListPullRequestsResponse,
+  MergePullRequestRequest,
+  CommentPullRequestRequest,
+  DismissPullRequestReviewRequest,
+  NudgePullRequestAuthorRequest,
+  RunSmokeTestsRequest,
+  ClosePullRequestAsStaleRequest,
 } from "../types";
 
 // Query key factory — workspace-scoped per CLAUDE.md so a workspace switch
@@ -18,10 +26,21 @@ export const shipKeys = {
     [...shipKeys.all(wsId), "pull_requests", projectId, state] as const,
   pullRequestsForProject: (wsId: string, projectId: string) =>
     [...shipKeys.all(wsId), "pull_requests", projectId] as const,
+  // Phase 3 — every pull_requests cache across all projects. Used by the
+  // ship:card_action WS handler when the payload doesn't carry project_id
+  // (the current backend payload only includes pull_request_id), so we
+  // invalidate broadly to keep correctness; the workspace-wide prefix keeps
+  // it scoped.
+  allPullRequests: (wsId: string) =>
+    [...shipKeys.all(wsId), "pull_requests"] as const,
   environments: (wsId: string, projectId: string) =>
     [...shipKeys.all(wsId), "envs", projectId] as const,
   deploys: (wsId: string, environmentId: string) =>
     [...shipKeys.all(wsId), "deploys", environmentId] as const,
+  // Phase 3 — recent-actions footer cache. Keyed per PR; an action invalidates
+  // the per-PR list. WS event `ship:card_action` triggers the same invalidation.
+  cardActions: (wsId: string, prId: string) =>
+    [...shipKeys.all(wsId), "card_actions", prId] as const,
 };
 
 /** List of projects in the workspace that have ≥1 GitHub repo attached.
@@ -155,4 +174,211 @@ export function useLogDeploy(environmentId: string) {
       });
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — chip mutations
+//
+// One `useMutation` per chip endpoint. Convention:
+//   - `mutationFn` calls the matching api method.
+//   - `onSettled` invalidates the workspace-wide pull_requests prefix +
+//     the per-PR card-actions cache. We invalidate the PREFIX rather than a
+//     single project's PR list because the WS payload doesn't carry
+//     project_id, and the chip caller only knows the PR id (not the
+//     project id) at call time. The over-invalidation is bounded to the
+//     active workspace's ship surface.
+//
+// Optimistic updates only happen for actions whose effect is deterministic
+// from the request alone — `merge` flips state to merged, `close_as_stale`
+// flips state to closed. Everything else (comment, rebase, nudge, smoke
+// tests) leaves the cache untouched and lets the WS event drive the refetch.
+// Optimism elsewhere would create a "fake green" frame on a chip whose
+// outcome the user can't verify locally.
+// ---------------------------------------------------------------------------
+
+// Helper: walk every cached pull_requests list under this workspace and
+// patch the matching PR row in place. Used by the merge / close-as-stale
+// mutations to give the user instant feedback while the server roundtrip
+// completes. We rely on TanStack's queryClient.setQueriesData with a
+// prefix matcher — every state-filter slice (open/closed/merged/all) is
+// updated in lockstep so the row doesn't pop columns.
+function patchPullRequestInCache(
+  qc: ReturnType<typeof useQueryClient>,
+  wsId: string,
+  prId: string,
+  patch: Partial<PullRequest>,
+): void {
+  qc.setQueriesData<ListPullRequestsResponse>(
+    { queryKey: shipKeys.allPullRequests(wsId) },
+    (old) => {
+      if (!old) return old;
+      let mutated = false;
+      const next = old.pull_requests.map((p) => {
+        if (p.id !== prId) return p;
+        mutated = true;
+        return { ...p, ...patch };
+      });
+      // Avoid creating a new object reference when nothing changed — keeps
+      // re-renders on unaffected slices to a minimum.
+      if (!mutated) return old;
+      return { ...old, pull_requests: next };
+    },
+  );
+}
+
+function invalidatePullRequestSurface(
+  qc: ReturnType<typeof useQueryClient>,
+  wsId: string,
+  prId: string,
+): void {
+  qc.invalidateQueries({ queryKey: shipKeys.allPullRequests(wsId) });
+  qc.invalidateQueries({ queryKey: shipKeys.cardActions(wsId, prId) });
+  // Open-PR badges on the ship project list also need a refresh whenever a
+  // chip can change a PR's open count (merge/close/reopen).
+  qc.invalidateQueries({ queryKey: shipKeys.projects(wsId) });
+}
+
+export function useMergePullRequest(prId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (body?: MergePullRequestRequest) => api.mergePullRequest(prId, body),
+    onMutate: async () => {
+      // Optimistic flip — the user's intent is clear and a successful merge
+      // moves the card to "Recently Merged". Rolled back from onError if the
+      // server rejects (typically 422 — branch not mergeable).
+      await qc.cancelQueries({ queryKey: shipKeys.allPullRequests(wsId) });
+      const snapshot = qc.getQueriesData<ListPullRequestsResponse>({
+        queryKey: shipKeys.allPullRequests(wsId),
+      });
+      const nowIso = new Date().toISOString();
+      patchPullRequestInCache(qc, wsId, prId, {
+        state: "merged",
+        pr_merged_at: nowIso,
+      });
+      return { snapshot };
+    },
+    onError: (_err, _vars, ctx) => {
+      // Restore each slice we touched. snapshot is an array of [key, data].
+      ctx?.snapshot?.forEach(([key, data]) => {
+        qc.setQueryData(key, data);
+      });
+    },
+    onSettled: () => invalidatePullRequestSurface(qc, wsId, prId),
+  });
+}
+
+export function useRebasePullRequestOnMain(prId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.rebasePullRequestOnMain(prId),
+    onSettled: () => invalidatePullRequestSurface(qc, wsId, prId),
+  });
+}
+
+export function useCommentOnPullRequest(prId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (body: CommentPullRequestRequest) => api.commentOnPullRequest(prId, body),
+    onSettled: () => invalidatePullRequestSurface(qc, wsId, prId),
+  });
+}
+
+export function useDismissPullRequestReview(prId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (body: DismissPullRequestReviewRequest) =>
+      api.dismissPullRequestReview(prId, body),
+    onSettled: () => invalidatePullRequestSurface(qc, wsId, prId),
+  });
+}
+
+export function useDiagnoseCIFailure(prId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.diagnoseCIFailure(prId),
+    // No optimistic update — this spawns an agent task; the chip surfaces
+    // the in_progress status from the response and lets the WS event drive
+    // any subsequent refresh.
+    onSettled: () => invalidatePullRequestSurface(qc, wsId, prId),
+  });
+}
+
+export function useSummarizeReviewFeedback(prId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.summarizeReviewFeedback(prId),
+    onSettled: () => invalidatePullRequestSurface(qc, wsId, prId),
+  });
+}
+
+export function useNudgePullRequestAuthor(prId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (body?: NudgePullRequestAuthorRequest) =>
+      api.nudgePullRequestAuthor(prId, body),
+    onSettled: () => invalidatePullRequestSurface(qc, wsId, prId),
+  });
+}
+
+export function useRunSmokeTests(prId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (body: RunSmokeTestsRequest) => api.runSmokeTests(prId, body),
+    onSettled: () => invalidatePullRequestSurface(qc, wsId, prId),
+  });
+}
+
+export function useClosePullRequestAsStale(prId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (body?: ClosePullRequestAsStaleRequest) =>
+      api.closePullRequestAsStale(prId, body),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: shipKeys.allPullRequests(wsId) });
+      const snapshot = qc.getQueriesData<ListPullRequestsResponse>({
+        queryKey: shipKeys.allPullRequests(wsId),
+      });
+      const nowIso = new Date().toISOString();
+      patchPullRequestInCache(qc, wsId, prId, {
+        state: "closed",
+        pr_closed_at: nowIso,
+      });
+      return { snapshot };
+    },
+    onError: (_err, _vars, ctx) => {
+      ctx?.snapshot?.forEach(([key, data]) => {
+        qc.setQueryData(key, data);
+      });
+    },
+    onSettled: () => invalidatePullRequestSurface(qc, wsId, prId),
+  });
+}
+
+// Phase 3 — recent-actions audit footer.
+//
+// The backend has the underlying SQL (ListShipCardActionsForPR) but the HTTP
+// handler isn't registered yet. The query is therefore disabled by default
+// — flip `enabled` to true once the route lands. parseWithFallback returns
+// an empty list on the 404, so a stray `enabled: true` won't crash.
+export function shipCardActionsOptions(wsId: string, prId: string, enabled: boolean) {
+  return queryOptions({
+    queryKey: shipKeys.cardActions(wsId, prId),
+    queryFn: () => api.listShipCardActions(prId),
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+export function useShipCardActions(prId: string, enabled = false) {
+  const wsId = useWorkspaceId();
+  return useQuery(shipCardActionsOptions(wsId, prId, enabled));
 }

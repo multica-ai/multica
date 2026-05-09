@@ -57,6 +57,48 @@ func (q *Queries) CountOpenPullRequestsForProjects(ctx context.Context, projectI
 	return items, nil
 }
 
+const getPullRequest = `-- name: GetPullRequest :one
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at FROM pull_request
+WHERE id = $1
+`
+
+// Phase 3 chip handlers resolve the PR by primary key (the URL pattern is
+// /api/pull_requests/{id}/...). Workspace scope is enforced by the caller.
+func (q *Queries) GetPullRequest(ctx context.Context, id pgtype.UUID) (PullRequest, error) {
+	row := q.db.QueryRow(ctx, getPullRequest, id)
+	var i PullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.RepoUrl,
+		&i.PrNumber,
+		&i.Title,
+		&i.State,
+		&i.IsDraft,
+		&i.AuthorLogin,
+		&i.AuthorAvatarUrl,
+		&i.BaseRef,
+		&i.HeadRef,
+		&i.HeadSha,
+		&i.HtmlUrl,
+		&i.Body,
+		&i.CiStatus,
+		&i.ReviewDecision,
+		&i.Mergeable,
+		&i.Additions,
+		&i.Deletions,
+		&i.ChangedFiles,
+		&i.Labels,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.PrMergedAt,
+		&i.PrClosedAt,
+		&i.FetchedAt,
+	)
+	return i, err
+}
+
 const getPullRequestByNumber = `-- name: GetPullRequestByNumber :one
 SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at FROM pull_request
 WHERE workspace_id = $1 AND repo_url = $2 AND pr_number = $3
@@ -223,6 +265,111 @@ func (q *Queries) ListPullRequestsByWorkspace(ctx context.Context, arg ListPullR
 		return nil, err
 	}
 	return items, nil
+}
+
+const markPullRequestClosed = `-- name: MarkPullRequestClosed :one
+UPDATE pull_request SET
+    state        = 'closed',
+    pr_closed_at = COALESCE($2::timestamptz, now()),
+    fetched_at   = now()
+WHERE id = $1
+RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at
+`
+
+type MarkPullRequestClosedParams struct {
+	ID       pgtype.UUID        `json:"id"`
+	ClosedAt pgtype.Timestamptz `json:"closed_at"`
+}
+
+// Phase 3 optimistic update after a successful GitHub close call. Same
+// rationale as MarkPullRequestMerged.
+func (q *Queries) MarkPullRequestClosed(ctx context.Context, arg MarkPullRequestClosedParams) (PullRequest, error) {
+	row := q.db.QueryRow(ctx, markPullRequestClosed, arg.ID, arg.ClosedAt)
+	var i PullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.RepoUrl,
+		&i.PrNumber,
+		&i.Title,
+		&i.State,
+		&i.IsDraft,
+		&i.AuthorLogin,
+		&i.AuthorAvatarUrl,
+		&i.BaseRef,
+		&i.HeadRef,
+		&i.HeadSha,
+		&i.HtmlUrl,
+		&i.Body,
+		&i.CiStatus,
+		&i.ReviewDecision,
+		&i.Mergeable,
+		&i.Additions,
+		&i.Deletions,
+		&i.ChangedFiles,
+		&i.Labels,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.PrMergedAt,
+		&i.PrClosedAt,
+		&i.FetchedAt,
+	)
+	return i, err
+}
+
+const markPullRequestMerged = `-- name: MarkPullRequestMerged :one
+UPDATE pull_request SET
+    state        = 'merged',
+    pr_merged_at = COALESCE($2::timestamptz, now()),
+    fetched_at   = now()
+WHERE id = $1
+RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at
+`
+
+type MarkPullRequestMergedParams struct {
+	ID       pgtype.UUID        `json:"id"`
+	MergedAt pgtype.Timestamptz `json:"merged_at"`
+}
+
+// Phase 3 optimistic update after a successful GitHub merge call. We
+// transition the local row to "merged" without waiting for the inbound
+// pull_request webhook so the chip's success state is reflected
+// immediately on the Kanban. The webhook event arrives a few seconds
+// later and lands on the same row idempotently.
+func (q *Queries) MarkPullRequestMerged(ctx context.Context, arg MarkPullRequestMergedParams) (PullRequest, error) {
+	row := q.db.QueryRow(ctx, markPullRequestMerged, arg.ID, arg.MergedAt)
+	var i PullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.RepoUrl,
+		&i.PrNumber,
+		&i.Title,
+		&i.State,
+		&i.IsDraft,
+		&i.AuthorLogin,
+		&i.AuthorAvatarUrl,
+		&i.BaseRef,
+		&i.HeadRef,
+		&i.HeadSha,
+		&i.HtmlUrl,
+		&i.Body,
+		&i.CiStatus,
+		&i.ReviewDecision,
+		&i.Mergeable,
+		&i.Additions,
+		&i.Deletions,
+		&i.ChangedFiles,
+		&i.Labels,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.PrMergedAt,
+		&i.PrClosedAt,
+		&i.FetchedAt,
+	)
+	return i, err
 }
 
 const upsertPullRequest = `-- name: UpsertPullRequest :one

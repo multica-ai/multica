@@ -146,6 +146,10 @@ const (
 	EventDeployStarted           = "deploy:started"
 	EventDeployProgress          = "deploy:progress"
 	EventDeployCompleted         = "deploy:completed"
+	// Phase 3 — card-action audit signal. Fired after every chip press
+	// regardless of synchronous/async outcome so the frontend can update
+	// the card's "recent actions" footer in real time.
+	EventCardAction = "ship:card_action"
 
 	// Daemon events
 	EventDaemonHeartbeat     = "daemon:heartbeat"

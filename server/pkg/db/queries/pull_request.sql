@@ -16,6 +16,35 @@ ORDER BY pr_updated_at DESC;
 SELECT * FROM pull_request
 WHERE workspace_id = $1 AND repo_url = $2 AND pr_number = $3;
 
+-- name: GetPullRequest :one
+-- Phase 3 chip handlers resolve the PR by primary key (the URL pattern is
+-- /api/pull_requests/{id}/...). Workspace scope is enforced by the caller.
+SELECT * FROM pull_request
+WHERE id = $1;
+
+-- name: MarkPullRequestMerged :one
+-- Phase 3 optimistic update after a successful GitHub merge call. We
+-- transition the local row to "merged" without waiting for the inbound
+-- pull_request webhook so the chip's success state is reflected
+-- immediately on the Kanban. The webhook event arrives a few seconds
+-- later and lands on the same row idempotently.
+UPDATE pull_request SET
+    state        = 'merged',
+    pr_merged_at = COALESCE(sqlc.narg('merged_at')::timestamptz, now()),
+    fetched_at   = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkPullRequestClosed :one
+-- Phase 3 optimistic update after a successful GitHub close call. Same
+-- rationale as MarkPullRequestMerged.
+UPDATE pull_request SET
+    state        = 'closed',
+    pr_closed_at = COALESCE(sqlc.narg('closed_at')::timestamptz, now()),
+    fetched_at   = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: UpsertPullRequest :one
 -- Sync path: insert a freshly-fetched PR or update the existing row's mutable
 -- fields. The unique key (workspace_id, repo_url, pr_number) keeps the upsert

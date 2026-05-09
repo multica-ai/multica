@@ -81,7 +81,8 @@ export type WSEventType =
   | "pull_request:state_changed"
   | "deploy:started"
   | "deploy:progress"
-  | "deploy:completed";
+  | "deploy:completed"
+  | "ship:card_action";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -351,4 +352,16 @@ export interface DeployStartedPayload {
 export interface DeployCompletedPayload {
   environment_id: string;
   deploy?: unknown;
+}
+
+// Phase 3 — `ship:card_action` fires when a chip on a PR card is pressed.
+// The handler-side payload (server/internal/handler/ship_actions.go) carries
+// `pull_request_id`, the action name, and the full ActionResult blob. The
+// frontend only needs the PR id + action to invalidate the right caches; the
+// `result` blob is opaque here so adding new ActionResult fields server-side
+// doesn't require a TS change in lockstep (per CLAUDE.md API compat rules).
+export interface ShipCardActionPayload {
+  pull_request_id: string;
+  action: string;
+  result?: unknown;
 }

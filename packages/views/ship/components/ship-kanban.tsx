@@ -147,7 +147,11 @@ export function ShipKanban({ pullRequests, isLoading, projectId }: ShipKanbanPro
           </div>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {buckets.failing_blocked.map((pr) => (
-              <ShipPRCard key={`fail-${pr.id}`} pr={pr} />
+              <ShipPRCard
+                key={`fail-${pr.id}`}
+                pr={pr}
+                stagingEnv={snapshot.staging}
+              />
             ))}
           </div>
         </div>
@@ -173,7 +177,9 @@ export function ShipKanban({ pullRequests, isLoading, projectId }: ShipKanbanPro
                     {isLoading ? "" : t(($) => $.kanban.empty_column)}
                   </div>
                 ) : (
-                  buckets[col].map((pr) => <ShipPRCard key={pr.id} pr={pr} />)
+                  buckets[col].map((pr) => (
+                    <ShipPRCard key={pr.id} pr={pr} stagingEnv={snapshot.staging} />
+                  ))
                 )}
               </div>
             </div>

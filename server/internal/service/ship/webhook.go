@@ -569,4 +569,3 @@ func textValue(t pgtype.Text) string {
 	}
 	return t.String
 }
-
