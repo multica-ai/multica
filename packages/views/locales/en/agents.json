@@ -121,7 +121,8 @@
     "agent_archived_toast": "Agent archived",
     "archive_failed_toast": "Failed to archive agent",
     "agent_restored_toast": "Agent restored",
-    "restore_failed_toast": "Failed to restore agent"
+    "restore_failed_toast": "Failed to restore agent",
+    "more_duplicate": "Duplicate Agent"
   },
   "inspector": {
     "section_properties": "Properties",

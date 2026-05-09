@@ -127,7 +127,12 @@
     "sidebar_tooltip": "切换侧边栏",
     "update_failed": "更新 issue 失败",
     "link_copied": "已复制链接",
-    "link_copy_failed": "复制链接失败"
+    "link_copy_failed": "复制链接失败",
+    "clear_history": "清空历史",
+    "clear_history_title": "清空所有历史记录？",
+    "clear_history_description": "这将永久删除所有评论和任务运行记录，此操作不可撤销。",
+    "clear_history_cancel": "取消",
+    "clear_history_confirm": "清空"
   },
   "timeline": {
     "show_older": "显示更早",

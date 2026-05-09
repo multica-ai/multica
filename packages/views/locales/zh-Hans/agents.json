@@ -117,7 +117,8 @@
     "agent_archived_toast": "已归档智能体",
     "archive_failed_toast": "归档智能体失败",
     "agent_restored_toast": "已恢复智能体",
-    "restore_failed_toast": "恢复智能体失败"
+    "restore_failed_toast": "恢复智能体失败",
+    "more_duplicate": "复制智能体"
   },
   "inspector": {
     "section_properties": "属性",

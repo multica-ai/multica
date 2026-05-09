@@ -6,11 +6,14 @@ import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
 import {
   Archive,
+  ArrowDownToLine,
+  ArrowUpToLine,
   Calendar,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  Eraser,
   MoreHorizontal,
   PanelRight,
   Pin,
@@ -21,6 +24,16 @@ import {
 import { PageHeader } from "../../layout/page-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -32,6 +45,13 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
@@ -40,7 +60,8 @@ import { PropRow } from "../../common/prop-row";
 import type { IssueStatus, IssuePriority, TimelineEntry } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
-import { IssueActionsDropdown, useIssueActions } from "../actions";
+import { useIssueActions } from "../actions";
+import { IssueActionsMenuItems, dropdownPrimitives } from "../actions/issue-actions-menu-items";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
@@ -48,10 +69,12 @@ import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
+import { toast } from "sonner";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
+import { useClearIssueHistory } from "@multica/core/issues/mutations";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
@@ -231,8 +254,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const scrollToTop = useCallback(() => {
+    scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+  const scrollToBottom = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+  }, []);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const didHighlightRef = useRef<string | null>(null);
+  const [clearHistoryDialogOpen, setClearHistoryDialogOpen] = useState(false);
+  const clearHistoryMutation = useClearIssueHistory();
 
   // Issue data from TQ — uses detail query, seeded from list cache if available.
   // Only seed when description is present; list API omits it, and ContentEditor
@@ -433,6 +466,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (panel.isCollapsed()) panel.expand();
     else panel.collapse();
   }, [isMobile, sidebarRef]);
+
+  const handleClearHistory = async () => {
+    try {
+      const result = await clearHistoryMutation.mutateAsync({
+        issueId: id,
+        clearComments: true,
+        clearTasks: true,
+      });
+      toast.success(`Cleared ${result.comments_deleted} comments, ${result.tasks_deleted} task runs`);
+      setClearHistoryDialogOpen(false);
+    } catch {
+      toast.error("Failed to clear history");
+    }
+  };
 
   if (loading) {
     return (
@@ -702,18 +749,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               />
               <TooltipContent side="bottom">{actions.isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}</TooltipContent>
             </Tooltip>
-            <IssueActionsDropdown
-              issue={issue}
-              align="end"
-              // When a parent passes `onDelete`, we detect deletion via effect
-              // above and skip navigation. Otherwise the modal navigates for us.
-              onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
-              trigger={
-                <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
-                  <MoreHorizontal />
-                </Button>
-              }
-            />
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
+                    <MoreHorizontal />
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="end" className="w-auto">
+                <IssueActionsMenuItems
+                  issue={issue}
+                  actions={actions}
+                  primitives={dropdownPrimitives}
+                  onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
+                />
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setClearHistoryDialogOpen(true)}>
+                  <Eraser className="h-3.5 w-3.5" />
+                  {t(($) => $.detail.clear_history)}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -733,6 +790,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </PageHeader>
 
         {/* Content — scrollable */}
+        <div className="flex flex-1 min-h-0">
         <div ref={scrollContainerRef} className="relative flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
           <TitleEditor
@@ -1139,11 +1197,45 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>
         </div>
         </div>
+        {!isMobile && (
+          <div className="pointer-events-none hidden w-12 shrink-0 justify-center md:flex">
+            <div className="sticky top-[calc(50%+48px)] -translate-y-1/2 self-start">
+              <div className="pointer-events-auto flex flex-col gap-1.5 rounded-lg border border-border/60 bg-background/70 p-1 shadow-xs backdrop-blur supports-[backdrop-filter]:bg-background/60">
+                <Button type="button" variant="ghost" size="icon-sm" className="h-8 w-8 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={scrollToTop} aria-label="Scroll to top">
+                  <ArrowUpToLine className="h-4 w-4" />
+                </Button>
+                <Button type="button" variant="ghost" size="icon-sm" className="h-8 w-8 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={scrollToBottom} aria-label="Scroll to comments">
+                  <ArrowDownToLine className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+        </div>
       </div>
+  );
+
+  const clearHistoryDialog = (
+    <AlertDialog open={clearHistoryDialogOpen} onOpenChange={setClearHistoryDialogOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t(($) => $.detail.clear_history_title)}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t(($) => $.detail.clear_history_description)}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t(($) => $.detail.clear_history_cancel)}</AlertDialogCancel>
+          <AlertDialogAction onClick={handleClearHistory}>{t(($) => $.detail.clear_history_confirm)}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 
   if (isMobile) {
     return (
+      <>
+      {clearHistoryDialog}
       <div className="flex flex-1 min-h-0">
         {detailContent}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
@@ -1152,10 +1244,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </SheetContent>
         </Sheet>
       </div>
+      </>
     );
   }
 
   return (
+    <>
+    {clearHistoryDialog}
     <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="content" minSize="50%">
         {detailContent}
@@ -1178,5 +1273,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       </div>
       </ResizablePanel>
     </ResizablePanelGroup>
+    </>
   );
 }
