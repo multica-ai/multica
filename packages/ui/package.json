@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "vitest run"
   },
   "exports": {
     "./components/ui/*": "./components/ui/*.tsx",
@@ -61,6 +62,7 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "rehype-sanitize": "^6.0.0",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

@@ -42,6 +42,7 @@ import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { ImageLightbox } from "./extensions/image-view";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
+import { isAllowedFileCardHref } from "@multica/ui/markdown";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { useDownloadAttachment } from "./use-download-attachment";
@@ -297,8 +298,7 @@ function buildComponents(
       const dataType = node?.properties?.dataType as string | undefined;
       if (dataType === "fileCard") {
         const rawHref = (node?.properties?.dataHref as string) || "";
-        // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
-        const href = /^https?:\/\//i.test(rawHref) ? rawHref : "";
+        const href = isAllowedFileCardHref(rawHref) ? rawHref : "";
         const filename = (node?.properties?.dataFilename as string) || "";
         return (
           <ReadonlyFileCard

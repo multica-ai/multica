@@ -18,8 +18,13 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { FileText, Loader2, Download } from "lucide-react";
+import { FILE_CARD_URL_PATTERN } from "@multica/ui/markdown";
 import { useT } from "../../i18n";
 import { useAttachmentDownloadResolver } from "../attachment-download-context";
+
+const FILE_CARD_MARKDOWN_RE = new RegExp(
+  `^!file\\[([^\\]]*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)`,
+);
 
 
 // ---------------------------------------------------------------------------
@@ -141,7 +146,7 @@ export const FileCardExtension = Node.create({
       return src.search(/^!file\[/m);
     },
     tokenize(src: string) {
-      const match = src.match(/^!file\[([^\]]*)\]\((https?:\/\/[^)]+)\)/);
+      const match = src.match(FILE_CARD_MARKDOWN_RE);
       if (!match) return undefined;
       return {
         type: "fileCard",
