@@ -139,11 +139,26 @@ export function useUpdateIssue() {
 
       // Resolve parent_issue_id from the freshest source so we can keep the
       // parent's children cache in sync (used by the parent issue's
-      // sub-issues list).
-      const parentId =
+      // sub-issues list). Falls back to scanning loaded children caches —
+      // when the user navigates straight to a parent's detail page, the
+      // child may live only there, not in detail/list.
+      let parentId: string | null =
         prevDetail?.parent_issue_id ??
         (prevList ? findIssueLocation(prevList, id)?.issue.parent_issue_id : null) ??
         null;
+      if (!parentId) {
+        const childrenCaches = qc.getQueriesData<Issue[]>({
+          queryKey: [...issueKeys.all(wsId), "children"],
+        });
+        for (const [key, data] of childrenCaches) {
+          if (!data?.some((c) => c.id === id)) continue;
+          const candidate = key[key.length - 1];
+          if (typeof candidate === "string") {
+            parentId = candidate;
+            break;
+          }
+        }
+      }
       const prevChildren = parentId
         ? qc.getQueryData<Issue[]>(issueKeys.children(wsId, parentId))
         : undefined;
