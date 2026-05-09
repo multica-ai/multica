@@ -213,30 +213,17 @@ function SubIssueRow({ child }: { child: Issue }) {
     [child.id, updateIssue, t],
   );
 
-  // The row is wrapped in AppLink for navigation. The picker triggers need
-  // both stopPropagation and preventDefault to suppress the link's default
-  // navigation; the checkbox only needs stopPropagation (preventDefault would
-  // also block the native checkbox toggle on some browsers).
-  const stopPickerNav = (e: React.SyntheticEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-  };
-  const stopCheckboxNav = (e: React.SyntheticEvent) => {
-    e.stopPropagation();
-  };
-
+  // AppLink wraps only the title/identifier area. Pickers and checkbox are
+  // siblings, so their clicks never navigate — no stopPropagation acrobatics
+  // and no risk of the native checkbox / picker triggers being blocked.
   return (
-    <AppLink
-      href={paths.issueDetail(child.id)}
+    <div
       className={cn(
         "flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
         selected && "bg-accent/30",
       )}
     >
       <div
-        onClick={stopCheckboxNav}
-        onMouseDown={stopCheckboxNav}
-        onPointerDown={stopCheckboxNav}
         className={cn(
           "flex h-4 w-4 shrink-0 items-center justify-center transition-opacity",
           selected
@@ -252,66 +239,57 @@ function SubIssueRow({ child }: { child: Issue }) {
           className="cursor-pointer accent-primary"
         />
       </div>
-      <div
-        onClick={stopPickerNav}
-        onMouseDown={stopPickerNav}
-        onPointerDown={stopPickerNav}
-        className="flex shrink-0"
+      <StatusPicker
+        status={child.status}
+        onUpdate={handleUpdate}
+        align="start"
+        trigger={
+          <StatusIcon
+            status={child.status}
+            className="h-[15px] w-[15px] shrink-0"
+          />
+        }
+      />
+      <AppLink
+        href={paths.issueDetail(child.id)}
+        className="flex min-w-0 flex-1 items-center gap-2.5"
       >
-        <StatusPicker
-          status={child.status}
-          onUpdate={handleUpdate}
-          align="start"
-          trigger={
-            <StatusIcon
-              status={child.status}
-              className="h-[15px] w-[15px] shrink-0"
+        <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
+          {child.identifier}
+        </span>
+        <span
+          className={cn(
+            "text-sm truncate flex-1",
+            isDone
+              ? "text-muted-foreground"
+              : "group-hover/row:text-foreground",
+          )}
+        >
+          {child.title}
+        </span>
+      </AppLink>
+      <AssigneePicker
+        assigneeType={child.assignee_type}
+        assigneeId={child.assignee_id}
+        onUpdate={handleUpdate}
+        align="end"
+        trigger={
+          child.assignee_type && child.assignee_id ? (
+            <ActorAvatar
+              actorType={child.assignee_type}
+              actorId={child.assignee_id}
+              size={20}
+              className="shrink-0"
             />
-          }
-        />
-      </div>
-      <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
-        {child.identifier}
-      </span>
-      <span
-        className={cn(
-          "text-sm truncate flex-1",
-          isDone
-            ? "text-muted-foreground"
-            : "group-hover/row:text-foreground",
-        )}
-      >
-        {child.title}
-      </span>
-      <div
-        onClick={stopPickerNav}
-        onMouseDown={stopPickerNav}
-        onPointerDown={stopPickerNav}
-        className="flex shrink-0"
-      >
-        <AssigneePicker
-          assigneeType={child.assignee_type}
-          assigneeId={child.assignee_id}
-          onUpdate={handleUpdate}
-          align="end"
-          trigger={
-            child.assignee_type && child.assignee_id ? (
-              <ActorAvatar
-                actorType={child.assignee_type}
-                actorId={child.assignee_id}
-                size={20}
-                className="shrink-0"
-              />
-            ) : (
-              <span
-                aria-hidden
-                className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 shrink-0"
-              />
-            )
-          }
-        />
-      </div>
-    </AppLink>
+          ) : (
+            <span
+              aria-hidden
+              className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 shrink-0"
+            />
+          )
+        }
+      />
+    </div>
   );
 }
 
@@ -833,7 +811,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   const detailContent = (
     <div className="flex h-full min-w-0 flex-1 flex-col">
-        <BatchActionToolbar />
         <PageHeader className="gap-2 bg-background text-sm">
           <div className="flex flex-1 items-center gap-1.5 min-w-0">
             {workspace && (
@@ -1080,6 +1057,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     <TooltipContent side="bottom">{t(($) => $.detail.add_sub_issue_tooltip)}</TooltipContent>
                   </Tooltip>
                 </div>
+
+                {/* Inline batch toolbar — appears next to the rows when
+                    selections exist, instead of as a far-away fixed bar. */}
+                <BatchActionToolbar placement="inline" />
 
                 {/* List */}
                 {!subIssuesCollapsed && (
