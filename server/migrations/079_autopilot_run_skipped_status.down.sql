@@ -1,6 +1,3 @@
--- Drop the queued-task TTL partial index.
-DROP INDEX IF EXISTS idx_agent_task_queue_queued_created_at;
-
 -- Migrate any 'skipped' rows to 'failed' before tightening the constraint
 -- (mirrors what 043 did for the original removal).
 UPDATE autopilot_run
