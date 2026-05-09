@@ -505,6 +505,190 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 	}
 }
 
+// TestExpireStaleQueuedTasks verifies the MUL-1899 queued-TTL sweeper:
+// tasks that have been sitting in 'queued' beyond the TTL are transitioned
+// to 'failed' with failure_reason='queued_expired', while fresh queued tasks
+// are left alone and the per-tick batch limit is respected.
+func TestExpireStaleQueuedTasks(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+
+	// Find the integration test agent
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a
+		JOIN member m ON m.workspace_id = a.workspace_id
+		JOIN "user" u ON u.id = m.user_id
+		WHERE u.email = $1
+		LIMIT 1
+	`, integrationTestEmail).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("failed to find test agent: %v", err)
+	}
+
+	// One ancient queued task (should expire) and one fresh queued task (should not).
+	// Constraint: idx_one_pending_task_per_issue_agent → use distinct issues.
+	mkIssue := func(label string) string {
+		var issueID string
+		if err := testPool.QueryRow(ctx, `
+			WITH bumped AS (
+				UPDATE workspace SET issue_counter = issue_counter + 1
+				WHERE id = $1 RETURNING issue_counter
+			)
+			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
+			SELECT $1, $3, 'todo', 'none', 'member', m.user_id, 'agent', $2, (SELECT issue_counter FROM bumped)
+			FROM member m WHERE m.workspace_id = $1 LIMIT 1
+			RETURNING id
+		`, testWorkspaceID, agentID, label).Scan(&issueID); err != nil {
+			t.Fatalf("failed to create %s issue: %v", label, err)
+		}
+		return issueID
+	}
+	oldIssueID := mkIssue("Queued TTL test (old)")
+	freshIssueID := mkIssue("Queued TTL test (fresh)")
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2)`, oldIssueID, freshIssueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id IN ($1, $2)`, oldIssueID, freshIssueID)
+	})
+
+	var oldTaskID, freshTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+		VALUES ($1, $2, $3, 'queued', 0, now() - interval '5 hours')
+		RETURNING id
+	`, agentID, runtimeID, oldIssueID).Scan(&oldTaskID); err != nil {
+		t.Fatalf("failed to insert old queued task: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+		VALUES ($1, $2, $3, 'queued', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, freshIssueID).Scan(&freshTaskID); err != nil {
+		t.Fatalf("failed to insert fresh queued task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	failed, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+		TtlSecs:    3600.0, // 1h TTL — old task is 5h, fresh task is 0s
+		MaxPerTick: 100,
+	})
+	if err != nil {
+		t.Fatalf("ExpireStaleQueuedTasks failed: %v", err)
+	}
+	if len(failed) != 1 {
+		t.Fatalf("expected exactly 1 expired task, got %d", len(failed))
+	}
+	if failed[0].ID.Bytes != parseUUIDBytes(oldTaskID) {
+		t.Fatalf("expired the wrong task: got %x", failed[0].ID.Bytes)
+	}
+
+	// DB assertions: old → failed/queued_expired, fresh → still queued.
+	var oldStatus, oldReason, oldErr string
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, COALESCE(failure_reason, ''), COALESCE(error, '')
+		FROM agent_task_queue WHERE id = $1
+	`, oldTaskID).Scan(&oldStatus, &oldReason, &oldErr); err != nil {
+		t.Fatalf("failed to read old task: %v", err)
+	}
+	if oldStatus != "failed" {
+		t.Fatalf("old task: expected status=failed, got %q", oldStatus)
+	}
+	if oldReason != "queued_expired" {
+		t.Fatalf("old task: expected failure_reason=queued_expired, got %q", oldReason)
+	}
+	if !strings.Contains(oldErr, "expired in queue") {
+		t.Fatalf("old task: expected error to mention expiry, got %q", oldErr)
+	}
+
+	var freshStatus string
+	if err := testPool.QueryRow(ctx, `
+		SELECT status FROM agent_task_queue WHERE id = $1
+	`, freshTaskID).Scan(&freshStatus); err != nil {
+		t.Fatalf("failed to read fresh task: %v", err)
+	}
+	if freshStatus != "queued" {
+		t.Fatalf("fresh task: expected status=queued, got %q", freshStatus)
+	}
+}
+
+// TestExpireStaleQueuedTasksRespectsBatchLimit verifies the per-tick cap so
+// that a large historical backlog cannot monopolise a single sweep.
+func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a
+		JOIN member m ON m.workspace_id = a.workspace_id
+		JOIN "user" u ON u.id = m.user_id
+		WHERE u.email = $1
+		LIMIT 1
+	`, integrationTestEmail).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("failed to find test agent: %v", err)
+	}
+
+	// Create 5 issues, each with one stale queued task — necessary because of the
+	// idx_one_pending_task_per_issue_agent unique constraint.
+	var issueIDs []string
+	t.Cleanup(func() {
+		for _, id := range issueIDs {
+			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, id)
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id)
+		}
+	})
+	for i := 0; i < 5; i++ {
+		var issueID string
+		if err := testPool.QueryRow(ctx, `
+			WITH bumped AS (
+				UPDATE workspace SET issue_counter = issue_counter + 1
+				WHERE id = $1 RETURNING issue_counter
+			)
+			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
+			SELECT $1, 'Queued TTL batch test', 'todo', 'none', 'member', m.user_id, 'agent', $2, (SELECT issue_counter FROM bumped)
+			FROM member m WHERE m.workspace_id = $1 LIMIT 1
+			RETURNING id
+		`, testWorkspaceID, agentID).Scan(&issueID); err != nil {
+			t.Fatalf("failed to create issue %d: %v", i, err)
+		}
+		issueIDs = append(issueIDs, issueID)
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+			VALUES ($1, $2, $3, 'queued', 0, now() - interval '5 hours')
+		`, agentID, runtimeID, issueID); err != nil {
+			t.Fatalf("failed to insert backlog task %d: %v", i, err)
+		}
+	}
+
+	queries := db.New(testPool)
+	failed, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+		TtlSecs:    3600.0,
+		MaxPerTick: 2, // cap below the backlog
+	})
+	if err != nil {
+		t.Fatalf("ExpireStaleQueuedTasks failed: %v", err)
+	}
+	if len(failed) != 2 {
+		t.Fatalf("expected batch cap of 2, got %d", len(failed))
+	}
+
+	var remaining int
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM agent_task_queue
+		WHERE issue_id = ANY($1::uuid[]) AND status = 'queued'
+	`, issueIDs).Scan(&remaining); err != nil {
+		t.Fatalf("failed to count remaining queued: %v", err)
+	}
+	if remaining != 3 {
+		t.Fatalf("expected 3 queued tasks remaining after batched sweep, got %d", remaining)
+	}
+}
+
 // parseUUIDBytes converts a UUID string to the 16-byte array used by pgtype.UUID.
 func parseUUIDBytes(s string) [16]byte {
 	s = strings.ReplaceAll(s, "-", "")

@@ -789,6 +789,83 @@ func (q *Queries) CreateRetryTask(ctx context.Context, id pgtype.UUID) (AgentTas
 	return i, err
 }
 
+const expireStaleQueuedTasks = `-- name: ExpireStaleQueuedTasks :many
+WITH victims AS (
+    SELECT id FROM agent_task_queue
+    WHERE status = 'queued'
+      AND created_at < now() - make_interval(secs => $1::double precision)
+    ORDER BY created_at ASC
+    LIMIT $2::int
+)
+UPDATE agent_task_queue t
+SET status = 'failed',
+    completed_at = now(),
+    error = 'task expired in queue',
+    failure_reason = 'queued_expired'
+FROM victims v
+WHERE t.id = v.id
+RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session
+`
+
+type ExpireStaleQueuedTasksParams struct {
+	TtlSecs    float64 `json:"ttl_secs"`
+	MaxPerTick int32   `json:"max_per_tick"`
+}
+
+// Fails tasks that have been sitting in 'queued' for longer than the TTL.
+// This is the cleanup arm of the MUL-1899 "queued backlog" fix: even with the
+// new dispatch-time admission gate that refuses to enqueue when the runtime
+// is offline, we still need to drain the historical 87k+ doomed rows and
+// handle edge cases where a runtime goes offline AFTER a task is already
+// queued (the admission check protects new enqueues, not in-flight queue
+// depth). Capped via LIMIT inside the CTE so a single sweep tick cannot
+// monopolise the DB when the backlog is large — the sweeper will drain the
+// rest on subsequent ticks.
+func (q *Queries) ExpireStaleQueuedTasks(ctx context.Context, arg ExpireStaleQueuedTasksParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, expireStaleQueuedTasks, arg.TtlSecs, arg.MaxPerTick)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const failAgentTask = `-- name: FailAgentTask :one
 UPDATE agent_task_queue
 SET status = 'failed',
