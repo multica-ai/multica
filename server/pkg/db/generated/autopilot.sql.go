@@ -689,7 +689,7 @@ const selectAutopilotsExceedingFailureThreshold = `-- name: SelectAutopilotsExce
 
 WITH stats AS (
     SELECT autopilot_id,
-           count(*) FILTER (WHERE status IN ('completed', 'failed', 'skipped')) AS total,
+           count(*) FILTER (WHERE status IN ('completed', 'failed')) AS total,
            count(*) FILTER (WHERE status = 'failed') AS failed
     FROM autopilot_run
     WHERE created_at >= $3::timestamptz
@@ -728,8 +728,13 @@ type SelectAutopilotsExceedingFailureThresholdRow struct {
 // Failure-rate auto-pause
 // =====================
 // Find active autopilots whose recent run failure rate exceeds the threshold.
-// Counts only terminal runs (completed | failed | skipped); pending,
-// issue_created and running are excluded so in-flight work isn't penalised.
+// Counts only "real" terminal runs (completed | failed). 'skipped' is
+// excluded from BOTH numerator and denominator: an admission-skipped run
+// (e.g. assignee runtime offline at dispatch time, MUL-1899) is neither a
+// success nor a failure, so it must not dilute the failure ratio (which
+// would let a 100%-failing autopilot mask itself behind a wall of skips)
+// nor inflate it. issue_created/running are still excluded so in-flight
+// work isn't penalised.
 // Used by the failure monitor to auto-pause sustained-failure autopilots
 // (the canonical example from MUL-1336 was an autopilot scheduled every 5 min
 // that 100% failed for days, burning ~1.5k useless tasks per week).

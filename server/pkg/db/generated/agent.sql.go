@@ -796,6 +796,7 @@ WITH victims AS (
       AND created_at < now() - make_interval(secs => $1::double precision)
     ORDER BY created_at ASC
     LIMIT $2::int
+    FOR UPDATE SKIP LOCKED
 )
 UPDATE agent_task_queue t
 SET status = 'failed',
@@ -804,6 +805,8 @@ SET status = 'failed',
     failure_reason = 'queued_expired'
 FROM victims v
 WHERE t.id = v.id
+  AND t.status = 'queued'
+  AND t.created_at < now() - make_interval(secs => $1::double precision)
 RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session
 `
 
@@ -818,9 +821,23 @@ type ExpireStaleQueuedTasksParams struct {
 // is offline, we still need to drain the historical 87k+ doomed rows and
 // handle edge cases where a runtime goes offline AFTER a task is already
 // queued (the admission check protects new enqueues, not in-flight queue
-// depth). Capped via LIMIT inside the CTE so a single sweep tick cannot
-// monopolise the DB when the backlog is large — the sweeper will drain the
-// rest on subsequent ticks.
+// depth).
+//
+// Concurrency safety: the daemon's claim path may race with this sweeper to
+// transition the same row out of 'queued'. We protect against that two
+// ways:
+//  1. The CTE selects victims with FOR UPDATE SKIP LOCKED so a row that is
+//     currently being claimed (or otherwise locked) is skipped — no lock
+//     contention with the dispatch path, and we won't queue up behind it.
+//  2. The outer UPDATE re-checks status='queued' AND the TTL predicate at
+//     apply time. If a daemon claimed the row between selection and update
+//     (e.g. lock released after the claim transaction commits), the row is
+//     already 'dispatched'/'running' and the WHERE clause filters it out
+//     so we cannot clobber an in-flight task.
+//
+// Capped via LIMIT inside the CTE so a single sweep tick cannot monopolise
+// the DB when the backlog is large — the sweeper drains the rest on
+// subsequent ticks.
 func (q *Queries) ExpireStaleQueuedTasks(ctx context.Context, arg ExpireStaleQueuedTasksParams) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, expireStaleQueuedTasks, arg.TtlSecs, arg.MaxPerTick)
 	if err != nil {
