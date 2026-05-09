@@ -420,7 +420,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	// (e.g. co_authored_by_enabled for the prepare-commit-msg hook).
 	var settings json.RawMessage
 	if len(ws.Settings) > 0 {
-		settings = json.RawMessage(ws.Settings)
+		settings = sanitizeWorkspaceSettingsJSON(ws.Settings)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

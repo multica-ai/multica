@@ -3,6 +3,7 @@ package runtime
 import "testing"
 
 func TestLoadFirtalGatewayRuntimeConfig_AutoEnablesWithServerCredentials(t *testing.T) {
+	clearFirtalGatewayEnv(t)
 	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://registry.example")
 	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
 	t.Setenv("FIRTAL_DATA_REGISTRY_AI_MODEL", "gpt-5.5")
@@ -27,6 +28,7 @@ func TestLoadFirtalGatewayRuntimeConfig_AutoEnablesWithServerCredentials(t *test
 }
 
 func TestLoadFirtalGatewayRuntimeConfig_ExplicitFalseDisables(t *testing.T) {
+	clearFirtalGatewayEnv(t)
 	t.Setenv("MULTICA_SERVER_FIRTAL_GATEWAY_ENABLED", "false")
 	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://registry.example")
 	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
@@ -37,6 +39,114 @@ func TestLoadFirtalGatewayRuntimeConfig_ExplicitFalseDisables(t *testing.T) {
 	}
 	if cfg.Enabled {
 		t.Fatal("expected explicit false to disable runtime")
+	}
+}
+
+func TestLoadFirtalGatewayRuntimeConfig_EnablesWithoutServerCredentials(t *testing.T) {
+	clearFirtalGatewayEnv(t)
+
+	cfg, err := LoadFirtalGatewayRuntimeConfig()
+	if err != nil {
+		t.Fatalf("LoadFirtalGatewayRuntimeConfig() error = %v", err)
+	}
+	if !cfg.Enabled {
+		t.Fatal("expected runtime worker to enable so workspace settings can supply credentials")
+	}
+	if cfg.BaseURL != "" || cfg.APIKey != "" {
+		t.Fatalf("unexpected credentials: %+v", cfg)
+	}
+}
+
+func TestLoadFirtalGatewayRuntimeConfig_RejectsUnsafeServerURL(t *testing.T) {
+	clearFirtalGatewayEnv(t)
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://127.0.0.1")
+	t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+
+	if _, err := LoadFirtalGatewayRuntimeConfig(); err == nil {
+		t.Fatal("expected unsafe server gateway URL to fail")
+	}
+}
+
+func clearFirtalGatewayEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
+		"FIRTAL_AE_GATEWAY_URL",
+		"FIRTAL_DATA_REGISTRY_URL",
+		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY",
+		"FIRTAL_AE_GATEWAY_KEY",
+		"FIRTAL_DATA_REGISTRY_API_KEY",
+		"FIRTAL_DATA_REGISTRY_AI_MODEL",
+		"FIRTAL_AE_GATEWAY_MODEL",
+		"MULTICA_SERVER_FIRTAL_GATEWAY_ENABLED",
+		"MULTICA_FIRTAL_GATEWAY_CLOUD_ENABLED",
+		"MULTICA_SERVER_FIRTAL_GATEWAY_MAX_CONCURRENCY",
+		"MULTICA_SERVER_FIRTAL_GATEWAY_WORKSPACE_IDS",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
+func TestFirtalGatewayConfigFromWorkspaceSettings_UsesOwnerSettings(t *testing.T) {
+	raw := []byte(`{"firtal_gateway":{"enabled":true,"gateway_url":"https://registry.example/","api_key":"rk_workspace","model":"gpt-5.5"}}`)
+
+	cfg, ok, err := FirtalGatewayConfigFromWorkspaceSettings(raw, FirtalGatewayRuntimeConfig{
+		Enabled: true,
+		BaseURL: "https://fallback.example",
+		APIKey:  "rk_fallback",
+		Model:   "fallback-model",
+	})
+	if err != nil {
+		t.Fatalf("FirtalGatewayConfigFromWorkspaceSettings() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected configured workspace")
+	}
+	if cfg.BaseURL != "https://registry.example" || cfg.APIKey != "rk_workspace" || cfg.Model != "gpt-5.5" {
+		t.Fatalf("workspace config not applied: %+v", cfg)
+	}
+}
+
+func TestFirtalGatewayConfigFromWorkspaceSettings_FallsBackToServerCredentials(t *testing.T) {
+	cfg, ok, err := FirtalGatewayConfigFromWorkspaceSettings([]byte(`{}`), FirtalGatewayRuntimeConfig{
+		Enabled: true,
+		BaseURL: "https://fallback.example",
+		APIKey:  "rk_fallback",
+	})
+	if err != nil {
+		t.Fatalf("FirtalGatewayConfigFromWorkspaceSettings() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected server fallback credentials to configure workspace")
+	}
+	if cfg.BaseURL != "https://fallback.example" || cfg.APIKey != "rk_fallback" {
+		t.Fatalf("fallback config not used: %+v", cfg)
+	}
+}
+
+func TestFirtalGatewayConfigFromWorkspaceSettings_RejectsUnsafeWorkspaceURL(t *testing.T) {
+	_, ok, err := FirtalGatewayConfigFromWorkspaceSettings([]byte(`{"firtal_gateway":{"enabled":true,"gateway_url":"https://169.254.169.254","api_key":"rk_workspace"}}`), FirtalGatewayRuntimeConfig{
+		Enabled: true,
+	})
+	if err == nil {
+		t.Fatal("expected unsafe workspace gateway URL to fail")
+	}
+	if ok {
+		t.Fatal("unsafe workspace should not be marked configured")
+	}
+}
+
+func TestFirtalGatewayConfigFromWorkspaceSettings_DisabledWorkspaceSkipsRuntime(t *testing.T) {
+	_, ok, err := FirtalGatewayConfigFromWorkspaceSettings([]byte(`{"firtal_gateway":{"enabled":false}}`), FirtalGatewayRuntimeConfig{
+		Enabled: true,
+		BaseURL: "https://fallback.example",
+		APIKey:  "rk_fallback",
+	})
+	if err != nil {
+		t.Fatalf("FirtalGatewayConfigFromWorkspaceSettings() error = %v", err)
+	}
+	if ok {
+		t.Fatal("expected disabled workspace settings to skip runtime even with server fallback")
 	}
 }
 

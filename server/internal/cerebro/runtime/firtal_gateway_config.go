@@ -1,19 +1,21 @@
 package runtime
 
 import (
+	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/cerebro/firtalgateway"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
 const (
-	FirtalGatewayProvider = "firtal-gateway"
+	FirtalGatewayProvider    = "firtal-gateway"
+	FirtalGatewaySettingsKey = "firtal_gateway"
 
 	defaultFirtalGatewayModel          = "claude-sonnet-4-6"
 	defaultFirtalGatewayRuntimeName    = "Firtal Gateway"
@@ -25,8 +27,8 @@ const (
 )
 
 // FirtalGatewayRuntimeConfig controls the server-owned HTTPS runtime backed by
-// the Data Registry AI Gateway. It deliberately uses server env only; agent
-// custom_env is not allowed to override central gateway credentials.
+// the Data Registry AI Gateway. Server env is a fallback/bootstrap layer;
+// workspace owners can override credentials in workspace settings.
 type FirtalGatewayRuntimeConfig struct {
 	Enabled        bool
 	BaseURL        string
@@ -41,6 +43,17 @@ type FirtalGatewayRuntimeConfig struct {
 	HistoryLimit   int
 	MaxConcurrency int
 	WorkspaceIDs   []pgtype.UUID
+}
+
+type WorkspaceFirtalGatewaySettings struct {
+	Enabled    bool   `json:"enabled"`
+	GatewayURL string `json:"gateway_url"`
+	APIKey     string `json:"api_key"`
+	Model      string `json:"model"`
+}
+
+type workspaceSettingsEnvelope struct {
+	FirtalGateway *WorkspaceFirtalGatewaySettings `json:"firtal_gateway"`
 }
 
 func withFirtalGatewayDefaults(cfg FirtalGatewayRuntimeConfig) FirtalGatewayRuntimeConfig {
@@ -77,7 +90,8 @@ func withFirtalGatewayDefaults(cfg FirtalGatewayRuntimeConfig) FirtalGatewayRunt
 
 // LoadFirtalGatewayRuntimeConfig reads the server-side gateway runtime config
 // from environment variables. If the explicit enable flag is absent, the
-// runtime auto-enables only when both URL and key are present.
+// worker is enabled so workspace-level settings can activate the runtime
+// without another server deploy.
 func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
 	baseURL := strings.TrimRight(firstNonEmptyEnv(
 		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
@@ -98,7 +112,7 @@ func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
 		return FirtalGatewayRuntimeConfig{}, err
 	}
 	if !explicit {
-		enabled = baseURL != "" && apiKey != ""
+		enabled = true
 	}
 
 	cfg := withFirtalGatewayDefaults(FirtalGatewayRuntimeConfig{
@@ -133,20 +147,57 @@ func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
 		}
 	}
 
-	if !cfg.Enabled {
-		return cfg, nil
-	}
-	if cfg.BaseURL == "" {
-		return FirtalGatewayRuntimeConfig{}, fmt.Errorf("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL is required when server firtal gateway runtime is enabled")
-	}
-	if cfg.APIKey == "" {
-		return FirtalGatewayRuntimeConfig{}, fmt.Errorf("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY is required when server firtal gateway runtime is enabled")
-	}
-	if parsed, err := url.Parse(cfg.BaseURL); err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return FirtalGatewayRuntimeConfig{}, fmt.Errorf("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL must be an absolute URL")
+	if cfg.Enabled && cfg.BaseURL != "" {
+		normalizedURL, err := firtalgateway.ValidateBaseURL(cfg.BaseURL)
+		if err != nil {
+			return FirtalGatewayRuntimeConfig{}, fmt.Errorf("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL %w", err)
+		}
+		cfg.BaseURL = normalizedURL
 	}
 
 	return cfg, nil
+}
+
+func FirtalGatewayConfigFromWorkspaceSettings(raw []byte, fallback FirtalGatewayRuntimeConfig) (FirtalGatewayRuntimeConfig, bool, error) {
+	cfg := withFirtalGatewayDefaults(fallback)
+	if !cfg.Enabled {
+		return cfg, false, nil
+	}
+
+	var envelope workspaceSettingsEnvelope
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			return cfg, false, fmt.Errorf("parse workspace gateway settings: %w", err)
+		}
+	}
+
+	if envelope.FirtalGateway != nil {
+		settings := envelope.FirtalGateway
+		if !settings.Enabled {
+			return cfg, false, nil
+		}
+		if gatewayURL := strings.TrimSpace(settings.GatewayURL); gatewayURL != "" {
+			cfg.BaseURL = strings.TrimRight(gatewayURL, "/")
+		}
+		if key := strings.TrimSpace(settings.APIKey); key != "" {
+			cfg.APIKey = key
+		}
+		if model := strings.TrimSpace(settings.Model); model != "" {
+			cfg.Model = model
+		}
+		cfg = withFirtalGatewayDefaults(cfg)
+	}
+
+	if cfg.BaseURL == "" || cfg.APIKey == "" {
+		return cfg, false, nil
+	}
+	normalizedURL, err := firtalgateway.ValidateBaseURL(cfg.BaseURL)
+	if err != nil {
+		return cfg, false, fmt.Errorf("workspace firtal gateway URL %w", err)
+	}
+	cfg.BaseURL = normalizedURL
+
+	return cfg, true, nil
 }
 
 func firstNonEmptyEnv(keys ...string) string {

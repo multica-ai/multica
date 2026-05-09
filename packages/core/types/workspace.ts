@@ -5,13 +5,24 @@ export interface WorkspaceRepo {
   url: string;
 }
 
+export interface FirtalGatewayWorkspaceSettings {
+  enabled?: boolean;
+  gateway_url?: string;
+  api_key_configured?: boolean;
+  model?: string;
+}
+
+export interface WorkspaceSettings extends Record<string, unknown> {
+  firtal_gateway?: FirtalGatewayWorkspaceSettings;
+}
+
 export interface Workspace {
   id: string;
   name: string;
   slug: string;
   description: string | null;
   context: string | null;
-  settings: Record<string, unknown>;
+  settings: WorkspaceSettings;
   repos: WorkspaceRepo[];
   issue_prefix: string;
   created_at: string;

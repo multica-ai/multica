@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/firtalgateway"
 )
 
 type GatewayMessage struct {
@@ -42,7 +44,7 @@ type GatewayClient struct {
 
 func NewGatewayClient(cfg FirtalGatewayRuntimeConfig, httpClient *http.Client) *GatewayClient {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = firtalgateway.NewHTTPClient()
 	}
 	cfg = withFirtalGatewayDefaults(cfg)
 	return &GatewayClient{cfg: cfg, httpClient: httpClient}
@@ -55,6 +57,10 @@ func (c *GatewayClient) Complete(ctx context.Context, model string, messages []G
 	}
 	if model == "" {
 		model = defaultFirtalGatewayModel
+	}
+	baseURL, err := firtalgateway.NormalizeBaseURL(c.cfg.BaseURL)
+	if err != nil {
+		return GatewayCompletion{}, fmt.Errorf("invalid gateway URL: %w", err)
 	}
 
 	body := map[string]any{
@@ -72,7 +78,7 @@ func (c *GatewayClient) Complete(ctx context.Context, model string, messages []G
 		return GatewayCompletion{}, fmt.Errorf("marshal gateway request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/api/ai/proxy/v1/chat/completions", bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/ai/proxy/v1/chat/completions", bytes.NewReader(raw))
 	if err != nil {
 		return GatewayCompletion{}, fmt.Errorf("build gateway request: %w", err)
 	}
@@ -100,7 +106,7 @@ func (c *GatewayClient) Complete(ctx context.Context, model string, messages []G
 	if err != nil {
 		return GatewayCompletion{}, fmt.Errorf("read gateway response: %w", err)
 	}
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return GatewayCompletion{}, fmt.Errorf("gateway returned HTTP %d: %s", resp.StatusCode, truncateGatewayError(string(respBody), 2048))
 	}
 

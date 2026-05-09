@@ -1,9 +1,9 @@
--- name: ListFirtalGatewayWorkspaceIDs :many
-SELECT id FROM workspace
+-- name: ListFirtalGatewayWorkspaceConfigs :many
+SELECT id, settings FROM workspace
 ORDER BY created_at ASC;
 
--- name: ListFirtalGatewayWorkspaceIDsByID :many
-SELECT id FROM workspace
+-- name: ListFirtalGatewayWorkspaceConfigsByID :many
+SELECT id, settings FROM workspace
 WHERE id = ANY(@ids::uuid[])
 ORDER BY created_at ASC;
 
@@ -11,7 +11,15 @@ ORDER BY created_at ASC;
 SELECT * FROM agent_runtime
 WHERE provider = @provider
   AND daemon_id = @daemon_id
+  AND status = 'online'
 ORDER BY created_at ASC;
+
+-- name: SetFirtalGatewayRuntimeOfflineByWorkspace :exec
+UPDATE agent_runtime
+SET status = 'offline', updated_at = now()
+WHERE workspace_id = @workspace_id
+  AND provider = @provider
+  AND daemon_id = @daemon_id;
 
 -- name: ClaimFirtalGatewayChatTask :one
 WITH next_task AS (

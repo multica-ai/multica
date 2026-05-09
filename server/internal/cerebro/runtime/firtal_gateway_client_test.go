@@ -14,7 +14,7 @@ func TestGatewayClientCompleteSendsStructuredMessagesAndUsage(t *testing.T) {
 		Messages []GatewayMessage `json:"messages"`
 	}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/ai/proxy/v1/chat/completions" {
 			t.Fatalf("path = %q", r.URL.Path)
 		}

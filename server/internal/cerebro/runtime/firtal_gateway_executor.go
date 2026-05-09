@@ -48,9 +48,6 @@ func NewFirtalGatewayExecutor(
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if gateway == nil {
-		gateway = NewGatewayClient(cfg, nil)
-	}
 	return &FirtalGatewayExecutor{
 		cfg:           cfg,
 		queries:       queries,
@@ -98,12 +95,12 @@ func (e *FirtalGatewayExecutor) Run(ctx context.Context) {
 }
 
 func (e *FirtalGatewayExecutor) syncRuntimes(ctx context.Context) {
-	workspaceIDs, err := e.workspaceIDs(ctx)
+	workspaces, err := e.workspaceConfigs(ctx)
 	if err != nil {
 		e.logger.Warn("firtal gateway runtime workspace sync failed", "error", err)
 		return
 	}
-	if len(workspaceIDs) == 0 {
+	if len(workspaces) == 0 {
 		return
 	}
 
@@ -111,11 +108,22 @@ func (e *FirtalGatewayExecutor) syncRuntimes(ctx context.Context) {
 		"managed_by": "multica-server",
 		"chat_only":  true,
 	})
-	for _, workspaceID := range workspaceIDs {
+	for _, workspace := range workspaces {
+		workspaceID := workspace.ID
+		cfg, ok, err := FirtalGatewayConfigFromWorkspaceSettings(workspace.Settings, e.cfg)
+		if err != nil {
+			e.logger.Warn("firtal gateway workspace config invalid", "workspace_id", util.UUIDToString(workspaceID), "error", err)
+			e.setRuntimeOffline(ctx, workspaceID)
+			continue
+		}
+		if !ok {
+			e.setRuntimeOffline(ctx, workspaceID)
+			continue
+		}
 		registered, err := e.queries.UpsertAgentRuntime(ctx, db.UpsertAgentRuntimeParams{
 			WorkspaceID: workspaceID,
 			DaemonID:    pgtype.Text{String: firtalGatewayServerDaemonID, Valid: true},
-			Name:        e.cfg.RuntimeName,
+			Name:        cfg.RuntimeName,
 			RuntimeMode: "cloud",
 			Provider:    FirtalGatewayProvider,
 			Status:      "online",
@@ -133,11 +141,42 @@ func (e *FirtalGatewayExecutor) syncRuntimes(ctx context.Context) {
 	}
 }
 
-func (e *FirtalGatewayExecutor) workspaceIDs(ctx context.Context) ([]pgtype.UUID, error) {
+type firtalGatewayWorkspaceConfig struct {
+	ID       pgtype.UUID
+	Settings []byte
+}
+
+func (e *FirtalGatewayExecutor) workspaceConfigs(ctx context.Context) ([]firtalGatewayWorkspaceConfig, error) {
 	if len(e.cfg.WorkspaceIDs) > 0 {
-		return e.cerebro.ListFirtalGatewayWorkspaceIDsByID(ctx, e.cfg.WorkspaceIDs)
+		rows, err := e.cerebro.ListFirtalGatewayWorkspaceConfigsByID(ctx, e.cfg.WorkspaceIDs)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]firtalGatewayWorkspaceConfig, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, firtalGatewayWorkspaceConfig{ID: row.ID, Settings: row.Settings})
+		}
+		return out, nil
 	}
-	return e.cerebro.ListFirtalGatewayWorkspaceIDs(ctx)
+	rows, err := e.cerebro.ListFirtalGatewayWorkspaceConfigs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]firtalGatewayWorkspaceConfig, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, firtalGatewayWorkspaceConfig{ID: row.ID, Settings: row.Settings})
+	}
+	return out, nil
+}
+
+func (e *FirtalGatewayExecutor) setRuntimeOffline(ctx context.Context, workspaceID pgtype.UUID) {
+	if err := e.cerebro.SetFirtalGatewayRuntimeOfflineByWorkspace(ctx, cerebrodb.SetFirtalGatewayRuntimeOfflineByWorkspaceParams{
+		WorkspaceID: workspaceID,
+		Provider:    FirtalGatewayProvider,
+		DaemonID:    pgtype.Text{String: firtalGatewayServerDaemonID, Valid: true},
+	}); err != nil {
+		e.logger.Warn("firtal gateway runtime offline update failed", "workspace_id", util.UUIDToString(workspaceID), "error", err)
+	}
 }
 
 func (e *FirtalGatewayExecutor) dispatchAvailable(ctx context.Context) {
@@ -158,6 +197,15 @@ func (e *FirtalGatewayExecutor) dispatchAvailable(ctx context.Context) {
 		}
 		if !e.tryAcquire() {
 			return
+		}
+		if _, ok, err := e.effectiveWorkspaceConfig(ctx, rt.WorkspaceID); err != nil {
+			e.release()
+			e.logger.Warn("firtal gateway workspace config load failed", "workspace_id", util.UUIDToString(rt.WorkspaceID), "error", err)
+			continue
+		} else if !ok {
+			e.release()
+			e.setRuntimeOffline(ctx, rt.WorkspaceID)
+			continue
 		}
 		claimed, err := e.cerebro.ClaimFirtalGatewayChatTask(ctx, rt.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -202,6 +250,15 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		e.failTask(parent, task, "failed to load chat session: "+err.Error(), "agent_error")
 		return
 	}
+	cfg, ok, err := e.effectiveWorkspaceConfig(parent, chatSession.WorkspaceID)
+	if err != nil {
+		e.failTask(parent, task, "failed to load firtal gateway settings: "+err.Error(), "agent_error")
+		return
+	}
+	if !ok {
+		e.failTask(parent, task, "firtal gateway runtime is not configured for this workspace", "agent_error")
+		return
+	}
 	if e.budgetSvc != nil {
 		decision := e.budgetSvc.CheckPreClaim(parent, chatSession.WorkspaceID, task.AgentID)
 		if !decision.Allowed {
@@ -215,15 +272,15 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		e.failTask(parent, task, "failed to load chat history: "+err.Error(), "agent_error")
 		return
 	}
-	messages := buildGatewayMessages(agent, history, task.StartedAt, e.cfg.HistoryLimit)
+	messages := buildGatewayMessages(agent, history, task.StartedAt, cfg.HistoryLimit)
 	if !hasUserGatewayMessage(messages) {
 		e.failTask(parent, task, "chat task has no user message to answer", "agent_error")
 		return
 	}
 
-	runCtx, cancel := context.WithTimeout(parent, e.cfg.TaskTimeout)
+	runCtx, cancel := context.WithTimeout(parent, cfg.TaskTimeout)
 	defer cancel()
-	completion, err := e.gateway.Complete(runCtx, agent.Model.String, messages, GatewayRequestMeta{
+	completion, err := e.completeGateway(runCtx, cfg, agent.Model.String, messages, GatewayRequestMeta{
 		TaskID:      taskID,
 		AgentID:     util.UUIDToString(task.AgentID),
 		WorkspaceID: util.UUIDToString(chatSession.WorkspaceID),
@@ -245,6 +302,21 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	if _, err := e.taskSvc.CompleteTask(finalCtx, task.ID, result, "", ""); err != nil {
 		e.logger.Warn("firtal gateway task complete failed", "task_id", taskID, "error", err)
 	}
+}
+
+func (e *FirtalGatewayExecutor) effectiveWorkspaceConfig(ctx context.Context, workspaceID pgtype.UUID) (FirtalGatewayRuntimeConfig, bool, error) {
+	ws, err := e.queries.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return FirtalGatewayRuntimeConfig{}, false, err
+	}
+	return FirtalGatewayConfigFromWorkspaceSettings(ws.Settings, e.cfg)
+}
+
+func (e *FirtalGatewayExecutor) completeGateway(ctx context.Context, cfg FirtalGatewayRuntimeConfig, model string, messages []GatewayMessage, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	if e.gateway != nil {
+		return e.gateway.Complete(ctx, model, messages, meta)
+	}
+	return NewGatewayClient(cfg, nil).Complete(ctx, model, messages, meta)
 }
 
 func buildGatewayMessages(agent db.Agent, history []db.ChatMessage, startedAt pgtype.Timestamptz, limit int) []GatewayMessage {

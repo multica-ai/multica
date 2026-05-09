@@ -80,6 +80,7 @@ const listFirtalGatewayRuntimes = `-- name: ListFirtalGatewayRuntimes :many
 SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled FROM agent_runtime
 WHERE provider = $1
   AND daemon_id = $2
+  AND status = 'online'
 ORDER BY created_at ASC
 `
 
@@ -124,24 +125,29 @@ func (q *Queries) ListFirtalGatewayRuntimes(ctx context.Context, arg ListFirtalG
 	return items, nil
 }
 
-const listFirtalGatewayWorkspaceIDs = `-- name: ListFirtalGatewayWorkspaceIDs :many
-SELECT id FROM workspace
+const listFirtalGatewayWorkspaceConfigs = `-- name: ListFirtalGatewayWorkspaceConfigs :many
+SELECT id, settings FROM workspace
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ListFirtalGatewayWorkspaceIDs(ctx context.Context) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listFirtalGatewayWorkspaceIDs)
+type ListFirtalGatewayWorkspaceConfigsRow struct {
+	ID       pgtype.UUID `json:"id"`
+	Settings []byte      `json:"settings"`
+}
+
+func (q *Queries) ListFirtalGatewayWorkspaceConfigs(ctx context.Context) ([]ListFirtalGatewayWorkspaceConfigsRow, error) {
+	rows, err := q.db.Query(ctx, listFirtalGatewayWorkspaceConfigs)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []pgtype.UUID{}
+	items := []ListFirtalGatewayWorkspaceConfigsRow{}
 	for rows.Next() {
-		var id pgtype.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i ListFirtalGatewayWorkspaceConfigsRow
+		if err := rows.Scan(&i.ID, &i.Settings); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -149,28 +155,52 @@ func (q *Queries) ListFirtalGatewayWorkspaceIDs(ctx context.Context) ([]pgtype.U
 	return items, nil
 }
 
-const listFirtalGatewayWorkspaceIDsByID = `-- name: ListFirtalGatewayWorkspaceIDsByID :many
-SELECT id FROM workspace
+const listFirtalGatewayWorkspaceConfigsByID = `-- name: ListFirtalGatewayWorkspaceConfigsByID :many
+SELECT id, settings FROM workspace
 WHERE id = ANY($1::uuid[])
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ListFirtalGatewayWorkspaceIDsByID(ctx context.Context, ids []pgtype.UUID) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listFirtalGatewayWorkspaceIDsByID, ids)
+type ListFirtalGatewayWorkspaceConfigsByIDRow struct {
+	ID       pgtype.UUID `json:"id"`
+	Settings []byte      `json:"settings"`
+}
+
+func (q *Queries) ListFirtalGatewayWorkspaceConfigsByID(ctx context.Context, ids []pgtype.UUID) ([]ListFirtalGatewayWorkspaceConfigsByIDRow, error) {
+	rows, err := q.db.Query(ctx, listFirtalGatewayWorkspaceConfigsByID, ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []pgtype.UUID{}
+	items := []ListFirtalGatewayWorkspaceConfigsByIDRow{}
 	for rows.Next() {
-		var id pgtype.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i ListFirtalGatewayWorkspaceConfigsByIDRow
+		if err := rows.Scan(&i.ID, &i.Settings); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return items, nil
+}
+
+const setFirtalGatewayRuntimeOfflineByWorkspace = `-- name: SetFirtalGatewayRuntimeOfflineByWorkspace :exec
+UPDATE agent_runtime
+SET status = 'offline', updated_at = now()
+WHERE workspace_id = $1
+  AND provider = $2
+  AND daemon_id = $3
+`
+
+type SetFirtalGatewayRuntimeOfflineByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Provider    string      `json:"provider"`
+	DaemonID    pgtype.Text `json:"daemon_id"`
+}
+
+func (q *Queries) SetFirtalGatewayRuntimeOfflineByWorkspace(ctx context.Context, arg SetFirtalGatewayRuntimeOfflineByWorkspaceParams) error {
+	_, err := q.db.Exec(ctx, setFirtalGatewayRuntimeOfflineByWorkspace, arg.WorkspaceID, arg.Provider, arg.DaemonID)
+	return err
 }
