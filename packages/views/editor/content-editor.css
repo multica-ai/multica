@@ -476,6 +476,16 @@
   cursor: default;
 }
 
+.rich-text-editor.readonly p,
+.rich-text-editor.readonly li,
+.rich-text-editor.readonly blockquote,
+.rich-text-editor.readonly th,
+.rich-text-editor.readonly td,
+.rich-text-editor.readonly code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* Mention NodeView inline layout fix */
 .rich-text-editor [data-node-view-wrapper] {
   display: inline;

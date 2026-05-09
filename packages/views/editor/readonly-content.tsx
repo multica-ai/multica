@@ -555,6 +555,24 @@ interface ReadonlyContentProps {
   className?: string;
 }
 
+function formatStandaloneJson(content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed) return content;
+
+  const looksLikeJsonEnvelope =
+    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+    (trimmed.startsWith("[") && trimmed.endsWith("]"));
+  if (!looksLikeJsonEnvelope) return content;
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== "object") return content;
+    return `\`\`\`json\n${JSON.stringify(parsed, null, 2)}\n\`\`\``;
+  } catch {
+    return content;
+  }
+}
+
 // Memoized so a long timeline of comments (Inbox + IssueDetail) does not
 // re-run the full react-markdown + rehype-* + lowlight pipeline on every
 // parent re-render. Props are `content` and `className` (both strings), so
@@ -563,12 +581,18 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   content,
   className,
 }: ReadonlyContentProps) {
-  const processed = useMemo(() => preprocessMarkdown(content), [content]);
+  const processed = useMemo(
+    () => preprocessMarkdown(formatStandaloneJson(content)),
+    [content],
+  );
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
 
   return (
-    <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>
+    <div
+      ref={wrapperRef}
+      className={cn("rich-text-editor readonly min-w-0 text-sm", className)}
+    >
       <ReactMarkdown
         remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
