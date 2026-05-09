@@ -2,21 +2,28 @@ import { CheckCircle2, ChevronRight } from "lucide-react";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { Card } from "@multica/ui/components/ui/card";
 import type { TimelineEntry } from "@multica/core/types";
+import { collectThreadReplies } from "./thread-utils";
 import { useT } from "../../i18n";
 
 interface ResolvedThreadBarProps {
   /** The resolved root comment. */
   entry: TimelineEntry;
-  /** Replies belonging to this thread, used for count + author aggregation. */
-  replies: TimelineEntry[];
+  /**
+   * Full reply graph keyed by parent_id. The bar walks the graph recursively
+   * so the count + author list match what CommentCard would render in the
+   * expanded view (direct-children-only would undercount nested replies).
+   */
+  repliesByParent: Map<string, TimelineEntry[]>;
   onExpand: () => void;
 }
 
 const MAX_NAMED_AUTHORS = 2;
 
-export function ResolvedThreadBar({ entry, replies, onExpand }: ResolvedThreadBarProps) {
+export function ResolvedThreadBar({ entry, repliesByParent, onExpand }: ResolvedThreadBarProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
+
+  const replies = collectThreadReplies(entry.id, repliesByParent);
 
   const authorKeys = new Set<string>();
   const authors: Array<{ type: string; id: string }> = [];

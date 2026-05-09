@@ -1394,9 +1394,19 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	}
 	// Resolve thread root: if parentID points to a reply (has its own parent),
 	// use that parent instead so the comment lands in the top-level thread.
+	// rootComment captures the root row so we can auto-unresolve it after the
+	// reply is committed (see AutoUnresolveThreadOnReply).
+	var rootComment *db.Comment
 	if parentID.Valid {
-		if parent, err := s.Queries.GetComment(ctx, parentID); err == nil && parent.ParentID.Valid {
-			parentID = parent.ParentID
+		if parent, err := s.Queries.GetComment(ctx, parentID); err == nil {
+			if parent.ParentID.Valid {
+				if root, err := s.Queries.GetComment(ctx, parent.ParentID); err == nil {
+					rootComment = &root
+					parentID = root.ID
+				}
+			} else {
+				rootComment = &parent
+			}
 		}
 	}
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
@@ -1431,6 +1441,46 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			},
 			"issue_title":  issue.Title,
 			"issue_status": issue.Status,
+		},
+	})
+	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "agent", util.UUIDToString(agentID))
+}
+
+// AutoUnresolveThreadOnReply clears resolved_at on the thread root when a
+// reply lands in a resolved thread, and broadcasts comment:unresolved. Shared
+// between the user-facing Handler.CreateComment path and the agent-facing
+// TaskService.createAgentComment path so the resolved-then-replied state can
+// never desync (one of the bugs Emacs flagged on PR #2300). Errors are logged
+// — the reply itself already committed, the desync is recoverable on next read.
+func (s *TaskService) AutoUnresolveThreadOnReply(ctx context.Context, parent *db.Comment, workspaceID, actorType, actorID string) {
+	if parent == nil || !parent.ResolvedAt.Valid {
+		return
+	}
+	updated, err := s.Queries.UnresolveComment(ctx, parent.ID)
+	if err != nil {
+		slog.Warn("auto-unresolve on reply failed", "error", err, "comment_id", util.UUIDToString(parent.ID))
+		return
+	}
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventCommentUnresolved,
+		WorkspaceID: workspaceID,
+		ActorType:   actorType,
+		ActorID:     actorID,
+		Payload: map[string]any{
+			"comment": map[string]any{
+				"id":               util.UUIDToString(updated.ID),
+				"issue_id":         util.UUIDToString(updated.IssueID),
+				"author_type":      updated.AuthorType,
+				"author_id":        util.UUIDToString(updated.AuthorID),
+				"content":          updated.Content,
+				"type":             updated.Type,
+				"parent_id":        util.UUIDToPtr(updated.ParentID),
+				"created_at":       util.TimestampToString(updated.CreatedAt),
+				"updated_at":       util.TimestampToString(updated.UpdatedAt),
+				"resolved_at":      util.TimestampToPtr(updated.ResolvedAt),
+				"resolved_by_type": util.TextToPtr(updated.ResolvedByType),
+				"resolved_by_id":   util.UUIDToPtr(updated.ResolvedByID),
+			},
 		},
 	})
 }

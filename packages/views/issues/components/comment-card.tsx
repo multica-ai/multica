@@ -35,6 +35,7 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
+import { collectThreadReplies } from "./thread-utils";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
@@ -426,16 +427,10 @@ function CommentCardImpl({
     }
   };
 
-  // Collect all nested replies recursively into a flat list
-  const allNestedReplies: TimelineEntry[] = [];
-  const collectReplies = (parentId: string) => {
-    const children = allReplies.get(parentId) ?? [];
-    for (const child of children) {
-      allNestedReplies.push(child);
-      collectReplies(child.id);
-    }
-  };
-  collectReplies(entry.id);
+  // Collect all nested replies recursively into a flat list. Helper is
+  // shared with ResolvedThreadBar so the collapsed count matches what the
+  // expanded card renders.
+  const allNestedReplies = collectThreadReplies(entry.id, allReplies);
 
   const replyCount = allNestedReplies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);

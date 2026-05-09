@@ -294,8 +294,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// A reply in a resolved thread re-opens it. Done after CreateComment commits
-	// so the reply is visible regardless of the unresolve outcome.
-	h.autoUnresolveThreadOnReply(r.Context(), parentComment, uuidToString(issue.WorkspaceID), authorType, authorID)
+	// so the reply is visible regardless of the unresolve outcome. Shared with
+	// the agent task path (TaskService.createAgentComment) — both reply paths
+	// must keep the resolved root in sync.
+	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), parentComment, uuidToString(issue.WorkspaceID), authorType, authorID)
 
 	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
 	// Skip when the comment comes from the assigned agent itself to avoid loops.
@@ -742,20 +744,3 @@ func (h *Handler) UnresolveComment(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// autoUnresolveThreadOnReply fires after a reply is created in a resolved
-// thread: clearing resolved_at re-opens the discussion. Errors are logged but
-// not propagated — the reply itself succeeded, the desync is recoverable on
-// the next read. Returns true if an unresolve happened (so callers can publish
-// the event).
-func (h *Handler) autoUnresolveThreadOnReply(ctx context.Context, parent *db.Comment, workspaceID, actorType, actorID string) {
-	if parent == nil || !parent.ResolvedAt.Valid {
-		return
-	}
-	updated, err := h.Queries.UnresolveComment(ctx, parent.ID)
-	if err != nil {
-		slog.Warn("auto-unresolve on reply failed", "error", err, "comment_id", uuidToString(parent.ID))
-		return
-	}
-	resp := commentToResponse(updated, nil, nil)
-	h.publish(protocol.EventCommentUnresolved, workspaceID, actorType, actorID, map[string]any{"comment": resp})
-}

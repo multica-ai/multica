@@ -243,6 +243,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       return next;
     });
   }, []);
+  const clearResolvedExpand = useCallback((commentId: string) => {
+    setExpandedResolved((prev) => {
+      if (!prev.has(commentId)) return prev;
+      const next = new Set(prev);
+      next.delete(commentId);
+      return next;
+    });
+  }, []);
   const didHighlightRef = useRef<string | null>(null);
 
   // Issue data from TQ — uses detail query, seeded from list cache if available.
@@ -298,6 +306,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     fetchOlder, fetchNewer, jumpToLatest,
     isAtLatest, newEntriesBelowCount,
   } = useIssueTimeline(id, user?.id, { around: highlightCommentId ?? null });
+
+  // Resolve / unresolve must always clear the per-session expand entry so
+  // re-resolving an already-expanded thread folds it back to the bar (the
+  // expand Set is keyed only on commentId, not on resolution state). Without
+  // this wrapper, an expand → unresolve → resolve sequence keeps the thread
+  // visually expanded after the second resolve.
+  const handleResolveToggle = useCallback(
+    (commentId: string, resolved: boolean) => {
+      clearResolvedExpand(commentId);
+      toggleResolveComment(commentId, resolved);
+    },
+    [clearResolvedExpand, toggleResolveComment],
+  );
 
   // Memoized timeline grouping. The same Map / groups references are reused
   // across re-renders that don't change `timeline`, so React.memo on
@@ -1039,7 +1060,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       <div key={entry.id} id={`comment-${entry.id}`}>
                         <ResolvedThreadBar
                           entry={entry}
-                          replies={timelineView.repliesByParent.get(entry.id) ?? []}
+                          repliesByParent={timelineView.repliesByParent}
                           onExpand={() => toggleResolvedExpand(entry.id, true)}
                         />
                       </div>
@@ -1057,7 +1078,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                         onEdit={editComment}
                         onDelete={deleteComment}
                         onToggleReaction={handleToggleReaction}
-                        onResolveToggle={toggleResolveComment}
+                        onResolveToggle={handleResolveToggle}
                         onCollapseResolved={isResolved ? () => toggleResolvedExpand(entry.id, false) : undefined}
                         highlightedCommentId={highlightedId}
                       />
