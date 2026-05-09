@@ -1,8 +1,10 @@
 package service
 
 import (
+	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSanitizeSubjectField(t *testing.T) {
@@ -35,12 +37,12 @@ func TestSanitizeSubjectField(t *testing.T) {
 	}
 }
 
-func TestBuildInvitationParams_EscapesHTMLInBody(t *testing.T) {
+func TestInvitationBody_EscapesHTMLInBody(t *testing.T) {
 	tests := []struct {
-		name        string
-		inviter     string
-		workspace   string
-		wantInBody  []string
+		name          string
+		inviter       string
+		workspace     string
+		wantInBody    []string
 		wantNotInBody []string
 	}{
 		{
@@ -87,95 +89,95 @@ func TestBuildInvitationParams_EscapesHTMLInBody(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := buildInvitationParams(
-				"noreply@multica.ai",
-				"invitee@example.com",
-				tt.inviter,
-				tt.workspace,
-				"https://app.multica.ai/invite/abc-123",
-			)
+			_, html := invitationBody(tt.inviter, tt.workspace, "https://app.multica.ai/invite/abc-123")
 			for _, needle := range tt.wantInBody {
-				if !strings.Contains(p.Html, needle) {
-					t.Errorf("body missing %q\nbody: %s", needle, p.Html)
+				if !strings.Contains(html, needle) {
+					t.Errorf("body missing %q\nbody: %s", needle, html)
 				}
 			}
 			for _, needle := range tt.wantNotInBody {
-				if strings.Contains(p.Html, needle) {
-					t.Errorf("body should not contain raw %q\nbody: %s", needle, p.Html)
+				if strings.Contains(html, needle) {
+					t.Errorf("body should not contain raw %q\nbody: %s", needle, html)
 				}
 			}
 		})
 	}
 }
 
-func TestBuildInvitationParams_SubjectStripsControls(t *testing.T) {
-	p := buildInvitationParams(
-		"noreply@multica.ai",
-		"invitee@example.com",
-		"Alice\r\n",
-		"Acme\t",
-		"https://app.multica.ai/invite/abc",
-	)
-	if strings.ContainsAny(p.Subject, "\r\n\t") {
-		t.Errorf("subject still contains control characters: %q", p.Subject)
+func TestInvitationSubject_StripsControls(t *testing.T) {
+	subj := invitationSubject("Alice\r\n", "Acme\t")
+	if strings.ContainsAny(subj, "\r\n\t") {
+		t.Errorf("subject still contains control characters: %q", subj)
 	}
-	if p.Subject != "Alice invited you to Acme on Multica" {
-		t.Errorf("unexpected subject: %q", p.Subject)
+	if subj != "Alice invited you to Acme on Multica" {
+		t.Errorf("unexpected subject: %q", subj)
 	}
 }
 
-func TestBuildInvitationParams_SubjectNotHTMLEscaped(t *testing.T) {
+func TestInvitationSubject_NotHTMLEscaped(t *testing.T) {
 	// Subject is not HTML-rendered; entities would render literally in inboxes.
-	p := buildInvitationParams(
-		"noreply@multica.ai",
-		"invitee@example.com",
-		"Alice",
-		"Acme & Co.",
-		"https://app.multica.ai/invite/abc",
-	)
-	if strings.Contains(p.Subject, "&amp;") {
-		t.Errorf("subject should not be HTML-escaped, got %q", p.Subject)
+	subj := invitationSubject("Alice", "Acme & Co.")
+	if strings.Contains(subj, "&amp;") {
+		t.Errorf("subject should not be HTML-escaped, got %q", subj)
 	}
-	if !strings.Contains(p.Subject, "Acme & Co.") {
-		t.Errorf("subject missing literal ampersand: %q", p.Subject)
+	if !strings.Contains(subj, "Acme & Co.") {
+		t.Errorf("subject missing literal ampersand: %q", subj)
 	}
 }
 
-func TestBuildInvitationParams_SubjectTruncated(t *testing.T) {
+func TestInvitationSubject_Truncated(t *testing.T) {
 	longWorkspace := strings.Repeat("A", 200)
-	p := buildInvitationParams(
-		"noreply@multica.ai",
-		"invitee@example.com",
-		"Alice",
-		longWorkspace,
-		"https://app.multica.ai/invite/abc",
-	)
+	subj := invitationSubject("Alice", longWorkspace)
 	// Template: "Alice invited you to <ws> on Multica"
 	// ws is capped at maxSubjectFieldRunes; overall subject should also be bounded.
 	maxExpected := len("Alice invited you to  on Multica") + maxSubjectFieldRunes
-	if runes := len([]rune(p.Subject)); runes > maxExpected {
-		t.Errorf("subject not bounded: %d runes, max %d: %q", runes, maxExpected, p.Subject)
+	if runes := len([]rune(subj)); runes > maxExpected {
+		t.Errorf("subject not bounded: %d runes, max %d: %q", runes, maxExpected, subj)
 	}
-	if !strings.Contains(p.Subject, "…") {
-		t.Errorf("truncated subject should contain ellipsis marker: %q", p.Subject)
+	if !strings.Contains(subj, "…") {
+		t.Errorf("truncated subject should contain ellipsis marker: %q", subj)
 	}
 }
 
-func TestBuildInvitationParams_ToAndFromPassedThrough(t *testing.T) {
-	p := buildInvitationParams(
-		"noreply@multica.ai",
-		"invitee@example.com",
-		"Alice",
-		"Acme",
-		"https://app.multica.ai/invite/abc",
-	)
-	if p.From != "noreply@multica.ai" {
-		t.Errorf("From = %q", p.From)
+func TestInvitationBody_InviteURLInHTML(t *testing.T) {
+	_, html := invitationBody("Alice", "Acme", "https://app.multica.ai/invite/abc")
+	if !strings.Contains(html, "https://app.multica.ai/invite/abc") {
+		t.Errorf("body missing invite URL: %s", html)
 	}
-	if len(p.To) != 1 || p.To[0] != "invitee@example.com" {
-		t.Errorf("To = %v", p.To)
+}
+
+func TestCallWithTimeout_ReturnsResultOnSuccess(t *testing.T) {
+	err := callWithTimeout(func() error { return nil })
+	if err != nil {
+		t.Errorf("expected nil, got %v", err)
 	}
-	if !strings.Contains(p.Html, "https://app.multica.ai/invite/abc") {
-		t.Errorf("body missing invite URL: %s", p.Html)
+}
+
+func TestCallWithTimeout_PropagatesError(t *testing.T) {
+	sentinel := errors.New("send failed")
+	err := callWithTimeout(func() error { return sentinel })
+	if !errors.Is(err, sentinel) {
+		t.Errorf("expected sentinel error, got %v", err)
+	}
+}
+
+func TestCallWithTimeout_TimesOut(t *testing.T) {
+	// Override the package-level timeout for this test.
+	orig := emailSendTimeout
+	emailSendTimeout = 50 * time.Millisecond
+	defer func() { emailSendTimeout = orig }()
+
+	done := make(chan struct{})
+	err := callWithTimeout(func() error {
+		<-done // blocks until the test exits
+		return nil
+	})
+	close(done)
+
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }

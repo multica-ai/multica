@@ -5,10 +5,9 @@ import (
 	"html"
 	"os"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/resend/resend-go/v2"
 )
 
 // maxSubjectFieldRunes bounds how much user-controlled text (workspace name,
@@ -16,97 +15,38 @@ import (
 // a full phishing pitch into a workspace name that gets sent from our domain.
 const maxSubjectFieldRunes = 60
 
-type EmailService struct {
-	client    *resend.Client
-	fromEmail string
+// emailSendTimeout is the maximum time allowed for a single email send attempt.
+var emailSendTimeout = 30 * time.Second
+
+// EmailService is the interface that email provider implementations must satisfy.
+type EmailService interface {
+	SendVerificationCode(to, code string) error
+	SendInvitationEmail(to, inviterName, workspaceName, invitationID string) error
 }
 
-func NewEmailService() *EmailService {
-	apiKey := os.Getenv("RESEND_API_KEY")
-	from := os.Getenv("RESEND_FROM_EMAIL")
-	if from == "" {
-		from = "noreply@multica.ai"
-	}
-
-	var client *resend.Client
-	if apiKey != "" {
-		client = resend.NewClient(apiKey)
-	}
-
-	return &EmailService{
-		client:    client,
-		fromEmail: from,
+// NewEmailService returns an EmailService selected by the EMAIL_PROVIDER
+// environment variable. Supported values: "resend" (default), "smtp".
+func NewEmailService() EmailService {
+	switch strings.ToLower(os.Getenv("EMAIL_PROVIDER")) {
+	case "smtp":
+		return NewSMTPEmailService()
+	default: // resend or unset
+		return NewResendEmailService()
 	}
 }
 
-// SendVerificationCode sends a one-time login code. The code is server-generated
-// (6-digit numeric) so no user-controlled text reaches the email body here.
-// If that ever changes, escape the user-controlled fields the same way
-// SendInvitationEmail does.
-func (s *EmailService) SendVerificationCode(to, code string) error {
-	if s.client == nil {
-		fmt.Printf("[DEV] Verification code for %s: %s\n", to, code)
-		return nil
-	}
+// callWithTimeout runs fn in a goroutine and returns its error. If fn does not
+// finish within emailSendTimeout an error is returned; the goroutine continues
+// in the background so the underlying connection is not left dangling.
+func callWithTimeout(fn func() error) error {
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
 
-	params := &resend.SendEmailRequest{
-		From:    s.fromEmail,
-		To:      []string{to},
-		Subject: "Your Multica verification code",
-		Html: fmt.Sprintf(
-			`<div style="font-family: sans-serif; max-width: 400px; margin: 0 auto;">
-				<h2>Your verification code</h2>
-				<p style="font-size: 32px; font-weight: bold; letter-spacing: 8px; margin: 24px 0;">%s</p>
-				<p>This code expires in 10 minutes.</p>
-				<p style="color: #666; font-size: 14px;">If you didn't request this code, you can safely ignore this email.</p>
-			</div>`, code),
-	}
-
-	_, err := s.client.Emails.Send(params)
-	return err
-}
-
-// SendInvitationEmail notifies the invitee that they have been invited to a workspace.
-// invitationID is included in the URL so the email deep-links to /invite/{id}.
-func (s *EmailService) SendInvitationEmail(to, inviterName, workspaceName, invitationID string) error {
-	appURL := strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN"))
-	if appURL == "" {
-		appURL = "https://app.multica.ai"
-	}
-	inviteURL := fmt.Sprintf("%s/invite/%s", appURL, invitationID)
-
-	if s.client == nil {
-		fmt.Printf("[DEV] Invitation email to %s: %s invited you to %s — %s\n", to, inviterName, workspaceName, inviteURL)
-		return nil
-	}
-
-	params := buildInvitationParams(s.fromEmail, to, inviterName, workspaceName, inviteURL)
-	_, err := s.client.Emails.Send(params)
-	return err
-}
-
-// buildInvitationParams assembles the Resend request for an invitation email.
-// Separated from SendInvitationEmail so the sanitization behavior is unit-testable
-// without needing to mock the Resend SDK.
-func buildInvitationParams(from, to, inviterName, workspaceName, inviteURL string) *resend.SendEmailRequest {
-	safeWorkspace := html.EscapeString(workspaceName)
-	safeInviter := html.EscapeString(inviterName)
-	subjectInviter := sanitizeSubjectField(inviterName)
-	subjectWorkspace := sanitizeSubjectField(workspaceName)
-
-	return &resend.SendEmailRequest{
-		From:    from,
-		To:      []string{to},
-		Subject: fmt.Sprintf("%s invited you to %s on Multica", subjectInviter, subjectWorkspace),
-		Html: fmt.Sprintf(
-			`<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-				<h2>You're invited to join %s</h2>
-				<p><strong>%s</strong> invited you to collaborate in the <strong>%s</strong> workspace on Multica.</p>
-				<p style="margin: 24px 0;">
-					<a href="%s" style="display: inline-block; padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500;">Accept invitation</a>
-				</p>
-				<p style="color: #666; font-size: 14px;">You'll need to log in to accept or decline the invitation.</p>
-			</div>`, safeWorkspace, safeInviter, safeWorkspace, inviteURL),
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(emailSendTimeout):
+		return fmt.Errorf("email send timed out after %s", emailSendTimeout)
 	}
 }
 
@@ -130,5 +70,38 @@ func sanitizeSubjectField(s string) string {
 		return cleaned
 	}
 	runes := []rune(cleaned)
-	return string(runes[:maxSubjectFieldRunes-1]) + "…"
+	return string(runes[:maxSubjectFieldRunes-1]) + "\u2026"
+}
+
+// buildInvitationHTML renders the HTML body for a workspace invitation email.
+// safeWorkspace and safeInviter must already be HTML-escaped by the caller.
+func buildInvitationHTML(safeInviter, safeWorkspace, inviteURL string) string {
+	return strings.Join([]string{
+		`<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">`,
+		`<h2>You're invited to join `, safeWorkspace, `</h2>`,
+		`<p><strong>`, safeInviter, `</strong> invited you to collaborate in the <strong>`, safeWorkspace, `</strong> workspace on Multica.</p>`,
+		`<p style="margin: 24px 0;">`,
+		`<a href="`, inviteURL, `" style="display: inline-block; padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500;">Accept invitation</a>`,
+		`</p>`,
+		`<p style="color: #666; font-size: 14px;">You'll need to log in to accept or decline the invitation.</p>`,
+		`</div>`,
+	}, "")
+}
+
+// invitationSubject returns the email subject for a workspace invitation.
+// inviterName and workspaceName are the raw (unescaped) values.
+func invitationSubject(inviterName, workspaceName string) string {
+	return sanitizeSubjectField(inviterName) + " invited you to " + sanitizeSubjectField(workspaceName) + " on Multica"
+}
+
+// invitationBody returns subject and HTML body for a workspace invitation,
+// applying all required escaping. Used by provider implementations.
+func invitationBody(inviterName, workspaceName, inviteURL string) (subject, htmlBody string) {
+	subject = invitationSubject(inviterName, workspaceName)
+	htmlBody = buildInvitationHTML(
+		html.EscapeString(inviterName),
+		html.EscapeString(workspaceName),
+		inviteURL,
+	)
+	return
 }
