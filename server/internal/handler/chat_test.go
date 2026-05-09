@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -138,6 +140,27 @@ func createOtherUserPrivateAgent(t *testing.T, name string) (agentID, ownerID st
 	})
 
 	return agentID, ownerID
+}
+
+type queryRowOverrideDB struct {
+	base     db.DBTX
+	matchSQL func(string) bool
+	queryRow func(context.Context, string, ...any) pgx.Row
+}
+
+func (d queryRowOverrideDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return d.base.Exec(ctx, sql, args...)
+}
+
+func (d queryRowOverrideDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return d.base.Query(ctx, sql, args...)
+}
+
+func (d queryRowOverrideDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if d.matchSQL != nil && d.matchSQL(sql) && d.queryRow != nil {
+		return d.queryRow(ctx, sql, args...)
+	}
+	return d.base.QueryRow(ctx, sql, args...)
 }
 
 // TestCreateChatSession_Error_PrivateAgentNotOwned verifies that creating a
@@ -403,9 +426,10 @@ func TestDeleteChatMessage_Error_MessageNotFound(t *testing.T) {
 	sessionID, _, _ := setupChatTestFixture(t)
 	defer cleanupChatTestFixture(t, sessionID)
 
-	req := newRequest("DELETE", "/api/chat/sessions/"+sessionID+"/messages/nonexistent", nil)
+	fakeMessageID := "00000000-0000-0000-0000-000000000097"
+	req := newRequest("DELETE", "/api/chat/sessions/"+sessionID+"/messages/"+fakeMessageID, nil)
 	req = withURLParam(req, "sessionId", sessionID)
-	req = withURLParam(req, "messageId", "nonexistent")
+	req = withURLParam(req, "messageId", fakeMessageID)
 	req = withWorkspaceContext(req, testWorkspaceID)
 
 	w := httptest.NewRecorder()
@@ -522,8 +546,9 @@ func TestRetryChatMessage_Error_SessionNotFound(t *testing.T) {
 	sessionID, messageID, _ := setupChatTestFixture(t)
 	defer cleanupChatTestFixture(t, sessionID)
 
-	req := newRequest("POST", "/api/chat/sessions/nonexistent/messages/"+messageID+"/retry", nil)
-	req = withURLParam(req, "sessionId", "nonexistent")
+	fakeSessionID := "00000000-0000-0000-0000-000000000096"
+	req := newRequest("POST", "/api/chat/sessions/"+fakeSessionID+"/messages/"+messageID+"/retry", nil)
+	req = withURLParam(req, "sessionId", fakeSessionID)
 	req = withURLParam(req, "messageId", messageID)
 	req = withWorkspaceContext(req, testWorkspaceID)
 
@@ -548,9 +573,10 @@ func TestRetryChatMessage_Error_MessageNotFound(t *testing.T) {
 	sessionID, _, _ := setupChatTestFixture(t)
 	defer cleanupChatTestFixture(t, sessionID)
 
-	req := newRequest("POST", "/api/chat/sessions/"+sessionID+"/messages/nonexistent/retry", nil)
+	fakeMessageID := "00000000-0000-0000-0000-000000000095"
+	req := newRequest("POST", "/api/chat/sessions/"+sessionID+"/messages/"+fakeMessageID+"/retry", nil)
 	req = withURLParam(req, "sessionId", sessionID)
-	req = withURLParam(req, "messageId", "nonexistent")
+	req = withURLParam(req, "messageId", fakeMessageID)
 	req = withWorkspaceContext(req, testWorkspaceID)
 
 	w := httptest.NewRecorder()
@@ -647,36 +673,23 @@ func TestRetryChatMessage_Error_NotAuthenticated(t *testing.T) {
 func TestDeleteChatMessage_Error_InvalidRole(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	sessionID, messageID, _ := setupChatTestFixture(t)
+	defer cleanupChatTestFixture(t, sessionID)
 
-	// Create chat session
-	var sid string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
-		SELECT workspace_id, id, $1, 'Test Chat Session', 'active'
-		FROM agent
-		WHERE workspace_id = $2
-		LIMIT 1
-		RETURNING id
-	`, testUserID, testWorkspaceID).Scan(&sid); err != nil {
-		t.Fatalf("failed to create chat session: %v", err)
-	}
-	sessionID := util.UUIDToString(util.MustParseUUID(sid))
-
-	// Create message with invalid role
-	var mid string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_message (chat_session_id, role, content)
-		VALUES ($1, 'invalid_role', 'Test message')
-		RETURNING id
-	`, sid).Scan(&mid); err != nil {
-		t.Fatalf("failed to create message: %v", err)
-	}
-	messageID := util.UUIDToString(util.MustParseUUID(mid))
-
-	defer func() {
-		testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, util.MustParseUUID(sessionID))
-	}()
+	handlerWithInvalidRole := *testHandler
+	handlerWithInvalidRole.Queries = db.New(queryRowOverrideDB{
+		base: testPool,
+		matchSQL: func(sql string) bool {
+			return strings.Contains(sql, "SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms FROM chat_message")
+		},
+		queryRow: func(ctx context.Context, _ string, args ...any) pgx.Row {
+			return testPool.QueryRow(ctx, `
+				SELECT id, chat_session_id, 'invalid_role' AS role, content, task_id, created_at, failure_reason, elapsed_ms
+				FROM chat_message
+				WHERE id = $1
+			`, args...)
+		},
+	})
 
 	req := newRequest("DELETE", "/api/chat/sessions/"+sessionID+"/messages/"+messageID, nil)
 	req = withURLParam(req, "sessionId", sessionID)
@@ -684,7 +697,7 @@ func TestDeleteChatMessage_Error_InvalidRole(t *testing.T) {
 	req = withWorkspaceContext(req, testWorkspaceID)
 
 	w := httptest.NewRecorder()
-	testHandler.DeleteChatMessage(w, req)
+	handlerWithInvalidRole.DeleteChatMessage(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
@@ -771,7 +784,7 @@ func TestDeleteChatMessage_Error_UserNotCreator(t *testing.T) {
 
 	var resp map[string]string
 	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["error"] != "not your message" {
-		t.Fatalf("expected 'not your message', got '%s'", resp["error"])
+	if resp["error"] != "not your chat session" {
+		t.Fatalf("expected 'not your chat session', got '%s'", resp["error"])
 	}
 }

@@ -426,9 +426,8 @@ func TestGetIssueGCCheck_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	}
 }
 
-// withURLParams merges the given chi URL parameters into the request context.
-// Unlike calling withURLParam twice (which replaces the whole chi.RouteContext
-// and loses earlier params), this preserves previously-added params.
+// withURLParams applies multiple chi URL parameters in a single call.
+// It shares the same merge behavior as withURLParam but keeps test setup terse.
 func withURLParams(req *http.Request, kv ...string) *http.Request {
 	rctx := chi.NewRouteContext()
 	if existing, ok := req.Context().Value(chi.RouteCtxKey).(*chi.Context); ok && existing != nil {
