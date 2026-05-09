@@ -1,0 +1,137 @@
+{
+  "common": {
+    "back": "Vissza",
+    "close": "Bezárás",
+    "cancel": "Mégse",
+    "expand_tooltip": "Kibontás",
+    "collapse_tooltip": "Összecsukás"
+  },
+  "create_workspace": {
+    "title": "Új munkaterület létrehozása",
+    "description": "A munkaterületek megosztott környezetek, ahol a csapatok projekteken és feladatokon dolgozhatnak."
+  },
+  "delete_issue": {
+    "title": "Feladat törlése",
+    "description": "Ez véglegesen törli a feladatot és az összes hozzászólást. Ez a művelet nem vonható vissza.",
+    "hint": "Bármely munkaterületi tag törölhet feladatokat.",
+    "cancel": "Mégse",
+    "confirm": "Törlés",
+    "deleting": "Törlés...",
+    "toast_deleted": "Feladat törölve",
+    "toast_delete_failed": "Nem sikerült törölni a feladatot"
+  },
+  "feedback": {
+    "title": "Visszajelzés",
+    "description": "Szívesen hallanánk, mi működik jól, mi nem, vagy mit látna szívesen legközelebb.",
+    "placeholder": "Meséljen a tapasztalatairól, a talált hibákról vagy a kért funkciókról…",
+    "toast_uploading": "Kérjük, várja meg a feltöltések befejezését…",
+    "toast_too_long": "Az üzenet túl hosszú",
+    "toast_sent": "Köszönjük a visszajelzést!",
+    "toast_failed": "Nem sikerült elküldeni a visszajelzést",
+    "send": "Visszajelzés küldése",
+    "sending": "Küldés…"
+  },
+  "issue_picker": {
+    "search_placeholder": "Feladatok keresése...",
+    "searching": "Keresés...",
+    "no_results": "Nem található feladat.",
+    "prompt_to_search": "Gépeljen a feladatok kereséséhez"
+  },
+  "set_parent": {
+    "title": "Szülő feladat beállítása",
+    "description": "Keressen egy feladatot, amelyet szülőként szeretne beállítani ehhez a feladathoz",
+    "toast_failed": "Nem sikerült frissíteni a feladatot",
+    "toast_success": "{{identifier}} beállítva szülő feladatként"
+  },
+  "add_child": {
+    "title": "Alfeladat hozzáadása",
+    "description": "Keressen egy feladatot, amelyet alfeladatként szeretne hozzáadni",
+    "toast_failed": "Nem sikerült hozzáadni az alfeladatot",
+    "toast_success": "{{identifier}} hozzáadva alfeladatként"
+  },
+  "backlog_hint": {
+    "toast_status_failed": "Nem sikerült frissíteni az állapotot"
+  },
+  "create_project": {
+    "title": "Új projekt",
+    "title_breadcrumb": "Új projekt",
+    "icon_tooltip": "Ikon választása",
+    "title_placeholder": "Projekt címe",
+    "description_placeholder": "Leírás hozzáadása...",
+    "lead": "Felelős",
+    "no_lead": "Nincs felelős",
+    "lead_placeholder": "Felelős hozzárendelése...",
+    "members_group": "Tagok",
+    "agents_group": "Ügynökök",
+    "no_results": "Nincs találat",
+    "submit": "Projekt létrehozása",
+    "submitting": "Létrehozás...",
+    "toast_created": "Projekt létrehozva",
+    "toast_failed": "Nem sikerült létrehozni a projektet",
+    "repos_pill": "Repók",
+    "repos_pill_count_one": "{{count}} repó",
+    "repos_pill_count_other": "{{count}} repó",
+    "repos_heading": "GitHub repók csatolása ehhez a projekthez",
+    "repos_empty": "Még nincsenek munkaterületi szintű repók. Illesszen be egy URL-t alább egy eseti csatoláshoz.",
+    "repos_url_placeholder": "https://github.com/owner/repo",
+    "repos_add": "Hozzáadás",
+    "repos_selected": "Kiválasztva"
+  },
+  "create_issue": {
+    "sr_manual": "Új feladat",
+    "sr_agent": "Feladat gyors létrehozása",
+    "manual_breadcrumb": "Létrehozás kézzel",
+    "agent_breadcrumb": "Létrehozás ügynökkel",
+    "title_placeholder": "Feladat címe",
+    "description_placeholder": "Leírás hozzáadása...",
+    "more_options_aria": "További opciók",
+    "submit": "Feladat létrehozása",
+    "submitting": "Létrehozás...",
+    "toast_created": "Feladat létrehozva",
+    "view_issue": "Feladat megtekintése",
+    "toast_failed": "Nem sikerült létrehozni a feladatot",
+    "toast_link_subissues_all_failed": "Nem sikerült összekapcsolni az alfeladatokat",
+    "toast_link_subissues_partial": "Nem sikerült összekapcsolni {{failed}} / {{total}} alfeladatot",
+    "switch_to_agent": "Váltás ügynökre",
+    "switch_to_agent_tooltip": "Váltás ügynökkel való létrehozásra — írja le egy sorban, és hagyja, hogy az ügynök rögzítse",
+    "switch_to_manual": "Váltás kézi rögzítésre",
+    "switch_to_manual_tooltip": "Váltás kézi létrehozásra — töltse ki ön a mezőket",
+    "create_another": "Újabb létrehozása",
+    "remove_parent_aria": "Szülő eltávolítása",
+    "remove_subissue_aria": "{{identifier}} alfeladat eltávolítása",
+    "subissue_of": "{{identifier}} alfeladata",
+    "subissue_chip": "Alfeladat: {{identifier}}",
+    "parent_with_id": "Szülő: {{identifier}}",
+    "set_parent": "Szülő feladat beállítása...",
+    "add_subissue": "Alfeladat hozzáadása...",
+    "remove_parent": "Szülő eltávolítása",
+    "set_parent_picker": {
+      "title": "Szülő feladat beállítása",
+      "description": "Keressen egy feladatot, amelyet az új feladat szülőjeként szeretne beállítani"
+    },
+    "add_subissue_picker": {
+      "title": "Alfeladat hozzáadása",
+      "description": "Keressen egy feladatot, amelyet az új feladat alfeladataként szeretne hozzáadni"
+    },
+    "agent": {
+      "created_by": "Létrehozta",
+      "select_agent_aria": "Ügynök kiválasztása",
+      "pick_an_agent": "Válasszon ügynököt…",
+      "no_agents": "Nincsenek elérhető ügynökök.",
+      "version_missing": "Ennek az ügynöknek a daemonja nem jelent CLI verziót. Az ügynökkel való létrehozáshoz multica CLI ≥ {{min}} szükséges. Frissítse a daemont és csatlakozzon újra, vagy váltson kézi létrehozásra.",
+      "version_below": "Ennek az ügynöknek a daemon CLI verziója {{current}} — Az ügynökkel való létrehozáshoz ≥ {{min}} szükséges. Frissítse a daemont, vagy váltson kézi létrehozásra.",
+      "prompt_placeholder": "Mondja el az ügynöknek, mit tegyen, pl. \"Bohan javítsa ki az inbox lassú betöltését a Web projektben\"",
+      "submit": "Létrehozás",
+      "sending": "Küldés…",
+      "uploading": "Feltöltés…",
+      "sent_label": "Elküldve",
+      "sent_count": "{{count}} elküldve",
+      "version_blocked_tooltip": "A daemon CLI verziója legalább {{min}} kell legyen",
+      "toast_sent": "Elküldve az ügynöknek — értesítést fog kapni, amint kész",
+      "error_agent_unavailable_fallback": "Az ügynök nem érhető el. Válasszon másik ügynököt.",
+      "error_daemon_version": "Ennek az ügynöknek a daemon CLI verziója ({{current}}) elmarad a szükséges {{min}} verziótól. Frissítse a daemont az ügynökkel való létrehozáshoz.",
+      "error_unknown": "Sikertelen küldés. Próbálja újra."
+    }
+  }
+}
+

@@ -1,0 +1,40 @@
+{
+  "nav": {
+    "inbox": "Bejövő",
+    "my_issues": "Feladataim",
+    "issues": "Összes feladat",
+    "projects": "Projektek",
+    "autopilots": "Autopilot",
+    "agents": "Ügynökök",
+    "runtimes": "Környezetek",
+    "skills": "Készségek",
+    "settings": "Beállítások"
+  },
+  "help": {
+    "trigger": "Súgó",
+    "docs": "Dokumentáció",
+    "changelog": "Változásnapló",
+    "feedback": "Visszajelzés"
+  },
+  "workspace_loader": {
+    "loading_workspace": "Munkaterület betöltése…",
+    "loading_named_prefix": "Betöltés:"
+  },
+  "sidebar": {
+    "unpin_tooltip": "Kitűzés törlése",
+    "workspaces_label": "Munkaterületek",
+    "create_workspace": "Munkaterület létrehozása",
+    "pending_invitations_label": "Függőben lévő meghívók",
+    "invitation_workspace_fallback": "Munkaterület",
+    "invitation_join": "Csatlakozás",
+    "invitation_decline": "Elutasítás",
+    "log_out": "Kijelentkezés",
+    "new_issue": "Új feladat",
+    "new_issue_shortcut": "C",
+    "pinned_label": "Kitűzve",
+    "workspace_group": "Munkaterület",
+    "configure_group": "Konfiguráció",
+    "unread_overflow": "99+"
+  }
+}
+

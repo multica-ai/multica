@@ -1,0 +1,116 @@
+{
+  "fab": {
+    "running": "A Multica dolgozik...",
+    "unread_one": "{{count}} olvasatlan üzenet",
+    "unread_other": "{{count}} olvasatlan üzenet",
+    "default": "Kérdezze a Multicát"
+  },
+  "input": {
+    "placeholder_no_agent": "Hozzon létre egy ügynököt a csevegéshez",
+    "placeholder_archived": "Ez a munkamenet archiválva van",
+    "placeholder_named": "Mondja el {{name}} ügynöknek, mit tegyen…",
+    "placeholder_default": "Mondja el, mit tegyek…"
+  },
+  "message_list": {
+    "show_details": "Részletek megjelenítése",
+    "replied_in": "Válaszolt {{elapsed}} alatt",
+    "failed_after": "Sikertelen {{elapsed}} után",
+    "task_failed_fallback": "Feladat sikertelen",
+    "tools_one": "{{count}} eszköz",
+    "tools_other": "{{count}} eszköz",
+    "tool_result_named": "{{tool}} eredménye: ",
+    "tool_result_unnamed": "eredmény: ",
+    "process_steps_one": "{{count}} lépés",
+    "process_steps_other": "{{count}} lépés",
+    "copy_action": "Másolás",
+    "copied_toast": "Másolva",
+    "copy_failed_toast": "Másolás sikertelen"
+  },
+  "session_history": {
+    "untitled": "Cím nélküli",
+    "time": {
+      "just_now": "most",
+      "minutes": "{{count}} perce",
+      "hours": "{{count}} órája",
+      "days": "{{count}} napja"
+    },
+    "row_delete_aria": "Csevegés törlése",
+    "delete_dialog": {
+      "title": "Csevegés törlése",
+      "description_with_title": "\"{{title}}\" és üzenetei véglegesen törlődnek. Ez a művelet nem vonható vissza.",
+      "description_default": "Ez a csevegés és üzenetei véglegesen törlődnek. Ez a művelet nem vonható vissza.",
+      "cancel": "Mégse",
+      "confirm": "Törlés",
+      "confirming": "Törlés..."
+    }
+  },
+  "window": {
+    "new_chat_tooltip": "Új csevegés",
+    "restore_tooltip": "Visszaállítás",
+    "expand_tooltip": "Kibontás",
+    "minimize_tooltip": "Kis méret",
+    "another_running": "Egy másik csevegés folyamatban van",
+    "another_unread": "Egy másik csevegésben olvasatlan válaszok vannak",
+    "running": "Folyamatban",
+    "unread": "Olvasatlan",
+    "no_previous": "Nincsenek korábbi csevegések",
+    "untitled": "Új csevegés",
+    "my_agents": "Saját ügynökök",
+    "others": "Egyebek",
+    "no_agents": "Nincsenek ügynökök",
+    "active_group": "Aktív",
+    "archived_group_one": "{{count}} archivált csevegés",
+    "archived_group_other": "{{count}} archivált csevegés"
+  },
+  "empty_state": {
+    "first_time_title": "Csevegjen az ügynökeivel",
+    "first_time_intro": "✨ Ismerik a munkaterületet —",
+    "first_time_pillars": "feladatok, projektek, készségek",
+    "first_time_pillars_suffix": ".",
+    "first_time_actions": "Kérjen összefoglalót, tervezze meg a napját, vagy bízzon meg egy ügynököt egy gyors feladattal.",
+    "returning_title_named": "Szia, {{name}} vagyok",
+    "returning_title_default": "Üdvözöljük a Multicában",
+    "returning_subtitle": "Próbálja meg ezt kérdezni"
+  },
+  "starter_prompts": {
+    "list_open": "Listázd a nyitott feladataimat prioritás szerint",
+    "summarize_today": "Foglald össze, mit csináltam ma",
+    "plan_next": "Tervezd meg, min dolgozzak legközelebb"
+  },
+  "context_anchor": {
+    "tooltip_disabled": "Nincs mit megosztani a Multicával erről az oldalról",
+    "tooltip_off": "Tudassa a Multicával, mit néz éppen",
+    "tooltip_on_issue": "A Multica tudja, hogy a(z) {{label}} feladatot nézi · Kattintson a kikapcsoláshoz",
+    "tooltip_on_project": "A Multica tudja, hogy a(z) \"{{label}}\" projektet nézi · Kattintson a kikapcsoláshoz",
+    "card_tooltip_issue_with_subtitle": "A Multica tudja, hogy a(z) {{label}} — {{subtitle}} feladatot nézi",
+    "card_tooltip_issue": "A Multica tudja, hogy a(z) {{label}} feladatot nézi",
+    "card_tooltip_project": "A Multica tudja, hogy a(z) \"{{label}}\" projektet nézi",
+    "aria_stop": "Jelenlegi oldal megosztásának leállítása",
+    "aria_start": "Jelenlegi oldal megosztása a Multicával"
+  },
+  "no_agent_banner": "Szüksége van egy ügynökre a csevegés megkezdéséhez.",
+  "offline_banner": {
+    "fallback_name": "az ügynök",
+    "unstable": "{{name}} kapcsolata instabil — a válaszok késhetnek.",
+    "offline": "{{name}} offline — az üzenet kézbesítésre kerül, amint online lesz."
+  },
+  "status_pill": {
+    "stages": {
+      "offline": "Offline",
+      "reconnecting": "Újracsatlakozás",
+      "queued": "Sorban áll",
+      "starting_up": "Indítás",
+      "thinking": "Gondolkodik",
+      "typing": "Gépel"
+    },
+    "tools": {
+      "running_command": "Parancs futtatása",
+      "reading_files": "Fájlok olvasása",
+      "searching_code": "Keresés a kódban",
+      "making_edits": "Módosítások végrehajtása",
+      "searching_web": "Keresés a weben",
+      "fallback": "Dolgozik"
+    }
+  }
+}
+

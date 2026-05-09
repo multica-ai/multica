@@ -1,0 +1,238 @@
+{
+  "page": {
+    "title": "Készségek",
+    "tagline": "Utasítások, amelyeket a munkaterület bármely ügynöke használhat.",
+    "learn_more": "További információ →",
+    "new_skill": "Új készség",
+    "search_placeholder": "Készségek keresése…",
+    "scopes": {
+      "all": { "label": "Összes", "description": "A munkaterület összes készsége" },
+      "used": { "label": "Használatban", "description": "Legalább egy ügynökhöz hozzárendelt készségek" },
+      "unused": { "label": "Használatlan", "description": "Egyik ügynökhöz sem hozzárendelt készségek" },
+      "mine": { "label": "Általam létrehozva", "description": "Az ön által létrehozott készségek" }
+    },
+    "empty": {
+      "title": "Még nincsenek készségek",
+      "description": "Hozza létre első készségét, importáljon egyet URL-ről, vagy másoljon egyet egy csatlakoztatott környezetből — és a munkaterület minden ügynöke használhatja majd."
+    },
+    "no_matches": {
+      "title": "Nincs találat",
+      "with_query": "Nincs a(z) \"{{query}}\" keresésnek megfelelő készség{{filterSuffix}}.",
+      "with_query_filter_suffix": " ebben a szűrőben",
+      "filter_only": "Nincs a szűrőnek megfelelő készség.",
+      "try_different": " Próbálkozzon más keresési kifejezéssel."
+    },
+    "intro_banner": {
+      "title": "Megosztva a munkaterületével.",
+      "body": "Bárki létrehozhat készséget, importálhat egyet URL-ről, vagy másolhat egyet a helyi környezetéből — és minden ügynök használhatja majd.",
+      "highlight": "A helyi környezet készségei privátak maradnak, amíg nem másolja őket ide."
+    },
+    "list_error": {
+      "title": "Nem sikerült betölteni a készségeket",
+      "fallback": "Valami hiba történt a készséglista lekérésekor.",
+      "retry": "Újra"
+    },
+    "supporting_data_warning": "Néhány munkaterületi adat betöltése sikertelen volt. A létrehozó adatai, a környezetnevek vagy a szerkesztési jogosultságok hiányosak lehetnek."
+  },
+  "table": {
+    "name": "Név",
+    "used_by": "Használja",
+    "source": "Forrás · Hozzáadta",
+    "updated": "Frissítve",
+    "no_description": "Nincs leírás",
+    "lock_tooltip": "Csak olvasható — csak a létrehozó vagy adminisztrátor szerkesztheti",
+    "unused": "— használatlan",
+    "by_creator": "készítette: {{name}}",
+    "source_manual": "Kézzel létrehozva",
+    "source_runtime_named": "Forrás: {{name}}",
+    "source_runtime_provider": "Forrás: {{provider}} környezet",
+    "source_runtime_unknown": "Forrás: környezet",
+    "source_clawhub": "Forrás: ClawHub",
+    "source_skills_sh": "Forrás: Skills.sh",
+    "source_github": "Forrás: GitHub"
+  },
+  "detail": {
+    "all_skills": "Minden készség",
+    "read_only": "Csak olvasható",
+    "delete_aria": "Készség törlése",
+    "delete_tooltip": "Készség törlése",
+    "supporting_data_warning": "Néhány munkaterületi adat betöltése sikertelen volt. A létrehozó adatai, a környezetnevek vagy a szerkesztési jogosultságok hiányosak lehetnek a következő frissítésig.",
+    "files_label": "Fájlok · {{count}}",
+    "add_file_aria": "Fájl hozzáadása",
+    "add_file_tooltip": "Fájl hozzáadása",
+    "delete_file": "Fájl törlése",
+    "name_aria": "Készség neve",
+    "name_placeholder": "keszseg-neve",
+    "description_label": "Leírás",
+    "description_placeholder": "Egy mondat, ami leírja, mikor használja az ügynök ezt a készséget…",
+    "subline": {
+      "origin_runtime_named": "Helyi környezet · {{name}}",
+      "origin_runtime_provider": "Helyi környezet · {{provider}}",
+      "origin_runtime_unknown": "Helyi környezet",
+      "origin_clawhub": "Importálva · ClawHub",
+      "origin_skills_sh": "Importálva · Skills.sh",
+      "origin_github": "Importálva · GitHub",
+      "origin_workspace": "Munkaterület",
+      "updated_label": "Frissítve: {{when}}",
+      "by_creator": "készítette: {{name}}"
+    },
+    "conflict_banner": {
+      "title": "Valaki más frissítette ezt a készséget",
+      "body": "Az ön szerkesztései megmaradtak. Vesse el az ő változtatásait az elvetéssel, vagy mentse el a sajátjait felülírással."
+    },
+    "save_bar": {
+      "unsaved": "Nem mentett módosítások — mentéskor felülírják az élő készséget",
+      "discard": "Elvetés",
+      "save": "Módosítások mentése",
+      "saving": "Mentés…"
+    },
+    "sidebar": {
+      "metadata": "Metaadatok",
+      "created": "Létrehozva",
+      "updated": "Frissítve",
+      "created_by": "Létrehozta",
+      "files": "Fájlok",
+      "id": "ID",
+      "origin": "Eredet",
+      "used_by_one": "{{count}} ügynök használja",
+      "used_by_other": "{{count}} ügynök használja",
+      "permissions": "Jogosultságok",
+      "permissions_owner": "Ön szerkesztheti és törölheti ezt a készséget. A változtatások az ügynök következő futtatásakor lépnek életbe.",
+      "permissions_locked_creator": "Csak a létrehozó ({{name}}) vagy a munkaterület adminisztrátora szerkesztheti ezt a készséget.",
+      "permissions_locked": "Csak a létrehozó vagy a munkaterület adminisztrátora szerkesztheti ezt a készséget.",
+      "used_by_empty": "Még nincs egyetlen ügynökhöz sem rendelve. Nyissa meg egy ügynök Készségek fülét a hozzárendeléshez."
+    },
+    "origin_card": {
+      "imported_runtime": "Helyi környezetből importálva",
+      "imported_clawhub": "ClawHub-ról importálva",
+      "imported_skills_sh": "Skills.sh-ról importálva",
+      "imported_github": "GitHub-ról importálva",
+      "provider": "szolgáltató · {{provider}}"
+    },
+    "not_found": {
+      "title": "Készség nem található",
+      "fallback": "Lehet, hogy ezt a készséget törölték, vagy elvesztette a hozzáférését.",
+      "back": "Vissza a Készségekhez"
+    },
+    "toast_saved": "Készség mentve",
+    "toast_save_failed": "Nem sikerült menteni a készséget",
+    "toast_deleted": "Készség törölve",
+    "toast_delete_failed": "Nem sikerült törölni a készséget",
+    "delete_dialog": {
+      "title": "Törli a készséget?",
+      "description_with_agents_one": "Ez véglegesen törli a(z) \"{{name}}\" készséget, és eltávolítja {{count}} ügynöktől, aki jelenleg használja.",
+      "description_with_agents_other": "Ez véglegesen törli a(z) \"{{name}}\" készséget, és eltávolítja {{count}} ügynöktől, aki jelenleg használja.",
+      "description_no_agents": "Ez véglegesen törli a(z) \"{{name}}\" készséget, és eltávolítja az összes ügynöktől.",
+      "warning": "Ez a művelet nem vonható vissza.",
+      "cancel": "Mégse",
+      "confirm": "Végleges törlés",
+      "deleting": "Törlés…"
+    },
+    "add_file": {
+      "placeholder": "sablonok/ellenorzes.md",
+      "add": "Hozzáadás",
+      "cancel": "Mégse",
+      "errors": {
+        "empty": "Az útvonal nem lehet üres.",
+        "absolute": "Abszolút útvonalak nem megengedettek.",
+        "double_dot": "Az útvonal nem tartalmazhat \"..\" részeket.",
+        "reserved": "SKILL.md a fő fájl számára van fenntartva.",
+        "exists": "Már létezik fájl ezen az útvonalon."
+      }
+    }
+  },
+  "create": {
+    "back": "Vissza",
+    "back_aria": "Vissza a módszerválasztóhoz",
+    "close": "Bezárás",
+    "close_aria": "Bezárás",
+    "method": {
+      "chooser": {
+        "title": "Új készség",
+        "desc": "Válassza ki, hogyan szeretne készséget hozzáadni ehhez a munkaterülethez."
+      },
+      "manual": {
+        "title": "Létrehozás kézzel",
+        "desc": "Írjon egy új SKILL.md fájlt a nulláról."
+      },
+      "url": {
+        "title": "Importálás URL-ről",
+        "desc": "Töltsön be egy publikált készséget URL alapján. A fájlok szerveroldalon kerülnek letöltésre."
+      },
+      "runtime": {
+        "title": "Másolás környezetből",
+        "desc": "Keressen rá egy helyi környezetre, és emeljen át egyet a lemezen lévő készségei közül ebbe a munkaterületbe."
+      }
+    },
+    "method_card": {
+      "manual_title": "Létrehozás kézzel",
+      "manual_desc": "Kezdjen egy üres SKILL.md-vel, és írja meg a saját utasításait.",
+      "url_title": "Importálás URL-ről",
+      "url_desc": "Töltsön be egy publikált készséget a ClawHub-ról vagy a Skills.sh-ról.",
+      "runtime_title": "Másolás környezetből",
+      "runtime_desc": "Emeljen át egy készségat, amely már telepítve van a helyi környezetében."
+    },
+    "manual": {
+      "name_label": "Név",
+      "name_placeholder": "pl. ellenorzes-segito",
+      "name_hint": "Egyedinek kell lennie a munkaterületen belül.",
+      "description_label": "Leírás",
+      "description_placeholder": "Egy mondat arról, mikor érdemes ezt a készséget egy ügynökhöz rendelni.",
+      "name_conflict_hint": " Próbálkozzon más névvel, és küldje be újra.",
+      "fallback_error": "Nem sikerült létrehozni a készséget",
+      "cancel": "Mégse",
+      "submit": "Készség létrehozása",
+      "submitting": "Létrehozás…",
+      "toast_created": "Készség létrehozva"
+    },
+    "url": {
+      "url_label": "Készség URL",
+      "supported_sources": "Támogatott források",
+      "import": "Importálás",
+      "importing": "Importálás…",
+      "importing_clawhub": "Importálás a ClawHub-ról…",
+      "importing_skills_sh": "Importálás a Skills.sh-ról…",
+      "importing_github": "Importálás a GitHub-ról…",
+      "name_conflict_hint": " Az importált készség neve már létezik — törölje a meglévőt az újbóli próbálkozás előtt.",
+      "fallback_error": "Az importálás sikertelen",
+      "cancel": "Mégse",
+      "toast_imported": "Készség importálva"
+    }
+  },
+  "runtime_import": {
+    "runtime_label": "Környezet",
+    "runtime_placeholder": "Válasszon egy helyi környezetet",
+    "no_local_runtimes_title": "Nincsenek elérhető helyi környezetek",
+    "no_local_runtimes_hint": "Csatlakoztasson egy helyi környezetet a helyi készségek böngészéséhez és importálásához.",
+    "choose_runtime": "Válasszon egy környezetet a folytatáshoz",
+    "must_be_online": "A környezetnek online-nak kell lennie a helyi készségek böngészéséhez.",
+    "load_failed": "Nem sikerült betölteni a környezet helyi készségeit",
+    "not_supported": "Ez a környezet-szolgáltató még nem teszi elérhetővé a helyi készségkészletet.",
+    "no_skills_title": "Nem találhatók helyi készségek",
+    "no_skills_hint": "Ennek a környezetnek még nincsenek feltérképezhető helyi készségei.",
+    "ignored_files_hint": "A szimbolikus linkek, olvashatatlan fájlok, túl nagy fájlok és a nagyon nagy csomagok figyelmen kívül maradnak az importálás során.",
+    "ready": "Kész az importálásra",
+    "into_workspace": "ebbe a munkaterületbe.",
+    "select_skill": "Válasszon egy készséget a folytatáshoz.",
+    "import_button": "Importálás a munkaterületbe",
+    "importing": "Importálás…",
+    "skill_files_one": "{{count}} fájl",
+    "skill_files_other": "{{count}} fájl",
+    "skill_name_label": "Munkaterületi készség neve",
+    "skill_description_label": "Leírás",
+    "skill_description_placeholder": "Opcionális — írja le, mikor használja az ügynök ezt a készséget.",
+    "toast_imported": "Készség importálva",
+    "toast_import_failed": "Nem sikerült importálni a készséget"
+  },
+  "file_tree": {
+    "no_files": "Nincsenek fájlok"
+  },
+  "file_viewer": {
+    "edit_tooltip": "Szerkesztés",
+    "preview_tooltip": "Előnézet",
+    "no_content": "*Még nincs tartalom*",
+    "markdown_placeholder": "Írjon markdown tartalmat...",
+    "raw_placeholder": "Fájl tartalma..."
+  }
+}
+

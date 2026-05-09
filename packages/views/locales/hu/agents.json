@@ -1,0 +1,360 @@
+{
+  "page": {
+    "title": "Ügynökök",
+    "tagline": "AI csapattársak, akik feladatokat vállalnak el, hozzászólnak és frissítik az állapotokat.",
+    "learn_more": "További információ →",
+    "new_agent": "Új ügynök",
+    "search_placeholder": "Ügynökök keresése…",
+    "show_archived": "Archiváltak megjelenítése ({{count}}) →",
+    "of_total": "{{visible}} a(z) {{total}}-ból",
+    "list_load_failed": "Nem sikerült betölteni az ügynököket",
+    "list_load_failed_default": "Valami hiba történt az ügynöklista lekérésekor.",
+    "try_again": "Újra"
+  },
+  "scope": {
+    "mine": "Saját",
+    "all": "Összes"
+  },
+  "sort": {
+    "label_recent": "Legutóbbi aktivitás",
+    "label_name": "Név",
+    "label_runs": "Legtöbb futtatás",
+    "label_created": "Legutóbb létrehozott"
+  },
+  "availability": {
+    "all": "Összes",
+    "online": "Online",
+    "unstable": "Instabil",
+    "offline": "Offline"
+  },
+  "workload": {
+    "working": "Dolgozik",
+    "queued": "Várakozik",
+    "idle": "Inaktív"
+  },
+  "archived": {
+    "active_link": "Aktív ügynökök",
+    "title": "Archivált ügynökök"
+  },
+  "empty": {
+    "title": "Még nincsenek ügynökök",
+    "description": "Hozzon létre egy ügynököt, és rendeljen hozzá feladatokat, mint bármelyik csapattárshoz. A helyi ügynökök az ön gépén futnak; a felhőalapú ügynökök a Multica környezetében."
+  },
+  "no_matches": {
+    "title": "Nincs találat",
+    "search_archived": "Nincs a(z) \"{{query}}\" keresésnek megfelelő archivált ügynök.",
+    "no_archived": "Még nincsenek archivált ügynökök.",
+    "search_active": "Nincs a(z) \"{{query}}\" keresésnek megfelelő ügynök.",
+    "search_active_filtered": "Nincs a(z) \"{{query}}\" keresésnek megfelelő ügynök ebben a szűrőben.",
+    "no_filter_match": "Nincs a szűrőnek megfelelő ügynök."
+  },
+  "columns": {
+    "agent": "Ügynök",
+    "status": "Állapot",
+    "workload": "Terheltség",
+    "runtime": "Környezet",
+    "activity_7d": "Aktivitás (7 nap)",
+    "runs": "Futtatások"
+  },
+  "row": {
+    "you": "Ön",
+    "archived": "Archiválva",
+    "no_description": "Nincs leírás",
+    "fallback_runtime_cloud": "Felhő",
+    "fallback_runtime_local": "Heni",
+    "actions_aria": "Sor műveletei"
+  },
+  "activity_tooltip": {
+    "created_today": "Ma létrehozva",
+    "created_days_ago_one": "{{count}} napja létrehozva",
+    "created_days_ago_other": "{{count}} napja létrehozva",
+    "last_7_days": "Utolsó 7 nap",
+    "no_activity": "Nincs aktivitás",
+    "runs_one": "{{count}} futtatás",
+    "runs_other": "{{count}} futtatás",
+    "failed_suffix": " · {{count}} sikertelen ({{percent}}%)"
+  },
+  "row_actions": {
+    "cancel_all_tasks": "Minden feladat megszakítása",
+    "duplicate": "Duplikálás",
+    "restore": "Visszaállítás",
+    "archive": "Archiválás",
+    "agent_archived_toast": "Ügynök archiválva",
+    "archive_failed_toast": "Nem sikerült archiválni az ügynököt",
+    "agent_restored_toast": "Ügynök visszaállítva",
+    "restore_failed_toast": "Nem sikerült visszaállítani az ügynököt",
+    "no_tasks_to_cancel_toast": "Nincs megszakítható aktív feladat",
+    "cancelled_tasks_toast_one": "{{count}} feladat megszakítva",
+    "cancelled_tasks_toast_other": "{{count}} feladat megszakítva",
+    "cancel_failed_toast": "Nem sikerült megszakítani a feladatokat",
+    "cancel_dialog_title": "Megszakítja \"{{name}}\" összes feladatát?",
+    "cancel_dialog_no_tasks": "Nincsenek megszakítható aktív feladatok.",
+    "cancel_dialog_running_one": "{{count}} fut",
+    "cancel_dialog_queued_one": "{{count}} várakozik",
+    "cancel_dialog_impact_one": "Ez meg fog szakítani {{summary}} feladatot.",
+    "cancel_dialog_impact_other": "Ez meg fog szakítani {{summary}} feladatot.",
+    "cancel_dialog_running_note": " A futó feladatok teljes leállítása akár 5 másodpercig is eltarthat.",
+    "cancel_dialog_irreversible": " A megszakított feladatok nem folytathatók.",
+    "cancel_dialog_keep": "Megtartás",
+    "cancel_dialog_confirm": "Minden feladat megszakítása",
+    "archive_dialog_title": "Archiválja a következőt: \"{{name}}\"?",
+    "archive_dialog_description": "Az ügynök többé nem lesz hozzárendelhető vagy megemlíthető, és minden aktív feladata megszakad. Az előzmények megmaradnak, és később bármikor visszaállíthatja.",
+    "archive_dialog_cancel": "Mégse",
+    "archive_dialog_confirm": "Archiválás"
+  },
+  "detail": {
+    "back_to_agents": "Ügynökök",
+    "back_to_agents_full": "Vissza az ügynökökhöz",
+    "not_found_title": "Az ügynök nem található",
+    "not_found_default": "Lehet, hogy ezt az ügynököt archiválták vagy törölték.",
+    "try_again": "Újra",
+    "archived_banner": "Ez az ügynök archiválva van. Nem rendelhető hozzá feladat és nem említhető meg.",
+    "restore": "Visszaállítás",
+    "archive_dialog_title": "Ügynök archiválása?",
+    "archive_dialog_description": "\"{{name}}\" archiválva lesz. Nem lesz hozzárendelhető vagy megemlíthető, de minden előzmény megmarad. Később visszaállíthatja.",
+    "archive_dialog_cancel": "Mégse",
+    "archive_dialog_confirm": "Archiválás",
+    "more_archive": "Ügynök archiválása",
+    "agent_updated_toast": "Ügynök frissítve",
+    "update_failed_toast": "Nem sikerült frissíteni az ügynököt",
+    "agent_archived_toast": "Ügynök archiválva",
+    "archive_failed_toast": "Nem sikerült archiválni az ügynököt",
+    "agent_restored_toast": "Ügynök visszaállítva",
+    "restore_failed_toast": "Nem sikerült visszaállítani az ügynököt"
+  },
+  "inspector": {
+    "section_properties": "Tulajdonságok",
+    "section_details": "Részletek",
+    "section_skills": "Készségek",
+    "prop_runtime": "Környezet",
+    "prop_model": "Modell",
+    "prop_visibility": "Láthatóság",
+    "prop_concurrency": "Párhuzamosság",
+    "prop_owner": "Tulajdonos",
+    "prop_created": "Létrehozva",
+    "prop_updated": "Frissítve",
+    "no_description_placeholder": "Nincs leírás",
+    "change_avatar_aria": "Avatar módosítása",
+    "avatar_updated_toast": "Avatar frissítve",
+    "avatar_upload_failed_toast": "Nem sikerült feltölteni az avatart",
+    "rename_title": "Ügynök átnevezése",
+    "rename_placeholder": "Ügynök neve",
+    "rename_required": "A név megadása kötelező",
+    "edit_description_title": "Leírás szerkesztése",
+    "description_placeholder": "Mit csinál ez az ügynök?",
+    "save": "Mentés",
+    "cancel": "Mégse"
+  },
+  "skill_attach": {
+    "trigger_aria": "Munkaterületi készség csatolása",
+    "trigger_label": "Csatolás"
+  },
+  "pickers": {
+    "concurrency_tooltip": "Párhuzamosság · legfeljebb {{value}} párhuzamos feladat",
+    "concurrency_range": "Maximális párhuzamos feladatok ({{min}}–{{max}})",
+    "runtime_none": "Nincs környezet",
+    "runtime_tooltip": "Környezet · {{name}} · {{status}}",
+    "runtime_tooltip_none": "Környezet · nincs kiválasztva",
+    "runtime_online": "online",
+    "runtime_offline": "offline",
+    "runtime_owned_by": "tulajdonosa: {{name}}",
+    "runtime_empty": "Nincsenek környezetek",
+    "model_default": "Alapértelmezett",
+    "model_tooltip": "Modell · {{value}}",
+    "model_managed_by_runtime": "A környezet által kezelve",
+    "model_search_placeholder": "Modell keresése vagy azonosító beírása",
+    "model_discovering": "Modellek keresése…",
+    "model_default_badge": "alapértelmezett",
+    "model_empty": "Nincsenek elérhető modellek",
+    "model_empty_with_dot": "Nincsenek elérhető modellek.",
+    "model_custom_tooltip": "A(z) \"{{value}}\" használata egyéni modellazonosítóként",
+    "model_custom_use": "A(z) \"{{value}}\" használata",
+    "model_clear": "Törlés (szolgáltató alapértelmezettje)",
+    "model_clear_title": "Törlés és visszalépés a környezet szolgáltatójának alapértelmezettjéhez"
+  },
+  "model_dropdown": {
+    "label": "Modell",
+    "select_runtime_first": "Előbb válasszon egy környezetet",
+    "default_provider": "Alapértelmezett (szolgáltató)",
+    "runtime_offline_manual": "A környezet offline — adja meg kézzel",
+    "managed_by_runtime_title": "A modellválasztást ez a környezet kezeli.",
+    "managed_by_runtime_hint": "Konfigurálja a modellt a környezet gazdagépén (pl. a Hermes a saját konfigurációs fájljából olvassa be).",
+    "discovery_failed": "a felderítés sikertelen",
+    "clear_full": "Választás törlése (szolgáltató alapértelmezettje)"
+  },
+  "tabs": {
+    "activity": "Aktivitás",
+    "instructions": "Utasítások",
+    "skills": "Készségek",
+    "environment": "Környezet",
+    "custom_args": "Egyéni argumentumok",
+    "discard_dialog_title": "Elveti a nem mentett módosításokat?",
+    "discard_dialog_description": "Nem mentett módosításai vannak ezen a fülön. Ha most elhagyja, ezek el fognak veszni.",
+    "discard_keep": "Szerkesztés folytatása",
+    "discard_confirm": "Módosítások elvetése"
+  },
+  "create_dialog": {
+    "title_create": "Ügynök létrehozása",
+    "title_duplicate": "Ügynök duplikálása",
+    "description_create": "Új AI ügynök létrehozása a munkaterületéhez.",
+    "description_duplicate": "Új ügynök létrehozása \"{{name}}\" alapján. Az utasítások, környezeti változók és készségek másolásra kerülnek.",
+    "name_label": "Név",
+    "name_placeholder": "pl. Mélykutató ügynök",
+    "description_label": "Leírás",
+    "description_placeholder": "Mit csinál ez az ügynök?",
+    "visibility_label": "Láthatóság",
+    "runtime_label": "Környezet",
+    "runtime_filter_mine": "Saját",
+    "runtime_filter_all": "Összes",
+    "runtime_loading": "Környezetek betöltése...",
+    "runtime_none": "Nincs elérhető környezet",
+    "runtime_register_first": "Ügynök létrehozása előtt regisztráljon egy környezetet",
+    "runtime_cloud_badge": "Felhő",
+    "duplicate_copy_suffix": " (Másolat)",
+    "create": "Létrehozás",
+    "creating": "Létrehozás...",
+    "cancel": "Mégse",
+    "create_failed_toast": "Nem sikerült létrehozni az ügynököt"
+  },
+  "tab_body": {
+    "common": {
+      "save": "Mentés",
+      "add": "Hozzáadás",
+      "unsaved_changes": "Nem mentett módosítások"
+    },
+    "instructions": {
+      "intro": "Határozza meg az ügynök identitását és munkastílusát. Minden feladatnál bekerül az ügynök kontextusába. A Markdown támogatott.",
+      "placeholder": "Határozza meg az ügynök szerepét, szakértelmét és munkastílusát.\n\n# Példa\nÖn egy frontend mérnök, aki a React és TypeScript technológiákra specializálódott.\n\n## Munkastílus\n- Kicsi, fókuszált PR-okat ír — logikai változásonként egy commit\n- Preferálja a kompozíciót az öröklődéssel szemben\n- Mindig adjon hozzá unit teszteket az új komponensekhez\n\n## Korlátok\n- Ne módosítsa a közös típusokat kifejezett jóváhagyás nélkül\n- Kövesse a meglévő mintákat a features/ mappában"
+    },
+    "env": {
+      "intro_readonly": "Az ügynök folyamatába kerül injektálásra indításkor. Az értékek rejtettek — csak az ügynök tulajdonosa vagy a munkaterület adminisztrátora láthatja és szerkesztheti őket.",
+      "empty_readonly": "Nincsenek konfigurált környezeti változók.",
+      "intro_prefix": "Az ügynök folyamatába kerül injektálásra indításkor (pl. ",
+      "intro_separator": ", ",
+      "intro_suffix": ").",
+      "key_placeholder": "KULCS",
+      "value_placeholder": "érték",
+      "show_value_aria": "Érték megjelenítése",
+      "hide_value_aria": "Érték elrejtése",
+      "remove_aria": "Változó eltávolítása",
+      "duplicate_keys_toast": "Duplikált környezeti változó kulcsok",
+      "saved_toast": "Környezeti változók mentve",
+      "save_failed_toast": "Nem sikerült menteni a környezeti változókat"
+    },
+    "custom_args": {
+      "intro": "További CLI argumentumok, amelyek az ügynök parancsához fűződnek indításkor. A több tokenből álló flagek osztozhatnak egy soron — a szóközök mentén lesznek felosztva, mielőtt átadásra kerülnének a CLI-nek.",
+      "launch_mode_prefix": "Indítási mód: ",
+      "launch_mode_args_placeholder": "<argumentumok>",
+      "input_placeholder": "--flag érték",
+      "remove_aria": "Argumentum eltávolítása",
+      "saved_toast": "Egyéni argumentumok mentve",
+      "save_failed_toast": "Nem sikerült menteni az egyéni argumentumokat"
+    },
+    "skills": {
+      "intro": "Az ügynökhöz rendelt munkaterületi készségek. A helyi környezet készségei mindig automatikusan elérhetőek.",
+      "add_action": "Készség hozzáadása",
+      "import_hint": "Az importálás létrehoz egy munkaterületi másolatot, amelyet a csapata szerkeszthet és újrafelhasználhat.",
+      "empty_title": "Nincsenek hozzárendelt készségek",
+      "empty_hint": "Adjon hozzá munkaterületi készségeket, hogy megossza a csapat tudását ezzel az ügynökkel.",
+      "remove_failed_toast": "Nem sikerült eltávolítani a készséget",
+      "add_dialog_title": "Készség hozzáadása",
+      "add_dialog_description": "Válasszon egy munkaterületi készséget, amelyet hozzárendel ehhez az ügynökhöz.",
+      "add_dialog_search_placeholder": "Készségek keresése",
+      "add_dialog_empty": "Minden munkaterületi készség hozzá van már rendelve.",
+      "add_dialog_no_match": "Nincs a keresésnek megfelelő készség.",
+      "add_dialog_cancel": "Mégse",
+      "add_failed_toast": "Nem sikerült hozzáadni a készséget"
+    },
+    "activity": {
+      "section_now": "Most",
+      "section_last_30d": "Utolsó 30 nap",
+      "section_recent": "Legutóbbi munka",
+      "subtitle_no_active": "Nincs aktív munka",
+      "subtitle_active_one": "{{count}} aktív feladat",
+      "subtitle_active_other": "{{count}} aktív feladat",
+      "subtitle_performance": "Teljesítmény",
+      "subtitle_no_recent": "Még semmi nem fejeződött be",
+      "subtitle_recent_progress": "{{shown}} a(z) {{total}}-ból",
+      "subtitle_recent_latest": "legutóbbi {{count}}",
+      "empty_now": "This agent isn't running anything right now.",
+      "empty_30d": "No completions in the last 30 days.",
+      "empty_recent": "This agent hasn't completed anything yet.",
+      "show_more": "Több megjelenítése →",
+      "runs_one": "futtatás",
+      "runs_other": "futtatás",
+      "success_pct": "{{percent}}% siker",
+      "avg_duration": "átlag {{value}}",
+      "failed_count": "{{count}} sikertelen",
+      "source_issue": "Feladat",
+      "source_chat": "Chat",
+      "source_autopilot": "Autopilot",
+      "source_untracked": "Követetlen",
+      "source_quick_create": "Gyors létrehozás",
+      "source_creating_issue": "Feladat létrehozása",
+      "source_chat_session": "Chat munkamenet",
+      "source_autopilot_run": "Autopilot futtatás",
+      "issue_short_fallback": "Feladat {{prefix}}…",
+      "triggered_by": "Indította:",
+      "open_issue_aria": "Feladat megnyitása",
+      "open_issue_tooltip": "Feladat megnyitása",
+      "transcript_tooltip": "Napló megtekintése",
+      "cancel_task_aria": "Feladat megszakítása",
+      "cancel_task_tooltip": "Feladat megszakítása",
+      "cancelling_tooltip": "Megszakítás…",
+      "cancel_failed_toast": "Nem sikerült megszakítani a feladatot",
+      "started_prefix": "Elkezdve: {{when}}",
+      "dispatched_prefix": "Kiosztva: {{when}}",
+      "queued_prefix": "Várakozik: {{when}}"
+    }
+  },
+  "char_counter": {
+    "over_limit": " · {{count}} karakterrel túllépve"
+  },
+  "presence": {
+    "queue_badge": "+{{count}} várakozik"
+  },
+  "visibility": {
+    "private": {
+      "label": "Személyes",
+      "tooltip": "Személyes · csak ön és a munkaterület adminisztrátorai használhatják ezt az ügynököt"
+    },
+    "workspace": {
+      "label": "Munkaterület",
+      "tooltip": "Munkaterület · ebben a munkaterületben mindenki használhatja ezt az ügynököt"
+    }
+  },
+  "profile_card": {
+    "unavailable": "Ügynök nem érhető el",
+    "detail_link": "Részletek →",
+    "runtime_label": "Környezet",
+    "skills_label": "Készségek",
+    "owner_label": "Tulajdonos",
+    "unknown_runtime": "Ismeretlen környezet"
+  },
+  "transcript": {
+    "dialog_title": "Ügynök futtatási naplója",
+    "status_running": "Fut",
+    "status_completed": "Befejezve",
+    "status_failed": "Sikertelen",
+    "filter": "Szűrés",
+    "clear_filters": "Szűrők törlése",
+    "tool_calls_one": "{{count}} eszközhívás",
+    "tool_calls_other": "{{count}} eszközhívás",
+    "events_one": "{{count}} esemény",
+    "events_other": "{{count}} esemény",
+    "events_filtered": "{{shown}} a(z) {{total}} eseményből",
+    "copy_all": "Összes másolása",
+    "copy_filtered": "Szűrt másolása",
+    "copied": "Másolva",
+    "waiting_events": "Várakozás eseményekre...",
+    "no_data": "Nincsenek rögzített futtatási adatok."
+  },
+  "task_failure": {
+    "agent_error": "Ügynök futtatási hiba",
+    "timeout": "Feladat időtúllépés",
+    "runtime_offline": "Daemon offline",
+    "runtime_recovery": "Daemon újraindult",
+    "manual": "Felhasználó által megszakítva"
+  }
+}
+

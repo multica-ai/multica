@@ -1,0 +1,69 @@
+{
+  "page": {
+    "title": "Bejövő üzenetek",
+    "back": "Bejövő üzenetek"
+  },
+  "menu": {
+    "mark_all_read": "Összes megjelölése olvasottként",
+    "archive_all": "Összes archiválása",
+    "archive_all_read": "Összes olvasott archiválása",
+    "archive_completed": "Befejezettek archiválása"
+  },
+  "list": {
+    "empty": "Nincsenek értesítések",
+    "mark_done_tooltip": "Megjelölés készként",
+    "archive_tooltip": "Archiválás",
+    "time": {
+      "just_now": "épp most",
+      "minutes": "{{count}}p",
+      "hours": "{{count}}ó",
+      "days": "{{count}}n"
+    }
+  },
+  "detail": {
+    "select_prompt": "Válasszon egy értesítést a részletek megtekintéséhez",
+    "empty": "A bejövő üzenetei mappája üres",
+    "original_input": "Eredeti bemenet",
+    "edit_advanced": "Szerkesztés haladó űrlapként",
+    "archive": "Archiválás"
+  },
+  "types": {
+    "issue_assigned": "Hozzárendelve",
+    "unassigned": "Hozzárendelés törölve",
+    "assignee_changed": "Felelős megváltozott",
+    "status_changed": "Állapot megváltozott",
+    "priority_changed": "Prioritás megváltozott",
+    "due_date_changed": "Határidő megváltozott",
+    "new_comment": "Új hozzászólás",
+    "mentioned": "Megemlítve",
+    "review_requested": "Ellenőrzés kérve",
+    "task_completed": "Feladat befejezve",
+    "task_failed": "Feladat sikertelen",
+    "agent_blocked": "Ügynök blokkolva",
+    "agent_completed": "Ügynök befejezte",
+    "reaction_added": "Reagált",
+    "quick_create_done": "Létrehozva ügynökkel",
+    "quick_create_failed": "Ügynökkel való létrehozás sikertelen"
+  },
+  "labels": {
+    "set_status_to": "Állapot beállítása:",
+    "set_priority_to": "Prioritás beállítása:",
+    "assigned_to": "Hozzárendelve: {{name}}",
+    "removed_assignee": "Felelős eltávolítva",
+    "set_due_date_to": "Határidő beállítása: {{date}}",
+    "removed_due_date": "Határidő eltávolítva",
+    "reacted_to_comment": "Reagált {{emoji}} a hozzászólásodra",
+    "created_with_agent": "Ügynökkel létrehozva: {{identifier}}",
+    "failed_with_detail": "Hiba: {{detail}}"
+  },
+  "errors": {
+    "mark_read_failed": "Nem sikerült olvasottnak jelölni",
+    "archive_failed": "Nem sikerült archiválni",
+    "mark_done_failed": "Nem sikerült készként jelölni",
+    "mark_all_read_failed": "Nem sikerült az összeset olvasottnak jelölni",
+    "archive_all_failed": "Nem sikerült az összeset archiválni",
+    "archive_all_read_failed": "Nem sikerült az olvasottakat archiválni",
+    "archive_completed_failed": "Nem sikerült a befejezetteket archiválni"
+  }
+}
+

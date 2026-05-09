@@ -1,0 +1,15 @@
+{
+  "role": {
+    "owner": "Tulajdonos",
+    "admin": "Admin",
+    "member": "Tag"
+  },
+  "card": {
+    "unavailable": "A tag nem érhető el",
+    "agents_section": "Ügynökök ({{count}})",
+    "detail_link": "Részletek →",
+    "more_agents_one": "és további {{count}} ügynök",
+    "more_agents_other": "és további {{count}} ügynök"
+  }
+}
+

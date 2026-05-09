@@ -1,0 +1,39 @@
+{
+  "page": {
+    "breadcrumb": "Saját feladatok",
+    "workspace_fallback": "Munkaterület",
+    "empty_title": "Nincsenek önhöz rendelt feladatok",
+    "empty_description": "Az ön által létrehozott vagy önhöz rendelt feladatok itt fognak megjelenni."
+  },
+  "header": {
+    "scope": {
+      "assigned_label": "Hozzám rendelt",
+      "assigned_description": "Nekem kiosztott feladatok",
+      "created_label": "Általam létrehozott",
+      "created_description": "Az általam létrehozott feladatok",
+      "agents_label": "Ügynökeim",
+      "agents_description": "Az ügynökeimhez rendelt feladatok"
+    },
+    "filter_button": "Szűrő",
+    "filter_status": "Állapot",
+    "filter_priority": "Prioritás",
+    "issue_count_one": "{{count}} feladat",
+    "issue_count_other": "{{count}} feladat",
+    "reset_filters": "Összes szűrő törlése",
+    "display_settings": "Megjelenítési beállítások",
+    "ordering": "Sorrend",
+    "ascending": "Növekvő",
+    "descending": "Csökkenő",
+    "card_properties": "Kártya tulajdonságai",
+    "view_board": "Tábla nézet",
+    "view_list": "Lista nézet",
+    "view_label": "Nézet",
+    "view_board_short": "Tábla",
+    "view_list_short": "Lista",
+    "sort_manual": "Kézi"
+  },
+  "errors": {
+    "move_failed": "Nem sikerült áthelyezni a feladatot"
+  }
+}
+

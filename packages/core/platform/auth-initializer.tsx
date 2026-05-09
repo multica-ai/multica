@@ -53,6 +53,8 @@ export function AuthInitializer({
         configStore.getState().setAuthConfig({
           allowSignup: cfg.allow_signup,
           googleClientId: cfg.google_client_id,
+          customLogoUrl: cfg.custom_logo_url,
+          loginText: cfg.login_page_text,
         });
         if (cfg.posthog_key) {
           initAnalytics({

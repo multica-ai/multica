@@ -51,6 +51,8 @@ export interface User {
   starter_content_state: string | null;
   /** Preferred UI language. null means "follow client/system". */
   language: string | null;
+  /** Whether the user has global system administrator privileges. */
+  is_system_admin: boolean;
   created_at: string;
   updated_at: string;
 }

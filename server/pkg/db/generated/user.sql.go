@@ -12,19 +12,25 @@ import (
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO "user" (name, email, avatar_url)
-VALUES ($1, $2, $3)
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language
+INSERT INTO "user" (name, email, avatar_url, is_system_admin)
+VALUES ($1, $2, $3, $4)
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, is_system_admin
 `
 
 type CreateUserParams struct {
-	Name      string      `json:"name"`
-	Email     string      `json:"email"`
-	AvatarUrl pgtype.Text `json:"avatar_url"`
+	Name          string      `json:"name"`
+	Email         string      `json:"email"`
+	AvatarUrl     pgtype.Text `json:"avatar_url"`
+	IsSystemAdmin bool        `json:"is_system_admin"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRow(ctx, createUser, arg.Name, arg.Email, arg.AvatarUrl)
+	row := q.db.QueryRow(ctx, createUser,
+		arg.Name,
+		arg.Email,
+		arg.AvatarUrl,
+		arg.IsSystemAdmin,
+	)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -39,12 +45,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CloudWaitlistReason,
 		&i.StarterContentState,
 		&i.Language,
+		&i.IsSystemAdmin,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language FROM "user"
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, is_system_admin FROM "user"
 WHERE id = $1
 `
 
@@ -64,12 +71,13 @@ func (q *Queries) GetUser(ctx context.Context, id pgtype.UUID) (User, error) {
 		&i.CloudWaitlistReason,
 		&i.StarterContentState,
 		&i.Language,
+		&i.IsSystemAdmin,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language FROM "user"
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, is_system_admin FROM "user"
 WHERE email = $1
 `
 
@@ -89,6 +97,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.CloudWaitlistReason,
 		&i.StarterContentState,
 		&i.Language,
+		&i.IsSystemAdmin,
 	)
 	return i, err
 }
@@ -99,7 +108,7 @@ UPDATE "user" SET
     cloud_waitlist_reason = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, is_system_admin
 `
 
 type JoinCloudWaitlistParams struct {
@@ -108,9 +117,6 @@ type JoinCloudWaitlistParams struct {
 	CloudWaitlistReason pgtype.Text `json:"cloud_waitlist_reason"`
 }
 
-// Records interest in cloud runtimes. Does NOT mark onboarding
-// complete — the user still has to pick a real path (CLI / Skip)
-// in Step 3. Repeating the call overwrites email + reason.
 func (q *Queries) JoinCloudWaitlist(ctx context.Context, arg JoinCloudWaitlistParams) (User, error) {
 	row := q.db.QueryRow(ctx, joinCloudWaitlist, arg.ID, arg.CloudWaitlistEmail, arg.CloudWaitlistReason)
 	var i User
@@ -127,6 +133,7 @@ func (q *Queries) JoinCloudWaitlist(ctx context.Context, arg JoinCloudWaitlistPa
 		&i.CloudWaitlistReason,
 		&i.StarterContentState,
 		&i.Language,
+		&i.IsSystemAdmin,
 	)
 	return i, err
 }
@@ -136,7 +143,7 @@ UPDATE "user" SET
     onboarded_at = COALESCE(onboarded_at, now()),
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, is_system_admin
 `
 
 func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (User, error) {
@@ -155,6 +162,7 @@ func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (User, 
 		&i.CloudWaitlistReason,
 		&i.StarterContentState,
 		&i.Language,
+		&i.IsSystemAdmin,
 	)
 	return i, err
 }
@@ -164,7 +172,7 @@ UPDATE "user" SET
     onboarding_questionnaire = COALESCE($1, onboarding_questionnaire),
     updated_at = now()
 WHERE id = $2
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, is_system_admin
 `
 
 type PatchUserOnboardingParams struct {
@@ -188,6 +196,7 @@ func (q *Queries) PatchUserOnboarding(ctx context.Context, arg PatchUserOnboardi
 		&i.CloudWaitlistReason,
 		&i.StarterContentState,
 		&i.Language,
+		&i.IsSystemAdmin,
 	)
 	return i, err
 }
@@ -197,7 +206,7 @@ UPDATE "user" SET
     starter_content_state = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, is_system_admin
 `
 
 type SetStarterContentStateParams struct {
@@ -205,11 +214,6 @@ type SetStarterContentStateParams struct {
 	StarterContentState pgtype.Text `json:"starter_content_state"`
 }
 
-// Atomically transition starter_content_state. The handler is
-// responsible for checking the current value first (to decide between
-// "transition NULL -> imported and run the seeding" vs "already
-// decided, short-circuit"). Using COALESCE here would swallow the
-// transition, so this is a straight assignment.
 func (q *Queries) SetStarterContentState(ctx context.Context, arg SetStarterContentStateParams) (User, error) {
 	row := q.db.QueryRow(ctx, setStarterContentState, arg.ID, arg.StarterContentState)
 	var i User
@@ -226,6 +230,7 @@ func (q *Queries) SetStarterContentState(ctx context.Context, arg SetStarterCont
 		&i.CloudWaitlistReason,
 		&i.StarterContentState,
 		&i.Language,
+		&i.IsSystemAdmin,
 	)
 	return i, err
 }
@@ -235,16 +240,18 @@ UPDATE "user" SET
     name = COALESCE($2, name),
     avatar_url = COALESCE($3, avatar_url),
     language = COALESCE($4, language),
+    is_system_admin = COALESCE($5, is_system_admin),
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, is_system_admin
 `
 
 type UpdateUserParams struct {
-	ID        pgtype.UUID `json:"id"`
-	Name      string      `json:"name"`
-	AvatarUrl pgtype.Text `json:"avatar_url"`
-	Language  pgtype.Text `json:"language"`
+	ID            pgtype.UUID `json:"id"`
+	Name          string      `json:"name"`
+	AvatarUrl     pgtype.Text `json:"avatar_url"`
+	Language      pgtype.Text `json:"language"`
+	IsSystemAdmin pgtype.Bool `json:"is_system_admin"`
 }
 
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {
@@ -253,6 +260,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		arg.Name,
 		arg.AvatarUrl,
 		arg.Language,
+		arg.IsSystemAdmin,
 	)
 	var i User
 	err := row.Scan(
@@ -268,6 +276,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.CloudWaitlistReason,
 		&i.StarterContentState,
 		&i.Language,
+		&i.IsSystemAdmin,
 	)
 	return i, err
 }
