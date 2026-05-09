@@ -115,6 +115,14 @@ SELECT * FROM agent_runtime
 WHERE workspace_id = $1 AND owner_id = $2
 ORDER BY created_at ASC;
 
+-- name: UpdateAgentRuntimeVisibility :one
+-- Owner-only mutation, gated by the handler. The visibility CHECK constraint
+-- on the column rejects unknown values at the DB layer as a backstop.
+UPDATE agent_runtime
+SET visibility = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: DeleteAgentRuntime :exec
 DELETE FROM agent_runtime WHERE id = $1;
 

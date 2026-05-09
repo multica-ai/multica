@@ -26,6 +26,7 @@ type AgentRuntimeResponse struct {
 	DeviceInfo   string  `json:"device_info"`
 	Metadata     any     `json:"metadata"`
 	OwnerID      *string `json:"owner_id"`
+	Visibility   string  `json:"visibility"`
 	LastSeenAt   *string `json:"last_seen_at"`
 	CreatedAt    string  `json:"created_at"`
 	UpdatedAt    string  `json:"updated_at"`
@@ -52,6 +53,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		DeviceInfo:   rt.DeviceInfo,
 		Metadata:     metadata,
 		OwnerID:      uuidToPtr(rt.OwnerID),
+		Visibility:   rt.Visibility,
 		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),
@@ -385,12 +387,79 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]AgentRuntimeResponse, len(runtimes))
-	for i, rt := range runtimes {
-		resp[i] = runtimeToResponse(rt)
+	// Hide private runtimes from anyone but the owner. Per #1804 / PR #365
+	// upstream design, "private" is literal: even workspace admins/owners
+	// don't see them in the list — they can be made workspace-visible by
+	// the owner if shared access is needed. Read the user id once; an
+	// empty currentUserID (e.g. ?owner=me already gated on it) leaves the
+	// filter inert, which is the correct behavior for that branch.
+	currentUserID := requestUserID(r)
+	resp := make([]AgentRuntimeResponse, 0, len(runtimes))
+	for _, rt := range runtimes {
+		if rt.Visibility == "private" && uuidToString(rt.OwnerID) != currentUserID {
+			continue
+		}
+		resp = append(resp, runtimeToResponse(rt))
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// UpdateAgentRuntimeRequest is the body for PATCH /api/runtimes/{id}.
+// Only the runtime owner can update; admins are intentionally NOT bypassed
+// for visibility — "private" means private from the admin too. They can
+// always ask the owner to flip it back to "workspace" if needed.
+type UpdateAgentRuntimeRequest struct {
+	Visibility *string `json:"visibility"`
+}
+
+func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return
+	}
+
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	if !rt.OwnerID.Valid || uuidToString(rt.OwnerID) != userID {
+		writeError(w, http.StatusForbidden, "only the runtime owner can update this runtime")
+		return
+	}
+
+	var req UpdateAgentRuntimeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Visibility != nil {
+		v := *req.Visibility
+		if v != "workspace" && v != "private" {
+			writeError(w, http.StatusBadRequest, "visibility must be 'workspace' or 'private'")
+			return
+		}
+		rt, err = h.Queries.UpdateAgentRuntimeVisibility(r.Context(), db.UpdateAgentRuntimeVisibilityParams{
+			ID:         runtimeUUID,
+			Visibility: v,
+		})
+		if err != nil {
+			slog.Warn("update runtime visibility failed", "error", err, "runtime_id", runtimeID)
+			writeError(w, http.StatusInternalServerError, "failed to update runtime")
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, runtimeToResponse(rt))
 }
 
 // DeleteAgentRuntime deletes a runtime after permission and dependency checks.

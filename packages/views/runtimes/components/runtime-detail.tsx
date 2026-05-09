@@ -6,15 +6,24 @@ import {
   Trash2,
   ChevronRight,
   Cpu,
+  Globe,
   Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
-import type { AgentRuntime, Agent, MemberWithUser } from "@multica/core/types";
+import type {
+  AgentRuntime,
+  Agent,
+  MemberWithUser,
+  RuntimeVisibility,
+} from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useDeleteRuntime } from "@multica/core/runtimes/mutations";
+import {
+  useDeleteRuntime,
+  useUpdateRuntimeVisibility,
+} from "@multica/core/runtimes/mutations";
 import { deriveRuntimeHealth } from "@multica/core/runtimes";
 import {
   type AgentPresenceDetail,
@@ -205,13 +214,14 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
             <UsageSection runtimeId={runtime.id} />
           </div>
 
-          {/* Right rail: serving agents + diagnostics */}
+          {/* Right rail: serving agents + visibility + diagnostics */}
           <div className="space-y-4">
             <ServingAgentsCard
               agents={servingAgents}
               presenceMap={presenceMap}
               agentHref={(id) => paths.agentDetail(id)}
             />
+            <VisibilityCard runtime={runtime} isRuntimeOwner={!!isRuntimeOwner} />
             <DiagnosticsCard
               runtime={runtime}
               cliVersion={cliVersion}
@@ -480,6 +490,101 @@ function ServingAgentsCard({
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// VisibilityCard — runtime owner controls workspace/private visibility.
+// Non-owners (including admins) see a read-only label so they understand
+// the row's semantics, but can't change it. List-level filtering means
+// non-owners don't see "private" runtimes at all, so they only ever land
+// here on workspace-visibility runtimes — but the label still fires for
+// completeness if e.g. they navigate via a stale link.
+function VisibilityCard({
+  runtime,
+  isRuntimeOwner,
+}: {
+  runtime: AgentRuntime;
+  isRuntimeOwner: boolean;
+}) {
+  const { t } = useT("runtimes");
+  const wsId = useWorkspaceId();
+  const mutation = useUpdateRuntimeVisibility(wsId);
+
+  const flip = (visibility: RuntimeVisibility) => {
+    if (visibility === runtime.visibility || mutation.isPending) return;
+    mutation.mutate(
+      { runtimeId: runtime.id, visibility },
+      {
+        onSuccess: () => toast.success(t(($) => $.detail.visibility_toast_updated)),
+        onError: (e) =>
+          toast.error(e instanceof Error ? e.message : t(($) => $.detail.visibility_toast_failed)),
+      },
+    );
+  };
+
+  if (!isRuntimeOwner) {
+    const Icon = runtime.visibility === "private" ? Lock : Globe;
+    const label =
+      runtime.visibility === "private"
+        ? t(($) => $.detail.visibility_static_private)
+        : t(($) => $.detail.visibility_static_workspace);
+    return (
+      <div className="rounded-lg border">
+        <div className="border-b px-4 py-2.5">
+          <span className="text-xs font-semibold">{t(($) => $.detail.visibility_title)}</span>
+        </div>
+        <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+          <Icon className="h-4 w-4 shrink-0" />
+          {label}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border">
+      <div className="border-b px-4 py-2.5">
+        <span className="text-xs font-semibold">{t(($) => $.detail.visibility_title)}</span>
+      </div>
+      <div className="flex flex-col gap-2 p-4">
+        <button
+          type="button"
+          onClick={() => flip("workspace")}
+          disabled={mutation.isPending}
+          className={`flex items-center gap-2 rounded-md border px-3 py-2.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            runtime.visibility === "workspace"
+              ? "border-primary bg-primary/5"
+              : "border-border hover:bg-muted"
+          }`}
+        >
+          <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <div>
+            <div className="font-medium">{t(($) => $.detail.visibility_workspace)}</div>
+            <div className="text-xs text-muted-foreground">
+              {t(($) => $.detail.visibility_workspace_hint)}
+            </div>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => flip("private")}
+          disabled={mutation.isPending}
+          className={`flex items-center gap-2 rounded-md border px-3 py-2.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            runtime.visibility === "private"
+              ? "border-primary bg-primary/5"
+              : "border-border hover:bg-muted"
+          }`}
+        >
+          <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <div>
+            <div className="font-medium">{t(($) => $.detail.visibility_private)}</div>
+            <div className="text-xs text-muted-foreground">
+              {t(($) => $.detail.visibility_private_hint)}
+            </div>
+          </div>
+        </button>
+      </div>
     </div>
   );
 }

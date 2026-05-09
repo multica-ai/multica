@@ -4,6 +4,8 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
+export type RuntimeVisibility = "workspace" | "private";
+
 export interface RuntimeDevice {
   id: string;
   workspace_id: string;
@@ -16,6 +18,7 @@ export interface RuntimeDevice {
   device_info: string;
   metadata: Record<string, unknown>;
   owner_id: string | null;
+  visibility: RuntimeVisibility;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;

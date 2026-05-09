@@ -434,6 +434,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !canBindAgentToRuntime(h, w, r, runtime, ownerID, workspaceID) {
+		return
+	}
+
 	// Probe workspace agent count BEFORE the insert so the funnel has a
 	// clean "first agent ever in this workspace" signal — Step 4 of
 	// onboarding always lands in this branch. A non-fatal read: if the
@@ -564,6 +568,29 @@ func redactMcpConfig(resp *AgentResponse) {
 	}
 }
 
+// canBindAgentToRuntime gates agent create / runtime-rebind on whether the
+// caller may use the chosen runtime. Allowed iff the caller is the runtime
+// owner OR a workspace owner/admin (per the upstream design discussed in
+// multica-ai/multica#1804 and multica-ai/multica#365). Unowned legacy
+// runtimes (NULL owner_id) are admin/owner-only — without an owner there
+// is no claim to delegate.
+//
+// On denial writes a 403 and returns false; callers must return immediately.
+func canBindAgentToRuntime(h *Handler, w http.ResponseWriter, r *http.Request, runtime db.AgentRuntime, callerUserID, workspaceID string) bool {
+	if runtime.OwnerID.Valid && uuidToString(runtime.OwnerID) == callerUserID {
+		return true
+	}
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if roleAllowed(member.Role, "owner", "admin") {
+		return true
+	}
+	writeError(w, http.StatusForbidden, "you can only bind agents to your own runtime; ask a workspace admin if you need to use someone else's runtime")
+	return false
+}
+
 // canManageAgent checks whether the current user can update or archive an agent.
 // Only the agent owner or workspace owner/admin can manage any agent,
 // regardless of whether it is public or private.
@@ -646,6 +673,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid runtime_id")
+			return
+		}
+		if !canBindAgentToRuntime(h, w, r, runtime, requestUserID(r), uuidToString(agent.WorkspaceID)) {
 			return
 		}
 		params.RuntimeID = runtime.ID
