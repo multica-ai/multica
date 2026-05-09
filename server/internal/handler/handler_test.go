@@ -1484,9 +1484,9 @@ func TestTriggerAutopilot_UsesManualRequesterAsTriggerActor(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO autopilot (
 			workspace_id, title, assignee_id, execution_mode, status,
-			created_by_type, created_by_id, priority
+			created_by_type, created_by_id
 		)
-		VALUES ($1, 'manual trigger actor test', $2, 'run_only', 'active', 'member', $3, 'medium')
+		VALUES ($1, 'manual trigger actor test', $2, 'run_only', 'active', 'member', $3)
 		RETURNING id
 	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
 		t.Fatalf("setup: create autopilot: %v", err)

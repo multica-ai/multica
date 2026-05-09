@@ -34,7 +34,7 @@ func setupChatTestFixture(t *testing.T) (sessionID, userMessageID, assistantMess
 	var sid string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
-		SELECT id, id, $1, 'Test Chat Session', 'active'
+		SELECT workspace_id, id, $1, 'Test Chat Session', 'active'
 		FROM agent
 		WHERE workspace_id = $2
 		LIMIT 1
@@ -375,9 +375,11 @@ func TestDeleteChatMessage_Success_DeleteAssistantMessage_AsOwner(t *testing.T) 
 func TestDeleteChatMessage_Error_SessionNotFound(t *testing.T) {
 	t.Parallel()
 
-	req := newRequest("DELETE", "/api/chat/sessions/nonexistent/messages/xyz", nil)
-	req = withURLParam(req, "sessionId", "nonexistent")
-	req = withURLParam(req, "messageId", "xyz")
+	fakeSessionID := "00000000-0000-0000-0000-000000000099"
+	fakeMessageID := "00000000-0000-0000-0000-000000000098"
+	req := newRequest("DELETE", "/api/chat/sessions/"+fakeSessionID+"/messages/"+fakeMessageID, nil)
+	req = withURLParam(req, "sessionId", fakeSessionID)
+	req = withURLParam(req, "messageId", fakeMessageID)
 	req = withWorkspaceContext(req, testWorkspaceID)
 
 	w := httptest.NewRecorder()
@@ -651,7 +653,7 @@ func TestDeleteChatMessage_Error_InvalidRole(t *testing.T) {
 	var sid string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
-		SELECT id, id, $1, 'Test Chat Session', 'active'
+		SELECT workspace_id, id, $1, 'Test Chat Session', 'active'
 		FROM agent
 		WHERE workspace_id = $2
 		LIMIT 1
@@ -703,11 +705,12 @@ func TestDeleteChatMessage_Error_UserNotCreator(t *testing.T) {
 
 	// Create another user
 	var otherUserID string
+	otherEmail := fmt.Sprintf("other-%s@multica.ai", t.Name())
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
-		VALUES ('Other User', 'other-test@multica.ai')
+		VALUES ('Other User', $1)
 		RETURNING id
-	`).Scan(&otherUserID); err != nil {
+	`, otherEmail).Scan(&otherUserID); err != nil {
 		t.Fatalf("failed to create other user: %v", err)
 	}
 	otherUserIDStr := util.UUIDToString(util.MustParseUUID(otherUserID))
@@ -724,7 +727,7 @@ func TestDeleteChatMessage_Error_UserNotCreator(t *testing.T) {
 	var sid string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
-		SELECT id, id, $1, 'Test Chat Session', 'active'
+		SELECT workspace_id, id, $1, 'Test Chat Session', 'active'
 		FROM agent
 		WHERE workspace_id = $2
 		LIMIT 1
