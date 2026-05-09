@@ -33,6 +33,7 @@ import {
   FolderKanban,
   X,
   Zap,
+  Rocket,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -75,6 +76,7 @@ import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
+import { shipProjectsOptions } from "@multica/core/ship";
 import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
 import { ProjectIcon } from "../projects/components/project-icon";
@@ -109,6 +111,7 @@ type NavKey =
   | "memory"
   | "autopilots"
   | "channels"
+  | "ship"
   | "agents"
   | "runtimes"
   | "skills"
@@ -123,6 +126,7 @@ type NavLabelKey =
   | "memory"
   | "autopilots"
   | "channels"
+  | "ship"
   | "agents"
   | "runtimes"
   | "skills"
@@ -141,14 +145,21 @@ const workspaceNav: NavItem[] = [
   { key: "memory", labelKey: "memory", icon: BookOpen },
   { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "channels", labelKey: "channels", icon: MessageCircle },
+  { key: "ship", labelKey: "ship", icon: Rocket },
   { key: "agents", labelKey: "agents", icon: Bot },
 ];
 
 // Items in workspaceNav that are gated on a workspace flag and hidden when
 // the flag is off. Render-time filter; the static array stays a complete
 // list for type-checking.
-const FLAG_GATED: Partial<Record<NavKey, (ws: { channels_enabled: boolean }) => boolean>> = {
+const FLAG_GATED: Partial<
+  Record<
+    NavKey,
+    (ws: { channels_enabled: boolean; ship_hub_enabled: boolean }) => boolean
+  >
+> = {
   channels: (ws) => ws.channels_enabled,
+  ship: (ws) => ws.ship_hub_enabled,
 };
 
 const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
@@ -369,6 +380,21 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     [inboxItems],
   );
   const hasRuntimeUpdates = useMyRuntimesNeedUpdate(wsId);
+  // Ship Hub badge: total open PR count across all projects with attached
+  // repos. We pass `enabled = ship_hub_enabled` so disabled workspaces
+  // don't fire a 404-fated request on every sidebar mount.
+  const shipEnabled = !!workspace?.ship_hub_enabled;
+  const { data: shipData } = useQuery({
+    ...shipProjectsOptions(wsId ?? "", shipEnabled && !!wsId),
+  });
+  const shipOpenPrCount = React.useMemo(
+    () =>
+      (shipData?.projects ?? []).reduce(
+        (acc, p) => acc + (p.open_pr_count ?? 0),
+        0,
+      ),
+    [shipData],
+  );
   const { data: pinnedItems = EMPTY_PINS } = useQuery({
     ...pinListOptions(wsId ?? "", userId ?? ""),
     enabled: !!wsId && !!userId,
@@ -701,6 +727,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         >
                           <item.icon />
                           <span>{t(($) => $.nav[item.labelKey])}</span>
+                          {item.key === "ship" && shipOpenPrCount > 0 && (
+                            <span className="ml-auto text-xs">
+                              {shipOpenPrCount > 99 ? "99+" : shipOpenPrCount}
+                            </span>
+                          )}
                         </SidebarMenuButton>
                       </SidebarMenuItem>
                     );

@@ -76,7 +76,10 @@ export type WSEventType =
   | "invitation:created"
   | "invitation:accepted"
   | "invitation:declined"
-  | "invitation:revoked";
+  | "invitation:revoked"
+  | "pull_request:synced"
+  | "deploy:started"
+  | "deploy:completed";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -326,4 +329,24 @@ export interface InvitationDeclinedPayload {
 export interface InvitationRevokedPayload {
   invitation_id: string;
   invitee_email: string;
+}
+
+// Ship Hub WS payloads. The `result` blob on PullRequestSyncedPayload mirrors
+// the SyncPullRequestsResult shape but is typed as unknown here to avoid a
+// types/ship.ts import cycle through this barrel; consumers cast at the
+// call site (today only the realtime invalidation handler reads it, and it
+// only cares about project_id).
+export interface PullRequestSyncedPayload {
+  project_id: string;
+  result?: unknown;
+}
+
+export interface DeployStartedPayload {
+  environment_id: string;
+  deploy?: unknown;
+}
+
+export interface DeployCompletedPayload {
+  environment_id: string;
+  deploy?: unknown;
 }

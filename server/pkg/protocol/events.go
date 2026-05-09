@@ -135,6 +135,13 @@ const (
 	EventAutopilotRunStart = "autopilot:run_start"
 	EventAutopilotRunDone  = "autopilot:run_done"
 
+	// Ship Hub events. Phase 1 publishes at the workspace scope; the
+	// frontend invalidates the per-project PR/deploy queries on receipt.
+	// Webhook-driven granular per-PR events arrive in a follow-up phase.
+	EventPullRequestSynced = "pull_request:synced"
+	EventDeployStarted     = "deploy:started"
+	EventDeployCompleted   = "deploy:completed"
+
 	// Daemon events
 	EventDaemonHeartbeat     = "daemon:heartbeat"
 	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"

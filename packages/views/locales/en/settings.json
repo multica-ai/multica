@@ -161,6 +161,28 @@
     "retention_toast_saved": "Retention setting saved",
     "retention_toast_save_failed": "Failed to save retention setting"
   },
+  "ship_hub": {
+    "section_title": "Ship Hub",
+    "enable_label": "Enable Ship Hub",
+    "enable_description": "Show GitHub pull requests and deploy state for projects with attached repositories. When off, the sidebar entry hides and Ship Hub endpoints return 404.",
+    "enable_aria": "Enable Ship Hub",
+    "toast_enabled": "Ship Hub enabled",
+    "toast_disabled": "Ship Hub disabled",
+    "toast_toggle_failed": "Failed to update Ship Hub setting",
+    "token_title": "GitHub access",
+    "token_description": "Personal access token used to fetch PRs from project repositories. Stored encrypted; the value is never returned to the UI after saving.",
+    "token_label": "GitHub personal access token",
+    "token_placeholder": "ghp_…",
+    "token_status_set": "Configured",
+    "token_status_unset": "Not configured",
+    "token_save": "Save token",
+    "token_saving": "Saving…",
+    "token_clear": "Clear token",
+    "token_toast_saved": "GitHub token saved",
+    "token_toast_cleared": "GitHub token cleared",
+    "token_toast_failed": "Failed to save GitHub token",
+    "token_help": "Needs `repo` scope (or `public_repo` for open-source projects)."
+  },
   "delete_workspace_dialog": {
     "title": "Delete workspace",
     "description": "This cannot be undone. All issues, agents, and data will be permanently removed.",

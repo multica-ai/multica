@@ -34,6 +34,8 @@ export const mockWorkspace: Workspace = {
   updated_at: "2026-01-01T00:00:00Z",
   channels_enabled: false,
   channel_retention_days: null,
+  ship_hub_enabled: false,
+  github_token_set: false,
 };
 
 // Mock members

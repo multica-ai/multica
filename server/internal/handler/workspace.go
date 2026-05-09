@@ -50,16 +50,76 @@ type WorkspaceResponse struct {
 	// ChannelRetentionDays is the workspace-level default retention window
 	// for channel messages, in days. null/nil = retain forever.
 	ChannelRetentionDays *int32 `json:"channel_retention_days"`
+	// ShipHubEnabled gates the entire Ship Hub feature surface — same
+	// "invisible feature" guarantee as ChannelsEnabled.
+	ShipHubEnabled bool `json:"ship_hub_enabled"`
+	// GitHubTokenSet is true when a workspace-level GitHub PAT is stored.
+	// The raw token NEVER appears in API responses — only this presence
+	// boolean is leaked to clients. Phase 1 stores the token in the
+	// settings JSON; encryption-at-rest is a TODO before Phase 2.
+	GitHubTokenSet bool `json:"github_token_set"`
+}
+
+// shipHubSettingsKey is the JSON object inside workspace.settings that holds
+// Ship-Hub-specific configuration. Kept under a namespaced key so other
+// settings (analytics opt-out, etc.) can coexist without collisions.
+const shipHubSettingsKey = "ship_hub"
+
+// ReadShipHubGitHubTokenForReconciler is the cmd/server-visible accessor
+// for the workspace-stored GitHub PAT. Lives here (not in cmd/server)
+// because the storage shape is a workspace-package concern; exporting just
+// the read path keeps the write path private.
+func ReadShipHubGitHubTokenForReconciler(settings []byte) string {
+	return readShipHubGitHubToken(settings)
+}
+
+// readShipHubGitHubToken extracts the workspace's GitHub PAT from settings.
+// Returns "" when not set. The token is stored unencrypted in v1 — see
+// the encryption TODO in UpdateWorkspace.
+func readShipHubGitHubToken(settings []byte) string {
+	if len(settings) == 0 {
+		return ""
+	}
+	var s map[string]any
+	if err := json.Unmarshal(settings, &s); err != nil {
+		return ""
+	}
+	sub, ok := s[shipHubSettingsKey].(map[string]any)
+	if !ok {
+		return ""
+	}
+	tok, _ := sub["github_token"].(string)
+	return tok
+}
+
+// redactShipHubSettings strips the github_token from a settings map before
+// the workspace response goes back to the client. This is the only field
+// that must not echo back; everything else under ship_hub is fine to leak
+// (auto-promote, target_url, etc. are non-secret).
+func redactShipHubSettings(settings map[string]any) {
+	sub, ok := settings[shipHubSettingsKey].(map[string]any)
+	if !ok {
+		return
+	}
+	delete(sub, "github_token")
+	if len(sub) == 0 {
+		// Drop the empty container so the client doesn't see a stub.
+		delete(settings, shipHubSettingsKey)
+	} else {
+		settings[shipHubSettingsKey] = sub
+	}
 }
 
 func workspaceToResponse(w db.Workspace) WorkspaceResponse {
-	var settings any
+	var settings map[string]any
 	if w.Settings != nil {
 		json.Unmarshal(w.Settings, &settings)
 	}
 	if settings == nil {
 		settings = map[string]any{}
 	}
+	tokenSet := readShipHubGitHubToken(w.Settings) != ""
+	redactShipHubSettings(settings)
 	var repos any
 	if w.Repos != nil {
 		json.Unmarshal(w.Repos, &repos)
@@ -86,6 +146,8 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		UpdatedAt:            timestampToString(w.UpdatedAt),
 		ChannelsEnabled:      w.ChannelsEnabled,
 		ChannelRetentionDays: retention,
+		ShipHubEnabled:       w.ShipHubEnabled,
+		GitHubTokenSet:       tokenSet,
 	}
 }
 
@@ -253,6 +315,17 @@ type UpdateWorkspaceRequest struct {
 	ChannelsEnabledSet      bool   `json:"channels_enabled_set"`
 	ChannelRetentionDays    *int32 `json:"channel_retention_days"`
 	ChannelRetentionDaysSet bool   `json:"channel_retention_days_set"`
+	// ShipHubEnabled mirrors ChannelsEnabled — paired-bool gate so a PATCH
+	// without the field doesn't silently flip the feature off.
+	ShipHubEnabled    *bool `json:"ship_hub_enabled"`
+	ShipHubEnabledSet bool  `json:"ship_hub_enabled_set"`
+	// GitHubToken is write-only. The plaintext token is merged into
+	// workspace.settings under ship_hub.github_token; the read path strips
+	// it before responding. Empty string clears the stored token.
+	// TODO(security): encrypt at rest before Phase 2 (use the same KMS
+	// path the daemon-token cache uses). Tracked in the Phase 1 PR.
+	GitHubToken    *string `json:"github_token,omitempty"`
+	GitHubTokenSet bool    `json:"github_token_set,omitempty"`
 	// OrchestratorAgentID + OrchestratorAgentIDSet use the paired-bool pattern
 	// so a PATCH can distinguish "don't touch" from "explicitly clear to NULL".
 	// Set the bool true to apply; pass null in OrchestratorAgentID to clear.
@@ -294,6 +367,21 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		s, _ := json.Marshal(req.Settings)
 		params.Settings = s
 	}
+	// Ship Hub GitHub token write path. The token never round-trips through
+	// the regular Settings JSON (the read path strips it) — a separate field
+	// keeps clients from accidentally echoing a redacted value back. We read
+	// the existing settings, merge the new token (or clear it), and replace
+	// the Settings param. If the caller also passed Settings, the explicit
+	// token field wins so clients can't bypass the redact-on-read.
+	if req.GitHubTokenSet {
+		current, err := h.Queries.GetWorkspace(r.Context(), idUUID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+		merged := mergeShipHubToken(current.Settings, params.Settings, req.GitHubToken)
+		params.Settings = merged
+	}
 	if req.Repos != nil {
 		reposJSON, _ := json.Marshal(req.Repos)
 		params.Repos = reposJSON
@@ -311,6 +399,10 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	params.ChannelRetentionDaysSet = req.ChannelRetentionDaysSet
 	if req.ChannelRetentionDays != nil {
 		params.ChannelRetentionDays = pgtype.Int4{Int32: *req.ChannelRetentionDays, Valid: true}
+	}
+	params.ShipHubEnabledSet = req.ShipHubEnabledSet
+	if req.ShipHubEnabled != nil {
+		params.ShipHubEnabled = pgtype.Bool{Bool: *req.ShipHubEnabled, Valid: true}
 	}
 	if req.OrchestratorAgentIDSet {
 		params.OrchestratorAgentIDSet = true
@@ -714,4 +806,53 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// mergeShipHubToken merges a new github_token value into a workspace settings
+// JSON blob.
+//
+//   - currentSettings: the existing row's settings (used so we don't clobber
+//     other ship_hub.* fields the client wasn't editing).
+//   - patchSettings:   the settings the request body included (may be nil).
+//                      Caller-provided values win over current except for the
+//                      token, which is always taken from `token`.
+//   - token:           pointer-of-string. nil means "do nothing"; an empty
+//                      string clears the stored token.
+//
+// Returns the marshalled JSON to write back. Never returns nil so the column
+// always holds a valid JSON object.
+func mergeShipHubToken(currentSettings, patchSettings []byte, token *string) []byte {
+	merged := map[string]any{}
+	// Start from current — the request body is a full replacement of the
+	// settings object today, but we re-merge defensively so future fields
+	// the client didn't include don't get wiped by a token-only PATCH.
+	if len(currentSettings) > 0 {
+		_ = json.Unmarshal(currentSettings, &merged)
+	}
+	if len(patchSettings) > 0 {
+		var patch map[string]any
+		if err := json.Unmarshal(patchSettings, &patch); err == nil {
+			for k, v := range patch {
+				merged[k] = v
+			}
+		}
+	}
+	sub, _ := merged[shipHubSettingsKey].(map[string]any)
+	if sub == nil {
+		sub = map[string]any{}
+	}
+	if token != nil {
+		if *token == "" {
+			delete(sub, "github_token")
+		} else {
+			sub["github_token"] = *token
+		}
+	}
+	if len(sub) == 0 {
+		delete(merged, shipHubSettingsKey)
+	} else {
+		merged[shipHubSettingsKey] = sub
+	}
+	out, _ := json.Marshal(merged)
+	return out
 }

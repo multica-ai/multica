@@ -385,6 +385,25 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Ship Hub (Phase 1, read-only). Endpoints respond 404 when
+			// workspace.ship_hub_enabled is FALSE — gate lives inside the
+			// handlers so the surface is invisible to non-opted-in workspaces.
+			r.Route("/api/ship", func(r chi.Router) {
+				r.Get("/projects", h.ListShipProjects)
+			})
+			// Project-scoped Ship Hub endpoints share the project router with
+			// the existing /api/projects/{id} routes below; we register them
+			// outside that block so the handlers can run their own feature gate
+			// (and so a workspace without ship_hub_enabled doesn't surface
+			// these on the regular project page).
+			r.Get("/api/projects/{id}/pull_requests", h.ListProjectPullRequests)
+			r.Post("/api/projects/{id}/pull_requests/sync", h.SyncProjectPullRequests)
+			r.Get("/api/projects/{id}/deploy_environments", h.ListProjectDeployEnvironments)
+			r.Post("/api/projects/{id}/deploy_environments", h.CreateProjectDeployEnvironment)
+			r.Patch("/api/deploy_environments/{id}", h.UpdateDeployEnvironment)
+			r.Get("/api/deploy_environments/{id}/deploys", h.ListDeploys)
+			r.Post("/api/deploy_environments/{id}/deploys", h.LogDeploy)
+
 			// Channels (multi-participant chat + DMs).
 			// Endpoints respond 404 when workspace.channels_enabled is FALSE
 			// — the gate lives inside each handler so the surface is invisible

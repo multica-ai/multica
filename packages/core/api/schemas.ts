@@ -145,3 +145,124 @@ export const SubscribersListSchema = z.array(SubscriberSchema);
 export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
 }).loose();
+
+// ---------------------------------------------------------------------------
+// Ship Hub schemas. The Phase 1 contract is small and stable, but per CLAUDE.md
+// we go through parseWithFallback anyway: the desktop app sitting on a user's
+// laptop is older than any backend it talks to, and an unexpected null in
+// `pull_requests` (or a new enum value in `state`) must downgrade gracefully
+// instead of white-screening the Kanban.
+// ---------------------------------------------------------------------------
+
+const PullRequestLabelSchema = z.object({
+  name: z.string().default(""),
+  color: z.string().default(""),
+}).loose();
+
+const PullRequestSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  project_id: z.string().nullable().default(null),
+  repo_url: z.string().default(""),
+  // Backend serializes the GH PR number as `number` (Go int32). The frontend
+  // type field is named `pr_number` historically, so we accept both keys
+  // and surface a single canonical value via `transform`.
+  number: z.number().default(0),
+  title: z.string().default(""),
+  state: z.string().default("open"),
+  is_draft: z.boolean().default(false),
+  author_login: z.string().default(""),
+  author_avatar_url: z.string().nullable().default(null),
+  base_ref: z.string().default(""),
+  head_ref: z.string().default(""),
+  head_sha: z.string().default(""),
+  html_url: z.string().default(""),
+  body: z.string().nullable().default(null),
+  ci_status: z.string().nullable().default(""),
+  review_decision: z.string().nullable().default(""),
+  mergeable: z.string().nullable().default(""),
+  additions: z.number().default(0),
+  deletions: z.number().default(0),
+  changed_files: z.number().default(0),
+  labels: z.array(PullRequestLabelSchema).default([]),
+  pr_created_at: z.string().default(""),
+  pr_updated_at: z.string().default(""),
+  pr_merged_at: z.string().nullable().default(null),
+  pr_closed_at: z.string().nullable().default(null),
+  fetched_at: z.string().default(""),
+}).loose();
+
+export const ListPullRequestsResponseSchema = z.object({
+  pull_requests: z.array(PullRequestSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_PULL_REQUESTS_RESPONSE = {
+  pull_requests: [],
+  total: 0,
+};
+
+const DeployEnvironmentSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  project_id: z.string(),
+  kind: z.string().default("staging"),
+  name: z.string().default(""),
+  target_branch: z.string().default("main"),
+  target_url: z.string().nullable().default(null),
+  current_sha: z.string().nullable().default(null),
+  current_deployed_at: z.string().nullable().default(null),
+  auto_promote: z.boolean().default(false),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const ListDeployEnvironmentsResponseSchema = z.object({
+  environments: z.array(DeployEnvironmentSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_DEPLOY_ENVIRONMENTS_RESPONSE = {
+  environments: [],
+};
+
+const DeploySchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  environment_id: z.string(),
+  ref: z.string().default(""),
+  sha: z.string().default(""),
+  status: z.string().default("pending"),
+  triggered_by: z.string().nullable().default(null),
+  triggered_at: z.string().default(""),
+  started_at: z.string().nullable().default(null),
+  completed_at: z.string().nullable().default(null),
+  log_url: z.string().nullable().default(null),
+  error_message: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+}).loose();
+
+export const ListDeploysResponseSchema = z.object({
+  deploys: z.array(DeploySchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_DEPLOYS_RESPONSE = {
+  deploys: [],
+  total: 0,
+};
+
+const ShipProjectSummarySchema = z.object({
+  id: z.string(),
+  title: z.string().default(""),
+  icon: z.string().nullable().default(null),
+  open_pr_count: z.number().default(0),
+  env_count: z.number().default(0),
+}).loose();
+
+export const ListShipProjectsResponseSchema = z.object({
+  projects: z.array(ShipProjectSummarySchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_SHIP_PROJECTS_RESPONSE = {
+  projects: [],
+};

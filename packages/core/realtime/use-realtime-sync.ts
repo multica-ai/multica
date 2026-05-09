@@ -32,6 +32,7 @@ import { notificationPreferenceOptions } from "../notification-preferences/queri
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { chatKeys } from "../chat/queries";
 import { channelKeys } from "../channels/queries";
+import { shipKeys } from "../ship/queries";
 import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
@@ -176,6 +177,18 @@ export function useRealtimeSync(
         // keyed by channel_id (not in workspaceKeys). Defer to the
         // specific handler below.
       },
+      // Ship Hub — pull_request:* and deploy:* both share the same broad
+      // "refresh the workspace's ship surface" semantics. The specific
+      // handlers below also do per-project / per-environment invalidation
+      // for the inner caches (per-project PR list, per-env deploy list).
+      pull_request: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: shipKeys.all(wsId) });
+      },
+      deploy: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: shipKeys.all(wsId) });
+      },
       // Powers the agent presence cache: any task lifecycle change
       // (dispatch / completed / failed / cancelled) refreshes the
       // workspace-wide agent-task-snapshot query so per-agent presence
@@ -240,6 +253,14 @@ export function useRealtimeSync(
       // inside the channel-messages cache, not under the channels tree.
       "channel_reaction:added",
       "channel_reaction:removed",
+      // Ship Hub: per-project/per-env granular invalidation. The prefix
+      // path above handles the general "refresh ship" case; these specific
+      // handlers narrow the invalidation to just the affected project /
+      // environment, avoiding a workspace-wide refetch storm when many
+      // projects sync concurrently.
+      "pull_request:synced",
+      "deploy:started",
+      "deploy:completed",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -615,6 +636,44 @@ export function useRealtimeSync(
       }
     });
 
+    // Ship Hub: PR sync completion → refetch the affected project's PR list
+    // (every state filter — open / closed / merged / all share the same
+    // backing data). Also bumps the workspace project list so the open-PR
+    // count badge stays current. The workspace-wide invalidation is handled
+    // by the `pull_request:` prefix entry in refreshMap; this granular
+    // handler narrows down to one project to avoid storming on bulk syncs.
+    const unsubPullRequestSynced = ws.on("pull_request:synced", (p) => {
+      const payload = p as { project_id?: string };
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      if (payload?.project_id) {
+        qc.invalidateQueries({
+          queryKey: shipKeys.pullRequestsForProject(wsId, payload.project_id),
+        });
+      }
+      qc.invalidateQueries({ queryKey: shipKeys.projects(wsId) });
+    });
+
+    // Ship Hub: deploy lifecycle → refresh that environment's deploy list
+    // and the workspace-wide environments cache (the env row carries
+    // `current_sha` / `current_deployed_at` which only flip on success).
+    const onDeployEvent = (p: unknown) => {
+      const payload = p as { environment_id?: string };
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      if (payload?.environment_id) {
+        qc.invalidateQueries({
+          queryKey: shipKeys.deploys(wsId, payload.environment_id),
+        });
+      }
+      // Environment-list invalidation is workspace-prefixed because we don't
+      // know which project owns this environment from the WS payload alone;
+      // a small cost vs. the per-project narrowing.
+      qc.invalidateQueries({ queryKey: [...shipKeys.all(wsId), "envs"] as const });
+    };
+    const unsubDeployStarted = ws.on("deploy:started", onDeployEvent);
+    const unsubDeployCompleted = ws.on("deploy:completed", onDeployEvent);
+
     const unsubChatDone = ws.on("chat:done", (p) => {
       const payload = p as ChatDonePayload;
       chatWsLogger.info("chat:done (global)", {
@@ -783,6 +842,9 @@ export function useRealtimeSync(
       unsubChannelReactionRemoved();
       unsubChannelMessageUpdated();
       unsubChannelMessageDeleted();
+      unsubPullRequestSynced();
+      unsubDeployStarted();
+      unsubDeployCompleted();
       unsubChatDone();
       unsubTaskQueued();
       unsubTaskDispatch();

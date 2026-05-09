@@ -5,8 +5,141 @@
 package db
 
 import (
+	"database/sql/driver"
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type DeployEnvironmentKind string
+
+const (
+	DeployEnvironmentKindStaging    DeployEnvironmentKind = "staging"
+	DeployEnvironmentKindProduction DeployEnvironmentKind = "production"
+)
+
+func (e *DeployEnvironmentKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DeployEnvironmentKind(s)
+	case string:
+		*e = DeployEnvironmentKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DeployEnvironmentKind: %T", src)
+	}
+	return nil
+}
+
+type NullDeployEnvironmentKind struct {
+	DeployEnvironmentKind DeployEnvironmentKind `json:"deploy_environment_kind"`
+	Valid                 bool                  `json:"valid"` // Valid is true if DeployEnvironmentKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDeployEnvironmentKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.DeployEnvironmentKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DeployEnvironmentKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDeployEnvironmentKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DeployEnvironmentKind), nil
+}
+
+type DeployStatus string
+
+const (
+	DeployStatusPending    DeployStatus = "pending"
+	DeployStatusInProgress DeployStatus = "in_progress"
+	DeployStatusSucceeded  DeployStatus = "succeeded"
+	DeployStatusFailed     DeployStatus = "failed"
+	DeployStatusRolledBack DeployStatus = "rolled_back"
+)
+
+func (e *DeployStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DeployStatus(s)
+	case string:
+		*e = DeployStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DeployStatus: %T", src)
+	}
+	return nil
+}
+
+type NullDeployStatus struct {
+	DeployStatus DeployStatus `json:"deploy_status"`
+	Valid        bool         `json:"valid"` // Valid is true if DeployStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDeployStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.DeployStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DeployStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDeployStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DeployStatus), nil
+}
+
+type PullRequestState string
+
+const (
+	PullRequestStateOpen   PullRequestState = "open"
+	PullRequestStateClosed PullRequestState = "closed"
+	PullRequestStateMerged PullRequestState = "merged"
+)
+
+func (e *PullRequestState) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = PullRequestState(s)
+	case string:
+		*e = PullRequestState(s)
+	default:
+		return fmt.Errorf("unsupported scan type for PullRequestState: %T", src)
+	}
+	return nil
+}
+
+type NullPullRequestState struct {
+	PullRequestState PullRequestState `json:"pull_request_state"`
+	Valid            bool             `json:"valid"` // Valid is true if PullRequestState is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullPullRequestState) Scan(value interface{}) error {
+	if value == nil {
+		ns.PullRequestState, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.PullRequestState.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullPullRequestState) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.PullRequestState), nil
+}
 
 type ActivityLog struct {
 	ID          pgtype.UUID        `json:"id"`
@@ -278,6 +411,37 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type Deploy struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	EnvironmentID pgtype.UUID        `json:"environment_id"`
+	Ref           string             `json:"ref"`
+	Sha           string             `json:"sha"`
+	Status        DeployStatus       `json:"status"`
+	TriggeredBy   pgtype.UUID        `json:"triggered_by"`
+	TriggeredAt   pgtype.Timestamptz `json:"triggered_at"`
+	StartedAt     pgtype.Timestamptz `json:"started_at"`
+	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
+	LogUrl        pgtype.Text        `json:"log_url"`
+	ErrorMessage  pgtype.Text        `json:"error_message"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type DeployEnvironment struct {
+	ID                pgtype.UUID           `json:"id"`
+	WorkspaceID       pgtype.UUID           `json:"workspace_id"`
+	ProjectID         pgtype.UUID           `json:"project_id"`
+	Kind              DeployEnvironmentKind `json:"kind"`
+	Name              string                `json:"name"`
+	TargetBranch      string                `json:"target_branch"`
+	TargetUrl         pgtype.Text           `json:"target_url"`
+	CurrentSha        pgtype.Text           `json:"current_sha"`
+	CurrentDeployedAt pgtype.Timestamptz    `json:"current_deployed_at"`
+	AutoPromote       bool                  `json:"auto_promote"`
+	CreatedAt         pgtype.Timestamptz    `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz    `json:"updated_at"`
+}
+
 type Feedback struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`
@@ -476,6 +640,36 @@ type ProjectResource struct {
 	CreatedBy    pgtype.UUID        `json:"created_by"`
 }
 
+type PullRequest struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	RepoUrl         string             `json:"repo_url"`
+	PrNumber        int32              `json:"pr_number"`
+	Title           string             `json:"title"`
+	State           PullRequestState   `json:"state"`
+	IsDraft         bool               `json:"is_draft"`
+	AuthorLogin     string             `json:"author_login"`
+	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
+	BaseRef         string             `json:"base_ref"`
+	HeadRef         string             `json:"head_ref"`
+	HeadSha         string             `json:"head_sha"`
+	HtmlUrl         string             `json:"html_url"`
+	Body            pgtype.Text        `json:"body"`
+	CiStatus        pgtype.Text        `json:"ci_status"`
+	ReviewDecision  pgtype.Text        `json:"review_decision"`
+	Mergeable       pgtype.Text        `json:"mergeable"`
+	Additions       int32              `json:"additions"`
+	Deletions       int32              `json:"deletions"`
+	ChangedFiles    int32              `json:"changed_files"`
+	Labels          []byte             `json:"labels"`
+	PrCreatedAt     pgtype.Timestamptz `json:"pr_created_at"`
+	PrUpdatedAt     pgtype.Timestamptz `json:"pr_updated_at"`
+	PrMergedAt      pgtype.Timestamptz `json:"pr_merged_at"`
+	PrClosedAt      pgtype.Timestamptz `json:"pr_closed_at"`
+	FetchedAt       pgtype.Timestamptz `json:"fetched_at"`
+}
+
 type Skill struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -594,6 +788,7 @@ type Workspace struct {
 	ChannelRetentionDays pgtype.Int4        `json:"channel_retention_days"`
 	ChannelsEnabled      bool               `json:"channels_enabled"`
 	OrchestratorAgentID  pgtype.UUID        `json:"orchestrator_agent_id"`
+	ShipHubEnabled       bool               `json:"ship_hub_enabled"`
 }
 
 type WorkspaceInvitation struct {

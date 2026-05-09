@@ -32,6 +32,7 @@ function workspaceScoped(slug: string) {
     myIssues: () => `${ws}/my-issues`,
     channels: () => `${ws}/channels`,
     channelDetail: (id: string) => `${ws}/channels/${encode(id)}`,
+    ship: () => `${ws}/ship`,
     runtimes: () => `${ws}/runtimes`,
     runtimeDetail: (id: string) => `${ws}/runtimes/${encode(id)}`,
     skills: () => `${ws}/skills`,

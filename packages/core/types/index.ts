@@ -117,3 +117,21 @@ export type {
   ListMemoryArtifactsResponse,
   SearchMemoryArtifactsParams,
 } from "./memory";
+export type {
+  PullRequest,
+  PullRequestLabel,
+  PullRequestState,
+  DeployEnvironment,
+  DeployEnvironmentKind,
+  Deploy,
+  DeployStatus,
+  ShipProjectSummary,
+  CreateDeployEnvironmentRequest,
+  UpdateDeployEnvironmentRequest,
+  LogDeployRequest,
+  ListShipProjectsResponse,
+  ListPullRequestsResponse,
+  SyncPullRequestsResult,
+  ListDeployEnvironmentsResponse,
+  ListDeploysResponse,
+} from "./ship";

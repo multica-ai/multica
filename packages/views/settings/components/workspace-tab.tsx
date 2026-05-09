@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Save, LogOut, MessageCircle } from "lucide-react";
+import { Save, LogOut, MessageCircle, Rocket } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
@@ -337,6 +337,25 @@ export function WorkspaceTab() {
         </section>
       )}
 
+      {/* Ship Hub settings — admin-only, paired with channels above so the
+          two feature flags live next to each other. The token field is
+          write-only: the server never echoes it back, only a presence
+          flag, so the input renders empty and "Configured" status comes
+          from `github_token_set`. */}
+      {canManageWorkspace && (
+        <section className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Rocket className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold">{t(($) => $.ship_hub.section_title)}</h2>
+          </div>
+          <Card>
+            <CardContent className="space-y-3">
+              <ShipHubSettings workspace={workspace} />
+            </CardContent>
+          </Card>
+        </section>
+      )}
+
       {/* Danger Zone — gated on the member query settling so the owner-only
           Delete button and the sole-owner Leave guidance don't flash in
           after mount. */}
@@ -609,6 +628,178 @@ function RetentionSettings({ workspace }: RetentionSettingsProps) {
           {saving ? t(($) => $.channels.retention_saving) : t(($) => $.channels.retention_save)}
         </Button>
       </div>
+    </div>
+  );
+}
+
+interface ShipHubSettingsProps {
+  workspace: Workspace;
+}
+
+/**
+ * ShipHubSettings — admin toggle for `workspace.ship_hub_enabled` plus
+ * write-only GitHub PAT input.
+ *
+ * The token field is genuinely write-only: the server returns
+ * `github_token_set: bool` instead of the value, so this component renders
+ * an empty input and shows "Configured" / "Not configured" derived from
+ * that flag. Submitting an empty value while "Configured" is shown clears
+ * the token (paired-bool pattern: `github_token: null, github_token_set: true`).
+ */
+function ShipHubSettings({ workspace }: ShipHubSettingsProps) {
+  const { t } = useT("settings");
+  const qc = useQueryClient();
+  const [enabled, setEnabled] = useState(workspace.ship_hub_enabled);
+  const [pendingToggle, setPendingToggle] = useState(false);
+  const [tokenInput, setTokenInput] = useState("");
+  const [tokenSaving, setTokenSaving] = useState(false);
+
+  // Reconcile when the workspace cache updates from elsewhere (WS event,
+  // another tab) so the switch never drifts from the source of truth.
+  useEffect(() => {
+    setEnabled(workspace.ship_hub_enabled);
+  }, [workspace.ship_hub_enabled]);
+
+  const handleToggle = async (next: boolean) => {
+    setEnabled(next);
+    setPendingToggle(true);
+    try {
+      const updated = await api.updateWorkspace(workspace.id, {
+        ship_hub_enabled: next,
+        ship_hub_enabled_set: true,
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((w) => (w.id === updated.id ? updated : w)),
+      );
+      toast.success(
+        next
+          ? t(($) => $.ship_hub.toast_enabled)
+          : t(($) => $.ship_hub.toast_disabled),
+      );
+    } catch (e) {
+      setEnabled(!next);
+      toast.error(
+        e instanceof Error ? e.message : t(($) => $.ship_hub.toast_toggle_failed),
+      );
+    } finally {
+      setPendingToggle(false);
+    }
+  };
+
+  const handleTokenSave = async () => {
+    setTokenSaving(true);
+    try {
+      const trimmed = tokenInput.trim();
+      const updated = await api.updateWorkspace(workspace.id, {
+        // Empty input is a no-op: we only PATCH when the user typed
+        // something. To clear, the user clicks "Clear token" below.
+        github_token: trimmed,
+        github_token_set: true,
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((w) => (w.id === updated.id ? updated : w)),
+      );
+      setTokenInput("");
+      toast.success(t(($) => $.ship_hub.token_toast_saved));
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : t(($) => $.ship_hub.token_toast_failed),
+      );
+    } finally {
+      setTokenSaving(false);
+    }
+  };
+
+  const handleTokenClear = async () => {
+    setTokenSaving(true);
+    try {
+      const updated = await api.updateWorkspace(workspace.id, {
+        github_token: null,
+        github_token_set: true,
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((w) => (w.id === updated.id ? updated : w)),
+      );
+      setTokenInput("");
+      toast.success(t(($) => $.ship_hub.token_toast_cleared));
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : t(($) => $.ship_hub.token_toast_failed),
+      );
+    } finally {
+      setTokenSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium">{t(($) => $.ship_hub.enable_label)}</p>
+          <p className="text-xs text-muted-foreground">
+            {t(($) => $.ship_hub.enable_description)}
+          </p>
+        </div>
+        <Switch
+          checked={enabled}
+          onCheckedChange={handleToggle}
+          disabled={pendingToggle}
+          aria-label={t(($) => $.ship_hub.enable_aria)}
+        />
+      </div>
+
+      {enabled && (
+        <div className="space-y-2 border-t border-border pt-3">
+          <div className="text-sm font-medium">
+            {t(($) => $.ship_hub.token_title)}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t(($) => $.ship_hub.token_description)}
+          </p>
+          <div className="text-xs text-muted-foreground">
+            {workspace.github_token_set
+              ? t(($) => $.ship_hub.token_status_set)
+              : t(($) => $.ship_hub.token_status_unset)}
+          </div>
+          <Label className="text-xs text-muted-foreground" htmlFor="ship-hub-token">
+            {t(($) => $.ship_hub.token_label)}
+          </Label>
+          <Input
+            id="ship-hub-token"
+            type="password"
+            autoComplete="off"
+            value={tokenInput}
+            onChange={(e) => setTokenInput(e.target.value)}
+            placeholder={t(($) => $.ship_hub.token_placeholder)}
+            disabled={tokenSaving}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t(($) => $.ship_hub.token_help)}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={handleTokenSave}
+              disabled={tokenSaving || !tokenInput.trim()}
+            >
+              <Save className="h-3 w-3" />
+              {tokenSaving
+                ? t(($) => $.ship_hub.token_saving)
+                : t(($) => $.ship_hub.token_save)}
+            </Button>
+            {workspace.github_token_set && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleTokenClear}
+                disabled={tokenSaving}
+              >
+                {t(($) => $.ship_hub.token_clear)}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -161,6 +161,28 @@
     "retention_toast_saved": "已保存保留设置",
     "retention_toast_save_failed": "保存保留设置失败"
   },
+  "ship_hub": {
+    "section_title": "发布中心",
+    "enable_label": "启用发布中心",
+    "enable_description": "为关联了仓库的项目展示 GitHub PR 和部署状态。关闭后，侧边栏入口隐藏，发布中心相关接口返回 404。",
+    "enable_aria": "启用发布中心",
+    "toast_enabled": "发布中心已启用",
+    "toast_disabled": "发布中心已关闭",
+    "toast_toggle_failed": "更新发布中心设置失败",
+    "token_title": "GitHub 访问凭据",
+    "token_description": "用于从项目仓库拉取 PR 的个人访问令牌。加密存储，保存后不会返回到前端。",
+    "token_label": "GitHub 个人访问令牌",
+    "token_placeholder": "ghp_…",
+    "token_status_set": "已配置",
+    "token_status_unset": "未配置",
+    "token_save": "保存令牌",
+    "token_saving": "保存中…",
+    "token_clear": "清除令牌",
+    "token_toast_saved": "GitHub 令牌已保存",
+    "token_toast_cleared": "GitHub 令牌已清除",
+    "token_toast_failed": "保存 GitHub 令牌失败",
+    "token_help": "需具备 `repo` 权限（开源项目可使用 `public_repo`）。"
+  },
   "delete_workspace_dialog": {
     "title": "删除工作区",
     "description": "此操作不可撤销。所有 issue、智能体和数据都将被永久删除。",

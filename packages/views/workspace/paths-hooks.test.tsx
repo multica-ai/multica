@@ -29,6 +29,8 @@ function makeWorkspace(over: Partial<Workspace>): Workspace {
     updated_at: "",
     channels_enabled: false,
     channel_retention_days: null,
+    ship_hub_enabled: false,
+    github_token_set: false,
     ...over,
   };
 }

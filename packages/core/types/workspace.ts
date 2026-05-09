@@ -29,6 +29,15 @@ export interface Workspace {
   /** Workspace-level retention default for channel messages, in days.
    * null = retain forever; per-channel overrides take precedence. */
   channel_retention_days: number | null;
+  /** Whether the Ship Hub feature (PR Kanban + deploy strip) is exposed in
+   * this workspace. Defaults to false until an admin opts in via Settings.
+   * When false, the sidebar entry hides and every /api/ship/* endpoint
+   * returns 404. */
+  ship_hub_enabled: boolean;
+  /** Whether a GitHub PAT is configured for this workspace. The token itself
+   * is never returned by the API — only this presence flag — so the UI can
+   * render "Configured" / "Not configured" without ever holding the secret. */
+  github_token_set: boolean;
 }
 
 export interface Member {

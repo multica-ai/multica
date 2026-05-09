@@ -323,6 +323,10 @@ func main() {
 	// no configured retention.
 	channelMsgSvc := channel.NewMessageService(queries)
 	go runChannelRetentionSweeper(sweepCtx, channelMsgSvc)
+	// Ship Hub reconciler: every 5 minutes, refresh PR caches for every
+	// workspace with the feature enabled. Defensive — per-workspace errors
+	// are logged and skipped so one bad token can't starve the rest.
+	go runShipHubReconciler(sweepCtx, queries)
 
 	if metricsServer != nil {
 		go func() {

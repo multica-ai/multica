@@ -101,6 +101,17 @@ import type {
   ListMemoryArtifactsResponse,
   SearchMemoryArtifactsParams,
   MemoryArtifactAnchorType,
+  Deploy,
+  DeployEnvironment,
+  CreateDeployEnvironmentRequest,
+  UpdateDeployEnvironmentRequest,
+  LogDeployRequest,
+  ListShipProjectsResponse,
+  ListPullRequestsResponse,
+  SyncPullRequestsResult,
+  ListDeployEnvironmentsResponse,
+  ListDeploysResponse,
+  PullRequestState,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -115,6 +126,14 @@ import {
   ListIssuesResponseSchema,
   SubscribersListSchema,
   TimelinePageSchema,
+  ListShipProjectsResponseSchema,
+  ListPullRequestsResponseSchema,
+  ListDeployEnvironmentsResponseSchema,
+  ListDeploysResponseSchema,
+  EMPTY_LIST_SHIP_PROJECTS_RESPONSE,
+  EMPTY_LIST_PULL_REQUESTS_RESPONSE,
+  EMPTY_LIST_DEPLOY_ENVIRONMENTS_RESPONSE,
+  EMPTY_LIST_DEPLOYS_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -906,6 +925,17 @@ export class ApiClient {
       // to set; both fields omitted to leave the value untouched.
       orchestrator_agent_id?: string | null;
       orchestrator_agent_id_set?: boolean;
+      // Ship Hub feature gate. Same paired-bool pattern as channels_enabled —
+      // pair with ship_hub_enabled_set=true to actually mutate.
+      ship_hub_enabled?: boolean;
+      ship_hub_enabled_set?: boolean;
+      // GitHub PAT for Ship Hub. Write-only — the server never echoes the
+      // token back; the read path returns only `github_token_set: bool`.
+      // Pair with github_token_set=true and github_token=null to clear, or
+      // github_token="ghp_..." to overwrite. Both fields omitted leaves the
+      // existing token untouched.
+      github_token?: string | null;
+      github_token_set?: boolean;
     },
   ): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
@@ -1523,5 +1553,104 @@ export class ApiClient {
 
   async deleteMemoryArtifact(id: string): Promise<void> {
     await this.fetch(`/api/memory/${id}`, { method: "DELETE" });
+  }
+
+  // Ship Hub — GitHub PR Kanban + deploy strip. Every endpoint 404s when
+  // workspace.ship_hub_enabled is false; the UI gates the surface upstream
+  // so the request is never even sent in that case.
+  async listShipProjects(): Promise<ListShipProjectsResponse> {
+    const raw = await this.fetch<unknown>("/api/ship/projects");
+    return parseWithFallback(
+      raw,
+      ListShipProjectsResponseSchema,
+      EMPTY_LIST_SHIP_PROJECTS_RESPONSE,
+      { endpoint: "GET /api/ship/projects" },
+    );
+  }
+
+  async listProjectPullRequests(
+    projectId: string,
+    params?: { state?: PullRequestState | "all" },
+  ): Promise<ListPullRequestsResponse> {
+    const search = new URLSearchParams();
+    if (params?.state) search.set("state", params.state);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(
+      `/api/projects/${projectId}/pull_requests${qs ? `?${qs}` : ""}`,
+    );
+    return parseWithFallback(
+      raw,
+      ListPullRequestsResponseSchema,
+      EMPTY_LIST_PULL_REQUESTS_RESPONSE,
+      { endpoint: "GET /api/projects/:id/pull_requests" },
+    );
+  }
+
+  async syncProjectPullRequests(projectId: string): Promise<SyncPullRequestsResult> {
+    return this.fetch(`/api/projects/${projectId}/pull_requests/sync`, {
+      method: "POST",
+    });
+  }
+
+  async listProjectDeployEnvironments(
+    projectId: string,
+  ): Promise<ListDeployEnvironmentsResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/projects/${projectId}/deploy_environments`,
+    );
+    return parseWithFallback(
+      raw,
+      ListDeployEnvironmentsResponseSchema,
+      EMPTY_LIST_DEPLOY_ENVIRONMENTS_RESPONSE,
+      { endpoint: "GET /api/projects/:id/deploy_environments" },
+    );
+  }
+
+  async upsertProjectDeployEnvironment(
+    projectId: string,
+    data: CreateDeployEnvironmentRequest,
+  ): Promise<DeployEnvironment> {
+    return this.fetch(`/api/projects/${projectId}/deploy_environments`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateDeployEnvironment(
+    environmentId: string,
+    data: UpdateDeployEnvironmentRequest,
+  ): Promise<DeployEnvironment> {
+    return this.fetch(`/api/deploy_environments/${environmentId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async logDeploy(
+    environmentId: string,
+    data: LogDeployRequest,
+  ): Promise<Deploy> {
+    return this.fetch(`/api/deploy_environments/${environmentId}/deploys`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listDeploys(
+    environmentId: string,
+    params?: { limit?: number },
+  ): Promise<ListDeploysResponse> {
+    const search = new URLSearchParams();
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(
+      `/api/deploy_environments/${environmentId}/deploys${qs ? `?${qs}` : ""}`,
+    );
+    return parseWithFallback(
+      raw,
+      ListDeploysResponseSchema,
+      EMPTY_LIST_DEPLOYS_RESPONSE,
+      { endpoint: "GET /api/deploy_environments/:id/deploys" },
+    );
   }
 }

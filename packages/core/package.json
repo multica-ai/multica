@@ -46,6 +46,8 @@
     "./channels": "./channels/index.ts",
     "./channels/queries": "./channels/queries.ts",
     "./channels/mutations": "./channels/mutations.ts",
+    "./ship": "./ship/index.ts",
+    "./ship/queries": "./ship/queries.ts",
     "./runtimes": "./runtimes/index.ts",
     "./runtimes/queries": "./runtimes/queries.ts",
     "./runtimes/mutations": "./runtimes/mutations.ts",

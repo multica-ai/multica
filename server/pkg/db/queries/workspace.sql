@@ -18,12 +18,15 @@ VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: UpdateWorkspace :one
--- Three paired-bool fields use the same "leave alone" / "explicitly write" pattern:
+-- Four paired-bool fields use the same "leave alone" / "explicitly write" pattern:
 --
 -- - channels_enabled / channels_enabled_set + channel_retention_days /
 --   channel_retention_days_set: a missing JSON field would otherwise coerce
 --   to false/NULL and a single name-update PATCH would silently disable
 --   channels or wipe the retention override.
+--
+-- - ship_hub_enabled / ship_hub_enabled_set: same gate semantics as channels —
+--   a name-only PATCH must not silently disable Ship Hub.
 --
 -- - orchestrator_agent_id / orchestrator_agent_id_set: distinguishes "don't
 --   change" from "explicitly clear to NULL". Same narg+bool pattern.
@@ -42,6 +45,10 @@ UPDATE workspace SET
         WHEN sqlc.arg('channel_retention_days_set')::bool THEN sqlc.narg('channel_retention_days')
         ELSE channel_retention_days
     END,
+    ship_hub_enabled = CASE
+        WHEN sqlc.arg('ship_hub_enabled_set')::bool THEN COALESCE(sqlc.narg('ship_hub_enabled'), ship_hub_enabled)
+        ELSE ship_hub_enabled
+    END,
     orchestrator_agent_id = CASE
         WHEN sqlc.arg('orchestrator_agent_id_set')::boolean
         THEN sqlc.narg('orchestrator_agent_id')::uuid
@@ -50,6 +57,13 @@ UPDATE workspace SET
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: ListWorkspacesWithShipHubEnabled :many
+-- Used by the periodic Ship Hub reconciler to find workspaces it should
+-- sync. Ordered by id for stable iteration.
+SELECT * FROM workspace
+WHERE ship_hub_enabled = TRUE
+ORDER BY id ASC;
 
 -- name: IncrementIssueCounter :one
 UPDATE workspace SET issue_counter = issue_counter + 1
