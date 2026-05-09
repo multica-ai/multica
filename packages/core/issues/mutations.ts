@@ -319,15 +319,23 @@ export function useBatchDeleteIssues() {
         }
       }
       // Children cache may be the only place sub-issues live when the user
-      // operates from a parent's detail page; collect parents from there too.
+      // operates from a parent's detail page. Collect affected parents and
+      // optimistically filter the deleted ids out of each children cache so
+      // the row disappears immediately, mirroring the list-cache behaviour.
       const idSet = new Set(ids);
       const childrenCaches = qc.getQueriesData<Issue[]>({
         queryKey: [...issueKeys.all(wsId), "children"],
       });
+      const prevChildren = new Map<string, Issue[] | undefined>();
       for (const [key, data] of childrenCaches) {
         if (!data?.some((c) => idSet.has(c.id))) continue;
         const parentId = key[key.length - 1];
-        if (typeof parentId === "string") parentIssueIds.add(parentId);
+        if (typeof parentId !== "string") continue;
+        parentIssueIds.add(parentId);
+        prevChildren.set(parentId, data);
+        qc.setQueryData<Issue[]>(issueKeys.children(wsId, parentId), (old) =>
+          old?.filter((c) => !idSet.has(c.id)),
+        );
       }
       qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) => {
         if (!old) return old;
@@ -335,10 +343,15 @@ export function useBatchDeleteIssues() {
         for (const id of ids) next = removeIssueFromBuckets(next, id);
         return next;
       });
-      return { prevList, parentIssueIds };
+      return { prevList, prevChildren, parentIssueIds };
     },
     onError: (_err, _ids, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevChildren) {
+        for (const [parentId, snapshot] of ctx.prevChildren) {
+          qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
+        }
+      }
     },
     onSettled: (_data, _err, _ids, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });

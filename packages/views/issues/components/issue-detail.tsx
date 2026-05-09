@@ -213,11 +213,16 @@ function SubIssueRow({ child }: { child: Issue }) {
     [child.id, updateIssue, t],
   );
 
-  // The row is wrapped in AppLink for navigation. Stop propagation on the
-  // pickers / checkbox so clicking them does not navigate.
-  const stopPropagation = (e: React.SyntheticEvent) => {
+  // The row is wrapped in AppLink for navigation. The picker triggers need
+  // both stopPropagation and preventDefault to suppress the link's default
+  // navigation; the checkbox only needs stopPropagation (preventDefault would
+  // also block the native checkbox toggle on some browsers).
+  const stopPickerNav = (e: React.SyntheticEvent) => {
     e.stopPropagation();
     e.preventDefault();
+  };
+  const stopCheckboxNav = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
   };
 
   return (
@@ -229,12 +234,14 @@ function SubIssueRow({ child }: { child: Issue }) {
       )}
     >
       <div
-        onClick={stopPropagation}
-        onMouseDown={stopPropagation}
-        onPointerDown={stopPropagation}
+        onClick={stopCheckboxNav}
+        onMouseDown={stopCheckboxNav}
+        onPointerDown={stopCheckboxNav}
         className={cn(
           "flex h-4 w-4 shrink-0 items-center justify-center transition-opacity",
-          selected ? "opacity-100" : "opacity-0 group-hover/row:opacity-100",
+          selected
+            ? "opacity-100"
+            : "opacity-0 group-hover/row:opacity-100 focus-within:opacity-100",
         )}
       >
         <input
@@ -246,9 +253,9 @@ function SubIssueRow({ child }: { child: Issue }) {
         />
       </div>
       <div
-        onClick={stopPropagation}
-        onMouseDown={stopPropagation}
-        onPointerDown={stopPropagation}
+        onClick={stopPickerNav}
+        onMouseDown={stopPickerNav}
+        onPointerDown={stopPickerNav}
         className="flex shrink-0"
       >
         <StatusPicker
@@ -277,9 +284,9 @@ function SubIssueRow({ child }: { child: Issue }) {
         {child.title}
       </span>
       <div
-        onClick={stopPropagation}
-        onMouseDown={stopPropagation}
-        onPointerDown={stopPropagation}
+        onClick={stopPickerNav}
+        onMouseDown={stopPickerNav}
+        onPointerDown={stopPickerNav}
         className="flex shrink-0"
       >
         <AssigneePicker
