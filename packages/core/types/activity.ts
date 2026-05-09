@@ -1,4 +1,4 @@
-import type { Reaction } from "./comment";
+import type { CommentAuthorType, Reaction } from "./comment";
 import type { Attachment } from "./attachment";
 
 export interface AssigneeFrequencyEntry {
@@ -23,6 +23,9 @@ export interface TimelineEntry {
   comment_type?: string;
   reactions?: Reaction[];
   attachments?: Attachment[];
+  resolved_at?: string | null;
+  resolved_by_type?: CommentAuthorType | null;
+  resolved_by_id?: string | null;
   /** Set by frontend coalescing when consecutive identical activities are merged. */
   coalesced_count?: number;
 }

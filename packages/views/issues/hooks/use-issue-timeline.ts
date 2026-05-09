@@ -33,6 +33,7 @@ import {
   useCreateComment,
   useUpdateComment,
   useDeleteComment,
+  useResolveComment,
   useToggleCommentReaction,
   type ToggleCommentReactionVars,
 } from "@multica/core/issues/mutations";
@@ -120,6 +121,7 @@ export function useIssueTimeline(
   const { mutateAsync: createComment } = useCreateComment(issueId);
   const { mutateAsync: updateComment } = useUpdateComment(issueId);
   const { mutateAsync: deleteCommentAsync } = useDeleteComment(issueId);
+  const { mutateAsync: resolveCommentAsync } = useResolveComment(issueId);
   const { mutate: toggleCommentReaction } = useToggleCommentReaction(issueId);
 
   // Reconnect recovery: drop the cache so the next render refetches the
@@ -343,6 +345,21 @@ export function useIssueTimeline(
     [deleteCommentAsync, t],
   );
 
+  const toggleResolveComment = useCallback(
+    async (commentId: string, resolved: boolean) => {
+      try {
+        await resolveCommentAsync({ commentId, resolved });
+      } catch {
+        toast.error(
+          resolved
+            ? t(($) => $.comment.resolve.resolve_failed)
+            : t(($) => $.comment.resolve.unresolve_failed),
+        );
+      }
+    },
+    [resolveCommentAsync, t],
+  );
+
   // --- Optimistic UI for comment reactions ---
   // Derive at render time from pending mutation variables instead of writing
   // temp data into the cache (which would race with WS events).
@@ -441,6 +458,7 @@ export function useIssueTimeline(
     submitReply,
     editComment,
     deleteComment,
+    toggleResolveComment,
     toggleReaction,
     // Pagination controls (new)
     hasMoreOlder: hasNextPage,

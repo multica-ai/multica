@@ -45,6 +45,8 @@ import type {
   CommentCreatedPayload,
   CommentUpdatedPayload,
   CommentDeletedPayload,
+  CommentResolvedPayload,
+  CommentUnresolvedPayload,
   ActivityCreatedPayload,
   ReactionAddedPayload,
   ReactionRemovedPayload,
@@ -202,6 +204,7 @@ export function useRealtimeSync(
     const specificEvents = new Set([
       "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
+      "comment:resolved", "comment:unresolved",
       "activity:created",
       "reaction:added", "reaction:removed",
       "issue_reaction:added", "issue_reaction:removed",
@@ -350,6 +353,16 @@ export function useRealtimeSync(
     const unsubCommentDeleted = ws.on("comment:deleted", (p) => {
       const { issue_id } = p as CommentDeletedPayload;
       if (issue_id) invalidateTimeline(issue_id);
+    });
+
+    const unsubCommentResolved = ws.on("comment:resolved", (p) => {
+      const { comment } = p as CommentResolvedPayload;
+      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+    });
+
+    const unsubCommentUnresolved = ws.on("comment:unresolved", (p) => {
+      const { comment } = p as CommentUnresolvedPayload;
+      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
     });
 
     const unsubActivityCreated = ws.on("activity:created", (p) => {
@@ -678,6 +691,8 @@ export function useRealtimeSync(
       unsubCommentCreated();
       unsubCommentUpdated();
       unsubCommentDeleted();
+      unsubCommentResolved();
+      unsubCommentUnresolved();
       unsubActivityCreated();
       unsubReactionAdded();
       unsubReactionRemoved();

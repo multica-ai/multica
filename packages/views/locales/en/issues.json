@@ -174,7 +174,18 @@
     "reply_count_other": "{{count}} replies",
     "leave_comment_placeholder": "Leave a comment...",
     "expand_tooltip": "Expand",
-    "collapse_tooltip": "Collapse"
+    "collapse_tooltip": "Collapse",
+    "resolve": {
+      "resolve_action": "Resolve thread",
+      "unresolve_action": "Unresolve thread",
+      "collapse": "Collapse",
+      "bar_one": "{{count}} resolved comment from {{authors}}",
+      "bar_other": "{{count}} resolved comments from {{authors}}",
+      "bar_authors_more": "{{names}} and {{count}} other",
+      "bar_authors_more_other": "{{names}} and {{count}} others",
+      "resolve_failed": "Failed to resolve thread",
+      "unresolve_failed": "Failed to unresolve thread"
+    }
   },
   "reply": {
     "placeholder": "Leave a reply...",

@@ -432,6 +432,45 @@ export function useDeleteComment(issueId: string) {
   });
 }
 
+export function useResolveComment(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ commentId, resolved }: { commentId: string; resolved: boolean }) =>
+      resolved ? api.resolveComment(commentId) : api.unresolveComment(commentId),
+    onMutate: async ({ commentId, resolved }) => {
+      await qc.cancelQueries({ queryKey: ["issues", "timeline", issueId] });
+      const prevSnapshots = qc.getQueriesData<TimelineCacheData>({
+        queryKey: ["issues", "timeline", issueId],
+      });
+      qc.setQueriesData<TimelineCacheData>(
+        { queryKey: ["issues", "timeline", issueId] },
+        (old) =>
+          mapAllEntries(old, (e) =>
+            e.id === commentId
+              ? {
+                  ...e,
+                  resolved_at: resolved ? new Date().toISOString() : null,
+                  resolved_by_type: resolved ? e.resolved_by_type ?? null : null,
+                  resolved_by_id: resolved ? e.resolved_by_id ?? null : null,
+                }
+              : e,
+          ),
+      );
+      return { prevSnapshots };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prevSnapshots) {
+        for (const [key, prev] of ctx.prevSnapshots) {
+          qc.setQueryData(key, prev);
+        }
+      }
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+    },
+  });
+}
+
 export function useToggleCommentReaction(issueId: string) {
   const qc = useQueryClient();
   return useMutation({

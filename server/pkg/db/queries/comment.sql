@@ -84,3 +84,25 @@ WHERE parent_id = @parent_id AND author_type = 'agent' AND author_id = @agent_id
 
 -- name: DeleteComment :exec
 DELETE FROM comment WHERE id = $1;
+
+-- name: ResolveComment :one
+-- Idempotent: re-resolving keeps the original resolved_at + resolver. Always
+-- returns the row so the handler can surface the canonical state.
+UPDATE comment SET
+    resolved_at = COALESCE(resolved_at, now()),
+    resolved_by_type = COALESCE(resolved_by_type, $2),
+    resolved_by_id = COALESCE(resolved_by_id, $3),
+    updated_at = CASE WHEN resolved_at IS NULL THEN now() ELSE updated_at END
+WHERE id = $1
+RETURNING *;
+
+-- name: UnresolveComment :one
+-- Idempotent: a no-op clear (already unresolved) just returns the row.
+UPDATE comment SET
+    resolved_at = NULL,
+    resolved_by_type = NULL,
+    resolved_by_id = NULL,
+    updated_at = CASE WHEN resolved_at IS NOT NULL THEN now() ELSE updated_at END
+WHERE id = $1
+RETURNING *;
+

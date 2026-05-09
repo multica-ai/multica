@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useRef, useState } from "react";
-import { ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -60,6 +60,14 @@ interface CommentCardProps {
   onEdit: (commentId: string, content: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
+  /** Toggle the resolved state on the thread root. Only invoked for root entries. */
+  onResolveToggle?: (commentId: string, resolved: boolean) => void;
+  /**
+   * When non-null, the thread root is currently rendered as a resolved-but-
+   * expanded card. Pass a "Collapse" affordance into the header so the user
+   * can fold the thread back to the bar; the parent owns the session state.
+   */
+  onCollapseResolved?: () => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
 }
@@ -361,6 +369,8 @@ function CommentCardImpl({
   onEdit,
   onDelete,
   onToggleReaction,
+  onResolveToggle,
+  onCollapseResolved,
   highlightedCommentId,
 }: CommentCardProps) {
   const { t } = useT("issues");
@@ -437,6 +447,20 @@ function CommentCardImpl({
 
   return (
     <Card className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isTemp && "opacity-60", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
+      {onCollapseResolved && (
+        <button
+          type="button"
+          onClick={onCollapseResolved}
+          className="flex w-full items-center justify-between border-b border-border/50 px-4 py-2.5 text-left text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+          aria-label={t(($) => $.comment.resolve.collapse)}
+        >
+          <span className="flex items-center gap-2">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            {t(($) => $.comment.resolve.collapse)}
+          </span>
+          <ChevronRight className="h-3.5 w-3.5 -rotate-90" />
+        </button>
+      )}
       <Collapsible open={open} onOpenChange={handleOpenChange}>
         {/* Header — always visible, acts as toggle */}
         <div className="px-4 py-3">
@@ -494,6 +518,24 @@ function CommentCardImpl({
                     <Copy className="h-3.5 w-3.5" />
                     {t(($) => $.comment.copy_action)}
                   </DropdownMenuItem>
+                  {onResolveToggle && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => onResolveToggle(entry.id, !entry.resolved_at)}>
+                        {entry.resolved_at ? (
+                          <>
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            {t(($) => $.comment.resolve.unresolve_action)}
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            {t(($) => $.comment.resolve.resolve_action)}
+                          </>
+                        )}
+                      </DropdownMenuItem>
+                    </>
+                  )}
                   {(canEditEntry || canDeleteEntry) && (
                     <>
                       <DropdownMenuSeparator />

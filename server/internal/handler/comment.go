@@ -18,17 +18,20 @@ import (
 )
 
 type CommentResponse struct {
-	ID          string               `json:"id"`
-	IssueID     string               `json:"issue_id"`
-	AuthorType  string               `json:"author_type"`
-	AuthorID    string               `json:"author_id"`
-	Content     string               `json:"content"`
-	Type        string               `json:"type"`
-	ParentID    *string              `json:"parent_id"`
-	CreatedAt   string               `json:"created_at"`
-	UpdatedAt   string               `json:"updated_at"`
-	Reactions   []ReactionResponse   `json:"reactions"`
-	Attachments []AttachmentResponse `json:"attachments"`
+	ID             string               `json:"id"`
+	IssueID        string               `json:"issue_id"`
+	AuthorType     string               `json:"author_type"`
+	AuthorID       string               `json:"author_id"`
+	Content        string               `json:"content"`
+	Type           string               `json:"type"`
+	ParentID       *string              `json:"parent_id"`
+	CreatedAt      string               `json:"created_at"`
+	UpdatedAt      string               `json:"updated_at"`
+	ResolvedAt     *string              `json:"resolved_at"`
+	ResolvedByType *string              `json:"resolved_by_type"`
+	ResolvedByID   *string              `json:"resolved_by_id"`
+	Reactions      []ReactionResponse   `json:"reactions"`
+	Attachments    []AttachmentResponse `json:"attachments"`
 }
 
 func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments []AttachmentResponse) CommentResponse {
@@ -39,17 +42,20 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		attachments = []AttachmentResponse{}
 	}
 	return CommentResponse{
-		ID:          uuidToString(c.ID),
-		IssueID:     uuidToString(c.IssueID),
-		AuthorType:  c.AuthorType,
-		AuthorID:    uuidToString(c.AuthorID),
-		Content:     c.Content,
-		Type:        c.Type,
-		ParentID:    uuidToPtr(c.ParentID),
-		CreatedAt:   timestampToString(c.CreatedAt),
-		UpdatedAt:   timestampToString(c.UpdatedAt),
-		Reactions:   reactions,
-		Attachments: attachments,
+		ID:             uuidToString(c.ID),
+		IssueID:        uuidToString(c.IssueID),
+		AuthorType:     c.AuthorType,
+		AuthorID:       uuidToString(c.AuthorID),
+		Content:        c.Content,
+		Type:           c.Type,
+		ParentID:       uuidToPtr(c.ParentID),
+		CreatedAt:      timestampToString(c.CreatedAt),
+		UpdatedAt:      timestampToString(c.UpdatedAt),
+		ResolvedAt:     timestampToPtr(c.ResolvedAt),
+		ResolvedByType: textToPtr(c.ResolvedByType),
+		ResolvedByID:   uuidToPtr(c.ResolvedByID),
+		Reactions:      reactions,
+		Attachments:    attachments,
 	}
 }
 
@@ -286,6 +292,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
 		"issue_status":        issue.Status,
 	})
+
+	// A reply in a resolved thread re-opens it. Done after CreateComment commits
+	// so the reply is visible regardless of the unresolve outcome.
+	h.autoUnresolveThreadOnReply(r.Context(), parentComment, uuidToString(issue.WorkspaceID), authorType, authorID)
 
 	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
 	// Skip when the comment comes from the assigned agent itself to avoid loops.
@@ -629,4 +639,123 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		"issue_id":   uuidToString(comment.IssueID),
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// loadRootCommentForActor resolves a {commentId} URL param to a root comment in
+// the caller's workspace. Returns the comment, the workspace UUID, the actor
+// identity, and ok. Resolve / unresolve handlers share this scaffolding so the
+// "must be a root comment" rule lives in one place.
+func (h *Handler) loadRootCommentForActor(w http.ResponseWriter, r *http.Request) (db.Comment, string, string, string, bool) {
+	commentId := chi.URLParam(r, "commentId")
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return db.Comment{}, "", "", "", false
+	}
+	commentUUID, ok := parseUUIDOrBadRequest(w, commentId, "comment id")
+	if !ok {
+		return db.Comment{}, "", "", "", false
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return db.Comment{}, "", "", "", false
+	}
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return db.Comment{}, "", "", "", false
+	}
+	comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+		ID:          commentUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "comment not found")
+		return db.Comment{}, "", "", "", false
+	}
+	if comment.ParentID.Valid {
+		writeError(w, http.StatusBadRequest, "only root comments can be resolved")
+		return db.Comment{}, "", "", "", false
+	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	return comment, workspaceID, actorType, actorID, true
+}
+
+func (h *Handler) ResolveComment(w http.ResponseWriter, r *http.Request) {
+	comment, workspaceID, actorType, actorID, ok := h.loadRootCommentForActor(w, r)
+	if !ok {
+		return
+	}
+	wasResolved := comment.ResolvedAt.Valid
+
+	actorUUID, err := util.ParseUUID(actorID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid actor id")
+		return
+	}
+	updated, err := h.Queries.ResolveComment(r.Context(), db.ResolveCommentParams{
+		ID:             comment.ID,
+		ResolvedByType: pgtype.Text{String: actorType, Valid: true},
+		ResolvedByID:   actorUUID,
+	})
+	if err != nil {
+		slog.Warn("resolve comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", uuidToString(comment.ID))...)
+		writeError(w, http.StatusInternalServerError, "failed to resolve comment")
+		return
+	}
+
+	grouped := h.groupReactions(r, []pgtype.UUID{updated.ID})
+	groupedAtt := h.groupAttachments(r, []pgtype.UUID{updated.ID})
+	cid := uuidToString(updated.ID)
+	resp := commentToResponse(updated, grouped[cid], groupedAtt[cid])
+
+	// Suppress the event on a re-resolve no-op so consumers do not re-process
+	// an unchanged thread (notifications, log spam).
+	if !wasResolved {
+		slog.Info("comment resolved", append(logger.RequestAttrs(r), "comment_id", cid)...)
+		h.publish(protocol.EventCommentResolved, workspaceID, actorType, actorID, map[string]any{"comment": resp})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) UnresolveComment(w http.ResponseWriter, r *http.Request) {
+	comment, workspaceID, actorType, actorID, ok := h.loadRootCommentForActor(w, r)
+	if !ok {
+		return
+	}
+	wasResolved := comment.ResolvedAt.Valid
+
+	updated, err := h.Queries.UnresolveComment(r.Context(), comment.ID)
+	if err != nil {
+		slog.Warn("unresolve comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", uuidToString(comment.ID))...)
+		writeError(w, http.StatusInternalServerError, "failed to unresolve comment")
+		return
+	}
+
+	grouped := h.groupReactions(r, []pgtype.UUID{updated.ID})
+	groupedAtt := h.groupAttachments(r, []pgtype.UUID{updated.ID})
+	cid := uuidToString(updated.ID)
+	resp := commentToResponse(updated, grouped[cid], groupedAtt[cid])
+
+	if wasResolved {
+		slog.Info("comment unresolved", append(logger.RequestAttrs(r), "comment_id", cid)...)
+		h.publish(protocol.EventCommentUnresolved, workspaceID, actorType, actorID, map[string]any{"comment": resp})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// autoUnresolveThreadOnReply fires after a reply is created in a resolved
+// thread: clearing resolved_at re-opens the discussion. Errors are logged but
+// not propagated — the reply itself succeeded, the desync is recoverable on
+// the next read. Returns true if an unresolve happened (so callers can publish
+// the event).
+func (h *Handler) autoUnresolveThreadOnReply(ctx context.Context, parent *db.Comment, workspaceID, actorType, actorID string) {
+	if parent == nil || !parent.ResolvedAt.Valid {
+		return
+	}
+	updated, err := h.Queries.UnresolveComment(ctx, parent.ID)
+	if err != nil {
+		slog.Warn("auto-unresolve on reply failed", "error", err, "comment_id", uuidToString(parent.ID))
+		return
+	}
+	resp := commentToResponse(updated, nil, nil)
+	h.publish(protocol.EventCommentUnresolved, workspaceID, actorType, actorID, map[string]any{"comment": resp})
 }

@@ -30,12 +30,15 @@ type TimelineEntry struct {
 	Details json.RawMessage `json:"details,omitempty"`
 
 	// Comment-only fields
-	Content     *string              `json:"content,omitempty"`
-	ParentID    *string              `json:"parent_id,omitempty"`
-	UpdatedAt   *string              `json:"updated_at,omitempty"`
-	CommentType *string              `json:"comment_type,omitempty"`
-	Reactions   []ReactionResponse   `json:"reactions,omitempty"`
-	Attachments []AttachmentResponse `json:"attachments,omitempty"`
+	Content        *string              `json:"content,omitempty"`
+	ParentID       *string              `json:"parent_id,omitempty"`
+	UpdatedAt      *string              `json:"updated_at,omitempty"`
+	CommentType    *string              `json:"comment_type,omitempty"`
+	Reactions      []ReactionResponse   `json:"reactions,omitempty"`
+	Attachments    []AttachmentResponse `json:"attachments,omitempty"`
+	ResolvedAt     *string              `json:"resolved_at,omitempty"`
+	ResolvedByType *string              `json:"resolved_by_type,omitempty"`
+	ResolvedByID   *string              `json:"resolved_by_id,omitempty"`
 }
 
 // TimelineResponse wraps the cursor-paginated timeline. Entries are sorted
@@ -519,17 +522,20 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 		updatedAt := timestampToString(c.UpdatedAt)
 		cid := uuidToString(c.ID)
 		out[i] = TimelineEntry{
-			Type:        "comment",
-			ID:          cid,
-			ActorType:   c.AuthorType,
-			ActorID:     uuidToString(c.AuthorID),
-			Content:     &content,
-			CommentType: &commentType,
-			ParentID:    uuidToPtr(c.ParentID),
-			CreatedAt:   timestampToString(c.CreatedAt),
-			UpdatedAt:   &updatedAt,
-			Reactions:   reactions[cid],
-			Attachments: attachments[cid],
+			Type:           "comment",
+			ID:             cid,
+			ActorType:      c.AuthorType,
+			ActorID:        uuidToString(c.AuthorID),
+			Content:        &content,
+			CommentType:    &commentType,
+			ParentID:       uuidToPtr(c.ParentID),
+			CreatedAt:      timestampToString(c.CreatedAt),
+			UpdatedAt:      &updatedAt,
+			Reactions:      reactions[cid],
+			Attachments:    attachments[cid],
+			ResolvedAt:     timestampToPtr(c.ResolvedAt),
+			ResolvedByType: textToPtr(c.ResolvedByType),
+			ResolvedByID:   uuidToPtr(c.ResolvedByID),
 		}
 	}
 	return out
