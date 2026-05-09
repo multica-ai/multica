@@ -144,6 +144,48 @@ describe("useIssueActions", () => {
     );
   });
 
+  it("opens a confirmation modal before updating status to cancelled", () => {
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    act(() => {
+      result.current.updateField({ status: "cancelled" });
+    });
+
+    expect(mockUpdateMutate).not.toHaveBeenCalled();
+    expect(mockOpenModal).toHaveBeenCalledWith("issue-status-confirm", {
+      status: "cancelled",
+      count: 1,
+      onConfirm: expect.any(Function),
+    });
+
+    const payload = mockOpenModal.mock.calls.at(-1)?.[1] as {
+      onConfirm: () => void;
+    };
+    act(() => {
+      payload.onConfirm();
+    });
+
+    expect(mockUpdateMutate).toHaveBeenCalledWith(
+      { id: "issue-1", status: "cancelled" },
+      expect.any(Object),
+    );
+  });
+
+  it("opens a confirmation modal before updating status to archive", () => {
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    act(() => {
+      result.current.updateField({ status: "archive" });
+    });
+
+    expect(mockUpdateMutate).not.toHaveBeenCalled();
+    expect(mockOpenModal).toHaveBeenCalledWith("issue-status-confirm", {
+      status: "archive",
+      count: 1,
+      onConfirm: expect.any(Function),
+    });
+  });
+
   it("assigning an agent to a backlog issue opens the backlog-hint modal", () => {
     const backlogIssue = { ...mockIssue, status: "backlog" } as Issue;
     const { result } = renderHook(() => useIssueActions(backlogIssue), { wrapper });

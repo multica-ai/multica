@@ -20,6 +20,16 @@
     "toast_deleted": "Issue deleted",
     "toast_delete_failed": "Failed to delete issue"
   },
+  "issue_status_confirm": {
+    "title": "Change issue status?",
+    "description_cancelled": "This issue will be marked as Cancelled. You can cancel now to keep the current status.",
+    "description_archive": "This issue will be moved to Archive. You can cancel now to keep the current status.",
+    "description_cancelled_batch": "{{count}} selected issues will be marked as Cancelled. You can cancel now to keep their current statuses.",
+    "description_archive_batch": "{{count}} selected issues will be moved to Archive. You can cancel now to keep their current statuses.",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "confirming": "Confirming..."
+  },
   "feedback": {
     "title": "Feedback",
     "description": "We'd love to hear what's working, what isn't, or what you'd like to see next.",

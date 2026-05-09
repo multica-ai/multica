@@ -20,6 +20,16 @@
     "toast_deleted": "已删除 issue",
     "toast_delete_failed": "删除 issue 失败"
   },
+  "issue_status_confirm": {
+    "title": "确认变更 issue 状态？",
+    "description_cancelled": "该 issue 将被标记为已取消。取消操作可保留当前状态。",
+    "description_archive": "该 issue 将被移动到已归档。取消操作可保留当前状态。",
+    "description_cancelled_batch": "{{count}} 个已选 issue 将被标记为已取消。取消操作可保留当前状态。",
+    "description_archive_batch": "{{count}} 个已选 issue 将被移动到已归档。取消操作可保留当前状态。",
+    "cancel": "取消",
+    "confirm": "确认",
+    "confirming": "确认中..."
+  },
   "feedback": {
     "title": "反馈",
     "description": "告诉我们哪些好用、哪些不好用、希望接下来做什么。",

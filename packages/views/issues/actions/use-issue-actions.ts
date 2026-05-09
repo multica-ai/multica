@@ -22,6 +22,7 @@ import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import { canAssignAgent } from "../components/pickers";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { requiresIssueStatusConfirmation } from "./status-confirmation";
 
 const BACKLOG_HINT_LS_KEY = "multica:backlog-agent-hint-dismissed";
 
@@ -90,21 +91,34 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const updateField = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
       if (!issueId) return;
-      updateIssue.mutate(
-        { id: issueId, ...updates },
-        { onError: () => toast.error(t(($) => $.detail.update_failed)) },
-      );
-      // Hint: assigning an agent to a backlog issue won't trigger execution
-      // until the issue is moved to an active status.
-      if (
-        updates.assignee_type === "agent" &&
-        updates.assignee_id &&
-        issueStatus === "backlog" &&
-        typeof window !== "undefined" &&
-        localStorage.getItem(BACKLOG_HINT_LS_KEY) !== "true"
-      ) {
-        openModal("issue-backlog-agent-hint", { issueId });
+      const runUpdate = () => {
+        updateIssue.mutate(
+          { id: issueId, ...updates },
+          { onError: () => toast.error(t(($) => $.detail.update_failed)) },
+        );
+        // Hint: assigning an agent to a backlog issue won't trigger execution
+        // until the issue is moved to an active status.
+        if (
+          updates.assignee_type === "agent" &&
+          updates.assignee_id &&
+          issueStatus === "backlog" &&
+          typeof window !== "undefined" &&
+          localStorage.getItem(BACKLOG_HINT_LS_KEY) !== "true"
+        ) {
+          openModal("issue-backlog-agent-hint", { issueId });
+        }
+      };
+
+      if (requiresIssueStatusConfirmation(updates.status)) {
+        openModal("issue-status-confirm", {
+          status: updates.status,
+          count: 1,
+          onConfirm: runUpdate,
+        });
+        return;
       }
+
+      runUpdate();
     },
     [issueId, issueStatus, updateIssue, openModal, t],
   );
