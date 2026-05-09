@@ -92,7 +92,14 @@
     "running": "运行中",
     "skipped": "已跳过",
     "completed": "已完成",
-    "failed": "失败"
+    "failed": "失败",
+    "skipped": "已跳过"
+  },
+  "run_source": {
+    "schedule": "时间表",
+    "manual": "手动",
+    "webhook": "Webhook",
+    "api": "API"
   },
   "run": {
     "issue_linked": "已关联 issue",
@@ -102,9 +109,27 @@
       "summary": "{{count}} 条跳过的运行"
     }
   },
+  "trigger_kind": {
+    "schedule": "时间表",
+    "webhook": "Webhook",
+    "api": "API"
+  },
   "trigger_row": {
     "disabled_badge": "已禁用",
+    "deprecated_badge": "已弃用",
     "next_label": "下次：{{date}}",
+    "webhook_url_label": "Webhook URL",
+    "copy_url": "复制 URL",
+    "url_copied": "已复制 Webhook URL",
+    "url_copy_failed": "复制失败",
+    "rotate_url": "重新生成 URL",
+    "rotate_confirm_title": "重新生成 Webhook URL",
+    "rotate_confirm_description": "当前 URL 将立即失效。所有调用它的外部系统都需要更新为新 URL。继续吗？",
+    "rotate_confirm_cancel": "取消",
+    "rotate_confirm_action": "重新生成",
+    "rotate_in_progress": "生成中...",
+    "toast_rotated": "Webhook URL 已重新生成",
+    "toast_rotate_failed": "重新生成 URL 失败",
     "toast_deleted": "已删除触发器",
     "toast_delete_failed": "删除触发器失败",
     "delete_dialog": {
@@ -117,11 +142,16 @@
   },
   "add_trigger_dialog": {
     "title": "添加触发器",
+    "type_label": "类型",
+    "type_schedule": "时间表",
+    "type_webhook": "Webhook",
     "label_field": "标签（可选）",
     "label_placeholder": "例如：工作日早晨",
+    "webhook_help": "保存后 Multica 会生成一个 Webhook URL。向它 POST 任意 JSON 即可触发本自动化。",
     "submit": "添加触发器",
     "submitting": "添加中...",
-    "toast_added": "已添加触发器",
+    "toast_added_schedule": "已添加时间表触发器",
+    "toast_added_webhook": "已添加 Webhook 触发器",
     "toast_add_failed": "添加触发器失败"
   },
   "dialog": {
