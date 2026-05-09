@@ -93,11 +93,20 @@ export function deriveWsUrl(apiUrl: string): string {
   return trimTrailingSlash(url.toString());
 }
 
+// Convention: api hosts are exposed at `api.<web-host>` (api.multica.ai →
+// multica.ai, api.test.multica.ai → test.multica.ai). Strip the leading
+// `api.` label so a single `apiUrl` configuration produces the right
+// shareable web URL. Hosts that don't match the convention (no leading
+// `api.` label, or short two-label hosts like `api.local`) fall through
+// untouched — those deployments must set `appUrl` explicitly.
 export function deriveAppUrl(apiUrl: string): string {
   const url = new URL(apiUrl);
   url.pathname = "";
   url.search = "";
   url.hash = "";
+  if (url.hostname.startsWith("api.") && url.hostname.split(".").length >= 3) {
+    url.hostname = url.hostname.slice("api.".length);
+  }
   return trimTrailingSlash(url.toString());
 }
 
