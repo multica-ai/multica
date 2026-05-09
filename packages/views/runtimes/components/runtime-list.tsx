@@ -15,7 +15,7 @@ import {
   agentListOptions,
   memberListOptions,
 } from "@multica/core/workspace/queries";
-import { latestCliVersionOptions } from "@multica/core/runtimes";
+import { latestCliManifestOptions } from "@multica/core/runtimes";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { DataTable } from "@multica/ui/components/ui/data-table";
@@ -77,9 +77,8 @@ export function RuntimeList({
 }: {
   runtimes: AgentRuntime[];
   // Kept on the API surface for callers — the CLI column re-derives
-  // update state per row via metadata.cli_version + the GitHub-release
-  // query, so this prop is now unused. Left to avoid scope creep on the
-  // page-level wrapper that still computes the set.
+  // update state per row via metadata.cli_version + the server-proxied
+  // manifest query, so this prop is now unused.
   updatableIds?: Set<string>;
   now: number;
 }) {
@@ -94,7 +93,8 @@ export function RuntimeList({
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
-  const { data: latestCliVersion = null } = useQuery(latestCliVersionOptions());
+  const { data: latestCliManifest = null } = useQuery(latestCliManifestOptions());
+  const latestCliVersion = latestCliManifest?.version ?? null;
 
   const currentMember = user
     ? members.find((m) => m.user_id === user.id)
