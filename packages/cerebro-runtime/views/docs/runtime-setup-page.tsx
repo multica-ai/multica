@@ -7,6 +7,7 @@ import { useNavigation } from "@multica/views/navigation";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useQuery } from "@tanstack/react-query";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
+import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 
 export function RuntimeSetupDocsPage() {
   const wsId = useWorkspaceId();
@@ -16,13 +17,16 @@ export function RuntimeSetupDocsPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 sm:px-6 py-6 sm:py-10">
-      <button
-        onClick={() => push(`/${slug}/runtimes`)}
-        className="mb-6 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="h-3.5 w-3.5" />
-        Back to runtimes
-      </button>
+      <div className="mb-6 flex items-center gap-2">
+        <MobileSidebarTrigger className="mr-0" />
+        <button
+          onClick={() => push(`/${slug}/runtimes`)}
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Back to runtimes
+        </button>
+      </div>
 
       <header className="mb-8">
         <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-md bg-muted">

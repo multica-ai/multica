@@ -93,6 +93,7 @@ import type {
   ArtifactAuthorType,
 } from "@multica/core/types";
 import { useNavigation } from "@multica/views/navigation";
+import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { KindIcon, KIND_LABELS } from "./kind-icon";
 
@@ -846,6 +847,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
         <div className="flex flex-col gap-2 border-b border-border px-4 py-2 md:flex-row md:flex-wrap md:items-center md:justify-between md:gap-3 md:px-6">
           {/* Row 1: folder access + breadcrumb + primary action */}
           <div className="flex min-w-0 items-center gap-2">
+            <MobileSidebarTrigger className="mr-0" />
             <Sheet open={foldersSheetOpen} onOpenChange={setFoldersSheetOpen}>
               <SheetTrigger
                 render={
@@ -1513,4 +1515,3 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
     </div>
   );
 }
-

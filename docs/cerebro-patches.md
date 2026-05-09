@@ -310,6 +310,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `notifications-handler` | server/internal/handler/notifications.go | 134 | Notification handler additions |
 | `orphan-task-test` | server/internal/handler/daemon_test.go | 0 | Cerebro orphan-task test additions |
 | `page-header-cerebro` | packages/views/layout/page-header.tsx | 1 | Layout cerebro additions |
+| `page-header-sticky` | packages/views/layout/page-header.tsx | 2 | JEH-821 — keep dashboard headers visible while mobile keyboard focus changes the visual viewport |
 | `pricing-pricing` | server/pkg/pricing/pricing.go | 108 | Pricing additions (token cost calc) |
 | `pricing-pricing-test` | server/pkg/pricing/pricing_test.go | 90 | Pricing additions (token cost calc) |
 | `privacy-toggle` | packages/views/issues/components/privacy-toggle.tsx | 59 | Privacy/restricted-access UI primitives |
@@ -329,6 +330,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `restricted-lock` | packages/views/common/restricted-lock.tsx | 37 | Privacy/restricted-access UI primitives |
 | `restricted-ref` | packages/views/common/restricted-ref.tsx | 56 | Privacy/restricted-access UI primitives |
 | `runtime-detail` | packages/views/runtimes/components/runtime-detail.tsx | 0 | Cerebro additions to runtime-detail |
+| `runtime-detail-mobile-nav` | packages/views/runtimes/components/runtime-detail.tsx | 2 | JEH-821 — expose the global sidebar trigger on runtime detail pages at mobile widths |
 | `runtime-handler-runtime` | server/internal/handler/runtime.go | 114 | Runtime handler additions |
 | `runtime-handler-runtime-test` | server/internal/handler/runtime_test.go | 211 | Runtime handler additions |
 | `runtime-list-cerebro` | packages/views/runtimes/components/runtime-list.tsx | 8 | Runtime view cerebro additions |
@@ -343,7 +345,9 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `service-budget` | server/internal/service/budget.go | 125 | Service-layer additions (budget/task/workspace-pause) |
 | `service-task-cerebro` | server/internal/service/task.go | 182 | Service-layer additions (budget/task/workspace-pause) |
 | `service-workspace-pause` | server/internal/service/workspace_pause.go | 53 | Service-layer additions (budget/task/workspace-pause) |
+| `settings-mobile-nav` | packages/views/settings/components/settings-page.tsx<br>packages/views/settings/components/cerebro-mobile-tab-nav.tsx | 62 | JEH-821 — replace Settings' stacked mobile tab sidebar with a sticky Select and global nav trigger |
 | `settings-page-cerebro` | packages/views/settings/components/settings-page.tsx | 119 | Settings page cerebro additions |
+| `skill-detail-mobile-nav` | packages/views/skills/components/skill-detail-page.tsx | 4 | JEH-821 — expose the global sidebar trigger on skill detail pages at mobile widths |
 | `setup-jwt-handler` | server/internal/handler/setup_jwt_test.go | 12 | JWT setup helper additions |
 | `sqlc-agent` | server/pkg/db/queries/agent.sql | 19 | Cerebro sqlc query additions |
 | `sqlc-agent-task-title` | server/pkg/db/queries/agent.sql | 3 | JEH-698 — `title` column on agent_task_queue + INSERT param. Curated short display label generated at enqueue time, distinct from `trigger_summary` (verbatim provenance) |

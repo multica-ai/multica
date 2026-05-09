@@ -38,6 +38,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import { AppLink } from "@multica/views/navigation";
+import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 
 const roleConfig: Record<MemberRole, { label: string; icon: typeof Crown }> = {
   owner: { label: "Owner", icon: Crown },
@@ -78,12 +79,15 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
   if (!member) {
     return (
       <div className="mx-auto max-w-2xl p-6">
-        <AppLink
-          href={`${paths.workspace(workspace.slug).settings()}?tab=members`}
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" /> Back to Members
-        </AppLink>
+        <div className="flex items-center gap-2">
+          <MobileSidebarTrigger className="mr-0" />
+          <AppLink
+            href={`${paths.workspace(workspace.slug).settings()}?tab=members`}
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" /> Back to Members
+          </AppLink>
+        </div>
         <p className="mt-4 text-sm text-muted-foreground">Member not found in this workspace.</p>
       </div>
     );
@@ -141,12 +145,15 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-6">
-      <AppLink
-        href={`${paths.workspace(workspace.slug).settings()}?tab=members`}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="h-4 w-4" /> Back to Members
-      </AppLink>
+      <div className="flex items-center gap-2">
+        <MobileSidebarTrigger className="mr-0" />
+        <AppLink
+          href={`${paths.workspace(workspace.slug).settings()}?tab=members`}
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back to Members
+        </AppLink>
+      </div>
 
       <header className="flex items-center gap-4">
         <ActorAvatar actorType="member" actorId={member.user_id} size={48} />
