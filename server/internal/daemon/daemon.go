@@ -1536,6 +1536,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		}
 	}
 
+	d.maybeCreateCodexAppVisibleTaskEntry(ctx, task, result, provider, taskLog)
+
 	// Write GC metadata after the task finishes so the periodic GC loop
 	// can look up the parent record (issue / chat session / autopilot run /
 	// task itself for quick-create) later. Written last so that a mid-task

@@ -126,6 +126,9 @@ The daemon runs on the user's local machine, and its config is read from local e
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Max concurrent tasks |
 | `MULTICA_<PROVIDER>_PATH` | matches the CLI name | Path to each AI coding tool's executable (for example `MULTICA_CLAUDE_PATH`) |
 | `MULTICA_<PROVIDER>_MODEL` | empty | Default model for each AI coding tool |
+| `MULTICA_CODEX_APP_VISIBLE` | `false` | When `true`, Codex tasks create an extra short Codex App-visible portal thread after completion |
+| `MULTICA_CODEX_APP_PORTAL_ROOT` | `~/Documents/Codex/Multica` | Directory for Codex App visible portal files |
+| `MULTICA_CODEX_APP_VISIBLE_CWD` | portal root | Working directory used for the visible Codex thread; set it to a Codex App workspace root when you want entries grouped there |
 
 For a full explanation of how each parameter affects daemon behavior, see [Daemon and runtimes](/daemon-runtimes).
 

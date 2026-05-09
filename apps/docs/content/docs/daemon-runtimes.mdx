@@ -25,6 +25,10 @@ On startup it does four things:
 3. Registers itself with the server, along with a runtime for each detected tool
 4. Keeps **polling every 3 seconds** for tasks to pick up, and **sends a heartbeat every 15 seconds**
 
+On macOS, Codex detection also checks the Codex Desktop bundle (`/Applications/Codex.app/Contents/Resources/codex`) when `codex` is not on `PATH` and `MULTICA_CODEX_PATH` is unset.
+
+For Codex tasks, `MULTICA_CODEX_APP_VISIBLE=true` can create an extra Codex App-visible portal thread after the Multica task completes. This does not change the real execution workdir; it writes a small portal directory with `README.md`, `result.md`, `links.json`, and a best-effort `real-workdir` link, then creates a compact Codex thread pointing at it. Set `MULTICA_CODEX_APP_VISIBLE_CWD` to the Codex App workspace root where you want the sidebar entry to appear.
+
 Common commands:
 
 | Command | Purpose |
