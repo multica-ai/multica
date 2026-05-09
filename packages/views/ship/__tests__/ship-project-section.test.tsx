@@ -45,6 +45,13 @@ vi.mock("@multica/core/ship", () => ({
   }),
   useUpsertDeployEnvironment: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useLogDeploy: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  // Phase 6 — adapter hooks. The dialog is rendered behind the swimlane
+  // edit button; the section mounts the swimlane so we need stubs even
+  // when the section's tests don't open the dialog.
+  useDeployAdapters: () => ({ data: { adapters: [] }, isLoading: false }),
+  useConfigureDeployAdapter: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  usePollDeployEnvironment: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRollbackDeployEnvironment: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@tanstack/react-query", async () => {

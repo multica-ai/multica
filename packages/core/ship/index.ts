@@ -35,4 +35,10 @@ export {
   usePromoteDeployPreflight,
   shipSnapshotOptions,
   useShipSnapshot,
+  // Phase 6 — multi-adapter deploy
+  deployAdaptersOptions,
+  useDeployAdapters,
+  useConfigureDeployAdapter,
+  usePollDeployEnvironment,
+  useRollbackDeployEnvironment,
 } from "./queries";

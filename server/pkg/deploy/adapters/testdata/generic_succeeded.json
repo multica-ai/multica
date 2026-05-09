@@ -1,0 +1,11 @@
+{
+  "build": {
+    "status": "PASSED",
+    "commit": {
+      "sha": "feedface1234feedface1234feedface1234feed",
+      "branch": "main"
+    },
+    "url": "https://ci.example.com/builds/123"
+  },
+  "project": "my-app"
+}

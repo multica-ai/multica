@@ -1,0 +1,9 @@
+{
+  "type": "deploy",
+  "data": {
+    "serviceId": "srv-abcdefg",
+    "deployId": "dep-xxx",
+    "status": "live"
+  },
+  "timestamp": "2024-01-15T12:00:00Z"
+}

@@ -337,6 +337,11 @@ func main() {
 	// "In Production" card can render error/latency Δ + a "Rollback?"
 	// chip when thresholds trip.
 	go runShipHubHealthMonitor(sweepCtx, queries)
+	// Ship Hub Phase 6 adapter poller: every 5 minutes, poll
+	// non-webhook deploy adapters (Vercel, Cloudflare, Fly, Render) for
+	// the current deployed SHA so the swimlane stays accurate even when
+	// a webhook delivery is missed (provider hiccup, Multica downtime).
+	go runShipHubAdapterPoller(sweepCtx, queries)
 
 	if metricsServer != nil {
 		go func() {

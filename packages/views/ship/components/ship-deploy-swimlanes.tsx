@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ExternalLink, Pencil, Plus, Rocket } from "lucide-react";
+import { adapterIcon } from "./adapter-icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Popover,
@@ -123,9 +124,13 @@ interface DeployPillProps {
   deploy: Deploy;
   /** Repo URL is used to build the GitHub commit link in the popover. */
   repoUrl?: string;
+  /** Phase 6 — render the adapter icon next to the SHA so the user can
+   *  tell at a glance which provider deployed each pill. Optional so
+   *  older callers (and the empty-state mock) keep working. */
+  adapterKind?: string;
 }
 
-function DeployPill({ deploy, repoUrl }: DeployPillProps) {
+function DeployPill({ deploy, repoUrl, adapterKind }: DeployPillProps) {
   const { t, i18n } = useT("ship");
   const kind = statusKind(deploy.status);
   const sha = shortSha(deploy.sha);
@@ -164,6 +169,13 @@ function DeployPill({ deploy, repoUrl }: DeployPillProps) {
           >
             <span aria-hidden>{pillGlyph(kind)}</span>
             <span>{sha || "—"}</span>
+            {adapterKind && (() => {
+              const Icon = adapterIcon(adapterKind);
+              // size-3 keeps the pill visually balanced with the glyph
+              // on the left. Decorative — aria-hidden so screen readers
+              // don't repeat the adapter name (the popover surfaces it).
+              return <Icon className="size-3 shrink-0 opacity-70" aria-hidden />;
+            })()}
           </button>
         }
       />
@@ -414,6 +426,7 @@ function Swimlane({ env, repoUrl }: SwimlaneProps) {
                   key={deploy.id}
                   deploy={deploy}
                   repoUrl={repoUrl}
+                  adapterKind={env.adapter_kind}
                 />
               ))}
             </div>

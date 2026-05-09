@@ -1,0 +1,15 @@
+{
+  "type": "deployment.succeeded",
+  "createdAt": 1700000000000,
+  "payload": {
+    "project": { "id": "prj_abc123" },
+    "deployment": {
+      "id": "dpl_xyz789",
+      "url": "myapp-abc123.vercel.app",
+      "meta": {
+        "githubCommitSha": "deadbeef000000000000000000000000deadbeef",
+        "githubCommitRef": "main"
+      }
+    }
+  }
+}

@@ -228,6 +228,11 @@ export const DeployEnvironmentSchema = z.object({
   auto_promote: z.boolean().default(false),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
+  // Phase 6 — adapter_kind defaults to "github_actions" for older
+  // backends that don't supply it. Treated as a free-form string per
+  // CLAUDE.md API Response Compatibility (don't pin to an enum that
+  // forces a TS-side migration whenever a server adapter ships).
+  adapter_kind: z.string().optional().default("github_actions"),
 }).loose();
 
 export const ListDeployEnvironmentsResponseSchema = z.object({
@@ -237,6 +242,44 @@ export const ListDeployEnvironmentsResponseSchema = z.object({
 export const EMPTY_LIST_DEPLOY_ENVIRONMENTS_RESPONSE = {
   environments: [],
 };
+
+// Phase 6 — adapters listing.
+export const DeployAdapterSchema = z.object({
+  kind: z.string().default(""),
+  supports_poll: z.boolean().default(false),
+  supports_rollback: z.boolean().default(false),
+  webhook_url: z.string().default(""),
+}).loose();
+
+export const ListDeployAdaptersResponseSchema = z.object({
+  adapters: z.array(DeployAdapterSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_DEPLOY_ADAPTERS_RESPONSE = {
+  adapters: [],
+};
+
+export const ConfigureDeployAdapterResponseSchema = z.object({
+  environment_id: z.string().default(""),
+  adapter_kind: z.string().default(""),
+  webhook_url: z.string().default(""),
+  webhook_secret_set: z.boolean().default(false),
+}).loose();
+
+export const EMPTY_CONFIGURE_DEPLOY_ADAPTER_RESPONSE = {
+  environment_id: "",
+  adapter_kind: "",
+  webhook_url: "",
+  webhook_secret_set: false,
+};
+
+export const PollDeployEnvironmentResponseSchema = z.object({
+  current_sha: z.string().optional(),
+  current_deployed_at: z.string().optional(),
+  changed: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_POLL_DEPLOY_ENVIRONMENT_RESPONSE = {};
 
 export const DeploySchema = z.object({
   id: z.string(),

@@ -1,0 +1,181 @@
+---
+title: 部署适配器
+description: "通过 Webhook、轮询和回滚分派，将 Multica 发布中心连接到 Vercel、Cloudflare Pages、Fly.io、Render 或任何其他部署平台。"
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+发布中心 Phase 6 引入了**部署适配器** —— 部署环境的多租户维度。同一个发布中心 UI 在跟踪 GitHub Actions 部署的同时，现在也能从 Vercel、Cloudflare Pages、Fly.io、Render，以及通用 Webhook 接收事件。新增第六个适配器只需一个 Go 文件加一个 `init()` —— 注册表会暴露二进制实际导入的所有适配器。
+
+本页说明每个内置适配器：在哪里找凭证、要粘贴到平台 UI 中的 Webhook URL，以及示例载荷。
+
+<Callout type="info">
+Webhook 接收端无身份验证 —— 平台特定的 HMAC 签名是唯一的认证手段。Multica 会扫描所有工作区存储的密钥来匹配对应环境，与 GitHub Actions 接收端的模式一致。
+</Callout>
+
+## 通用配置流程
+
+每个适配器的配置流程相同：
+
+1. 在 Multica 中打开部署环境的**配置**对话框。
+2. 在**部署适配器**下拉菜单中选择适配器。
+3. 在**适配器配置** JSON 框中填入下方对应的字段。
+4. 生成或粘贴 **Webhook 密钥**（点击按钮 Multica 会自动生成）。
+5. 复制 Multica 显示的 **Webhook URL**，粘贴到平台的 Webhook 设置中。
+6. 点击**保存**，然后点击**测试连接**验证轮询路径（不支持轮询的适配器会跳过）。
+
+配置在服务端加密保存（AES-256-GCM，与 GitHub PAT 存储使用相同的密钥）。
+
+---
+
+## Vercel
+
+接收 `deployment.created`、`deployment.succeeded`、`deployment.error` 和 `deployment.canceled` 事件。轮询 v6 deployments API 获取当前状态。通过 v13 promote 端点支持回滚。
+
+**查找项目 ID 与令牌：**
+- `team_id`：Vercel 控制台 → Settings → ID（以 `team_` 开头）。
+- `project_id`：项目页面 → Settings → ID（以 `prj_` 开头）。
+- `token`：Vercel 控制台 → Settings → Tokens → "Create Token"，需 `read` + `deploy` 权限。
+
+**适配器配置：**
+
+```json
+{
+  "team_id": "team_xyz",
+  "project_id": "prj_abc123",
+  "token": "vc_xxxxxxxxxxxxx"
+}
+```
+
+**Webhook URL：** `https://<your-multica-host>/api/integrations/deploy/vercel/webhook`
+
+Vercel 在 `x-vercel-signature` 头部使用 HMAC-SHA1 签名。
+
+---
+
+## Cloudflare Pages
+
+接收 Pages 部署状态通知。轮询 v4 deployments 列表端点。通过重试历史部署支持回滚。
+
+**查找项目与令牌：**
+- `account_id`：Cloudflare 控制台 → 右上角账号选择器 → "Account ID"（32 位十六进制）。
+- `project_name`：Pages 项目 URL slug（例如 `my-pages-project`）。
+- `api_token`：Cloudflare 控制台 → Profile → API Tokens → 自定义令牌，需 **Account → Cloudflare Pages → Edit** 权限。
+
+**适配器配置：**
+
+```json
+{
+  "account_id": "acc_32_char_hex",
+  "project_name": "my-pages-project",
+  "api_token": "cf_token"
+}
+```
+
+**Webhook URL：** `https://<your-multica-host>/api/integrations/deploy/cloudflare/webhook`
+
+Cloudflare 使用共享密钥模式：将密钥同时粘贴到 Multica 的 **Webhook 密钥**字段和 Pages 项目的 Webhook 配置中。`cf-webhook-auth` 头部会原样携带密钥 —— Multica 使用常数时间比较。
+
+---
+
+## Fly.io
+
+<Callout type="warn">
+Fly.io 目前**不**提供部署 Webhook。本适配器每 5 分钟轮询一次 machines API；回滚未在本期实现（请使用 `flyctl releases rollback` 命令行）。
+</Callout>
+
+**查找应用与令牌：**
+- `app_name`：你的 Fly 应用名（例如 `my-app`）。
+- `api_token`：执行 `flyctl auth token`（以 `fm1_…` 或 `fo1_…` 开头）。
+
+**适配器配置：**
+
+```json
+{
+  "app_name": "my-app",
+  "api_token": "fm1_…"
+}
+```
+
+轮询时会读取每台 machine 的 `latest_deployment_status` 和 `config.env.COMMIT_SHA`。请在 `fly.toml` 中设置 `COMMIT_SHA` 环境变量，或在 CI 流水线中传入，以便轮询能够识别正在运行的提交。
+
+---
+
+## Render
+
+接收 `deploy` 事件。轮询 v1 deploys 列表端点。回滚未在本期实现（请使用 Render 控制台）。
+
+**查找服务与密钥：**
+- `service_id`：Render 控制台 → 服务 → Settings → Service ID（以 `srv-` 开头）。
+- `api_key`：Render 控制台 → Account Settings → API Keys。
+
+**适配器配置：**
+
+```json
+{
+  "service_id": "srv-abcdefg",
+  "api_key": "rnd_xxx"
+}
+```
+
+**Webhook URL：** `https://<your-multica-host>/api/integrations/deploy/render/webhook`
+
+Render 在 `x-webhook-signature` 头部使用 HMAC-SHA256 签名。Webhook 载荷不包含提交 SHA，因此适配器会通过 REST 调用获取。
+
+---
+
+## 通用 Webhook
+
+适用于没有一方适配器支持的平台。你需要配置 JSON 路径（gjson 语法）告诉 Multica 在你的载荷中哪里能找到 SHA、状态、引用和日志 URL。
+
+**适配器配置：**
+
+```json
+{
+  "status_path": "build.status",
+  "sha_path": "build.commit.sha",
+  "ref_path": "build.commit.branch",
+  "log_url_path": "build.url",
+  "identity_path": "project",
+  "identity_value": "my-app",
+  "signature_header": "X-CI-Signature",
+  "signature_algo": "hmac-sha256",
+  "status_map": {
+    "PASSED": "succeeded",
+    "FAILED": "failed",
+    "RUNNING": "in_progress"
+  }
+}
+```
+
+| 字段 | 必填 | 备注 |
+|---|---|---|
+| `status_path` | 是 | 状态字符串在载荷中的 gjson 路径。 |
+| `sha_path` | 是 | 提交 SHA 的 gjson 路径。 |
+| `ref_path` | 否 | 留空时回退到环境的目标分支。 |
+| `log_url_path` | 否 | 显示为 Pill 的"打开日志"链接。 |
+| `identity_path` + `identity_value` | 否 | 当 identity 字段不匹配时丢弃投递。 |
+| `signature_header` | 否 | 默认为 `X-Webhook-Secret`。 |
+| `signature_algo` | 否 | `hmac-sha256` \| `hmac-sha1` \| `shared-secret`（默认）。 |
+| `status_map` | 否 | 将平台状态字符串翻译到 Multica 枚举（`pending`、`in_progress`、`succeeded`、`failed`、`rolled_back`）。 |
+
+**Webhook URL：** `https://<your-multica-host>/api/integrations/deploy/generic_webhook/webhook`
+
+通用适配器不支持轮询和回滚。部署对账器会跳过使用通用适配器的环境。
+
+---
+
+## 添加新适配器
+
+要添加新的一方适配器，请在 `server/pkg/deploy/adapters/` 中新增一个 Go 文件：
+
+```go
+type myAdapter struct{}
+
+func (a *myAdapter) Name() string { return "myprovider" }
+// ... 实现 deploy.Adapter 接口 ...
+
+func init() { deploy.Register(&myAdapter{}) }
+```
+
+注册表会暴露 `init()` 中注册的内容，多适配器 Webhook 接收端按 URL slug 分派，环境配置下拉菜单会自动出现新选项。前端无需修改即可看到新适配器 —— 在 `packages/views/locales/{en,zh-Hans}/ship.json` 中添加翻译键以获得友好名称，并在 `adapter-icons.tsx` 中映射图标即可。

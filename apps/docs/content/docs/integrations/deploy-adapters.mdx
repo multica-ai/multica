@@ -1,0 +1,198 @@
+---
+title: Deploy adapters
+description: "Connect Multica's Ship Hub to Vercel, Cloudflare Pages, Fly.io, Render, or any other deploy provider via webhooks, polling, and rollback dispatch."
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Ship Hub Phase 6 introduces **deploy adapters** — a multi-tenant axis on the deploy environment. The same Ship Hub UI that already tracks GitHub Actions deploys now ingests events from Vercel, Cloudflare Pages, Fly.io, Render, and a generic-webhook escape hatch. Adding a sixth adapter is a single Go file plus an `init()` — the registry exposes whatever the binary imports.
+
+This page covers each built-in adapter: where to find the credentials, the webhook URL to paste into the provider's UI, and a sample payload.
+
+<Callout type="info">
+The webhook receivers are unauthenticated — the per-provider HMAC signature is the only auth. Multica scans every workspace's stored secret to find the matching environment, the same pattern the GitHub Actions receiver uses.
+</Callout>
+
+## Common configuration flow
+
+For every adapter, the workflow is the same:
+
+1. In Multica, open the deploy environment's **Configure** dialog.
+2. Pick the adapter from the **Deploy adapter** dropdown.
+3. Fill the **Adapter configuration** JSON box with the provider-specific fields below.
+4. Mint or paste a **Webhook secret** (Multica generates one for you on click).
+5. Copy the **Webhook URL** Multica displays and paste it into the provider's webhook settings.
+6. Click **Save**, then **Test connection** to verify the poll path (skipped for adapters that don't support polling).
+
+Configuration is stored encrypted on the server (AES-256-GCM, same key as the GitHub PAT store).
+
+---
+
+## Vercel
+
+Receives `deployment.created`, `deployment.succeeded`, `deployment.error`, and `deployment.canceled` events. Polls the v6 deployments API for current state. Supports rollback via the v13 promote endpoint.
+
+**Find your project ID + token:**
+- `team_id`: Vercel dashboard → Settings → ID (starts with `team_`).
+- `project_id`: Project page → Settings → ID (starts with `prj_`).
+- `token`: Vercel dashboard → Settings → Tokens → "Create Token" with `read` + `deploy` scopes.
+
+**Adapter configuration:**
+
+```json
+{
+  "team_id": "team_xyz",
+  "project_id": "prj_abc123",
+  "token": "vc_xxxxxxxxxxxxx"
+}
+```
+
+**Webhook URL:** `https://<your-multica-host>/api/integrations/deploy/vercel/webhook`
+
+**Sample payload (deployment.succeeded):**
+
+```json
+{
+  "type": "deployment.succeeded",
+  "createdAt": 1700000000000,
+  "payload": {
+    "project": { "id": "prj_abc123" },
+    "deployment": {
+      "id": "dpl_xyz",
+      "url": "myapp-xyz.vercel.app",
+      "meta": { "githubCommitSha": "deadbeef…", "githubCommitRef": "main" }
+    }
+  }
+}
+```
+
+Vercel signs the request with HMAC-SHA1 in the `x-vercel-signature` header.
+
+---
+
+## Cloudflare Pages
+
+Receives Pages deployment status notifications. Polls the v4 deployments listing endpoint. Supports rollback by retrying a prior deployment.
+
+**Find your project + token:**
+- `account_id`: Cloudflare dashboard → top-right account picker → "Account ID" (32-char hex).
+- `project_name`: Pages project URL slug (e.g. `my-pages-project`).
+- `api_token`: Cloudflare dashboard → Profile → API Tokens → custom token with **Account → Cloudflare Pages → Edit** permission.
+
+**Adapter configuration:**
+
+```json
+{
+  "account_id": "acc_32_char_hex",
+  "project_name": "my-pages-project",
+  "api_token": "cf_token"
+}
+```
+
+**Webhook URL:** `https://<your-multica-host>/api/integrations/deploy/cloudflare/webhook`
+
+Cloudflare uses a shared-secret model: paste the secret into both Multica's **Webhook secret** field and the Pages project's webhook builder. The `cf-webhook-auth` header carries the secret verbatim — Multica compares it in constant time.
+
+---
+
+## Fly.io
+
+<Callout type="warn">
+Fly.io does **not** expose deploy webhooks as of this writing. The adapter polls the machines API every 5 minutes; rollback is out of scope (use `flyctl releases rollback` from the CLI).
+</Callout>
+
+**Find your app + token:**
+- `app_name`: name of your Fly app (e.g. `my-app`).
+- `api_token`: `flyctl auth token` (starts with `fm1_…` or `fo1_…`).
+
+**Adapter configuration:**
+
+```json
+{
+  "app_name": "my-app",
+  "api_token": "fm1_…"
+}
+```
+
+The poller reads `latest_deployment_status` and `config.env.COMMIT_SHA` from each machine. Set the `COMMIT_SHA` env var in your `fly.toml` or pass it via your CI pipeline so the poller can identify which commit is running.
+
+---
+
+## Render
+
+Receives `deploy` events. Polls the v1 deploys listing endpoint. Rollback is out of scope (use the Render dashboard).
+
+**Find your service + key:**
+- `service_id`: Render dashboard → service → Settings → Service ID (starts with `srv-`).
+- `api_key`: Render dashboard → Account Settings → API Keys.
+
+**Adapter configuration:**
+
+```json
+{
+  "service_id": "srv-abcdefg",
+  "api_key": "rnd_xxx"
+}
+```
+
+**Webhook URL:** `https://<your-multica-host>/api/integrations/deploy/render/webhook`
+
+Render signs with HMAC-SHA256 in the `x-webhook-signature` header. The webhook payload doesn't include the commit SHA, so the adapter follows up with a REST call to fetch it.
+
+---
+
+## Generic webhook
+
+The escape hatch for providers without a first-party adapter. You configure JSON paths (gjson syntax) that tell Multica where to find the SHA, status, ref, and log URL inside your provider's payload.
+
+**Adapter configuration:**
+
+```json
+{
+  "status_path": "build.status",
+  "sha_path": "build.commit.sha",
+  "ref_path": "build.commit.branch",
+  "log_url_path": "build.url",
+  "identity_path": "project",
+  "identity_value": "my-app",
+  "signature_header": "X-CI-Signature",
+  "signature_algo": "hmac-sha256",
+  "status_map": {
+    "PASSED": "succeeded",
+    "FAILED": "failed",
+    "RUNNING": "in_progress"
+  }
+}
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `status_path` | yes | gjson path to the status string in the payload. |
+| `sha_path` | yes | gjson path to the commit SHA. |
+| `ref_path` | no | Falls back to the env's target branch when omitted. |
+| `log_url_path` | no | Surfaced as the pill's "Open log" link. |
+| `identity_path` + `identity_value` | no | Drop deliveries whose identity field doesn't match. |
+| `signature_header` | no | Defaults to `X-Webhook-Secret`. |
+| `signature_algo` | no | `hmac-sha256` \| `hmac-sha1` \| `shared-secret` (default). |
+| `status_map` | no | Translate provider status strings to Multica's enum (`pending`, `in_progress`, `succeeded`, `failed`, `rolled_back`). |
+
+**Webhook URL:** `https://<your-multica-host>/api/integrations/deploy/generic_webhook/webhook`
+
+Polling and rollback are not supported for the generic adapter. The deploy reconciler skips environments using it.
+
+---
+
+## Adding a new adapter
+
+For first-party adapters beyond the five built-in ones, drop a Go file in `server/pkg/deploy/adapters/`:
+
+```go
+type myAdapter struct{}
+
+func (a *myAdapter) Name() string { return "myprovider" }
+// ... implement the deploy.Adapter interface ...
+
+func init() { deploy.Register(&myAdapter{}) }
+```
+
+The registry exposes whatever `init()` registered, the multi-adapter webhook receiver dispatches by URL slug, and the env-config dropdown picks up the new option automatically. No frontend changes are required for the adapter to appear — add a translation key in `packages/views/locales/{en,zh-Hans}/ship.json` for a friendly name and an icon mapping in `adapter-icons.tsx` for the swimlane glyph.

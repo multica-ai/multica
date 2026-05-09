@@ -106,6 +106,11 @@ import type {
   CreateDeployEnvironmentRequest,
   UpdateDeployEnvironmentRequest,
   LogDeployRequest,
+  ListDeployAdaptersResponse,
+  ConfigureDeployAdapterRequest,
+  ConfigureDeployAdapterResponse,
+  PollDeployEnvironmentResponse,
+  RollbackDeployRequest,
   ListShipProjectsResponse,
   ListPullRequestsResponse,
   SyncPullRequestsResult,
@@ -154,6 +159,12 @@ import {
   EMPTY_LIST_PULL_REQUESTS_RESPONSE,
   EMPTY_LIST_DEPLOY_ENVIRONMENTS_RESPONSE,
   EMPTY_LIST_DEPLOYS_RESPONSE,
+  ListDeployAdaptersResponseSchema,
+  EMPTY_LIST_DEPLOY_ADAPTERS_RESPONSE,
+  ConfigureDeployAdapterResponseSchema,
+  EMPTY_CONFIGURE_DEPLOY_ADAPTER_RESPONSE,
+  PollDeployEnvironmentResponseSchema,
+  EMPTY_POLL_DEPLOY_ENVIRONMENT_RESPONSE,
   WebhookSecretResponseSchema,
   EMPTY_WEBHOOK_SECRET_RESPONSE,
   ActionResultSchema,
@@ -1669,6 +1680,65 @@ export class ApiClient {
     data: LogDeployRequest,
   ): Promise<Deploy> {
     return this.fetch(`/api/deploy_environments/${environmentId}/deploys`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Phase 6 — multi-adapter deploy. The dialog calls listDeployAdapters
+  // to populate the dropdown; configureDeployAdapter persists the
+  // adapter kind + encrypted config; pollDeployEnvironment forces a
+  // refresh against the provider's API; rollbackDeployEnvironment
+  // dispatches a redeploy of a prior SHA.
+  async listDeployAdapters(): Promise<ListDeployAdaptersResponse> {
+    const raw = await this.fetch<unknown>("/api/deploy/adapters");
+    return parseWithFallback(
+      raw,
+      ListDeployAdaptersResponseSchema,
+      EMPTY_LIST_DEPLOY_ADAPTERS_RESPONSE,
+      { endpoint: "GET /api/deploy/adapters" },
+    );
+  }
+
+  async configureDeployAdapter(
+    environmentId: string,
+    data: ConfigureDeployAdapterRequest,
+  ): Promise<ConfigureDeployAdapterResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/deploy_environments/${environmentId}/adapter`,
+      {
+        method: "PUT",
+        body: JSON.stringify(data),
+      },
+    );
+    return parseWithFallback(
+      raw,
+      ConfigureDeployAdapterResponseSchema,
+      EMPTY_CONFIGURE_DEPLOY_ADAPTER_RESPONSE,
+      { endpoint: "PUT /api/deploy_environments/:id/adapter" },
+    );
+  }
+
+  async pollDeployEnvironment(
+    environmentId: string,
+  ): Promise<PollDeployEnvironmentResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/deploy_environments/${environmentId}/poll_now`,
+      { method: "POST" },
+    );
+    return parseWithFallback(
+      raw,
+      PollDeployEnvironmentResponseSchema,
+      EMPTY_POLL_DEPLOY_ENVIRONMENT_RESPONSE,
+      { endpoint: "POST /api/deploy_environments/:id/poll_now" },
+    );
+  }
+
+  async rollbackDeployEnvironment(
+    environmentId: string,
+    data: RollbackDeployRequest,
+  ): Promise<{ environment_id: string; target_sha: string; deploy_id?: string }> {
+    return this.fetch(`/api/deploy_environments/${environmentId}/rollback`, {
       method: "POST",
       body: JSON.stringify(data),
     });

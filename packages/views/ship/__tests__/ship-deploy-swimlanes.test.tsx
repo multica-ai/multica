@@ -22,6 +22,13 @@ vi.mock("@multica/core/ship", () => ({
   }),
   useUpsertDeployEnvironment: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useLogDeploy: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  // Phase 6 — adapter-related hooks consumed by configure-deploy-env-dialog.
+  // The dialog is mounted inside Swimlane (gated on the edit button) so we
+  // need stub implementations even when the test doesn't open the dialog.
+  useDeployAdapters: () => ({ data: { adapters: [] }, isLoading: false }),
+  useConfigureDeployAdapter: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  usePollDeployEnvironment: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRollbackDeployEnvironment: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({

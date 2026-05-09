@@ -1,0 +1,21 @@
+{
+  "type": "deployment_status",
+  "data": {
+    "project": { "name": "my-pages-project" },
+    "deployment": {
+      "id": "abc-123",
+      "short_id": "abc123",
+      "project_name": "my-pages-project",
+      "latest_stage_status": "success",
+      "url": "https://abc-123.my-pages-project.pages.dev",
+      "production_branch": "main",
+      "created_on": "2024-01-15T12:00:00Z",
+      "source": {
+        "config": {
+          "commit_hash": "cafebabe1234cafebabe1234cafebabe1234cafe",
+          "production_branch": "main"
+        }
+      }
+    }
+  }
+}

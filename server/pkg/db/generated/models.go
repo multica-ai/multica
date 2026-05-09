@@ -471,6 +471,15 @@ type Deploy struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type DeployAdapterConfig struct {
+	EnvironmentID          pgtype.UUID        `json:"environment_id"`
+	AdapterKind            string             `json:"adapter_kind"`
+	ConfigEncrypted        []byte             `json:"config_encrypted"`
+	WebhookSecretEncrypted []byte             `json:"webhook_secret_encrypted"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
 type DeployEnvironment struct {
 	ID                pgtype.UUID           `json:"id"`
 	WorkspaceID       pgtype.UUID           `json:"workspace_id"`
@@ -484,6 +493,7 @@ type DeployEnvironment struct {
 	AutoPromote       bool                  `json:"auto_promote"`
 	CreatedAt         pgtype.Timestamptz    `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz    `json:"updated_at"`
+	AdapterKind       string                `json:"adapter_kind"`
 }
 
 type DeployHealthSnapshot struct {

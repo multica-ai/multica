@@ -221,6 +221,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// checked.
 	r.Post("/api/integrations/github/webhook", h.HandleGitHubWebhook)
 
+	// Ship Hub Phase 6: multi-adapter deploy webhook receiver. Same
+	// unauthenticated stance as the GitHub one (signature verifies who
+	// the sender is), but routed by adapter kind so adding a 6th
+	// adapter doesn't require a new endpoint.
+	r.Post("/api/integrations/deploy/{adapter}/webhook", h.HandleDeployAdapterWebhook)
+
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache))
@@ -453,6 +459,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/deploy_preflight/{id}/promote", h.PromoteDeployPreflight)
 			r.Get("/api/ship_hub/summary", h.GetShipHubSummary)
 			r.Get("/api/projects/{id}/ship_snapshot", h.GetProjectShipSnapshot)
+
+			// Ship Hub Phase 6 — multi-adapter deploy. List registered
+			// adapters; configure / poll an env; rollback an env. The
+			// adapter-config write and the rollback dispatch are
+			// owner/admin-gated downstream; poll is members-OK because
+			// reading current SHA can't damage anything.
+			r.Get("/api/deploy/adapters", h.ListDeployAdapters)
+			r.Put("/api/deploy_environments/{id}/adapter", h.ConfigureDeployAdapter)
+			r.Post("/api/deploy_environments/{id}/poll_now", h.PollDeployEnvironment)
+			r.Post("/api/deploy_environments/{id}/rollback", h.RollbackDeployEnvironment)
 
 			// Channels (multi-participant chat + DMs).
 			// Endpoints respond 404 when workspace.channels_enabled is FALSE

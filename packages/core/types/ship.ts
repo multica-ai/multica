@@ -100,6 +100,52 @@ export interface DeployEnvironment {
   auto_promote: boolean;
   created_at: string;
   updated_at: string;
+  /** Phase 6 — which deploy adapter handles this env's webhooks +
+   *  poll + rollback. Defaults to "github_actions" for envs created
+   *  before Phase 6 landed (server-side migration). Treated as a
+   *  free-form string per CLAUDE.md API Response Compatibility — UI
+   *  switches on it MUST have a default branch so a server-side enum
+   *  addition doesn't crash older Electron builds. */
+  adapter_kind?: string;
+}
+
+/** Phase 6 — entry returned by GET /api/deploy/adapters. */
+export interface DeployAdapter {
+  kind: string;
+  supports_poll: boolean;
+  supports_rollback: boolean;
+  webhook_url: string;
+}
+
+/** Phase 6 — body for PUT /api/deploy_environments/:id/adapter. */
+export interface ConfigureDeployAdapterRequest {
+  adapter_kind: string;
+  /** Adapter-specific JSON config (Vercel: {team_id, project_id, token};
+   *  Cloudflare: {account_id, project_name, api_token}; etc.). */
+  config: Record<string, unknown>;
+  /** Optional inbound-webhook signing secret. Empty / omitted = leave
+   *  the previously stored secret alone. */
+  webhook_secret?: string;
+}
+
+/** Phase 6 — response from PUT /api/deploy_environments/:id/adapter. */
+export interface ConfigureDeployAdapterResponse {
+  environment_id: string;
+  adapter_kind: string;
+  webhook_url: string;
+  webhook_secret_set: boolean;
+}
+
+/** Phase 6 — response from POST /api/deploy_environments/:id/poll_now. */
+export interface PollDeployEnvironmentResponse {
+  current_sha?: string;
+  current_deployed_at?: string;
+  changed?: boolean;
+}
+
+/** Phase 6 — body for POST /api/deploy_environments/:id/rollback. */
+export interface RollbackDeployRequest {
+  target_sha: string;
 }
 
 /** Single deploy attempt logged against an environment. */
@@ -180,6 +226,10 @@ export interface SyncPullRequestsResult {
 
 export interface ListDeployEnvironmentsResponse {
   environments: DeployEnvironment[];
+}
+
+export interface ListDeployAdaptersResponse {
+  adapters: DeployAdapter[];
 }
 
 export interface ListDeploysResponse {

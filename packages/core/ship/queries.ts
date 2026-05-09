@@ -15,6 +15,8 @@ import type {
   ClosePullRequestAsStaleRequest,
   CreatePreflightRequest,
   UpdatePreflightRequest,
+  ConfigureDeployAdapterRequest,
+  RollbackDeployRequest,
 } from "../types";
 
 // Query key factory — workspace-scoped per CLAUDE.md so a workspace switch
@@ -50,6 +52,10 @@ export const shipKeys = {
     [...shipKeys.all(wsId), "preflight", envId, sha] as const,
   snapshot: (wsId: string, projectId: string, at: string) =>
     [...shipKeys.all(wsId), "snapshot", projectId, at] as const,
+  // Phase 6 — multi-adapter deploy. Adapter list is workspace-scoped so a
+  // workspace switch refetches (different adapters may be available
+  // server-side in the future based on plan / feature flags).
+  adapters: (wsId: string) => [...shipKeys.all(wsId), "adapters"] as const,
 };
 
 /** List of projects in the workspace that have ≥1 GitHub repo attached.
@@ -482,4 +488,88 @@ export function shipSnapshotOptions(
 export function useShipSnapshot(projectId: string, at: string | null) {
   const wsId = useWorkspaceId();
   return useQuery(shipSnapshotOptions(wsId, projectId, at));
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6 — multi-adapter deploy.
+// ---------------------------------------------------------------------------
+
+/** List the deploy adapters this server has registered. Drives the
+ *  env-config dialog dropdown so adding a new adapter is purely a
+ *  server-side change. */
+export function deployAdaptersOptions(wsId: string, enabled: boolean) {
+  return queryOptions({
+    queryKey: shipKeys.adapters(wsId),
+    queryFn: () => api.listDeployAdapters(),
+    enabled,
+    // Adapters list is effectively static within a server build, but
+    // we still refetch on workspace switch (the wsId in the key
+    // handles that automatically).
+    staleTime: 60 * 60 * 1000,
+  });
+}
+
+export function useDeployAdapters(enabled = true) {
+  const wsId = useWorkspaceId();
+  return useQuery(deployAdaptersOptions(wsId, enabled));
+}
+
+/** Configure the adapter for a deploy environment. Server encrypts both
+ *  the config blob and the optional webhook secret with the workspace's
+ *  AES-256-GCM key (same primitive as the GitHub PAT store). */
+export function useConfigureDeployAdapter(environmentId: string, projectId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data: ConfigureDeployAdapterRequest) =>
+      api.configureDeployAdapter(environmentId, data),
+    onSettled: () => {
+      // Adapter change affects how the env's deploys are interpreted;
+      // refresh the env list so adapter_kind on the row updates and
+      // the swimlane re-renders the right adapter icon.
+      qc.invalidateQueries({
+        queryKey: shipKeys.environments(wsId, projectId),
+      });
+    },
+  });
+}
+
+/** Force-poll a deploy environment via its adapter. Returns the updated
+ *  current_sha when the provider has a newer SHA than what we have
+ *  cached, or `changed: false` when the cache is already up-to-date. */
+export function usePollDeployEnvironment(environmentId: string, projectId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.pollDeployEnvironment(environmentId),
+    onSettled: () => {
+      qc.invalidateQueries({
+        queryKey: shipKeys.environments(wsId, projectId),
+      });
+      qc.invalidateQueries({
+        queryKey: shipKeys.deploys(wsId, environmentId),
+      });
+    },
+  });
+}
+
+/** Rollback an environment to a prior SHA via its adapter. Owner/admin
+ *  only on the server; the UI hides the affordance for non-admin
+ *  members upstream. */
+export function useRollbackDeployEnvironment(environmentId: string, projectId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data: RollbackDeployRequest) =>
+      api.rollbackDeployEnvironment(environmentId, data),
+    onSettled: () => {
+      qc.invalidateQueries({
+        queryKey: shipKeys.environments(wsId, projectId),
+      });
+      qc.invalidateQueries({
+        queryKey: shipKeys.deploys(wsId, environmentId),
+      });
+      qc.invalidateQueries({ queryKey: shipKeys.summary(wsId) });
+    },
+  });
 }
