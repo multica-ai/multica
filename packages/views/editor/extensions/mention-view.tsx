@@ -45,7 +45,7 @@ function IssueMention({
   issueId: string;
   fallbackLabel?: string;
 }) {
-  const p = useWorkspacePaths();
+ const p = useWorkspacePaths();
   const { push, openInNewTab } = useNavigation();
   const issuePath = p.issueDetail(issueId);
 
@@ -53,7 +53,11 @@ function IssueMention({
     e.preventDefault();
     e.stopPropagation();
     if (e.metaKey || e.ctrlKey || e.shiftKey) {
-      if (openInNewTab) openInNewTab(issuePath, fallbackLabel);
+      if (openInNewTab) {
+        openInNewTab(issuePath, fallbackLabel);
+      } else if (typeof window !== "undefined") {
+        window.open(issuePath, "_blank", "noopener,noreferrer");
+      }
       return;
     }
     push(issuePath);
