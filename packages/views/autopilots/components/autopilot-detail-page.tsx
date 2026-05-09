@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil } from "lucide-react";
+import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions } from "@multica/core/autopilots/queries";
 import {
@@ -59,6 +59,28 @@ function formatDate(date: string): string {
   });
 }
 
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${secs}s`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${hours}h ${mins}m`;
+}
+
+interface RunResult {
+  output?: string;
+  pr_url?: string;
+  session_id?: string;
+}
+
+function parseRunResult(result: unknown): RunResult | null {
+  if (!result || typeof result !== "object") return null;
+  return result as RunResult;
+}
+
 type RunStatus = "issue_created" | "running" | "completed" | "failed";
 
 const RUN_VISUAL: Record<RunStatus, { color: string; icon: typeof CheckCircle2; spin?: boolean }> = {
@@ -68,12 +90,31 @@ const RUN_VISUAL: Record<RunStatus, { color: string; icon: typeof CheckCircle2; 
   failed: { color: "text-destructive", icon: XCircle },
 };
 
-function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: string; agentName: string }) {
+function RunRow({
+  run,
+  agentId,
+  agentName,
+  isExpanded,
+  onToggle,
+}: {
+  run: AutopilotRun;
+  agentId: string;
+  agentName: string;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
   const { t } = useT("autopilots");
   const wsPaths = useWorkspacePaths();
   const status = (RUN_VISUAL[run.status as RunStatus] ? (run.status as RunStatus) : "issue_created");
   const visual = RUN_VISUAL[status];
   const StatusIcon = visual.icon;
+
+  const result = parseRunResult(run.result);
+  const outputSummary = result?.output ? result.output.slice(0, 150) : null;
+
+  const durationMs = run.completed_at && run.triggered_at
+    ? new Date(run.completed_at).getTime() - new Date(run.triggered_at).getTime()
+    : null;
 
   // For runs with a task_id (run_only mode), build a minimal AgentTask so
   // TranscriptButton can lazy-load the execution transcript.
@@ -98,8 +139,20 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
       }
     : null;
 
-  const content = (
+  const hasExpandableContent = !!(result?.output || result?.pr_url || result?.session_id);
+  const canExpand = hasExpandableContent && !run.issue_id;
+
+  const rowClass = "flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent/30 transition-colors";
+
+  const headerContent = (
     <>
+      {canExpand ? (
+        isExpanded
+          ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      ) : (
+        <span className="w-3.5 shrink-0" />
+      )}
       <StatusIcon className={cn("h-4 w-4 shrink-0", visual.color, visual.spin && "animate-spin")} />
       <span className={cn("w-24 shrink-0 text-xs font-medium", visual.color)}>
         {t(($) => $.run_status[status])}
@@ -108,6 +161,8 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
       <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
         {run.issue_id ? (
           t(($) => $.run.issue_linked)
+        ) : outputSummary ? (
+          outputSummary + (result!.output!.length > 150 ? "…" : "")
         ) : run.failure_reason ? (
           <span className="text-destructive">{run.failure_reason}</span>
         ) : null}
@@ -115,6 +170,11 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
       <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
         {formatDate(run.triggered_at || run.created_at)}
       </span>
+      {durationMs != null && durationMs >= 0 && (
+        <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+          {formatDuration(durationMs)}
+        </span>
+      )}
       {syntheticTask && !run.issue_id && (
         <TranscriptButton
           task={syntheticTask}
@@ -126,17 +186,63 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
     </>
   );
 
-  const rowClass = "flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent/30 transition-colors";
+  const expandedPanel = isExpanded && (
+    <div className="px-4 pb-3 pt-0 border-t border-border/50 bg-accent/10">
+      <div className="space-y-2 pt-2">
+        {run.completed_at && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="font-medium">{t(($) => $.run.completed_at)}:</span>
+            <span>{formatDate(run.completed_at)}</span>
+          </div>
+        )}
+        {result?.output ? (
+          <div className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">{t(($) => $.run.output_summary)}:</span>
+            <div className="rounded-md border bg-background p-3 text-sm max-h-80 overflow-y-auto">
+              <ReadonlyContent content={result.output} />
+            </div>
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground italic">{t(($) => $.run.no_output)}</div>
+        )}
+        {result?.pr_url && (
+          <div className="flex items-center gap-2 text-xs">
+            <span className="font-medium text-muted-foreground">{t(($) => $.run.pr_link)}:</span>
+            <a href={result.pr_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline inline-flex items-center gap-1">
+              {result.pr_url}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
+        )}
+        {result?.session_id && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="font-medium">{t(($) => $.run.session_id)}:</span>
+            <code className="bg-muted px-1.5 py-0.5 rounded text-[11px]">{result.session_id}</code>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
   if (run.issue_id) {
     return (
       <AppLink href={wsPaths.issueDetail(run.issue_id)} className={cn(rowClass, "cursor-pointer")}>
-        {content}
+        {headerContent}
       </AppLink>
     );
   }
 
-  return <div className={rowClass}>{content}</div>;
+  return (
+    <div>
+      <div
+        className={cn(rowClass, canExpand && "cursor-pointer")}
+        onClick={canExpand ? onToggle : undefined}
+      >
+        {headerContent}
+      </div>
+      {expandedPanel}
+    </div>
+  );
 }
 
 function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autopilotId: string }) {
@@ -308,6 +414,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
 
   if (isLoading) {
     return (
@@ -501,9 +608,16 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 {t(($) => $.detail.no_runs)}
               </div>
             ) : (
-              <div className="rounded-md border overflow-hidden">
+              <div className="rounded-md border overflow-hidden divide-y">
                 {runs.map((run) => (
-                  <RunRow key={run.id} run={run} agentId={autopilot.assignee_id} agentName={getActorName("agent", autopilot.assignee_id)} />
+                  <RunRow
+                    key={run.id}
+                    run={run}
+                    agentId={autopilot.assignee_id}
+                    agentName={getActorName("agent", autopilot.assignee_id)}
+                    isExpanded={expandedRunId === run.id}
+                    onToggle={() => setExpandedRunId(expandedRunId === run.id ? null : run.id)}
+                  />
                 ))}
               </div>
             )}

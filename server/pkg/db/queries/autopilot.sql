@@ -104,6 +104,9 @@ INSERT INTO autopilot_run (
 SELECT * FROM autopilot_run
 WHERE id = $1;
 
+-- name: CountAutopilotRuns :one
+SELECT count(*) FROM autopilot_run WHERE autopilot_id = $1;
+
 -- name: ListAutopilotRuns :many
 SELECT * FROM autopilot_run
 WHERE autopilot_id = $1

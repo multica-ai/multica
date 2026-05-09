@@ -95,7 +95,13 @@
   },
   "run": {
     "issue_linked": "已关联 issue",
-    "view_log": "查看执行日志"
+    "view_log": "查看执行日志",
+    "completed_at": "完成时间",
+    "duration": "耗时",
+    "output_summary": "输出",
+    "pr_link": "Pull Request",
+    "session_id": "会话",
+    "no_output": "无输出"
   },
   "trigger_row": {
     "disabled_badge": "已禁用",
