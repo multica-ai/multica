@@ -323,6 +323,11 @@ func main() {
 	// no configured retention.
 	channelMsgSvc := channel.NewMessageService(queries)
 	go runChannelRetentionSweeper(sweepCtx, channelMsgSvc)
+	// Ship Hub Phase 2 secret migrator. Runs once on boot to move any
+	// plaintext ship_hub.github_token entries out of workspace.settings
+	// and into the encrypted workspace_secret table. Idempotent: a
+	// second run on already-migrated workspaces is a cheap SELECT.
+	go migrateShipHubSecrets(sweepCtx, queries)
 	// Ship Hub reconciler: every 5 minutes, refresh PR caches for every
 	// workspace with the feature enabled. Defensive — per-workspace errors
 	// are logged and skipped so one bad token can't starve the rest.

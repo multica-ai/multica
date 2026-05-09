@@ -1,0 +1,37 @@
+{
+  "action": "closed",
+  "number": 42,
+  "pull_request": {
+    "number": 42,
+    "title": "Add ship hub phase 2",
+    "state": "closed",
+    "draft": false,
+    "html_url": "https://github.com/multica-ai/multica/pull/42",
+    "body": "Adds the GitHub webhook receiver and the supporting tables.",
+    "user": {
+      "login": "octocat",
+      "avatar_url": "https://example.com/octocat.png"
+    },
+    "base": { "ref": "main" },
+    "head": { "ref": "feat/ship-hub-phase-2", "sha": "abc123def4567890" },
+    "labels": [],
+    "additions": 320,
+    "deletions": 12,
+    "changed_files": 18,
+    "mergeable": true,
+    "created_at": "2026-05-09T10:00:00Z",
+    "updated_at": "2026-05-09T11:00:00Z",
+    "merged_at": "2026-05-09T11:00:00Z",
+    "closed_at": "2026-05-09T11:00:00Z"
+  },
+  "repository": {
+    "id": 123,
+    "full_name": "multica-ai/multica",
+    "html_url": "https://github.com/multica-ai/multica",
+    "default_branch": "main"
+  },
+  "sender": {
+    "login": "octocat",
+    "avatar_url": "https://example.com/octocat.png"
+  }
+}

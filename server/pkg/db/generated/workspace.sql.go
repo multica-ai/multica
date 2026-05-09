@@ -14,7 +14,7 @@ import (
 const createWorkspace = `-- name: CreateWorkspace :one
 INSERT INTO workspace (name, slug, description, context, issue_prefix)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled, ship_hub_webhook_secret
 `
 
 type CreateWorkspaceParams struct {
@@ -50,6 +50,7 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		&i.ChannelsEnabled,
 		&i.OrchestratorAgentID,
 		&i.ShipHubEnabled,
+		&i.ShipHubWebhookSecret,
 	)
 	return i, err
 }
@@ -64,7 +65,7 @@ func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getWorkspace = `-- name: GetWorkspace :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled, ship_hub_webhook_secret FROM workspace
 WHERE id = $1
 `
 
@@ -87,12 +88,13 @@ func (q *Queries) GetWorkspace(ctx context.Context, id pgtype.UUID) (Workspace, 
 		&i.ChannelsEnabled,
 		&i.OrchestratorAgentID,
 		&i.ShipHubEnabled,
+		&i.ShipHubWebhookSecret,
 	)
 	return i, err
 }
 
 const getWorkspaceBySlug = `-- name: GetWorkspaceBySlug :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled, ship_hub_webhook_secret FROM workspace
 WHERE slug = $1
 `
 
@@ -115,6 +117,7 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 		&i.ChannelsEnabled,
 		&i.OrchestratorAgentID,
 		&i.ShipHubEnabled,
+		&i.ShipHubWebhookSecret,
 	)
 	return i, err
 }
@@ -133,7 +136,7 @@ func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (in
 }
 
 const listWorkspaces = `-- name: ListWorkspaces :many
-SELECT w.id, w.name, w.slug, w.description, w.settings, w.created_at, w.updated_at, w.context, w.repos, w.issue_prefix, w.issue_counter, w.channel_retention_days, w.channels_enabled, w.orchestrator_agent_id, w.ship_hub_enabled FROM workspace w
+SELECT w.id, w.name, w.slug, w.description, w.settings, w.created_at, w.updated_at, w.context, w.repos, w.issue_prefix, w.issue_counter, w.channel_retention_days, w.channels_enabled, w.orchestrator_agent_id, w.ship_hub_enabled, w.ship_hub_webhook_secret FROM workspace w
 JOIN member m ON m.workspace_id = w.id
 WHERE m.user_id = $1
 ORDER BY w.created_at ASC
@@ -164,6 +167,7 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 			&i.ChannelsEnabled,
 			&i.OrchestratorAgentID,
 			&i.ShipHubEnabled,
+			&i.ShipHubWebhookSecret,
 		); err != nil {
 			return nil, err
 		}
@@ -176,7 +180,7 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 }
 
 const listWorkspacesWithShipHubEnabled = `-- name: ListWorkspacesWithShipHubEnabled :many
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled, ship_hub_webhook_secret FROM workspace
 WHERE ship_hub_enabled = TRUE
 ORDER BY id ASC
 `
@@ -208,6 +212,7 @@ func (q *Queries) ListWorkspacesWithShipHubEnabled(ctx context.Context) ([]Works
 			&i.ChannelsEnabled,
 			&i.OrchestratorAgentID,
 			&i.ShipHubEnabled,
+			&i.ShipHubWebhookSecret,
 		); err != nil {
 			return nil, err
 		}
@@ -246,7 +251,7 @@ UPDATE workspace SET
     END,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled, ship_hub_webhook_secret
 `
 
 type UpdateWorkspaceParams struct {
@@ -314,6 +319,7 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		&i.ChannelsEnabled,
 		&i.OrchestratorAgentID,
 		&i.ShipHubEnabled,
+		&i.ShipHubWebhookSecret,
 	)
 	return i, err
 }

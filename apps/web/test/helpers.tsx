@@ -36,6 +36,8 @@ export const mockWorkspace: Workspace = {
   channel_retention_days: null,
   ship_hub_enabled: false,
   github_token_set: false,
+  ship_hub_webhook_url: "",
+  ship_hub_webhook_secret_set: false,
 };
 
 // Mock members

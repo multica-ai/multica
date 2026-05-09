@@ -1,0 +1,14 @@
+{
+  "sha": "abc123def4567890",
+  "name": "multica-ai/multica",
+  "state": "success",
+  "context": "ci/legacy",
+  "target_url": "https://example.com/status/legacy",
+  "updated_at": "2026-05-09T10:06:00Z",
+  "repository": {
+    "id": 123,
+    "full_name": "multica-ai/multica",
+    "html_url": "https://github.com/multica-ai/multica",
+    "default_branch": "main"
+  }
+}

@@ -79,12 +79,89 @@ func (q *Queries) GetDeploy(ctx context.Context, id pgtype.UUID) (Deploy, error)
 	return i, err
 }
 
+const getDeployByEnvAndSHA = `-- name: GetDeployByEnvAndSHA :one
+SELECT id, workspace_id, environment_id, ref, sha, status, triggered_by, triggered_at, started_at, completed_at, log_url, error_message, created_at FROM deploy
+WHERE environment_id = $1 AND sha = $2
+ORDER BY triggered_at DESC
+LIMIT 1
+`
+
+type GetDeployByEnvAndSHAParams struct {
+	EnvironmentID pgtype.UUID `json:"environment_id"`
+	Sha           string      `json:"sha"`
+}
+
+// Looks up the most recent deploy row for (environment, sha). Used by
+// the deployment_status webhook handler to find the row to update.
+func (q *Queries) GetDeployByEnvAndSHA(ctx context.Context, arg GetDeployByEnvAndSHAParams) (Deploy, error) {
+	row := q.db.QueryRow(ctx, getDeployByEnvAndSHA, arg.EnvironmentID, arg.Sha)
+	var i Deploy
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.EnvironmentID,
+		&i.Ref,
+		&i.Sha,
+		&i.Status,
+		&i.TriggeredBy,
+		&i.TriggeredAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.LogUrl,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getDeployEnvironment = `-- name: GetDeployEnvironment :one
 SELECT id, workspace_id, project_id, kind, name, target_branch, target_url, current_sha, current_deployed_at, auto_promote, created_at, updated_at FROM deploy_environment WHERE id = $1
 `
 
 func (q *Queries) GetDeployEnvironment(ctx context.Context, id pgtype.UUID) (DeployEnvironment, error) {
 	row := q.db.QueryRow(ctx, getDeployEnvironment, id)
+	var i DeployEnvironment
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.Kind,
+		&i.Name,
+		&i.TargetBranch,
+		&i.TargetUrl,
+		&i.CurrentSha,
+		&i.CurrentDeployedAt,
+		&i.AutoPromote,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getDeployEnvironmentByRepoAndName = `-- name: GetDeployEnvironmentByRepoAndName :one
+SELECT de.id, de.workspace_id, de.project_id, de.kind, de.name, de.target_branch, de.target_url, de.current_sha, de.current_deployed_at, de.auto_promote, de.created_at, de.updated_at FROM deploy_environment de
+JOIN project_resource pr ON pr.project_id = de.project_id
+WHERE de.workspace_id = $1
+  AND pr.resource_type = 'github_repo'
+  AND pr.resource_ref->>'url' = $2::text
+  AND de.name = $3::text
+LIMIT 1
+`
+
+type GetDeployEnvironmentByRepoAndNameParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RepoUrl     string      `json:"repo_url"`
+	EnvName     string      `json:"env_name"`
+}
+
+// Webhook-driven deploy ingestion needs to resolve "which env does this
+// GitHub deployment.created event refer to" by (repo_url, environment
+// name). The repo_url comes from the deployment's repository.html_url;
+// env name from deployment.environment. We join via project_resource so
+// only environments whose project has the matching github_repo resource
+// match — keeps two workspaces with the same env name from colliding.
+func (q *Queries) GetDeployEnvironmentByRepoAndName(ctx context.Context, arg GetDeployEnvironmentByRepoAndNameParams) (DeployEnvironment, error) {
+	row := q.db.QueryRow(ctx, getDeployEnvironmentByRepoAndName, arg.WorkspaceID, arg.RepoUrl, arg.EnvName)
 	var i DeployEnvironment
 	err := row.Scan(
 		&i.ID,
@@ -393,6 +470,57 @@ func (q *Queries) UpdateDeployEnvironmentCurrent(ctx context.Context, arg Update
 		&i.AutoPromote,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateDeployStatus = `-- name: UpdateDeployStatus :one
+UPDATE deploy SET
+    status        = $2,
+    started_at    = COALESCE($3, started_at),
+    completed_at  = COALESCE($4, completed_at),
+    log_url       = COALESCE($5, log_url),
+    error_message = COALESCE($6, error_message)
+WHERE id = $1
+RETURNING id, workspace_id, environment_id, ref, sha, status, triggered_by, triggered_at, started_at, completed_at, log_url, error_message, created_at
+`
+
+type UpdateDeployStatusParams struct {
+	ID           pgtype.UUID        `json:"id"`
+	Status       DeployStatus       `json:"status"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+	LogUrl       pgtype.Text        `json:"log_url"`
+	ErrorMessage pgtype.Text        `json:"error_message"`
+}
+
+// Webhook-driven status transition. Caller supplies the timestamps to
+// match the GitHub event semantics (in_progress → started_at; success/
+// failure → completed_at).
+func (q *Queries) UpdateDeployStatus(ctx context.Context, arg UpdateDeployStatusParams) (Deploy, error) {
+	row := q.db.QueryRow(ctx, updateDeployStatus,
+		arg.ID,
+		arg.Status,
+		arg.StartedAt,
+		arg.CompletedAt,
+		arg.LogUrl,
+		arg.ErrorMessage,
+	)
+	var i Deploy
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.EnvironmentID,
+		&i.Ref,
+		&i.Sha,
+		&i.Status,
+		&i.TriggeredBy,
+		&i.TriggeredAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.LogUrl,
+		&i.ErrorMessage,
+		&i.CreatedAt,
 	)
 	return i, err
 }

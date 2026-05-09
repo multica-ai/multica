@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -13,7 +14,14 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/secrets"
 )
+
+// secretsEncryptString is a thin handler-package alias so the package
+// import lives only here. Tests override secrets directly.
+func secretsEncryptString(plaintext string) ([]byte, error) {
+	return secrets.EncryptString(plaintext)
+}
 
 var nonAlpha = regexp.MustCompile(`[^a-zA-Z]`)
 var workspaceSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -55,9 +63,18 @@ type WorkspaceResponse struct {
 	ShipHubEnabled bool `json:"ship_hub_enabled"`
 	// GitHubTokenSet is true when a workspace-level GitHub PAT is stored.
 	// The raw token NEVER appears in API responses — only this presence
-	// boolean is leaked to clients. Phase 1 stores the token in the
-	// settings JSON; encryption-at-rest is a TODO before Phase 2.
+	// boolean is leaked to clients. Phase 2 moves the token into the
+	// encrypted workspace_secret table; the legacy ship_hub.github_token
+	// settings field is migrated on startup.
 	GitHubTokenSet bool `json:"github_token_set"`
+	// ShipHubWebhookURL is the public URL the workspace owner copies into
+	// GitHub's webhook config. Computed from MULTICA_API_BASE_URL so the
+	// frontend doesn't have to thread the env var through.
+	ShipHubWebhookURL string `json:"ship_hub_webhook_url"`
+	// ShipHubWebhookSecretSet mirrors GitHubTokenSet — true when a
+	// webhook secret has been configured. The plaintext value is only
+	// ever returned by POST .../regenerate_webhook_secret.
+	ShipHubWebhookSecretSet bool `json:"ship_hub_webhook_secret_set"`
 }
 
 // shipHubSettingsKey is the JSON object inside workspace.settings that holds
@@ -69,8 +86,29 @@ const shipHubSettingsKey = "ship_hub"
 // for the workspace-stored GitHub PAT. Lives here (not in cmd/server)
 // because the storage shape is a workspace-package concern; exporting just
 // the read path keeps the write path private.
+//
+// Phase 2 prefers the encrypted workspace_secret row; the settings path
+// is the legacy fallback for workspaces that haven't been migrated yet.
+// Pass the workspace's encrypted-secret ciphertext (or nil) so the
+// reconciler doesn't have to call back into queries from this package.
 func ReadShipHubGitHubTokenForReconciler(settings []byte) string {
 	return readShipHubGitHubToken(settings)
+}
+
+// ReadShipHubGitHubTokenFromEncrypted decrypts the value_encrypted blob
+// returned by Queries.GetWorkspaceSecret. Returns "" on any error so a
+// corrupted row degrades to "no token" rather than blocking the
+// reconciler.
+func ReadShipHubGitHubTokenFromEncrypted(ciphertext []byte) string {
+	if len(ciphertext) == 0 {
+		return ""
+	}
+	plaintext, err := secrets.DecryptString(ciphertext)
+	if err != nil {
+		slog.Warn("ship hub: decrypt github token failed", "error", err)
+		return ""
+	}
+	return plaintext
 }
 
 // readShipHubGitHubToken extracts the workspace's GitHub PAT from settings.
@@ -110,7 +148,25 @@ func redactShipHubSettings(settings map[string]any) {
 	}
 }
 
+// workspaceToResponse projects a workspace row into the public JSON
+// shape. Static derivations only — for fields that need a DB lookup
+// (e.g. "is the encrypted github_token row present?") use
+// workspaceToResponseWithSecrets which the workspace handler invokes
+// when it has access to the queries object.
 func workspaceToResponse(w db.Workspace) WorkspaceResponse {
+	return workspaceToResponseWithSecretFlags(w, secretFlags{})
+}
+
+// secretFlags carries the presence-only signals that need DB lookups
+// alongside the workspace row. Decoupling these from the row itself
+// keeps the legacy callsites (tests, listeners) functional without
+// requiring a Queries handle everywhere.
+type secretFlags struct {
+	HasEncryptedGitHubToken    bool
+	HasEncryptedWebhookSecret  bool
+}
+
+func workspaceToResponseWithSecretFlags(w db.Workspace, flags secretFlags) WorkspaceResponse {
 	var settings map[string]any
 	if w.Settings != nil {
 		json.Unmarshal(w.Settings, &settings)
@@ -118,7 +174,11 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	if settings == nil {
 		settings = map[string]any{}
 	}
-	tokenSet := readShipHubGitHubToken(w.Settings) != ""
+	// "Is a token configured?" is true when EITHER the legacy settings
+	// JSON has it OR the encrypted store has a row. Same for the webhook
+	// secret across the plaintext column + encrypted store.
+	tokenSet := readShipHubGitHubToken(w.Settings) != "" || flags.HasEncryptedGitHubToken
+	webhookSet := (w.ShipHubWebhookSecret.Valid && w.ShipHubWebhookSecret.String != "") || flags.HasEncryptedWebhookSecret
 	redactShipHubSettings(settings)
 	var repos any
 	if w.Repos != nil {
@@ -133,22 +193,44 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		retention = &v
 	}
 	return WorkspaceResponse{
-		ID:                   uuidToString(w.ID),
-		Name:                 w.Name,
-		Slug:                 w.Slug,
-		Description:          textToPtr(w.Description),
-		Context:              textToPtr(w.Context),
-		Settings:             settings,
-		Repos:                repos,
-		IssuePrefix:          w.IssuePrefix,
-		OrchestratorAgentID:  uuidToPtr(w.OrchestratorAgentID),
-		CreatedAt:            timestampToString(w.CreatedAt),
-		UpdatedAt:            timestampToString(w.UpdatedAt),
-		ChannelsEnabled:      w.ChannelsEnabled,
-		ChannelRetentionDays: retention,
-		ShipHubEnabled:       w.ShipHubEnabled,
-		GitHubTokenSet:       tokenSet,
+		ID:                      uuidToString(w.ID),
+		Name:                    w.Name,
+		Slug:                    w.Slug,
+		Description:             textToPtr(w.Description),
+		Context:                 textToPtr(w.Context),
+		Settings:                settings,
+		Repos:                   repos,
+		IssuePrefix:             w.IssuePrefix,
+		OrchestratorAgentID:     uuidToPtr(w.OrchestratorAgentID),
+		CreatedAt:               timestampToString(w.CreatedAt),
+		UpdatedAt:               timestampToString(w.UpdatedAt),
+		ChannelsEnabled:         w.ChannelsEnabled,
+		ChannelRetentionDays:    retention,
+		ShipHubEnabled:          w.ShipHubEnabled,
+		GitHubTokenSet:          tokenSet,
+		ShipHubWebhookURL:       webhookPublicURL(),
+		ShipHubWebhookSecretSet: webhookSet,
 	}
+}
+
+// workspaceToResponseFull is the preferred call shape from any handler
+// that already has a context + queries handle. It populates the secret
+// presence flags from the encrypted store.
+func (h *Handler) workspaceToResponseFull(ctx context.Context, w db.Workspace) WorkspaceResponse {
+	flags := secretFlags{}
+	if _, err := h.Queries.GetWorkspaceSecret(ctx, db.GetWorkspaceSecretParams{
+		WorkspaceID: w.ID,
+		Name:        "github_token",
+	}); err == nil {
+		flags.HasEncryptedGitHubToken = true
+	}
+	if _, err := h.Queries.GetWorkspaceSecret(ctx, db.GetWorkspaceSecretParams{
+		WorkspaceID: w.ID,
+		Name:        "github_webhook_secret",
+	}); err == nil {
+		flags.HasEncryptedWebhookSecret = true
+	}
+	return workspaceToResponseWithSecretFlags(w, flags)
 }
 
 type MemberResponse struct {
@@ -183,7 +265,7 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]WorkspaceResponse, len(workspaces))
 	for i, ws := range workspaces {
-		resp[i] = workspaceToResponse(ws)
+		resp[i] = h.workspaceToResponseFull(r.Context(), ws)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -201,7 +283,7 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, workspaceToResponse(ws))
+	writeJSON(w, http.StatusOK, h.workspaceToResponseFull(r.Context(), ws))
 }
 
 type CreateWorkspaceRequest struct {
@@ -367,20 +449,40 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		s, _ := json.Marshal(req.Settings)
 		params.Settings = s
 	}
-	// Ship Hub GitHub token write path. The token never round-trips through
-	// the regular Settings JSON (the read path strips it) — a separate field
-	// keeps clients from accidentally echoing a redacted value back. We read
-	// the existing settings, merge the new token (or clear it), and replace
-	// the Settings param. If the caller also passed Settings, the explicit
-	// token field wins so clients can't bypass the redact-on-read.
+	// Ship Hub GitHub token write path.
+	//
+	// Phase 2 stores the token encrypted in workspace_secret. The legacy
+	// settings path is left in place so a token written by a Phase 1
+	// build still round-trips correctly until the startup migrator
+	// moves it. New writes ALWAYS land in the encrypted store and the
+	// settings JSON is cleared in the same call.
+	//
+	// nil pointer = "do nothing"; empty string = "clear".
 	if req.GitHubTokenSet {
-		current, err := h.Queries.GetWorkspace(r.Context(), idUUID)
-		if err != nil {
-			writeError(w, http.StatusNotFound, "workspace not found")
-			return
+		if req.GitHubToken == nil || *req.GitHubToken == "" {
+			_ = h.Queries.DeleteWorkspaceSecret(r.Context(), db.DeleteWorkspaceSecretParams{
+				WorkspaceID: idUUID,
+				Name:        "github_token",
+			})
+			_ = h.Queries.ClearShipHubTokenInSettings(r.Context(), idUUID)
+		} else {
+			ciphertext, err := secretsEncryptString(*req.GitHubToken)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to encrypt token")
+				return
+			}
+			if _, err := h.Queries.UpsertWorkspaceSecret(r.Context(), db.UpsertWorkspaceSecretParams{
+				WorkspaceID:    idUUID,
+				Name:           "github_token",
+				ValueEncrypted: ciphertext,
+			}); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to store token")
+				return
+			}
+			// Clear the legacy settings copy if present so the encrypted
+			// store is the single source of truth going forward.
+			_ = h.Queries.ClearShipHubTokenInSettings(r.Context(), idUUID)
 		}
-		merged := mergeShipHubToken(current.Settings, params.Settings, req.GitHubToken)
-		params.Settings = merged
 	}
 	if req.Repos != nil {
 		reposJSON, _ := json.Marshal(req.Repos)
@@ -438,9 +540,10 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)
 	userID := requestUserID(r)
-	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": workspaceToResponse(ws)})
+	full := h.workspaceToResponseFull(r.Context(), ws)
+	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": full})
 
-	writeJSON(w, http.StatusOK, workspaceToResponse(ws))
+	writeJSON(w, http.StatusOK, full)
 }
 
 func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {

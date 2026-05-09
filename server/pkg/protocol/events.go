@@ -137,10 +137,15 @@ const (
 
 	// Ship Hub events. Phase 1 publishes at the workspace scope; the
 	// frontend invalidates the per-project PR/deploy queries on receipt.
-	// Webhook-driven granular per-PR events arrive in a follow-up phase.
-	EventPullRequestSynced = "pull_request:synced"
-	EventDeployStarted     = "deploy:started"
-	EventDeployCompleted   = "deploy:completed"
+	// Phase 2 adds the granular webhook-driven signals — frontends that
+	// only care about coarse refreshes can keep listening to
+	// pull_request:synced; those that want surgical cache patches subscribe
+	// to the per-PR / per-deploy events.
+	EventPullRequestSynced       = "pull_request:synced"
+	EventPullRequestStateChanged = "pull_request:state_changed"
+	EventDeployStarted           = "deploy:started"
+	EventDeployProgress          = "deploy:progress"
+	EventDeployCompleted         = "deploy:completed"
 
 	// Daemon events
 	EventDaemonHeartbeat     = "daemon:heartbeat"

@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Save, LogOut, MessageCircle, Rocket } from "lucide-react";
+import {
+  Save,
+  LogOut,
+  MessageCircle,
+  Rocket,
+  Webhook,
+  Copy,
+  Check,
+  RefreshCw,
+} from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
@@ -18,6 +27,19 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@multica/ui/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@multica/ui/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@multica/ui/components/ui/tooltip";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -800,6 +822,263 @@ function ShipHubSettings({ workspace }: ShipHubSettingsProps) {
           </div>
         </div>
       )}
+
+      {/* Phase 2 — GitHub webhook setup. The webhook URL is computed
+          server-side from MULTICA_API_BASE_URL; the secret is generated
+          on demand and shown once. The same URL/secret is reused across
+          every repo in the workspace, so the user only completes this
+          flow once even with many repositories. */}
+      {enabled && <WebhookSettings workspace={workspace} />}
+    </div>
+  );
+}
+
+interface WebhookSettingsProps {
+  workspace: Workspace;
+}
+
+/**
+ * WebhookSettings — workspace-scoped GitHub webhook config.
+ *
+ * Renders three pieces:
+ *   1. The Payload URL (copy-on-click), surfaced from
+ *      `workspace.ship_hub_webhook_url` so the server controls what to
+ *      display (computed from MULTICA_API_BASE_URL with a sensible
+ *      fallback for local dev).
+ *   2. A status pill driven by `workspace.ship_hub_webhook_secret_set`.
+ *   3. A "Generate" / "Rotate" button that calls the regenerate endpoint;
+ *      the plaintext secret is shown ONCE in a one-time-display modal,
+ *      mirroring the personal-access-token create flow in tokens-tab.tsx.
+ *
+ * No "Test webhook" affordance — the backend doesn't (yet) expose a
+ * webhook_health endpoint. When that lands, surface "Last delivery:
+ * <timestamp>" here. Until then, document the gap in code rather than
+ * shipping a button that 404s.
+ */
+function WebhookSettings({ workspace }: WebhookSettingsProps) {
+  const { t } = useT("settings");
+  const qc = useQueryClient();
+  const [generating, setGenerating] = useState(false);
+  const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+  const [secretCopied, setSecretCopied] = useState(false);
+  const [urlCopied, setUrlCopied] = useState(false);
+
+  const isConfigured = workspace.ship_hub_webhook_secret_set;
+  const url = workspace.ship_hub_webhook_url;
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const result = await api.regenerateShipHubWebhookSecret(workspace.id);
+      // Schema fallback returns "" when the response is malformed; only
+      // celebrate if we actually got a secret back.
+      if (!result.webhook_secret) {
+        toast.error(t(($) => $.ship_hub.webhook_toast_failed));
+        return;
+      }
+      setRevealedSecret(result.webhook_secret);
+      // The workspace cache holds `ship_hub_webhook_secret_set: false` if
+      // this is the first generation. The handler returns `true` after a
+      // successful write, so optimistically flip the cached row so the
+      // status pill updates immediately. WS event traffic will reconcile.
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((w) =>
+          w.id === workspace.id
+            ? { ...w, ship_hub_webhook_secret_set: true }
+            : w,
+        ),
+      );
+      toast.success(
+        isConfigured
+          ? t(($) => $.ship_hub.webhook_toast_rotated)
+          : t(($) => $.ship_hub.webhook_toast_generated),
+      );
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : t(($) => $.ship_hub.webhook_toast_failed),
+      );
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleCopyUrl = async () => {
+    if (!url) return;
+    await navigator.clipboard.writeText(url);
+    setUrlCopied(true);
+    setTimeout(() => setUrlCopied(false), 1500);
+  };
+
+  const handleCopySecret = async () => {
+    if (!revealedSecret) return;
+    await navigator.clipboard.writeText(revealedSecret);
+    setSecretCopied(true);
+    setTimeout(() => setSecretCopied(false), 1500);
+  };
+
+  const handleDialogClose = (open: boolean) => {
+    if (open) return;
+    // Reset both the secret and the copy indicator together so reopening
+    // the modal (a second rotation in the same session) doesn't briefly
+    // flash "Copied" before the new secret renders.
+    setRevealedSecret(null);
+    setSecretCopied(false);
+  };
+
+  return (
+    <div className="space-y-3 border-t border-border pt-3">
+      <div className="flex items-center gap-2">
+        <Webhook className="h-3.5 w-3.5 text-muted-foreground" />
+        <div className="text-sm font-medium">
+          {t(($) => $.ship_hub.webhook_section_title)}
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {t(($) => $.ship_hub.webhook_description)}
+      </p>
+
+      {/* URL row — copy-on-click. Reads from the workspace shape (not a
+          local config) so a server-side env-var change automatically
+          propagates without a frontend release. */}
+      <div className="space-y-1">
+        <Label className="text-xs text-muted-foreground">
+          {t(($) => $.ship_hub.webhook_url_label)}
+        </Label>
+        <div className="flex items-center gap-2">
+          <code className="flex-1 truncate rounded-md border bg-muted/50 px-3 py-2 text-xs select-all">
+            {url || (
+              <span className="text-muted-foreground">
+                {t(($) => $.ship_hub.webhook_url_unavailable)}
+              </span>
+            )}
+          </code>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={handleCopyUrl}
+                  disabled={!url}
+                  aria-label={t(($) => $.ship_hub.webhook_copy_url_tooltip)}
+                >
+                  {urlCopied ? (
+                    <Check className="h-3.5 w-3.5" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              }
+            />
+            <TooltipContent>
+              {t(($) => $.ship_hub.webhook_copy_url_tooltip)}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+
+      {/* Status pill + generate/rotate button */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs ${
+            isConfigured
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+              : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+          }`}
+        >
+          <span
+            className={`size-1.5 rounded-full ${isConfigured ? "bg-emerald-500" : "bg-amber-500"}`}
+            aria-hidden
+          />
+          {isConfigured
+            ? t(($) => $.ship_hub.webhook_secret_status_set)
+            : t(($) => $.ship_hub.webhook_secret_status_unset)}
+        </span>
+        <Button
+          size="sm"
+          variant={isConfigured ? "outline" : "default"}
+          onClick={handleGenerate}
+          disabled={generating}
+        >
+          <RefreshCw className="h-3 w-3" />
+          {isConfigured
+            ? generating
+              ? t(($) => $.ship_hub.webhook_rotating)
+              : t(($) => $.ship_hub.webhook_rotate)
+            : generating
+              ? t(($) => $.ship_hub.webhook_generating)
+              : t(($) => $.ship_hub.webhook_generate)}
+        </Button>
+      </div>
+
+      {/* Setup steps — numbered list with explicit GH navigation cues so
+          a user new to webhooks can follow without leaving the page. */}
+      <div className="space-y-1.5 rounded-md border bg-muted/30 p-3 text-xs">
+        <div className="font-medium">
+          {t(($) => $.ship_hub.webhook_instructions_title)}
+        </div>
+        <ol className="list-decimal space-y-1 pl-4 text-muted-foreground">
+          <li>{t(($) => $.ship_hub.webhook_step_repo)}</li>
+          <li>{t(($) => $.ship_hub.webhook_step_url)}</li>
+          <li>{t(($) => $.ship_hub.webhook_step_secret)}</li>
+          <li>{t(($) => $.ship_hub.webhook_step_content_type)}</li>
+          <li>{t(($) => $.ship_hub.webhook_step_events)}</li>
+          <li>{t(($) => $.ship_hub.webhook_step_save)}</li>
+        </ol>
+      </div>
+
+      {/* One-time-display modal for the freshly minted secret. Mirrors
+          the PAT-create dialog at packages/views/settings/components/
+          tokens-tab.tsx — captures the value, lets the user copy, then
+          discards on close. The plaintext is never written to localStorage
+          or any persisted cache. */}
+      <Dialog open={!!revealedSecret} onOpenChange={handleDialogClose}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {t(($) => $.ship_hub.webhook_secret_dialog_title)}
+            </DialogTitle>
+            <DialogDescription>
+              {t(($) => $.ship_hub.webhook_secret_dialog_description)}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 rounded-md border bg-muted/50 px-3 py-2 text-sm break-all select-all">
+              {revealedSecret}
+            </code>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handleCopySecret}
+                  >
+                    {secretCopied ? (
+                      <Check className="h-4 w-4" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </Button>
+                }
+              />
+              <TooltipContent>
+                {t(($) => $.ship_hub.webhook_secret_dialog_copy_tooltip)}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                setRevealedSecret(null);
+                setSecretCopied(false);
+              }}
+            >
+              {t(($) => $.ship_hub.webhook_secret_dialog_done)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,6 +1,13 @@
 "use client";
 
-import { CheckCircle2, XCircle, Clock, GitPullRequest, AlertTriangle } from "lucide-react";
+import {
+  CheckCircle2,
+  XCircle,
+  Clock,
+  GitPullRequest,
+  AlertTriangle,
+  HelpCircle,
+} from "lucide-react";
 import type { PullRequest } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
@@ -38,11 +45,14 @@ function formatRelativeTime(iso: string, locale: string): string {
   return rtf.format(-Math.round(value), "year");
 }
 
-/** CI status pill. Returns one of three states; renders nothing for blank
- *  ci_status (server hasn't seen a check run yet) so the card stays clean. */
+/** CI status pill — Phase 2 surface. With webhooks online the value
+ *  arrives in real time; we still default to silent ("") for fresh
+ *  PRs that haven't had a check run yet. The `unknown` branch is
+ *  reached when the server reports a status string we don't recognize
+ *  (forward-compat per CLAUDE.md "API Response Compatibility"). */
 function CIPill({ status }: { status: string }) {
-  const { t, i18n } = useT("ship");
-  void i18n; // keep import tree-shakeable
+  const { t } = useT("ship");
+  if (!status) return null;
   if (status === "success") {
     return (
       <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
@@ -67,6 +77,52 @@ function CIPill({ status }: { status: string }) {
       </span>
     );
   }
+  // Unknown enum value — render a generic fallback so the user can still
+  // see "something is reported" without crashing.
+  return (
+    <span className="inline-flex items-center gap-1 text-muted-foreground">
+      <HelpCircle className="size-3" />
+      {t(($) => $.card.ci_unknown)}
+    </span>
+  );
+}
+
+/** Review-decision badge. Phase 2 — backend now populates this from PR
+ *  review webhooks. Empty string ("") is the "no decision yet" state and
+ *  intentionally renders nothing so the card stays clean for fresh PRs.
+ *
+ *  The card uses the badge AS WELL AS the column placement: Ready-to-Land
+ *  cards land in the green column, but the badge surfaces the same signal
+ *  on the failing/blocked rail (where columns aren't visible) and on the
+ *  card detail flyout. */
+function ReviewBadge({ decision }: { decision: string }) {
+  const { t } = useT("ship");
+  if (!decision) return null;
+  if (decision === "APPROVED") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
+        <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden />
+        {t(($) => $.card.review_approved)}
+      </span>
+    );
+  }
+  if (decision === "CHANGES_REQUESTED") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-700 dark:text-orange-400">
+        <span className="size-1.5 rounded-full bg-orange-500" aria-hidden />
+        {t(($) => $.card.review_changes_requested)}
+      </span>
+    );
+  }
+  if (decision === "REVIEW_REQUIRED") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+        <span className="size-1.5 rounded-full bg-muted-foreground/40" aria-hidden />
+        {t(($) => $.card.review_required)}
+      </span>
+    );
+  }
+  // Unknown enum — degrade silently rather than render an unstyled chip.
   return null;
 }
 
@@ -139,10 +195,15 @@ export function ShipPRCard({ pr }: ShipPRCardProps) {
         </div>
       )}
 
-      {/* CI / mergeable pill row. Hidden when nothing to say. */}
-      {(pr.ci_status || pr.mergeable === "CONFLICTING") && (
-        <div className="mt-1.5 flex items-center gap-2 text-xs">
+      {/* CI / review / mergeable pill row. Hidden when nothing to say.
+          Render review_decision next to ci_status because they read as
+          a unit ("approved + passing CI" / "changes requested + failing"
+          etc.). Conflict warning is its own chip because it's a hard
+          blocker independent of either signal. */}
+      {(pr.ci_status || pr.review_decision || pr.mergeable === "CONFLICTING") && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
           <CIPill status={pr.ci_status} />
+          <ReviewBadge decision={pr.review_decision} />
           {pr.mergeable === "CONFLICTING" && (
             <span className="inline-flex items-center gap-1 text-destructive">
               <AlertTriangle className="size-3" />

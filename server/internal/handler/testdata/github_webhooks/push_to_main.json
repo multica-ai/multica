@@ -1,0 +1,11 @@
+{
+  "ref": "refs/heads/main",
+  "before": "0000000000000000000000000000000000000000",
+  "after": "abc123def4567890",
+  "repository": {
+    "id": 123,
+    "full_name": "multica-ai/multica",
+    "html_url": "https://github.com/multica-ai/multica",
+    "default_branch": "main"
+  }
+}

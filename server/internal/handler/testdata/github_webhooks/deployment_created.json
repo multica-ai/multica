@@ -1,0 +1,17 @@
+{
+  "action": "created",
+  "deployment": {
+    "id": 555001,
+    "sha": "abc123def4567890",
+    "ref": "main",
+    "environment": "production",
+    "description": "Promote main",
+    "created_at": "2026-05-09T11:05:00Z"
+  },
+  "repository": {
+    "id": 123,
+    "full_name": "multica-ai/multica",
+    "html_url": "https://github.com/multica-ai/multica",
+    "default_branch": "main"
+  }
+}

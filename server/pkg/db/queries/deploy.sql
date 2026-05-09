@@ -83,3 +83,39 @@ INSERT INTO deploy (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 ) RETURNING *;
+
+-- name: GetDeployEnvironmentByRepoAndName :one
+-- Webhook-driven deploy ingestion needs to resolve "which env does this
+-- GitHub deployment.created event refer to" by (repo_url, environment
+-- name). The repo_url comes from the deployment's repository.html_url;
+-- env name from deployment.environment. We join via project_resource so
+-- only environments whose project has the matching github_repo resource
+-- match — keeps two workspaces with the same env name from colliding.
+SELECT de.* FROM deploy_environment de
+JOIN project_resource pr ON pr.project_id = de.project_id
+WHERE de.workspace_id = sqlc.arg('workspace_id')
+  AND pr.resource_type = 'github_repo'
+  AND pr.resource_ref->>'url' = sqlc.arg('repo_url')::text
+  AND de.name = sqlc.arg('env_name')::text
+LIMIT 1;
+
+-- name: GetDeployByEnvAndSHA :one
+-- Looks up the most recent deploy row for (environment, sha). Used by
+-- the deployment_status webhook handler to find the row to update.
+SELECT * FROM deploy
+WHERE environment_id = $1 AND sha = $2
+ORDER BY triggered_at DESC
+LIMIT 1;
+
+-- name: UpdateDeployStatus :one
+-- Webhook-driven status transition. Caller supplies the timestamps to
+-- match the GitHub event semantics (in_progress → started_at; success/
+-- failure → completed_at).
+UPDATE deploy SET
+    status        = $2,
+    started_at    = COALESCE(sqlc.narg('started_at'), started_at),
+    completed_at  = COALESCE(sqlc.narg('completed_at'), completed_at),
+    log_url       = COALESCE(sqlc.narg('log_url'), log_url),
+    error_message = COALESCE(sqlc.narg('error_message'), error_message)
+WHERE id = $1
+RETURNING *;

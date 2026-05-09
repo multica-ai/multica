@@ -213,6 +213,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Public API
 	r.Get("/api/config", h.GetConfig)
 
+	// Ship Hub Phase 2: GitHub webhook receiver. UNAUTHENTICATED — the
+	// HMAC signature is the only auth, and signature verification scans
+	// every workspace's stored secret. Mounted OUTSIDE the workspace
+	// middleware because GitHub never sends an X-Workspace-ID and we
+	// don't want the requests bouncing off auth before the signature is
+	// checked.
+	r.Post("/api/integrations/github/webhook", h.HandleGitHubWebhook)
+
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache))
@@ -291,6 +299,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
+				// Ship Hub webhook secret rotation (owner-only). Returns
+				// the plaintext exactly once; subsequent reads see only
+				// the *_set boolean on the workspace response.
+				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).
+					Post("/ship_hub/regenerate_webhook_secret", h.RegenerateShipHubWebhookSecret)
 			})
 		})
 

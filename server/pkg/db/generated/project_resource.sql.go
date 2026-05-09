@@ -74,6 +74,48 @@ func (q *Queries) DeleteProjectResource(ctx context.Context, id pgtype.UUID) err
 	return err
 }
 
+const findProjectByRepoURL = `-- name: FindProjectByRepoURL :one
+SELECT p.id, p.workspace_id, p.title, p.description, p.icon, p.status, p.lead_type, p.lead_id, p.created_at, p.updated_at, p.priority, p.archived_at, p.archived_by FROM project p
+JOIN project_resource pr ON pr.project_id = p.id
+WHERE p.workspace_id = $1
+  AND pr.resource_type = 'github_repo'
+  AND pr.resource_ref->>'url' = $2::text
+ORDER BY pr.position ASC, pr.created_at ASC
+LIMIT 1
+`
+
+type FindProjectByRepoURLParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RepoUrl     string      `json:"repo_url"`
+}
+
+// Webhook ingestion needs the inverse mapping: given a repo_url from a
+// GitHub event, which project (in this workspace) should we attach the
+// PR / deploy row to? The github_repo resource_ref carries the URL we
+// match against. LIMIT 1 because the same repo can in theory be
+// attached to multiple projects in the same workspace; we pick the
+// earliest by position so behavior is deterministic.
+func (q *Queries) FindProjectByRepoURL(ctx context.Context, arg FindProjectByRepoURLParams) (Project, error) {
+	row := q.db.QueryRow(ctx, findProjectByRepoURL, arg.WorkspaceID, arg.RepoUrl)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Icon,
+		&i.Status,
+		&i.LeadType,
+		&i.LeadID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Priority,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+	)
+	return i, err
+}
+
 const getProjectResource = `-- name: GetProjectResource :one
 SELECT id, project_id, workspace_id, resource_type, resource_ref, label, position, created_at, created_by FROM project_resource
 WHERE id = $1

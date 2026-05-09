@@ -266,3 +266,22 @@ export const ListShipProjectsResponseSchema = z.object({
 export const EMPTY_LIST_SHIP_PROJECTS_RESPONSE = {
   projects: [],
 };
+
+// Phase 2 — POST /api/workspaces/{id}/ship_hub/regenerate_webhook_secret.
+// The plaintext `webhook_secret` is returned exactly once, mirroring the
+// PAT-create flow. We still parse with a lenient schema so a corrupted
+// response shape (missing field, wrong type) downgrades to a usable empty
+// state in the UI rather than throwing — the caller surfaces an error toast
+// instead. The fallback intentionally has an empty webhook_secret so the
+// UI can detect the failure ("show modal only if secret is non-empty").
+export const WebhookSecretResponseSchema = z.object({
+  webhook_secret: z.string().default(""),
+  webhook_url: z.string().default(""),
+  webhook_secret_set: z.boolean().default(false),
+}).loose();
+
+export const EMPTY_WEBHOOK_SECRET_RESPONSE = {
+  webhook_secret: "",
+  webhook_url: "",
+  webhook_secret_set: false,
+};

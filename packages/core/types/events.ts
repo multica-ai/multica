@@ -78,7 +78,9 @@ export type WSEventType =
   | "invitation:declined"
   | "invitation:revoked"
   | "pull_request:synced"
+  | "pull_request:state_changed"
   | "deploy:started"
+  | "deploy:progress"
   | "deploy:completed";
 
 export interface WSMessage<T = unknown> {

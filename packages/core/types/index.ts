@@ -134,4 +134,5 @@ export type {
   SyncPullRequestsResult,
   ListDeployEnvironmentsResponse,
   ListDeploysResponse,
+  WebhookSecretResponse,
 } from "./ship";

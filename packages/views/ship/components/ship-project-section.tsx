@@ -14,7 +14,7 @@ import { AppLink } from "../../navigation";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
 import { ShipKanban } from "./ship-kanban";
-import { ShipDeployStrip } from "./ship-deploy-strip";
+import { ShipDeploySwimlanes } from "./ship-deploy-swimlanes";
 
 interface ShipProjectSectionProps {
   project: ShipProjectSummary;
@@ -166,9 +166,13 @@ export function ShipProjectSection({ project }: ShipProjectSectionProps) {
         </div>
       )}
 
-      <ShipDeployStrip projectId={project.id} />
+      <ShipDeploySwimlanes projectId={project.id} />
 
-      <ShipKanban pullRequests={prs} isLoading={isLoading} />
+      <ShipKanban
+        pullRequests={prs}
+        isLoading={isLoading}
+        projectId={project.id}
+      />
     </section>
   );
 }

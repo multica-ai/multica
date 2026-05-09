@@ -38,6 +38,15 @@ export interface Workspace {
    * is never returned by the API — only this presence flag — so the UI can
    * render "Configured" / "Not configured" without ever holding the secret. */
   github_token_set: boolean;
+  /** Public URL the workspace owner pastes into GitHub's webhook config.
+   * Computed server-side from MULTICA_API_BASE_URL so the frontend doesn't
+   * have to thread the env var through. Empty string when the server hasn't
+   * been configured (older builds). */
+  ship_hub_webhook_url: string;
+  /** Mirrors `github_token_set`: true when a webhook secret has been
+   * configured. The plaintext value is only ever returned by
+   * POST /workspaces/{id}/ship_hub/regenerate_webhook_secret. */
+  ship_hub_webhook_secret_set: boolean;
 }
 
 export interface Member {

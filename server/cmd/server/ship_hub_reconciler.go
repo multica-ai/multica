@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/service/ship"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -53,6 +55,19 @@ func runShipHubOnce(ctx context.Context, queries *db.Queries) {
 	}
 	for _, ws := range workspaces {
 		token := handler.ReadShipHubGitHubTokenForReconciler(ws.Settings)
+		if token == "" {
+			// Phase 2: check the encrypted store before giving up.
+			row, err := queries.GetWorkspaceSecret(ctx, db.GetWorkspaceSecretParams{
+				WorkspaceID: ws.ID,
+				Name:        "github_token",
+			})
+			if err == nil {
+				token = handler.ReadShipHubGitHubTokenFromEncrypted(row.ValueEncrypted)
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				slog.Warn("ship hub reconciler: load encrypted token failed",
+					"workspace_id", ws.ID, "error", err)
+			}
+		}
 		if token == "" {
 			// Workspace enabled the feature but never configured a token.
 			// We could still call the public GitHub API for public repos,

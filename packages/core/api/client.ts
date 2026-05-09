@@ -112,6 +112,7 @@ import type {
   ListDeployEnvironmentsResponse,
   ListDeploysResponse,
   PullRequestState,
+  WebhookSecretResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -134,6 +135,8 @@ import {
   EMPTY_LIST_PULL_REQUESTS_RESPONSE,
   EMPTY_LIST_DEPLOY_ENVIRONMENTS_RESPONSE,
   EMPTY_LIST_DEPLOYS_RESPONSE,
+  WebhookSecretResponseSchema,
+  EMPTY_WEBHOOK_SECRET_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1651,6 +1654,27 @@ export class ApiClient {
       ListDeploysResponseSchema,
       EMPTY_LIST_DEPLOYS_RESPONSE,
       { endpoint: "GET /api/deploy_environments/:id/deploys" },
+    );
+  }
+
+  // Phase 2 — mints a fresh GitHub webhook secret for the workspace's
+  // Ship Hub config. The response carries the plaintext secret EXACTLY
+  // ONCE (mirrors PAT-create UX); subsequent reads of the workspace
+  // only echo `ship_hub_webhook_secret_set: true`. The plaintext is
+  // never written to localStorage or cached — the caller is expected
+  // to display it in a one-time-display modal and discard.
+  async regenerateShipHubWebhookSecret(
+    workspaceId: string,
+  ): Promise<WebhookSecretResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/ship_hub/regenerate_webhook_secret`,
+      { method: "POST" },
+    );
+    return parseWithFallback(
+      raw,
+      WebhookSecretResponseSchema,
+      EMPTY_WEBHOOK_SECRET_RESPONSE,
+      { endpoint: "POST /api/workspaces/:id/ship_hub/regenerate_webhook_secret" },
     );
   }
 }

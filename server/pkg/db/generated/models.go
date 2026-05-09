@@ -451,6 +451,16 @@ type Feedback struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type GithubWebhookDelivery struct {
+	DeliveryID  string             `json:"delivery_id"`
+	EventType   string             `json:"event_type"`
+	ReceivedAt  pgtype.Timestamptz `json:"received_at"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RepoUrl     pgtype.Text        `json:"repo_url"`
+	ProcessedAt pgtype.Timestamptz `json:"processed_at"`
+	Error       pgtype.Text        `json:"error"`
+}
+
 type InboxItem struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
@@ -670,6 +680,31 @@ type PullRequest struct {
 	FetchedAt       pgtype.Timestamptz `json:"fetched_at"`
 }
 
+type PullRequestCheck struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	PullRequestID pgtype.UUID        `json:"pull_request_id"`
+	HeadSha       string             `json:"head_sha"`
+	Name          string             `json:"name"`
+	Conclusion    pgtype.Text        `json:"conclusion"`
+	Status        string             `json:"status"`
+	DetailsUrl    pgtype.Text        `json:"details_url"`
+	StartedAt     pgtype.Timestamptz `json:"started_at"`
+	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type PullRequestReview struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	PullRequestID     pgtype.UUID        `json:"pull_request_id"`
+	ReviewerLogin     string             `json:"reviewer_login"`
+	ReviewerAvatarUrl pgtype.Text        `json:"reviewer_avatar_url"`
+	State             string             `json:"state"`
+	Body              pgtype.Text        `json:"body"`
+	SubmittedAt       pgtype.Timestamptz `json:"submitted_at"`
+}
+
 type Skill struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -789,6 +824,7 @@ type Workspace struct {
 	ChannelsEnabled      bool               `json:"channels_enabled"`
 	OrchestratorAgentID  pgtype.UUID        `json:"orchestrator_agent_id"`
 	ShipHubEnabled       bool               `json:"ship_hub_enabled"`
+	ShipHubWebhookSecret pgtype.Text        `json:"ship_hub_webhook_secret"`
 }
 
 type WorkspaceInvitation struct {
@@ -802,4 +838,12 @@ type WorkspaceInvitation struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+}
+
+type WorkspaceSecret struct {
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Name           string             `json:"name"`
+	ValueEncrypted []byte             `json:"value_encrypted"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }

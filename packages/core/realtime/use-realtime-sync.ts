@@ -257,9 +257,12 @@ export function useRealtimeSync(
       // path above handles the general "refresh ship" case; these specific
       // handlers narrow the invalidation to just the affected project /
       // environment, avoiding a workspace-wide refetch storm when many
-      // projects sync concurrently.
+      // projects sync concurrently. Phase 2 adds :state_changed and
+      // :progress to the granular set.
       "pull_request:synced",
+      "pull_request:state_changed",
       "deploy:started",
+      "deploy:progress",
       "deploy:completed",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
@@ -654,9 +657,37 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: shipKeys.projects(wsId) });
     });
 
+    // Phase 2 — pull_request:state_changed fires from the webhook path
+    // (PR review submitted, check run completed, status updated, draft
+    // toggled). Same per-project narrowing as :synced. Carrying the new
+    // ci_status/review_decision in the payload would let us update in
+    // place, but the cache holds the full PR row keyed by id — a fresh
+    // list fetch is simpler than a partial setQueryData merge across the
+    // open/closed/merged/all state filters.
+    const unsubPullRequestStateChanged = ws.on(
+      "pull_request:state_changed",
+      (p) => {
+        const payload = p as { project_id?: string };
+        const wsId = getCurrentWsId();
+        if (!wsId) return;
+        if (payload?.project_id) {
+          qc.invalidateQueries({
+            queryKey: shipKeys.pullRequestsForProject(wsId, payload.project_id),
+          });
+        }
+        // Open-PR count on the projects list doesn't change on state_changed
+        // (the row count is the same, only fields shifted), so we skip the
+        // shipKeys.projects invalidation here.
+      },
+    );
+
     // Ship Hub: deploy lifecycle → refresh that environment's deploy list
     // and the workspace-wide environments cache (the env row carries
     // `current_sha` / `current_deployed_at` which only flip on success).
+    //
+    // Phase 2 adds `deploy:progress` (status updates between started and
+    // completed). Same handler — invalidating the deploy list is enough
+    // for the swimlane pill to flip from pending → in_progress → success.
     const onDeployEvent = (p: unknown) => {
       const payload = p as { environment_id?: string };
       const wsId = getCurrentWsId();
@@ -672,6 +703,7 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: [...shipKeys.all(wsId), "envs"] as const });
     };
     const unsubDeployStarted = ws.on("deploy:started", onDeployEvent);
+    const unsubDeployProgress = ws.on("deploy:progress", onDeployEvent);
     const unsubDeployCompleted = ws.on("deploy:completed", onDeployEvent);
 
     const unsubChatDone = ws.on("chat:done", (p) => {
@@ -843,7 +875,9 @@ export function useRealtimeSync(
       unsubChannelMessageUpdated();
       unsubChannelMessageDeleted();
       unsubPullRequestSynced();
+      unsubPullRequestStateChanged();
       unsubDeployStarted();
+      unsubDeployProgress();
       unsubDeployCompleted();
       unsubChatDone();
       unsubTaskQueued();

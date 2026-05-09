@@ -1,0 +1,26 @@
+{
+  "action": "completed",
+  "check_run": {
+    "id": 88002,
+    "name": "ci/lint",
+    "head_sha": "abc123def4567890",
+    "status": "completed",
+    "conclusion": "failure",
+    "details_url": "https://example.com/checks/88002",
+    "html_url": "https://example.com/checks/88002",
+    "started_at": "2026-05-09T10:01:00Z",
+    "completed_at": "2026-05-09T10:03:00Z",
+    "pull_requests": [
+      {
+        "number": 42,
+        "head": { "sha": "abc123def4567890" }
+      }
+    ]
+  },
+  "repository": {
+    "id": 123,
+    "full_name": "multica-ai/multica",
+    "html_url": "https://github.com/multica-ai/multica",
+    "default_branch": "main"
+  }
+}

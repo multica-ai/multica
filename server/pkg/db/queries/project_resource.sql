@@ -34,3 +34,18 @@ SELECT project_id, count(*)::bigint AS resource_count
 FROM project_resource
 WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])
 GROUP BY project_id;
+
+-- name: FindProjectByRepoURL :one
+-- Webhook ingestion needs the inverse mapping: given a repo_url from a
+-- GitHub event, which project (in this workspace) should we attach the
+-- PR / deploy row to? The github_repo resource_ref carries the URL we
+-- match against. LIMIT 1 because the same repo can in theory be
+-- attached to multiple projects in the same workspace; we pick the
+-- earliest by position so behavior is deterministic.
+SELECT p.* FROM project p
+JOIN project_resource pr ON pr.project_id = p.id
+WHERE p.workspace_id = sqlc.arg('workspace_id')
+  AND pr.resource_type = 'github_repo'
+  AND pr.resource_ref->>'url' = sqlc.arg('repo_url')::text
+ORDER BY pr.position ASC, pr.created_at ASC
+LIMIT 1;

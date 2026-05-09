@@ -1,0 +1,26 @@
+{
+  "action": "created",
+  "deployment_status": {
+    "id": 555002,
+    "state": "success",
+    "log_url": "https://example.com/deployments/555001",
+    "target_url": "https://example.com/deployments/555001",
+    "description": "Deployment finished",
+    "created_at": "2026-05-09T11:08:00Z",
+    "updated_at": "2026-05-09T11:08:00Z"
+  },
+  "deployment": {
+    "id": 555001,
+    "sha": "abc123def4567890",
+    "ref": "main",
+    "environment": "production",
+    "description": "Promote main",
+    "created_at": "2026-05-09T11:05:00Z"
+  },
+  "repository": {
+    "id": 123,
+    "full_name": "multica-ai/multica",
+    "html_url": "https://github.com/multica-ai/multica",
+    "default_branch": "main"
+  }
+}

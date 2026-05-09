@@ -161,3 +161,14 @@ export interface ListDeploysResponse {
   deploys: Deploy[];
   total: number;
 }
+
+/** Response of POST /api/workspaces/{id}/ship_hub/regenerate_webhook_secret.
+ * Mirrors the personal-access-token create flow: `webhook_secret` is the
+ * PLAINTEXT value, returned exactly once. The UI must capture it from this
+ * response — subsequent reads of the workspace only echo
+ * `ship_hub_webhook_secret_set: true`. */
+export interface WebhookSecretResponse {
+  webhook_secret: string;
+  webhook_url: string;
+  webhook_secret_set: boolean;
+}
