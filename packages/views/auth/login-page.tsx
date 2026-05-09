@@ -21,6 +21,7 @@ import {
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
+import { useConfigStore } from "@multica/core/config";
 import type { User } from "@multica/core/types";
 import { useT } from "../i18n";
 
@@ -107,6 +108,7 @@ export function LoginPage({
   extra,
 }: LoginPageProps) {
   const { t } = useT("auth");
+  const { customLogoUrl, loginText } = useConfigStore();
   const qc = useQueryClient();
   const [step, setStep] = useState<"email" | "code" | "cli_confirm">("email");
   const [email, setEmail] = useState("");
@@ -295,7 +297,11 @@ export function LoginPage({
       <div className="flex min-h-svh items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
-            {logo && <div className="mx-auto mb-4">{logo}</div>}
+            {customLogoUrl ? (
+              <img src={customLogoUrl} alt="Logo" className="mx-auto h-12 w-auto mb-4 object-contain" />
+            ) : logo && (
+              <div className="mx-auto mb-4">{logo}</div>
+            )}
             <CardTitle className="text-2xl">
               {t(($) => $.cli.title)}
             </CardTitle>
@@ -339,7 +345,11 @@ export function LoginPage({
       <div className="flex min-h-svh items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
-            {logo && <div className="mx-auto mb-4">{logo}</div>}
+            {customLogoUrl ? (
+              <img src={customLogoUrl} alt="Logo" className="mx-auto h-12 w-auto mb-4 object-contain" />
+            ) : logo && (
+              <div className="mx-auto mb-4">{logo}</div>
+            )}
             <CardTitle className="text-2xl">
               {t(($) => $.verify.title)}
             </CardTitle>
@@ -409,12 +419,16 @@ export function LoginPage({
     <div className="flex min-h-svh items-center justify-center">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          {logo && <div className="mx-auto mb-4">{logo}</div>}
+          {customLogoUrl ? (
+            <img src={customLogoUrl} alt="Logo" className="mx-auto h-12 w-auto mb-4 object-contain" />
+          ) : logo && (
+            <div className="mx-auto mb-4">{logo}</div>
+          )}
           <CardTitle className="text-2xl">
             {t(($) => $.signin.title)}
           </CardTitle>
           <CardDescription>
-            {t(($) => $.signin.description)}
+            {loginText || t(($) => $.signin.description)}
           </CardDescription>
         </CardHeader>
         <CardContent>

@@ -1,0 +1,31 @@
+{
+  "create_form": {
+    "name_label": "Munkaterület neve",
+    "name_placeholder": "Saját munkaterület",
+    "url_label": "Munkaterület URL",
+    "url_placeholder": "sajat-munkaterulet",
+    "submit": "Munkaterület létrehozása",
+    "submitting": "Létrehozás...",
+    "errors": {
+      "slug_format": "Csak kisbetűk, számok és kötőjelek",
+      "slug_taken": "Ez a munkaterület URL már foglalt.",
+      "slug_reserved": "Ez a munkaterület URL fenntartott, nem használható.",
+      "slug_conflict_toast": "Válasszon másik munkaterület URL-t",
+      "create_failed": "Nem sikerült létrehozni a munkaterületet"
+    }
+  },
+  "new_page": {
+    "back": "Vissza",
+    "log_out": "Kijelentkezés",
+    "title": "Üdvözöljük a Multicában",
+    "description": "Egy munkaterület, ahol ön és AI csapattársai egymás mellett dolgoznak — feladatokat vállalnak, hozzászólnak, és közös kontextust használnak.",
+    "invite_hint": "Meghívhatja csapattársait, amint a munkaterülete elkészült."
+  },
+  "no_access": {
+    "title": "A munkaterület nem érhető el",
+    "description": "Ez a munkaterület nem létezik, vagy nincs hozzá jogosultsága.",
+    "go_to_workspaces": "Ugrás a munkaterületeimhez",
+    "sign_in_different": "Bejelentkezés más felhasználóként"
+  }
+}
+

@@ -1,0 +1,55 @@
+{
+  "header": {
+    "back": "Vissza",
+    "log_out": "Kijelentkezés"
+  },
+  "not_found": {
+    "title": "Meghívó nem található",
+    "description": "Ez a meghívó lejárt, visszavonták, vagy nem ehhez a fiókhoz tartozik.",
+    "go_to_dashboard": "Ugrás az irányítópultra"
+  },
+  "accepted": {
+    "title": "Csatlakozott a(z) {{workspace_name}} munkaterülethez!",
+    "redirecting": "Átirányítás a munkaterületre..."
+  },
+  "declined": {
+    "title": "Meghívó elutasítva",
+    "description": "Ön nem kerül hozzáadásra ehhez a munkaterülethez.",
+    "go_to_dashboard": "Ugrás az irányítópultra"
+  },
+  "main": {
+    "join_title": "Csatlakozás a(z) {{workspace_name}} munkaterülethez",
+    "fallback_workspace_name": "munkaterület",
+    "invited_role_admin": "meghívta önt, hogy csatlakozzon adminisztrátorként.",
+    "invited_role_member": "meghívta önt, hogy csatlakozzon tagként.",
+    "already_handled_accepted": "Ezt a meghívót már elfogadták.",
+    "already_handled_declined": "Ezt a meghívót már elutasították.",
+    "expired": "Ez a meghívó lejárt.",
+    "decline": "Elutasítás",
+    "declining": "Elutasítás...",
+    "accept": "Elfogadás és csatlakozás",
+    "joining": "Csatlakozás..."
+  },
+  "errors": {
+    "accept_failed": "Nem sikerült elfogadni a meghívót",
+    "decline_failed": "Nem sikerült elutasítani a meghívót"
+  },
+  "batch": {
+    "log_out": "Kijelentkezés",
+    "empty_title": "Nincsenek függőben lévő meghívók",
+    "empty_hint": "Folytassa a saját munkaterülete beállításával.",
+    "empty_continue": "Folytatás a beállításhoz",
+    "title": "Meghívták önt",
+    "subtitle": "Válassza ki a munkaterületeket, amelyekhez csatlakozni szeretne. A többit később is kezelheti az oldalsávról.",
+    "submit_skip": "Kihagyás és saját munkaterület beállítása",
+    "submit_join_one": "Csatlakozás 1 munkaterülethez",
+    "submit_join_other": "Csatlakozás {{count}} munkaterülethez",
+    "joining": "Csatlakozás...",
+    "error_generic": "Nem sikerült feldolgozni a meghívókat. Kérjük, próbálja újra.",
+    "row_workspace_fallback": "Munkaterület",
+    "row_inviter_fallback": "Valaki",
+    "row_invited_admin": "{{inviter}} meghívta önt adminisztrátornak",
+    "row_invited_member": "{{inviter}} meghívta önt tagnak"
+  }
+}
+

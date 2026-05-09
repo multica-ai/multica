@@ -10,6 +10,7 @@ import {
   FolderGit2,
   FlaskConical,
   Bell,
+  ShieldCheck,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -23,6 +24,8 @@ import { RepositoriesTab } from "./repositories-tab";
 import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { useT } from "../../i18n";
+import { SystemTab } from "./system-tab";
+import { useAuthStore } from "@multica/core/auth";
 
 const ACCOUNT_TAB_KEYS = ["profile", "preferences", "notifications", "tokens"] as const;
 const ACCOUNT_TAB_ICONS = {
@@ -64,6 +67,8 @@ interface SettingsPageProps {
 export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
   const { t } = useT("settings");
   const workspaceName = useCurrentWorkspace()?.name;
+  const user = useAuthStore((s) => s.user);
+  const isSystemAdmin = user?.is_system_admin ?? false;
   const navigation = useNavigation();
 
   // Whitelist of valid tab values; unknown ?tab=… values silently fall back to
@@ -74,6 +79,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
       new Set<string>([
         ...ACCOUNT_TAB_KEYS,
         ...Object.values(WORKSPACE_TAB_VALUES),
+        "system",
         ...(extraAccountTabs?.map((tab) => tab.value) ?? []),
       ]),
     [extraAccountTabs],
@@ -135,6 +141,19 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
               </TabsTrigger>
             );
           })}
+
+          {/* System group (Admin only) */}
+          {isSystemAdmin && (
+            <>
+              <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground truncate">
+                {t(($) => $.system.title)}
+              </span>
+              <TabsTrigger value="system">
+                <ShieldCheck className="h-4 w-4" />
+                {t(($) => $.page.tabs.system)}
+              </TabsTrigger>
+            </>
+          )}
         </TabsList>
       </div>
 
@@ -149,6 +168,9 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
           <TabsContent value="labs"><LabsTab /></TabsContent>
           <TabsContent value="members"><MembersTab /></TabsContent>
+          {isSystemAdmin && (
+            <TabsContent value="system"><SystemTab /></TabsContent>
+          )}
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
           ))}

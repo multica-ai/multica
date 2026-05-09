@@ -20,6 +20,28 @@ import enChat from "./en/chat.json";
 import enModals from "./en/modals.json";
 import enRuntimes from "./en/runtimes.json";
 import enLayout from "./en/layout.json";
+import huCommon from "./hu/common.json";
+import huAuth from "./hu/auth.json";
+import huSettings from "./hu/settings.json";
+import huIssues from "./hu/issues.json";
+import huAgents from "./hu/agents.json";
+import huEditor from "./hu/editor.json";
+import huOnboarding from "./hu/onboarding.json";
+import huInvite from "./hu/invite.json";
+import huLabels from "./hu/labels.json";
+import huMembers from "./hu/members.json";
+import huMyIssues from "./hu/my-issues.json";
+import huSearch from "./hu/search.json";
+import huInbox from "./hu/inbox.json";
+import huWorkspace from "./hu/workspace.json";
+import huProjects from "./hu/projects.json";
+import huAutopilots from "./hu/autopilots.json";
+import huSkills from "./hu/skills.json";
+import huChat from "./hu/chat.json";
+import huModals from "./hu/modals.json";
+import huRuntimes from "./hu/runtimes.json";
+import huLayout from "./hu/layout.json";
+
 import zhHansCommon from "./zh-Hans/common.json";
 import zhHansAuth from "./zh-Hans/auth.json";
 import zhHansSettings from "./zh-Hans/settings.json";
@@ -92,4 +114,28 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     runtimes: zhHansRuntimes,
     layout: zhHansLayout,
   },
+  hu: {
+    common: huCommon,
+    auth: huAuth,
+    settings: huSettings,
+    issues: huIssues,
+    agents: huAgents,
+    editor: huEditor,
+    onboarding: huOnboarding,
+    invite: huInvite,
+    labels: huLabels,
+    members: huMembers,
+    "my-issues": huMyIssues,
+    search: huSearch,
+    inbox: huInbox,
+    workspace: huWorkspace,
+    projects: huProjects,
+    autopilots: huAutopilots,
+    skills: huSkills,
+    chat: huChat,
+    modals: huModals,
+    runtimes: huRuntimes,
+    layout: huLayout,
+  },
 };
+

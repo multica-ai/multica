@@ -852,8 +852,18 @@ export class ApiClient {
     posthog_key?: string;
     posthog_host?: string;
     analytics_environment?: string;
+    custom_logo_url?: string;
+    login_page_text?: string;
   }> {
     return this.fetch("/api/config");
+  }
+
+  // System Settings (Admin only)
+  async updateSystemSettings(settings: { key: string; value: string }[]): Promise<void> {
+    await this.fetch("/api/admin/system-settings", {
+      method: "POST",
+      body: JSON.stringify({ settings }),
+    });
   }
 
   // Workspaces

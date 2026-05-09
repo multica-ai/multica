@@ -387,6 +387,26 @@ func (h *Handler) requireWorkspaceRole(w http.ResponseWriter, r *http.Request, w
 	return member, true
 }
 
+func (h *Handler) requireSystemAdmin(w http.ResponseWriter, r *http.Request) (db.User, bool) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return db.User{}, false
+	}
+
+	user, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "user not found")
+		return db.User{}, false
+	}
+
+	if !user.IsSystemAdmin {
+		writeError(w, http.StatusForbidden, "system administrator privileges required")
+		return db.User{}, false
+	}
+
+	return user, true
+}
+
 // isWorkspaceEntity checks whether a user_id belongs to the given workspace,
 // as either a member or an agent depending on userType.
 func (h *Handler) isWorkspaceEntity(ctx context.Context, userType, userID, workspaceID string) bool {

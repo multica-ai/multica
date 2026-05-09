@@ -1,0 +1,45 @@
+{
+  "title": "Keresés",
+  "description": "Oldalak, feladatok és projektek keresése",
+  "placeholder": "Gépeljen be egy parancsot vagy keressen...",
+  "groups": {
+    "pages": "Oldalak",
+    "commands": "Parancsok",
+    "switch_workspace": "Munkaterület váltása",
+    "projects": "Projektek",
+    "issues": "Feladatok",
+    "recent": "Legutóbbi"
+  },
+  "pages": {
+    "inbox": "Inbox",
+    "my_issues": "Saját feladatok",
+    "issues": "Feladatok",
+    "projects": "Projektek",
+    "agents": "Ügynökök",
+    "runtimes": "Környezetek",
+    "skills": "Készségek",
+    "settings": "Beállítások"
+  },
+  "commands": {
+    "current_theme_aria": "Jelenlegi téma",
+    "new_issue": "Új feladat",
+    "new_project": "Új projekt",
+    "copy_issue_link": "Feladat linkjének másolása",
+    "copy_identifier": "Azonosító másolása ({{identifier}})",
+    "switch_to_light": "Váltás világos témára",
+    "switch_to_dark": "Váltás sötét témára",
+    "use_system_theme": "Rendszer-téma használata"
+  },
+  "toast": {
+    "link_copied": "Link másolva",
+    "copied_identifier": "{{identifier}} másolva"
+  },
+  "empty": {
+    "no_results": "Nincs találat.",
+    "type_to_search": "Gépeljen a feladatok és projektek kereséséhez"
+  },
+  "trigger": {
+    "label": "Keresés..."
+  }
+}
+

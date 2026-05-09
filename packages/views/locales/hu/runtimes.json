@@ -1,0 +1,198 @@
+{
+  "page": {
+    "title": "Környezetek",
+    "tagline": "CLI munkameneteket futtató gépek és felhőalapú munkavégzők az ügynökök számára.",
+    "learn_more": "További információ →",
+    "connect_remote": "Távoli gép csatlakoztatása",
+    "search_placeholder": "Környezetek keresése…",
+    "scope_mine": "Saját",
+    "scope_all": "Összes",
+    "live": "Élő",
+    "live_tooltip": "Valós idejű frissítések · offline észlelés legfeljebb 75 mp",
+    "filter_all": "Összes",
+    "filter_all_description": "Minden környezet ebben a nézetben",
+    "empty": {
+      "title": "Még nincsenek környezetek",
+      "hint": "Az asztali alkalmazás automatikusan átvizsgálja a helyi gépet. For AWS EC2 vagy más távoli gépek esetén a beállítási varázsló segítségével csatlakoztathatja őket."
+    },
+    "no_matches": {
+      "title": "Nincs találat",
+      "with_query": "Nincs a(z) \"{{query}}\" keresésnek megfelelő környezet{{filterSuffix}}.",
+      "with_query_filter_suffix": " ebben a szűrőben",
+      "no_query": "Nincs a szűrőnek megfelelő környezet.",
+      "try_widening": " Próbálja meg szélesíteni a keresést vagy törölni a szűrőket."
+    },
+    "bootstrapping": {
+      "title": "Helyi környezet indítása…",
+      "hint": "Ez általában néhány másodpercet vesz igénybe. A daemon regisztrálja magát a munkaterülethez."
+    }
+  },
+  "health": {
+    "online": {
+      "label": "Online",
+      "description": "Szívverés érkezett az utolsó 45 mp-ben. Készen áll a feladatok kiosztására."
+    },
+    "recently_lost": {
+      "label": "Nemrég elveszett",
+      "description": "A kapcsolat kevesebb mint 5 perce szakadt meg — gyakran csak rövid hálózati hiba."
+    },
+    "offline": {
+      "label": "Offline",
+      "description": "Nincs szívverés több mint 5 perce. Indítsa újra a daemont vagy ellenőrizze a gazdagépet."
+    },
+    "about_to_gc": {
+      "label": "Törlés előtt",
+      "description": "Offline több mint 6 napja. 7 nap után automatikusan törlődik, hacsak nem csatlakozik újra."
+    }
+  },
+  "detail": {
+    "all_runtimes": "Minden környezet",
+    "read_only": "Csak olvasható",
+    "delete_aria": "Környezet törlése",
+    "delete_tooltip": "Környezet törlése",
+    "delete_button": "Környezet törlése",
+    "last_seen": "utoljára látva: {{when}}",
+    "fact_owner": "Tulajdonos",
+    "fact_device": "Eszköz",
+    "fact_runtime": "Környezet",
+    "technical_details": "Technikai részletek",
+    "fact_daemon_cli": "Daemon CLI",
+    "fact_daemon_id": "Daemon azonosító",
+    "serving_title": "Kiszolgált",
+    "serving_count_one": "{{count}} ügynök",
+    "serving_count_other": "{{count}} ügynök",
+    "no_agents": "Még nincsenek ügynökök ehhez a környezethez rendelve.",
+    "diagnostics_title": "Diagnosztika",
+    "diagnostics_cli": "CLI",
+    "delete_dialog": {
+      "title": "Környezet törlése",
+      "description": "Biztosan törölni szeretné a(z) \"{{name}}\" környezetet? Ez a művelet nem vonható vissza.",
+      "cancel": "Mégse",
+      "confirm": "Törlés",
+      "deleting": "Törlés..."
+    },
+    "toast_deleted": "Környezet törölve",
+    "toast_delete_failed": "Nem sikerült törölni a környezetet",
+    "running_chip_one": "· {{count}} fut",
+    "running_chip_other": "· {{count}} fut",
+    "queued_chip_one": "· {{count}} várakozik",
+    "queued_chip_other": "· {{count}} várakozik"
+  },
+  "detail_page": {
+    "not_found_title": "A környezet nem található",
+    "not_found_hint": "Lehet, hogy törölték, vagy nincs hozzáférése."
+  },
+  "running_one": "{{count}} fut",
+  "running_other": "{{count}} fut",
+  "queued_one": "{{count}} várakozik",
+  "queued_other": "{{count}} várakozik",
+  "connect": {
+    "title": "Távoli gép csatlakoztatása",
+    "description": "Futtassa ezeket a parancsokat a távoli gépen (pl. AWS EC2) a Multica CLI telepítéséhez és környezetként való regisztrálásához.",
+    "step1": "1. Telepítse a CLI-t",
+    "step2": "2. Konfigurálja",
+    "step3": "3. Jelentkezzen be egy személyes hozzáférési tokennel",
+    "step3_hint_prefix": "Hozzon létre egyet itt: ",
+    "step3_hint_destination": "Beállítások → Tokenek",
+    "step3_hint_suffix": ".",
+    "step4": "4. Indítsa el a daemont",
+    "security_label": "Biztonság: ",
+    "security_body": "Használjon EC2 IAM szerepkört vagy minimális jogosultságú hitelesítő adatokat. Soha ne tegyen root kulcsokat az ügynök ",
+    "security_body_suffix": ". A daemon csak kifelé irányuló kapcsolatokat használ — nincs szükség nyitott bejövő portokra.",
+    "troubleshooting": "Hibaelhárítás",
+    "trouble_check_status": "Állapot ellenőrzése: ",
+    "trouble_view_logs": "Naplók megtekintése: ",
+    "trouble_verify_provider": "Szolgáltató ellenőrzése: ",
+    "trouble_remote_note_prefix": "Az asztali alkalmazás csak a helyi gépet vizsgálja automatikusan. A távoli gépeken a ",
+    "trouble_remote_note_suffix": " -et külön kell futtatni.",
+    "cancel": "Mégse",
+    "started_daemon": "Elindítottam a daemont",
+    "waiting_title": "Várakozás a környezetre…",
+    "waiting_description": "Várakozás a távoli daemon regisztrációjára. Ez az oldal automatikusan frissül — nem kell frissíteni.",
+    "waiting_hint_prefix": "Futtassa a(z) ",
+    "waiting_hint_suffix": " parancsot a távoli gépen a futás ellenőrzéséhez.",
+    "back": "Vissza",
+    "success_title": "Környezet csatlakoztatva!",
+    "success_description": "A távoli gép környezetként regisztrálva lett. Most már létrehozhat olyan ügynököt, amely feladatokat küld neki.",
+    "view_runtime": "Környezet megtekintése",
+    "create_agent": "Ügynök létrehozása"
+  },
+  "update": {
+    "cli_version_label": "CLI verzió:",
+    "version_unknown": "ismeretlen",
+    "managed_by_desktop": "Az asztali alkalmazás kezeli",
+    "managed_by_desktop_title": "A CLI binárist a Multica Desktop kezeli — a CLI frissítéséhez frissítse a Desktopot.",
+    "latest": "Legfrissebb",
+    "available": "elérhető",
+    "action": "Frissítés",
+    "retry": "Újra",
+    "unknown_error": "Ismeretlen hiba",
+    "initiate_failed": "Nem sikerült elindítani a frissítést",
+    "status": {
+      "pending": "Várakozás a daemonra...",
+      "running": "Frissítés...",
+      "completed": "Frissítés kész. A daemon újraindul...",
+      "failed": "Frissítés sikertelen",
+      "timeout": "Időtúllépés"
+    }
+  },
+  "charts": {
+    "heatmap_less": "Kevesebb",
+    "heatmap_more": "Több"
+  },
+  "list": {
+    "col_runtime": "Környezet",
+    "col_health": "Állapot",
+    "col_owner": "Tulajdonos",
+    "col_agents": "Ügynökök",
+    "col_workload": "Terheltség",
+    "col_cost": "Költség · 7 nap",
+    "col_cli": "CLI",
+    "cost_delta_flat": "stagnál",
+    "cli_managed_badge": "Desktop",
+    "cli_update_available_aria": "Frissítés elérhető",
+    "cli_update_available_tooltip": "Frissítés elérhető: {{version}}",
+    "row_actions_aria": "Sor műveletei",
+    "delete_action": "Törlés",
+    "delete_permission_hint": "Csak a környezet tulajdonosa és a munkaterület adminisztrátorai törölhetik ezt a környezetet",
+    "delete_admin_hint": "Csak a környezet tulajdonosa és a munkaterület adminisztrátorai törölhetnek környezetet."
+  },
+  "usage": {
+    "period_label": "Időszak",
+    "kpi_cost_label": "Költség · {{days}} nap",
+    "kpi_cost_delta": "{{sign}}{{pct}}% az előzőhöz képest",
+    "kpi_cache_label": "Cache megtakarítás · {{days}} nap",
+    "kpi_cache_hint": "{{pct}}% találat · {{reads}} olvasás",
+    "kpi_tokens_label": "Tokenek · {{days}} nap",
+    "kpi_tokens_hint": "be {{input}} · ki {{output}}",
+    "when_title": "Mikor költött ez a környezet",
+    "when_tab_daily": "Napi",
+    "when_tab_hourly": "Óránkénti",
+    "when_tab_heatmap": "Hőtérkép",
+    "heatmap_caption": "Utolsó 26 hét · napi $ intenzitás (az időszakválasztó itt nem érvényes)",
+    "legend_input": "Bemenet",
+    "legend_output": "Kimenet",
+    "legend_cache_write": "Cache írás",
+    "empty_no_usage": "Nincs használat ebben az időszakban.",
+    "empty_pricing_missing": "Tokenek rögzítve, de hiányzik az árazás a következőhöz:",
+    "empty_pricing_hint": "Adja hozzá a MODEL_PRICING-hez itt: packages/views/runtimes/utils.ts",
+    "empty_zero_cost": "Tokenek rögzítve, de a költségszámítás 0 $-t eredményezett.",
+    "cost_by_title_agent": "Költség ügynökönként",
+    "cost_by_title_model": "Költség modellenként",
+    "cost_by_tab_agent": "Ügynök szerint",
+    "cost_by_tab_model": "Modell szerint",
+    "cost_by_caption_agent_one": "{{count}} ügynök ezen a környezeten",
+    "cost_by_caption_agent_other": "{{count}} ügynök ezen a környezeten",
+    "cost_by_caption_model_one": "{{count}} használt modell",
+    "cost_by_caption_model_other": "{{count}} használt modell",
+    "daily_breakdown_toggle": "Napi bontás táblázat",
+    "table_date": "Dátum",
+    "table_model": "Modell",
+    "table_input": "Bemenet",
+    "table_output": "Kimenet",
+    "table_cache_r": "Cache olvasás",
+    "table_cache_w": "Cache írás",
+    "no_data": "Még nincsenek használati adatok"
+  }
+}
+

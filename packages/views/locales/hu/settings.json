@@ -1,0 +1,229 @@
+{
+  "preferences": {
+    "theme": {
+      "title": "Téma",
+      "light": "Világos",
+      "dark": "Sötét",
+      "system": "Rendszer"
+    },
+    "language": {
+      "title": "Nyelv",
+      "english": "English",
+      "chinese": "中文",
+      "hungarian": "Magyar",
+      "sync_failed": "A nyelv mentése ezen az eszközön sikerült, de a fiókjával való szinkronizálás sikertelen volt. Más eszközökön továbbra is az előző nyelv jelenhet meg."
+    }
+  },
+  "page": {
+    "title": "Beállítások",
+    "my_account": "Fiókom",
+    "workspace_fallback": "Munkaterület",
+    "tabs": {
+      "profile": "Profil",
+      "preferences": "Beállítások",
+      "notifications": "Értesítések",
+      "tokens": "API tokenek",
+      "general": "Általános",
+      "repositories": "Repozitóriumok",
+      "labs": "Labor",
+      "members": "Tagok",
+      "system": "Rendszer"
+    }
+  },
+  "account": {
+    "section_profile": "Profil",
+    "click_avatar_hint": "Kattintson az avatar feltöltéséhez",
+    "name_label": "Név",
+    "save": "Profil frissítése",
+    "saving": "Frissítés...",
+    "toast_avatar_updated": "Avatar frissítve",
+    "toast_avatar_failed": "Avatar feltöltése sikertelen",
+    "toast_profile_updated": "Profil frissítve",
+    "toast_profile_failed": "Profil frissítése sikertelen"
+  },
+  "notifications": {
+    "title": "Bejövő értesítések",
+    "description": "Itt állíthatja be, mely eseményekről kapjon értesítést a bejövő üzenetek közé. A némított eseménytípusok csendben szűrve lesznek — de továbbra is megtekintheti őket közvetlenül a feladatnál.",
+    "toast_failed": "Nem sikerült frissíteni az értesítési beállításokat",
+    "groups": {
+      "assignments": {
+        "label": "Hozzárendelések",
+        "description": "Amikor önhöz rendelnek egy feladatot, vagy eltávolítják onnan"
+      },
+      "status_changes": {
+        "label": "Állapotváltozások",
+        "description": "Amikor egy követett feladat állapota megváltozik (pl. teendő, folyamatban, kész)"
+      },
+      "comments": {
+        "label": "Hozzászólások és említések",
+        "description": "Új hozzászólások a követett feladatoknál, vagy ha valaki megemlíti önt (@név)"
+      },
+      "updates": {
+        "label": "Prioritás és határidő",
+        "description": "Amikor a prioritás vagy a határidő megváltozik a követett feladatoknál"
+      },
+      "agent_activity": {
+        "label": "Ügynökaktivitás",
+        "description": "Amikor egy ügynökfeladat befejeződik vagy sikertelen lesz"
+      }
+    },
+    "system": {
+      "title": "Rendszerértesítések",
+      "description": "Az operációs rendszer natív értesítéseinek kezelése, amelyek akkor jelennek meg, ha a Multica a háttérben fut.",
+      "label": "Rendszerértesítések megjelenítése",
+      "hint": "Mutasson értesítést az operációs rendszeren keresztül az új bejövő tételekről, ha az alkalmazás nincs fókuszban."
+    }
+  },
+  "tokens": {
+    "title": "API tokenek",
+    "description": "A személyes hozzáférési tokenek lehetővé teszik a CLI és a külső integrációk számára, hogy hitelesítsék magukat az ön fiókjával.",
+    "name_placeholder": "Token neve (pl. Saját CLI)",
+    "expiry": {
+      "30": "30 nap",
+      "90": "90 nap",
+      "365": "1 év",
+      "never": "Nincs lejárati idő"
+    },
+    "create": "Létrehozás",
+    "creating": "Létrehozás...",
+    "toast_load_failed": "Tokenek betöltése sikertelen",
+    "toast_create_failed": "Token létrehozása sikertelen",
+    "toast_revoked": "Token visszavonva",
+    "toast_revoke_failed": "Token visszavonása sikertelen",
+    "metadata_prefix": "{{prefix}}... · Létrehozva: {{created}} · {{lastUsed}}",
+    "last_used_with_date": "Utoljára használva: {{date}}",
+    "last_used_never": "Soha nem volt használva",
+    "expires_with_date": " · Lejár: {{date}}",
+    "revoke_aria": "{{name}} visszavonása",
+    "revoke_tooltip": "Visszavonás",
+    "revoke_dialog": {
+      "title": "Token visszavonása",
+      "description": "Ez a token véglegesen vissza lesz vonva, és többé nem használható. Ez a művelet nem vonható vissza.",
+      "cancel": "Mégse",
+      "confirm": "Visszavonás"
+    },
+    "created_dialog": {
+      "title": "Token létrehozva",
+      "description": "Másolja ki most a személyes hozzáférési tokenét. Később nem fogja tudni újra megtekinteni.",
+      "copy_tooltip": "Token másolása",
+      "done": "Kész"
+    }
+  },
+  "workspace": {
+    "section_general": "Általános",
+    "name_label": "Név",
+    "description_label": "Leírás",
+    "description_placeholder": "Mire fókuszál ez a munkaterület?",
+    "context_label": "Kontextus",
+    "context_placeholder": "Háttérinformációk és kontextus a munkaterületen dolgozó AI ügynökök számára",
+    "slug_label": "Slug (azonosító)",
+    "save": "Mentés",
+    "saving": "Mentés...",
+    "manage_hint": "Csak az adminisztrátorok és a tulajdonosok frissíthetik a munkaterület beállításait.",
+    "toast_saved": "Munkaterület beállításai mentve",
+    "toast_save_failed": "Nem sikerült menteni a munkaterület beállításait",
+    "danger_zone": "Veszélyzóna",
+    "leave_title": "Kilépés a munkaterületről",
+    "leave_sole_owner": "Ön az egyetlen tulajdonos. Előbb léptessen elő egy másik tagot tulajdonosnak, vagy törölje a munkaterületet.",
+    "leave_sole_member": "Ön az egyetlen tag. A kilépéshez törölnie kell a munkaterületet.",
+    "leave_default": "Eltávolítja magát ebből a munkaterületről.",
+    "leave_button": "Kilépés a munkaterületről",
+    "leaving": "Kilépés...",
+    "leave_confirm_title": "Kilépés a munkaterületről",
+    "leave_confirm_description": "Kilép a következő munkaterületről: {{name}}? Elveszíti a hozzáférést, amíg újra meg nem hívják.",
+    "toast_leave_failed": "Nem sikerült kilépni a munkaterületről",
+    "delete_title": "Munkaterület törlése",
+    "delete_description": "Véglegesen törli ezt a munkaterületet és annak összes adatát.",
+    "delete_button": "Munkaterület törlése",
+    "deleting": "Törlés...",
+    "toast_delete_failed": "Nem sikerült törölni a munkaterületet",
+    "confirm_cancel": "Mégse",
+    "confirm_action": "Megerősítés"
+  },
+  "delete_workspace_dialog": {
+    "title": "Munkaterület törlése",
+    "description": "Ez a művelet nem vonható vissza. Minden feladat, ügynök és adat véglegesen törlésre kerül.",
+    "type_to_confirm_prefix": "A megerősítéshez írja be:",
+    "type_to_confirm_suffix": " az alábbi mezőbe.",
+    "cancel": "Mégse",
+    "confirm": "Munkaterület törlése",
+    "deleting": "Törlés..."
+  },
+  "labs": {
+    "section_git": "Git",
+    "co_authored_by_label": "Co-authored-by megjelölés",
+    "co_authored_by_description_prefix": "Automatikusan adja hozzá a",
+    "co_authored_by_description_suffix": "sort az ügynökök által készített commitokhoz.",
+    "toast_failed": "Nem sikerült frissíteni a beállítást"
+  },
+  "repositories": {
+    "section_title": "Repozitóriumok",
+    "description": "A munkaterülethez társított Git repozitóriumok. Az ügynökök ezeket használják a kód klónozásához és a munkához.",
+    "url_placeholder": "https://git.pelda.hu/szervezet/repo.git",
+    "description_placeholder": "Leírás (pl. Go backend + Next.js frontend)",
+    "add": "Repozitórium hozzáadása",
+    "save": "Mentés",
+    "saving": "Mentés...",
+    "manage_hint": "Csak az adminisztrátorok és a tulajdonosok kezelhetik a repozitóriumokat.",
+    "toast_saved": "Repozitóriumok mentve",
+    "toast_save_failed": "Nem sikerült menteni a repozitóriumokat"
+  },
+  "members": {
+    "section_title": "Tagok ({{count}})",
+    "invite_title": "Tag meghívása",
+    "invite_email_placeholder": "felhasznalo@ceg.hu",
+    "invite_button": "Meghívás",
+    "inviting": "Meghívás...",
+    "toast_invitation_sent": "Meghívó elküldve",
+    "toast_invitation_failed": "Nem sikerült elküldeni a meghívót",
+    "no_members": "Nem találhatók tagok.",
+    "pending_title": "Függőben lévő meghívók ({{count}})",
+    "pending_status": "Függőben",
+    "revoke_invitation_tooltip": "Meghívó visszavonása",
+    "revoke_invitation_title": "Meghívó visszavonása",
+    "revoke_invitation_description": "Visszavonja a meghívót a következő címre: {{email}}? Többé nem fognak tudni csatlakozni ehhez a munkaterülethez.",
+    "toast_invitation_revoked": "Meghívó visszavonva",
+    "toast_invitation_revoke_failed": "Nem sikerült visszavonni a meghívót",
+    "toast_role_updated": "Szerepkör frissítve",
+    "toast_role_failed": "Nem sikerült frissíteni a tagot",
+    "toast_member_removed": "Tag eltávolítva",
+    "toast_member_remove_failed": "Nem sikerült eltávolítani a tagot",
+    "remove_member_title": "{{name}} eltávolítása",
+    "remove_member_description": "Eltávolítja a következőt: {{name}} innen: {{workspace}}? Elveszíti a hozzáférést ehhez a munkaterülethez.",
+    "confirm_cancel": "Mégse",
+    "confirm_action": "Megerősítés",
+    "change_role": "Szerepkör módosítása",
+    "remove_action": "Eltávolítás a munkaterületről",
+    "cannot_demote_last_owner_title": "Előbb léptessen elő egy másik tagot tulajdonosnak — egy munkaterületnek legalább egy tulajdonossal kell rendelkeznie.",
+    "cannot_demote_last_owner": "Az utolsó tulajdonos nem fokozható le",
+    "roles": {
+      "owner": {
+        "label": "Tulajdonos",
+        "description": "Teljes hozzáférés, minden beállítás kezelése"
+      },
+      "admin": {
+        "label": "Adminisztrátor",
+        "description": "Tagok és beállítások kezelése"
+      },
+      "member": {
+        "label": "Tag",
+        "description": "Feladatok létrehozása és azokon való munka"
+      }
+    }
+  },
+  "system": {
+    "title": "Rendszer",
+    "branding_title": "Egyedi arculat",
+    "branding_description": "Szabja személyre a Multica megjelenését. Ezek a beállítások globálisan érvényesek.",
+    "logo_label": "Egyedi logó URL",
+    "logo_hint": "Adja meg egy képfájl URL-jét. Ez a logó fog megjelenni a bejelentkezési képernyőn a Multica logó helyett.",
+    "text_label": "Bejelentkezési oldal szövege",
+    "text_placeholder": "Üdvözöljük a rendszerünkben!",
+    "text_hint": "Ez a szöveg a bejelentkezési képernyőn, a logó alatt fog megjelenni.",
+    "save_button": "Módosítások mentése",
+    "saving": "Mentés...",
+    "success_toast": "Rendszerbeállítások frissítve",
+    "error_toast": "Nem sikerült frissíteni a rendszerbeállításokat"
+  }
+}
+

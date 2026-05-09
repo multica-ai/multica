@@ -23,6 +23,8 @@ type AppConfig struct {
 	PosthogKey           string `json:"posthog_key"`
 	PosthogHost          string `json:"posthog_host"`
 	AnalyticsEnvironment string `json:"analytics_environment"`
+	CustomLogoURL        string `json:"custom_logo_url,omitempty"`
+	LoginPageText        string `json:"login_page_text,omitempty"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -46,6 +48,15 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		config.AnalyticsEnvironment = analytics.EnvironmentFromEnv()
 		if config.PosthogHost == "" && config.PosthogKey != "" {
 			config.PosthogHost = "https://us.i.posthog.com"
+		}
+	}
+
+	if h.Queries != nil {
+		if logo, err := h.Queries.GetSystemSetting(r.Context(), "custom_logo_url"); err == nil {
+			config.CustomLogoURL = logo
+		}
+		if text, err := h.Queries.GetSystemSetting(r.Context(), "login_page_text"); err == nil {
+			config.LoginPageText = text
 		}
 	}
 

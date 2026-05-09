@@ -459,6 +459,12 @@ type TaskUsageRollupState struct {
 	LastError         pgtype.Text        `json:"last_error"`
 }
 
+type SystemSetting struct {
+	Key       string             `json:"key"`
+	Value     string             `json:"value"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type User struct {
 	ID                      pgtype.UUID        `json:"id"`
 	Name                    string             `json:"name"`
@@ -472,6 +478,7 @@ type User struct {
 	CloudWaitlistReason     pgtype.Text        `json:"cloud_waitlist_reason"`
 	StarterContentState     pgtype.Text        `json:"starter_content_state"`
 	Language                pgtype.Text        `json:"language"`
+	IsSystemAdmin           bool               `json:"is_system_admin"`
 }
 
 type VerificationCode struct {

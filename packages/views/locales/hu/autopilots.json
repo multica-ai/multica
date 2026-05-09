@@ -1,0 +1,233 @@
+{
+  "page": {
+    "title": "Autopilot",
+    "new_autopilot": "Új autopilot",
+    "start_blank": "Kezdés alapoktól",
+    "table": {
+      "name": "Név",
+      "agent": "Ügynök",
+      "mode": "Mód",
+      "status": "Állapot",
+      "last_run": "Legutóbbi futtatás"
+    },
+    "last_run_empty": "--",
+    "empty": {
+      "title": "Még nincsenek autopilotok",
+      "hint": "Ütemezzen ismétlődő feladatokat AI ügynökei számára. Válasszon egy sablont, vagy kezdje az alapoktól."
+    }
+  },
+  "status": {
+    "active": "Aktív",
+    "paused": "Szüneteltetve",
+    "archived": "Archiválva"
+  },
+  "execution_mode": {
+    "create_issue": "Feladat létrehozása",
+    "run_only": "Csak futtatás"
+  },
+  "relative_date": {
+    "today": "Ma",
+    "one_day_ago": "1 napja",
+    "days_ago": "{{count}} napja",
+    "months_ago": "{{count}} hónapja"
+  },
+  "templates": {
+    "daily_news": {
+      "title": "Napi hírek összefoglalója",
+      "summary": "A mai hírek keresése és összefoglalása a csapat számára"
+    },
+    "pr_review": {
+      "title": "PR ellenőrzés emlékeztető",
+      "summary": "Ellenőrzésre váró elavult pull requestek megjelölése"
+    },
+    "bug_triage": {
+      "title": "Hibajegyek osztályozása (triage)",
+      "summary": "Új hibaüzenetek értékelése és prioritizálása"
+    },
+    "weekly_progress": {
+      "title": "Heti előrehaladási jelentés",
+      "summary": "A csapat heti előrehaladásának összefoglalása"
+    },
+    "dependency_audit": {
+      "title": "Függőség-audit",
+      "summary": "Biztonsági sebezhetőségek és elavult csomagok keresése"
+    },
+    "documentation_check": {
+      "title": "Documentation check",
+      "summary": "Review recent changes for documentation gaps"
+    }
+  },
+  "detail": {
+    "not_found": "Autopilot nem található",
+    "pause_aria": "Autopilot szüneteltetése",
+    "activate_aria": "Autopilot aktiválása",
+    "edit": "Szerkesztés",
+    "run_now": "Futtatás most",
+    "running": "Futtatás...",
+    "toast_triggered": "Autopilot elindítva",
+    "toast_trigger_failed": "Nem sikerült elindítani az autopilotot",
+    "section_properties": "Tulajdonságok",
+    "section_triggers": "Triggerek",
+    "section_run_history": "Futtatási előzmények",
+    "section_danger": "Veszélyzóna",
+    "field_agent": "Ügynök",
+    "field_output_mode": "Kimeneti mód",
+    "field_prompt": "Prompt",
+    "add_trigger": "Trigger hozzáadása",
+    "no_triggers": "Nincsenek trigger konfigurálva. Adjon hozzá egy ütemezést az automatikus futtatáshoz.",
+    "no_runs": "Még nem voltak futtatások. Kattintson a \"Futtatás most\" gombra a kézi indításhoz.",
+    "delete_button": "Autopilot törlése",
+    "toast_deleted": "Autopilot törölve",
+    "toast_delete_failed": "Nem sikerült törölni az autopilotot",
+    "delete_dialog": {
+      "title": "Autopilot törlése",
+      "description": "Ezzel véglegesen törli a(z) \"{{title}}\" autopilotot, a triggereivel és futtatási előzményeivel együtt. Ez a művelet nem vonható vissza.",
+      "cancel": "Mégse",
+      "confirm": "Törlés",
+      "deleting": "Törlés..."
+    }
+  },
+  "run_status": {
+    "issue_created": "Feladat létrehozva",
+    "running": "Fut",
+    "completed": "Befejezve",
+    "failed": "Sikertelen"
+  },
+  "run": {
+    "issue_linked": "Feladat csatolva",
+    "view_log": "Futtatási napló megtekintése"
+  },
+  "trigger_row": {
+    "disabled_badge": "Kikapcsolva",
+    "next_label": "Következő: {{date}}",
+    "toast_deleted": "Trigger törölve",
+    "toast_delete_failed": "Nem sikerült törölni a triggert",
+    "delete_dialog": {
+      "title": "Trigger törlése",
+      "description": "Ez a trigger el lesz távolítva, és az autopilot nem fog többé ezen ütemezés szerint futni. Ez a művelet nem vonható vissza.",
+      "cancel": "Mégse",
+      "confirm": "Törlés",
+      "deleting": "Törlés..."
+    }
+  },
+  "add_trigger_dialog": {
+    "title": "Trigger hozzáadása",
+    "label_field": "Címke (opcionális)",
+    "label_placeholder": "pl. Hétköznap reggel",
+    "submit": "Trigger hozzáadása",
+    "submitting": "Hozzáadás...",
+    "toast_added": "Trigger hozzáadva",
+    "toast_add_failed": "Nem sikerült hozzáadni a triggert"
+  },
+  "dialog": {
+    "sr_create": "Új autopilot",
+    "sr_edit": "Autopilot szerkesztése",
+    "header_create": "Új autopilot",
+    "header_edit": "Autopilot szerkesztése",
+    "subtitle": "Ismétlődő AI feladat",
+    "expand": "Kibontás",
+    "collapse": "Összecsukás",
+    "close": "Bezárás",
+    "title_placeholder": "Autopilot neve",
+    "runbook_label": "Runbook",
+    "runbook_hint": "Az ügynök minden futtatáskor elolvassa",
+    "description_placeholder": "# Cél\nMit érjen el az ügynök?\n\n# Kontextus\nKinek készül? Vannak korlátok?\n\n# Lépések\n1. …\n2. …",
+    "auto_run_hint": "Mentés után automatikusan fut, amíg szüneteltetve nincs.",
+    "cancel": "Mégse",
+    "create": "Autopilot létrehozása",
+    "save": "Mentés",
+    "creating": "Létrehozás...",
+    "saving": "Mentés...",
+    "toast_created": "Autopilot létrehozva",
+    "toast_create_partial": "Autopilot létrehozva, de az ütemezés mentése sikertelen volt",
+    "toast_create_failed": "Nem sikerült létrehozni az autopilotot",
+    "toast_updated": "Autopilot frissítve",
+    "toast_update_partial": "Autopilot frissítve, de az ütemezés mentése sikertelen volt",
+    "toast_update_failed": "Nem sikerült frissíteni az autopilotot",
+    "section_agent": "Ügynök",
+    "select_agent": "Ügynök választása",
+    "section_output_mode": "Kimeneti mód",
+    "section_schedule": "Ütemezés",
+    "schedule_disabled_reason": "Ennek az autopilotnak több ütemezése van — ezeket a részletek oldalon szerkesztheti.",
+    "next_run_label": "Következő futtatás:",
+    "output_modes": {
+      "create_issue": {
+        "label": "Feladat létrehozása",
+        "description": "Minden futtatás létrehoz egy követett feladatot"
+      },
+      "run_only": {
+        "label": "Csak futtatás",
+        "description": "Csendes futtatás, nem jön létre feladat"
+      }
+    },
+    "frequency_long": {
+      "hourly": "Minden órában",
+      "daily": "Naponta",
+      "weekdays": "Minden hétköznap",
+      "weekly": "Hetente",
+      "custom": "Egyéni cron"
+    },
+    "days": {
+      "sunday": "Vasárnap",
+      "monday": "Hétfő",
+      "tuesday": "Kedd",
+      "wednesday": "Szerda",
+      "thursday": "Csütörtök",
+      "friday": "Péntek",
+      "saturday": "Szombat"
+    }
+  },
+  "trigger_config": {
+    "frequencies": {
+      "hourly": "Óránként",
+      "daily": "Naponta",
+      "weekdays": "Hétköznapokon",
+      "weekly": "Napok",
+      "custom": "Egyéni"
+    },
+    "days_short": {
+      "sun": "V",
+      "mon": "H",
+      "tue": "K",
+      "wed": "Sze",
+      "thu": "Cs",
+      "fri": "P",
+      "sat": "Szo"
+    },
+    "cron_label": "Cron kifejezés",
+    "cron_hint": "Standard 5 mezős cron (perc óra nap hónap hétnap)",
+    "minute_label": "Perc",
+    "time_label": "Időpont",
+    "timezone_label": "Időzóna",
+    "days_label": "Napok",
+    "summary": {
+      "hourly": "Óránként · :{{min}}",
+      "daily": "Naponta {{time}}",
+      "weekdays": "Hétköznap {{time}}",
+      "weekly": "{{days}} {{time}}",
+      "custom": "Egyéni cron",
+      "no_days": "—"
+    },
+    "describe": {
+      "hourly": "Futtatás minden órában ekkor: :{{min}}",
+      "daily": "Futtatás naponta ekkor: {{time}} {{offset}}",
+      "weekdays": "Futtatás hétköznapokon ekkor: {{time}} {{offset}}",
+      "weekly": "Futtatás minden {{days}} napokon ekkor: {{time}} {{offset}}",
+      "custom": "Egyéni ütemezés: {{cron}}"
+    },
+    "countdown": {
+      "days_hours": "{{days}}n {{hours}}ó",
+      "hours_minutes": "{{hours}}ó {{minutes}}p",
+      "minutes": "{{minutes}}p",
+      "less_than_minute": "<1p"
+    }
+  },
+  "agent_picker": {
+    "filter_placeholder": "Ügynökök szűrése...",
+    "select_agent": "Ügynök választása"
+  },
+  "timezone_picker": {
+    "search_placeholder": "Időzóna keresése..."
+  }
+}
+

@@ -1,0 +1,93 @@
+{
+  "page": {
+    "title": "Projektek",
+    "new_project": "Új projekt",
+    "empty": "Még nincsenek projektek",
+    "create_first": "Hozza létre első projektjét"
+  },
+  "table": {
+    "name": "Név",
+    "priority": "Prioritás",
+    "status": "Állapot",
+    "progress": "Előrehaladás",
+    "lead": "Felelős",
+    "created": "Létrehozva"
+  },
+  "status": {
+    "planned": "Tervezett",
+    "in_progress": "Folyamatban",
+    "paused": "Szüneteltetve",
+    "completed": "Befejezve",
+    "cancelled": "Megszakítva"
+  },
+  "priority": {
+    "urgent": "Sürgős",
+    "high": "Magas",
+    "medium": "Közepes",
+    "low": "Alacsony",
+    "none": "Nincs prioritás"
+  },
+  "lead": {
+    "no_lead": "Nincs felelős",
+    "assign_placeholder": "Felelős hozzárendelése...",
+    "members_group": "Tagok",
+    "agents_group": "Ügynökök",
+    "no_results": "Nincs találat"
+  },
+  "relative_date": {
+    "today": "Ma",
+    "one_day_ago": "1 napja",
+    "days_ago": "{{count}} napja",
+    "months_ago": "{{count}} hónapja"
+  },
+  "detail": {
+    "not_found": "A projekt nem található",
+    "breadcrumb_fallback": "Projektek",
+    "title_placeholder": "Projekt címe",
+    "icon_tooltip": "Ikon módosítása",
+    "pin_tooltip": "Rögzítés az oldalsávon",
+    "unpin_tooltip": "Eltávolítás az oldalsávról",
+    "sidebar_tooltip": "Oldalsáv ki/be",
+    "copy_link": "Link másolása",
+    "delete_action": "Projekt törlése",
+    "section_properties": "Tulajdonságok",
+    "section_progress": "Előrehaladás",
+    "section_description": "Leírás",
+    "description_placeholder": "Leírás hozzáadása...",
+    "empty_issues_title": "Nincsenek csatolt feladatok",
+    "empty_issues_hint": "Hozzon létre egy új feladatot, vagy rendeljen hozzá létezőket ehhez a projekthez.",
+    "empty_issues_new_button": "Új feladat",
+    "toast_link_copied": "Link másolva",
+    "toast_project_deleted": "Projekt törölve",
+    "toast_move_issue_failed": "Nem sikerült áthelyezni a feladatot"
+  },
+  "resources": {
+    "section_header": "Erőforrások",
+    "empty": "Nincsenek csatolt erőforrások.",
+    "add_button": "Erőforrás hozzáadása",
+    "popover_title": "GitHub repo csatolása",
+    "attached_badge": "csatolva",
+    "remove_tooltip": "Eltávolítás",
+    "url_placeholder": "https://github.com/owner/repo",
+    "url_submit": "Hozzáadás",
+    "toast_attached": "Repozitórium csatolva",
+    "toast_attach_failed": "Sikertelen csatolás",
+    "toast_removed": "Erőforrás eltávolítva",
+    "toast_remove_failed": "Nem sikerült eltávolítani az erőforrást"
+  },
+  "delete_dialog": {
+    "title": "Projekt törlése",
+    "description": "Ez törölni fogja a projektet. A feladatok nem törlődnek, de a projektkapcsolatuk megszűnik.",
+    "confirm": "Törlés",
+    "cancel": "Mégse"
+  },
+  "picker": {
+    "no_project": "Nincs projekt",
+    "remove": "Eltávolítás a projektből",
+    "empty": "Még nincsenek projektek"
+  },
+  "chip": {
+    "fallback_label": "Projekt"
+  }
+}
+
