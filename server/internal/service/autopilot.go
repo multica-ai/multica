@@ -35,6 +35,12 @@ func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *
 // DispatchAutopilot is the core execution entry point.
 // It creates a run and either creates an issue or enqueues a direct agent task
 // depending on execution_mode.
+//
+// Before any work is queued we run an admission check against the assignee
+// agent's runtime: if it is not online, we record a `skipped` run with a
+// failure_reason and return without enqueueing. This is the "触发时准入" gate
+// from MUL-1899 — without it a paused laptop / offline daemon causes scheduled
+// autopilots to pile thousands of doomed tasks onto agent_task_queue.
 func (s *AutopilotService) DispatchAutopilot(
 	ctx context.Context,
 	autopilot db.Autopilot,
@@ -42,6 +48,10 @@ func (s *AutopilotService) DispatchAutopilot(
 	source string,
 	payload []byte,
 ) (*db.AutopilotRun, error) {
+	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
+		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, reason)
+	}
+
 	// Determine initial status based on execution mode.
 	initialStatus := "issue_created"
 	if autopilot.ExecutionMode == "run_only" {
@@ -333,6 +343,96 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 	}); err != nil {
 		slog.Warn("failed to mark autopilot run as failed", "run_id", util.UUIDToString(runID), "error", err)
 	}
+}
+
+// shouldSkipDispatch is the pre-flight admission check from MUL-1899.
+// Returns (reason, true) when dispatching now would only enqueue a doomed
+// task — i.e. the assignee agent is gone, archived, has no runtime bound, or
+// its runtime is not currently online. Returns ("", false) on the happy path.
+//
+// Errors loading the agent / runtime are logged but treated as "do not skip"
+// so a transient DB hiccup never silently swallows a scheduled run.
+func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopilot) (string, bool) {
+	if !ap.AssigneeID.Valid {
+		return "autopilot has no assignee", true
+	}
+	agent, err := s.Queries.GetAgent(ctx, ap.AssigneeID)
+	if err != nil {
+		slog.Warn("autopilot admission: failed to load assignee agent",
+			"autopilot_id", util.UUIDToString(ap.ID),
+			"agent_id", util.UUIDToString(ap.AssigneeID),
+			"error", err,
+		)
+		return "", false
+	}
+	if agent.ArchivedAt.Valid {
+		return "assignee agent is archived", true
+	}
+	if !agent.RuntimeID.Valid {
+		return "assignee agent has no runtime bound", true
+	}
+	rt, err := s.Queries.GetAgentRuntime(ctx, agent.RuntimeID)
+	if err != nil {
+		slog.Warn("autopilot admission: failed to load runtime",
+			"autopilot_id", util.UUIDToString(ap.ID),
+			"runtime_id", util.UUIDToString(agent.RuntimeID),
+			"error", err,
+		)
+		return "", false
+	}
+	if rt.Status != "online" {
+		return "agent runtime is " + rt.Status + " at dispatch time", true
+	}
+	return "", false
+}
+
+// recordSkippedRun persists a `skipped` autopilot_run with the given reason
+// and emits the same WS / analytics signals that a normal terminal transition
+// would. Returns the run + nil error so callers (scheduler tick, manual
+// trigger handler) treat this as a successful — but no-op — dispatch.
+func (s *AutopilotService) recordSkippedRun(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	source string,
+	payload []byte,
+	reason string,
+) (*db.AutopilotRun, error) {
+	run, err := s.Queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
+		AutopilotID:    autopilot.ID,
+		TriggerID:      triggerID,
+		Source:         source,
+		Status:         "skipped",
+		TriggerPayload: payload,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create skipped run: %w", err)
+	}
+
+	updated, err := s.Queries.UpdateAutopilotRunSkipped(ctx, db.UpdateAutopilotRunSkippedParams{
+		ID:            run.ID,
+		FailureReason: pgtype.Text{String: reason, Valid: true},
+	})
+	if err == nil {
+		run = updated
+	} else {
+		slog.Warn("failed to set skip reason on autopilot run",
+			"run_id", util.UUIDToString(run.ID), "error", err)
+	}
+
+	slog.Info("autopilot dispatch skipped",
+		"autopilot_id", util.UUIDToString(autopilot.ID),
+		"run_id", util.UUIDToString(run.ID),
+		"source", source,
+		"reason", reason,
+	)
+
+	// Bump last_run_at so scheduler advancement and "last seen" UI both
+	// reflect that we did evaluate the trigger this tick.
+	s.Queries.UpdateAutopilotLastRunAt(ctx, autopilot.ID)
+
+	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), run, "skipped")
+	return &run, nil
 }
 
 func (s *AutopilotService) publishRunDone(workspaceID string, run db.AutopilotRun, status string) {

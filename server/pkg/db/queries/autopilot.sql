@@ -134,6 +134,18 @@ SET status = 'failed', completed_at = now(), failure_reason = $2
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateAutopilotRunSkipped :one
+-- Marks an autopilot_run as skipped without enqueueing any task. Used by the
+-- pre-flight admission check when the assignee agent's runtime is offline:
+-- creating an issue / task in that state would just pile a doomed job onto
+-- agent_task_queue (the canonical "持续给离线 local agent 入队" symptom from
+-- MUL-1899). Recording the skip + reason gives the UI / failure monitor / ops
+-- a paper trail without polluting the failure ratio.
+UPDATE autopilot_run
+SET status = 'skipped', completed_at = now(), failure_reason = $2
+WHERE id = $1
+RETURNING *;
+
 -- =====================
 -- Scheduler Queries
 -- =====================
