@@ -1526,6 +1526,87 @@ func TestTriggerAutopilot_UsesManualRequesterAsTriggerActor(t *testing.T) {
 	}
 }
 
+func TestMaybeRetryFailedTask_PreservesTriggerActor(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id, runtime_id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent/runtime: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_id, creator_type,
+			assignee_id, assignee_type, number, position
+		)
+		VALUES ($1, 'retry preserves trigger actor', 'in_progress', 'medium', $2, 'member', $3, 'agent', 92002, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var parentTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts,
+			failure_reason, trigger_source, trigger_actor_type, trigger_actor_id
+		)
+		VALUES ($1, $2, $3, 'failed', 3, 1, 2, 'runtime_recovery', 'comment', 'member', $4)
+		RETURNING id
+	`, agentID, runtimeID, issueID, testUserID).Scan(&parentTaskID); err != nil {
+		t.Fatalf("setup: create failed parent task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, parentTaskID) })
+
+	parent, err := testHandler.Queries.GetAgentTask(ctx, parseUUID(parentTaskID))
+	if err != nil {
+		t.Fatalf("load parent task: %v", err)
+	}
+
+	child, err := testHandler.TaskService.MaybeRetryFailedTask(ctx, parent)
+	if err != nil {
+		t.Fatalf("MaybeRetryFailedTask: %v", err)
+	}
+	if child == nil {
+		t.Fatal("MaybeRetryFailedTask: expected retry task, got nil")
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, child.ID) })
+
+	var gotSource, gotActorType, gotActorID, gotParentID string
+	var gotAttempt int
+	if err := testPool.QueryRow(ctx, `
+		SELECT trigger_source, trigger_actor_type, trigger_actor_id::text, parent_task_id::text, attempt
+		FROM agent_task_queue
+		WHERE id = $1
+	`, child.ID).Scan(&gotSource, &gotActorType, &gotActorID, &gotParentID, &gotAttempt); err != nil {
+		t.Fatalf("read retry child task: %v", err)
+	}
+
+	if gotSource != "comment" {
+		t.Fatalf("expected trigger_source comment, got %q", gotSource)
+	}
+	if gotActorType != "member" {
+		t.Fatalf("expected trigger_actor_type member, got %q", gotActorType)
+	}
+	if gotActorID != testUserID {
+		t.Fatalf("expected trigger_actor_id %q, got %q", testUserID, gotActorID)
+	}
+	if gotParentID != parentTaskID {
+		t.Fatalf("expected parent_task_id %q, got %q", parentTaskID, gotParentID)
+	}
+	if gotAttempt != 2 {
+		t.Fatalf("expected retry attempt 2, got %d", gotAttempt)
+	}
+}
+
 func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/agents", map[string]any{
