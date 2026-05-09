@@ -519,11 +519,7 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	}
 
 	params := db.UpdateAutopilotTriggerParams{
-		ID:             prev.ID,
-		CronExpression: prev.CronExpression,
-		Timezone:       prev.Timezone,
-		NextRunAt:      prev.NextRunAt,
-		Label:          prev.Label,
+		ID: prev.ID,
 	}
 	if req.Enabled != nil {
 		params.Enabled = pgtype.Bool{Bool: *req.Enabled, Valid: true}

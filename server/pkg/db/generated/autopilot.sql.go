@@ -898,7 +898,7 @@ UPDATE autopilot_trigger SET
     enabled = COALESCE($2::boolean, enabled),
     cron_expression = COALESCE($3, cron_expression),
     timezone = COALESCE($4, timezone),
-    next_run_at = $5,
+    next_run_at = COALESCE($5, next_run_at),
     label = COALESCE($6, label),
     updated_at = now()
 WHERE id = $1

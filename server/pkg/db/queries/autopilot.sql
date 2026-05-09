@@ -73,7 +73,7 @@ UPDATE autopilot_trigger SET
     enabled = COALESCE(sqlc.narg('enabled')::boolean, enabled),
     cron_expression = COALESCE(sqlc.narg('cron_expression'), cron_expression),
     timezone = COALESCE(sqlc.narg('timezone'), timezone),
-    next_run_at = sqlc.narg('next_run_at'),
+    next_run_at = COALESCE(sqlc.narg('next_run_at'), next_run_at),
     label = COALESCE(sqlc.narg('label'), label),
     updated_at = now()
 WHERE id = $1
