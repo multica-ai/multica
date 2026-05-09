@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -1540,6 +1541,93 @@ func TestVerifyCode(t *testing.T) {
 	}
 	if resp.User.Email != email {
 		t.Fatalf("VerifyCode: expected email '%s', got '%s'", email, resp.User.Email)
+	}
+}
+
+func TestOAuthLoginWithFeishuLarkProvider(t *testing.T) {
+	const email = "oauth-lark-test@multica.ai"
+	ctx := context.Background()
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+	})
+
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/open-apis/authen/v2/oauth/token":
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode token request: %v", err)
+			}
+			if body["code"] != "oauth-code" || body["code_verifier"] != "pkce-verifier" {
+				t.Fatalf("unexpected token request body: %#v", body)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"user-token","token_type":"Bearer","expires_in":7200}`))
+		case "/open-apis/authen/v1/user_info":
+			if got := r.Header.Get("Authorization"); got != "Bearer user-token" {
+				t.Fatalf("userinfo authorization header: %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"code": 0,
+				"msg": "success",
+				"data": {
+					"name": "Lark User",
+					"avatar_url": "https://avatar.example/lark.png",
+					"email": "personal@example.com",
+					"enterprise_email": "oauth-lark-test@multica.ai"
+				}
+			}`))
+		default:
+			t.Fatalf("unexpected provider path: %s", r.URL.Path)
+		}
+	}))
+	defer providerServer.Close()
+
+	t.Setenv("LARK_OAUTH_CLIENT_ID", "cli_lark")
+	t.Setenv("LARK_OAUTH_CLIENT_SECRET", "lark-secret")
+	t.Setenv("LARK_OAUTH_BASE_URL", providerServer.URL)
+
+	origProviders := testHandler.OAuthProviders
+	testHandler.OAuthProviders = service.NewOAuthProviderRegistryFromEnv(providerServer.Client())
+	t.Cleanup(func() { testHandler.OAuthProviders = origProviders })
+
+	w := httptest.NewRecorder()
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]string{
+		"code":          "oauth-code",
+		"redirect_uri":  "http://localhost:3000/auth/callback",
+		"code_verifier": "pkce-verifier",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/auth/oauth/feishu_lark", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	req = withURLParam(req, "provider", "feishu_lark")
+
+	testHandler.OAuthLogin(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("OAuthLogin: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp LoginResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode login response: %v", err)
+	}
+	if resp.Token == "" {
+		t.Fatalf("OAuthLogin: expected token")
+	}
+	if resp.User.Email != email {
+		t.Fatalf("OAuthLogin email: want %s, got %s", email, resp.User.Email)
+	}
+
+	var hasAuthCookie bool
+	for _, cookie := range w.Result().Cookies() {
+		if cookie.Name == auth.AuthCookieName && cookie.Value != "" {
+			hasAuthCookie = true
+		}
+	}
+	if !hasAuthCookie {
+		t.Fatalf("OAuthLogin: expected %s cookie", auth.AuthCookieName)
 	}
 }
 

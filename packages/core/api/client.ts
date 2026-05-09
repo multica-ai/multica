@@ -93,6 +93,7 @@ import {
   CommentsListSchema,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_TIMELINE_PAGE,
+  AppConfigSchema,
   ListIssuesResponseSchema,
   SubscribersListSchema,
   TimelinePageSchema,
@@ -121,6 +122,31 @@ export interface ApiClientOptions {
 export interface LoginResponse {
   token: string;
   user: User;
+}
+
+export interface OAuthProviderPublicConfig {
+  id: string;
+  label: string;
+  client_id: string;
+  authorization_url: string;
+  scope?: string;
+  pkce?: boolean;
+  extra_auth_params?: Record<string, string>;
+}
+
+export interface OAuthLoginInput {
+  code: string;
+  redirectUri: string;
+  codeVerifier?: string;
+}
+
+export interface AppConfigResponse {
+  cdn_domain: string;
+  allow_signup: boolean;
+  google_client_id?: string;
+  oauth_providers?: OAuthProviderPublicConfig[];
+  posthog_key?: string;
+  posthog_host?: string;
 }
 
 // --- Starter content (post-onboarding import) -----------------------------
@@ -283,7 +309,7 @@ export class ApiClient {
     if (!res.ok) {
       if (res.status === 401) this.handleUnauthorized();
       const { message, body } = await this.parseErrorBody(res, `API error: ${res.status} ${res.statusText}`);
-      const logLevel = res.status === 404 ? "warn" : "error";
+      const logLevel = res.status === 401 || res.status === 404 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
       throw new ApiError(message, res.status, res.statusText, body);
     }
@@ -317,6 +343,17 @@ export class ApiClient {
     return this.fetch("/auth/google", {
       method: "POST",
       body: JSON.stringify({ code, redirect_uri: redirectUri }),
+    });
+  }
+
+  async oauthLogin(provider: string, input: OAuthLoginInput): Promise<LoginResponse> {
+    return this.fetch(`/auth/oauth/${encodeURIComponent(provider)}`, {
+      method: "POST",
+      body: JSON.stringify({
+        code: input.code,
+        redirect_uri: input.redirectUri,
+        code_verifier: input.codeVerifier,
+      }),
     });
   }
 
@@ -840,14 +877,15 @@ export class ApiClient {
   }
 
   // App Config
-  async getConfig(): Promise<{
-    cdn_domain: string;
-    allow_signup: boolean;
-    google_client_id?: string;
-    posthog_key?: string;
-    posthog_host?: string;
-  }> {
-    return this.fetch("/api/config");
+  async getConfig(): Promise<AppConfigResponse> {
+    const raw = await this.fetch<unknown>("/api/config");
+    return parseWithFallback(raw, AppConfigSchema, {
+      cdn_domain: "",
+      allow_signup: true,
+      oauth_providers: [],
+    }, {
+      endpoint: "GET /api/config",
+    });
   }
 
   // Workspaces

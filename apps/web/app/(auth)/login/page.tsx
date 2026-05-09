@@ -27,6 +27,7 @@ import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import Link from "next/link";
 import { LoginPage, validateCliCallback } from "@multica/views/auth";
 import { useT } from "@multica/views/i18n";
+import { getBrowserOAuthRedirectUri } from "./oauth-redirect";
 
 /**
  * Pick where a logged-in user with no explicit `?next=` should land.
@@ -58,7 +59,7 @@ function LoginPageContent() {
   const router = useRouter();
   const qc = useQueryClient();
   const { t } = useT("auth");
-  const googleClientId = useConfigStore((state) => state.googleClientId);
+  const oauthProviders = useConfigStore((state) => state.oauthProviders);
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
@@ -110,7 +111,7 @@ function LoginPageContent() {
     void resolveLoggedInDestination(qc, hasOnboarded, list).then((dest) =>
       router.replace(dest),
     );
-  }, [isLoading, user, router, nextUrl, cliCallbackRaw, isDesktopHandoff, hasOnboarded, qc]);
+  }, [isLoading, user, router, nextUrl, cliCallbackRaw, isDesktopHandoff, hasOnboarded, qc, t]);
 
   const handleSuccess = async () => {
     // Read the latest user snapshot directly — the closure's `hasOnboarded`
@@ -126,9 +127,9 @@ function LoginPageContent() {
     router.push(dest);
   };
 
-  // Build Google OAuth state: encode platform + next URL so the callback
+  // Build OAuth state: encode provider + platform + next URL so the callback
   // can redirect to the right place after login.
-  const googleState = [
+  const oauthState = [
     platform === "desktop" ? "platform:desktop" : "",
     nextUrl ? `next:${nextUrl}` : "",
   ]
@@ -188,15 +189,17 @@ function LoginPageContent() {
   return (
     <LoginPage
       onSuccess={handleSuccess}
-      google={
-        googleClientId
-          ? {
-              clientId: googleClientId,
-              redirectUri: `${window.location.origin}/auth/callback`,
-              state: googleState,
-            }
-          : undefined
-      }
+      oauthProviders={oauthProviders.map((provider) => ({
+        id: provider.id,
+        label: provider.label,
+        clientId: provider.client_id,
+        authorizationUrl: provider.authorization_url,
+        scope: provider.scope,
+        pkce: provider.pkce,
+        extraAuthParams: provider.extra_auth_params,
+      }))}
+      oauthState={oauthState}
+      oauthRedirectUri={getBrowserOAuthRedirectUri()}
       cliCallback={
         cliCallbackRaw && validateCliCallback(cliCallbackRaw)
           ? { url: cliCallbackRaw, state: cliState }

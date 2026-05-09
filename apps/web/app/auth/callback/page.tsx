@@ -22,6 +22,7 @@ function CallbackContent() {
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle);
+  const loginWithOAuthProvider = useAuthStore((s) => s.loginWithOAuthProvider);
   const [error, setError] = useState("");
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
 
@@ -40,6 +41,10 @@ function CallbackContent() {
 
     const state = searchParams.get("state") || "";
     const stateParts = state.split(",");
+    const providerPart = stateParts.find((p) => p.startsWith("provider:"));
+    const provider = providerPart ? providerPart.slice(9) : "google";
+    const noncePart = stateParts.find((p) => p.startsWith("nonce:"));
+    const nonce = noncePart ? noncePart.slice(6) : "";
     const isDesktop = stateParts.includes("platform:desktop");
     const nextPart = stateParts.find((p) => p.startsWith("next:"));
     // Strip "next:" prefix, then drop anything that isn't a safe relative path
@@ -47,11 +52,19 @@ function CallbackContent() {
     const nextUrl = sanitizeNextUrl(nextPart ? nextPart.slice(5) : null);
 
     const redirectUri = `${window.location.origin}/auth/callback`;
+    const codeVerifier = provider !== "google" && nonce
+      ? sessionStorage.getItem(`multica_oauth_pkce:${provider}:${nonce}`) ?? undefined
+      : undefined;
+    if (provider !== "google" && nonce) {
+      sessionStorage.removeItem(`multica_oauth_pkce:${provider}:${nonce}`);
+    }
 
     if (isDesktop) {
       // Desktop flow: exchange code for token, then redirect via deep link
-      api
-        .googleLogin(code, redirectUri)
+      const login = provider === "google"
+        ? api.googleLogin(code, redirectUri)
+        : api.oauthLogin(provider, { code, redirectUri, codeVerifier });
+      login
         .then(({ token }) => {
           setDesktopToken(token);
           window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
@@ -61,7 +74,10 @@ function CallbackContent() {
         });
     } else {
       // Normal web flow
-      loginWithGoogle(code, redirectUri)
+      const login = provider === "google"
+        ? loginWithGoogle(code, redirectUri)
+        : loginWithOAuthProvider(provider, code, redirectUri, codeVerifier);
+      login
         .then(async (loggedInUser) => {
           const wsList = await api.listWorkspaces();
           qc.setQueryData(workspaceKeys.list(), wsList);
@@ -107,7 +123,7 @@ function CallbackContent() {
           setError(err instanceof Error ? err.message : "Login failed");
         });
     }
-  }, [searchParams, loginWithGoogle, router, qc]);
+  }, [searchParams, loginWithGoogle, loginWithOAuthProvider, router, qc]);
 
   if (desktopToken) {
     return (
