@@ -21,6 +21,10 @@ type CreateChatSessionRequest struct {
 	Title   string `json:"title"`
 }
 
+func canAccessChatAgent(agent db.Agent, userID string) bool {
+	return agent.Visibility != "private" || uuidToString(agent.OwnerID) == userID
+}
+
 func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -85,24 +89,38 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	workspaceUUID := parseUUID(workspaceID)
 
 	status := r.URL.Query().Get("status")
+	agents, err := h.Queries.ListAllAgents(r.Context(), workspaceUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat agents")
+		return
+	}
+	agentByID := make(map[string]db.Agent, len(agents))
+	for _, agent := range agents {
+		agentByID[uuidToString(agent.ID)] = agent
+	}
 
 	// Two call sites → two row types with identical shape. Collect into a
 	// common response slice via small per-branch loops.
 	var resp []ChatSessionResponse
 	if status == "all" {
 		rows, err := h.Queries.ListAllChatSessionsByCreator(r.Context(), db.ListAllChatSessionsByCreatorParams{
-			WorkspaceID: parseUUID(workspaceID),
+			WorkspaceID: workspaceUUID,
 			CreatorID:   parseUUID(userID),
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list chat sessions")
 			return
 		}
-		resp = make([]ChatSessionResponse, len(rows))
-		for i, s := range rows {
-			resp[i] = ChatSessionResponse{
+		resp = make([]ChatSessionResponse, 0, len(rows))
+		for _, s := range rows {
+			agent, ok := agentByID[uuidToString(s.AgentID)]
+			if !ok || !canAccessChatAgent(agent, userID) {
+				continue
+			}
+			resp = append(resp, ChatSessionResponse{
 				ID:          uuidToString(s.ID),
 				WorkspaceID: uuidToString(s.WorkspaceID),
 				AgentID:     uuidToString(s.AgentID),
@@ -112,20 +130,24 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				HasUnread:   s.HasUnread,
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
-			}
+			})
 		}
 	} else {
 		rows, err := h.Queries.ListChatSessionsByCreator(r.Context(), db.ListChatSessionsByCreatorParams{
-			WorkspaceID: parseUUID(workspaceID),
+			WorkspaceID: workspaceUUID,
 			CreatorID:   parseUUID(userID),
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list chat sessions")
 			return
 		}
-		resp = make([]ChatSessionResponse, len(rows))
-		for i, s := range rows {
-			resp[i] = ChatSessionResponse{
+		resp = make([]ChatSessionResponse, 0, len(rows))
+		for _, s := range rows {
+			agent, ok := agentByID[uuidToString(s.AgentID)]
+			if !ok || !canAccessChatAgent(agent, userID) {
+				continue
+			}
+			resp = append(resp, ChatSessionResponse{
 				ID:          uuidToString(s.ID),
 				WorkspaceID: uuidToString(s.WorkspaceID),
 				AgentID:     uuidToString(s.AgentID),
@@ -135,7 +157,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				HasUnread:   s.HasUnread,
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
-			}
+			})
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -160,6 +182,18 @@ func (h *Handler) loadChatSessionForUser(w http.ResponseWriter, r *http.Request,
 	}
 	if uuidToString(session.CreatorID) != userID {
 		writeError(w, http.StatusForbidden, "not your chat session")
+		return db.ChatSession{}, false
+	}
+	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          session.AgentID,
+		WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return db.ChatSession{}, false
+	}
+	if !canAccessChatAgent(agent, userID) {
+		writeError(w, http.StatusForbidden, "private agent belongs to another user")
 		return db.ChatSession{}, false
 	}
 	return session, true
@@ -609,16 +643,12 @@ func (h *Handler) DeleteChatMessage(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
 	messageID := chi.URLParam(r, "messageId")
 
-	// Load session and message.
-	session, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
-		ID:          parseUUID(sessionID),
-		WorkspaceID: parseUUID(workspaceID),
-	})
-	if err != nil {
-		writeError(w, http.StatusNotFound, "chat session not found")
+	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
 		return
 	}
 
+	// Load session and message.
 	message, err := h.Queries.GetChatMessage(r.Context(), parseUUID(messageID))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "message not found")
@@ -680,16 +710,12 @@ func (h *Handler) RetryChatMessage(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionId")
 	messageID := chi.URLParam(r, "messageId")
 
-	// Load session and original message.
-	session, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
-		ID:          parseUUID(sessionID),
-		WorkspaceID: parseUUID(workspaceID),
-	})
-	if err != nil {
-		writeError(w, http.StatusNotFound, "chat session not found")
+	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
 		return
 	}
 
+	// Load session and original message.
 	originalMessage, err := h.Queries.GetChatMessage(r.Context(), parseUUID(messageID))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "message not found")
@@ -699,12 +725,6 @@ func (h *Handler) RetryChatMessage(w http.ResponseWriter, r *http.Request) {
 	// Verify message belongs to this session.
 	if uuidToString(originalMessage.ChatSessionID) != sessionID {
 		writeError(w, http.StatusNotFound, "message not found")
-		return
-	}
-
-	// Verify session creator matches current user.
-	if uuidToString(session.CreatorID) != userID {
-		writeError(w, http.StatusForbidden, "not your chat session")
 		return
 	}
 
