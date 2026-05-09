@@ -42,6 +42,10 @@ func TestNextDuplicateAgentName(t *testing.T) {
 	for _, tc := range cases {
 		if got := nextDuplicateAgentName(tc.existing, tc.source); got != tc.want {
 			t.Fatalf("nextDuplicateAgentName(%v, %q) = %q, want %q", tc.existing, tc.source, got, tc.want)
+		}
+	}
+}
+
 // TestListWorkspaceAgentTaskSnapshot covers the agent presence snapshot endpoint:
 // every active task (queued/dispatched/running) PLUS each agent's most recent
 // OUTCOME task (completed/failed only). Cancelled tasks are excluded by design

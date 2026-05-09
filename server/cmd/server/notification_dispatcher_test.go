@@ -83,7 +83,7 @@ func seedPendingDingTalkDelivery(t *testing.T, seed dingTalkDeliverySeed) (strin
 	externalUserID := firstValue(seed.UnionID, seed.UserID)
 
 	binding, err := queries.UpsertExternalAccountBinding(context.Background(), db.UpsertExternalAccountBindingParams{
-		UserID:                util.ParseUUID(testUserID),
+		UserID:                util.MustParseUUID(testUserID),
 		Provider:              "dingtalk",
 		ExternalUserID:        externalUserID,
 		DisplayName:           util.StrToText("Bound DingTalk User"),
@@ -98,14 +98,14 @@ func seedPendingDingTalkDelivery(t *testing.T, seed dingTalkDeliverySeed) (strin
 	}
 
 	event, err := queries.CreateNotificationEvent(context.Background(), db.CreateNotificationEventParams{
-		WorkspaceID:     util.ParseUUID(testWorkspaceID),
-		RecipientUserID: util.ParseUUID(testUserID),
+		WorkspaceID:     util.MustParseUUID(testWorkspaceID),
+		RecipientUserID: util.MustParseUUID(testUserID),
 		Type:            "mentioned",
 		Severity:        "info",
 		IssueID:         pgtype.UUID{},
 		CommentID:       pgtype.UUID{},
 		ActorType:       util.StrToText("member"),
-		ActorID:         util.ParseUUID(testUserID),
+		ActorID:         util.MustParseUUID(testUserID),
 		Title:           "dispatcher issue",
 		Body:            util.StrToText("please review this change"),
 		Link:            util.StrToText("https://app.multica.test/test/issues/123"),
@@ -151,7 +151,7 @@ func loadNotificationDeliveryByEvent(t *testing.T, eventID string) db.Notificati
 	t.Helper()
 
 	queries := db.New(testPool)
-	deliveries, err := queries.ListNotificationDeliveriesByEvent(context.Background(), util.ParseUUID(eventID))
+	deliveries, err := queries.ListNotificationDeliveriesByEvent(context.Background(), util.MustParseUUID(eventID))
 	if err != nil {
 		t.Fatalf("ListNotificationDeliveriesByEvent: %v", err)
 	}
@@ -464,7 +464,7 @@ func TestDispatchPendingDingTalkDeliveries_BackfillsMissingUserID(t *testing.T) 
 		t.Fatalf("expected 1 message call, got %d", messageCalls)
 	}
 
-	binding, err := db.New(testPool).GetExternalAccountBinding(context.Background(), util.ParseUUID(bindingID))
+	binding, err := db.New(testPool).GetExternalAccountBinding(context.Background(), util.MustParseUUID(bindingID))
 	if err != nil {
 		t.Fatalf("GetExternalAccountBinding: %v", err)
 	}

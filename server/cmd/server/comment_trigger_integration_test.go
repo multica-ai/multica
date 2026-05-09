@@ -628,16 +628,6 @@ func postCommentWithToken(t *testing.T, issueID, content, token string) string {
 func TestCommentTriggerPrivateAgentVisibility(t *testing.T) {
 	privateAgentID := createPrivateAgent(t) // owned by testUserID
 	issueID := createIssue(t, "Private agent visibility test")
-// TestDeleteCommentCancelsTriggeredTasks verifies that deleting a comment
-// also cancels any active tasks that were triggered by it. Without this,
-// the daemon would still claim the queued task after the FK SET NULL
-// nullified its trigger_comment_id, and the agent would either run with a
-// stale prompt (race during claim) or with a generic "you are assigned"
-// prompt that has no record of the now-deleted user request — both of
-// which manifest as "the agent still sees the deleted comment".
-func TestDeleteCommentCancelsTriggeredTasks(t *testing.T) {
-	agentID := getAgentID(t)
-	issueID := createIssueAssignedToAgent(t, "Delete-comment cancels task test", agentID)
 	t.Cleanup(func() {
 		clearTasks(t, issueID)
 		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
@@ -660,6 +650,26 @@ func TestDeleteCommentCancelsTriggeredTasks(t *testing.T) {
 		postCommentWithToken(t, issueID, content, admin.Token) // posted by admin (not owner)
 		if n := countPendingTasks(t, issueID); n != 0 {
 			t.Errorf("expected 0 pending tasks (admin should not trigger private agent), got %d", n)
+		}
+	})
+}
+
+// TestDeleteCommentCancelsTriggeredTasks verifies that deleting a comment
+// also cancels any active tasks that were triggered by it. Without this,
+// the daemon would still claim the queued task after the FK SET NULL
+// nullified its trigger_comment_id, and the agent would either run with a
+// stale prompt (race during claim) or with a generic "you are assigned"
+// prompt that has no record of the now-deleted user request — both of
+// which manifest as "the agent still sees the deleted comment".
+func TestDeleteCommentCancelsTriggeredTasks(t *testing.T) {
+	agentID := getAgentID(t)
+	issueID := createIssueAssignedToAgent(t, "Delete-comment cancels task test", agentID)
+	t.Cleanup(func() {
+		clearTasks(t, issueID)
+		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
+		resp.Body.Close()
+	})
+
 	t.Run("deleting trigger comment cancels its queued task", func(t *testing.T) {
 		clearTasks(t, issueID)
 		commentID := postComment(t, issueID, "Please fix this bug", nil)

@@ -17,8 +17,8 @@ import (
 // withWorkspaceContext sets the workspace ID in the request context.
 func withWorkspaceContext(req *http.Request, workspaceID string) *http.Request {
 	member := db.Member{
-		UserID:      util.ParseUUID(testUserID),
-		WorkspaceID: util.ParseUUID(workspaceID),
+		UserID:      util.MustParseUUID(testUserID),
+		WorkspaceID: util.MustParseUUID(workspaceID),
 		Role:        "owner",
 	}
 	ctx := middleware.SetMemberContext(req.Context(), workspaceID, member)
@@ -42,7 +42,7 @@ func setupChatTestFixture(t *testing.T) (sessionID, userMessageID, assistantMess
 	`, testUserID, testWorkspaceID).Scan(&sid); err != nil {
 		t.Fatalf("failed to create chat session: %v", err)
 	}
-	sessionID = util.UUIDToString(util.ParseUUID(sid))
+	sessionID = util.UUIDToString(util.MustParseUUID(sid))
 
 	// Create user message
 	var umid string
@@ -53,7 +53,7 @@ func setupChatTestFixture(t *testing.T) (sessionID, userMessageID, assistantMess
 	`, sid).Scan(&umid); err != nil {
 		t.Fatalf("failed to create user message: %v", err)
 	}
-	userMessageID = util.UUIDToString(util.ParseUUID(umid))
+	userMessageID = util.UUIDToString(util.MustParseUUID(umid))
 
 	// Create assistant message
 	var amid string
@@ -64,7 +64,7 @@ func setupChatTestFixture(t *testing.T) (sessionID, userMessageID, assistantMess
 	`, sid).Scan(&amid); err != nil {
 		t.Fatalf("failed to create assistant message: %v", err)
 	}
-	assistantMessageID = util.UUIDToString(util.ParseUUID(amid))
+	assistantMessageID = util.UUIDToString(util.MustParseUUID(amid))
 
 	return
 }
@@ -73,7 +73,7 @@ func setupChatTestFixture(t *testing.T) (sessionID, userMessageID, assistantMess
 func cleanupChatTestFixture(t *testing.T, sessionID string) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, util.ParseUUID(sessionID)); err != nil {
+	if _, err := testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, util.MustParseUUID(sessionID)); err != nil {
 		t.Logf("warning: failed to cleanup chat session: %v", err)
 	}
 }
@@ -91,7 +91,7 @@ func createChatSessionForAgent(t *testing.T, agentID, creatorID, title string) s
 	}
 
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, util.ParseUUID(sessionID))
+		testPool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, util.MustParseUUID(sessionID))
 	})
 
 	return sessionID
@@ -115,7 +115,7 @@ func createOtherUserPrivateAgent(t *testing.T, name string) (agentID, ownerID st
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'member')
-	`, util.ParseUUID(testWorkspaceID), util.ParseUUID(ownerID)); err != nil {
+	`, util.MustParseUUID(testWorkspaceID), util.MustParseUUID(ownerID)); err != nil {
 		t.Fatalf("failed to add other user to workspace: %v", err)
 	}
 
@@ -132,9 +132,9 @@ func createOtherUserPrivateAgent(t *testing.T, name string) (agentID, ownerID st
 	}
 
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, util.ParseUUID(agentID))
-		testPool.Exec(ctx, `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, util.ParseUUID(testWorkspaceID), util.ParseUUID(ownerID))
-		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, util.ParseUUID(ownerID))
+		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, util.MustParseUUID(agentID))
+		testPool.Exec(ctx, `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, util.MustParseUUID(testWorkspaceID), util.MustParseUUID(ownerID))
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, util.MustParseUUID(ownerID))
 	})
 
 	return agentID, ownerID
@@ -156,14 +156,14 @@ func TestCreateChatSession_Error_PrivateAgentNotOwned(t *testing.T) {
 	`).Scan(&otherUserID); err != nil {
 		t.Fatalf("setup: create other user: %v", err)
 	}
-	otherUserIDStr := util.UUIDToString(util.ParseUUID(otherUserID))
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, util.ParseUUID(otherUserIDStr)) })
+	otherUserIDStr := util.UUIDToString(util.MustParseUUID(otherUserID))
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, util.MustParseUUID(otherUserIDStr)) })
 
 	// Add them to the workspace.
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'member')
-	`, util.ParseUUID(testWorkspaceID), util.ParseUUID(otherUserIDStr)); err != nil {
+	`, util.MustParseUUID(testWorkspaceID), util.MustParseUUID(otherUserIDStr)); err != nil {
 		t.Fatalf("setup: add other member: %v", err)
 	}
 
@@ -187,8 +187,8 @@ func TestCreateChatSession_Error_PrivateAgentNotOwned(t *testing.T) {
 	`, testWorkspaceID, runtimeID, otherUserIDStr).Scan(&agentID); err != nil {
 		t.Fatalf("setup: create private agent: %v", err)
 	}
-	agentIDStr := util.UUIDToString(util.ParseUUID(agentID))
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, util.ParseUUID(agentIDStr)) })
+	agentIDStr := util.UUIDToString(util.MustParseUUID(agentID))
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, util.MustParseUUID(agentIDStr)) })
 
 	// testUserID tries to create a chat session with the other user's private agent → 403
 	req := newRequest("POST", "/api/chat/sessions?workspace_id="+testWorkspaceID, map[string]any{
@@ -233,7 +233,7 @@ func TestCreateChatSession_Success_OwnPrivateAgent(t *testing.T) {
 	json.NewDecoder(rr.Body).Decode(&resp)
 	if sid, ok := resp["id"].(string); ok {
 		t.Cleanup(func() {
-			testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, util.ParseUUID(sid))
+			testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, util.MustParseUUID(sid))
 		})
 	}
 }
@@ -333,7 +333,7 @@ func TestDeleteChatMessage_Success_DeleteUserMessage(t *testing.T) {
 	// Verify message is deleted
 	ctx := context.Background()
 	var count int
-	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM chat_message WHERE id = $1`, util.ParseUUID(messageID)).Scan(&count); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM chat_message WHERE id = $1`, util.MustParseUUID(messageID)).Scan(&count); err != nil {
 		t.Fatalf("failed to query message: %v", err)
 	}
 	if count != 0 {
@@ -363,7 +363,7 @@ func TestDeleteChatMessage_Success_DeleteAssistantMessage_AsOwner(t *testing.T) 
 	// Verify message is deleted
 	ctx := context.Background()
 	var count int
-	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM chat_message WHERE id = $1`, util.ParseUUID(assistantMessageID)).Scan(&count); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM chat_message WHERE id = $1`, util.MustParseUUID(assistantMessageID)).Scan(&count); err != nil {
 		t.Fatalf("failed to query message: %v", err)
 	}
 	if count != 0 {
@@ -496,7 +496,7 @@ func TestRetryChatMessage_Success(t *testing.T) {
 	// Verify new message was created with original content
 	ctx := context.Background()
 	var content string
-	if err := testPool.QueryRow(ctx, `SELECT content FROM chat_message WHERE id = $1`, util.ParseUUID(resp.MessageID)).Scan(&content); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT content FROM chat_message WHERE id = $1`, util.MustParseUUID(resp.MessageID)).Scan(&content); err != nil {
 		t.Fatalf("failed to query new message: %v", err)
 	}
 	if content != "Test user message" {
@@ -505,7 +505,7 @@ func TestRetryChatMessage_Success(t *testing.T) {
 
 	// Verify original message still exists
 	var originalCount int
-	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM chat_message WHERE id = $1`, util.ParseUUID(messageID)).Scan(&originalCount); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM chat_message WHERE id = $1`, util.MustParseUUID(messageID)).Scan(&originalCount); err != nil {
 		t.Fatalf("failed to query original message: %v", err)
 	}
 	if originalCount != 1 {
@@ -597,7 +597,7 @@ func TestRetryChatMessage_Error_SessionArchived(t *testing.T) {
 
 	// Archive the session
 	ctx := context.Background()
-	if _, err := testPool.Exec(ctx, `UPDATE chat_session SET status = 'archived' WHERE id = $1`, util.ParseUUID(sessionID)); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE chat_session SET status = 'archived' WHERE id = $1`, util.MustParseUUID(sessionID)); err != nil {
 		t.Fatalf("failed to archive session: %v", err)
 	}
 
@@ -659,7 +659,7 @@ func TestDeleteChatMessage_Error_InvalidRole(t *testing.T) {
 	`, testUserID, testWorkspaceID).Scan(&sid); err != nil {
 		t.Fatalf("failed to create chat session: %v", err)
 	}
-	sessionID := util.UUIDToString(util.ParseUUID(sid))
+	sessionID := util.UUIDToString(util.MustParseUUID(sid))
 
 	// Create message with invalid role
 	var mid string
@@ -670,10 +670,10 @@ func TestDeleteChatMessage_Error_InvalidRole(t *testing.T) {
 	`, sid).Scan(&mid); err != nil {
 		t.Fatalf("failed to create message: %v", err)
 	}
-	messageID := util.UUIDToString(util.ParseUUID(mid))
+	messageID := util.UUIDToString(util.MustParseUUID(mid))
 
 	defer func() {
-		testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, util.ParseUUID(sessionID))
+		testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, util.MustParseUUID(sessionID))
 	}()
 
 	req := newRequest("DELETE", "/api/chat/sessions/"+sessionID+"/messages/"+messageID, nil)
@@ -710,13 +710,13 @@ func TestDeleteChatMessage_Error_UserNotCreator(t *testing.T) {
 	`).Scan(&otherUserID); err != nil {
 		t.Fatalf("failed to create other user: %v", err)
 	}
-	otherUserIDStr := util.UUIDToString(util.ParseUUID(otherUserID))
+	otherUserIDStr := util.UUIDToString(util.MustParseUUID(otherUserID))
 
 	// Add other user to workspace
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'member')
-	`, util.ParseUUID(testWorkspaceID), util.ParseUUID(otherUserIDStr)); err != nil {
+	`, util.MustParseUUID(testWorkspaceID), util.MustParseUUID(otherUserIDStr)); err != nil {
 		t.Fatalf("failed to add member: %v", err)
 	}
 
@@ -732,7 +732,7 @@ func TestDeleteChatMessage_Error_UserNotCreator(t *testing.T) {
 	`, testUserID, testWorkspaceID).Scan(&sid); err != nil {
 		t.Fatalf("failed to create chat session: %v", err)
 	}
-	sessionID := util.UUIDToString(util.ParseUUID(sid))
+	sessionID := util.UUIDToString(util.MustParseUUID(sid))
 
 	// Create user message
 	var mid string
@@ -743,11 +743,11 @@ func TestDeleteChatMessage_Error_UserNotCreator(t *testing.T) {
 	`, sid).Scan(&mid); err != nil {
 		t.Fatalf("failed to create message: %v", err)
 	}
-	messageID := util.UUIDToString(util.ParseUUID(mid))
+	messageID := util.UUIDToString(util.MustParseUUID(mid))
 
 	defer func() {
-		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, util.ParseUUID(otherUserIDStr))
-		testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, util.ParseUUID(sessionID))
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, util.MustParseUUID(otherUserIDStr))
+		testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, util.MustParseUUID(sessionID))
 	}()
 
 	// Try to delete with other user (not the creator)

@@ -30,44 +30,6 @@ func inboxItemsForRecipient(t *testing.T, queries *db.Queries, recipientID strin
 	return items
 }
 
-func notificationEventsForRecipient(t *testing.T, queries *db.Queries, recipientID string) []db.NotificationEvent {
-	t.Helper()
-	items, err := queries.ListNotificationEventsByRecipient(context.Background(), db.ListNotificationEventsByRecipientParams{
-		WorkspaceID:     util.ParseUUID(testWorkspaceID),
-		RecipientUserID: util.ParseUUID(recipientID),
-	})
-	if err != nil {
-		t.Fatalf("ListNotificationEventsByRecipient: %v", err)
-	}
-	return items
-}
-
-func notificationDeliveriesForEvent(t *testing.T, queries *db.Queries, eventID string) []db.NotificationDelivery {
-	t.Helper()
-	items, err := queries.ListNotificationDeliveriesByEvent(context.Background(), util.ParseUUID(eventID))
-	if err != nil {
-		t.Fatalf("ListNotificationDeliveriesByEvent: %v", err)
-	}
-	return items
-}
-
-func issueIdentifierForTest(t *testing.T, queries *db.Queries, issueID string) string {
-	t.Helper()
-
-	workspace, err := queries.GetWorkspace(context.Background(), util.ParseUUID(testWorkspaceID))
-	if err != nil {
-		t.Fatalf("GetWorkspace: %v", err)
-	}
-	issue, err := queries.GetIssueInWorkspace(context.Background(), db.GetIssueInWorkspaceParams{
-		ID:          util.ParseUUID(issueID),
-		WorkspaceID: util.ParseUUID(testWorkspaceID),
-	})
-	if err != nil {
-		t.Fatalf("GetIssueInWorkspace: %v", err)
-	}
-	return fmt.Sprintf("%s-%d", workspace.IssuePrefix, issue.Number)
-}
-
 // cleanupInboxForIssue deletes all inbox items related to a given issue.
 func cleanupInboxForIssue(t *testing.T, issueID string) {
 	t.Helper()
@@ -87,35 +49,6 @@ func addTestSubscriber(t *testing.T, issueID, userType, userID, reason string) {
 	}
 }
 
-func createNotificationBindingForUser(t *testing.T, userID, provider string) string {
-	t.Helper()
-
-	var bindingID string
-	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO external_account_binding (
-			user_id, provider, external_user_id, display_name, status, metadata
-		)
-		VALUES ($1, $2, $3, $4, 'active', '{}'::jsonb)
-		RETURNING id
-	`, userID, provider, provider+"-external-user", "Bound "+provider).Scan(&bindingID); err != nil {
-		t.Fatalf("createNotificationBindingForUser: %v", err)
-	}
-	return bindingID
-}
-
-func enableNotificationPreferenceForUser(t *testing.T, userID, channel, eventType, bindingID string) {
-	t.Helper()
-
-	if _, err := testPool.Exec(context.Background(), `
-		INSERT INTO notification_channel_preference (
-			user_id, channel, event_type, enabled, binding_id
-		)
-		VALUES ($1, $2, $3, true, $4)
-		ON CONFLICT (user_id, channel, event_type)
-		DO UPDATE SET enabled = EXCLUDED.enabled, binding_id = EXCLUDED.binding_id
-	`, userID, channel, eventType, bindingID); err != nil {
-		t.Fatalf("enableNotificationPreferenceForUser: %v", err)
-	}
 // createTestSubIssue inserts an issue with parent_issue_id set and returns its UUID.
 // Picks the next per-workspace number to avoid colliding with the
 // uq_issue_workspace_number unique constraint (parent + sub created in the
@@ -508,8 +441,8 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 				AssigneeType: &newAssigneeType,
 				AssigneeID:   &newAssigneeID,
 			},
-			"assignee_changed":   true,
-			"status_changed":     false,
+			"assignee_changed":  true,
+			"status_changed":    false,
 			"prev_assignee_type": &oldAssigneeType,
 			"prev_assignee_id":   &oldAssigneeID,
 		},
@@ -765,30 +698,6 @@ func TestNotification_DueDateChanged(t *testing.T) {
 	}
 }
 
-func TestNotification_MentionedCommentCreatesCanonicalNotification(t *testing.T) {
-	queries := db.New(testPool)
-	bus := newNotificationBus(t, queries)
-
-	mentionedEmail := "notif-mentioned@multica.ai"
-	mentionedID := createTestUser(t, mentionedEmail)
-	t.Cleanup(func() { cleanupTestUser(t, mentionedEmail) })
-
-	issueID := createTestIssue(t, testWorkspaceID, testUserID)
-	t.Cleanup(func() {
-		cleanupInboxForIssue(t, issueID)
-		cleanupTestIssue(t, issueID)
-	})
-
-	commentID := "00000000-0000-0000-0000-000000000123"
-	commentContent := "ping [@Mentioned](mention://member/" + mentionedID + ") please check this"
-	issueTitle := "mentioned issue"
-
-	if _, err := testPool.Exec(context.Background(), `
-		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, commentID, issueID, testWorkspaceID, "member", testUserID, commentContent, "comment"); err != nil {
-		t.Fatalf("insert comment: %v", err)
-	}
 // TestNotification_ParentBubble_StatusChanged verifies that a status_changed
 // event on a sub-issue bubbles to subscribers of the parent issue.
 func TestNotification_ParentBubble_StatusChanged(t *testing.T) {
@@ -882,6 +791,176 @@ func TestNotification_ParentBubble_NewCommentSuppressed(t *testing.T) {
 		Type:        protocol.EventCommentCreated,
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
+		ActorID:     commenterID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000000",
+				IssueID:    subID,
+				AuthorType: "member",
+				AuthorID:   commenterID,
+				Content:    "comment on sub-issue",
+				Type:       "comment",
+			},
+			"issue_title":  "sub-issue comment bubble",
+			"issue_status": "todo",
+		},
+	})
+
+	items := inboxItemsForRecipient(t, queries, parentSubID)
+	if len(items) != 0 {
+		t.Fatalf("expected 0 inbox items bubbled to parent subscriber for new_comment, got %d", len(items))
+	}
+}
+
+// TestNotification_ParentBubble_PriorityChangeSuppressed verifies that a
+// priority change on a sub-issue does NOT bubble to parent subscribers.
+func TestNotification_ParentBubble_PriorityChangeSuppressed(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	parentSubEmail := "notif-parent-sub-priority@multica.ai"
+	parentSubID := createTestUser(t, parentSubEmail)
+	t.Cleanup(func() { cleanupTestUser(t, parentSubEmail) })
+
+	parentID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, parentID)
+		cleanupTestIssue(t, parentID)
+	})
+	subID := createTestSubIssue(t, testWorkspaceID, testUserID, parentID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, subID)
+		cleanupTestIssue(t, subID)
+	})
+
+	addTestSubscriber(t, parentID, "member", parentSubID, "manual")
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          subID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "sub-issue priority bubble",
+				Status:      "todo",
+				Priority:    "high",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+			},
+			"assignee_changed": false,
+			"status_changed":   false,
+			"priority_changed": true,
+			"prev_priority":    "medium",
+		},
+	})
+
+	items := inboxItemsForRecipient(t, queries, parentSubID)
+	if len(items) != 0 {
+		t.Fatalf("expected 0 inbox items bubbled to parent subscriber for priority_changed, got %d", len(items))
+	}
+}
+
+func notificationEventsForRecipient(t *testing.T, queries *db.Queries, recipientID string) []db.NotificationEvent {
+	t.Helper()
+	items, err := queries.ListNotificationEventsByRecipient(context.Background(), db.ListNotificationEventsByRecipientParams{
+		WorkspaceID:     util.MustParseUUID(testWorkspaceID),
+		RecipientUserID: util.MustParseUUID(recipientID),
+	})
+	if err != nil {
+		t.Fatalf("ListNotificationEventsByRecipient: %v", err)
+	}
+	return items
+}
+
+func notificationDeliveriesForEvent(t *testing.T, queries *db.Queries, eventID string) []db.NotificationDelivery {
+	t.Helper()
+	items, err := queries.ListNotificationDeliveriesByEvent(context.Background(), util.MustParseUUID(eventID))
+	if err != nil {
+		t.Fatalf("ListNotificationDeliveriesByEvent: %v", err)
+	}
+	return items
+}
+
+func issueIdentifierForTest(t *testing.T, queries *db.Queries, issueID string) string {
+	t.Helper()
+
+	workspace, err := queries.GetWorkspace(context.Background(), util.MustParseUUID(testWorkspaceID))
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	issue, err := queries.GetIssueInWorkspace(context.Background(), db.GetIssueInWorkspaceParams{
+		ID:          util.MustParseUUID(issueID),
+		WorkspaceID: util.MustParseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("GetIssueInWorkspace: %v", err)
+	}
+	return fmt.Sprintf("%s-%d", workspace.IssuePrefix, issue.Number)
+}
+
+func createNotificationBindingForUser(t *testing.T, userID, provider string) string {
+	t.Helper()
+
+	var bindingID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO external_account_binding (
+			user_id, provider, external_user_id, display_name, status, metadata
+		)
+		VALUES ($1, $2, $3, $4, 'active', '{}'::jsonb)
+		RETURNING id
+	`, userID, provider, provider+"-external-user", "Bound "+provider).Scan(&bindingID); err != nil {
+		t.Fatalf("createNotificationBindingForUser: %v", err)
+	}
+	return bindingID
+}
+
+func enableNotificationPreferenceForUser(t *testing.T, userID, channel, eventType, bindingID string) {
+	t.Helper()
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO notification_channel_preference (
+			user_id, channel, event_type, enabled, binding_id
+		)
+		VALUES ($1, $2, $3, true, $4)
+		ON CONFLICT (user_id, channel, event_type)
+		DO UPDATE SET enabled = EXCLUDED.enabled, binding_id = EXCLUDED.binding_id
+	`, userID, channel, eventType, bindingID); err != nil {
+		t.Fatalf("enableNotificationPreferenceForUser: %v", err)
+	}
+}
+
+func TestNotification_MentionedCommentCreatesCanonicalNotification(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	mentionedEmail := "notif-mentioned@multica.ai"
+	mentionedID := createTestUser(t, mentionedEmail)
+	t.Cleanup(func() { cleanupTestUser(t, mentionedEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	commentID := "00000000-0000-0000-0000-000000000123"
+	commentContent := "ping [@Mentioned](mention://member/" + mentionedID + ") please check this"
+	issueTitle := "mentioned issue"
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, commentID, issueID, testWorkspaceID, "member", testUserID, commentContent, "comment"); err != nil {
+		t.Fatalf("insert comment: %v", err)
+	}
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
 		ActorID:     testUserID,
 		Payload: map[string]any{
 			"comment": handler.CommentResponse{
@@ -926,7 +1005,7 @@ func TestNotification_ParentBubble_NewCommentSuppressed(t *testing.T) {
 		t.Fatalf("expected notification comment_id %q, got %q", commentID, util.UUIDToString(events[0].CommentID))
 	}
 
-	workspace, err := queries.GetWorkspace(context.Background(), util.ParseUUID(testWorkspaceID))
+	workspace, err := queries.GetWorkspace(context.Background(), util.MustParseUUID(testWorkspaceID))
 	if err != nil {
 		t.Fatalf("GetWorkspace: %v", err)
 	}
@@ -982,52 +1061,6 @@ func TestNotification_MentionedCommentQueuesDingTalkDeliveryWhenEnabled(t *testi
 
 	bus.Publish(events.Event{
 		Type:        protocol.EventCommentCreated,
-		ActorID:     commenterID,
-		Payload: map[string]any{
-			"comment": handler.CommentResponse{
-				ID:         "00000000-0000-0000-0000-000000000000",
-				IssueID:    subID,
-				AuthorType: "member",
-				AuthorID:   commenterID,
-				Content:    "comment on sub-issue",
-				Type:       "comment",
-			},
-			"issue_title":  "sub-issue comment bubble",
-			"issue_status": "todo",
-		},
-	})
-
-	items := inboxItemsForRecipient(t, queries, parentSubID)
-	if len(items) != 0 {
-		t.Fatalf("expected 0 inbox items bubbled to parent subscriber for new_comment, got %d", len(items))
-	}
-}
-
-// TestNotification_ParentBubble_PriorityChangeSuppressed verifies that a
-// priority change on a sub-issue does NOT bubble to parent subscribers.
-func TestNotification_ParentBubble_PriorityChangeSuppressed(t *testing.T) {
-	queries := db.New(testPool)
-	bus := newNotificationBus(t, queries)
-
-	parentSubEmail := "notif-parent-sub-priority@multica.ai"
-	parentSubID := createTestUser(t, parentSubEmail)
-	t.Cleanup(func() { cleanupTestUser(t, parentSubEmail) })
-
-	parentID := createTestIssue(t, testWorkspaceID, testUserID)
-	t.Cleanup(func() {
-		cleanupInboxForIssue(t, parentID)
-		cleanupTestIssue(t, parentID)
-	})
-	subID := createTestSubIssue(t, testWorkspaceID, testUserID, parentID)
-	t.Cleanup(func() {
-		cleanupInboxForIssue(t, subID)
-		cleanupTestIssue(t, subID)
-	})
-
-	addTestSubscriber(t, parentID, "member", parentSubID, "manual")
-
-	bus.Publish(events.Event{
-		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
@@ -1105,7 +1138,7 @@ func TestNotification_ParentBubble_PriorityChangeSuppressed(t *testing.T) {
 	if nested.IssueIdentifier != expectedIdentifier {
 		t.Fatalf("expected nested issue_identifier %q, got %q", expectedIdentifier, nested.IssueIdentifier)
 	}
-	workspace, err := queries.GetWorkspace(context.Background(), util.ParseUUID(testWorkspaceID))
+	workspace, err := queries.GetWorkspace(context.Background(), util.MustParseUUID(testWorkspaceID))
 	if err != nil {
 		t.Fatalf("GetWorkspace: %v", err)
 	}
@@ -1290,24 +1323,5 @@ func TestNotification_SelfMentionQueuesDingTalkDeliveryWhenEnabled(t *testing.T)
 	}
 	if expected := issueIdentifierForTest(t, queries, issueID); nested.IssueIdentifier != expected {
 		t.Fatalf("expected nested issue_identifier %q, got %q", expected, nested.IssueIdentifier)
-			"issue": handler.IssueResponse{
-				ID:          subID,
-				WorkspaceID: testWorkspaceID,
-				Title:       "sub-issue priority bubble",
-				Status:      "todo",
-				Priority:    "high",
-				CreatorType: "member",
-				CreatorID:   testUserID,
-			},
-			"assignee_changed": false,
-			"status_changed":   false,
-			"priority_changed": true,
-			"prev_priority":    "medium",
-		},
-	})
-
-	items := inboxItemsForRecipient(t, queries, parentSubID)
-	if len(items) != 0 {
-		t.Fatalf("expected 0 inbox items bubbled to parent subscriber for priority_changed, got %d", len(items))
 	}
 }

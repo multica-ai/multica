@@ -1853,6 +1853,54 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 }
 
 func TestReuseRefreshesCodexWorkspaceSkills(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	workspacesRoot := t.TempDir()
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-codex-refresh",
+		TaskID:         "a5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task: TaskContextForEnv{
+			IssueID: "refresh-test",
+			AgentSkills: []SkillContextForEnv{
+				{Name: "Legacy Skill", Content: "old"},
+			},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	reused := Reuse(env.WorkDir, "codex", "", TaskContextForEnv{
+		IssueID: "refresh-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "New Skill", Content: "new"},
+		},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	if _, err := os.Stat(filepath.Join(reused.CodexHome, "skills", "legacy-skill")); !os.IsNotExist(err) {
+		t.Fatal("expected stale managed skill to be removed on reuse")
+	}
+
+	newSkill, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "new-skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read refreshed SKILL.md: %v", err)
+	}
+	if string(newSkill) != "new" {
+		t.Errorf("refreshed skill content = %q", string(newSkill))
+	}
+}
+
 func TestReuseRestoresCodexPluginCache(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
@@ -1905,17 +1953,6 @@ func TestReuseWritesMissingCodexWorkspaceSkills(t *testing.T) {
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	workspacesRoot := t.TempDir()
-
-	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: workspacesRoot,
-		WorkspaceID:    "ws-codex-refresh",
-		TaskID:         "a5f6a7b8-c9d0-1234-efab-567890123456",
-		AgentName:      "Codex Agent",
-		Provider:       "codex",
-		Task: TaskContextForEnv{
-			IssueID: "refresh-test",
-			AgentSkills: []SkillContextForEnv{
-				{Name: "Legacy Skill", Content: "old"},
 	env, err := Prepare(PrepareParams{
 		WorkspacesRoot: workspacesRoot,
 		WorkspaceID:    "ws-codex-skill-reuse",
@@ -1993,9 +2030,6 @@ func TestReuseUpdatesCodexWorkspaceSkills(t *testing.T) {
 	defer env.Cleanup(true)
 
 	reused := Reuse(env.WorkDir, "codex", "", TaskContextForEnv{
-		IssueID: "refresh-test",
-		AgentSkills: []SkillContextForEnv{
-			{Name: "New Skill", Content: "new"},
 		IssueID: "reuse-skill-update-test",
 		AgentSkills: []SkillContextForEnv{
 			{
@@ -2009,16 +2043,6 @@ func TestReuseUpdatesCodexWorkspaceSkills(t *testing.T) {
 		t.Fatal("Reuse returned nil")
 	}
 
-	if _, err := os.Stat(filepath.Join(reused.CodexHome, "skills", "legacy-skill")); !os.IsNotExist(err) {
-		t.Fatal("expected stale managed skill to be removed on reuse")
-	}
-
-	newSkill, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "new-skill", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("read refreshed SKILL.md: %v", err)
-	}
-	if string(newSkill) != "new" {
-		t.Errorf("refreshed skill content = %q", string(newSkill))
 	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "SKILL.md"))
 	if err != nil {
 		t.Fatalf("missing reused codex workspace skill: %v", err)
@@ -2193,40 +2217,4 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 			}
 		}
 	})
-}
-
-func TestRuntimeConfigContainsFormattingRules(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID:   "test-issue-id",
-		AgentName: "TestAgent",
-		AgentID:   "agent-uuid-123",
-	}
-
-	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-
-	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
-	if err != nil {
-		t.Fatalf("failed to read CLAUDE.md: %v", err)
-	}
-
-	s := string(content)
-	for _, want := range []string{
-		"### Formatting Rules",
-		"well-structured Markdown",
-		"Use headings",
-		"Use code blocks",
-		"Do NOT output raw HTML",
-		"### Issue Description Updates",
-		"automatically annotates each update",
-		"### Comment Style",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("CLAUDE.md missing formatting instruction: %q", want)
-		}
-	}
 }

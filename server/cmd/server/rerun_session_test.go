@@ -183,7 +183,7 @@ func TestEnqueueTaskForIssueDoesNotForceFreshSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load issue: %v", err)
 	}
-	task, err := taskService.EnqueueTaskForIssue(ctx, issue)
+	task, err := taskService.EnqueueTaskForIssue(ctx, issue, service.TriggerActor{Source: "test"})
 	if err != nil {
 		t.Fatalf("EnqueueTaskForIssue failed: %v", err)
 	}

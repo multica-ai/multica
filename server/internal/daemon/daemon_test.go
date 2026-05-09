@@ -256,6 +256,9 @@ func TestResolveAuthUsesExplicitConfigPath(t *testing.T) {
 	}
 	if got := d.client.Token(); got != "explicit-config-token" {
 		t.Fatalf("client token = %q, want %q", got, "explicit-config-token")
+	}
+}
+
 // TestBuildPromptCommentTriggeredByAgent covers the agent-to-agent mention
 // loop signal injected into the per-turn prompt (MUL-1323 / GH#1576). When
 // the triggering comment was posted by another agent, the prompt must name
@@ -1031,7 +1034,7 @@ func TestHandleTask_PrivateGateRejectsBeforeStartOrExecute(t *testing.T) {
 		},
 	}
 
-	d.handleTask(context.Background(), task)
+	d.handleTask(context.Background(), task, 0)
 
 	if startCalls.Load() != 0 {
 		t.Fatalf("expected StartTask not to be called, got %d", startCalls.Load())
@@ -1047,6 +1050,9 @@ func TestHandleTask_PrivateGateRejectsBeforeStartOrExecute(t *testing.T) {
 	}
 	if !strings.Contains(failBody, "private agent execution denied: only the agent owner can run this task") {
 		t.Fatalf("expected fail body to contain owner gate message, got %s", failBody)
+	}
+}
+
 func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
