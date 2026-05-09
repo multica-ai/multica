@@ -68,6 +68,16 @@ type Config struct {
 	//   3) cron job scheduled (`rollup_task_usage_dashboard_daily`) and
 	//      `task_usage_dashboard_rollup_lag_seconds()` < 900.
 	UseDailyRollupForDashboard bool
+	// PublicURL is the absolute base URL the API is reachable at from the
+	// public internet, with no trailing slash (e.g. "https://app.multica.ai").
+	// Used only to build webhook_url responses for autopilot webhook triggers
+	// — never for auth, routing, or workspace resolution. Empty when unset,
+	// in which case clients fall back to webhook_path + their own origin.
+	// Reading the public host from request headers (Host / X-Forwarded-Host)
+	// is intentionally avoided so a misconfigured reverse proxy cannot trick
+	// the server into minting webhook URLs pointing at an attacker-controlled
+	// host.
+	PublicURL string
 }
 
 type Handler struct {
