@@ -6,10 +6,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+// maxWebhookBodyBytes is the request body size cap for webhook ingress.
+// 256 KiB is plenty for normal provider webhooks (a max-size GitHub PR
+// payload comes in well under this) and small enough that an attacker
+// cannot wedge agent context windows by sending megabytes of arbitrary JSON.
+const maxWebhookBodyBytes = 256 * 1024
 
 // webhookTokenPrefix makes a leaked token recognisable in logs / audit trails
 // without revealing the entropy bytes themselves. 32 random bytes encoded as
@@ -162,3 +173,166 @@ func stripBOM(b []byte) []byte {
 	}
 	return b
 }
+
+// ── Public ingress ──────────────────────────────────────────────────────────
+
+// HandleAutopilotWebhook is the public entry point for webhook-triggered
+// autopilots. It runs OUTSIDE the authenticated route group: the bearer
+// token in the URL path IS the credential. Workspace context is derived
+// from the trigger row's joined autopilot.workspace_id, never from request
+// headers — that's why this handler does not call resolveWorkspaceID.
+//
+// Response shapes:
+//   - 200 {"status":"accepted",  "run_id", "autopilot_id", "trigger_id"}
+//   - 200 {"status":"skipped",   "run_id", "reason"}                — runtime offline at dispatch
+//   - 200 {"status":"ignored",   "reason":"trigger_disabled"}      — disabled trigger
+//   - 200 {"status":"ignored",   "reason":"autopilot_paused"}      — paused autopilot
+//   - 200 {"status":"ignored",   "reason":"autopilot_archived"}    — archived autopilot
+//   - 400 {"error":"..."}                                          — invalid JSON / scalar / empty
+//   - 404 {"error":"webhook not found"}                            — unknown token
+//   - 413 {"error":"payload too large"}                            — body exceeded cap
+//   - 429 {"error":"rate limit exceeded"}                          — over per-token budget
+//   - 500 {"error":"..."}                                          — dispatch failure
+func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	if token == "" {
+		writeError(w, http.StatusNotFound, "webhook not found")
+		return
+	}
+
+	// 1. Look up the trigger by token. We resolve before applying the rate
+	//    limit so a single bad-token flood is bounded by DB-side caching;
+	//    a per-IP coarse limiter is left for follow-up.
+	trigRow, err := h.Queries.GetWebhookTriggerByToken(r.Context(), pgtype.Text{String: token, Valid: true})
+	if err != nil {
+		// Don't distinguish "no row" from "DB error" so we don't leak
+		// timing signal about which tokens exist.
+		writeError(w, http.StatusNotFound, "webhook not found")
+		return
+	}
+
+	// 2. Per-token rate limit.
+	if h.WebhookRateLimiter != nil {
+		if !h.WebhookRateLimiter.Allow(r.Context(), token) {
+			writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+			return
+		}
+	}
+
+	// 3. Disabled trigger → ignored. We deliberately return 200 so the
+	//    sender's webhook-retry machinery doesn't keep hammering us; the
+	//    "ignored" status makes the no-op visible if the operator inspects
+	//    delivery logs.
+	if !trigRow.Enabled {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ignored", "reason": "trigger_disabled"})
+		return
+	}
+
+	// 4. Load Autopilot and cross-check workspace consistency.
+	autopilot, err := h.Queries.GetAutopilot(r.Context(), trigRow.AutopilotID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "webhook not found")
+		return
+	}
+	if uuidToString(autopilot.WorkspaceID) != uuidToString(trigRow.AutopilotWorkspaceID) {
+		// This should be impossible — the join is by primary key — but
+		// fail closed if it ever happens rather than dispatching against
+		// the wrong workspace.
+		slog.Warn("webhook: trigger workspace mismatch",
+			"trigger_id", uuidToString(trigRow.ID),
+			"autopilot_id", uuidToString(autopilot.ID),
+		)
+		writeError(w, http.StatusNotFound, "webhook not found")
+		return
+	}
+
+	if autopilot.Status == "archived" {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ignored", "reason": "autopilot_archived"})
+		return
+	}
+	if autopilot.Status != "active" {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ignored", "reason": "autopilot_paused"})
+		return
+	}
+
+	// 5. Body size cap + JSON validation. http.MaxBytesReader stops the
+	//    read mid-stream once the cap is exceeded so an oversized payload
+	//    is rejected before being fully buffered.
+	r.Body = http.MaxBytesReader(w, r.Body, maxWebhookBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			writeError(w, http.StatusRequestEntityTooLarge, "payload too large")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "failed to read request body")
+		return
+	}
+
+	envelope, err := normalizeWebhookPayload(body, r.Header)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return
+	}
+
+	envelopeBytes, err := json.Marshal(envelope)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode envelope")
+		return
+	}
+
+	// 6. Dispatch. DispatchAutopilot already publishes the workspace-scoped
+	//    EventAutopilotRunStart, persists the payload, runs the admission
+	//    check (offline runtime → records a `skipped` run), and bumps
+	//    last_run_at. We don't add a second WS publish.
+	run, err := h.AutopilotService.DispatchAutopilot(
+		r.Context(),
+		autopilot,
+		trigRow.ID,
+		"webhook",
+		envelopeBytes,
+	)
+	if err != nil {
+		slog.Warn("webhook dispatch failed",
+			"trigger_id", uuidToString(trigRow.ID),
+			"autopilot_id", uuidToString(autopilot.ID),
+			"error", err,
+		)
+		writeError(w, http.StatusInternalServerError, "failed to dispatch autopilot")
+		return
+	}
+
+	// 7. Bump last_fired_at (separate from autopilot.last_run_at). Done
+	//    after dispatch returns — including the skipped path — so paused
+	//    early-return arms above don't corrupt the meaning of "last fired".
+	if err := h.Queries.TouchAutopilotTriggerFiredAt(r.Context(), trigRow.ID); err != nil {
+		slog.Warn("webhook: failed to touch last_fired_at",
+			"trigger_id", uuidToString(trigRow.ID),
+			"error", err,
+		)
+	}
+
+	// 8. Response shape mirrors PLAN.md: skipped runs surface their reason
+	//    so providers can log it without parsing free-form text.
+	if run.Status == "skipped" {
+		reason := ""
+		if run.FailureReason.Valid {
+			reason = run.FailureReason.String
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "skipped",
+			"run_id": uuidToString(run.ID),
+			"reason": reason,
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":       "accepted",
+		"run_id":       uuidToString(run.ID),
+		"autopilot_id": uuidToString(autopilot.ID),
+		"trigger_id":   uuidToString(trigRow.ID),
+	})
+}
+
