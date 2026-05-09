@@ -8,6 +8,7 @@ import type {
 /** Shape of the cursor-paginated timeline cache. Exported so consumers (the
  *  hook, mutations, tests) all reference the same type. */
 export type TimelineCacheData = InfiniteData<TimelinePage, TimelinePageParam>;
+export type TimelineEntriesCacheData = TimelineCacheData | TimelineEntry[];
 
 /** Map fn over every entry across every page, preserving page identity for
  *  any page whose entries don't change so React.memo on CommentCard isn't
@@ -33,6 +34,14 @@ export function mapAllEntries(
   return { ...data, pages };
 }
 
+export function mapTimelineEntries(
+  data: TimelineEntriesCacheData | undefined,
+  fn: (e: TimelineEntry) => TimelineEntry,
+): TimelineEntriesCacheData | undefined {
+  if (Array.isArray(data)) return data.map(fn);
+  return mapAllEntries(data, fn);
+}
+
 /** Filter out entries matching the predicate from every page. */
 export function filterAllEntries(
   data: TimelineCacheData | undefined,
@@ -48,6 +57,14 @@ export function filterAllEntries(
   });
   if (!pagesChanged) return data;
   return { ...data, pages };
+}
+
+export function filterTimelineEntries(
+  data: TimelineEntriesCacheData | undefined,
+  predicate: (e: TimelineEntry) => boolean,
+): TimelineEntriesCacheData | undefined {
+  if (Array.isArray(data)) return data.filter((e) => !predicate(e));
+  return filterAllEntries(data, predicate);
 }
 
 /** Prepend a new entry to the latest page (pages[0]). Caller must verify
@@ -70,4 +87,21 @@ export function prependToLatestPage(
       ...data.pages.slice(1),
     ],
   };
+}
+
+export function prependTimelineEntry(
+  data: TimelineEntriesCacheData | undefined,
+  entry: TimelineEntry,
+): TimelineEntriesCacheData | undefined {
+  if (Array.isArray(data)) {
+    if (data.some((e) => e.id === entry.id)) return data;
+    return [entry, ...data];
+  }
+  return prependToLatestPage(data, entry);
+}
+
+export function getTimelineEntries(data: TimelineEntriesCacheData | undefined): TimelineEntry[] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  return data.pages.flatMap((page) => page.entries);
 }

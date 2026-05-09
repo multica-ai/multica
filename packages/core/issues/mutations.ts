@@ -30,10 +30,11 @@ import type {
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import {
-  mapAllEntries,
-  filterAllEntries,
-  prependToLatestPage,
-  type TimelineCacheData,
+  filterTimelineEntries,
+  getTimelineEntries,
+  mapTimelineEntries,
+  prependTimelineEntry,
+  type TimelineEntriesCacheData,
 } from "./timeline-cache";
 
 // ---------------------------------------------------------------------------
@@ -357,9 +358,9 @@ export function useCreateComment(issueId: string) {
         created_at: comment.created_at,
         updated_at: comment.updated_at,
       };
-      qc.setQueriesData<TimelineCacheData>(
+      qc.setQueriesData<TimelineEntriesCacheData>(
         { queryKey: ["issues", "timeline", issueId] },
-        (old) => prependToLatestPage(old, entry),
+        (old) => prependTimelineEntry(old, entry),
       );
     },
     onSettled: () => {
@@ -378,13 +379,13 @@ export function useUpdateComment(issueId: string) {
       await qc.cancelQueries({ queryKey: ["issues", "timeline", issueId] });
       // Snapshot every open timeline cache (latest + any around windows) so
       // an error rollback restores them all atomically.
-      const prevSnapshots = qc.getQueriesData<TimelineCacheData>({
+      const prevSnapshots = qc.getQueriesData<TimelineEntriesCacheData>({
         queryKey: ["issues", "timeline", issueId],
       });
-      qc.setQueriesData<TimelineCacheData>(
+      qc.setQueriesData<TimelineEntriesCacheData>(
         { queryKey: ["issues", "timeline", issueId] },
         (old) =>
-          mapAllEntries(old, (e) =>
+          mapTimelineEntries(old, (e) =>
             e.id === commentId ? { ...e, content } : e,
           ),
       );
@@ -409,35 +410,32 @@ export function useDeleteComment(issueId: string) {
     mutationFn: (commentId: string) => api.deleteComment(commentId),
     onMutate: async (commentId) => {
       await qc.cancelQueries({ queryKey: ["issues", "timeline", issueId] });
-      const prevSnapshots = qc.getQueriesData<TimelineCacheData>({
+      const prevSnapshots = qc.getQueriesData<TimelineEntriesCacheData>({
         queryKey: ["issues", "timeline", issueId],
       });
 
       // Cascade: collect all child comment IDs across every loaded page.
       const toRemove = new Set<string>([commentId]);
       for (const [, data] of prevSnapshots) {
-        if (!data) continue;
         let changed = true;
         while (changed) {
           changed = false;
-          for (const page of data.pages) {
-            for (const e of page.entries) {
-              if (
-                e.parent_id &&
-                toRemove.has(e.parent_id) &&
-                !toRemove.has(e.id)
-              ) {
-                toRemove.add(e.id);
-                changed = true;
-              }
+          for (const e of getTimelineEntries(data)) {
+            if (
+              e.parent_id &&
+              toRemove.has(e.parent_id) &&
+              !toRemove.has(e.id)
+            ) {
+              toRemove.add(e.id);
+              changed = true;
             }
           }
         }
       }
 
-      qc.setQueriesData<TimelineCacheData>(
+      qc.setQueriesData<TimelineEntriesCacheData>(
         { queryKey: ["issues", "timeline", issueId] },
-        (old) => filterAllEntries(old, (e) => toRemove.has(e.id)),
+        (old) => filterTimelineEntries(old, (e) => toRemove.has(e.id)),
       );
       return { prevSnapshots };
     },
