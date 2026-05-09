@@ -9,6 +9,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { channelMessagesOptions } from "@multica/core/channels";
 import { MessageRow } from "./message-row";
+import { useT } from "../../i18n";
 
 // Two messages are part of the same "group" — same author, in close
 // succession — when the second one came in within this window. Slack
@@ -47,6 +48,7 @@ export function ChannelMessageList({
   onOpenThread,
   initialUnreadCursor,
 }: ChannelMessageListProps) {
+  const { t } = useT("channels");
   const wsId = useWorkspaceId();
   const { data: rawMessages = [], isLoading } = useQuery(
     channelMessagesOptions(channelId, enabled),
@@ -131,14 +133,14 @@ export function ChannelMessageList({
   if (isLoading && messages.length === 0) {
     return (
       <div className="flex-1 overflow-y-auto px-4 py-6 text-sm text-muted-foreground">
-        Loading messages…
+        {t(($) => $.messages.loading)}
       </div>
     );
   }
   if (messages.length === 0) {
     return (
       <div className="flex-1 overflow-y-auto px-4 py-12 text-center text-sm text-muted-foreground">
-        No messages yet. Be the first to say hello.
+        {t(($) => $.messages.empty)}
       </div>
     );
   }
@@ -159,7 +161,13 @@ export function ChannelMessageList({
             GROUP_CONTINUATION_MS;
         return (
           <Fragment key={m.id}>
-            {dividerBeforeIndex === i ? <UnreadDivider ref={dividerRef} /> : null}
+            {dividerBeforeIndex === i ? (
+              <UnreadDivider
+                ref={dividerRef}
+                ariaLabel={t(($) => $.messages.new_messages_aria)}
+                label={t(($) => $.messages.new_messages)}
+              />
+            ) : null}
             <MessageRow
               message={m}
               channelId={channelId}
@@ -175,14 +183,22 @@ export function ChannelMessageList({
   );
 }
 
-const UnreadDivider = ({ ref }: { ref?: React.Ref<HTMLDivElement> }) => (
+const UnreadDivider = ({
+  ref,
+  ariaLabel,
+  label,
+}: {
+  ref?: React.Ref<HTMLDivElement>;
+  ariaLabel: string;
+  label: string;
+}) => (
   <div
     ref={ref}
     className="my-2 flex items-center gap-3 px-4 text-[11px] font-semibold uppercase tracking-wide text-primary"
-    aria-label="New messages"
+    aria-label={ariaLabel}
   >
     <span className="h-px flex-1 bg-primary/40" />
-    <span>New messages</span>
+    <span>{label}</span>
     <span className="h-px flex-1 bg-primary/40" />
   </div>
 );

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -96,17 +97,53 @@ func (h *Handler) GetRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 
 	since := parseSinceParam(r, 90)
 
-	rows, err := h.Queries.ListRuntimeUsage(r.Context(), db.ListRuntimeUsageParams{
-		RuntimeID: rt.ID,
-		Since:     since,
-	})
+	resp, err := h.listRuntimeUsage(r.Context(), rt.ID, since)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list usage")
 		return
 	}
 
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// listRuntimeUsage dispatches between the raw task_usage scan and the
+// task_usage_daily rollup based on the UseDailyRollupForRuntimeUsage
+// feature flag. Both code paths return rows in the same shape, so the
+// handler doesn't care which one ran.
+func (h *Handler) listRuntimeUsage(ctx context.Context, runtimeID pgtype.UUID, since pgtype.Timestamptz) ([]RuntimeUsageResponse, error) {
+	resolvedRuntimeID := uuidToString(runtimeID)
+	if h.cfg.UseDailyRollupForRuntimeUsage {
+		rows, err := h.Queries.ListRuntimeUsageDaily(ctx, db.ListRuntimeUsageDailyParams{
+			RuntimeID: runtimeID,
+			Since:     since,
+		})
+		if err != nil {
+			return nil, err
+		}
+		resp := make([]RuntimeUsageResponse, len(rows))
+		for i, row := range rows {
+			resp[i] = RuntimeUsageResponse{
+				RuntimeID:        resolvedRuntimeID,
+				Date:             row.Date.Time.Format("2006-01-02"),
+				Provider:         row.Provider,
+				Model:            row.Model,
+				InputTokens:      row.InputTokens,
+				OutputTokens:     row.OutputTokens,
+				CacheReadTokens:  row.CacheReadTokens,
+				CacheWriteTokens: row.CacheWriteTokens,
+			}
+		}
+		return resp, nil
+	}
+
+	rows, err := h.Queries.ListRuntimeUsage(ctx, db.ListRuntimeUsageParams{
+		RuntimeID: runtimeID,
+		Since:     since,
+	})
+	if err != nil {
+		return nil, err
+	}
 	resp := make([]RuntimeUsageResponse, len(rows))
-	resolvedRuntimeID := uuidToString(rt.ID)
 	for i, row := range rows {
 		resp[i] = RuntimeUsageResponse{
 			RuntimeID:        resolvedRuntimeID,
@@ -119,8 +156,7 @@ func (h *Handler) GetRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 			CacheWriteTokens: row.CacheWriteTokens,
 		}
 	}
-
-	writeJSON(w, http.StatusOK, resp)
+	return resp, nil
 }
 
 // GetRuntimeTaskActivity returns hourly task activity distribution for a runtime.

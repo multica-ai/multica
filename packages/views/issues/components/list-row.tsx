@@ -19,6 +19,7 @@ import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
+import { useT } from "../../i18n";
 
 export interface ChildProgress {
   done: number;
@@ -73,6 +74,7 @@ export const ListRow = memo(function ListRow({
    */
   isDragOverlay?: boolean;
 }) {
+  const { t } = useT("issues");
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
   const toggle = useIssueSelectionStore((s) => s.toggle);
   const p = useWorkspacePaths();
@@ -216,9 +218,12 @@ export const ListRow = memo(function ListRow({
             {orphanParent && (
               <span
                 className="inline-flex shrink-0 items-center gap-1 rounded bg-muted/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground"
-                title={`Sub-issue of ${orphanParent.identifier} ${orphanParent.title}`}
+                title={t(($) => $.list.orphan_subissue_title, {
+                  identifier: orphanParent.identifier,
+                  title: orphanParent.title,
+                })}
               >
-                in {orphanParent.identifier}
+                {t(($) => $.list.orphan_subissue_in, { identifier: orphanParent.identifier })}
               </span>
             )}
             {showLabels && (

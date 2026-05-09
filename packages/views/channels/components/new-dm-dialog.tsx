@@ -22,6 +22,7 @@ import {
 import { useCreateOrFetchDM } from "@multica/core/channels";
 import { useNavigation } from "../../navigation";
 import type { ChannelActorType } from "@multica/core/types";
+import { useT } from "../../i18n";
 
 interface NewDMDialogProps {
   open: boolean;
@@ -45,6 +46,7 @@ interface PickerRow {
  * scope per the spec; multi-recipient flows should use a private channel.
  */
 export function NewDMDialog({ open, onOpenChange }: NewDMDialogProps) {
+  const { t } = useT("channels");
   const wsId = useWorkspaceId();
   const slug = useRequiredWorkspaceSlug();
   const navigation = useNavigation();
@@ -79,7 +81,7 @@ export function NewDMDialog({ open, onOpenChange }: NewDMDialogProps) {
         type: "agent",
         id: a.id,
         label: a.name,
-        sublabel: "agent",
+        sublabel: t(($) => $.new_dm_dialog.agent_sublabel),
       });
     }
     if (!filter) return out;
@@ -89,7 +91,7 @@ export function NewDMDialog({ open, onOpenChange }: NewDMDialogProps) {
         r.label.toLowerCase().includes(needle) ||
         r.sublabel?.toLowerCase().includes(needle),
     );
-  }, [members, agents, currentUser, filter]);
+  }, [members, agents, currentUser, filter, t]);
 
   const close = () => {
     if (createDM.isPending) return;
@@ -111,7 +113,7 @@ export function NewDMDialog({ open, onOpenChange }: NewDMDialogProps) {
           navigation.push(paths.workspace(slug).channelDetail(channel.id));
         },
         onError: (err: unknown) => {
-          const msg = err instanceof Error ? err.message : "Failed to open DM";
+          const msg = err instanceof Error ? err.message : t(($) => $.new_dm_dialog.open_failed);
           setError(msg);
           setPendingId(null);
         },
@@ -123,27 +125,26 @@ export function NewDMDialog({ open, onOpenChange }: NewDMDialogProps) {
     <Dialog open={open} onOpenChange={(v) => (v ? onOpenChange(true) : close())}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>New direct message</DialogTitle>
+          <DialogTitle>{t(($) => $.new_dm_dialog.title)}</DialogTitle>
           <DialogDescription>
-            Pick a teammate or an agent to start a 1:1 conversation. If a DM
-            with this person already exists, you'll jump back to it.
+            {t(($) => $.new_dm_dialog.description)}
           </DialogDescription>
         </DialogHeader>
         <Input
-          placeholder="Search people and agents…"
+          placeholder={t(($) => $.new_dm_dialog.search_placeholder)}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           autoFocus
         />
         {rows.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            {filter ? "No matches." : "No teammates or agents yet."}
+            {filter ? t(($) => $.new_dm_dialog.no_matches) : t(($) => $.new_dm_dialog.no_recipients)}
           </p>
         ) : (
           <ul
             className="max-h-80 overflow-y-auto"
             role="listbox"
-            aria-label="DM recipients"
+            aria-label={t(($) => $.new_dm_dialog.list_aria)}
           >
             {rows.map((row) => {
               const key = `${row.type}:${row.id}`;
@@ -183,7 +184,7 @@ export function NewDMDialog({ open, onOpenChange }: NewDMDialogProps) {
                       ) : null}
                     </div>
                     {pending ? (
-                      <span className="text-xs text-muted-foreground">Opening…</span>
+                      <span className="text-xs text-muted-foreground">{t(($) => $.new_dm_dialog.opening)}</span>
                     ) : null}
                   </button>
                 </li>

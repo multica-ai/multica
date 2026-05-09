@@ -4,7 +4,8 @@
     "new_project": "新建项目",
     "empty": "还没有项目",
     "empty_archived": "没有已归档的项目",
-    "create_first": "创建第一个项目"
+    "create_first": "创建第一个项目",
+    "archived_filter_badge": "已归档"
   },
   "table": {
     "name": "名称",
@@ -60,7 +61,10 @@
     "empty_issues_new_button": "新建 issue",
     "toast_link_copied": "已复制链接",
     "toast_project_deleted": "已删除项目",
-    "toast_move_issue_failed": "移动 issue 失败"
+    "toast_move_issue_failed": "移动 issue 失败",
+    "archived_banner": "已归档。已从项目列表中隐藏。",
+    "restore_action": "恢复项目",
+    "archive_action": "归档项目"
   },
   "resources": {
     "section_header": "资源",
@@ -74,7 +78,9 @@
     "toast_attached": "已关联仓库",
     "toast_attach_failed": "关联失败",
     "toast_removed": "已移除资源",
-    "toast_remove_failed": "移除资源失败"
+    "toast_remove_failed": "移除资源失败",
+    "primary_badge": "主仓库",
+    "primary_tooltip": "主仓库——本项目中的 issue 默认在该仓库中处理。如需调整，请移除并按所需顺序重新添加资源。"
   },
   "delete_dialog": {
     "title": "删除项目",

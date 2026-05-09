@@ -26,6 +26,12 @@ import (
 // server refresh.
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
 
+var (
+	isBrewInstall        = cli.IsBrewInstall
+	getBrewPrefix        = cli.GetBrewPrefix
+	matchKnownBrewPrefix = cli.MatchKnownBrewPrefix
+)
+
 // workspaceState tracks registered runtimes for a single workspace.
 //
 // allowedRepoURLs covers the workspace-level repo bindings; it gets rebuilt on
@@ -44,11 +50,17 @@ type workspaceState struct {
 	repoRefreshMu   sync.Mutex
 }
 
+type repoCacheBackend interface {
+	Lookup(workspaceID, url string) string
+	Sync(workspaceID string, repos []repocache.RepoInfo) error
+	CreateWorktree(params repocache.WorktreeParams) (*repocache.WorktreeResult, error)
+}
+
 // Daemon is the local agent runtime that polls for and executes tasks.
 type Daemon struct {
 	cfg       Config
 	client    *Client
-	repoCache *repocache.Cache
+	repoCache repoCacheBackend
 	logger    *slog.Logger
 
 	mu           sync.Mutex
@@ -458,6 +470,11 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 		return
 	}
 
+	type repoCandidate struct {
+		url     string
+		tracked bool
+	}
+
 	d.mu.Lock()
 	ws, ok := d.workspaces[workspaceID]
 	if !ok {
@@ -467,7 +484,7 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 	if ws.taskRepoURLs == nil {
 		ws.taskRepoURLs = make(map[string]struct{}, len(repos))
 	}
-	toSync := make([]RepoData, 0, len(repos))
+	candidates := make([]repoCandidate, 0, len(repos))
 	for _, repo := range repos {
 		url := strings.TrimSpace(repo.URL)
 		if url == "" {
@@ -477,14 +494,21 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 		// AND the cache already has it.
 		_, inWorkspace := ws.allowedRepoURLs[url]
 		_, inTask := ws.taskRepoURLs[url]
-		if (inWorkspace || inTask) && d.repoCache != nil && d.repoCache.Lookup(workspaceID, url) != "" {
-			ws.taskRepoURLs[url] = struct{}{}
-			continue
-		}
 		ws.taskRepoURLs[url] = struct{}{}
-		toSync = append(toSync, RepoData{URL: url})
+		candidates = append(candidates, repoCandidate{
+			url:     url,
+			tracked: inWorkspace || inTask,
+		})
 	}
 	d.mu.Unlock()
+
+	toSync := make([]RepoData, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.tracked && d.repoCache != nil && d.repoCache.Lookup(workspaceID, candidate.url) != "" {
+			continue
+		}
+		toSync = append(toSync, RepoData{URL: candidate.url})
+	}
 
 	if d.repoCache != nil && len(toSync) > 0 {
 		// Sync in the background — same shape used at workspace registration.
@@ -1157,9 +1181,19 @@ func (d *Daemon) triggerRestart() {
 		d.logger.Error("could not resolve executable path for restart", "error", err)
 		return
 	}
-	// Only resolve symlinks for non-brew installs. Brew uses a symlink that
-	// points to the latest Cellar version, so we must preserve it.
-	if !cli.IsBrewInstall() {
+	// On Linux, os.Executable() reads /proc/self/exe, which the kernel resolves
+	// to the Cellar path. brew cleanup deletes that path after upgrade, so we
+	// must use the stable <brew-prefix>/bin/multica symlink instead.
+	if isBrewInstall() {
+		if brewPrefix := getBrewPrefix(); brewPrefix != "" {
+			newBin = filepath.Join(brewPrefix, "bin", "multica")
+		} else if prefix := matchKnownBrewPrefix(newBin); prefix != "" {
+			newBin = filepath.Join(prefix, "bin", "multica")
+		} else {
+			d.logger.Warn("brew install detected but prefix could not be resolved; restart may fail",
+				"executable", newBin)
+		}
+	} else {
 		if resolved, err := filepath.EvalSymlinks(newBin); err == nil {
 			newBin = resolved
 		}
@@ -1517,13 +1551,49 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	}
 
 	// Write GC metadata after the task finishes so the periodic GC loop
-	// can look up the issue later. Written last so that a mid-task crash
-	// leaves the directory as an orphan (cleaned up by GCOrphanTTL).
+	// can look up the parent record (issue / chat session / autopilot run /
+	// task itself for quick-create) later. Written last so that a mid-task
+	// crash leaves the directory as an orphan (cleaned up by GCOrphanTTL).
 	if result.EnvRoot != "" {
-		if err := execenv.WriteGCMeta(result.EnvRoot, task.IssueID, task.WorkspaceID, taskLog); err != nil {
-			taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
+		if meta, ok := gcMetaForTask(task); ok {
+			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
+				taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
+			}
 		}
 	}
+}
+
+// gcMetaForTask classifies a finished task and produces a GCMeta of the right
+// kind. The discriminator order matters: a task carrying both an issue_id
+// and a chat_session_id (theoretical, not produced today) should be treated
+// as a chat task because the chat session is the longer-lived parent record.
+//
+// Returns ok=false when the task has no recognizable parent (e.g. an
+// internal task with no IDs at all). The caller skips writing a meta file
+// in that case so the directory falls back to mtime-based orphan cleanup.
+func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
+	meta := execenv.GCMeta{WorkspaceID: task.WorkspaceID}
+	switch {
+	case task.ChatSessionID != "":
+		meta.Kind = execenv.GCKindChat
+		meta.ChatSessionID = task.ChatSessionID
+	case task.AutopilotRunID != "":
+		meta.Kind = execenv.GCKindAutopilotRun
+		meta.AutopilotRunID = task.AutopilotRunID
+	case task.IssueID != "":
+		meta.Kind = execenv.GCKindIssue
+		meta.IssueID = task.IssueID
+	case task.QuickCreatePrompt != "":
+		// Quick-create tasks reach WriteGCMeta before the server runs
+		// LinkTaskToIssue, so IssueID is always empty here. Persist the
+		// task ID instead and let the GC loop ask the server for terminal
+		// state via the task gc-check endpoint.
+		meta.Kind = execenv.GCKindQuickCreate
+		meta.TaskID = task.ID
+	default:
+		return execenv.GCMeta{}, false
+	}
+	return meta, true
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {

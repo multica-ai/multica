@@ -76,7 +76,9 @@
   },
   "list": {
     "empty_status": "无 issue",
-    "add_issue_tooltip": "新建 issue"
+    "add_issue_tooltip": "新建 issue",
+    "orphan_subissue_in": "归属 {{identifier}}",
+    "orphan_subissue_title": "属于 {{identifier}} {{title}} 的子 issue"
   },
   "board": {
     "hidden_columns_label": "隐藏的列",
@@ -127,7 +129,10 @@
     "sidebar_tooltip": "切换侧边栏",
     "update_failed": "更新 issue 失败",
     "link_copied": "已复制链接",
-    "link_copy_failed": "复制链接失败"
+    "link_copy_failed": "复制链接失败",
+    "workdir_path_copied": "已复制本地 workdir 路径",
+    "workdir_path_copy_failed": "复制本地 workdir 路径失败",
+    "workdir_path_unavailable": "暂无本地 workdir — 这个 issue 还没被本地 agent 运行过"
   },
   "timeline": {
     "show_older": "显示更早",
@@ -151,7 +156,8 @@
     "task_completed_one": "完成了 task",
     "task_completed_other": "完成了 task（{{count}} 次）",
     "task_failed_one": "task 失败",
-    "task_failed_other": "task 失败（{{count}} 次）"
+    "task_failed_other": "task 失败（{{count}} 次）",
+    "coalesced_badge": "×{{count}}"
   },
   "comment": {
     "delete_title": "删除评论",
@@ -241,6 +247,7 @@
     "pin_to_sidebar": "固定到侧边栏",
     "unpin_from_sidebar": "从侧边栏取消固定",
     "copy_link": "复制链接",
+    "copy_workdir_path": "复制本地 workdir 路径",
     "more": "更多",
     "create_sub_issue": "创建子 issue",
     "set_parent_issue": "设置父 issue...",

@@ -2,6 +2,7 @@
 
 import { Paperclip, FileText, Download } from "lucide-react";
 import type { ChannelMessageAttachment } from "@multica/core/types";
+import { useT } from "../../i18n";
 
 interface MessageAttachmentsProps {
   attachments: ChannelMessageAttachment[];
@@ -105,6 +106,7 @@ interface PendingAttachmentsRowProps {
 }
 
 export function PendingAttachmentsRow({ pending, onRemove }: PendingAttachmentsRowProps) {
+  const { t } = useT("channels");
   if (pending.length === 0) return null;
   return (
     <div className="mb-2 flex flex-wrap gap-2">
@@ -126,14 +128,14 @@ export function PendingAttachmentsRow({ pending, onRemove }: PendingAttachmentsR
             <span className="shrink-0 text-muted-foreground">…</span>
           ) : null}
           {p.status === "error" ? (
-            <span className="shrink-0" title={p.error ?? "upload failed"}>
-              ⚠️
+            <span className="shrink-0" title={p.error ?? t(($) => $.attachments.upload_failed)}>
+              {"⚠️"}
             </span>
           ) : null}
           <button
             type="button"
             onClick={() => onRemove(p.key)}
-            aria-label={`Remove ${p.filename}`}
+            aria-label={t(($) => $.attachments.remove_aria, { filename: p.filename })}
             className="ml-1 shrink-0 rounded hover:bg-muted"
           >
             ×

@@ -522,6 +522,43 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
   });
 
+  // Orphan-reply rescue (#1857): a reply whose parent is paginated out of the
+  // current page used to disappear from the UI entirely, since only the
+  // root's CommentCard knew to pull replies from repliesByParent. Now the
+  // reply is promoted to top-level and rendered standalone, so the user
+  // never loses sight of comment content even when the page boundary cuts
+  // through a thread.
+  it("renders orphaned replies (parent not in timeline) at top level", async () => {
+    mockApiObj.listTimeline.mockResolvedValue({
+      entries: [
+        {
+          type: "comment",
+          id: "reply-1",
+          actor_type: "member",
+          actor_id: "user-1",
+          // parent_id refers to a comment that is NOT in this page (would
+          // happen if the merge truncation drops the root or pagination
+          // splits the thread).
+          parent_id: "missing-parent",
+          content: "Reply with no visible parent",
+          created_at: "2026-01-18T00:00:00Z",
+          updated_at: "2026-01-18T00:00:00Z",
+          comment_type: "comment",
+        },
+      ],
+      next_cursor: null,
+      prev_cursor: null,
+      has_more_before: false,
+      has_more_after: false,
+    });
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Reply with no visible parent")).toBeInTheDocument();
+    });
+  });
+
   it("sends empty description when editor is cleared", async () => {
     renderIssueDetail();
 

@@ -383,7 +383,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             <div className="flex items-center gap-2">
               <Archive className="h-3.5 w-3.5 text-amber-500" />
               <span className="text-amber-700 dark:text-amber-400">
-                Archived. Hidden from the projects list.
+                {t(($) => $.detail.archived_banner)}
               </span>
             </div>
             <button
@@ -644,7 +644,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                       disabled={restoreProject.isPending}
                     >
                       <Archive className="h-3.5 w-3.5" />
-                      Restore project
+                      {t(($) => $.detail.restore_action)}
                     </DropdownMenuItem>
                   ) : (
                     <DropdownMenuItem
@@ -652,7 +652,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                       disabled={archiveProject.isPending}
                     >
                       <Archive className="h-3.5 w-3.5" />
-                      Archive project
+                      {t(($) => $.detail.archive_action)}
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem

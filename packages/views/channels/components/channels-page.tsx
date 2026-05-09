@@ -23,6 +23,7 @@ import { ChannelComposer } from "./channel-composer";
 import { ChannelCreateDialog } from "./channel-create-dialog";
 import { NewDMDialog } from "./new-dm-dialog";
 import { ThreadPanel } from "./thread-panel";
+import { useT } from "../../i18n";
 
 interface ChannelsPageProps {
   /** When non-null, the right pane shows that channel. When null, an empty
@@ -53,6 +54,7 @@ interface ChannelsPageProps {
  * broken-looking empty page.
  */
 export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
+  const { t } = useT("channels");
   const wsId = useWorkspaceId();
   const workspace = useCurrentWorkspace();
   const enabled = !!workspace?.channels_enabled;
@@ -123,11 +125,9 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
   if (!enabled) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-        <h2 className="text-lg font-semibold text-foreground">Channels are off for this workspace</h2>
+        <h2 className="text-lg font-semibold text-foreground">{t(($) => $.page.disabled_title)}</h2>
         <p className="max-w-md text-sm text-muted-foreground">
-          A workspace admin can turn on Channels from Settings. Once enabled,
-          you'll be able to chat with teammates and agents in dedicated
-          channels alongside the issue board.
+          {t(($) => $.page.disabled_description)}
         </p>
       </div>
     );
@@ -146,11 +146,11 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
           <EmptyRightPane />
         ) : channelLoading ? (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            Loading channel…
+            {t(($) => $.page.loading_channel)}
           </div>
         ) : !channel ? (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            Channel not found.
+            {t(($) => $.page.channel_not_found)}
           </div>
         ) : (
           <>
@@ -209,11 +209,12 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
 }
 
 function EmptyRightPane() {
+  const { t } = useT("channels");
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
-      <h2 className="text-lg font-semibold text-foreground">Welcome to Channels</h2>
+      <h2 className="text-lg font-semibold text-foreground">{t(($) => $.page.welcome_title)}</h2>
       <p className="max-w-md text-sm text-muted-foreground">
-        Pick a channel from the left, or create a new one with the + button.
+        {t(($) => $.page.welcome_description)}
       </p>
     </div>
   );

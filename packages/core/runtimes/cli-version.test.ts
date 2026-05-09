@@ -22,4 +22,12 @@ describe("checkQuickCreateCliVersion", () => {
     expect(checkQuickCreateCliVersion("v0.2.15-235-gdaf0e935-dirty").state).toBe("ok");
     expect(checkQuickCreateCliVersion("0.1.0-1-gabc1234").state).toBe("ok");
   });
+
+  // The bare "dev" fallback: `go build ./cmd/multica` (no ldflags) and
+  // `make build` outside a git checkout both stamp the binary as "dev".
+  // Same intent as the git-describe shape — treat as a development build,
+  // ahead of every release — so the gate accepts it.
+  it("treats bare 'dev' fallback as ok", () => {
+    expect(checkQuickCreateCliVersion("dev").state).toBe("ok");
+  });
 });

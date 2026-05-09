@@ -13,7 +13,7 @@ import type {
   Agent,
   AgentRuntime,
   MemberWithUser,
-  Skill,
+  SkillSummary,
 } from "@multica/core/types";
 import { timeAgo } from "@multica/core/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -26,9 +26,11 @@ import { readOrigin, totalFileCount } from "../lib/origin";
 import { useT } from "../../i18n";
 
 // Per-row data assembled at the page level. The columns reach into
-// `row.original` and never pull their own queries.
+// `row.original` and never pull their own queries. `skill` is the list-shape
+// `SkillSummary`; the body and files are loaded only when the user opens the
+// detail page.
 export interface SkillRow {
-  skill: Skill;
+  skill: SkillSummary;
   agents: Agent[];
   creator: MemberWithUser | null;
   // Originating runtime when the skill was imported from a runtime-local
@@ -181,7 +183,7 @@ function SourceCell({
   creator,
   runtime,
 }: {
-  skill: Skill;
+  skill: SkillSummary;
   creator: MemberWithUser | null;
   runtime: AgentRuntime | null;
 }) {
@@ -203,6 +205,9 @@ function SourceCell({
   } else if (origin.type === "skills_sh") {
     icon = <Download className="h-3 w-3 shrink-0" />;
     label = t(($) => $.table.source_skills_sh);
+  } else if (origin.type === "github") {
+    icon = <Download className="h-3 w-3 shrink-0" />;
+    label = t(($) => $.table.source_github);
   }
 
   return (

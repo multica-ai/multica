@@ -452,10 +452,13 @@ func TestMemoryArtifactRevisionHistory(t *testing.T) {
 	}
 
 	// 5. Get full content of revision 1 — should be the original content.
+	// withURLParams (plural) sets both keys in one chi.RouteContext —
+	// chaining two withURLParam calls would replace the first context
+	// and drop "id", causing parseUUIDOrBadRequest to fail with
+	// "invalid memory artifact id".
 	w = httptest.NewRecorder()
 	req = newRequest("GET", "/api/memory/"+created.ID+"/history/1", nil)
-	req = withURLParam(req, "id", created.ID)
-	req = withURLParam(req, "revision", "1")
+	req = withURLParams(req, "id", created.ID, "revision", "1")
 	testHandler.GetMemoryArtifactRevision(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GetMemoryArtifactRevision: %d %s", w.Code, w.Body.String())
@@ -470,8 +473,7 @@ func TestMemoryArtifactRevisionHistory(t *testing.T) {
 	// as revision 3, then apply v1's content onto the live row.
 	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/memory/"+created.ID+"/restore-revision/1", map[string]any{})
-	req = withURLParam(req, "id", created.ID)
-	req = withURLParam(req, "revision", "1")
+	req = withURLParams(req, "id", created.ID, "revision", "1")
 	testHandler.RestoreMemoryArtifactRevision(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("RestoreMemoryArtifactRevision: %d %s", w.Code, w.Body.String())
@@ -500,8 +502,7 @@ func TestMemoryArtifactRevisionHistory(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	req = newRequest("GET", "/api/memory/"+created.ID+"/history/3", nil)
-	req = withURLParam(req, "id", created.ID)
-	req = withURLParam(req, "revision", "3")
+	req = withURLParams(req, "id", created.ID, "revision", "3")
 	testHandler.GetMemoryArtifactRevision(w, req)
 	json.NewDecoder(w.Body).Decode(&revDetail)
 	if revDetail.Content != "Third draft content." {

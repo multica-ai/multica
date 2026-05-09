@@ -357,7 +357,7 @@ export function ProjectsPage() {
           )}
           {showArchived && (
             <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
-              Archived
+              {t(($) => $.page.archived_filter_badge)}
             </span>
           )}
         </div>

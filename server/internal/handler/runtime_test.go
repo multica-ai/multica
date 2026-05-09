@@ -139,6 +139,27 @@ func TestGetRuntimeUsage_BucketsByUsageTime(t *testing.T) {
 	insertTaskWithUsage(yesterdayLate, todayEarly, 1000)          // cross-midnight
 	insertTaskWithUsage(yesterdayMorning, yesterdayMorning, 2000) // full-day yesterday
 
+	// ListRuntimeUsage now reads from the `task_usage_daily` rollup
+	// table maintained by the cron-driven rollup_task_usage_daily()
+	// function. In production the watermarked wrapper waits a 5 min
+	// safety lag before consuming rows; here we drive the underlying
+	// window function directly with a wide-open range so the freshly
+	// inserted fixture rows are guaranteed to be aggregated before the
+	// handler is called. Each test invocation gets its own isolated
+	// daily buckets keyed by (date, runtime, provider, model), so
+	// re-running the test is idempotent (the upsert just rewrites the
+	// same totals).
+	if _, err := testPool.Exec(ctx, `
+		SELECT rollup_task_usage_daily_window('-infinity'::timestamptz, 'infinity'::timestamptz)
+	`); err != nil {
+		t.Fatalf("rollup_task_usage_daily_window: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `
+			DELETE FROM task_usage_daily WHERE runtime_id = $1 AND bucket_date IN ($2::date, $3::date)
+		`, runtimeID, today, today.Add(-24*time.Hour))
+	})
+
 	// Call the handler with ?days=1 at whatever "now" is. That should include
 	// both today and yesterday in full.
 	w := httptest.NewRecorder()

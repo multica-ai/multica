@@ -6,10 +6,12 @@ import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
 import {
   Archive,
+  ArrowDownToLine,
   Calendar,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   CircleCheck,
   MoreHorizontal,
   PanelRight,
@@ -60,7 +62,6 @@ import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
-import { useModalStore } from "@multica/core/modals";
 import { timeAgo } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -291,10 +292,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // CommentCard can skip re-rendering when the only thing that moved was
   // unrelated parent state (e.g. composer draft, sidebar toggle).
   const timelineView = useMemo(() => {
-    const topLevel = timeline.filter((e) => e.type === "activity" || !e.parent_id);
+    // Orphan-reply rescue (#1857): a reply whose parent_id points to a
+    // comment that isn't in the loaded timeline gets promoted to top-level
+    // instead of disappearing. Without this, paginating between a root and
+    // its replies (or a backend bug that drops the root from the page) hides
+    // the entire reply subtree because only the root's CommentCard knows to
+    // pull its children out of repliesByParent.
+    const idsInTimeline = new Set(timeline.map((e) => e.id));
+    const topLevel = timeline.filter(
+      (e) =>
+        e.type === "activity" ||
+        !e.parent_id ||
+        !idsInTimeline.has(e.parent_id),
+    );
     const repliesByParent = new Map<string, TimelineEntry[]>();
     for (const e of timeline) {
-      if (e.type === "comment" && e.parent_id) {
+      if (e.type === "comment" && e.parent_id && idsInTimeline.has(e.parent_id)) {
         const list = repliesByParent.get(e.parent_id) ?? [];
         list.push(e);
         repliesByParent.set(e.parent_id, list);
@@ -630,6 +643,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
+            <span className="text-muted-foreground tabular-nums shrink-0">
+              {issue.identifier}
+            </span>
             <span className="truncate font-medium text-foreground">
               {issue.title}
             </span>
@@ -786,12 +802,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <button
                 type="button"
                 className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                onClick={() =>
-                  useModalStore.getState().open("create-issue", {
-                    parent_issue_id: issue.id,
-                    parent_issue_identifier: issue.identifier,
-                  })
-                }
+                onClick={() => actions.openCreateSubIssue()}
               >
                 <Plus className="h-3.5 w-3.5" />
                 <span>{t(($) => $.detail.add_sub_issues)}</span>
@@ -829,12 +840,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                         <button
                           type="button"
                           className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                          onClick={() =>
-                            useModalStore.getState().open("create-issue", {
-                              parent_issue_id: issue.id,
-                              parent_issue_identifier: issue.identifier,
-                            })
-                          }
+                          onClick={() => actions.openCreateSubIssue()}
                           aria-label={t(($) => $.detail.add_sub_issue_aria)}
                         >
                           <Plus className="h-4 w-4" />
@@ -1001,18 +1007,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             ) : (
             <>
             {hasMoreOlder && (
-              <div className="my-4 flex items-center gap-3">
-                <div className="h-px flex-1 bg-border" />
-                <button
+              <div className="my-4 flex justify-center">
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={fetchOlder}
                   disabled={isFetchingOlder}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                 >
+                  <ChevronUp />
                   {isFetchingOlder
                     ? t(($) => $.timeline.loading)
                     : t(($) => $.timeline.show_older)}
-                </button>
-                <div className="h-px flex-1 bg-border" />
+                </Button>
               </div>
             )}
             <div className="mt-4 flex flex-col gap-3">
@@ -1064,6 +1070,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                           <div className="flex min-w-0 flex-1 items-center gap-1">
                             <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
                             <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+                            {/* Coalesce badge for non-task actions: task_completed / task_failed already
+                                bake the count into their translation, so suppress the badge there to
+                                avoid showing "×N" twice. */}
+                            {(entry.coalesced_count ?? 1) > 1 &&
+                              entry.action !== "task_completed" &&
+                              entry.action !== "task_failed" && (
+                                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                                  {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
+                                </span>
+                              )}
                             <Tooltip>
                               <TooltipTrigger
                                 render={
@@ -1085,29 +1101,33 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               })}
             </div>
             {(hasMoreNewer || !isAtLatest) && (
-              <div className="mt-4 flex items-center justify-center gap-4">
+              <div className="mt-4 flex items-center justify-center gap-2">
                 {hasMoreNewer && (
-                  <button
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={fetchNewer}
                     disabled={isFetchingNewer}
-                    className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                   >
+                    <ChevronDown />
                     {isFetchingNewer
                       ? t(($) => $.timeline.loading)
                       : t(($) => $.timeline.show_newer)}
-                  </button>
+                  </Button>
                 )}
                 {!isAtLatest && (
-                  <button
+                  <Button
+                    variant="default"
+                    size="sm"
                     onClick={jumpToLatest}
-                    className="text-xs font-medium text-foreground hover:text-foreground/80 transition-colors"
                   >
+                    <ArrowDownToLine />
                     {newEntriesBelowCount > 0
                       ? t(($) => $.timeline.jump_to_latest_with_count, {
                           count: newEntriesBelowCount,
                         })
                       : t(($) => $.timeline.jump_to_latest)}
-                  </button>
+                  </Button>
                 )}
               </div>
             )}
