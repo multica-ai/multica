@@ -25,6 +25,7 @@ export type {
   RuntimeUsageByHour,
   RuntimeUpdate,
   RuntimeUpdateStatus,
+  CLIUpdateManifest,
   RuntimeModel,
   RuntimeModelListRequest,
   RuntimeModelListStatus,

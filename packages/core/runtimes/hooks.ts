@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "../auth";
 import type { AgentRuntime } from "../types";
 import { isCliVersionNewer } from "./cli-version";
-import { runtimeListOptions, latestCliVersionOptions } from "./queries";
+import { runtimeListOptions, latestCliManifestOptions } from "./queries";
 
 function runtimeNeedsUpdate(
   rt: AgentRuntime,
@@ -40,7 +40,8 @@ export function useMyRuntimesNeedUpdate(wsId: string | undefined): boolean {
     ...runtimeListOptions(wsId ?? ""),
     enabled: !!wsId,
   });
-  const { data: latestVersion } = useQuery(latestCliVersionOptions());
+  const { data: latestManifest } = useQuery(latestCliManifestOptions());
+  const latestVersion = latestManifest?.version ?? null;
 
   if (!runtimes || !latestVersion || !userId) return false;
 
@@ -57,7 +58,8 @@ export function useUpdatableRuntimeIds(wsId: string | undefined): Set<string> {
     ...runtimeListOptions(wsId ?? ""),
     enabled: !!wsId,
   });
-  const { data: latestVersion } = useQuery(latestCliVersionOptions());
+  const { data: latestManifest } = useQuery(latestCliManifestOptions());
+  const latestVersion = latestManifest?.version ?? null;
 
   return useMemo(() => {
     if (!runtimes || !latestVersion || !userId) return new Set<string>();

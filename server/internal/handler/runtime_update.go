@@ -3,12 +3,18 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 // ---------------------------------------------------------------------------
@@ -205,6 +211,60 @@ func (s *InMemoryUpdateStore) Fail(_ context.Context, id string, errMsg string) 
 // Handlers
 // ---------------------------------------------------------------------------
 
+type CLIUpdateManifestResponse struct {
+	Version             string `json:"version"`
+	PublishedAt         string `json:"published_at,omitempty"`
+	MinSupportedVersion string `json:"min_supported_version,omitempty"`
+	ReleaseNotes        string `json:"release_notes,omitempty"`
+}
+
+func runtimeUpdateManifestURL() string {
+	if env := strings.TrimSpace(os.Getenv("MULTICA_UPDATE_MANIFEST_URL")); env != "" {
+		return env
+	}
+	return cli.DefaultUpdateManifestURL
+}
+
+func fetchRuntimeUpdateManifest(ctx context.Context) (*cli.UpdateManifest, error) {
+	type result struct {
+		manifest *cli.UpdateManifest
+		err      error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		manifest, err := cli.FetchUpdateManifestFromURL(runtimeUpdateManifestURL())
+		ch <- result{manifest: manifest, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		return res.manifest, res.err
+	}
+}
+
+func updateManifestToResponse(manifest *cli.UpdateManifest) CLIUpdateManifestResponse {
+	return CLIUpdateManifestResponse{
+		Version:             manifest.Version,
+		PublishedAt:         manifest.PublishedAt,
+		MinSupportedVersion: manifest.MinSupportedVersion,
+		ReleaseNotes:        manifest.ReleaseNotes,
+	}
+}
+
+// GetCLIUpdateManifest exposes the server-configured CLI update manifest to
+// browser clients. It intentionally returns only display metadata; the daemon
+// fetches the full manifest again when it performs the update.
+func (h *Handler) GetCLIUpdateManifest(w http.ResponseWriter, r *http.Request) {
+	manifest, err := fetchRuntimeUpdateManifest(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to fetch CLI update manifest: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, updateManifestToResponse(manifest))
+}
+
 // InitiateUpdate creates a new CLI update request (protected route, called by frontend).
 func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
@@ -226,16 +286,27 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TargetVersion string `json:"target_version"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.TargetVersion == "" {
-		writeError(w, http.StatusBadRequest, "target_version is required")
+
+	manifest, err := fetchRuntimeUpdateManifest(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to fetch CLI update manifest: "+err.Error())
+		return
+	}
+	targetVersion := strings.TrimSpace(manifest.Version)
+	if targetVersion == "" {
+		writeError(w, http.StatusBadGateway, "CLI update manifest missing version")
+		return
+	}
+	if requested := strings.TrimSpace(req.TargetVersion); requested != "" && requested != targetVersion {
+		writeError(w, http.StatusConflict, "target_version does not match current CLI update manifest")
 		return
 	}
 
-	update, err := h.UpdateStore.Create(r.Context(), uuidToString(rt.ID), req.TargetVersion)
+	update, err := h.UpdateStore.Create(r.Context(), uuidToString(rt.ID), targetVersion)
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return

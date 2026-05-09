@@ -292,6 +292,13 @@ export interface RuntimeUpdate {
   updated_at: string;
 }
 
+export interface CLIUpdateManifest {
+  version: string;
+  published_at?: string;
+  min_supported_version?: string;
+  release_notes?: string;
+}
+
 export interface RuntimeModel {
   id: string;
   label: string;

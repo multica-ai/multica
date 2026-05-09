@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Loader2,
   CheckCircle2,
@@ -8,34 +9,12 @@ import {
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { api } from "@multica/core/api";
-import { isCliVersionNewer } from "@multica/core/runtimes";
+import {
+  isCliVersionNewer,
+  latestCliManifestOptions,
+} from "@multica/core/runtimes";
 import type { RuntimeUpdateStatus } from "@multica/core/types";
 import { useT } from "../../i18n";
-
-const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/multica-ai/multica/releases/latest";
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-
-let cachedLatestVersion: string | null = null;
-let cachedAt = 0;
-
-async function fetchLatestVersion(): Promise<string | null> {
-  if (cachedLatestVersion && Date.now() - cachedAt < CACHE_TTL_MS) {
-    return cachedLatestVersion;
-  }
-  try {
-    const resp = await fetch(GITHUB_RELEASES_URL, {
-      headers: { Accept: "application/vnd.github+json" },
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    cachedLatestVersion = data.tag_name ?? null;
-    cachedAt = Date.now();
-    return cachedLatestVersion;
-  } catch {
-    return null;
-  }
-}
 
 const statusConfig: Record<
   RuntimeUpdateStatus,
@@ -69,7 +48,8 @@ export function UpdateSection({
 }: UpdateSectionProps) {
   const { t } = useT("runtimes");
   const isManaged = launchedBy === "desktop";
-  const [latestVersion, setLatestVersion] = useState<string | null>(null);
+  const { data: latestManifest = null } = useQuery(latestCliManifestOptions());
+  const latestVersion = latestManifest?.version ?? null;
   const [status, setStatus] = useState<RuntimeUpdateStatus | null>(null);
   const [error, setError] = useState("");
   const [output, setOutput] = useState("");
@@ -85,11 +65,6 @@ export function UpdateSection({
   }, []);
 
   useEffect(() => cleanup, [cleanup]);
-
-  // Fetch latest version on mount.
-  useEffect(() => {
-    fetchLatestVersion().then(setLatestVersion);
-  }, []);
 
   const markCompleted = useCallback(
     (message: string) => {
@@ -122,7 +97,12 @@ export function UpdateSection({
     setOutput("");
 
     try {
-      const update = await api.initiateUpdate(runtimeId, latestVersion);
+      const update = await api.initiateUpdate(runtimeId);
+      const requestedVersion = update.target_version || latestVersion;
+      if (!requestedVersion) {
+        throw new Error("missing target version");
+      }
+      setTargetVersion(requestedVersion);
 
       pollRef.current = setInterval(async () => {
         try {
@@ -131,7 +111,7 @@ export function UpdateSection({
 
           if (result.status === "completed") {
             markCompleted(
-              result.output ?? `Updated to ${targetVersion ?? latestVersion}`,
+              result.output ?? `Updated to ${requestedVersion}`,
             );
           } else if (
             result.status === "failed" ||

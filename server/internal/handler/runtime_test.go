@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -64,6 +65,72 @@ func TestRuntimeHandlersRejectMalformedRuntimeID(t *testing.T) {
 				t.Fatalf("%s: expected 400 for malformed runtimeId, got %d: %s", tt.name, w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+func withUpdateManifestServer(t *testing.T, version string) {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"version":%q,"published_at":"2026-05-09T00:00:00Z","assets":[]}`, version)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("MULTICA_UPDATE_MANIFEST_URL", srv.URL)
+}
+
+func TestGetCLIUpdateManifest(t *testing.T) {
+	withUpdateManifestServer(t, "v1.2.3")
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodGet, "/api/runtimes/cli-update-manifest", nil)
+	testHandler.GetCLIUpdateManifest(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp CLIUpdateManifestResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Version != "v1.2.3" {
+		t.Fatalf("Version = %q, want v1.2.3", resp.Version)
+	}
+}
+
+func TestInitiateUpdateUsesManifestVersionWhenTargetOmitted(t *testing.T) {
+	withUpdateManifestServer(t, "v1.2.3")
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodPost, "/api/runtimes/"+testRuntimeID+"/update", map[string]any{})
+	req = withURLParam(req, "runtimeId", testRuntimeID)
+	testHandler.InitiateUpdate(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp UpdateRequest
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.TargetVersion != "v1.2.3" {
+		t.Fatalf("TargetVersion = %q, want v1.2.3", resp.TargetVersion)
+	}
+	if err := testHandler.UpdateStore.Complete(context.Background(), resp.ID, "done"); err != nil {
+		t.Fatalf("cleanup update request: %v", err)
+	}
+}
+
+func TestInitiateUpdateRejectsTargetVersionMismatch(t *testing.T) {
+	withUpdateManifestServer(t, "v1.2.3")
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodPost, "/api/runtimes/"+testRuntimeID+"/update", map[string]any{
+		"target_version": "v9.9.9",
+	})
+	req = withURLParam(req, "runtimeId", testRuntimeID)
+	testHandler.InitiateUpdate(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
