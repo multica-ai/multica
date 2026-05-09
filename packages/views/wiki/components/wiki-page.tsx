@@ -14,8 +14,16 @@ import {
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
+import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { cn } from "@multica/ui/lib/utils";
-import { ContentEditor, type ContentEditorRef, ReadonlyContent } from "../../editor";
+import {
+  ContentEditor,
+  FileDropOverlay,
+  type ContentEditorRef,
+  ReadonlyContent,
+  useFileDropZone,
+} from "../../editor";
 import { PageHeader } from "../../layout/page-header";
 
 export function WikiPage() {
@@ -26,6 +34,9 @@ export function WikiPage() {
   const editorRef = useRef<ContentEditorRef>(null);
   const lastSavedContentRef = useRef<string | null>(null);
   const { data: members = [], isLoading: membersLoading } = useQuery(memberListOptions(wsId));
+  const { uploadWithToast, uploading } = useFileUpload(api, (err) => {
+    toast.error(err.message);
+  });
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canEdit = currentMember?.role === "owner" || currentMember?.role === "admin";
@@ -56,6 +67,16 @@ export function WikiPage() {
     if (latestContent == null) return;
     void handleUpdate(latestContent);
   }, [handleUpdate]);
+
+  const handleUpload = useCallback(
+    (file: File) => uploadWithToast(file),
+    [uploadWithToast],
+  );
+
+  const { isDragOver, dropZoneProps } = useFileDropZone({
+    onDrop: (files) => files.forEach((file) => editorRef.current?.uploadFile(file)),
+    enabled: canEdit,
+  });
 
   if (!workspace || membersLoading) {
     return (
@@ -91,17 +112,31 @@ export function WikiPage() {
             {workspace.name}
           </p>
 
-          <div className={cn("mt-6", canEdit && "rounded-lg")}>
+          <div
+            {...(canEdit ? dropZoneProps : {})}
+            className={cn("relative mt-6", canEdit && "rounded-lg")}
+          >
             {canEdit ? (
-              <ContentEditor
-                ref={editorRef}
-                key={workspace.id}
-                defaultValue={content}
-                placeholder="Add wiki content..."
-                onUpdate={handleUpdate}
-                onBlur={handleBlur}
-                debounceMs={1500}
-              />
+              <>
+                <ContentEditor
+                  ref={editorRef}
+                  key={workspace.id}
+                  defaultValue={content}
+                  placeholder="Add wiki content..."
+                  onUpdate={handleUpdate}
+                  onBlur={handleBlur}
+                  onUploadFile={handleUpload}
+                  debounceMs={1500}
+                />
+                <div className="mt-3 flex items-center gap-1">
+                  <FileUploadButton
+                    size="sm"
+                    disabled={uploading}
+                    onSelect={(file) => editorRef.current?.uploadFile(file)}
+                  />
+                </div>
+                {isDragOver && <FileDropOverlay />}
+              </>
             ) : content.trim() ? (
               <ReadonlyContent content={content} />
             ) : (
