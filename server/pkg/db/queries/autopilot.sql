@@ -89,6 +89,51 @@ SET next_run_at = sqlc.narg('next_run_at'),
     updated_at = now()
 WHERE id = $1;
 
+-- name: GetWebhookTriggerByToken :one
+-- Look up a webhook trigger by its public bearer token. Joined to autopilot
+-- so the webhook handler can derive the workspace from the trigger's parent
+-- without trusting any request header. The handler still re-loads the
+-- Autopilot via GetAutopilot and cross-checks WorkspaceID matches the row's
+-- autopilot_workspace_id.
+SELECT t.*, a.workspace_id AS autopilot_workspace_id
+FROM autopilot_trigger t
+JOIN autopilot a ON a.id = t.autopilot_id
+WHERE t.kind = 'webhook'
+  AND t.webhook_token = $1;
+
+-- name: TouchAutopilotTriggerFiredAt :exec
+-- Bumps last_fired_at after a webhook fires, regardless of whether the
+-- dispatch succeeded, was admission-skipped, or even if Autopilot status
+-- transitioned to paused/disabled at exactly the wrong moment. Disabled /
+-- paused early-return paths in the handler never call this.
+UPDATE autopilot_trigger
+SET last_fired_at = now(),
+    updated_at = now()
+WHERE id = $1;
+
+-- name: RotateAutopilotTriggerWebhookToken :one
+-- Rotates the bearer token for a webhook trigger. Restricted to kind='webhook'
+-- so an accidental call against a schedule/api trigger is a no-op (returns no
+-- rows) rather than corrupting unrelated state.
+UPDATE autopilot_trigger
+SET webhook_token = $2,
+    updated_at = now()
+WHERE id = $1
+  AND kind = 'webhook'
+RETURNING *;
+
+-- name: SetAutopilotTriggerWebhookToken :one
+-- Sets the webhook token at creation time. CreateAutopilotTrigger inserts the
+-- row first (using its full 8-arg signature), then this query attaches the
+-- token. Splitting the create + token-set keeps the existing CreateAutopilotTrigger
+-- query usable by the schedule path without forcing every caller to think
+-- about webhook_token.
+UPDATE autopilot_trigger
+SET webhook_token = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- =====================
 -- Autopilot Run Management
 -- =====================
