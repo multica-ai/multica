@@ -76,6 +76,8 @@ const (
 	EventChatDone           = "chat:done"
 	EventChatSessionRead    = "chat:session_read"
 	EventChatSessionDeleted = "chat:session_deleted"
+	// CEREBRO-PATCH(chat-session-updated-event): JEH-799 chat-session header — broadcast title/status changes.
+	EventChatSessionUpdated = "chat:session_updated"
 
 	// Channel events (multi-party chat — issues with kind in channel,dm)
 	EventChannelCreated = "channel:created"

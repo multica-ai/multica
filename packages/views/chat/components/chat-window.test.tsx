@@ -11,6 +11,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 vi.mock("@multica/cerebro-chat/views", () => ({
   ChatStatusLine: () => <div data-testid="chat-status-line" />,
+  ChatSessionHeader: () => <div data-testid="chat-session-header" />,
   getToolSummary: () => null,
 }));
 

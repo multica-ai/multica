@@ -16,7 +16,9 @@
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",
     "@tanstack/react-query": "catalog:",
-    "lucide-react": "catalog:"
+    "lucide-react": "catalog:",
+    "react-i18next": "catalog:",
+    "sonner": "^2.0.7"
   },
   "peerDependencies": {
     "react": "catalog:"

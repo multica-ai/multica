@@ -1352,6 +1352,26 @@ export class ApiClient {
     await this.fetch(`/api/chat/sessions/${id}`, { method: "DELETE" });
   }
 
+  // CEREBRO-PATCH(api-chat-session-actions): JEH-799 chat-session header actions.
+  async updateChatSession(
+    id: string,
+    data: { title?: string; status?: "active" | "archived" },
+  ): Promise<ChatSession> {
+    return this.fetch(`/api/chat/sessions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // CEREBRO-PATCH(api-chat-session-actions): JEH-799 chat-session header actions.
+  async convertChatSessionToIssue(
+    id: string,
+  ): Promise<{ issue_id: string; identifier: string; number: number }> {
+    return this.fetch(`/api/chat/sessions/${id}/convert-to-issue`, {
+      method: "POST",
+    });
+  }
+
   async listChatMessages(sessionId: string): Promise<ChatMessage[]> {
     return this.fetch(`/api/chat/sessions/${sessionId}/messages`);
   }

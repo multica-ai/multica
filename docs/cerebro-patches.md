@@ -126,6 +126,11 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `chat-status-line` | packages/views/chat/components/chat-status-line.tsx | 93 | Chat view cerebro additions (MCP onboarding, status, archive) |
 | `chat-tool-summary` | packages/views/chat/components/tool-summary.ts | 35 | Chat view cerebro additions (MCP onboarding, status, archive) |
 | `chat-window-cerebro` | packages/views/chat/components/chat-window.tsx | 7 | Chat view cerebro additions (MCP onboarding, status, archive) |
+| `chat-actions-cerebro` | server/internal/handler/chat_actions_cerebro.go | ~210 | JEH-799 — net-new fork file: handlers for chat-session header actions (PATCH /api/chat/sessions/{id} for rename/archive, POST /convert-to-issue for issue conversion) |
+| `chat-session-actions-routes` | server/cmd/server/router.go | 2 | JEH-799 — register PATCH and convert-to-issue routes for the chat-session header |
+| `chat-session-updated-event` | server/pkg/protocol/events.go<br>server/pkg/protocol/messages.go<br>packages/core/types/events.ts | 1 + 7 + 2 | JEH-799 — new `chat:session_updated` WS event so other tabs sync title/status changes from the session header |
+| `api-chat-session-actions` | packages/core/api/client.ts | 18 | JEH-799 — chat-session API methods: `updateChatSession`, `convertChatSessionToIssue` |
+| `chat-session-header` | packages/views/chat/components/chat-window.tsx | 2 | JEH-799 — mount `<ChatSessionHeader />` (from `@multica/cerebro-chat`) above the message list |
 | `channel-favorites-storage` | packages/core/platform/storage-cleanup.ts | 1 | JEH-718 — registers `multica_channel_favorites` as a workspace-scoped storage key so it is cleared on logout/workspace deletion |
 | `channels-components-participants-panel` | packages/views/channels/components/index.ts | 1 | JEH-700 — re-exports new ParticipantsPanel side-panel component |
 | `channels-index-rename-participants` | packages/core/channels/index.ts | 3 | JEH-700 — re-exports useUpdateChannel + useToggleChannelParticipant |
@@ -349,6 +354,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `sqlc-budget` | server/pkg/db/queries/budget.sql | 42 | Cerebro sqlc query additions |
 | `sqlc-cerebro-package` | server/sqlc.yaml | 0 | Adds cerebro sqlc package config |
 | `sqlc-chat` | server/pkg/db/queries/chat.sql | 41 | Cerebro sqlc query additions |
+| `sqlc-chat-update-status` | server/pkg/db/queries/chat.sql | 1 | JEH-799 — UpdateChatSessionStatus query for the chat-session header archive/restore action |
 | `sqlc-inbox` | server/pkg/db/queries/inbox.sql | 30 | Cerebro sqlc query additions |
 | `sqlc-inbox-folder` | server/pkg/db/queries/inbox_folder.sql | 175 | Cerebro sqlc query additions |
 | `sqlc-issue` | server/pkg/db/queries/issue.sql | 40 | Cerebro sqlc query additions |

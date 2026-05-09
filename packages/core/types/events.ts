@@ -54,6 +54,8 @@ export type WSEventType =
   | "chat:done"
   | "chat:session_read"
   | "chat:session_deleted"
+  // CEREBRO-PATCH(chat-session-updated-event): JEH-799 chat-session header.
+  | "chat:session_updated"
   | "project:created"
   | "project:updated"
   | "project:deleted"

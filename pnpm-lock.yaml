@@ -781,6 +781,12 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.2.3
+      react-i18next:
+        specifier: 'catalog:'
+        version: 17.0.6(i18next@26.0.9(typescript@5.9.3))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(typescript@5.9.3)
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
     devDependencies:
       '@multica/tsconfig':
         specifier: workspace:*

@@ -2,6 +2,8 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { WSClient } from "@multica/core/api/ws-client";
 import { getCurrentWsId } from "@multica/core/platform";
 import { artifactKeys } from "@multica/cerebro-artifacts/core";
+import { chatKeys } from "@multica/core/chat/queries";
+import type { ChatSession } from "@multica/core/types";
 
 /**
  * Registers WS handlers for cerebro-only events (currently: artifact:created /
@@ -56,9 +58,44 @@ export function registerCerebroHandlers(
     if (payload?.artifact) invalidateArtifact(payload.artifact);
   });
 
+  // chat:session_updated — JEH-799 chat-session header.
+  // Title/status changes from the originating tab need to reach this device's
+  // other tabs (the active list filters by status, so an archive flips the
+  // session out of the active list and into the all-list view). The
+  // originating tab already optimistically rewrote its caches; this handler
+  // keeps everyone else in sync without a full refetch.
+  const unsubChatSessionUpdated = ws.on("chat:session_updated", (p) => {
+    const payload = p as {
+      chat_session_id: string;
+      title: string;
+      status: string;
+    };
+    const wsId = getCurrentWsId();
+    if (!wsId) return;
+    const apply = (s: ChatSession): ChatSession => ({
+      ...s,
+      title: payload.title,
+      status: payload.status as ChatSession["status"],
+    });
+    qc.setQueryData<ChatSession[]>(chatKeys.allSessions(wsId), (old) =>
+      old?.map((s) => (s.id === payload.chat_session_id ? apply(s) : s)),
+    );
+    qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), (old) => {
+      if (!old) return old;
+      return old.flatMap((s) => {
+        if (s.id !== payload.chat_session_id) return [s];
+        if (payload.status === "archived") return [];
+        return [apply(s)];
+      });
+    });
+    qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    qc.invalidateQueries({ queryKey: chatKeys.allSessions(wsId) });
+  });
+
   return () => {
     unsubArtifactCreated();
     unsubArtifactUpdated();
     unsubArtifactDeleted();
+    unsubChatSessionUpdated();
   };
 }

@@ -739,6 +739,39 @@ func (q *Queries) UpdateChatSessionSession(ctx context.Context, arg UpdateChatSe
 	return err
 }
 
+const updateChatSessionStatus = `-- name: UpdateChatSessionStatus :one
+UPDATE chat_session SET status = $2, updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id
+`
+
+type UpdateChatSessionStatusParams struct {
+	ID     pgtype.UUID `json:"id"`
+	Status string      `json:"status"`
+}
+
+// Used by the cerebro session-header archive/restore action. Allowed values are
+// enforced by the existing CHECK constraint ('active' | 'archived').
+func (q *Queries) UpdateChatSessionStatus(ctx context.Context, arg UpdateChatSessionStatusParams) (ChatSession, error) {
+	row := q.db.QueryRow(ctx, updateChatSessionStatus, arg.ID, arg.Status)
+	var i ChatSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.CreatorID,
+		&i.Title,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnreadSince,
+		&i.RuntimeID,
+	)
+	return i, err
+}
+
 const updateChatSessionTitle = `-- name: UpdateChatSessionTitle :one
 UPDATE chat_session SET title = $2, updated_at = now()
 WHERE id = $1

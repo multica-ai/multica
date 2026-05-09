@@ -662,6 +662,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
 					r.Delete("/", h.DeleteChatSession)
+					// CEREBRO-PATCH(chat-session-actions-routes): JEH-799 chat-session header.
+					r.Patch("/", h.UpdateChatSession)
+					r.Post("/convert-to-issue", h.ConvertChatSessionToIssue)
 					r.Post("/messages", h.SendChatMessage)
 					r.Get("/messages", h.ListChatMessages)
 					r.Get("/pending-task", h.GetPendingChatTask)

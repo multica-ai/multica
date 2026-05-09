@@ -33,6 +33,7 @@ const { SESSION_ID, RUNNING_TASK_ID, sendChatMessage } = vi.hoisted(() => ({
 
 vi.mock("@multica/cerebro-chat/views", () => ({
   ChatStatusLine: () => <div data-testid="chat-status-line" />,
+  ChatSessionHeader: () => <div data-testid="chat-session-header" />,
   getToolSummary: () => null,
 }));
 

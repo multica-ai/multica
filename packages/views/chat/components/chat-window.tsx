@@ -38,7 +38,7 @@ import { useCreateChatSession, useMarkChatSessionRead } from "@multica/core/chat
 import { useChatStore } from "@multica/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 // CEREBRO-PATCH(chat-window-cerebro): import from cerebro-chat after Phase 6 relocation
-import { ChatStatusLine } from "@multica/cerebro-chat/views";
+import { ChatStatusLine, ChatSessionHeader } from "@multica/cerebro-chat/views";
 import { ChatInput } from "./chat-input";
 import { ChatSessionHistory } from "./chat-session-history";
 import {
@@ -502,6 +502,8 @@ export function ChatWindow() {
         <ChatSessionHistory />
       ) : (
         <>
+          {/* CEREBRO-PATCH(chat-session-header): JEH-799 — session header (rename/archive/convert). */}
+          <ChatSessionHeader session={currentSession ?? null} />
           {/* Messages / skeleton / empty state */}
           {showSkeleton ? (
             <ChatMessageSkeleton />

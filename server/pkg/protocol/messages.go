@@ -94,6 +94,15 @@ type ChatSessionDeletedPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 }
 
+// CEREBRO-PATCH(chat-session-updated-event): JEH-799.
+// ChatSessionUpdatedPayload is broadcast when a chat session's title or status
+// changes (header rename / archive / restore).
+type ChatSessionUpdatedPayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+	Title         string `json:"title"`
+	Status        string `json:"status"`
+}
+
 // DaemonHeartbeatRequestPayload is sent from daemon to server over WebSocket
 // to update last_seen_at and pull pending actions for a single runtime.
 // Mirrors the body of POST /api/daemon/heartbeat so both transports share
