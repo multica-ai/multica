@@ -130,7 +130,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	qtx := s.Queries.WithTx(tx)
 
 	title := s.interpolateTemplate(ap)
-	description := s.buildIssueDescription(ap)
+	description := s.buildIssueDescription(ap, *run)
 
 	duplicate, foundDuplicate, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, ap.WorkspaceID, pgtype.UUID{}, pgtype.UUID{}, title, false)
 	if err != nil {
@@ -647,12 +647,57 @@ func autopilotRunDurationMS(run db.AutopilotRun) int64 {
 
 // buildIssueDescription appends an autopilot system instruction to the
 // user-provided description, asking the agent to rename the issue after
-// it understands the actual work.
-func (s *AutopilotService) buildIssueDescription(ap db.Autopilot) pgtype.Text {
+// it understands the actual work. For webhook-sourced runs, also appends
+// a payload section so the agent has the event context inline (otherwise
+// the agent only sees the issue body, never the run's trigger_payload).
+func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.AutopilotRun) pgtype.Text {
 	now := time.Now().UTC().Format("2006-01-02 15:04 UTC")
-	note := fmt.Sprintf("\n\n---\n*Autopilot run triggered at %s. After starting work, rename this issue to accurately reflect what you are doing.*", now)
-	base := ap.Description.String
-	return pgtype.Text{String: base + note, Valid: true}
+	var b strings.Builder
+	b.WriteString(ap.Description.String)
+	b.WriteString("\n\n---\n*Autopilot run triggered at ")
+	b.WriteString(now)
+	b.WriteString(". After starting work, rename this issue to accurately reflect what you are doing.*")
+
+	if run.Source == "webhook" && len(run.TriggerPayload) > 0 {
+		event := "webhook.received"
+		var payloadJSON []byte
+		var env struct {
+			Event        string          `json:"event"`
+			EventPayload json.RawMessage `json:"eventPayload"`
+		}
+		if err := json.Unmarshal(run.TriggerPayload, &env); err == nil {
+			if env.Event != "" {
+				event = env.Event
+			}
+			if len(env.EventPayload) > 0 {
+				if pretty, err := prettifyJSON(env.EventPayload); err == nil {
+					payloadJSON = pretty
+				}
+			}
+		}
+		if len(payloadJSON) == 0 {
+			if pretty, err := prettifyJSON(run.TriggerPayload); err == nil {
+				payloadJSON = pretty
+			} else {
+				payloadJSON = run.TriggerPayload
+			}
+		}
+		b.WriteString("\n\nWebhook event: ")
+		b.WriteString(event)
+		b.WriteString("\n\nWebhook payload:\n```json\n")
+		b.Write(payloadJSON)
+		b.WriteString("\n```")
+	}
+
+	return pgtype.Text{String: b.String(), Valid: true}
+}
+
+func prettifyJSON(raw []byte) ([]byte, error) {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, err
+	}
+	return json.MarshalIndent(v, "", "  ")
 }
 
 // interpolateTemplate replaces {{date}} in the issue title template.

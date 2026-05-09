@@ -370,8 +370,7 @@ func TestRotateWebhookToken_ReplacesOldToken(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", fmt.Sprintf("/api/autopilots/%s/triggers/%s/rotate-webhook-token", apID, trig.ID), nil)
-	req = withURLParam(req, "id", apID)
-	req = withURLParam(req, "triggerId", trig.ID)
+	req = withURLParams(req, "id", apID, "triggerId", trig.ID)
 	testHandler.RotateAutopilotTriggerWebhookToken(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("rotate: expected 200, got %d body=%s", w.Code, w.Body.String())
