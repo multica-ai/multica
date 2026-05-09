@@ -282,6 +282,111 @@ func TestListTimeline_MergedCommentAndActivity(t *testing.T) {
 	}
 }
 
+// TestListTimeline_HasMoreBefore_MixedCounts verifies that HasMoreBefore is
+// true when comments AND activities each individually stay below the page
+// limit but their combined count exceeds it. The old code checked
+// len(comments)>=limit || len(activities)>=limit which produced a false
+// negative in this scenario.
+func TestListTimeline_HasMoreBefore_MixedCounts(t *testing.T) {
+	issueID := createIssueForTimeline(t, "Mixed count has_more test")
+	// Use limit=10 so we can trigger the bug with a small dataset.
+	// Seed 7 comments + 7 activities = 14 entries > limit(10).
+	// Neither individual count (7) reaches the limit, but the combined pool
+	// exceeds it — the page must report has_more_before=true.
+	seedTimelineEntries(t, issueID, 7, 7)
+
+	resp, code := fetchTimeline(t, issueID, "limit=10")
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	if len(resp.Entries) != 10 {
+		t.Fatalf("expected 10 entries, got %d", len(resp.Entries))
+	}
+	if !resp.HasMoreBefore {
+		t.Fatalf("has_more_before must be true: 14 total > limit 10, but neither source alone reached 10")
+	}
+}
+
+// TestListTimeline_Around_HasMore_MixedCounts is the inbox-path regression
+// test. It seeds an issue with many comments and activities around a central
+// anchor. Neither the comments nor the activities count alone reaches the
+// half-window limit, but their combined count exceeds it for both the "before"
+// and "after" halves. The old listTimelineAround checked per-source counts
+// independently and returned false negatives, hiding the "show older / newer"
+// buttons and leaving entries unreachable.
+func TestListTimeline_Around_HasMore_MixedCounts(t *testing.T) {
+	issueID := createIssueForTimeline(t, "Around mixed count test")
+	ctx := context.Background()
+	// Use limit=10 → half = 5. We want 4 comments + 4 activities on each side
+	// of the anchor (8 per side > half 5). Neither source alone hits 5, but
+	// the combined pool does.
+	base := time.Now().UTC().Add(-60 * time.Minute)
+
+	// Plant 4 older comments and 4 older activities (before anchor).
+	for i := 0; i < 4; i++ {
+		ts := base.Add(time.Duration(i) * time.Minute)
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at, updated_at)
+			VALUES ($1, $2, 'member', $3, $4, 'comment', $5, $5)
+		`, issueID, testWorkspaceID, testUserID, fmt.Sprintf("old-comment-%d", i), ts); err != nil {
+			t.Fatalf("seed old comment: %v", err)
+		}
+		ts2 := base.Add(time.Duration(i)*time.Minute + 30*time.Second)
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO activity_log (workspace_id, issue_id, actor_type, actor_id, action, details, created_at)
+			VALUES ($1, $2, 'member', $3, 'status_changed', '{"from":"todo","to":"in_progress"}'::jsonb, $4)
+		`, testWorkspaceID, issueID, testUserID, ts2); err != nil {
+			t.Fatalf("seed old activity: %v", err)
+		}
+	}
+
+	// Anchor comment at t=0 relative to the older entries.
+	anchorTS := base.Add(10 * time.Minute)
+	var anchorID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at, updated_at)
+		VALUES ($1, $2, 'member', $3, 'anchor', 'comment', $4, $4)
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID, anchorTS).Scan(&anchorID); err != nil {
+		t.Fatalf("seed anchor: %v", err)
+	}
+
+	// Plant 4 newer comments and 4 newer activities (after anchor).
+	for i := 0; i < 4; i++ {
+		ts := anchorTS.Add(time.Duration(i+1) * time.Minute)
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at, updated_at)
+			VALUES ($1, $2, 'member', $3, $4, 'comment', $5, $5)
+		`, issueID, testWorkspaceID, testUserID, fmt.Sprintf("new-comment-%d", i), ts); err != nil {
+			t.Fatalf("seed new comment: %v", err)
+		}
+		ts2 := anchorTS.Add(time.Duration(i+1)*time.Minute + 30*time.Second)
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO activity_log (workspace_id, issue_id, actor_type, actor_id, action, details, created_at)
+			VALUES ($1, $2, 'member', $3, 'status_changed', '{"from":"todo","to":"in_progress"}'::jsonb, $4)
+		`, testWorkspaceID, issueID, testUserID, ts2); err != nil {
+			t.Fatalf("seed new activity: %v", err)
+		}
+	}
+
+	resp, code := fetchTimeline(t, issueID, "around="+anchorID+"&limit=10")
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", code)
+	}
+	if resp.TargetIndex == nil {
+		t.Fatalf("expected target_index in around mode")
+	}
+	if len(resp.Entries) == 0 || resp.Entries[*resp.TargetIndex].ID != anchorID {
+		t.Fatalf("anchor not at target_index")
+	}
+	if !resp.HasMoreBefore {
+		t.Fatalf("has_more_before must be true: 8 older entries > half-limit 5, but neither source alone hits 5")
+	}
+	if !resp.HasMoreAfter {
+		t.Fatalf("has_more_after must be true: 8 newer entries > half-limit 5, but neither source alone hits 5")
+	}
+}
+
 func TestUpdateCommentPermission_NonAuthorForbidden(t *testing.T) {
 	ctx := context.Background()
 

@@ -177,9 +177,12 @@ func (h *Handler) listTimelineLatest(w http.ResponseWriter, r *http.Request, iss
 
 	entries := h.mergeTimelineDesc(r, comments, activities, limit)
 	resp := TimelineResponse{Entries: entries}
-	// has_more_before: the page is full → there are likely more older. If the
-	// page is partial it means we hit the bottom of one or both tables.
-	resp.HasMoreBefore = len(entries) >= limit && (len(comments) >= limit || len(activities) >= limit)
+	// has_more_before: the merged page is full, meaning the combined pool had
+	// at least `limit` entries and the merge may have truncated some. Using
+	// only `len(entries) >= limit` (rather than also requiring one source to
+	// hit its individual limit) avoids a false-negative when both comments and
+	// activities are plentiful but neither alone reaches `limit`.
+	resp.HasMoreBefore = len(entries) >= limit
 	if resp.HasMoreBefore && len(entries) > 0 {
 		c := encodeTimelineCursor(entryTimestamp(entries[len(entries)-1]), entryID(entries[len(entries)-1]))
 		resp.NextCursor = &c
@@ -221,7 +224,7 @@ func (h *Handler) listTimelineBefore(w http.ResponseWriter, r *http.Request, iss
 		Entries:      entries,
 		HasMoreAfter: true, // we're paging older from a known position, so newer exists
 	}
-	resp.HasMoreBefore = len(entries) >= limit && (len(comments) >= limit || len(activities) >= limit)
+	resp.HasMoreBefore = len(entries) >= limit
 	if resp.HasMoreBefore && len(entries) > 0 {
 		c := encodeTimelineCursor(entryTimestamp(entries[len(entries)-1]), entryID(entries[len(entries)-1]))
 		resp.NextCursor = &c
@@ -262,7 +265,7 @@ func (h *Handler) listTimelineAfter(w http.ResponseWriter, r *http.Request, issu
 	// reverse to DESC for the response.
 	entries := h.mergeTimelineAscThenReverse(r, comments, activities, limit)
 	resp := TimelineResponse{Entries: entries, HasMoreBefore: true}
-	resp.HasMoreAfter = len(entries) >= limit && (len(comments) >= limit || len(activities) >= limit)
+	resp.HasMoreAfter = len(entries) >= limit
 	if resp.HasMoreAfter && len(entries) > 0 {
 		c := encodeTimelineCursor(entryTimestamp(entries[0]), entryID(entries[0]))
 		resp.PrevCursor = &c
@@ -369,9 +372,17 @@ func (h *Handler) listTimelineAround(w http.ResponseWriter, r *http.Request, iss
 	targetIdx := len(newerEntries)
 
 	resp := TimelineResponse{
-		Entries:       entries,
-		HasMoreBefore: len(olderComments) >= beforeLimit || len(olderActivities) >= beforeLimit,
-		HasMoreAfter:  len(newerComments) >= afterLimit || len(newerActivities) >= afterLimit,
+		Entries: entries,
+		// HasMoreBefore/HasMoreAfter: use the merged-half size rather than the
+		// individual source counts. The old check (len(olderComments) >= beforeLimit
+		// || len(olderActivities) >= beforeLimit) produced false negatives when
+		// both comment and activity counts were below the half-limit but their
+		// combined total exceeded it — causing the merged half to be truncated
+		// silently. Checking the merged result length is exact: if it equals the
+		// requested half-limit, the combined pool had at least that many entries
+		// and may have more beyond what was fetched.
+		HasMoreBefore: len(olderEntries) >= beforeLimit,
+		HasMoreAfter:  len(newerEntries) >= afterLimit,
 		TargetIndex:   &targetIdx,
 	}
 	if resp.HasMoreBefore {
