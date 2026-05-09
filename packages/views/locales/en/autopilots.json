@@ -187,8 +187,12 @@
     "trigger_kind_schedule": "Schedule",
     "trigger_kind_webhook": "Webhook",
     "section_webhook": "Webhook",
-    "webhook_help_create": "Multica will generate a webhook URL after this autopilot is created. POST any JSON to that URL to fire it. You'll find the URL on the autopilot's detail page.",
+    "webhook_help_create": "Multica will generate a webhook URL after this autopilot is created. POST any JSON to that URL to fire it.",
     "webhook_help_edit": "This autopilot is fired by webhook. Manage the URL (copy / rotate) on the autopilot's detail page.",
+    "webhook_created_title": "Webhook autopilot ready",
+    "webhook_created_description": "POST any JSON to the URL below and the autopilot will fire. Copy it now — you can also find and rotate it on the autopilot's detail page.",
+    "webhook_created_warning": "Treat this URL like a password. Anyone who has it can trigger the autopilot.",
+    "webhook_created_done": "Done",
     "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
     "next_run_label": "Next run:",
     "output_modes": {

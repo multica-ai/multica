@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Copy,
   FilePlus2,
   Maximize2,
   Minimize2,
@@ -43,6 +44,8 @@ import {
   useUpdateAutopilot,
   useUpdateAutopilotTrigger,
 } from "@multica/core/autopilots/mutations";
+import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
+import { api } from "@multica/core/api";
 import type {
   AutopilotExecutionMode,
   AutopilotTrigger,
@@ -303,6 +306,12 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const updateTrigger = useUpdateAutopilotTrigger();
   const [submitting, setSubmitting] = useState(false);
 
+  // After a successful webhook-kind create, we don't close the dialog —
+  // we swap to a confirmation state showing the freshly minted URL with
+  // copy / done affordances. This avoids the "now go find your autopilot
+  // and click into it to grab the URL" friction.
+  const [createdWebhookTrigger, setCreatedWebhookTrigger] = useState<AutopilotTrigger | null>(null);
+
   const canSubmit =
     title.trim().length > 0 && assigneeId.length > 0 && !submitting;
 
@@ -318,9 +327,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           execution_mode: executionMode,
         });
         let triggerOk = true;
+        let webhookTrigger: AutopilotTrigger | null = null;
         try {
           if (triggerKind === "webhook") {
-            await createTrigger.mutateAsync({
+            webhookTrigger = await createTrigger.mutateAsync({
               autopilotId: autopilot.id,
               kind: "webhook",
             });
@@ -334,6 +344,13 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           }
         } catch {
           triggerOk = false;
+        }
+        if (triggerKind === "webhook" && webhookTrigger) {
+          // Stay in the dialog and surface the URL inline so the user
+          // can copy it without first navigating to the detail page.
+          setCreatedWebhookTrigger(webhookTrigger);
+          toast.success(t(($) => $.dialog.toast_created));
+          return;
         }
         onOpenChange(false);
         if (triggerOk) toast.success(t(($) => $.dialog.toast_created));
@@ -460,6 +477,16 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           </div>
         </div>
 
+        {createdWebhookTrigger ? (
+          <WebhookCreatedPanel
+            trigger={createdWebhookTrigger}
+            onClose={() => {
+              setCreatedWebhookTrigger(null);
+              onOpenChange(false);
+            }}
+          />
+        ) : (
+          <>
         {/* Body: two columns (stacks on narrow screens via flex-wrap at container level) */}
         <div
           key={contentKey}
@@ -553,6 +580,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             </Button>
           </div>
         </div>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -886,5 +915,96 @@ function WebhookHelpSection({ isCreate }: { isCreate: boolean }) {
           : t(($) => $.dialog.webhook_help_edit)}
       </p>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Post-create state for webhook autopilots: shows the freshly minted URL
+// inline so the user can copy it without leaving the dialog.
+// ---------------------------------------------------------------------------
+
+function WebhookCreatedPanel({
+  trigger,
+  onClose,
+}: {
+  trigger: AutopilotTrigger;
+  onClose: () => void;
+}) {
+  const { t } = useT("autopilots");
+  const [copied, setCopied] = useState(false);
+
+  // Same URL composition the trigger row uses: prefer the server-provided
+  // webhook_url, fall back to apiBaseUrl + webhook_path, then origin + path.
+  const url =
+    buildAutopilotWebhookUrl({
+      trigger,
+      apiBaseUrl: api.getBaseUrl(),
+      currentOrigin: typeof window !== "undefined" ? window.location.origin : undefined,
+    }) ?? "";
+
+  const handleCopy = async () => {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      toast.success(t(($) => $.trigger_row.url_copied));
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error(t(($) => $.trigger_row.url_copy_failed));
+    }
+  };
+
+  return (
+    <>
+      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-10">
+        <div className="mx-auto max-w-xl space-y-5">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex size-9 items-center justify-center rounded-full bg-primary/15 text-primary">
+              <Webhook className="size-4" />
+            </span>
+            <h2 className="text-lg font-semibold tracking-tight">
+              {t(($) => $.dialog.webhook_created_title)}
+            </h2>
+          </div>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {t(($) => $.dialog.webhook_created_description)}
+          </p>
+
+          <div>
+            <div className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase mb-2">
+              {t(($) => $.trigger_row.webhook_url_label)}
+            </div>
+            <div className="flex items-stretch gap-1.5">
+              <code className="flex-1 min-w-0 truncate rounded-md border bg-muted px-3 py-2 text-xs font-mono text-foreground">
+                {url}
+              </code>
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-9 w-9 shrink-0"
+                onClick={handleCopy}
+                title={t(($) => $.trigger_row.copy_url)}
+              >
+                {copied ? (
+                  <Check className="size-4 text-emerald-500" />
+                ) : (
+                  <Copy className="size-4 text-muted-foreground" />
+                )}
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400 leading-relaxed">
+            {t(($) => $.dialog.webhook_created_warning)}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-end gap-3 px-5 py-3 border-t shrink-0 bg-background">
+        <Button size="sm" onClick={onClose}>
+          {t(($) => $.dialog.webhook_created_done)}
+        </Button>
+      </div>
+    </>
   );
 }
