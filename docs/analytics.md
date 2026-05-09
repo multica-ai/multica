@@ -188,7 +188,10 @@ under a single "anonymous" person.
 
 Fires when a runtime is first registered in an online/ready state. This is the
 activation-funnel step that should replace treating `runtime_registered` as
-proof of readiness.
+proof of readiness. The backend emits this only on the INSERT path for a new
+`agent_runtime` row; ordinary daemon reconnects update the existing row and do
+not emit another `runtime_ready`. Dashboard funnels should still count
+distinct `runtime_id`.
 
 | Property | Type | Description |
 |---|---|---|
@@ -286,7 +289,7 @@ Fires from `autopilot_run` lifecycle changes. `source` is always
 | `trigger_source` | string | `manual`, `schedule`, `webhook`, or `api`. |
 | `duration_ms` | int64 | Terminal events only. |
 | `failure_reason` | string | Failed events only. |
-| `error_type` | string | Failed events only; stable coarse classifier such as `configuration`, `issue_deleted`, `dispatch_error`, `task_error`, or `autopilot_error`. |
+| `error_type` | string | Failed events only; stable coarse classifier such as `configuration`, `issue_terminal`, `dispatch_error`, `task_error`, or `autopilot_error`. |
 | `will_retry` | bool | Failed events only; currently `false` because autopilot retry cadence is owned by triggers/schedules. |
 
 ### `issue_executed`

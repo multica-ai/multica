@@ -657,8 +657,8 @@ type UpsertAgentRuntimeRow struct {
 }
 
 // (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
-// that updated an existing row (false). Analytics reads this to fire the
-// runtime_registered event only on first-time registration.
+// that updated an existing row (false). Analytics reads this to fire
+// runtime_registered/runtime_ready only on first-time registration.
 func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntimeParams) (UpsertAgentRuntimeRow, error) {
 	row := q.db.QueryRow(ctx, upsertAgentRuntime,
 		arg.WorkspaceID,

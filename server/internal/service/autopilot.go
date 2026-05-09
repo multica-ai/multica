@@ -417,8 +417,8 @@ func autopilotErrorType(reason string) string {
 	switch {
 	case strings.Contains(reason, "unknown execution_mode"):
 		return "configuration"
-	case strings.Contains(reason, "linked issue") && strings.Contains(reason, "deleted"):
-		return "issue_deleted"
+	case strings.HasPrefix(reason, "issue "):
+		return "issue_terminal"
 	case strings.Contains(reason, "create issue"), strings.Contains(reason, "enqueue task"), strings.Contains(reason, "dispatch"):
 		return "dispatch_error"
 	case strings.HasPrefix(reason, "task "):

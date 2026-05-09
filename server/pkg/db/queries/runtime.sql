@@ -13,8 +13,8 @@ WHERE id = $1 AND workspace_id = $2;
 
 -- name: UpsertAgentRuntime :one
 -- (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
--- that updated an existing row (false). Analytics reads this to fire the
--- runtime_registered event only on first-time registration.
+-- that updated an existing row (false). Analytics reads this to fire
+-- runtime_registered/runtime_ready only on first-time registration.
 INSERT INTO agent_runtime (
     workspace_id,
     daemon_id,
