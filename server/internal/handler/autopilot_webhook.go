@@ -272,7 +272,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 
 	envelope, err := normalizeWebhookPayload(body, r.Header)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 

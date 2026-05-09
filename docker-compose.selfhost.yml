@@ -68,6 +68,14 @@ services:
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      # Public URL the API is reachable at from the open internet, no
+      # trailing slash. Used to mint absolute webhook URLs for autopilot
+      # webhook triggers. Leave unset behind a same-origin reverse proxy
+      # (e.g. plain localhost dev); the frontend will compose the URL
+      # from window.origin + webhook_path in that case. Headers are
+      # intentionally NOT used to derive this value, to avoid Host /
+      # X-Forwarded-Host spoofing on misconfigured proxies.
+      MULTICA_PUBLIC_URL: ${MULTICA_PUBLIC_URL:-}
     restart: unless-stopped
 
   frontend:
