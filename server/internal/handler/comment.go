@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -59,6 +58,13 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 	}
 }
 
+// commentHardCap bounds the comments returned per issue. Sized as a defensive
+// safety net rather than a UX paging window: prod p99 is ~30 comments and
+// the all-time max observed is ~1.1k, so 2000 leaves ~2x headroom while still
+// preventing a runaway response if some user manages to accumulate a wild
+// number of rows on a single issue.
+const commentHardCap = 2000
+
 func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -66,31 +72,12 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse optional pagination query params.
-	q := r.URL.Query()
-	var limit, offset int32
-	var hasPagination bool
-	if v := q.Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			writeError(w, http.StatusBadRequest, "invalid limit parameter")
-			return
-		}
-		limit = int32(n)
-		hasPagination = true
-	}
-	if v := q.Get("offset"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 0 {
-			writeError(w, http.StatusBadRequest, "invalid offset parameter")
-			return
-		}
-		offset = int32(n)
-		hasPagination = true
-	}
-
+	// Only `since` is honoured — used by the CLI's `--since` agent-polling
+	// flow to fetch incremental comments. The previous limit/offset cursor
+	// was ripped out (#1929): time-based pagination breaks reply threads,
+	// and at the actual data sizes there is no win from paging.
 	var sinceTime pgtype.Timestamptz
-	if v := q.Get("since"); v != "" {
+	if v := r.URL.Query().Get("since"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid since parameter; expected RFC3339 format")
@@ -101,39 +88,18 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 
 	var comments []db.Comment
 	var err error
-
-	// When neither limit nor offset is specified, default to the most recent
-	// 50 comments. The previous behavior returned every comment unbounded,
-	// which let an agent or browser call accidentally pull thousands of rows
-	// (see issue #1968). Callers that want everything must opt in with a
-	// large explicit --limit; a 100-cap on the server side stays in place via
-	// the timeline endpoint, but this endpoint is used by humans + the CLI
-	// where the cap is the documented 50 default.
-	if !hasPagination {
-		limit = 50
-		hasPagination = true
-	}
-	switch {
-	case sinceTime.Valid:
-		if limit == 0 {
-			limit = 50
-		}
-		comments, err = h.Queries.ListCommentsSincePaginated(r.Context(), db.ListCommentsSincePaginatedParams{
+	if sinceTime.Valid {
+		comments, err = h.Queries.ListCommentsSinceForIssue(r.Context(), db.ListCommentsSinceForIssueParams{
 			IssueID:     issue.ID,
 			WorkspaceID: issue.WorkspaceID,
 			CreatedAt:   sinceTime,
-			Limit:       limit,
-			Offset:      offset,
+			Limit:       commentHardCap,
 		})
-	default:
-		if limit == 0 {
-			limit = 50
-		}
-		comments, err = h.Queries.ListCommentsPaginated(r.Context(), db.ListCommentsPaginatedParams{
+	} else {
+		comments, err = h.Queries.ListCommentsForIssue(r.Context(), db.ListCommentsForIssueParams{
 			IssueID:     issue.ID,
 			WorkspaceID: issue.WorkspaceID,
-			Limit:       limit,
-			Offset:      offset,
+			Limit:       commentHardCap,
 		})
 	}
 	if err != nil {
@@ -152,17 +118,6 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	for i, c := range comments {
 		cid := uuidToString(c.ID)
 		resp[i] = commentToResponse(c, grouped[cid], groupedAtt[cid])
-	}
-
-	// Include total count in response header when paginating.
-	if hasPagination {
-		total, countErr := h.Queries.CountComments(r.Context(), db.CountCommentsParams{
-			IssueID:     issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-		})
-		if countErr == nil {
-			w.Header().Set("X-Total-Count", strconv.FormatInt(total, 10))
-		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -743,4 +698,3 @@ func (h *Handler) UnresolveComment(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
-

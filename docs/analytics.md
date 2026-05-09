@@ -89,7 +89,7 @@ Every event is assigned to one dashboard category:
 
 | Category | Events |
 |---|---|
-| `core_loop` | `workspace_created`, `runtime_registered`, `runtime_ready`, `runtime_failed`, `runtime_offline`, `agent_created`, `issue_created`, `chat_message_sent`, `agent_task_queued`, `agent_task_started`, `agent_task_completed`, `agent_task_failed`, `agent_task_cancelled`, `autopilot_run_started`, `autopilot_run_completed`, `autopilot_run_failed` |
+| `core_loop` | `workspace_created`, `runtime_registered`, `runtime_ready`, `runtime_failed`, `runtime_offline`, `agent_created`, `issue_created`, `chat_message_sent`, `agent_task_queued`, `agent_task_dispatched`, `agent_task_started`, `agent_task_completed`, `agent_task_failed`, `agent_task_cancelled`, `autopilot_run_started`, `autopilot_run_completed`, `autopilot_run_failed` |
 | `onboarding_support` | `onboarding_started`, `onboarding_questionnaire_submitted`, `onboarding_completed`, `onboarding_runtime_path_selected`, `onboarding_runtime_detected`, `starter_content_decided` |
 | `acquisition` | `signup`, `download_intent_expressed`, `download_page_viewed`, `download_initiated`, `cloud_waitlist_joined` |
 | `ops_feedback` | `feedback_opened`, `feedback_submitted` |
@@ -247,10 +247,14 @@ is queued.
 | `agent_id` | string (UUID) | Chat agent. |
 | `source` | string | Always `chat`. |
 
-### `agent_task_queued` / `agent_task_started` / `agent_task_completed`
+### `agent_task_queued` / `agent_task_dispatched` / `agent_task_started` / `agent_task_completed`
 
 Canonical task lifecycle events emitted from `agent_task_queue` state
-transitions. These replace `issue_executed` for core loop success metrics.
+transitions. `agent_task_dispatched` fires when the backend claims a queued
+task for a runtime, before the daemon marks it running with
+`agent_task_started`. These events replace `issue_executed` for core loop
+success metrics and allow the activation funnel to split queue backlog from
+claim/start handoff.
 
 | Property | Type | Description |
 |---|---|---|

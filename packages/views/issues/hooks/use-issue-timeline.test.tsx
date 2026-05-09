@@ -47,49 +47,28 @@ vi.mock("@multica/core/issues/mutations", () => ({
   }),
 }));
 
-// Spy on issueTimelineInfiniteOptions so tests can assert which `around` value
-// the hook actually fed to useInfiniteQuery on each render.
-const queriesMock = vi.hoisted(() => ({
-  issueTimelineInfiniteOptions: vi.fn(
-    (id: string, around?: string | null) => ({
-      queryKey: around
-        ? ["issues", "timeline", id, "around", around]
-        : ["issues", "timeline", id],
-      queryFn: () => Promise.resolve({}),
-      initialPageParam: { mode: "latest" as const },
-      getNextPageParam: () => undefined,
-      getPreviousPageParam: () => undefined,
-    }),
-  ),
-}));
-
 vi.mock("@multica/core/issues/queries", () => ({
-  issueTimelineInfiniteOptions: queriesMock.issueTimelineInfiniteOptions,
+  issueTimelineOptions: (id: string) => ({
+    queryKey: ["issues", "timeline", id],
+    queryFn: () => Promise.resolve([]),
+  }),
   issueKeys: {
-    timeline: (id: string, around?: string | null) =>
-      around
-        ? ["issues", "timeline", id, "around", around]
-        : ["issues", "timeline", id],
+    timeline: (id: string) => ["issues", "timeline", id],
   },
 }));
 
-// Hoisted state controllable from tests — represents what useInfiniteQuery
-// would return for the current render.
+// Hoisted state controllable from tests — represents what useQuery would
+// return for the current render.
 const queryState = vi.hoisted(() => ({
-  // by default: at-latest with one page that has no newer entries.
   data: undefined as unknown,
   isLoading: false,
 }));
 
-function emptyPage() {
-  return {
-    entries: [],
-    next_cursor: null,
-    prev_cursor: null,
-    has_more_before: false,
-    has_more_after: false,
-  };
-}
+// Track the latest cache-update fn the hook hands to setQueryData so tests
+// can assert what would have been written.
+const cacheUpdates = vi.hoisted(() => ({
+  last: null as unknown,
+}));
 
 vi.mock("@tanstack/react-query", async () => {
   const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
@@ -97,22 +76,18 @@ vi.mock("@tanstack/react-query", async () => {
   );
   return {
     ...actual,
-    useInfiniteQuery: () => ({
+    useQuery: () => ({
       data: queryState.data,
       isLoading: queryState.isLoading,
-      fetchNextPage: vi.fn(),
-      fetchPreviousPage: vi.fn(),
-      hasNextPage: false,
-      hasPreviousPage: false,
-      isFetchingNextPage: false,
-      isFetchingPreviousPage: false,
     }),
     useQueryClient: () => ({
       invalidateQueries: vi.fn(),
-      setQueryData: vi.fn(),
-      setQueriesData: vi.fn(),
+      setQueryData: vi.fn((_key: unknown, updater: unknown) => {
+        cacheUpdates.last = typeof updater === "function"
+          ? (updater as (old: unknown) => unknown)(queryState.data)
+          : updater;
+      }),
       getQueryData: vi.fn(),
-      getQueriesData: vi.fn(() => []),
       cancelQueries: vi.fn(),
     }),
     useMutationState: () => [],
@@ -135,12 +110,9 @@ import { useIssueTimeline } from "./use-issue-timeline";
 describe("useIssueTimeline", () => {
   beforeEach(() => {
     wsHandlers.clear();
-    queriesMock.issueTimelineInfiniteOptions.mockClear();
-    queryState.data = {
-      pages: [{ ...emptyPage(), has_more_after: false }],
-      pageParams: [{ mode: "latest" }],
-    };
+    queryState.data = [];
     queryState.isLoading = false;
+    cacheUpdates.last = null;
   });
 
   // CommentCard is wrapped in React.memo (perf fix for long timelines, see
@@ -170,84 +142,19 @@ describe("useIssueTimeline", () => {
     expect(result.current.submitComment).toBe(first.submitComment);
   });
 
-  it("flattens DESC pages into ASC timeline order", () => {
-    queryState.data = {
-      pages: [
-        // Latest page: DESC.
-        {
-          ...emptyPage(),
-          entries: [
-            { type: "comment", id: "c3", actor_type: "member", actor_id: "u", created_at: "2026-05-06T03:00:00Z" },
-            { type: "comment", id: "c2", actor_type: "member", actor_id: "u", created_at: "2026-05-06T02:00:00Z" },
-          ],
-          has_more_after: false,
-        },
-        // Older page: also DESC.
-        {
-          ...emptyPage(),
-          entries: [
-            { type: "comment", id: "c1", actor_type: "member", actor_id: "u", created_at: "2026-05-06T01:00:00Z" },
-          ],
-        },
-      ],
-      pageParams: [{ mode: "latest" }, { mode: "before", cursor: "x" }],
-    };
+  it("returns the timeline as a flat array directly from the query cache", () => {
+    queryState.data = [
+      { type: "comment", id: "c1", actor_type: "member", actor_id: "u", created_at: "2026-05-06T01:00:00Z" },
+      { type: "comment", id: "c2", actor_type: "member", actor_id: "u", created_at: "2026-05-06T02:00:00Z" },
+      { type: "comment", id: "c3", actor_type: "member", actor_id: "u", created_at: "2026-05-06T03:00:00Z" },
+    ];
     const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
-    const ids = result.current.timeline.map((e) => e.id);
-    // ASC: oldest at top, newest at bottom.
-    expect(ids).toEqual(["c1", "c2", "c3"]);
+    expect(result.current.timeline.map((e) => e.id)).toEqual(["c1", "c2", "c3"]);
   });
 
-  it("reports isAtLatest=true when first page has no newer entries", () => {
-    queryState.data = {
-      pages: [{ ...emptyPage(), has_more_after: false }],
-      pageParams: [{ mode: "latest" }],
-    };
-    const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
-    expect(result.current.isAtLatest).toBe(true);
-    expect(result.current.newEntriesBelowCount).toBe(0);
-  });
-
-  it("bumps newEntriesBelowCount when comment:created arrives while not at latest", () => {
-    // Around-mode page: the user is reading older history, so has_more_after=true.
-    queryState.data = {
-      pages: [{ ...emptyPage(), has_more_after: true }],
-      pageParams: [{ mode: "around", id: "anchor" }],
-    };
-    const { result } = renderHook(() =>
-      useIssueTimeline("issue-1", "user-1", { around: "anchor" }),
-    );
-    expect(result.current.isAtLatest).toBe(false);
-    expect(result.current.newEntriesBelowCount).toBe(0);
-
-    const handler = wsHandlers.get("comment:created");
-    expect(handler).toBeDefined();
-    act(() => {
-      handler!({
-        comment: {
-          id: "new-c",
-          issue_id: "issue-1",
-          author_type: "member",
-          author_id: "u",
-          content: "hi",
-          parent_id: null,
-          created_at: "2026-05-06T05:00:00Z",
-          updated_at: "2026-05-06T05:00:00Z",
-          type: "comment",
-          reactions: [],
-          attachments: [],
-        },
-      });
-    });
-    expect(result.current.newEntriesBelowCount).toBe(1);
-  });
-
-  it("does NOT bump newEntriesBelowCount when at-latest (entry should land in cache instead)", () => {
-    queryState.data = {
-      pages: [{ ...emptyPage(), has_more_after: false }],
-      pageParams: [{ mode: "latest" }],
-    };
-    const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+  it("comment:created appends the new entry to the cache", () => {
+    queryState.data = [];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
     const handler = wsHandlers.get("comment:created");
     act(() => {
       handler!({
@@ -266,17 +173,13 @@ describe("useIssueTimeline", () => {
         },
       });
     });
-    expect(result.current.newEntriesBelowCount).toBe(0);
+    const updated = cacheUpdates.last as Array<{ id: string }>;
+    expect(updated.map((e) => e.id)).toEqual(["new-c"]);
   });
 
   it("ignores WS events for other issues", () => {
-    queryState.data = {
-      pages: [{ ...emptyPage(), has_more_after: true }],
-      pageParams: [{ mode: "around", id: "anchor" }],
-    };
-    const { result } = renderHook(() =>
-      useIssueTimeline("issue-1", "user-1", { around: "anchor" }),
-    );
+    queryState.data = [];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
     const handler = wsHandlers.get("comment:created");
     act(() => {
       handler!({
@@ -295,65 +198,7 @@ describe("useIssueTimeline", () => {
         },
       });
     });
-    expect(result.current.newEntriesBelowCount).toBe(0);
-  });
-
-  // Regression: when the inbox split-pane is open and the user clicks a
-  // comment-notification (around=<id>) and then a notification for the SAME
-  // issue without a comment_id (around=undefined), <IssueDetail> stays
-  // mounted (keyed on issueId, see inbox-page.tsx). The hook therefore has
-  // to react to the around prop transitioning back to falsy — otherwise the
-  // around-mode cache is re-served on every subsequent click and entries
-  // outside the original window appear "lost" until a hard refresh.
-  it("syncs around state when the prop transitions back to undefined", () => {
-    const { rerender } = renderHook(
-      ({ around }: { around?: string | null }) =>
-        useIssueTimeline("issue-1", "user-1", { around }),
-      { initialProps: { around: "comment-X" as string | null | undefined } },
-    );
-
-    // First render is anchored on comment-X.
-    const firstAround = queriesMock.issueTimelineInfiniteOptions.mock.calls.at(-1)?.[1];
-    expect(firstAround).toBe("comment-X");
-
-    rerender({ around: undefined });
-
-    // After transitioning to undefined, the next call MUST use the latest
-    // (around=null) cache, not keep re-using the comment-X anchor.
-    const lastAround = queriesMock.issueTimelineInfiniteOptions.mock.calls.at(-1)?.[1];
-    expect(lastAround).toBeNull();
-  });
-
-  it("jumpToLatest clears newEntriesBelowCount", () => {
-    queryState.data = {
-      pages: [{ ...emptyPage(), has_more_after: true }],
-      pageParams: [{ mode: "around", id: "anchor" }],
-    };
-    const { result } = renderHook(() =>
-      useIssueTimeline("issue-1", "user-1", { around: "anchor" }),
-    );
-    const handler = wsHandlers.get("comment:created");
-    act(() => {
-      handler!({
-        comment: {
-          id: "n",
-          issue_id: "issue-1",
-          author_type: "member",
-          author_id: "u",
-          content: "",
-          parent_id: null,
-          created_at: "",
-          updated_at: "",
-          type: "comment",
-          reactions: [],
-          attachments: [],
-        },
-      });
-    });
-    expect(result.current.newEntriesBelowCount).toBe(1);
-    act(() => {
-      result.current.jumpToLatest();
-    });
-    expect(result.current.newEntriesBelowCount).toBe(0);
+    // setQueryData should not have been invoked for a non-matching issue.
+    expect(cacheUpdates.last).toBeNull();
   });
 });

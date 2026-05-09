@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ListIssuesResponse, TimelinePage } from "../types";
+import type { ListIssuesResponse, TimelineEntry } from "../types";
 
 // ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
@@ -66,22 +66,12 @@ const TimelineEntrySchema = z.object({
   coalesced_count: z.number().optional(),
 }).loose();
 
-export const TimelinePageSchema = z.object({
-  entries: z.array(TimelineEntrySchema).default([]),
-  next_cursor: z.string().nullable().default(null),
-  prev_cursor: z.string().nullable().default(null),
-  has_more_before: z.boolean().default(false),
-  has_more_after: z.boolean().default(false),
-  target_index: z.number().optional(),
-}).loose();
+// /timeline returns a flat array of TimelineEntry, oldest first. The
+// previously cursor-paginated wrapper was removed (#1929) — at observed data
+// sizes (p99 ~30 entries per issue) paged delivery only created bugs.
+export const TimelineEntriesSchema = z.array(TimelineEntrySchema);
 
-export const EMPTY_TIMELINE_PAGE: TimelinePage = {
-  entries: [],
-  next_cursor: null,
-  prev_cursor: null,
-  has_more_before: false,
-  has_more_after: false,
-};
+export const EMPTY_TIMELINE_ENTRIES: TimelineEntry[] = [];
 
 export const CommentSchema = z.object({
   id: z.string(),

@@ -120,3 +120,93 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 		})
 	}
 }
+
+// TestAutopilotDispatchSkipsWhenRuntimeOffline locks in the MUL-1899
+// admission gate: when the assignee agent's runtime is not online we must
+// record a `skipped` autopilot_run with a failure_reason and NOT enqueue an
+// agent_task_queue row. This is the fix for "活跃 schedule 持续给离线 local
+// agent 入队".
+func TestAutopilotDispatchSkipsWhenRuntimeOffline(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	// Spin up a dedicated runtime + agent so we can flip the runtime to
+	// offline without affecting the shared fixture used by other tests.
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+		)
+		VALUES ($1, NULL, 'Offline runtime', 'local', 'mul1899_offline_runtime', 'offline', '{}'::jsonb, '{}'::jsonb, now())
+		RETURNING id::text
+	`, parseUUID(testWorkspaceID)).Scan(&runtimeID); err != nil {
+		t.Fatalf("create offline runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'mul1899-offline-agent', '', 'local', '{}'::jsonb, $2, 'workspace', 1, $3)
+		RETURNING id::text
+	`, parseUUID(testWorkspaceID), runtimeID, parseUUID(testUserID)).Scan(&agentID); err != nil {
+		t.Fatalf("create offline agent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Offline-runtime autopilot",
+		Description:        pgtype.Text{String: "MUL-1899 admission test", Valid: true},
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "run_only",
+		IssueTitleTemplate: pgtype.Text{},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+	})
+
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if run == nil {
+		t.Fatal("expected a run, got nil")
+	}
+	if run.Status != "skipped" {
+		t.Fatalf("expected run status 'skipped', got %q", run.Status)
+	}
+	if !run.FailureReason.Valid || !strings.Contains(run.FailureReason.String, "offline") {
+		t.Fatalf("expected failure reason mentioning 'offline', got %+v", run.FailureReason)
+	}
+	if run.TaskID.Valid {
+		t.Fatalf("expected no task to be enqueued, got task_id %v", run.TaskID)
+	}
+
+	// Defensive: confirm at the DB layer that nothing landed on the queue.
+	var taskCount int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM agent_task_queue WHERE agent_id = $1`,
+		agentID,
+	).Scan(&taskCount); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if taskCount != 0 {
+		t.Fatalf("expected 0 queued tasks for offline-runtime agent, got %d", taskCount)
+	}
+}

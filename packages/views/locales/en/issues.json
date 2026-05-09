@@ -134,11 +134,7 @@
     "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent"
   },
   "timeline": {
-    "show_older": "Show older",
-    "show_newer": "Show newer",
-    "loading": "Loading...",
-    "jump_to_latest": "Jump to latest",
-    "jump_to_latest_with_count": "Jump to latest · {{count}} new"
+    "loading": "Loading..."
   },
   "activity": {
     "created": "created this issue",
@@ -214,6 +210,9 @@
     "hide_past": "Hide past runs ({{count}})",
     "cancel_task_tooltip": "Cancel task",
     "cancel_task_aria": "Cancel task",
+    "retry_task_tooltip": "Retry task",
+    "retry_task_aria": "Retry task",
+    "retry_failed": "Failed to retry task",
     "transcript_tooltip": "View transcript",
     "cancel_failed": "Failed to cancel task",
     "trigger_retry": "Retry",

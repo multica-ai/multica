@@ -43,8 +43,7 @@ import type {
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
-  TimelinePage,
-  TimelinePageParam,
+  TimelineEntry,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
@@ -92,10 +91,10 @@ import {
   ChildIssuesResponseSchema,
   CommentsListSchema,
   EMPTY_LIST_ISSUES_RESPONSE,
-  EMPTY_TIMELINE_PAGE,
+  EMPTY_TIMELINE_ENTRIES,
   ListIssuesResponseSchema,
   SubscribersListSchema,
-  TimelinePageSchema,
+  TimelineEntriesSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -443,7 +442,7 @@ export class ApiClient {
     });
   }
 
-  async quickCreateIssue(data: { agent_id: string; prompt: string }): Promise<{ task_id: string }> {
+  async quickCreateIssue(data: { agent_id: string; prompt: string; project_id?: string | null }): Promise<{ task_id: string }> {
     return this.fetch("/api/issues/quick-create", {
       method: "POST",
       body: JSON.stringify(data),
@@ -517,20 +516,11 @@ export class ApiClient {
     });
   }
 
-  async listTimeline(
-    issueId: string,
-    pageParam: TimelinePageParam = { mode: "latest" },
-    limit = 50,
-  ): Promise<TimelinePage> {
-    const params = new URLSearchParams();
-    params.set("limit", String(limit));
-    if (pageParam.mode === "before") params.set("before", pageParam.cursor);
-    else if (pageParam.mode === "after") params.set("after", pageParam.cursor);
-    else if (pageParam.mode === "around") params.set("around", pageParam.id);
+  async listTimeline(issueId: string): Promise<TimelineEntry[]> {
     const raw = await this.fetch<unknown>(
-      `/api/issues/${issueId}/timeline?${params.toString()}`,
+      `/api/issues/${issueId}/timeline`,
     );
-    return parseWithFallback(raw, TimelinePageSchema, EMPTY_TIMELINE_PAGE, {
+    return parseWithFallback(raw, TimelineEntriesSchema, EMPTY_TIMELINE_ENTRIES, {
       endpoint: "GET /api/issues/:id/timeline",
     });
   }
@@ -799,6 +789,12 @@ export class ApiClient {
 
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
+      method: "POST",
+    });
+  }
+
+  async rerunIssue(issueId: string): Promise<AgentTask> {
+    return this.fetch(`/api/issues/${issueId}/rerun`, {
       method: "POST",
     });
   }

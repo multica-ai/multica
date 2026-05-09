@@ -177,6 +177,31 @@ func TestNewTaskSlotSemaphoreReturnsStableSlotIndexes(t *testing.T) {
 	}
 }
 
+func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		provider string
+		want     bool
+	}{
+		{provider: "openclaw", want: true},
+		{provider: "hermes", want: true},
+		{provider: "kiro", want: true},
+		{provider: "kimi", want: true},
+		{provider: "codex", want: false},
+		{provider: "claude", want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Parallel()
+			if got := providerNeedsInlineSystemPrompt(tc.provider); got != tc.want {
+				t.Fatalf("providerNeedsInlineSystemPrompt(%q) = %v, want %v", tc.provider, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestBuildPromptContainsIssueID(t *testing.T) {
 	t.Parallel()
 
@@ -1139,5 +1164,147 @@ func TestDefaultArgsForProvider(t *testing.T) {
 	}
 	if got := defaultArgsForProvider(cfg, "gemini"); got != nil {
 		t.Fatalf("expected nil for unsupported provider, got %#v", got)
+	}
+}
+
+// reportTaskResultRecorder captures which terminal endpoint
+// (.../complete or .../fail) reportTaskResult hits and the body it
+// posts, so the tests can assert the disposition (success vs fail)
+// independently of the rest of handleTask.
+type reportTaskResultRecorder struct {
+	mu      sync.Mutex
+	path    string
+	method  string
+	payload map[string]any
+}
+
+func (r *reportTaskResultRecorder) handler(t *testing.T) http.HandlerFunc {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var payload map[string]any
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Errorf("decode body: %v", err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		r.mu.Lock()
+		r.path = req.URL.Path
+		r.method = req.Method
+		r.payload = payload
+		r.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
+func TestReportTaskResult_CompletedHitsCompleteEndpoint(t *testing.T) {
+	t.Parallel()
+
+	rec := &reportTaskResultRecorder{}
+	srv := httptest.NewServer(rec.handler(t))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(context.Background(), "task-1", TaskResult{
+		Status:     "completed",
+		Comment:    "all good",
+		BranchName: "agent/foo",
+		SessionID:  "ses-1",
+		WorkDir:    "/tmp/foo",
+	}, slog.Default())
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if rec.path != "/api/daemon/tasks/task-1/complete" {
+		t.Fatalf("expected /complete endpoint, got %s", rec.path)
+	}
+	if rec.payload["output"] != "all good" {
+		t.Errorf("output: got %v", rec.payload["output"])
+	}
+	if rec.payload["branch_name"] != "agent/foo" {
+		t.Errorf("branch_name: got %v", rec.payload["branch_name"])
+	}
+	if rec.payload["session_id"] != "ses-1" {
+		t.Errorf("session_id: got %v", rec.payload["session_id"])
+	}
+}
+
+// Pins the GitHub multica#1952 fail-closed behaviour: a task whose
+// agent run never produced a real result (blocked, cancelled, or any
+// future status we forget to enumerate) MUST go through FailTask, so
+// the UI never shows a green "Completed" badge for a run that didn't
+// actually do anything (e.g. provider 429 / out-of-credit).
+func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name              string
+		status            string
+		failureReasonIn   string
+		wantFailureReason string
+	}{
+		{
+			name:              "blocked with explicit reason preserves it",
+			status:            "blocked",
+			failureReasonIn:   "iteration_limit",
+			wantFailureReason: "iteration_limit",
+		},
+		{
+			name:              "blocked without reason defaults to agent_error",
+			status:            "blocked",
+			failureReasonIn:   "",
+			wantFailureReason: "agent_error",
+		},
+		{
+			name:              "cancelled defaults to cancelled reason",
+			status:            "cancelled",
+			failureReasonIn:   "",
+			wantFailureReason: "cancelled",
+		},
+		{
+			name:              "unknown status fails closed",
+			status:            "weird_new_status",
+			failureReasonIn:   "",
+			wantFailureReason: "agent_error",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &reportTaskResultRecorder{}
+			srv := httptest.NewServer(rec.handler(t))
+			t.Cleanup(srv.Close)
+
+			d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+			d.reportTaskResult(context.Background(), "task-x", TaskResult{
+				Status:        tc.status,
+				Comment:       "rate limit reached",
+				SessionID:     "ses-x",
+				WorkDir:       "/tmp/x",
+				FailureReason: tc.failureReasonIn,
+			}, slog.Default())
+
+			rec.mu.Lock()
+			defer rec.mu.Unlock()
+			if rec.path != "/api/daemon/tasks/task-x/fail" {
+				t.Fatalf("expected /fail endpoint for status=%q, got %s", tc.status, rec.path)
+			}
+			if rec.payload["error"] != "rate limit reached" {
+				t.Errorf("error body: got %v", rec.payload["error"])
+			}
+			if got := rec.payload["failure_reason"]; got != tc.wantFailureReason {
+				t.Errorf("failure_reason: got %v, want %q", got, tc.wantFailureReason)
+			}
+			if rec.payload["session_id"] != "ses-x" {
+				t.Errorf("session_id should be forwarded on failure paths so chat resume keeps working, got %v", rec.payload["session_id"])
+			}
+		})
 	}
 }

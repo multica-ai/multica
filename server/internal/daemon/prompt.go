@@ -27,7 +27,7 @@ func BuildPrompt(task Task) string {
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
-	fmt.Fprintf(&b, "If you need comment history, `multica issue comment list %s` returns the latest 50 by default — pass --limit or --since to scope older windows. Long issues can have thousands of comments; do not fetch everything blindly.\n", task.IssueID)
+	fmt.Fprintf(&b, "If you need comment history, `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). Pass `--since <RFC3339>` to fetch only comments newer than a known cursor.\n", task.IssueID)
 	return b.String()
 }
 
@@ -76,8 +76,19 @@ func buildQuickCreatePrompt(task Task) string {
 		b.WriteString("    - When the user did NOT name an assignee, default to YOURSELF (the picker agent): pass `--assignee-id <your agent UUID>` (preferred) or `--assignee <your agent name>`. Never leave the issue unassigned.\n\n")
 	}
 
-	// fields to omit
-	b.WriteString("- **project**: omit. The platform will route the issue to the workspace default.\n")
+	// project — pinned by the modal when the user picked one, otherwise
+	// omitted so the platform routes to the workspace default. Always pass
+	// the UUID (never a name) so the issue lands in the right project even
+	// when several share a title.
+	if task.ProjectID != "" {
+		if task.ProjectTitle != "" {
+			fmt.Fprintf(&b, "- **project**: required for this run. Pass `--project %q` so the new issue lands in project %q (the user picked it in the quick-create modal). Do not infer a different project from the prompt text — the modal selection is authoritative.\n", task.ProjectID, task.ProjectTitle)
+		} else {
+			fmt.Fprintf(&b, "- **project**: required for this run. Pass `--project %q` so the new issue lands in the project the user picked in the quick-create modal. Do not infer a different project from the prompt text — the modal selection is authoritative.\n", task.ProjectID)
+		}
+	} else {
+		b.WriteString("- **project**: omit. The platform will route the issue to the workspace default.\n")
+	}
 	b.WriteString("- **status**: omit (defaults to `todo`).\n")
 	b.WriteString("- **attachments**: do NOT pass `--attachment`. The flag only accepts LOCAL file paths. Any image URL in the user input is already markdown — keep it inline in `--description` instead.\n\n")
 
@@ -116,7 +127,7 @@ func buildCommentPrompt(task Task) string {
 		}
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
-	fmt.Fprintf(&b, "If you need comment history, `multica issue comment list %s` returns the latest 50 by default — pass --limit or --since to scope older windows. Long issues can have thousands of comments; do not fetch everything blindly.\n\n", task.IssueID)
+	fmt.Fprintf(&b, "If you need comment history, `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). Pass `--since <RFC3339>` to fetch only comments newer than a known cursor.\n\n", task.IssueID)
 	b.WriteString(execenv.BuildCommentReplyInstructions(task.IssueID, task.TriggerCommentID))
 	return b.String()
 }

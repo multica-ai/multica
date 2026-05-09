@@ -1513,28 +1513,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		}
 	}
 
-	switch result.Status {
-	case "blocked":
-		// Forward SessionID/WorkDir even on the blocked path: the agent may
-		// have built a real session before getting stuck (rate-limit, tool
-		// error, etc.) and we want the next chat turn to resume there
-		// rather than start over and "forget" the conversation.
-		failureReason := result.FailureReason
-		if failureReason == "" {
-			failureReason = "agent_error"
-		}
-		if err := d.client.FailTask(ctx, task.ID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
-			taskLog.Error("report blocked task failed", "error", err)
-		}
-	default:
-		taskLog.Info("task completed", "status", result.Status)
-		if err := d.client.CompleteTask(ctx, task.ID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
-			taskLog.Error("complete task failed, falling back to fail", "error", err)
-			if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error"); failErr != nil {
-				taskLog.Error("fail task fallback also failed", "error", failErr)
-			}
-		}
-	}
+	d.reportTaskResult(ctx, task.ID, result, taskLog)
 
 	// Write GC metadata after the task finishes so the periodic GC loop
 	// can look up the parent record (issue / chat session / autopilot run /
@@ -1545,6 +1524,42 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
 				taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
 			}
+		}
+	}
+}
+
+// reportTaskResult writes the final task disposition back to the server.
+//
+// Fail closed: only an explicit "completed" status is reported as success.
+// Anything else — "blocked", "cancelled", or any future status we forget to
+// enumerate — must go through FailTask, so a run that never produced a real
+// result can never be displayed as "Completed" in the UI (e.g. provider 429 /
+// out-of-credit / runtime crash). Forward SessionID/WorkDir on every path:
+// the agent may have built a real session before getting stuck, and we want
+// the next chat turn to resume there rather than start over and "forget"
+// the conversation.
+func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) {
+	switch result.Status {
+	case "completed":
+		taskLog.Info("task completed", "status", result.Status)
+		if err := d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
+			taskLog.Error("complete task failed, falling back to fail", "error", err)
+			if failErr := d.client.FailTask(ctx, taskID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error"); failErr != nil {
+				taskLog.Error("fail task fallback also failed", "error", failErr)
+			}
+		}
+	default:
+		failureReason := result.FailureReason
+		if failureReason == "" {
+			if result.Status == "cancelled" {
+				failureReason = "cancelled"
+			} else {
+				failureReason = "agent_error"
+			}
+		}
+		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
+		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
+			taskLog.Error("report failed task failed", "error", err)
 		}
 	}
 }
@@ -1580,6 +1595,15 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 		return execenv.GCMeta{}, false
 	}
 	return meta, true
+}
+
+func providerNeedsInlineSystemPrompt(provider string) bool {
+	switch provider {
+	case "openclaw", "hermes", "kiro", "kimi":
+		return true
+	default:
+		return false
+	}
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
@@ -1803,13 +1827,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
 	}
-	// openclaw loads its bootstrap files (AGENTS.md, SOUL.md, ...) from its own
-	// workspace dir rather than the task workdir, so the AGENTS.md written by
-	// execenv.InjectRuntimeConfig is never read. Pass agent instructions inline
-	// via SystemPrompt so the backend can prepend them to the --message payload.
-	// Other providers already surface instructions through their runtime config
-	// file and don't need this.
-	if provider == "openclaw" {
+	// Some providers do not reliably load the per-task runtime config files we
+	// write into the task workdir:
+	//   - openclaw loads bootstrap files (AGENTS.md, SOUL.md, ...) from its own
+	//     workspace dir rather than the task workdir.
+	//   - hermes is driven through ACP and starts from a long-lived Hermes home;
+	//     deployments that cross a wrapper/container boundary can miss the
+	//     task-workdir AGENTS.md even when the prompt itself is delivered.
+	// Pass Multica-defined identity/persona instructions inline so the backend
+	// can prepend them to the turn payload instead of relying only on file
+	// discovery.
+	if providerNeedsInlineSystemPrompt(provider) {
 		execOpts.SystemPrompt = instructions
 	}
 
@@ -1944,13 +1972,27 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// model reject, …). Without this the chat_session resume pointer
 		// would either be left stale or overwritten with NULL on the
 		// server, causing the next chat turn to lose context.
+		//
+		// Classify upstream API 400 invalid_request_error failures with a
+		// dedicated failure_reason so GetLastTaskSession excludes the
+		// task from the (agent_id, issue_id) resume lookup. Without this
+		// classifier a corrupt image or oversized payload baked into the
+		// conversation permanently blocks the issue: every follow-up
+		// task resumes the same poisoned session and hits the same 400.
+		failureReason, _ := classifyPoisonedError(errMsg)
+		if failureReason != "" {
+			taskLog.Warn("agent failed with poisoned API error, classifying as blocked",
+				"failure_reason", failureReason,
+			)
+		}
 		return TaskResult{
-			Status:    "blocked",
-			Comment:   errMsg,
-			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
-			EnvRoot:   env.RootDir,
-			Usage:     usageEntries,
+			Status:        "blocked",
+			Comment:       errMsg,
+			SessionID:     result.SessionID,
+			WorkDir:       env.WorkDir,
+			EnvRoot:       env.RootDir,
+			Usage:         usageEntries,
+			FailureReason: failureReason,
 		}, nil
 	}
 }

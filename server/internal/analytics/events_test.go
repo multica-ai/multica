@@ -38,3 +38,30 @@ func TestFailedEventsUseWillRetry(t *testing.T) {
 		t.Fatalf("autopilot failure should not emit recoverable")
 	}
 }
+
+func TestAgentTaskDispatchedUsesTaskCoreProperties(t *testing.T) {
+	ctx := TaskContext{
+		UserID:      "user-1",
+		WorkspaceID: "workspace-1",
+		AgentID:     "agent-1",
+		TaskID:      "task-1",
+		IssueID:     "issue-1",
+		Source:      SourceManual,
+		RuntimeMode: "local",
+		Provider:    "codex",
+	}
+	ev := AgentTaskDispatched(ctx)
+
+	if ev.Name != EventAgentTaskDispatched {
+		t.Fatalf("event name = %q, want %q", ev.Name, EventAgentTaskDispatched)
+	}
+	if got := ev.WorkspaceID; got != "workspace-1" {
+		t.Fatalf("workspace_id = %q, want workspace-1", got)
+	}
+	if got := ev.Properties["task_id"]; got != "task-1" {
+		t.Fatalf("task_id = %v, want task-1", got)
+	}
+	if got := ev.Properties["runtime_mode"]; got != "local" {
+		t.Fatalf("runtime_mode = %v, want local", got)
+	}
+}

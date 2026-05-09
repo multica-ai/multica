@@ -256,8 +256,6 @@ func init() {
 
 	// issue comment list
 	issueCommentListCmd.Flags().String("output", "table", "Output format: table or json")
-	issueCommentListCmd.Flags().Int("limit", 50, "Maximum number of comments to return (0 = server default of 50, max ~100 depending on server)")
-	issueCommentListCmd.Flags().Int("offset", 0, "Number of comments to skip")
 	issueCommentListCmd.Flags().String("since", "", "Only return comments created after this timestamp (RFC3339)")
 
 	// issue runs
@@ -827,12 +825,6 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	}
 
 	params := url.Values{}
-	if v, _ := cmd.Flags().GetInt("limit"); v > 0 {
-		params.Set("limit", fmt.Sprintf("%d", v))
-	}
-	if v, _ := cmd.Flags().GetInt("offset"); v > 0 {
-		params.Set("offset", fmt.Sprintf("%d", v))
-	}
 	if v, _ := cmd.Flags().GetString("since"); v != "" {
 		params.Set("since", v)
 	}
@@ -843,20 +835,10 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	}
 
 	var comments []map[string]any
-	isPaginated := len(params) > 0
-	if isPaginated {
-		headers, getErr := client.GetJSONWithHeaders(ctx, path, &comments)
-		if getErr != nil {
-			return fmt.Errorf("list comments: %w", getErr)
-		}
-		if total := headers.Get("X-Total-Count"); total != "" {
-			fmt.Fprintf(os.Stderr, "Showing %d of %s comments.\n", len(comments), total)
-		}
-	} else {
-		if err := client.GetJSON(ctx, path, &comments); err != nil {
-			return fmt.Errorf("list comments: %w", err)
-		}
+	if err := client.GetJSON(ctx, path, &comments); err != nil {
+		return fmt.Errorf("list comments: %w", err)
 	}
+	fmt.Fprintf(os.Stderr, "Showing %d comments.\n", len(comments))
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {

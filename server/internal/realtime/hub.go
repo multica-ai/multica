@@ -81,6 +81,14 @@ func checkOrigin(r *http.Request) bool {
 	if origin == "" {
 		return true
 	}
+	// Native mobile clients authenticate with an explicit first-frame token.
+	// Origin is a browser CSRF control, so only skip it for mobile requests
+	// that are not carrying the browser session cookie.
+	if r.URL.Query().Get("client_platform") == "mobile" {
+		if _, err := r.Cookie(auth.AuthCookieName); err == http.ErrNoCookie {
+			return true
+		}
+	}
 	origins := allowedWSOrigins.Load().([]string)
 	for _, allowed := range origins {
 		if origin == allowed {

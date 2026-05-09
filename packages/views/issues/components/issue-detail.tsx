@@ -6,12 +6,10 @@ import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
 import {
   Archive,
-  ArrowDownToLine,
   Calendar,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ChevronUp,
   CircleCheck,
   MoreHorizontal,
   PanelRight,
@@ -302,11 +300,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     timeline, loading: timelineLoading,
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
-    hasMoreOlder, hasMoreNewer,
-    isFetchingOlder, isFetchingNewer,
-    fetchOlder, fetchNewer, jumpToLatest,
-    isAtLatest, newEntriesBelowCount,
-  } = useIssueTimeline(id, user?.id, { around: highlightCommentId ?? null });
+  } = useIssueTimeline(id, user?.id);
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
@@ -326,22 +320,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // CommentCard can skip re-rendering when the only thing that moved was
   // unrelated parent state (e.g. composer draft, sidebar toggle).
   const timelineView = useMemo(() => {
-    // Orphan-reply rescue (#1857): a reply whose parent_id points to a
-    // comment that isn't in the loaded timeline gets promoted to top-level
-    // instead of disappearing. Without this, paginating between a root and
-    // its replies (or a backend bug that drops the root from the page) hides
-    // the entire reply subtree because only the root's CommentCard knows to
-    // pull its children out of repliesByParent.
-    const idsInTimeline = new Set(timeline.map((e) => e.id));
+    // Group entries: top-level = activities + root comments; replies are
+    // bucketed under their parent's id and rendered nested inside CommentCard.
+    // No orphan rescue needed: the timeline is fetched in full, so every
+    // reply's parent is always in the same array.
     const topLevel = timeline.filter(
-      (e) =>
-        e.type === "activity" ||
-        !e.parent_id ||
-        !idsInTimeline.has(e.parent_id),
+      (e) => e.type === "activity" || !e.parent_id,
     );
     const repliesByParent = new Map<string, TimelineEntry[]>();
     for (const e of timeline) {
-      if (e.type === "comment" && e.parent_id && idsInTimeline.has(e.parent_id)) {
+      if (e.type === "comment" && e.parent_id) {
         const list = repliesByParent.get(e.parent_id) ?? [];
         list.push(e);
         repliesByParent.set(e.parent_id, list);
@@ -1040,21 +1028,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <TimelineSkeleton />
             ) : (
             <>
-            {hasMoreOlder && (
-              <div className="my-4 flex justify-center">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={fetchOlder}
-                  disabled={isFetchingOlder}
-                >
-                  <ChevronUp />
-                  {isFetchingOlder
-                    ? t(($) => $.timeline.loading)
-                    : t(($) => $.timeline.show_older)}
-                </Button>
-              </div>
-            )}
             <div className="mt-4 flex flex-col gap-3">
               {timelineView.groups.map((group) => {
                 if (group.type === "comment") {
@@ -1149,37 +1122,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 );
               })}
             </div>
-            {(hasMoreNewer || !isAtLatest) && (
-              <div className="mt-4 flex items-center justify-center gap-2">
-                {hasMoreNewer && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={fetchNewer}
-                    disabled={isFetchingNewer}
-                  >
-                    <ChevronDown />
-                    {isFetchingNewer
-                      ? t(($) => $.timeline.loading)
-                      : t(($) => $.timeline.show_newer)}
-                  </Button>
-                )}
-                {!isAtLatest && (
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={jumpToLatest}
-                  >
-                    <ArrowDownToLine />
-                    {newEntriesBelowCount > 0
-                      ? t(($) => $.timeline.jump_to_latest_with_count, {
-                          count: newEntriesBelowCount,
-                        })
-                      : t(($) => $.timeline.jump_to_latest)}
-                  </Button>
-                )}
-              </div>
-            )}
             </>
             )}
 

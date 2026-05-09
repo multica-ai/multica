@@ -1,46 +1,19 @@
--- name: ListCommentsPaginated :many
+-- name: ListCommentsForIssue :many
+-- All comments for an issue in chronological order, capped at $3 (DB safety
+-- net). Issue p99 is ~30 comments, max ever observed in prod is ~1.1k, so
+-- the handler-side cap of 2000 is purely defensive.
 SELECT * FROM comment
 WHERE issue_id = $1 AND workspace_id = $2
-ORDER BY created_at ASC
-LIMIT $3 OFFSET $4;
-
--- name: ListCommentsSince :many
-SELECT * FROM comment
-WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
-ORDER BY created_at ASC;
-
--- name: ListCommentsSincePaginated :many
-SELECT * FROM comment
-WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
-ORDER BY created_at ASC
-LIMIT $4 OFFSET $5;
-
--- name: ListCommentsLatest :many
--- Top N comments for an issue, newest first. Backs the default cursor
--- pagination entry point (no cursor → return the most recent page).
-SELECT * FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
-ORDER BY created_at DESC, id DESC
+ORDER BY created_at ASC, id ASC
 LIMIT $3;
 
--- name: ListCommentsBefore :many
--- Keyset pagination: comments older than ($3, $4) tuple. Returns DESC so the
--- caller can stitch pages without re-sorting.
+-- name: ListCommentsSinceForIssue :many
+-- Comments created strictly after $3 in chronological order, capped at $4.
+-- Powers the CLI's `--since` agent-polling flow.
 SELECT * FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
-  AND (created_at, id) < ($3::timestamptz, $4::uuid)
-ORDER BY created_at DESC, id DESC
-LIMIT $5;
-
--- name: ListCommentsAfter :many
--- Keyset pagination: comments newer than ($3, $4) tuple. Returns ASC because
--- "newer" pagination naturally walks forward in time; the merge layer
--- normalizes to the response order.
-SELECT * FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
-  AND (created_at, id) > ($3::timestamptz, $4::uuid)
+WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
 ORDER BY created_at ASC, id ASC
-LIMIT $5;
+LIMIT $4;
 
 -- name: CountComments :one
 SELECT count(*) FROM comment
@@ -105,4 +78,3 @@ UPDATE comment SET
     updated_at = CASE WHEN resolved_at IS NOT NULL THEN now() ELSE updated_at END
 WHERE id = $1
 RETURNING *;
-

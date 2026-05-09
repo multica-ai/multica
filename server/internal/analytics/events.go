@@ -14,6 +14,7 @@ const (
 	EventIssueCreated                  = "issue_created"
 	EventChatMessageSent               = "chat_message_sent"
 	EventAgentTaskQueued               = "agent_task_queued"
+	EventAgentTaskDispatched           = "agent_task_dispatched"
 	EventAgentTaskStarted              = "agent_task_started"
 	EventAgentTaskCompleted            = "agent_task_completed"
 	EventAgentTaskFailed               = "agent_task_failed"
@@ -305,6 +306,10 @@ func ChatMessageSent(userID, workspaceID, chatSessionID, taskID, agentID, runtim
 
 func AgentTaskQueued(ctx TaskContext) Event {
 	return agentTaskEvent(EventAgentTaskQueued, ctx, nil)
+}
+
+func AgentTaskDispatched(ctx TaskContext) Event {
+	return agentTaskEvent(EventAgentTaskDispatched, ctx, nil)
 }
 
 func AgentTaskStarted(ctx TaskContext) Event {

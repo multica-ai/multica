@@ -81,6 +81,46 @@ func connectWS(t *testing.T, server *httptest.Server) *websocket.Conn {
 	return conn
 }
 
+func TestCheckOrigin_AllowsMobileClientWithoutCookie(t *testing.T) {
+	prevOrigins := allowedWSOrigins.Load().([]string)
+	SetAllowedOrigins([]string{"https://app.example.com"})
+	t.Cleanup(func() { SetAllowedOrigins(prevOrigins) })
+
+	req := httptest.NewRequest(http.MethodGet, "/ws?client_platform=mobile", nil)
+	req.Header.Set("Origin", "https://not-allowed.example.com")
+
+	if !checkOrigin(req) {
+		t.Fatal("expected mobile request without browser auth cookie to bypass Origin whitelist")
+	}
+}
+
+func TestCheckOrigin_RejectsDisallowedOriginWithoutMobileClient(t *testing.T) {
+	prevOrigins := allowedWSOrigins.Load().([]string)
+	SetAllowedOrigins([]string{"https://app.example.com"})
+	t.Cleanup(func() { SetAllowedOrigins(prevOrigins) })
+
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req.Header.Set("Origin", "https://not-allowed.example.com")
+
+	if checkOrigin(req) {
+		t.Fatal("expected disallowed Origin without mobile client platform to be rejected")
+	}
+}
+
+func TestCheckOrigin_RejectsMobileClientWithBrowserCookie(t *testing.T) {
+	prevOrigins := allowedWSOrigins.Load().([]string)
+	SetAllowedOrigins([]string{"https://app.example.com"})
+	t.Cleanup(func() { SetAllowedOrigins(prevOrigins) })
+
+	req := httptest.NewRequest(http.MethodGet, "/ws?client_platform=mobile", nil)
+	req.Header.Set("Origin", "https://not-allowed.example.com")
+	req.AddCookie(&http.Cookie{Name: auth.AuthCookieName, Value: "browser-session"})
+
+	if checkOrigin(req) {
+		t.Fatal("expected disallowed mobile Origin with browser auth cookie to be rejected")
+	}
+}
+
 // totalClients counts all currently registered clients.
 func totalClients(hub *Hub) int {
 	hub.mu.RLock()
@@ -228,86 +268,86 @@ func TestHub_MultipleBroadcasts(t *testing.T) {
 // headers on WS upgrades, so this query-param channel is the only way to
 // preserve the same observability dimensions HTTP clients get via X-Client-*.
 func TestHandleWebSocket_ClientIdentityFromQuery(t *testing.T) {
-var buf bytes.Buffer
-var mu sync.Mutex
-handler := slog.NewJSONHandler(&lockedWriter{w: &buf, mu: &mu}, &slog.HandlerOptions{Level: slog.LevelDebug})
-prevDefault := slog.Default()
-slog.SetDefault(slog.New(handler))
-t.Cleanup(func() { slog.SetDefault(prevDefault) })
+	var buf bytes.Buffer
+	var mu sync.Mutex
+	handler := slog.NewJSONHandler(&lockedWriter{w: &buf, mu: &mu}, &slog.HandlerOptions{Level: slog.LevelDebug})
+	prevDefault := slog.Default()
+	slog.SetDefault(slog.New(handler))
+	t.Cleanup(func() { slog.SetDefault(prevDefault) })
 
-_, server := newTestHub(t)
-defer server.Close()
+	_, server := newTestHub(t)
+	defer server.Close()
 
-token := makeTestToken(t)
-wsURL := "ws" + strings.TrimPrefix(server.URL, "http") +
-"/ws?workspace_id=" + testWorkspaceID +
-"&client_platform=desktop&client_version=1.2.3&client_os=macos"
-conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-if err != nil {
-t.Fatalf("dial: %v", err)
-}
-defer conn.Close()
+	token := makeTestToken(t)
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") +
+		"/ws?workspace_id=" + testWorkspaceID +
+		"&client_platform=desktop&client_version=1.2.3&client_os=macos"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
 
-authMsg, _ := json.Marshal(map[string]any{
-"type":    "auth",
-"payload": map[string]string{"token": token},
-})
-if err := conn.WriteMessage(websocket.TextMessage, authMsg); err != nil {
-t.Fatalf("write auth: %v", err)
-}
-conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-if _, _, err := conn.ReadMessage(); err != nil {
-t.Fatalf("read auth_ack: %v", err)
-}
+	authMsg, _ := json.Marshal(map[string]any{
+		"type":    "auth",
+		"payload": map[string]string{"token": token},
+	})
+	if err := conn.WriteMessage(websocket.TextMessage, authMsg); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("read auth_ack: %v", err)
+	}
 
-// Wait briefly for the "websocket connected" log line to be flushed.
-deadline := time.Now().Add(2 * time.Second)
-var found map[string]any
-for time.Now().Before(deadline) {
-mu.Lock()
-raw := buf.String()
-mu.Unlock()
-for _, line := range strings.Split(raw, "\n") {
-if line == "" {
-continue
-}
-var entry map[string]any
-if err := json.Unmarshal([]byte(line), &entry); err != nil {
-continue
-}
-if msg, _ := entry["msg"].(string); msg == "websocket connected" {
-found = entry
-break
-}
-}
-if found != nil {
-break
-}
-time.Sleep(20 * time.Millisecond)
-}
+	// Wait briefly for the "websocket connected" log line to be flushed.
+	deadline := time.Now().Add(2 * time.Second)
+	var found map[string]any
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		raw := buf.String()
+		mu.Unlock()
+		for _, line := range strings.Split(raw, "\n") {
+			if line == "" {
+				continue
+			}
+			var entry map[string]any
+			if err := json.Unmarshal([]byte(line), &entry); err != nil {
+				continue
+			}
+			if msg, _ := entry["msg"].(string); msg == "websocket connected" {
+				found = entry
+				break
+			}
+		}
+		if found != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 
-if found == nil {
-t.Fatalf("did not observe \"websocket connected\" log entry; buffered logs:\n%s", buf.String())
-}
-if got, _ := found["client_platform"].(string); got != "desktop" {
-t.Errorf("client_platform = %q, want %q", got, "desktop")
-}
-if got, _ := found["client_version"].(string); got != "1.2.3" {
-t.Errorf("client_version = %q, want %q", got, "1.2.3")
-}
-if got, _ := found["client_os"].(string); got != "macos" {
-t.Errorf("client_os = %q, want %q", got, "macos")
-}
+	if found == nil {
+		t.Fatalf("did not observe \"websocket connected\" log entry; buffered logs:\n%s", buf.String())
+	}
+	if got, _ := found["client_platform"].(string); got != "desktop" {
+		t.Errorf("client_platform = %q, want %q", got, "desktop")
+	}
+	if got, _ := found["client_version"].(string); got != "1.2.3" {
+		t.Errorf("client_version = %q, want %q", got, "1.2.3")
+	}
+	if got, _ := found["client_os"].(string); got != "macos" {
+		t.Errorf("client_os = %q, want %q", got, "macos")
+	}
 }
 
 // lockedWriter is a thread-safe writer used to capture concurrent slog output.
 type lockedWriter struct {
-w  *bytes.Buffer
-mu *sync.Mutex
+	w  *bytes.Buffer
+	mu *sync.Mutex
 }
 
 func (l *lockedWriter) Write(p []byte) (int, error) {
-l.mu.Lock()
-defer l.mu.Unlock()
-return l.w.Write(p)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }

@@ -240,13 +240,28 @@ RETURNING *;
 --
 -- Tasks that ended in a known "poisoned" terminal state are also excluded
 -- here so even auto-retry does not inherit the bad session. The daemon
--- classifies these failures (iteration_limit, agent_fallback_message) when
--- it detects the agent emitted a fallback marker instead of a real result.
+-- classifies these failures (iteration_limit, agent_fallback_message,
+-- api_invalid_request) when it detects either an agent fallback marker in
+-- the output or an upstream API 400 that means the conversation history
+-- itself is unprocessable (oversized image, malformed base64, etc.).
+--
+-- The error-text ILIKE clause is defense-in-depth for the api_invalid_request
+-- shape: a legacy row tagged 'agent_error' (pre-MUL-1921), a deploy-window
+-- row that the old code wrote between migration and rollout, or a future
+-- error format that escapes the daemon classifier all still get filtered
+-- here as long as the canonical Anthropic 400 marker is present in the
+-- error text. Migration 079 backfills the failure_reason column itself,
+-- so observability stays accurate; this clause guarantees session resume
+-- never picks up a bad session even when failure_reason hasn't caught up.
 SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2
   AND (
     status = 'completed'
-    OR (status = 'failed' AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message'))
+    OR (
+      status = 'failed'
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request')
+      AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
+    )
   )
   AND session_id IS NOT NULL
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
@@ -304,6 +319,48 @@ SET status = 'failed', completed_at = now(), error = 'task timed out',
 WHERE (status = 'dispatched' AND dispatched_at < now() - make_interval(secs => @dispatch_timeout_secs::double precision))
    OR (status = 'running' AND started_at < now() - make_interval(secs => @running_timeout_secs::double precision))
 RETURNING *;
+
+-- name: ExpireStaleQueuedTasks :many
+-- Fails tasks that have been sitting in 'queued' for longer than the TTL.
+-- This is the cleanup arm of the MUL-1899 "queued backlog" fix: even with the
+-- new dispatch-time admission gate that refuses to enqueue when the runtime
+-- is offline, we still need to drain the historical 87k+ doomed rows and
+-- handle edge cases where a runtime goes offline AFTER a task is already
+-- queued (the admission check protects new enqueues, not in-flight queue
+-- depth).
+--
+-- Concurrency safety: the daemon's claim path may race with this sweeper to
+-- transition the same row out of 'queued'. We protect against that two
+-- ways:
+--   1. The CTE selects victims with FOR UPDATE SKIP LOCKED so a row that is
+--      currently being claimed (or otherwise locked) is skipped — no lock
+--      contention with the dispatch path, and we won't queue up behind it.
+--   2. The outer UPDATE re-checks status='queued' AND the TTL predicate at
+--      apply time. If a daemon claimed the row between selection and update
+--      (e.g. lock released after the claim transaction commits), the row is
+--      already 'dispatched'/'running' and the WHERE clause filters it out
+--      so we cannot clobber an in-flight task.
+-- Capped via LIMIT inside the CTE so a single sweep tick cannot monopolise
+-- the DB when the backlog is large — the sweeper drains the rest on
+-- subsequent ticks.
+WITH victims AS (
+    SELECT id FROM agent_task_queue
+    WHERE status = 'queued'
+      AND created_at < now() - make_interval(secs => @ttl_secs::double precision)
+    ORDER BY created_at ASC
+    LIMIT @max_per_tick::int
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE agent_task_queue t
+SET status = 'failed',
+    completed_at = now(),
+    error = 'task expired in queue',
+    failure_reason = 'queued_expired'
+FROM victims v
+WHERE t.id = v.id
+  AND t.status = 'queued'
+  AND t.created_at < now() - make_interval(secs => @ttl_secs::double precision)
+RETURNING t.*;
 
 -- name: CancelAgentTask :one
 UPDATE agent_task_queue
