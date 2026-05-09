@@ -13,6 +13,7 @@ const RESET_STATE = {
   },
   lastAssigneeType: undefined,
   lastAssigneeId: undefined,
+  lastProjectId: undefined,
 };
 
 describe("issue draft store — last assignee", () => {
@@ -56,5 +57,15 @@ describe("issue draft store — last assignee", () => {
     clearDraft();
     expect(useIssueDraftStore.getState().draft.assigneeId).toBeUndefined();
     expect(useIssueDraftStore.getState().draft.assigneeType).toBeUndefined();
+  });
+
+  it("remembers and clears the last project ID", () => {
+    const { setLastProjectId } = useIssueDraftStore.getState();
+
+    setLastProjectId("project-1");
+    expect(useIssueDraftStore.getState().lastProjectId).toBe("project-1");
+
+    setLastProjectId(null);
+    expect(useIssueDraftStore.getState().lastProjectId).toBeUndefined();
   });
 });

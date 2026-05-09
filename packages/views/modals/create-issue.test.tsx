@@ -24,6 +24,7 @@ const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockSetDraft = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetLastAssignee = vi.hoisted(() => vi.fn());
+const mockSetLastProjectId = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
@@ -41,9 +42,11 @@ const mockDraftStore = {
   },
   lastAssigneeType: undefined,
   lastAssigneeId: undefined,
+  lastProjectId: undefined,
   setDraft: mockSetDraft,
   clearDraft: mockClearDraft,
   setLastAssignee: mockSetLastAssignee,
+  setLastProjectId: mockSetLastProjectId,
 };
 
 const mockQuickCreateStore = {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftRight, Check, ChevronRight, X as XIcon } from "lucide-react";
+import { Check, ChevronRight, X as XIcon } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -20,6 +20,7 @@ import { agentListOptions } from "@multica/core/workspace/queries";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
+import type { CreateMode } from "@multica/core/issues/stores/create-mode-store";
 import {
   runtimeListOptions,
   checkQuickCreateCliVersion,
@@ -41,6 +42,8 @@ import {
 } from "../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useT } from "../i18n";
+import { ProjectPicker } from "../projects/components/project-picker";
+import { CreateModeSelector } from "./create-mode-selector";
 
 // AgentCreatePanel — agent-mode body of the create-issue dialog. Renders
 // only the inner content; the surrounding `<Dialog>` AND `<DialogContent>`
@@ -53,11 +56,13 @@ import { useT } from "../i18n";
 // agent → manual; the shared draft store carries description + agent).
 export function AgentCreatePanel({
   onClose,
+  mode = "agent",
   onSwitchMode,
   data,
 }: {
   onClose: () => void;
-  onSwitchMode?: () => void;
+  mode?: CreateMode;
+  onSwitchMode?: (mode: CreateMode, carry?: Record<string, unknown> | null) => void;
   data?: Record<string, unknown> | null;
 }) {
   const { t } = useT("modals");
@@ -89,11 +94,16 @@ export function AgentCreatePanel({
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
+  const setLastProjectId = useIssueDraftStore((s) => s.setLastProjectId);
 
   const [agentId, setAgentId] = useState<string | undefined>(() => {
     const seed = (data?.agent_id as string) || lastAgentId || undefined;
     if (seed && visibleAgents.some((a) => a.id === seed)) return seed;
     return visibleAgents[0]?.id;
+  });
+  const [projectId, setProjectId] = useState<string | undefined>(() => {
+    const seed = data?.project_id;
+    return typeof seed === "string" && seed ? seed : undefined;
   });
 
   // Re-seed once visible list resolves (queries may be empty on first render).
@@ -173,8 +183,13 @@ export function AgentCreatePanel({
     setSubmitting(true);
     setError(null);
     try {
-      await api.quickCreateIssue({ agent_id: agentId, prompt: md });
+      await api.quickCreateIssue({
+        agent_id: agentId,
+        prompt: md,
+        ...(projectId ? { project_id: projectId } : {}),
+      });
       setLastAgentId(agentId);
+      setLastProjectId(projectId);
       clearPrompt();
       setLastMode("agent");
       toast.success(t(($) => $.create_issue.agent.toast_sent), {
@@ -246,7 +261,23 @@ export function AgentCreatePanel({
         : {}),
     });
     setLastMode("manual");
-    onSwitchMode?.();
+    onSwitchMode?.("manual", projectId ? { project_id: projectId } : null);
+  };
+
+  const switchToBatch = () => {
+    setLastMode("batch");
+    onSwitchMode?.("batch", projectId ? { project_id: projectId } : null);
+  };
+
+  const handleModeSelect = (next: CreateMode) => {
+    if (next === mode) return;
+    if (next === "manual") {
+      switchToManual();
+      return;
+    }
+    if (next === "batch") {
+      switchToBatch();
+    }
   };
 
   return (
@@ -264,19 +295,22 @@ export function AgentCreatePanel({
               keyboard focus, and the dialog's focus trap briefly lands focus
               on the first focusable element on mount, causing the tooltip to
               auto-pop every open. */}
-          <button
-            type="button"
-            onClick={onClose}
-            title={t(($) => $.common.close)}
-            aria-label={t(($) => $.common.close)}
-            className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-          >
-            <XIcon className="size-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <CreateModeSelector mode={mode} onSelect={handleModeSelect} className="mr-1" />
+            <button
+              type="button"
+              onClick={onClose}
+              title={t(($) => $.common.close)}
+              aria-label={t(($) => $.common.close)}
+              className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+            >
+              <XIcon className="size-4" />
+            </button>
+          </div>
         </div>
 
-        {/* Agent picker */}
-        <div className="px-5 pt-1 pb-2 shrink-0">
+        {/* Agent and project pickers */}
+        <div className="px-5 pt-1 pb-2 shrink-0 flex flex-wrap items-center gap-x-4 gap-y-1">
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -330,6 +364,16 @@ export function AgentCreatePanel({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+          <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <span>{t(($) => $.create_issue.project)}</span>
+            <ProjectPicker
+              projectId={projectId ?? null}
+              onUpdate={(updates) => {
+                setProjectId(updates.project_id ?? undefined);
+                setError(null);
+              }}
+            />
+          </div>
         </div>
 
         {selectedAgent && versionBlocked && (
@@ -388,15 +432,6 @@ export function AgentCreatePanel({
             )}
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={switchToManual}
-              title={t(($) => $.create_issue.switch_to_manual_tooltip)}
-              className="flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
-            >
-              <ArrowLeftRight className="size-3.5" />
-              {t(($) => $.create_issue.switch_to_manual)}
-            </button>
             <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
               <Switch
                 size="sm"

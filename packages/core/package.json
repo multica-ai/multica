@@ -23,6 +23,7 @@
     "./workspace/mutations": "./workspace/mutations.ts",
     "./workspace/hooks": "./workspace/hooks.ts",
     "./issues": "./issues/index.ts",
+    "./issues/batch-create-json": "./issues/batch-create-json.ts",
     "./issues/queries": "./issues/queries.ts",
     "./issues/mutations": "./issues/mutations.ts",
     "./issues/timeline-cache": "./issues/timeline-cache.ts",

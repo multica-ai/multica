@@ -58,6 +58,45 @@ test.describe("Issues", () => {
     await expect(page.locator("text=Properties")).toBeVisible();
   });
 
+  test("can batch create issues from JSON", async ({ page }) => {
+    const newIssueButton = page.getByRole("button", { name: "New Issue" });
+    await expect(newIssueButton).toBeVisible();
+    await newIssueButton.click();
+
+    await page.getByRole("tab", { name: "Batch" }).click();
+    await expect(page.getByText("Batch creation")).toBeVisible();
+
+    const suffix = Date.now();
+    const firstTitle = `E2E Batch Created A ${suffix}`;
+    const secondTitle = `E2E Batch Created B ${suffix}`;
+    await page.getByRole("textbox", { name: "Batch issues JSON" }).fill(
+      JSON.stringify({
+        issues: [
+          {
+            title: firstTitle,
+            description: "Created by the batch creation E2E flow.",
+            status: "todo",
+          },
+          {
+            title: secondTitle,
+            status: "backlog",
+          },
+        ],
+      }, null, 2),
+    );
+
+    await expect(page.getByText("2 rows")).toBeVisible();
+    await expect(page.getByRole("table").getByText(firstTitle)).toBeVisible();
+    await expect(page.getByRole("table").getByText(secondTitle)).toBeVisible();
+
+    await page.getByRole("button", { name: "Create issues" }).click();
+    await expect(page.getByText("Created 2 issues")).toBeVisible({ timeout: 10000 });
+
+    await page.reload();
+    await expect(page.getByText(firstTitle)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(secondTitle)).toBeVisible();
+  });
+
   test("can navigate to issue detail page", async ({ page }) => {
     // Create a known issue via API so the test controls its own fixture
     const issue = await api.createIssue("E2E Detail Test " + Date.now());

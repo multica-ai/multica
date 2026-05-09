@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import {
   ArrowDown,
-  ArrowLeftRight,
   ArrowUp,
   Check,
   ChevronRight,
@@ -39,6 +38,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
+import type { CreateMode } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
@@ -48,6 +48,7 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { PillButton } from "../common/pill-button";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
+import { CreateModeSelector } from "./create-mode-selector";
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -59,6 +60,7 @@ import { useT } from "../i18n";
 
 export function ManualCreatePanel({
   onClose,
+  mode = "manual",
   onSwitchMode,
   data,
   isExpanded,
@@ -67,8 +69,9 @@ export function ManualCreatePanel({
   setBacklogHintIssueId,
 }: {
   onClose: () => void;
-  /** Called with the carry payload to seed the agent panel after switch. */
-  onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
+  mode?: CreateMode;
+  /** Called with the target mode and optional carry payload after switch. */
+  onSwitchMode?: (mode: CreateMode, carry?: Record<string, unknown> | null) => void;
   data?: Record<string, unknown> | null;
   /** Lifted to the shell so DialogContent's mode-aware className can react
    *  without the body itself having to live inside DialogContent (which would
@@ -87,6 +90,7 @@ export function ManualCreatePanel({
   const setDraft = useIssueDraftStore((s) => s.setDraft);
   const clearDraft = useIssueDraftStore((s) => s.clearDraft);
   const setLastAssignee = useIssueDraftStore((s) => s.setLastAssignee);
+  const setLastProjectId = useIssueDraftStore((s) => s.setLastProjectId);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
@@ -210,6 +214,7 @@ export function ManualCreatePanel({
       }
 
       setLastAssignee(assigneeType, assigneeId);
+      setLastProjectId(projectId);
       setLastMode("manual");
       clearDraft();
       const shouldShowBacklogHint =
@@ -266,12 +271,28 @@ export function ManualCreatePanel({
     const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
     const prompt = [title.trim(), desc].filter(Boolean).join("\n\n");
     setLastMode("agent");
-    onSwitchMode?.({
+    onSwitchMode?.("agent", {
       prompt,
       ...(assigneeType === "agent" && assigneeId
         ? { agent_id: assigneeId }
         : {}),
     });
+  };
+
+  const switchToBatch = () => {
+    setLastMode("batch");
+    onSwitchMode?.("batch", projectId ? { project_id: projectId } : null);
+  };
+
+  const handleModeSelect = (next: CreateMode) => {
+    if (next === mode) return;
+    if (next === "agent") {
+      switchToAgent();
+      return;
+    }
+    if (next === "batch") {
+      switchToBatch();
+    }
   };
 
   return (
@@ -306,6 +327,7 @@ export function ManualCreatePanel({
                 <span className="font-medium">{t(($) => $.create_issue.manual_breadcrumb)}</span>
               </div>
               <div className="flex items-center gap-1">
+                <CreateModeSelector mode={mode} onSelect={handleModeSelect} className="mr-1" />
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -542,15 +564,6 @@ export function ManualCreatePanel({
                 />
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={switchToAgent}
-                  title={t(($) => $.create_issue.switch_to_agent_tooltip)}
-                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer"
-                >
-                  <ArrowLeftRight className="size-3.5 text-brand/80 transition-transform duration-300 group-hover:rotate-180" />
-                  {t(($) => $.create_issue.switch_to_agent)}
-                </button>
                 <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
                   <Switch
                     size="sm"

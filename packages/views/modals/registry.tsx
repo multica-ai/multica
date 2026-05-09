@@ -24,6 +24,8 @@ export function ModalRegistry() {
       return <CreateIssueDialog onClose={close} initialMode="manual" data={data} />;
     case "quick-create-issue":
       return <CreateIssueDialog onClose={close} initialMode="agent" data={data} />;
+    case "batch-create-issue":
+      return <CreateIssueDialog onClose={close} initialMode="batch" data={data} />;
     case "create-project":
       return <CreateProjectModal onClose={close} />;
     case "feedback":

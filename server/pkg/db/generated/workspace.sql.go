@@ -120,6 +120,24 @@ func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (in
 	return issue_counter, err
 }
 
+const incrementIssueCounterBy = `-- name: IncrementIssueCounterBy :one
+UPDATE workspace SET issue_counter = issue_counter + $1
+WHERE id = $2
+RETURNING issue_counter
+`
+
+type IncrementIssueCounterByParams struct {
+	Amount int32       `json:"amount"`
+	ID     pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) IncrementIssueCounterBy(ctx context.Context, arg IncrementIssueCounterByParams) (int32, error) {
+	row := q.db.QueryRow(ctx, incrementIssueCounterBy, arg.Amount, arg.ID)
+	var issue_counter int32
+	err := row.Scan(&issue_counter)
+	return issue_counter, err
+}
+
 const listWorkspaces = `-- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings, w.created_at, w.updated_at, w.context, w.repos, w.issue_prefix, w.issue_counter FROM workspace w
 JOIN member m ON m.workspace_id = w.id

@@ -15,7 +15,7 @@ import { defaultStorage } from "../../platform/storage";
  * localStorage rather than the workspace-aware StateStorage that scopes
  * per-workspace stores like quick-create-store / draft-store.
  */
-export type CreateMode = "agent" | "manual";
+export type CreateMode = "agent" | "manual" | "batch";
 
 interface CreateModeState {
   lastMode: CreateMode;
