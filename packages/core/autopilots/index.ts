@@ -7,4 +7,6 @@ export {
   useCreateAutopilotTrigger,
   useUpdateAutopilotTrigger,
   useDeleteAutopilotTrigger,
+  useRotateAutopilotTriggerWebhookToken,
 } from "./mutations";
+export { buildAutopilotWebhookUrl } from "./webhook";

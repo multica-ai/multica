@@ -1579,6 +1579,16 @@ export class ApiClient {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
   }
 
+  async rotateAutopilotTriggerWebhookToken(
+    autopilotId: string,
+    triggerId: string,
+  ): Promise<AutopilotTrigger> {
+    return this.fetch(
+      `/api/autopilots/${autopilotId}/triggers/${triggerId}/rotate-webhook-token`,
+      { method: "POST" },
+    );
+  }
+
   // GitHub integration
   async getGitHubConnectURL(workspaceId: string): Promise<GitHubConnectResponse> {
     return this.fetch(`/api/workspaces/${workspaceId}/github/connect`);

@@ -128,3 +128,15 @@ export function useDeleteAutopilotTrigger() {
     },
   });
 }
+
+export function useRotateAutopilotTriggerWebhookToken() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ autopilotId, triggerId }: { autopilotId: string; triggerId: string }) =>
+      api.rotateAutopilotTriggerWebhookToken(autopilotId, triggerId),
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: autopilotKeys.detail(wsId, vars.autopilotId) });
+    },
+  });
+}
