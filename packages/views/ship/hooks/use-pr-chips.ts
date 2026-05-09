@@ -8,6 +8,7 @@ import {
   PlayCircle,
   MessagesSquare,
   ListPlus,
+  Eye,
   type LucideIcon,
 } from "lucide-react";
 import type { PullRequest } from "@multica/core/types";
@@ -59,6 +60,12 @@ export interface PrChip {
    *  if the chip wants to send an empty body (or a body composed entirely
    *  of server defaults). The card's ChipButton calls this lazily. */
   bodyBuilder?: (pr: PullRequest) => Record<string, unknown> | undefined;
+  /** When true, the chip's click does NOT fire a mutation directly — the
+   *  chip-row owner must intercept and open whatever UI the action
+   *  needs (today only `submit_review`, which opens the ReviewDialog).
+   *  Falls back to a no-op when no handler is wired so a misconfigured
+   *  product surface degrades visibly rather than crashing. */
+  custom?: boolean;
 }
 
 const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
@@ -83,6 +90,21 @@ const REBASE_ON_MAIN_CHIP: PrChip = {
   labelKey: "rebase_on_main",
   icon: GitBranch,
   variant: "primary",
+};
+
+/** Phase 6.5 — "Review" chip. Opens a dialog rather than firing a
+ *  mutation directly; the chip-row consumer must wire a handler that
+ *  knows how to open the ReviewDialog. State-coupled: only surfaces
+ *  for non-draft open PRs (you can't review a draft, and a closed PR
+ *  doesn't accept new reviews). Priority sits between "Diagnose CI"
+ *  and "Merge" so the workflow on a clean PR reads as "review → merge". */
+const REVIEW_CHIP: PrChip = {
+  id: "review",
+  action: "submit_review",
+  labelKey: "review",
+  icon: Eye,
+  variant: "secondary",
+  custom: true,
 };
 
 /** "Merge" — only shows for an approved + green PR. Destructive because it
@@ -209,6 +231,16 @@ export function derivePrChips(
       chips.push(REBASE_ON_MAIN_CHIP);
     }
 
+    // Rule 2.5 — Phase 6.5. Open + non-draft PRs get a Review chip so a
+    // workspace member can submit a review without leaving Multica. We
+    // surface it before Merge because the natural workflow on a clean PR
+    // is review → merge; offering Merge before Review would skip the
+    // collaborative step. Drafts are excluded because GitHub doesn't
+    // accept reviews on drafts (the dialog would always 422).
+    if (!pr.is_draft) {
+      chips.push(REVIEW_CHIP);
+    }
+
     // Rule 3 — Ready to land. Strict ALL conditions: approved, green CI,
     // open, not draft, mergeable. If any of those is missing the merge
     // chip would be misleading at best and dangerous at worst.
@@ -297,5 +329,6 @@ export const __testing__ = {
   NUDGE_AUTHOR_CHIP,
   TALK_TO_AGENT_CHIP,
   PULL_INTO_ISSUE_CHIP,
+  REVIEW_CHIP,
   AlertTriangleIcon: AlertTriangle,
 };

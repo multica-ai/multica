@@ -13,6 +13,7 @@ import {
   Globe,
   Hash,
   MessagesSquare,
+  ExternalLink,
 } from "lucide-react";
 import type { PullRequest } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
@@ -204,8 +205,27 @@ export function ShipPRCard({
         <span className="truncate">{pr.author_login}</span>
         <span aria-hidden>·</span>
         <span className="tabular-nums">#{pr.number}</span>
+        {/* Phase 6.5 — "View diff" deep-link to the GitHub Files tab.
+            Sits at the top-right so it's reachable without scrolling
+            the card; clicking it opens GitHub in a new tab and stops
+            propagation so the parent <a> doesn't navigate to the
+            conversation tab at the same time. The Draft pill sits
+            directly to its left when both render, sharing the
+            ml-auto right-aligned cluster. */}
+        <a
+          href={`${pr.html_url}/files`}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="ml-auto inline-flex items-center gap-0.5 rounded px-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          data-testid="ship-card-view-diff"
+          aria-label={t(($) => $.card.view_diff)}
+        >
+          <ExternalLink className="size-3" aria-hidden />
+          {t(($) => $.card.view_diff)}
+        </a>
         {pr.is_draft && (
-          <span className="ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">
             {t(($) => $.card.draft_pill)}
           </span>
         )}

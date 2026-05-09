@@ -35,3 +35,5 @@ export type {
 } from "./hooks/use-pr-chips";
 export { PrChipRow } from "./components/pr-chip-row";
 export { ChipButton } from "./components/chip-button";
+// Phase 6.5 — submit-review dialog
+export { ReviewDialog } from "./components/review-dialog";

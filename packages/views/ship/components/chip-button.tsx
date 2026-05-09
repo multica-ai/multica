@@ -53,13 +53,19 @@ interface ChipButtonProps {
   pr: PullRequest;
   /** Mutation function — already bound to a specific PR id by the parent.
    *  Returning the parsed ActionResult lets us branch on `status` after
-   *  awaiting. */
-  onFire: (body?: Record<string, unknown>) => Promise<ActionResult>;
+   *  awaiting. Optional for chips with `custom: true` whose click is
+   *  handled entirely by the parent via `onCustomClick`. */
+  onFire?: (body?: Record<string, unknown>) => Promise<ActionResult>;
   /** True while the bound mutation is in flight; passed in by the parent
    *  rather than read from a hook so the parent can disable a whole row of
    *  chips during an action (avoids double-fire when two chips touch the
    *  same PR). */
   isPending: boolean;
+  /** For chips marked `custom: true` (see PrChip). The chip-row provides
+   *  this so the click opens an owner-managed dialog instead of firing
+   *  a mutation. The handler still receives the click event so it can
+   *  swallow propagation if needed. */
+  onCustomClick?: () => void;
 }
 
 // Stops the click from reaching the parent <a href> on the card. Used on
@@ -69,7 +75,7 @@ function swallow(e: SyntheticEvent) {
   if ("preventDefault" in e) (e as MouseEvent).preventDefault();
 }
 
-export function ChipButton({ chip, pr, onFire, isPending }: ChipButtonProps) {
+export function ChipButton({ chip, pr, onFire, isPending, onCustomClick }: ChipButtonProps) {
   const { t } = useT("ship");
   // Local "just succeeded" state — drives the brief checkmark animation.
   // Reset by the timeout below so a second press doesn't show a stale check.
@@ -94,6 +100,12 @@ export function ChipButton({ chip, pr, onFire, isPending }: ChipButtonProps) {
 
   const fire = async (e: MouseEvent | SyntheticEvent) => {
     swallow(e);
+    if (!onFire) {
+      // Defensive: a non-custom chip must always have onFire wired. If
+      // it doesn't, the chip-row is misconfigured — degrade silently
+      // rather than throwing into the click handler.
+      return;
+    }
     try {
       const body = chip.bodyBuilder?.(pr);
       const result = await onFire(body);
@@ -128,6 +140,14 @@ export function ChipButton({ chip, pr, onFire, isPending }: ChipButtonProps) {
 
   const handleClick = (e: MouseEvent) => {
     swallow(e);
+    // Phase 6.5 — chips marked `custom` open an owner-managed dialog
+    // (e.g. ReviewDialog) instead of firing a mutation. Skip the
+    // destructive confirmation flow because the dialog itself is the
+    // confirmation surface for any sensitive sub-action.
+    if (chip.custom) {
+      onCustomClick?.();
+      return;
+    }
     if (chip.destructive) {
       setConfirmOpen(true);
       return;

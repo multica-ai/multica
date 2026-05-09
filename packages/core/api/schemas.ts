@@ -344,6 +344,25 @@ const ShipActionCommentSchema = z.object({
     .optional(),
 }).loose();
 
+// Phase 6.5 — submit_review payload. Optional on every chip's
+// ActionResult so older Electron builds parse cleanly when the field
+// arrives, and so chip handlers that don't populate review still
+// validate. Lenient on every nested string for the same reason.
+const ShipActionReviewSchema = z.object({
+  id: z.number().default(0),
+  html_url: z.string().default(""),
+  state: z.string().default(""),
+  body: z.string().default(""),
+  user: z
+    .object({
+      login: z.string().default(""),
+      avatar_url: z.string().default(""),
+    })
+    .loose()
+    .optional(),
+  submitted_at: z.string().optional(),
+}).loose();
+
 export const ActionResultSchema = z.object({
   status: z.string().default("failed"),
   action_id: z.string().default(""),
@@ -351,6 +370,7 @@ export const ActionResultSchema = z.object({
   comment: ShipActionCommentSchema.nullable().optional(),
   merge_sha: z.string().optional(),
   error: z.string().optional(),
+  review: ShipActionReviewSchema.nullable().optional(),
 }).loose();
 
 // Fallback used when an ActionResult fails schema validation. The chip code

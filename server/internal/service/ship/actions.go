@@ -42,6 +42,9 @@ const (
 	ActionNudgeAuthor             = "nudge_author"
 	ActionRunSmokeTests           = "run_smoke_tests"
 	ActionCloseAsStale            = "close_as_stale"
+	// ActionSubmitReview — Phase 6.5. Posts a GitHub PR review
+	// (APPROVE / REQUEST_CHANGES / COMMENT) without leaving Multica.
+	ActionSubmitReview = "submit_review"
 )
 
 // ActionStatus values mirror what's recorded in result_status.
@@ -84,6 +87,11 @@ type ActionResult struct {
 	// ActionID is the row id in ship_card_action — handed back so the
 	// frontend can subscribe to status updates for async actions.
 	ActionID string `json:"action_id"`
+	// Review is populated by the submit_review chip (Phase 6.5). Older
+	// clients that don't know the field will simply ignore it per
+	// CLAUDE.md "API Response Compatibility" — this is an additive
+	// extension to the chip response shape.
+	Review *gh.Review `json:"review,omitempty"`
 }
 
 // TaskEnqueuer is the slice of TaskService the ship actions service
@@ -168,6 +176,8 @@ func (s *Service) ExecuteAction(
 		return s.actionCloseAsStale(ctx, row, pr, owner, repo, payload, result)
 	case ActionRunSmokeTests:
 		return s.actionRunSmokeTests(ctx, row, pr, owner, repo, smokeWorkflow, payload, result)
+	case ActionSubmitReview:
+		return s.actionSubmitReview(ctx, row, pr, owner, repo, actorUserID, payload, result)
 	case ActionDiagnoseCIFailure, ActionSummarizeReviewFeedback:
 		return s.actionSpawnAgentTask(ctx, row, pr, owner, repo, action, task, orchestratorAgentID, actorUserID, result)
 	default:
@@ -614,5 +624,118 @@ func (s *Service) actionSpawnAgentTask(
 	// For now we update the result_payload with the task id so the
 	// audit-trail has a forensic breadcrumb without the row closing.
 	s.markActionInProgress(ctx, row.ID, map[string]any{"agent_task_id": taskID})
+	return result, nil
+}
+
+// submitReviewRequestPayload is the JSON body the submit_review chip sends.
+// event is the GitHub review verb; body is the optional text.
+type submitReviewRequestPayload struct {
+	Event string `json:"event"`
+	Body  string `json:"body"`
+}
+
+// reviewVerbDisplay maps GitHub's review event names to a short
+// human-readable verb used in the channel post. Falls back to the raw
+// event string for forward-compat in case GitHub introduces a new verb.
+func reviewVerbDisplay(event gh.ReviewEvent) string {
+	switch event {
+	case gh.ReviewEventApprove:
+		return "Approved"
+	case gh.ReviewEventRequestChanges:
+		return "Requested changes"
+	case gh.ReviewEventComment:
+		return "Commented"
+	default:
+		return string(event)
+	}
+}
+
+// actionSubmitReview posts a PR review to GitHub then (best-effort) drops a
+// status line into the PR's Multica conversation channel so the team sees
+// the review without leaving Multica. The channel post is intentionally
+// non-blocking — a failed channel write must not surface as a failed
+// review submission, since the GitHub side already succeeded.
+func (s *Service) actionSubmitReview(
+	ctx context.Context,
+	row db.ShipCardAction,
+	pr db.PullRequest,
+	owner, repo string,
+	actorUserID pgtype.UUID,
+	payload json.RawMessage,
+	result *ActionResult,
+) (*ActionResult, error) {
+	var req submitReviewRequestPayload
+	if err := json.Unmarshal(payload, &req); err != nil {
+		s.finishAction(ctx, row.ID, StatusFailed, map[string]any{"error": "invalid body"})
+		result.Error = "invalid body"
+		return result, fmt.Errorf("%w: %v", ErrInvalidPayload, err)
+	}
+	event := gh.ReviewEvent(strings.ToUpper(strings.TrimSpace(req.Event)))
+	switch event {
+	case gh.ReviewEventApprove, gh.ReviewEventRequestChanges, gh.ReviewEventComment:
+	default:
+		s.finishAction(ctx, row.ID, StatusFailed, map[string]any{"error": "invalid event"})
+		result.Error = "invalid event"
+		return result, fmt.Errorf("%w: invalid review event %q", ErrInvalidPayload, req.Event)
+	}
+	body := strings.TrimSpace(req.Body)
+	// Validate body presence here so the chip dialog can render a clean
+	// 400 with a useful message instead of relaying GitHub's terse 422.
+	// APPROVE allows an empty body; the other two events do not.
+	if (event == gh.ReviewEventComment || event == gh.ReviewEventRequestChanges) && body == "" {
+		s.finishAction(ctx, row.ID, StatusFailed, map[string]any{"error": "body is required"})
+		result.Error = "body is required for this review type"
+		return result, fmt.Errorf("%w: body is required for %s", ErrInvalidPayload, event)
+	}
+
+	rev, err := s.Github.SubmitReview(ctx, owner, repo, int(pr.PrNumber), event, body)
+	if err != nil {
+		s.finishAction(ctx, row.ID, StatusFailed, map[string]any{"error": err.Error()})
+		result.Error = err.Error()
+		return result, err
+	}
+
+	result.Status = StatusSucceeded
+	result.Review = rev
+
+	// Best-effort: if the PR has a Multica conversation channel, drop a
+	// status line so the team sees the review without watching GitHub.
+	// We pull the actor's display name from the user table so the line
+	// reads "Alice ✅ Approved · …" rather than a raw UUID. Lookup
+	// failures fall back to "A reviewer" — better to post a generic line
+	// than to skip the post.
+	if s.PostToPRChannel != nil && pr.ConversationChannelID.Valid {
+		who := "A reviewer"
+		if actorUserID.Valid {
+			if u, uerr := s.Q.GetUser(ctx, actorUserID); uerr == nil {
+				if u.Name != "" {
+					who = u.Name
+				} else if u.Email != "" {
+					who = u.Email
+				}
+			}
+		}
+		verb := reviewVerbDisplay(event)
+		var content string
+		if body != "" {
+			// Escape pipe / newline collisions by simply trimming —
+			// the channel renders markdown so user input passes through
+			// the standard sanitizer downstream.
+			content = fmt.Sprintf("**%s** %s on PR [#%d](%s) — %s\n\n> %s",
+				who, verb, pr.PrNumber, rev.HTMLURL, pr.Title, body)
+		} else {
+			content = fmt.Sprintf("**%s** %s on PR [#%d](%s) — %s",
+				who, verb, pr.PrNumber, rev.HTMLURL, pr.Title)
+		}
+		// Swallow the error: the review itself succeeded; surfacing a
+		// channel-post failure here would mis-represent the outcome.
+		_ = s.PostToPRChannel(ctx, pr.ConversationChannelID, content)
+	}
+
+	s.finishAction(ctx, row.ID, StatusSucceeded, map[string]any{
+		"review_id":  rev.ID,
+		"review_url": rev.HTMLURL,
+		"event":      string(event),
+	})
 	return result, nil
 }

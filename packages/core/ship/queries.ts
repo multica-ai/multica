@@ -13,6 +13,7 @@ import type {
   NudgePullRequestAuthorRequest,
   RunSmokeTestsRequest,
   ClosePullRequestAsStaleRequest,
+  SubmitPullRequestReviewRequest,
   CreatePreflightRequest,
   UpdatePreflightRequest,
   ConfigureDeployAdapterRequest,
@@ -347,6 +348,28 @@ export function useRunSmokeTests(prId: string) {
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (body: RunSmokeTestsRequest) => api.runSmokeTests(prId, body),
+    onSettled: () => invalidatePullRequestSurface(qc, wsId, prId),
+  });
+}
+
+// Phase 6.5 — submit a PR review. No optimistic update: we don't know
+// the resulting review_decision until the server replies (server runs
+// the actual review_decision derivation). The WS card_action event
+// triggers the same broad refresh as the other chip mutations.
+//
+// Invalidates the same surface as the other chip mutations so the
+// per-PR card and the card-actions footer pick up the new audit row.
+// The PR's conversation channel may have a fresh status post too —
+// we conservatively invalidate channel message lists by passing them
+// through the queryClient.invalidateQueries with the channel id when
+// review.html_url is available, but for now the channel sidebar
+// already polls / receives WS events so we lean on those.
+export function useSubmitPullRequestReview(prId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (body: SubmitPullRequestReviewRequest) =>
+      api.submitPullRequestReview(prId, body),
     onSettled: () => invalidatePullRequestSurface(qc, wsId, prId),
   });
 }

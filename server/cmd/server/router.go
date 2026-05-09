@@ -436,6 +436,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/pull_requests/{id}/nudge_author", h.NudgeAuthor)
 			r.Post("/api/pull_requests/{id}/run_smoke_tests", h.RunSmokeTests)
 			r.Post("/api/pull_requests/{id}/close_as_stale", h.ClosePullRequestAsStale)
+			// Phase 6.5 — submit a PR review (Approve / Request changes /
+			// Comment) without leaving Multica. Workspace-member auth (any
+			// member can review); the destructive gate doesn't apply.
+			r.Post("/api/pull_requests/{id}/review", h.SubmitPullRequestReview)
 
 			// Ship Hub Phase 4 — issue↔PR linkage + agent talk-back +
 			// PR conversation channels + stack visualization. None of

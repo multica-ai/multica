@@ -492,6 +492,54 @@ func (c *Client) ClosePullRequest(ctx context.Context, owner, repo string, prNum
 	return c.doWithBody(ctx, "PATCH", path, body, nil)
 }
 
+// ReviewEvent is the verb GitHub accepts on POST /pulls/{n}/reviews.
+// Three values per the GitHub REST docs — anything else is a 422.
+type ReviewEvent string
+
+const (
+	// ReviewEventApprove approves the PR. GitHub permits an empty body.
+	ReviewEventApprove ReviewEvent = "APPROVE"
+	// ReviewEventRequestChanges requires a non-empty body server-side
+	// (GitHub returns 422 without one). The handler validates upstream
+	// so the user gets a 400 with a useful message.
+	ReviewEventRequestChanges ReviewEvent = "REQUEST_CHANGES"
+	// ReviewEventComment posts a plain comment review. GitHub also
+	// requires a non-empty body for this event.
+	ReviewEventComment ReviewEvent = "COMMENT"
+)
+
+// submitReviewRequest is the body POST /pulls/{n}/reviews accepts.
+// Comments (per-line review threads) is intentionally omitted — Phase 6.5
+// only does whole-PR reviews. Adding inline comments is a future scope.
+type submitReviewRequest struct {
+	Event ReviewEvent `json:"event"`
+	Body  string      `json:"body,omitempty"`
+}
+
+// SubmitReview posts a PR review.
+//
+// Body validation: APPROVE accepts an empty body; COMMENT and
+// REQUEST_CHANGES require a body server-side (GitHub returns 422
+// without). We mirror that here so the handler can surface a clean
+// 400 instead of forwarding GitHub's terse 422 message.
+func (c *Client) SubmitReview(ctx context.Context, owner, repo string, prNumber int, event ReviewEvent, body string) (*Review, error) {
+	switch event {
+	case ReviewEventApprove, ReviewEventRequestChanges, ReviewEventComment:
+	default:
+		return nil, fmt.Errorf("github: invalid review event %q", event)
+	}
+	if (event == ReviewEventComment || event == ReviewEventRequestChanges) && strings.TrimSpace(body) == "" {
+		return nil, fmt.Errorf("github: review body is required for event %s", event)
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews",
+		url.PathEscape(owner), url.PathEscape(repo), prNumber)
+	var out Review
+	if err := c.doWithBody(ctx, "POST", path, submitReviewRequest{Event: event, Body: body}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // dispatchWorkflowRequest is the body POST /actions/workflows/{file}/dispatches
 // accepts. Inputs is a flat map of string keys/values — GitHub coerces
 // non-string types but our chip only ever forwards an environment_id

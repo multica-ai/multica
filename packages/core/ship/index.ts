@@ -25,6 +25,8 @@ export {
   useNudgePullRequestAuthor,
   useRunSmokeTests,
   useClosePullRequestAsStale,
+  // Phase 6.5
+  useSubmitPullRequestReview,
   useShipCardActions,
   shipCardActionsOptions,
   // Phase 5

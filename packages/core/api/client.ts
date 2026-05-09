@@ -126,6 +126,7 @@ import type {
   NudgePullRequestAuthorRequest,
   RunSmokeTestsRequest,
   ClosePullRequestAsStaleRequest,
+  SubmitPullRequestReviewRequest,
   UpdatePullRequestRequest,
   LinkedIssuesResponse,
   TalkToAgentRequest,
@@ -1845,6 +1846,16 @@ export class ApiClient {
     body?: ClosePullRequestAsStaleRequest,
   ): Promise<ActionResult> {
     return this.postPullRequestAction(prId, "close_as_stale", body ?? {});
+  }
+
+  // Phase 6.5 — submit a PR review (Approve / Request changes / Comment).
+  // The endpoint is named "review" rather than "submit_review" to keep
+  // the URL ergonomic; the action name in the audit row IS submit_review.
+  async submitPullRequestReview(
+    prId: string,
+    body: SubmitPullRequestReviewRequest,
+  ): Promise<ActionResult> {
+    return this.postPullRequestAction(prId, "review", body);
   }
 
   // Phase 3 — recent-actions footer on the PR card. Today the backend has

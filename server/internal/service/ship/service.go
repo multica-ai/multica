@@ -32,6 +32,11 @@ type GithubClient interface {
 	UpdatePullRequestBranch(ctx context.Context, owner, repo string, prNumber int, expectedSHA string) error
 	CreatePullRequestComment(ctx context.Context, owner, repo string, prNumber int, body string) (*gh.Comment, error)
 	DismissPullRequestReview(ctx context.Context, owner, repo string, prNumber int, reviewID int64, message string) error
+	// Phase 6.5 — submit a PR review (Approve / Request changes / Comment).
+	// Behavior parity with the chip on GitHub's UI: APPROVE allows an
+	// empty body; COMMENT and REQUEST_CHANGES require one. The client
+	// enforces this so the handler can return a clean 400.
+	SubmitReview(ctx context.Context, owner, repo string, prNumber int, event gh.ReviewEvent, body string) (*gh.Review, error)
 	ClosePullRequest(ctx context.Context, owner, repo string, prNumber int) error
 	DispatchWorkflow(ctx context.Context, owner, repo, workflowFile, ref string, inputs map[string]string) error
 	// Phase 5 — used by the risk classifier. Optional in spirit (the
@@ -41,6 +46,17 @@ type GithubClient interface {
 	ListPullRequestFiles(ctx context.Context, owner, repo string, prNumber int) ([]gh.PullRequestFile, error)
 }
 
+// PRChannelPoster posts a system-style message to a PR's conversation
+// channel. Best-effort: callers swallow errors (the chip's primary
+// outcome — submitting the review — already succeeded). Wired by the
+// handler with a closure that calls into ChannelMessageService.
+//
+// Phase 6.5 — used by the submit_review action so a member's review
+// shows up in the PR's conversation channel without requiring a manual
+// re-post. Defined as a function type rather than a fat interface
+// because the ship service has exactly one channel-side need today.
+type PRChannelPoster func(ctx context.Context, channelID pgtype.UUID, content string) error
+
 // Service is the Ship Hub entry point. Construct one per workspace token
 // (so the GithubClient can carry workspace-specific auth) — the periodic
 // reconciler in cmd/server constructs a Service per iteration.
@@ -49,6 +65,10 @@ type Service struct {
 	Github GithubClient
 	// Now lets tests pin time. nil → time.Now.
 	Now func() time.Time
+	// PostToPRChannel is optional — when set, the submit_review action
+	// best-effort posts a status line to the PR's conversation channel
+	// after a successful review submission. nil disables the hook.
+	PostToPRChannel PRChannelPoster
 }
 
 // SyncResult is the per-call return shape — the handler echoes it back so

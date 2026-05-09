@@ -297,3 +297,100 @@ func TestDispatchWorkflow_RejectsEmpty(t *testing.T) {
 		t.Fatalf("expected error on empty ref")
 	}
 }
+
+// TestSubmitReview_Approve_EmptyBody — APPROVE is the one event GitHub
+// accepts without a body. The chip surfaces the resulting review URL
+// so the user can deep-link to it from the success toast.
+func TestSubmitReview_Approve_EmptyBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method: got %s", r.Method)
+		}
+		if r.URL.Path != "/repos/owner/repo/pulls/77/reviews" {
+			t.Errorf("path: got %q", r.URL.Path)
+		}
+		var got submitReviewRequest
+		readJSON(t, r, &got)
+		if got.Event != ReviewEventApprove || got.Body != "" {
+			t.Errorf("body: %+v", got)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":555,"html_url":"https://github.com/owner/repo/pull/77#pullrequestreview-555","state":"APPROVED","body":"","user":{"login":"alice"},"submitted_at":"2026-05-09T12:00:00Z"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient("t")
+	c.BaseURL = srv.URL
+	rev, err := c.SubmitReview(context.Background(), "owner", "repo", 77, ReviewEventApprove, "")
+	if err != nil {
+		t.Fatalf("SubmitReview: %v", err)
+	}
+	if rev.ID != 555 || rev.State != "APPROVED" {
+		t.Errorf("review: %+v", rev)
+	}
+}
+
+// TestSubmitReview_Comment_HappyPath — COMMENT submits with a body.
+func TestSubmitReview_Comment_HappyPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var got submitReviewRequest
+		readJSON(t, r, &got)
+		if got.Event != ReviewEventComment || got.Body != "looks good overall" {
+			t.Errorf("body: %+v", got)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":42,"state":"COMMENTED","body":"looks good overall","user":{"login":"alice"}}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient("t")
+	c.BaseURL = srv.URL
+	rev, err := c.SubmitReview(context.Background(), "o", "r", 1, ReviewEventComment, "looks good overall")
+	if err != nil {
+		t.Fatalf("SubmitReview: %v", err)
+	}
+	if rev.ID != 42 {
+		t.Errorf("review: %+v", rev)
+	}
+}
+
+// TestSubmitReview_RejectsEmptyBody — both COMMENT and REQUEST_CHANGES
+// require a body. We validate client-side so the handler can render a
+// clean 400 instead of forwarding GitHub's 422.
+func TestSubmitReview_RejectsEmptyBody(t *testing.T) {
+	c := NewClient("t")
+	c.BaseURL = "http://invalid.example"
+	if _, err := c.SubmitReview(context.Background(), "o", "r", 1, ReviewEventComment, "  "); err == nil {
+		t.Fatalf("expected empty-body error for COMMENT")
+	}
+	if _, err := c.SubmitReview(context.Background(), "o", "r", 1, ReviewEventRequestChanges, ""); err == nil {
+		t.Fatalf("expected empty-body error for REQUEST_CHANGES")
+	}
+}
+
+// TestSubmitReview_InvalidEvent — anything outside the three-value enum
+// is rejected before the request fires.
+func TestSubmitReview_InvalidEvent(t *testing.T) {
+	c := NewClient("t")
+	c.BaseURL = "http://invalid.example"
+	if _, err := c.SubmitReview(context.Background(), "o", "r", 1, ReviewEvent("DELETE"), "x"); err == nil {
+		t.Fatalf("expected invalid-event error")
+	}
+}
+
+// TestSubmitReview_Unprocessable — GitHub's 422 (e.g. "Can not approve
+// your own pull request") bubbles up as ErrUnprocessable.
+func TestSubmitReview_Unprocessable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		w.Write([]byte(`{"message":"Can not approve your own pull request"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient("t")
+	c.BaseURL = srv.URL
+	_, err := c.SubmitReview(context.Background(), "o", "r", 1, ReviewEventApprove, "")
+	if !errors.Is(err, ErrUnprocessable) {
+		t.Fatalf("expected ErrUnprocessable, got %v", err)
+	}
+}

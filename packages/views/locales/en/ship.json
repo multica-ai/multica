@@ -53,6 +53,7 @@
     "review_required": "Review needed",
     "review_approved": "Approved",
     "review_changes_requested": "Changes requested",
+    "view_diff": "View diff",
     "additions_deletions": "+{{additions}} −{{deletions}}",
     "files_count_one": "{{count}} file",
     "files_count_other": "{{count}} files",
@@ -136,6 +137,25 @@
       "label": "Pull into a Multica issue",
       "toast_success": "Issue draft opened",
       "toast_in_progress": "Opening draft…"
+    },
+    "review": {
+      "label": "Review",
+      "toast_success": "Review submitted",
+      "toast_in_progress": "Submitting review…",
+      "dialog_title": "Review #{{number}} · {{title}}",
+      "view_diff_link": "View diff on GitHub →",
+      "body_placeholder": "Add a comment (markdown supported, @mentions allowed)…",
+      "body_label": "Comment",
+      "submit_approve": "Approve ✓",
+      "submit_request_changes": "Request changes",
+      "submit_comment": "Comment only",
+      "request_changes_confirm_title": "Request changes on this PR?",
+      "request_changes_confirm_description": "Reviewer feedback is sent immediately and blocks the PR until dismissed.",
+      "request_changes_confirm_action": "Request changes",
+      "body_required_for_comment": "Add a comment before submitting.",
+      "body_required_for_changes": "Explain what needs to change before submitting.",
+      "error_banner_title": "Review couldn't be submitted",
+      "close_dialog": "Close"
     }
   },
   "linkage": {

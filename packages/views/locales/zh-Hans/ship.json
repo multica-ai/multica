@@ -53,6 +53,7 @@
     "review_required": "待审查",
     "review_approved": "已通过",
     "review_changes_requested": "需修改",
+    "view_diff": "查看 diff",
     "additions_deletions": "+{{additions}} −{{deletions}}",
     "files_count_other": "{{count}} 个文件",
     "updated_relative": "{{when}}更新",
@@ -135,6 +136,25 @@
       "label": "纳入 Multica 工单",
       "toast_success": "工单草稿已打开",
       "toast_in_progress": "打开草稿中…"
+    },
+    "review": {
+      "label": "评审",
+      "toast_success": "评审已提交",
+      "toast_in_progress": "提交评审中…",
+      "dialog_title": "评审 #{{number}} · {{title}}",
+      "view_diff_link": "在 GitHub 上查看 diff →",
+      "body_placeholder": "添加评论（支持 markdown 与 @ 提及）…",
+      "body_label": "评论",
+      "submit_approve": "通过 ✓",
+      "submit_request_changes": "请求修改",
+      "submit_comment": "仅评论",
+      "request_changes_confirm_title": "确定对此 PR 请求修改吗？",
+      "request_changes_confirm_description": "评审意见会立即发送，并在被忽略前阻止合并。",
+      "request_changes_confirm_action": "请求修改",
+      "body_required_for_comment": "提交前请填写评论。",
+      "body_required_for_changes": "提交前请说明需要修改的内容。",
+      "error_banner_title": "评审提交失败",
+      "close_dialog": "关闭"
     }
   },
   "linkage": {

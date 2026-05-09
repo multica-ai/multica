@@ -17,7 +17,7 @@
 //   - Toast/dialog UI — that's all inside ChipButton.
 //   - Cache invalidation — the mutations themselves do that on settle.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import {
   useMergePullRequest,
@@ -27,6 +27,7 @@ import {
   useNudgePullRequestAuthor,
   useRunSmokeTests,
 } from "@multica/core/ship";
+import { ReviewDialog } from "./review-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -110,6 +111,11 @@ function useChipMutations(prId: string) {
 export function PrChipRow({ pr, stagingEnv, maxVisible = 2 }: PrChipRowProps) {
   const { t } = useT("ship");
   const mutations = useChipMutations(pr.id);
+  // Phase 6.5 — review-dialog state lives on the row because the chip
+  // itself is stateless and re-rendered on every PR cache update.
+  // Keeping it here means dialogs survive WS-driven re-renders while
+  // a member is mid-typing.
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
   const chips = useMemo(
     () => derivePrChips(pr, { stagingEnv: stagingEnv ?? null }),
     [pr, stagingEnv],
@@ -122,12 +128,32 @@ export function PrChipRow({ pr, stagingEnv, maxVisible = 2 }: PrChipRowProps) {
 
   // Are any chips for this PR currently firing? Used to disable the row
   // while in flight so a user can't queue multiple actions on the same
-  // PR before the first one settles.
+  // PR before the first one settles. Custom chips (e.g. submit_review)
+  // don't have a mutation entry — they show a dialog instead — so we
+  // skip them in the pending check.
   const anyPending = visible.some(
-    (c) => mutations[c.action]?.isPending,
+    (c) => !c.custom && mutations[c.action]?.isPending,
   );
 
   const renderChip = (chip: PrChip) => {
+    if (chip.custom) {
+      // Phase 6.5 — dispatch by action name. Today only submit_review
+      // qualifies; new custom chips would extend this switch.
+      const customClick = () => {
+        if (chip.action === "submit_review") {
+          setReviewDialogOpen(true);
+        }
+      };
+      return (
+        <ChipButton
+          key={chip.id}
+          chip={chip}
+          pr={pr}
+          onCustomClick={customClick}
+          isPending={anyPending}
+        />
+      );
+    }
     const m = mutations[chip.action];
     if (!m) return null;
     return (
@@ -177,10 +203,28 @@ export function PrChipRow({ pr, stagingEnv, maxVisible = 2 }: PrChipRowProps) {
             onClick={swallow}
           >
             {overflow.map((chip) => {
-              const m = mutations[chip.action];
-              if (!m) return null;
               const Icon = chip.icon;
               const label = chipLabel(t, chip.action);
+              if (chip.custom) {
+                // Custom chips in the overflow menu also dispatch by
+                // action name. The menu close fires before the dialog
+                // open, so the two don't visually overlap.
+                return (
+                  <DropdownMenuItem
+                    key={chip.id}
+                    onSelect={() => {
+                      if (chip.action === "submit_review") {
+                        setReviewDialogOpen(true);
+                      }
+                    }}
+                  >
+                    <Icon className="size-3.5" aria-hidden />
+                    {label}
+                  </DropdownMenuItem>
+                );
+              }
+              const m = mutations[chip.action];
+              if (!m) return null;
               return (
                 <DropdownMenuItem
                   key={chip.id}
@@ -202,6 +246,11 @@ export function PrChipRow({ pr, stagingEnv, maxVisible = 2 }: PrChipRowProps) {
           </DropdownMenuContent>
         </DropdownMenu>
       )}
+      <ReviewDialog
+        pr={pr}
+        open={reviewDialogOpen}
+        onOpenChange={setReviewDialogOpen}
+      />
     </div>
   );
 }

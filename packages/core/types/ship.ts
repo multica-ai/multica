@@ -252,7 +252,8 @@ export type ShipCardActionName =
   | "summarize_review_feedback"
   | "nudge_author"
   | "run_smoke_tests"
-  | "close_as_stale";
+  | "close_as_stale"
+  | "submit_review";
 
 export type ShipCardActionStatus = "succeeded" | "failed" | "in_progress";
 
@@ -270,6 +271,27 @@ export interface ShipActionComment {
   };
 }
 
+/** Phase 6.5 — review payload returned by the submit_review chip. Mirrors
+ *  the GitHub Reviews API response. SubmittedAt is a string because the
+ *  client passes through the raw ISO timestamp; we don't bother converting
+ *  to Date here since the chip toast renders the action right after a
+ *  fresh submission. */
+export interface ShipActionReview {
+  id: number;
+  html_url: string;
+  /** GitHub returns "APPROVED" / "CHANGES_REQUESTED" / "COMMENTED" /
+   *  "DISMISSED" on REST and lowercased equivalents on webhooks. We
+   *  carry the literal string and let the UI degrade for unknown values
+   *  per CLAUDE.md "Enum drift downgrades, not crashes". */
+  state: string;
+  body: string;
+  user?: {
+    login: string;
+    avatar_url: string;
+  };
+  submitted_at?: string;
+}
+
 /** Result of every POST /api/pull_requests/{id}/{action}. Fields are
  *  populated per-action; consult `status` to decide which branch to render. */
 export interface ActionResult {
@@ -279,6 +301,9 @@ export interface ActionResult {
   comment?: ShipActionComment | null;
   merge_sha?: string;
   error?: string;
+  /** Phase 6.5 — populated by submit_review. Optional so older Electron
+   *  builds that don't know the field still parse the response cleanly. */
+  review?: ShipActionReview | null;
 }
 
 /** Audit-trail row backing the "recent actions" footer on PR cards. Mirrors
@@ -327,6 +352,16 @@ export interface RunSmokeTestsRequest {
 
 export interface ClosePullRequestAsStaleRequest {
   reason?: string;
+}
+
+/** Phase 6.5 — submit_review request body. The three events match
+ *  GitHub's Reviews API exactly; the union is a UI hint only — the
+ *  server still accepts an arbitrary string and rejects with a clean
+ *  400 if it isn't one of these. body is required for COMMENT and
+ *  REQUEST_CHANGES (the dialog disables the button until then). */
+export interface SubmitPullRequestReviewRequest {
+  event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
+  body?: string;
 }
 
 // --- Phase 4: linkage / talk-to-agent / stacks ----------------------

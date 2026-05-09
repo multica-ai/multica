@@ -84,10 +84,21 @@ type PullRequestReviewEvent struct {
 	Repository  Repository  `json:"repository"`
 }
 
-// Review mirrors the wire shape of the review block.
+// Review mirrors the wire shape of the review block. Used by both the
+// pull_request_review webhook payload AND the response of POST
+// /repos/.../pulls/{n}/reviews (Phase 6.5 in-app review submission).
+//
+// Why share a type? Both are GitHub's same Review object — the webhook
+// just delivers it via webhook plumbing and SubmitReview returns it
+// directly. SubmittedAt is time.Time because both webhook and REST
+// emit it in RFC3339; net/http auto-decodes via time.Time's
+// UnmarshalJSON. HTMLURL is populated by REST but absent on some
+// webhook payload variants — that's fine since it's an optional
+// pointer-to-renderable in the chip toast.
 type Review struct {
 	ID          int64     `json:"id"`
-	State       string    `json:"state"` // "approved" | "changes_requested" | "commented" | "dismissed"
+	HTMLURL     string    `json:"html_url"`
+	State       string    `json:"state"` // "approved" | "changes_requested" | "commented" | "dismissed" | "APPROVED" | ...
 	Body        string    `json:"body"`
 	SubmittedAt time.Time `json:"submitted_at"`
 	User        User      `json:"user"`

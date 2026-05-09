@@ -29,6 +29,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/service/channel"
 	"github.com/multica-ai/multica/server/internal/service/ship"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	gh "github.com/multica-ai/multica/server/pkg/github"
@@ -167,6 +168,22 @@ func (h *Handler) dispatchAction(w http.ResponseWriter, r *http.Request, action 
 	}
 
 	enqueuer := &shipTaskEnqueuer{inner: h.TaskService}
+
+	// Phase 6.5 — wire the channel-post hook for the submit_review action.
+	// Other actions don't read this field; setting it unconditionally is
+	// cheap and keeps the loader path simple. The author is the human
+	// who clicked the chip — submitting a review is a personal action,
+	// not a system notice, so the channel post should attribute to them.
+	memberUserID := member.UserID
+	svc.PostToPRChannel = func(ctx context.Context, channelID pgtype.UUID, content string) error {
+		_, err := h.ChannelMessageService.Create(ctx, channel.CreateMessageParams{
+			ChannelID: channelID,
+			Author:    channel.Actor{Type: channel.ActorMember, ID: memberUserID},
+			Content:   content,
+		})
+		return err
+	}
+
 	result, err := svc.ExecuteAction(
 		r.Context(),
 		wsID,
@@ -273,4 +290,13 @@ func (h *Handler) RunSmokeTests(w http.ResponseWriter, r *http.Request) {
 // ClosePullRequestAsStale — POST /api/pull_requests/{id}/close_as_stale
 func (h *Handler) ClosePullRequestAsStale(w http.ResponseWriter, r *http.Request) {
 	h.dispatchAction(w, r, ship.ActionCloseAsStale)
+}
+
+// SubmitPullRequestReview — POST /api/pull_requests/{id}/review (Phase 6.5).
+// Posts a GitHub PR review (APPROVE / REQUEST_CHANGES / COMMENT) without
+// leaving Multica. Workspace-member auth (same as comment); the destructive
+// gate is intentionally NOT applied — submitting a review is reversible
+// (dismissal exists) and reads as a normal collaborative action.
+func (h *Handler) SubmitPullRequestReview(w http.ResponseWriter, r *http.Request) {
+	h.dispatchAction(w, r, ship.ActionSubmitReview)
 }

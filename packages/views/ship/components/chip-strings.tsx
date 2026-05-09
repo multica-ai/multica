@@ -47,6 +47,8 @@ export function chipLabel(t: T, action: string): string {
       return t(($) => $.chips.talk_to_agent.label_fallback);
     case "pull_into_issue":
       return t(($) => $.chips.pull_into_issue.label);
+    case "submit_review":
+      return t(($) => $.chips.review.label);
     default:
       // Unknown enum drift — render the action name itself rather than a
       // blank chip. The user can still read the affordance and cancel out.
@@ -78,6 +80,8 @@ export function chipSuccessToast(t: T, action: string): string {
       return t(($) => $.chips.talk_to_agent.toast_success);
     case "pull_into_issue":
       return t(($) => $.chips.pull_into_issue.toast_success);
+    case "submit_review":
+      return t(($) => $.chips.review.toast_success);
     default:
       return t(($) => $.chips.toast_generic_failure);
   }
@@ -107,6 +111,8 @@ export function chipInProgressToast(t: T, action: string): string {
       return t(($) => $.chips.talk_to_agent.toast_in_progress);
     case "pull_into_issue":
       return t(($) => $.chips.pull_into_issue.toast_in_progress);
+    case "submit_review":
+      return t(($) => $.chips.review.toast_in_progress);
     default:
       return "";
   }

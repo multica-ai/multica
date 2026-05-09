@@ -27,6 +27,10 @@ type fakeGithub struct {
 	// Phase 5 — files lookup for the risk classifier. Default returns
 	// nil/nil so existing tests degrade to the title-only path.
 	listFilesFn func(ctx context.Context, owner, repo string, prNumber int) ([]gh.PullRequestFile, error)
+	// Phase 6.5 — submit_review. Default returns a synthetic review with
+	// the supplied event echoed back so tests can assert on the
+	// passthrough without wiring a custom hook.
+	submitReviewFn func(ctx context.Context, owner, repo string, prNumber int, event gh.ReviewEvent, body string) (*gh.Review, error)
 }
 
 type ghResponse struct {
@@ -97,6 +101,13 @@ func (f *fakeGithub) ListPullRequestFiles(ctx context.Context, owner, repo strin
 		return f.listFilesFn(ctx, owner, repo, prNumber)
 	}
 	return nil, nil
+}
+
+func (f *fakeGithub) SubmitReview(ctx context.Context, owner, repo string, prNumber int, event gh.ReviewEvent, body string) (*gh.Review, error) {
+	if f.submitReviewFn != nil {
+		return f.submitReviewFn(ctx, owner, repo, prNumber, event, body)
+	}
+	return &gh.Review{ID: 1, HTMLURL: "https://example.com/r/1", State: string(event), Body: body}, nil
 }
 
 func TestMapPRState(t *testing.T) {

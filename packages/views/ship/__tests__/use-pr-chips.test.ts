@@ -178,6 +178,50 @@ describe("derivePrChips priority order", () => {
     expect(chips[1]?.action).toBe("rebase_on_main");
   });
 
+  it("surfaces 'Review' for any open non-draft PR", () => {
+    // Phase 6.5 — Review chip is state-coupled to open + non-draft.
+    const chips = derivePrChips(makePR(), { now: NOW });
+    expect(chips.some((c) => c.action === "submit_review")).toBe(true);
+  });
+
+  it("does NOT surface 'Review' on a draft PR", () => {
+    // GitHub doesn't accept reviews on drafts; offering the chip would
+    // result in a guaranteed 422.
+    const chips = derivePrChips(makePR({ is_draft: true }), { now: NOW });
+    expect(chips.some((c) => c.action === "submit_review")).toBe(false);
+  });
+
+  it("does NOT surface 'Review' on a closed or merged PR", () => {
+    // Closed-not-merged returns no chips at all (existing rule).
+    expect(
+      derivePrChips(
+        makePR({ state: "closed", pr_closed_at: "2026-05-09T10:00:00Z" }),
+        { now: NOW },
+      ).some((c) => c.action === "submit_review"),
+    ).toBe(false);
+
+    // Merged PRs get smoke-tests / talk-to-agent chips but never review.
+    expect(
+      derivePrChips(
+        makePR({
+          state: "merged",
+          head_sha: "deadbee",
+          pr_merged_at: "2026-05-07T00:00:00Z",
+        }),
+        {
+          now: NOW,
+          stagingEnv: { id: "env-staging-1", current_sha: "older" },
+        },
+      ).some((c) => c.action === "submit_review"),
+    ).toBe(false);
+  });
+
+  it("marks the Review chip as custom (opens a dialog, not a mutation)", () => {
+    const chips = derivePrChips(makePR(), { now: NOW });
+    const review = chips.find((c) => c.action === "submit_review");
+    expect(review?.custom).toBe(true);
+  });
+
   it("attaches an environment_id body builder to the smoke-test chip", () => {
     const chips = derivePrChips(
       makePR({

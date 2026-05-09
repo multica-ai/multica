@@ -26,6 +26,7 @@ type fakeShipGithub struct {
 	dismissReviewFn func(ctx context.Context, owner, repo string, prNumber int, reviewID int64, message string) error
 	closePRFn       func(ctx context.Context, owner, repo string, prNumber int) error
 	dispatchFn      func(ctx context.Context, owner, repo, workflowFile, ref string, inputs map[string]string) error
+	submitReviewFn  func(ctx context.Context, owner, repo string, prNumber int, event gh.ReviewEvent, body string) (*gh.Review, error)
 }
 
 func (f *fakeShipGithub) ListPullRequests(ctx context.Context, owner, repo string, opts gh.ListOptions) ([]gh.PullRequest, error) {
@@ -74,6 +75,12 @@ func (f *fakeShipGithub) ListPullRequestFiles(_ context.Context, _, _ string, _ 
 	// Phase 5 — chip handler tests don't drive the risk classifier; return
 	// nil so the classifier degrades to its title-only path.
 	return nil, nil
+}
+func (f *fakeShipGithub) SubmitReview(ctx context.Context, owner, repo string, prNumber int, event gh.ReviewEvent, body string) (*gh.Review, error) {
+	if f.submitReviewFn != nil {
+		return f.submitReviewFn(ctx, owner, repo, prNumber, event, body)
+	}
+	return &gh.Review{ID: 700, HTMLURL: "https://example.com/r/700", State: string(event), Body: body}, nil
 }
 
 // fakeShipTaskEnqueuer captures spawn calls so tests can assert on the
@@ -563,5 +570,136 @@ func TestShip_MergeEndpoint_BadID(t *testing.T) {
 	testHandler.MergePullRequest(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("want 400 (bad uuid), got %d", w.Code)
+	}
+}
+
+// TestActions_SubmitReview_Approve_HappyPath — APPROVE with empty body
+// succeeds; the review is recorded and the result carries the review URL.
+func TestActions_SubmitReview_Approve_HappyPath(t *testing.T) {
+	if !shipPhase3MigrationApplied(t) {
+		t.Skip("phase 3 migration not applied")
+	}
+	enableShipHub(t, true)
+	_, prID := seedPRForActions(t, "https://github.com/multica-ai/multica", 200)
+
+	var sawEvent gh.ReviewEvent
+	var sawBody string
+	ghClient := &fakeShipGithub{
+		submitReviewFn: func(ctx context.Context, owner, repo string, prNumber int, event gh.ReviewEvent, body string) (*gh.Review, error) {
+			sawEvent = event
+			sawBody = body
+			return &gh.Review{ID: 9001, HTMLURL: "https://github.com/.../#review-9001", State: "APPROVED"}, nil
+		},
+	}
+	svc := &ship.Service{Q: testHandler.Queries, Github: ghClient}
+	res, err := runAction(t, svc, prID, parseUUID(testUserID), ship.ActionSubmitReview, map[string]string{"event": "APPROVE"}, nil, pgtype.UUID{}, "")
+	if err != nil {
+		t.Fatalf("submit_review: %v", err)
+	}
+	if res.Status != ship.StatusSucceeded {
+		t.Fatalf("status: %s", res.Status)
+	}
+	if res.Review == nil || res.Review.ID != 9001 {
+		t.Fatalf("review missing/wrong: %+v", res.Review)
+	}
+	if sawEvent != gh.ReviewEventApprove || sawBody != "" {
+		t.Fatalf("upstream call: event=%s body=%q", sawEvent, sawBody)
+	}
+	if actionRowCount(t, prID, ship.StatusSucceeded) != 1 {
+		t.Fatalf("expected one succeeded audit row")
+	}
+}
+
+// TestActions_SubmitReview_Comment_RequiresBody — COMMENT with empty body
+// is rejected at the service layer (mapped to 400 by the handler) so the
+// user sees a clean error rather than GitHub's 422 forwarded raw.
+func TestActions_SubmitReview_Comment_RequiresBody(t *testing.T) {
+	if !shipPhase3MigrationApplied(t) {
+		t.Skip("phase 3 migration not applied")
+	}
+	enableShipHub(t, true)
+	_, prID := seedPRForActions(t, "https://github.com/multica-ai/multica", 201)
+
+	svc := &ship.Service{Q: testHandler.Queries, Github: &fakeShipGithub{}}
+	_, err := runAction(t, svc, prID, parseUUID(testUserID), ship.ActionSubmitReview, map[string]string{"event": "COMMENT", "body": "  "}, nil, pgtype.UUID{}, "")
+	if !errors.Is(err, ship.ErrInvalidPayload) {
+		t.Fatalf("expected ErrInvalidPayload, got %v", err)
+	}
+	if mapActionError(err) != http.StatusBadRequest {
+		t.Fatalf("expected 400 from mapper, got %d", mapActionError(err))
+	}
+}
+
+// TestActions_SubmitReview_RequestChanges_RequiresBody — REQUEST_CHANGES
+// with empty body is rejected at the service layer.
+func TestActions_SubmitReview_RequestChanges_RequiresBody(t *testing.T) {
+	if !shipPhase3MigrationApplied(t) {
+		t.Skip("phase 3 migration not applied")
+	}
+	enableShipHub(t, true)
+	_, prID := seedPRForActions(t, "https://github.com/multica-ai/multica", 202)
+
+	svc := &ship.Service{Q: testHandler.Queries, Github: &fakeShipGithub{}}
+	_, err := runAction(t, svc, prID, parseUUID(testUserID), ship.ActionSubmitReview, map[string]string{"event": "REQUEST_CHANGES", "body": ""}, nil, pgtype.UUID{}, "")
+	if !errors.Is(err, ship.ErrInvalidPayload) {
+		t.Fatalf("expected ErrInvalidPayload, got %v", err)
+	}
+}
+
+// TestActions_SubmitReview_InvalidEvent — anything outside the three-value
+// enum is a 400 (drift from a future GitHub event must not crash).
+func TestActions_SubmitReview_InvalidEvent(t *testing.T) {
+	if !shipPhase3MigrationApplied(t) {
+		t.Skip("phase 3 migration not applied")
+	}
+	enableShipHub(t, true)
+	_, prID := seedPRForActions(t, "https://github.com/multica-ai/multica", 203)
+
+	svc := &ship.Service{Q: testHandler.Queries, Github: &fakeShipGithub{}}
+	_, err := runAction(t, svc, prID, parseUUID(testUserID), ship.ActionSubmitReview, map[string]string{"event": "DELETE", "body": "x"}, nil, pgtype.UUID{}, "")
+	if !errors.Is(err, ship.ErrInvalidPayload) {
+		t.Fatalf("expected ErrInvalidPayload, got %v", err)
+	}
+}
+
+// TestActions_SubmitReview_PostsToConversationChannel — when the PR has a
+// conversation_channel_id set AND the service has PostToPRChannel wired,
+// the review submission triggers a status post in the channel. The
+// channel post is best-effort; a failure must not fail the review.
+func TestActions_SubmitReview_PostsToConversationChannel(t *testing.T) {
+	if !shipPhase3MigrationApplied(t) {
+		t.Skip("phase 3 migration not applied")
+	}
+	enableShipHub(t, true)
+	_, prID := seedPRForActions(t, "https://github.com/multica-ai/multica", 204)
+
+	// Attach a fake channel id directly on the PR row so the service
+	// hook fires. Real flow uses GetOrCreatePRConversationChannel; we
+	// shortcut here so the test stays narrow.
+	chanID := pgtype.UUID{Bytes: [16]byte{0xCA, 0xFE, 0xBE, 0xEF}, Valid: true}
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE pull_request SET conversation_channel_id = $1 WHERE id = $2`,
+		chanID, prID); err != nil {
+		t.Fatalf("attach channel id: %v", err)
+	}
+
+	var posted []string
+	svc := &ship.Service{
+		Q:      testHandler.Queries,
+		Github: &fakeShipGithub{},
+		PostToPRChannel: func(ctx context.Context, channelID pgtype.UUID, content string) error {
+			posted = append(posted, content)
+			return nil
+		},
+	}
+	_, err := runAction(t, svc, prID, parseUUID(testUserID), ship.ActionSubmitReview, map[string]string{"event": "APPROVE", "body": "LGTM"}, nil, pgtype.UUID{}, "")
+	if err != nil {
+		t.Fatalf("submit_review: %v", err)
+	}
+	if len(posted) != 1 {
+		t.Fatalf("expected 1 channel post, got %d", len(posted))
+	}
+	if !strings.Contains(posted[0], "Approved") || !strings.Contains(posted[0], "LGTM") {
+		t.Fatalf("channel post content: %q", posted[0])
 	}
 }

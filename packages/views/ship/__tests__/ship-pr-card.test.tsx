@@ -103,4 +103,20 @@ describe("ShipPRCard", () => {
     });
     expect(screen.getByText(/Draft/i)).toBeInTheDocument();
   });
+
+  it("renders a 'View diff' link pointing at /files in a new tab", () => {
+    // Phase 6.5 — the deep-link goes to the GitHub Files tab so a
+    // reviewer lands on the unified diff rather than the conversation.
+    render(<ShipPRCard pr={makePR()} />, { wrapper: I18nWrapper });
+    const link = screen.getByTestId("ship-card-view-diff");
+    expect(link).toHaveAttribute(
+      "href",
+      "https://github.com/acme/app/pull/1234/files",
+    );
+    expect(link).toHaveAttribute("target", "_blank");
+    // rel="noopener" prevents the new-tab GitHub page from grabbing
+    // window.opener; defensive even when target=_blank already
+    // protects most browsers.
+    expect(link.getAttribute("rel")).toMatch(/noopener/);
+  });
 });
