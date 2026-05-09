@@ -190,7 +190,7 @@ function TimelineSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
-// SubIssueRow — sub-issue list item with inline status editing
+// SubIssueRow — sub-issue list item with inline status & assignee editing
 // ---------------------------------------------------------------------------
 
 function SubIssueRow({ child }: { child: Issue }) {
@@ -210,7 +210,7 @@ function SubIssueRow({ child }: { child: Issue }) {
   );
 
   // The row is wrapped in AppLink for navigation. Stop propagation on the
-  // status picker so clicking the icon opens the popover instead of navigating.
+  // pickers so clicking them opens the popover instead of navigating.
   const stopPropagation = (e: React.SyntheticEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -252,20 +252,34 @@ function SubIssueRow({ child }: { child: Issue }) {
       >
         {child.title}
       </span>
-      {child.assignee_type && child.assignee_id ? (
-        <ActorAvatar
-          actorType={child.assignee_type}
-          actorId={child.assignee_id}
-          size={20}
-          className="shrink-0"
-          enableHoverCard
+      <div
+        onClick={stopPropagation}
+        onMouseDown={stopPropagation}
+        onPointerDown={stopPropagation}
+        className="flex shrink-0"
+      >
+        <AssigneePicker
+          assigneeType={child.assignee_type}
+          assigneeId={child.assignee_id}
+          onUpdate={handleUpdate}
+          align="end"
+          trigger={
+            child.assignee_type && child.assignee_id ? (
+              <ActorAvatar
+                actorType={child.assignee_type}
+                actorId={child.assignee_id}
+                size={20}
+                className="shrink-0"
+              />
+            ) : (
+              <span
+                aria-hidden
+                className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 shrink-0"
+              />
+            )
+          }
         />
-      ) : (
-        <span
-          aria-hidden
-          className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 shrink-0"
-        />
-      )}
+      </div>
     </AppLink>
   );
 }
