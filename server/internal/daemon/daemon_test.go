@@ -186,6 +186,8 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 	}{
 		{provider: "openclaw", want: true},
 		{provider: "hermes", want: true},
+		{provider: "kiro", want: true},
+		{provider: "kimi", want: true},
 		{provider: "codex", want: false},
 		{provider: "claude", want: false},
 	}

@@ -15,6 +15,8 @@ import type {
   CommentCreatedPayload,
   CommentUpdatedPayload,
   CommentDeletedPayload,
+  CommentResolvedPayload,
+  CommentUnresolvedPayload,
   ActivityCreatedPayload,
   ReactionAddedPayload,
   ReactionRemovedPayload,
@@ -50,6 +52,9 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
     comment_type: c.type,
     reactions: c.reactions ?? [],
     attachments: c.attachments ?? [],
+    resolved_at: c.resolved_at,
+    resolved_by_type: c.resolved_by_type,
+    resolved_by_id: c.resolved_by_id,
   };
 }
 
@@ -107,6 +112,44 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     useCallback(
       (payload: unknown) => {
         const { comment } = payload as CommentUpdatedPayload;
+        if (comment.issue_id !== issueId) return;
+        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+          old?.map((e) =>
+            e.id === comment.id ? commentToTimelineEntry(comment) : e,
+          ),
+        );
+      },
+      [qc, issueId],
+    ),
+  );
+
+  // Granular handlers for comment:resolved / comment:unresolved. The payload
+  // carries the full Comment with the new resolved_at/resolved_by_* fields,
+  // which `commentToTimelineEntry` already preserves, so the existing
+  // entry can simply be replaced in place. Without these handlers the only
+  // path that updated the cache was `useRealtimeSync`'s global invalidate,
+  // which forces a full timeline refetch and busts every CommentCard memo.
+  useWSEvent(
+    "comment:resolved",
+    useCallback(
+      (payload: unknown) => {
+        const { comment } = payload as CommentResolvedPayload;
+        if (comment.issue_id !== issueId) return;
+        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+          old?.map((e) =>
+            e.id === comment.id ? commentToTimelineEntry(comment) : e,
+          ),
+        );
+      },
+      [qc, issueId],
+    ),
+  );
+
+  useWSEvent(
+    "comment:unresolved",
+    useCallback(
+      (payload: unknown) => {
+        const { comment } = payload as CommentUnresolvedPayload;
         if (comment.issue_id !== issueId) return;
         qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
           old?.map((e) =>

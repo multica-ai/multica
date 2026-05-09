@@ -36,7 +36,6 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
-import { collectThreadReplies } from "./thread-utils";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
@@ -48,7 +47,14 @@ import { useT } from "../../i18n";
 interface CommentCardProps {
   issueId: string;
   entry: TimelineEntry;
-  allReplies: Map<string, TimelineEntry[]>;
+  /**
+   * Flat list of every nested reply under this thread root, in render order.
+   * Computed once in `issue-detail.tsx`'s `timelineView` and stabilized so
+   * the array reference only changes when *this* thread's replies change —
+   * an unrelated thread receiving a new reply must NOT bust this card's
+   * memo. Passing the full Map here used to do exactly that.
+   */
+  replies: TimelineEntry[];
   currentUserId?: string;
   /**
    * True when the current user is a workspace owner/admin and can therefore
@@ -391,7 +397,7 @@ function CommentRow({
 function CommentCardImpl({
   issueId,
   entry,
-  allReplies,
+  replies,
   currentUserId,
   canModerate = false,
   onReply,
@@ -455,10 +461,10 @@ function CommentCardImpl({
     }
   };
 
-  // Collect all nested replies recursively into a flat list. Helper is
-  // shared with ResolvedThreadBar so the collapsed count matches what the
-  // expanded card renders.
-  const allNestedReplies = collectThreadReplies(entry.id, allReplies);
+  // The parent precomputes the flat thread (using collectThreadReplies),
+  // memoizes by thread, and stabilizes the array reference, so we render
+  // straight from `replies` instead of re-walking the graph on every render.
+  const allNestedReplies = replies;
 
   const replyCount = allNestedReplies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);

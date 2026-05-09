@@ -336,9 +336,13 @@ export function useCreateComment(issueId: string) {
         return [...old, entry];
       });
     },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
-    },
+    // No onSettled invalidate. The `comment:created` WS broadcast keeps
+    // the timeline cache fresh after a successful create, and reconnect
+    // recovery in useIssueTimeline already invalidates if the connection
+    // dropped. Re-fetching on every submit replaces every entry's
+    // reference, which forces every memoized CommentCard subtree to
+    // re-render (visible as a flash across sibling threads during AI
+    // streaming).
   });
 }
 

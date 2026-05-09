@@ -45,6 +45,7 @@ import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
+import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
 import { useQuery } from "@tanstack/react-query";
@@ -150,6 +151,23 @@ function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
+}
+
+// Stable reference for threads with no replies. Inline `[]` would create a
+// new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
+const EMPTY_REPLIES: TimelineEntry[] = [];
+
+// Shallow array equality by element identity. Used to reuse the previous
+// render's per-thread reply slice when nothing in *this* thread changed,
+// even if the surrounding `timeline` array was rebuilt by a WS event in
+// some unrelated thread.
+function shallowEqualEntries(a: TimelineEntry[], b: TimelineEntry[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }
 
 function TimelineSkeleton() {
@@ -315,10 +333,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [clearResolvedExpand, toggleResolveComment],
   );
 
-  // Memoized timeline grouping. The same Map / groups references are reused
-  // across re-renders that don't change `timeline`, so React.memo on
-  // CommentCard can skip re-rendering when the only thing that moved was
-  // unrelated parent state (e.g. composer draft, sidebar toggle).
+  // Memoized timeline grouping. Each render rebuilds the per-parent map from
+  // the latest timeline, then pre-flattens each thread's reply subtree into a
+  // dedicated `threadReplies` slice per root. Slices are stabilized against
+  // the previous render via `prevThreadRepliesRef`: if a thread's flat list
+  // is shallow-equal to the previous one, we reuse the previous array so
+  // React.memo on CommentCard / ResolvedThreadBar can short-circuit. Without
+  // this, every WS event (including reactions, edits, AI streaming on an
+  // unrelated thread) hands every card a brand-new prop reference and forces
+  // every thread subtree to re-render in lockstep.
+  const prevThreadRepliesRef = useRef<Map<string, TimelineEntry[]>>(new Map());
   const timelineView = useMemo(() => {
     // Group entries: top-level = activities + root comments; replies are
     // bucketed under their parent's id and rendered nested inside CommentCard.
@@ -335,6 +359,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         repliesByParent.set(e.parent_id, list);
       }
     }
+
+    // Pre-flatten each top-level comment's thread subtree (parent + every
+    // descendant in render order). Reuse the previous array reference when
+    // the thread is unchanged so unrelated CommentCards keep their memo.
+    const prevThreadReplies = prevThreadRepliesRef.current;
+    const threadReplies = new Map<string, TimelineEntry[]>();
+    for (const root of topLevel) {
+      if (root.type !== "comment") continue;
+      const fresh = collectThreadReplies(root.id, repliesByParent);
+      const previous = prevThreadReplies.get(root.id);
+      threadReplies.set(
+        root.id,
+        previous && shallowEqualEntries(previous, fresh) ? previous : fresh,
+      );
+    }
+    prevThreadRepliesRef.current = threadReplies;
 
     // Coalesce consecutive activities from the same actor + action.
     // - task_completed / task_failed: no time limit (these repeat across runs)
@@ -375,7 +415,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
     }
 
-    return { repliesByParent, groups };
+    return { threadReplies, groups };
   }, [timeline]);
 
   const {
@@ -1039,7 +1079,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       <div key={entry.id} id={`comment-${entry.id}`}>
                         <ResolvedThreadBar
                           entry={entry}
-                          repliesByParent={timelineView.repliesByParent}
+                          replies={timelineView.threadReplies.get(entry.id) ?? EMPTY_REPLIES}
                           onExpand={() => toggleResolvedExpand(entry.id, true)}
                         />
                       </div>
@@ -1050,7 +1090,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       <CommentCard
                         issueId={id}
                         entry={entry}
-                        allReplies={timelineView.repliesByParent}
+                        replies={timelineView.threadReplies.get(entry.id) ?? EMPTY_REPLIES}
                         currentUserId={user?.id}
                         canModerate={canModerateComments}
                         onReply={submitReply}

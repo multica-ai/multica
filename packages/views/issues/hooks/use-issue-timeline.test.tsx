@@ -201,4 +201,172 @@ describe("useIssueTimeline", () => {
     // setQueryData should not have been invoked for a non-matching issue.
     expect(cacheUpdates.last).toBeNull();
   });
+
+  // The global useRealtimeSync handler now uses refetchType: "none" for
+  // timeline events, which means useIssueTimeline must own the granular
+  // cache update for every event that mutates the timeline — including
+  // comment:resolved / comment:unresolved. Without these handlers the
+  // resolve toggle on a thread root would only update the cache when the
+  // user remounts IssueDetail (the stale flag triggers a refetch), so the
+  // bar/expanded view would lag the click by a navigation cycle.
+  it("comment:resolved updates the matching entry in place with the new resolved fields", () => {
+    queryState.data = [
+      {
+        type: "comment",
+        id: "c1",
+        actor_type: "member",
+        actor_id: "u",
+        content: "hello",
+        parent_id: null,
+        created_at: "2026-05-06T01:00:00Z",
+        updated_at: "2026-05-06T01:00:00Z",
+        reactions: [],
+        attachments: [],
+        resolved_at: null,
+        resolved_by_type: null,
+        resolved_by_id: null,
+      },
+      {
+        type: "comment",
+        id: "c2",
+        actor_type: "member",
+        actor_id: "u",
+        content: "untouched",
+        parent_id: null,
+        created_at: "2026-05-06T02:00:00Z",
+        updated_at: "2026-05-06T02:00:00Z",
+        reactions: [],
+        attachments: [],
+        resolved_at: null,
+        resolved_by_type: null,
+        resolved_by_id: null,
+      },
+    ];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    const handler = wsHandlers.get("comment:resolved");
+    expect(handler).toBeDefined();
+    act(() => {
+      handler!({
+        comment: {
+          id: "c1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "u",
+          content: "hello",
+          parent_id: null,
+          created_at: "2026-05-06T01:00:00Z",
+          updated_at: "2026-05-06T01:00:00Z",
+          type: "comment",
+          reactions: [],
+          attachments: [],
+          resolved_at: "2026-05-06T03:00:00Z",
+          resolved_by_type: "member",
+          resolved_by_id: "u",
+        },
+      });
+    });
+    const updated = cacheUpdates.last as Array<{
+      id: string;
+      resolved_at: string | null;
+      resolved_by_type: string | null;
+      resolved_by_id: string | null;
+    }>;
+    expect(updated.map((e) => e.id)).toEqual(["c1", "c2"]);
+    expect(updated[0]!.resolved_at).toBe("2026-05-06T03:00:00Z");
+    expect(updated[0]!.resolved_by_type).toBe("member");
+    expect(updated[0]!.resolved_by_id).toBe("u");
+    // Sibling entry must not change (identity preserved by .map).
+    expect(updated[1]!.resolved_at).toBeNull();
+  });
+
+  it("comment:unresolved clears the resolved fields on the matching entry", () => {
+    queryState.data = [
+      {
+        type: "comment",
+        id: "c1",
+        actor_type: "member",
+        actor_id: "u",
+        content: "hello",
+        parent_id: null,
+        created_at: "2026-05-06T01:00:00Z",
+        updated_at: "2026-05-06T01:00:00Z",
+        reactions: [],
+        attachments: [],
+        resolved_at: "2026-05-06T03:00:00Z",
+        resolved_by_type: "member",
+        resolved_by_id: "u",
+      },
+    ];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    const handler = wsHandlers.get("comment:unresolved");
+    expect(handler).toBeDefined();
+    act(() => {
+      handler!({
+        comment: {
+          id: "c1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "u",
+          content: "hello",
+          parent_id: null,
+          created_at: "2026-05-06T01:00:00Z",
+          updated_at: "2026-05-06T01:00:00Z",
+          type: "comment",
+          reactions: [],
+          attachments: [],
+          resolved_at: null,
+          resolved_by_type: null,
+          resolved_by_id: null,
+        },
+      });
+    });
+    const updated = cacheUpdates.last as Array<{
+      id: string;
+      resolved_at: string | null;
+    }>;
+    expect(updated[0]!.resolved_at).toBeNull();
+  });
+
+  it("comment:resolved ignores events from other issues", () => {
+    queryState.data = [
+      {
+        type: "comment",
+        id: "c1",
+        actor_type: "member",
+        actor_id: "u",
+        content: "hello",
+        parent_id: null,
+        created_at: "2026-05-06T01:00:00Z",
+        updated_at: "2026-05-06T01:00:00Z",
+        reactions: [],
+        attachments: [],
+        resolved_at: null,
+        resolved_by_type: null,
+        resolved_by_id: null,
+      },
+    ];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    const handler = wsHandlers.get("comment:resolved");
+    act(() => {
+      handler!({
+        comment: {
+          id: "c1",
+          issue_id: "different-issue",
+          author_type: "member",
+          author_id: "u",
+          content: "hello",
+          parent_id: null,
+          created_at: "2026-05-06T01:00:00Z",
+          updated_at: "2026-05-06T01:00:00Z",
+          type: "comment",
+          reactions: [],
+          attachments: [],
+          resolved_at: "2026-05-06T03:00:00Z",
+          resolved_by_type: "member",
+          resolved_by_id: "u",
+        },
+      });
+    });
+    expect(cacheUpdates.last).toBeNull();
+  });
 });
