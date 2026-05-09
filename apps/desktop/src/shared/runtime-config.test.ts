@@ -96,4 +96,41 @@ describe("runtime config", () => {
       appUrl: "http://dev-app.example.test:3000",
     });
   });
+
+  it("falls back to local web URL when dev apiUrl is localhost", () => {
+    expect(runtimeConfigFromDevEnv({ apiUrl: "http://localhost:8080" })).toEqual({
+      schemaVersion: 1,
+      apiUrl: "http://localhost:8080",
+      wsUrl: "ws://localhost:8080/ws",
+      appUrl: "http://localhost:3000",
+    });
+  });
+
+  it("derives dev appUrl from a remote apiUrl host", () => {
+    // When the dev renderer is pointed at a remote backend (e.g. a test
+    // environment), copy-link / share URLs must reflect that environment's
+    // public web host, not the local renderer's port.
+    expect(
+      runtimeConfigFromDevEnv({ apiUrl: "https://api.test.multica.ai" }),
+    ).toEqual({
+      schemaVersion: 1,
+      apiUrl: "https://api.test.multica.ai",
+      wsUrl: "wss://api.test.multica.ai/ws",
+      appUrl: "https://api.test.multica.ai",
+    });
+  });
+
+  it("dev VITE_APP_URL still wins over apiUrl-derived value", () => {
+    expect(
+      runtimeConfigFromDevEnv({
+        apiUrl: "https://api.test.multica.ai",
+        appUrl: "https://staging.multica.ai",
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      apiUrl: "https://api.test.multica.ai",
+      wsUrl: "wss://api.test.multica.ai/ws",
+      appUrl: "https://staging.multica.ai",
+    });
+  });
 });

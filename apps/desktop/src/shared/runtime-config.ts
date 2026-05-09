@@ -44,10 +44,9 @@ export function runtimeConfigFromDevEnv(env: RuntimeConfigEnv): RuntimeConfig {
     wsUrl: env.wsUrl
       ? normalizeWsUrl(env.wsUrl, "VITE_WS_URL")
       : deriveWsUrl(apiUrl),
-    appUrl: normalizeHttpUrl(
-      env.appUrl || LOCAL_DEV_RUNTIME_CONFIG.appUrl,
-      "VITE_APP_URL",
-    ),
+    appUrl: env.appUrl
+      ? normalizeHttpUrl(env.appUrl, "VITE_APP_URL")
+      : deriveDevAppUrl(apiUrl),
   };
 }
 
@@ -100,6 +99,20 @@ export function deriveAppUrl(apiUrl: string): string {
   url.search = "";
   url.hash = "";
   return trimTrailingSlash(url.toString());
+}
+
+// Dev variant: when the api host is the local backend (`localhost:8080` /
+// `127.0.0.1:8080`), the renderer is served from a different port (3000),
+// so deriving by host alone is wrong. Fall back to the local dev web URL
+// in that case; for any non-local host (e.g. a remote test environment),
+// trust the production-style derivation so `apiUrl=https://api.test.x`
+// yields `appUrl=https://test.x` without a separate VITE_APP_URL.
+export function deriveDevAppUrl(apiUrl: string): string {
+  const url = new URL(apiUrl);
+  if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+    return LOCAL_DEV_RUNTIME_CONFIG.appUrl;
+  }
+  return deriveAppUrl(apiUrl);
 }
 
 function requiredString(value: unknown, field: string): string {

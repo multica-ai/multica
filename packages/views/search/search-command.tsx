@@ -228,8 +228,7 @@ export function SearchCommand() {
           icon: Link2,
           keywords: ["copy", "link", "share", "url", identifier.toLowerCase()],
           onSelect: () => {
-            const url = getShareableUrl ? getShareableUrl(pathname) : window.location.href;
-            void navigator.clipboard.writeText(url);
+            void navigator.clipboard.writeText(getShareableUrl(pathname));
             toast.success(t(($) => $.toast.link_copied));
             setOpen(false);
           },

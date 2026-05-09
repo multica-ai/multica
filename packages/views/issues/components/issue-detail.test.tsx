@@ -97,7 +97,11 @@ vi.mock("../../navigation", () => ({
       {children}
     </a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/issues/issue-1", getShareableUrl: undefined }),
+  useNavigation: () => ({
+    push: vi.fn(),
+    pathname: "/issues/issue-1",
+    getShareableUrl: (p: string) => `https://app.multica.com${p}`,
+  }),
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
