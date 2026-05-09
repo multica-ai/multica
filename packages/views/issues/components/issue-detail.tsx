@@ -58,6 +58,8 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
+import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
@@ -197,6 +199,8 @@ function SubIssueRow({ child }: { child: Issue }) {
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
   const updateIssue = useUpdateIssue();
+  const selected = useIssueSelectionStore((s) => s.selectedIds.has(child.id));
+  const toggleSelected = useIssueSelectionStore((s) => s.toggle);
   const isDone = child.status === "done" || child.status === "cancelled";
 
   const handleUpdate = useCallback(
@@ -210,7 +214,7 @@ function SubIssueRow({ child }: { child: Issue }) {
   );
 
   // The row is wrapped in AppLink for navigation. Stop propagation on the
-  // pickers so clicking them opens the popover instead of navigating.
+  // pickers / checkbox so clicking them does not navigate.
   const stopPropagation = (e: React.SyntheticEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -219,8 +223,28 @@ function SubIssueRow({ child }: { child: Issue }) {
   return (
     <AppLink
       href={paths.issueDetail(child.id)}
-      className="flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row"
+      className={cn(
+        "flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
+        selected && "bg-accent/30",
+      )}
     >
+      <div
+        onClick={stopPropagation}
+        onMouseDown={stopPropagation}
+        onPointerDown={stopPropagation}
+        className={cn(
+          "flex h-4 w-4 shrink-0 items-center justify-center transition-opacity",
+          selected ? "opacity-100" : "opacity-0 group-hover/row:opacity-100",
+        )}
+      >
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => toggleSelected(child.id)}
+          aria-label={`Select ${child.identifier}`}
+          className="cursor-pointer accent-primary"
+        />
+      </div>
       <div
         onClick={stopPropagation}
         onMouseDown={stopPropagation}
@@ -546,6 +570,30 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   });
   const [subIssuesCollapsed, setSubIssuesCollapsed] = useState(false);
 
+  // Selection store is global (workspace-scoped); clear it whenever this
+  // issue detail is mounted or switched, so leftover selections from the
+  // main list view (or another sub-issue list) don't leak into this one.
+  const clearSelection = useIssueSelectionStore((s) => s.clear);
+  const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
+  const selectIds = useIssueSelectionStore((s) => s.select);
+  const deselectIds = useIssueSelectionStore((s) => s.deselect);
+  useEffect(() => {
+    clearSelection();
+    return clearSelection;
+  }, [id, clearSelection]);
+
+  const childIssueIds = useMemo(() => childIssues.map((c) => c.id), [childIssues]);
+  const childSelectedCount = childIssueIds.filter((cid) =>
+    selectedIds.has(cid),
+  ).length;
+  const allChildrenSelected =
+    childIssueIds.length > 0 && childSelectedCount === childIssueIds.length;
+  const someChildrenSelected = childSelectedCount > 0;
+  const handleToggleSelectAllChildren = useCallback(() => {
+    if (allChildrenSelected) deselectIds(childIssueIds);
+    else selectIds(childIssueIds);
+  }, [allChildrenSelected, childIssueIds, deselectIds, selectIds]);
+
   const loading = issueLoading;
 
   // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
@@ -778,6 +826,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   const detailContent = (
     <div className="flex h-full min-w-0 flex-1 flex-col">
+        <BatchActionToolbar />
         <PageHeader className="gap-2 bg-background text-sm">
           <div className="flex flex-1 items-center gap-1.5 min-w-0">
             {workspace && (
@@ -971,7 +1020,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {childIssues.length > 0 && (() => {
             const doneCount = childIssues.filter((c) => c.status === "done").length;
             return (
-              <div className="mt-10">
+              <div className="mt-10 group/sub-issues">
                 {/* Header */}
                 <div className="flex items-center gap-2 mb-2">
                   <button
@@ -993,6 +1042,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       {doneCount}/{childIssues.length}
                     </span>
                   </div>
+                  <input
+                    type="checkbox"
+                    checked={allChildrenSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = someChildrenSelected && !allChildrenSelected;
+                    }}
+                    onChange={handleToggleSelectAllChildren}
+                    aria-label="Select all sub-issues"
+                    className={cn(
+                      "ml-1 cursor-pointer accent-primary transition-opacity",
+                      someChildrenSelected
+                        ? "opacity-100"
+                        : "opacity-0 group-hover/sub-issues:opacity-100 focus-visible:opacity-100",
+                    )}
+                  />
                   <Tooltip>
                     <TooltipTrigger
                       render={

@@ -259,13 +259,46 @@ export function useBatchUpdateIssues() {
         for (const id of ids) next = patchIssueInBuckets(next, id, updates);
         return next;
       });
-      return { prevList };
+
+      // Mirror the optimistic patch into any loaded children cache so
+      // sub-issue rows on a parent's detail page reflect the change too.
+      const idSet = new Set(ids);
+      const childrenCaches = qc.getQueriesData<Issue[]>({
+        queryKey: [...issueKeys.all(wsId), "children"],
+      });
+      const prevChildren = new Map<string, Issue[] | undefined>();
+      const affectedParentIds = new Set<string>();
+      for (const [key, data] of childrenCaches) {
+        if (!data?.some((c) => idSet.has(c.id))) continue;
+        const parentId = key[key.length - 1];
+        if (typeof parentId !== "string") continue;
+        affectedParentIds.add(parentId);
+        prevChildren.set(parentId, data);
+        qc.setQueryData<Issue[]>(issueKeys.children(wsId, parentId), (old) =>
+          old?.map((c) => (idSet.has(c.id) ? { ...c, ...updates } : c)),
+        );
+      }
+
+      return { prevList, prevChildren, affectedParentIds };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevChildren) {
+        for (const [parentId, snapshot] of ctx.prevChildren) {
+          qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
+        }
+      }
     },
-    onSettled: () => {
+    onSettled: (_data, _err, _vars, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
+        for (const parentId of ctx.affectedParentIds) {
+          qc.invalidateQueries({
+            queryKey: issueKeys.children(wsId, parentId),
+          });
+        }
+        qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+      }
     },
   });
 }
@@ -284,6 +317,17 @@ export function useBatchDeleteIssues() {
           const loc = findIssueLocation(prevList, id);
           if (loc?.issue.parent_issue_id) parentIssueIds.add(loc.issue.parent_issue_id);
         }
+      }
+      // Children cache may be the only place sub-issues live when the user
+      // operates from a parent's detail page; collect parents from there too.
+      const idSet = new Set(ids);
+      const childrenCaches = qc.getQueriesData<Issue[]>({
+        queryKey: [...issueKeys.all(wsId), "children"],
+      });
+      for (const [key, data] of childrenCaches) {
+        if (!data?.some((c) => idSet.has(c.id))) continue;
+        const parentId = key[key.length - 1];
+        if (typeof parentId === "string") parentIssueIds.add(parentId);
       }
       qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) => {
         if (!old) return old;
