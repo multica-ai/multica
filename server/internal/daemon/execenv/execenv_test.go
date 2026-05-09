@@ -924,9 +924,9 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 
 // TestInjectRuntimeConfigRequiresExplicitCommentPost ensures the injected
 // workflow makes "post a comment with results" an explicit, unmissable step in
-// both the assignment- and comment-triggered branches, plus hard-warns in the
-// Output section that terminal/log text is not user-visible. Agents were
-// silently finishing tasks without ever posting their result to the issue; see
+// both the assignment- and comment-triggered branches, including a hard
+// warning that terminal/log text is not user-visible. Agents were silently
+// finishing tasks without ever posting their result to the issue; see
 // MUL-1124. Covering this in a test prevents the guidance from decaying back
 // into a nested clause again.
 func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
@@ -956,26 +956,20 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 			s := string(data)
 
 			// The workflow must contain an explicit `multica issue comment add`
-			// invocation for this issue — not just a prose mention of posting.
+			// invocation for this issue, the word "mandatory" so the agent can
+			// see the post-result step is non-optional, and a hard warning
+			// that terminal/log text is not user-visible. After MUL-1823 the
+			// terminal-not-delivered warning lives inside the workflow step
+			// itself (single source of truth), not duplicated in an Output
+			// section.
 			mustContain := []string{
 				"multica issue comment add issue-1",
 				"mandatory",
+				"NOT delivered",
 			}
 			for _, want := range mustContain {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s: CLAUDE.md missing %q\n---\n%s", tc.name, want, s)
-				}
-			}
-
-			// The Output section must carry a hard warning that terminal/log
-			// output is not user-visible. This is the second line of defense
-			// in case the agent skips past the workflow steps.
-			for _, want := range []string{
-				"Final results MUST be delivered via `multica issue comment add`",
-				"does NOT see your terminal output",
-			} {
-				if !strings.Contains(s, want) {
-					t.Errorf("%s: Output warning missing %q", tc.name, want)
 				}
 			}
 		})
@@ -1002,10 +996,9 @@ func TestInjectRuntimeConfigDirectsMultiLineWritesToStdin(t *testing.T) {
 	s := string(data)
 
 	for _, want := range []string{
-		"multi-line content",
-		"MUST pipe via stdin",
+		"Multi-line content",
+		"MUST pipe via stdin with a HEREDOC",
 		"--content-stdin",
-		"<<'COMMENT'",
 		"`--description`",
 		"--description-stdin",
 	} {
@@ -2106,11 +2099,13 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 	t.Run("mentions-section-lists-loop-protocol", func(t *testing.T) {
 		t.Parallel()
 		s := readClaudeMD(t, assignmentCtx)
+		// After MUL-1823 the Mentions section is condensed: the When-NOT /
+		// When-IS section headers are gone, but every anti-loop *signal* must
+		// still survive in prose.
 		for _, want := range []string{
 			"side-effecting actions",
 			"enqueues a new run for that agent",
-			"When NOT to use a mention link",
-			"When a mention IS appropriate",
+			"Default to NO `@mention`",
 			"end with no mention at all",
 			"Silence ends conversations",
 		} {
@@ -2130,16 +2125,18 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		}
 	})
 
-	t.Run("workflow-carries-silence-as-exit-and-no-signoff-mention", func(t *testing.T) {
+	t.Run("workflow-points-to-per-turn-anti-loop-guidance", func(t *testing.T) {
 		t.Parallel()
 		s := readClaudeMD(t, commentTriggerCtx)
-		// The anti-loop signal for CLAUDE.md lives in the numbered workflow
-		// steps (4 + 5), not in a dedicated preamble. Lock in the key phrases
-		// so the signal can't decay back into pure prose again.
+		// After MUL-1823 the canonical anti-loop guidance lives in the
+		// per-turn user message (daemon.buildCommentPrompt agent block).
+		// CLAUDE.md only carries a one-line pointer to it so the rule has a
+		// single source of truth. Lock in the pointer so it cannot silently
+		// decay; the per-turn message itself is covered by daemon prompt
+		// tests.
 		for _, want := range []string{
-			"Decide whether a reply is warranted",
-			"Silence is a valid and preferred way",
-			"Never @mention the agent you are replying to as a thank-you or sign-off",
+			"per-turn user message",
+			"when to stay silent",
 		} {
 			if !strings.Contains(s, want) {
 				t.Errorf("comment-triggered CLAUDE.md missing %q", want)
