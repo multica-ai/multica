@@ -161,9 +161,15 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 // alongside the workspace row. Decoupling these from the row itself
 // keeps the legacy callsites (tests, listeners) functional without
 // requiring a Queries handle everywhere.
+//
+// WebhookURL is request-derived (forwarded-proto/host or direct host)
+// when set by workspaceToResponseFull, falling back to env-derived
+// webhookPublicURL() for paths that don't have a request in scope
+// (background goroutines).
 type secretFlags struct {
 	HasEncryptedGitHubToken    bool
 	HasEncryptedWebhookSecret  bool
+	WebhookURL                 string
 }
 
 func workspaceToResponseWithSecretFlags(w db.Workspace, flags secretFlags) WorkspaceResponse {
@@ -208,7 +214,7 @@ func workspaceToResponseWithSecretFlags(w db.Workspace, flags secretFlags) Works
 		ChannelRetentionDays:    retention,
 		ShipHubEnabled:          w.ShipHubEnabled,
 		GitHubTokenSet:          tokenSet,
-		ShipHubWebhookURL:       webhookPublicURL(),
+		ShipHubWebhookURL:       flags.WebhookURL, // pass-through; built upstream when a request is in scope
 		ShipHubWebhookSecretSet: webhookSet,
 	}
 }
@@ -216,8 +222,15 @@ func workspaceToResponseWithSecretFlags(w db.Workspace, flags secretFlags) Works
 // workspaceToResponseFull is the preferred call shape from any handler
 // that already has a context + queries handle. It populates the secret
 // presence flags from the encrypted store.
-func (h *Handler) workspaceToResponseFull(ctx context.Context, w db.Workspace) WorkspaceResponse {
-	flags := secretFlags{}
+//
+// Pass r when available so the webhook URL is derived from the live
+// request's forwarded-proto/host (the only honest source for deployments
+// behind a reverse proxy). Pass nil for code paths without a request in
+// scope; the URL falls back to MULTICA_API_BASE_URL.
+func (h *Handler) workspaceToResponseFull(ctx context.Context, r *http.Request, w db.Workspace) WorkspaceResponse {
+	flags := secretFlags{
+		WebhookURL: webhookPublicURLFromRequest(r),
+	}
 	if _, err := h.Queries.GetWorkspaceSecret(ctx, db.GetWorkspaceSecretParams{
 		WorkspaceID: w.ID,
 		Name:        "github_token",
@@ -265,7 +278,7 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]WorkspaceResponse, len(workspaces))
 	for i, ws := range workspaces {
-		resp[i] = h.workspaceToResponseFull(r.Context(), ws)
+		resp[i] = h.workspaceToResponseFull(r.Context(), r, ws)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -283,7 +296,7 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.workspaceToResponseFull(r.Context(), ws))
+	writeJSON(w, http.StatusOK, h.workspaceToResponseFull(r.Context(), r, ws))
 }
 
 type CreateWorkspaceRequest struct {
@@ -540,7 +553,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)
 	userID := requestUserID(r)
-	full := h.workspaceToResponseFull(r.Context(), ws)
+	full := h.workspaceToResponseFull(r.Context(), r, ws)
 	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": full})
 
 	writeJSON(w, http.StatusOK, full)

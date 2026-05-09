@@ -68,7 +68,7 @@ func (h *Handler) loadPullRequestForAction(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "pull request not found")
 		return nil, db.PullRequest{}, pgtype.UUID{}, db.Workspace{}, false
 	}
-	svc, ok := h.shipServiceFromWorkspace(w, ws, true)
+	svc, ok := h.shipServiceFromWorkspace(w, r, ws, true)
 	if !ok {
 		return nil, db.PullRequest{}, pgtype.UUID{}, db.Workspace{}, false
 	}

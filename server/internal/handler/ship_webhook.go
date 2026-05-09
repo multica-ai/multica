@@ -392,11 +392,40 @@ func (h *Handler) RegenerateShipHubWebhookSecret(w http.ResponseWriter, r *http.
 
 // webhookPublicURL is the public address clients should configure on
 // GitHub. Read from MULTICA_API_BASE_URL with a sensible default for
-// local dev.
+// local dev. Used by code paths that don't have an HTTP request to
+// derive from (e.g. background goroutines).
 func webhookPublicURL() string {
 	base := strings.TrimRight(os.Getenv("MULTICA_API_BASE_URL"), "/")
 	if base == "" {
 		base = "http://localhost:8080"
 	}
 	return base + "/api/integrations/github/webhook"
+}
+
+// webhookPublicURLFromRequest derives the user-facing webhook URL from
+// the incoming request, preferring forwarded-proto/host headers from a
+// reverse proxy, then the request's own Host. Falls back to
+// webhookPublicURL() (which reads MULTICA_API_BASE_URL) only when no
+// host can be determined from the request — keeps deploys behind a
+// proxy honest about their public URL without forcing operators to
+// duplicate the address as an env var.
+func webhookPublicURLFromRequest(r *http.Request) string {
+	if r != nil {
+		host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+		if host == "" {
+			host = strings.TrimSpace(r.Host)
+		}
+		if host != "" {
+			proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
+			if proto == "" {
+				if r.TLS != nil {
+					proto = "https"
+				} else {
+					proto = "http"
+				}
+			}
+			return proto + "://" + host + "/api/integrations/github/webhook"
+		}
+	}
+	return webhookPublicURL()
 }

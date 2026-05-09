@@ -1,14 +1,17 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service/ship"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -37,6 +40,37 @@ func (h *Handler) requireShipHubEnabled(w http.ResponseWriter, r *http.Request) 
 	return wsID, ws, true
 }
 
+// loadShipHubGitHubToken returns the workspace's GitHub PAT, preferring the
+// Phase 2 encrypted workspace_secret row and falling back to the legacy
+// plaintext settings.ship_hub.github_token only for unmigrated rows. Mirrors
+// the read order in cmd/server/ship_hub_reconciler.go so handler and
+// reconciler always agree about whether a workspace has a token.
+//
+// Returns "" when no token is configured anywhere. Errors decrypting an
+// encrypted row are logged and treated as no-token (fail closed) rather
+// than leaking a partial value.
+func (h *Handler) loadShipHubGitHubToken(ctx context.Context, ws db.Workspace) string {
+	// Encrypted store wins. The Phase 2 startup migrator moves any legacy
+	// settings.ship_hub.github_token into this row and clears the settings
+	// path, so post-migration this is the only place the token lives.
+	row, err := h.Queries.GetWorkspaceSecret(ctx, db.GetWorkspaceSecretParams{
+		WorkspaceID: ws.ID,
+		Name:        "github_token",
+	})
+	if err == nil {
+		if tok := ReadShipHubGitHubTokenFromEncrypted(row.ValueEncrypted); tok != "" {
+			return tok
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("ship hub: load encrypted token failed",
+			"workspace_id", ws.ID, "error", err)
+	}
+	// Legacy fallback: pre-Phase-2 workspaces might still have a plaintext
+	// token in settings if the startup migrator hasn't run yet (e.g. mid-
+	// upgrade). The migrator is idempotent so this path heals on next boot.
+	return readShipHubGitHubToken(ws.Settings)
+}
+
 // shipServiceFromWorkspace constructs a ship.Service whose GitHub client
 // uses the workspace's stored token. Returns ok=false (with error already
 // written) when the workspace has no token AND the request needed one.
@@ -44,10 +78,10 @@ func (h *Handler) requireShipHubEnabled(w http.ResponseWriter, r *http.Request) 
 // Read-only handlers (list PRs, list envs) call this with requireToken=false
 // — they're fine working off cached rows. Sync/refresh handlers call it
 // with requireToken=true.
-func (h *Handler) shipServiceFromWorkspace(w http.ResponseWriter, ws db.Workspace, requireToken bool) (*ship.Service, bool) {
-	token := readShipHubGitHubToken(ws.Settings)
+func (h *Handler) shipServiceFromWorkspace(w http.ResponseWriter, r *http.Request, ws db.Workspace, requireToken bool) (*ship.Service, bool) {
+	token := h.loadShipHubGitHubToken(r.Context(), ws)
 	if requireToken && token == "" {
-		writeError(w, http.StatusBadRequest, "ship_hub: github_token is not configured for this workspace")
+		writeError(w, http.StatusBadRequest, "GitHub token not configured. Set it in workspace settings → Ship Hub.")
 		return nil, false
 	}
 	return &ship.Service{
@@ -344,7 +378,7 @@ func (h *Handler) SyncProjectPullRequests(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	svc, ok := h.shipServiceFromWorkspace(w, ws, true)
+	svc, ok := h.shipServiceFromWorkspace(w, r, ws, true)
 	if !ok {
 		return
 	}
