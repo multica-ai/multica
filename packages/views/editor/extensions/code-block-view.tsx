@@ -5,11 +5,14 @@ import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { Copy, Check } from "lucide-react";
 import { useT } from "../../i18n";
+import { MermaidDiagram } from "../mermaid-diagram";
 
 function CodeBlockView({ node }: NodeViewProps) {
   const { t } = useT("editor");
   const [copied, setCopied] = useState(false);
   const language = node.attrs.language || "";
+  const isMermaid = language === "mermaid";
+  const chart = node.textContent;
 
   const handleCopy = async () => {
     const text = node.textContent;
@@ -21,6 +24,14 @@ function CodeBlockView({ node }: NodeViewProps) {
 
   return (
     <NodeViewWrapper className="code-block-wrapper group/code relative my-2">
+      {isMermaid && chart.trim() && (
+        <div
+          contentEditable={false}
+          className="mermaid-diagram-preview mb-1"
+        >
+          <MermaidDiagram chart={chart} />
+        </div>
+      )}
       <div
         contentEditable={false}
         className="code-block-header absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100"
