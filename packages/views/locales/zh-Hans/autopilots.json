@@ -183,6 +183,12 @@
     "select_agent": "选择智能体",
     "section_output_mode": "输出模式",
     "section_schedule": "时间表",
+    "section_trigger_kind": "触发方式",
+    "trigger_kind_schedule": "时间表",
+    "trigger_kind_webhook": "Webhook",
+    "section_webhook": "Webhook",
+    "webhook_help_create": "Autopilot 创建后 Multica 会生成一个 Webhook URL。向它 POST 任意 JSON 即可触发。URL 会显示在 Autopilot 详情页上。",
+    "webhook_help_edit": "该 Autopilot 由 Webhook 触发。请在详情页复制或重新生成 URL。",
     "schedule_disabled_reason": "该自动化有多个时间表——请到详情页编辑。",
     "next_run_label": "下次运行：",
     "output_modes": {

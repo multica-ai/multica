@@ -13,6 +13,7 @@ import {
   Minimize2,
   Play,
   Rocket,
+  Webhook,
   X as XIcon,
   Zap,
 } from "lucide-react";
@@ -264,6 +265,20 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   })();
   const [triggerConfig, setTriggerConfig] = useState<TriggerConfig>(initialCfg);
 
+  // Trigger kind selector. Only meaningful in create mode — edit mode does
+  // not support converting between kinds inline (PLAN.md calls that
+  // out as "delete old, create new" rather than ambiguous in-place
+  // updates), so the toggle is hidden when editing. The kind is
+  // initialized from the first existing trigger so we render the right
+  // panel without surprising the user.
+  const initialKind: "schedule" | "webhook" = (() => {
+    if (isCreate) return "schedule";
+    const first = props.triggers[0];
+    if (first?.kind === "webhook") return "webhook";
+    return "schedule";
+  })();
+  const [triggerKind, setTriggerKind] = useState<"schedule" | "webhook">(initialKind);
+
   const initialCronRef = useRef(toCronExpression(initialCfg));
   const initialTimezoneRef = useRef(initialCfg.timezone);
   const scheduleDirty =
@@ -302,19 +317,26 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           assignee_id: assigneeId,
           execution_mode: executionMode,
         });
-        let scheduleOk = true;
+        let triggerOk = true;
         try {
-          await createTrigger.mutateAsync({
-            autopilotId: autopilot.id,
-            kind: "schedule",
-            cron_expression: toCronExpression(triggerConfig),
-            timezone: triggerConfig.timezone,
-          });
+          if (triggerKind === "webhook") {
+            await createTrigger.mutateAsync({
+              autopilotId: autopilot.id,
+              kind: "webhook",
+            });
+          } else {
+            await createTrigger.mutateAsync({
+              autopilotId: autopilot.id,
+              kind: "schedule",
+              cron_expression: toCronExpression(triggerConfig),
+              timezone: triggerConfig.timezone,
+            });
+          }
         } catch {
-          scheduleOk = false;
+          triggerOk = false;
         }
         onOpenChange(false);
-        if (scheduleOk) toast.success(t(($) => $.dialog.toast_created));
+        if (triggerOk) toast.success(t(($) => $.dialog.toast_created));
         else toast.error(t(($) => $.dialog.toast_create_partial));
       } else {
         await updateAutopilot.mutateAsync({
@@ -325,7 +347,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           execution_mode: executionMode,
         });
         let scheduleOk = true;
-        if (scheduleDirty && !schedulePillDisabled) {
+        // Skip the schedule sync when the autopilot's first trigger is a
+        // webhook — there's no cron to update there, and the schedule
+        // panel isn't even rendered for webhook autopilots.
+        if (triggerKind === "schedule" && scheduleDirty && !schedulePillDisabled) {
           const snapshottedTriggerId = firstTriggerIdRef.current;
           try {
             if (snapshottedTriggerId) {
@@ -486,16 +511,24 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
 
-            <ScheduleSection
-              config={triggerConfig}
-              onChange={setTriggerConfig}
-              disabled={schedulePillDisabled}
-              disabledReason={
-                schedulePillDisabled
-                  ? t(($) => $.dialog.schedule_disabled_reason)
-                  : undefined
-              }
-            />
+            {isCreate && (
+              <TriggerKindSection kind={triggerKind} onChange={setTriggerKind} />
+            )}
+
+            {triggerKind === "schedule" ? (
+              <ScheduleSection
+                config={triggerConfig}
+                onChange={setTriggerConfig}
+                disabled={schedulePillDisabled}
+                disabledReason={
+                  schedulePillDisabled
+                    ? t(($) => $.dialog.schedule_disabled_reason)
+                    : undefined
+                }
+              />
+            ) : (
+              <WebhookHelpSection isCreate={isCreate} />
+            )}
           </aside>
         </div>
 
@@ -777,6 +810,81 @@ function ScheduleSection({
           {disabledReason}
         </p>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Trigger kind segmented control + webhook help section
+// ---------------------------------------------------------------------------
+
+function TriggerKindSection({
+  kind,
+  onChange,
+}: {
+  kind: "schedule" | "webhook";
+  onChange: (kind: "schedule" | "webhook") => void;
+}) {
+  const { t } = useT("autopilots");
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_trigger_kind)}</SectionLabel>
+      <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-1">
+        <TriggerKindButton
+          active={kind === "schedule"}
+          onClick={() => onChange("schedule")}
+          icon={<Clock className="h-3.5 w-3.5" />}
+          label={t(($) => $.dialog.trigger_kind_schedule)}
+        />
+        <TriggerKindButton
+          active={kind === "webhook"}
+          onClick={() => onChange("webhook")}
+          icon={<Webhook className="h-3.5 w-3.5" />}
+          label={t(($) => $.dialog.trigger_kind_webhook)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function TriggerKindButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex items-center justify-center gap-1.5 rounded px-3 py-1.5 text-sm transition-colors",
+        active
+          ? "bg-background text-foreground shadow-sm"
+          : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function WebhookHelpSection({ isCreate }: { isCreate: boolean }) {
+  const { t } = useT("autopilots");
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_webhook)}</SectionLabel>
+      <p className="rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground leading-relaxed">
+        {isCreate
+          ? t(($) => $.dialog.webhook_help_create)
+          : t(($) => $.dialog.webhook_help_edit)}
+      </p>
     </div>
   );
 }

@@ -183,6 +183,12 @@
     "select_agent": "Select agent",
     "section_output_mode": "Output mode",
     "section_schedule": "Schedule",
+    "section_trigger_kind": "Trigger",
+    "trigger_kind_schedule": "Schedule",
+    "trigger_kind_webhook": "Webhook",
+    "section_webhook": "Webhook",
+    "webhook_help_create": "Multica will generate a webhook URL after this autopilot is created. POST any JSON to that URL to fire it. You'll find the URL on the autopilot's detail page.",
+    "webhook_help_edit": "This autopilot is fired by webhook. Manage the URL (copy / rotate) on the autopilot's detail page.",
     "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
     "next_run_label": "Next run:",
     "output_modes": {
