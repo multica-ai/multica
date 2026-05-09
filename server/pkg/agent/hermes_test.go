@@ -220,6 +220,74 @@ func TestHermesClientHandleLineError(t *testing.T) {
 	}
 }
 
+// TestHermesClientHandleLineErrorWithData guards #2192-class regressions: when
+// an ACP backend returns -32603 (Internal error), the meaningful reason lives
+// in the `data` field. Dropping it leaves operators with a bare "Internal
+// error" and no way to tell apart "session expired", "model unavailable",
+// "auth lost", etc. Kiro CLI 2.2.x emits `data` as a string; some backends use
+// objects/arrays — both must round-trip into the wrapped Go error.
+func TestHermesClientHandleLineErrorWithStringData(t *testing.T) {
+	t.Parallel()
+
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+	}
+	pr := &pendingRPC{ch: make(chan rpcResult, 1), method: "session/prompt"}
+	c.pending[3] = pr
+
+	c.handleLine(`{"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Internal error","data":"No session found with id"}}`)
+
+	res := <-pr.ch
+	if res.err == nil {
+		t.Fatal("expected error")
+	}
+	want := "session/prompt: Internal error (code=-32603, data=No session found with id)"
+	if got := res.err.Error(); got != want {
+		t.Errorf("error: got %q, want %q", got, want)
+	}
+}
+
+func TestHermesClientHandleLineErrorWithObjectData(t *testing.T) {
+	t.Parallel()
+
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+	}
+	pr := &pendingRPC{ch: make(chan rpcResult, 1), method: "session/prompt"}
+	c.pending[5] = pr
+
+	c.handleLine(`{"jsonrpc":"2.0","id":5,"error":{"code":-32000,"message":"quota","data":{"reason":"limit","remaining":0}}}`)
+
+	res := <-pr.ch
+	if res.err == nil {
+		t.Fatal("expected error")
+	}
+	want := `session/prompt: quota (code=-32000, data={"reason":"limit","remaining":0})`
+	if got := res.err.Error(); got != want {
+		t.Errorf("error: got %q, want %q", got, want)
+	}
+}
+
+func TestHermesClientHandleLineErrorWithNullData(t *testing.T) {
+	t.Parallel()
+
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+	}
+	pr := &pendingRPC{ch: make(chan rpcResult, 1), method: "initialize"}
+	c.pending[7] = pr
+
+	c.handleLine(`{"jsonrpc":"2.0","id":7,"error":{"code":-32600,"message":"bad request","data":null}}`)
+
+	res := <-pr.ch
+	if res.err == nil {
+		t.Fatal("expected error")
+	}
+	if got := res.err.Error(); got != "initialize: bad request (code=-32600)" {
+		t.Errorf("error: got %q", got)
+	}
+}
+
 // ── agent → client request handling ──
 
 // bufferWriter is a test stand-in for cmd.StdinPipe that captures

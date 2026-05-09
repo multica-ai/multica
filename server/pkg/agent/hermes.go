@@ -568,11 +568,31 @@ func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
 
 	if errData, hasErr := raw["error"]; hasErr {
 		var rpcErr struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
+			Code    int             `json:"code"`
+			Message string          `json:"message"`
+			Data    json.RawMessage `json:"data"`
 		}
 		_ = json.Unmarshal(errData, &rpcErr)
-		pr.ch <- rpcResult{err: fmt.Errorf("%s: %s (code=%d)", pr.method, rpcErr.Message, rpcErr.Code)}
+		// JSON-RPC `data` carries the provider-specific reason (e.g. Kiro
+		// returns "No session found with id" for code=-32603). Surface it
+		// in the wrapped error so daemon logs / UI can show *why* the
+		// agent failed instead of a bare "Internal error". `data` may be
+		// any JSON value: render strings unquoted, everything else as raw
+		// JSON.
+		detail := ""
+		if len(rpcErr.Data) > 0 && string(rpcErr.Data) != "null" {
+			var s string
+			if err := json.Unmarshal(rpcErr.Data, &s); err == nil {
+				detail = s
+			} else {
+				detail = string(rpcErr.Data)
+			}
+		}
+		if detail != "" {
+			pr.ch <- rpcResult{err: fmt.Errorf("%s: %s (code=%d, data=%s)", pr.method, rpcErr.Message, rpcErr.Code, detail)}
+		} else {
+			pr.ch <- rpcResult{err: fmt.Errorf("%s: %s (code=%d)", pr.method, rpcErr.Message, rpcErr.Code)}
+		}
 	} else {
 		// If this is a prompt response, extract usage and stop reason.
 		if pr.method == "session/prompt" {
