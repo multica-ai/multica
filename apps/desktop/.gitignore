@@ -1,0 +1,8 @@
+node_modules
+dist
+out
+.DS_Store
+.eslintcache
+*.log*
+# CLI binary bundled at build time (from server/bin/)
+resources/bin/

@@ -1,0 +1,56 @@
+# Declares the ALB instance (and its listeners) that the ACK ALB Ingress
+# Controller will create and manage. The Ingress below references this
+# AlbConfig via its own IngressClass.
+#
+# Docs: https://www.alibabacloud.com/help/en/ack/ack-managed-and-ack-dedicated/user-guide/create-an-albconfig
+#
+# vSwitches are pinned to 2 AZs of the ACK cluster's VPC. TLS cert is fed in
+# via a K8s Secret referenced by Ingress.spec.tls — the ALB Ingress Controller
+# uploads it to Aliyun SSL Certificate Service and binds it to the 443 listener
+# automatically. HTTP→HTTPS redirect and IP whitelist live on the Ingress as
+# annotations, not at the AlbConfig listener level (controller v2 ignores
+# listener-level redirectConfig / aclConfig for those cases).
+apiVersion: alibabacloud.com/v1
+kind: AlbConfig
+metadata:
+  name: multica
+spec:
+  config:
+    name: multica-prod
+    addressType: Internet
+    addressAllocatedMode: Fixed
+    edition: Standard
+    deletionProtectionEnabled: true
+    zoneMappings:
+      - vSwitchId: vsw-uf63wwiqokc71da0ghfv0  # cn-shanghai-l
+      - vSwitchId: vsw-uf6cmsr8x8tx31pvst0qd  # cn-shanghai-n
+  listeners:
+    # Plain HTTP — the Ingress's force-override-https annotation turns every
+    # rule on this listener into a 301 to HTTPS.
+    - port: 80
+      protocol: HTTP
+    - port: 443
+      protocol: HTTPS
+      # Certificate supplied via Ingress.spec.tls[].secretName below.
+      # IP whitelist — bind the OpenTofu-managed ACL (acl_id output from
+      # deploy/tofu/alb_acl.tf). Changes to entries flow through tofu;
+      # AlbConfig only references the ACL by id so ACK doesn't try to
+      # manage entries (it would clobber our list otherwise).
+      aclConfig:
+        aclType: White
+        aclRelations:
+          - aclId: acl-ry04o6lyky6tmscnfu
+---
+# Our own IngressClass that points at the AlbConfig above. Separate from the
+# default "alb" IngressClass the controller registers at install time, so
+# other apps in the cluster keep their own Ingress routing intact.
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: multica-alb
+spec:
+  controller: ingress.k8s.alibabacloud/alb
+  parameters:
+    apiGroup: alibabacloud.com
+    kind: AlbConfig
+    name: multica

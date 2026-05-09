@@ -1,0 +1,693 @@
+openapi: 3.0.3
+info:
+  title: Multica API
+  version: "0.2.0"
+  description: |
+    Multica HTTP API — as deployed at `https://ship.lilithgames.com`.
+
+    Scope of this document: the subset an external integrator (e.g. a Feishu
+    Project / Meego plugin) needs to create/update issues, post comments, and
+    pick an assignee. Admin-only and daemon-only routes are not listed.
+
+    ## Authentication
+
+    All `/api/*` endpoints require a bearer token (Personal Access Token or
+    JWT). Obtain a PAT from `POST /api/tokens` after logging in, and send it
+    as `Authorization: Bearer <token>`.
+
+    ## Workspace selection
+
+    Workspace-scoped endpoints need the workspace identified via one of:
+
+      * `X-Workspace-Slug: <slug>` (preferred)
+      * `X-Workspace-ID: <uuid>`   (CLI / daemon style)
+
+    Both can't be set together.
+
+    ## Error format
+
+    Any non-2xx response is JSON `{ "error": "<reason>" }`.
+
+servers:
+  - url: https://ship.lilithgames.com
+    description: Production (Lilith)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+    description: Login + token issuance
+  - name: Me
+    description: Current user
+  - name: Workspaces
+    description: Workspaces the caller belongs to
+  - name: Issues
+    description: Issue CRUD and search
+  - name: Comments
+    description: Issue comments
+  - name: Projects
+    description: Projects (folders for issues)
+  - name: Agents
+    description: Available agents (for assigning)
+
+paths:
+  # ---------------- Auth ----------------
+  /auth/send-code:
+    post:
+      tags: [Auth]
+      summary: Email magic-link — send a 6-digit code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "200":
+          description: Code sent (printed to server stdout when Resend is unconfigured)
+          content:
+            application/json:
+              schema: { type: object, properties: { message: { type: string } } }
+
+  /auth/verify-code:
+    post:
+      tags: [Auth]
+      summary: Email magic-link — verify a code and obtain a JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email: { type: string, format: email }
+                code:  { type: string, example: "123456" }
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "400":
+          description: Invalid or expired code
+
+  /api/tokens:
+    get:
+      tags: [Auth]
+      summary: List my personal access tokens
+      responses:
+        "200":
+          description: Array of PAT metadata (values NOT returned).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PersonalAccessToken" }
+    post:
+      tags: [Auth]
+      summary: Create a personal access token
+      description: The plaintext `token` is returned ONCE in the response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:       { type: string, example: feishu-plugin }
+                expires_at: { type: string, format: date-time, nullable: true }
+      responses:
+        "201":
+          description: Token created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PersonalAccessToken"
+                  - type: object
+                    properties:
+                      token: { type: string, description: "Plaintext token (not retrievable later)." }
+
+  /api/tokens/{id}:
+    delete:
+      tags: [Auth]
+      summary: Revoke a token
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "204": { description: Revoked }
+
+  # ---------------- Me ----------------
+  /api/me:
+    get:
+      tags: [Me]
+      summary: Current authenticated user
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+    patch:
+      tags: [Me]
+      summary: Update my profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:       { type: string }
+                avatar_url: { type: string, nullable: true }
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+
+  # ---------------- Workspaces ----------------
+  /api/workspaces:
+    get:
+      tags: [Workspaces]
+      summary: List workspaces I belong to
+      responses:
+        "200":
+          description: Workspace list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Workspace" }
+
+  /api/workspaces/{id}:
+    get:
+      tags: [Workspaces]
+      summary: Get workspace details
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Workspace
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Workspace" }
+
+  /api/workspaces/{id}/members:
+    get:
+      tags: [Workspaces]
+      summary: List workspace members (with user details joined)
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Members
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/MemberWithUser" }
+
+  # ---------------- Issues ----------------
+  /api/issues:
+    get:
+      tags: [Issues]
+      summary: List issues in a workspace
+      parameters:
+        - $ref: "#/components/parameters/HeaderWorkspaceSlug"
+        - $ref: "#/components/parameters/HeaderWorkspaceID"
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, maximum: 200 }
+        - in: query
+          name: offset
+          schema: { type: integer, default: 0 }
+        - in: query
+          name: status
+          schema: { $ref: "#/components/schemas/IssueStatus" }
+        - in: query
+          name: priority
+          schema: { $ref: "#/components/schemas/IssuePriority" }
+        - in: query
+          name: assignee_id
+          schema: { type: string }
+        - in: query
+          name: assignee_ids
+          description: Comma-separated list (OR filter).
+          schema: { type: string }
+        - in: query
+          name: creator_id
+          schema: { type: string }
+        - in: query
+          name: open_only
+          description: Exclude `done` / `cancelled` statuses.
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Paged issue list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  issues: { type: array, items: { $ref: "#/components/schemas/Issue" } }
+                  total:  { type: integer }
+    post:
+      tags: [Issues]
+      summary: Create an issue
+      parameters:
+        - $ref: "#/components/parameters/HeaderWorkspaceSlug"
+        - $ref: "#/components/parameters/HeaderWorkspaceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateIssueRequest" }
+      responses:
+        "201":
+          description: Created issue
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Issue" }
+
+  /api/issues/search:
+    get:
+      tags: [Issues]
+      summary: Full-text search issues (title / description / comments)
+      parameters:
+        - $ref: "#/components/parameters/HeaderWorkspaceSlug"
+        - $ref: "#/components/parameters/HeaderWorkspaceID"
+        - in: query
+          name: q
+          required: true
+          schema: { type: string, minLength: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20 }
+        - in: query
+          name: offset
+          schema: { type: integer, default: 0 }
+        - in: query
+          name: include_closed
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  issues:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Issue"
+                        - type: object
+                          properties:
+                            match_source:    { type: string, enum: [title, description, comment] }
+                            matched_snippet: { type: string }
+                  total: { type: integer }
+
+  /api/issues/{id}:
+    get:
+      tags: [Issues]
+      summary: Get one issue
+      parameters:
+        - $ref: "#/components/parameters/HeaderWorkspaceSlug"
+        - $ref: "#/components/parameters/HeaderWorkspaceID"
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Issue
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Issue" }
+        "404": { description: Not found }
+    put:
+      tags: [Issues]
+      summary: Update an issue (partial — send only the fields to change)
+      parameters:
+        - $ref: "#/components/parameters/HeaderWorkspaceSlug"
+        - $ref: "#/components/parameters/HeaderWorkspaceID"
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateIssueRequest" }
+      responses:
+        "200":
+          description: Updated issue
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Issue" }
+    delete:
+      tags: [Issues]
+      summary: Delete an issue
+      parameters:
+        - $ref: "#/components/parameters/HeaderWorkspaceSlug"
+        - $ref: "#/components/parameters/HeaderWorkspaceID"
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "204": { description: Deleted }
+
+  # ---------------- Comments ----------------
+  /api/issues/{id}/comments:
+    get:
+      tags: [Comments]
+      summary: List comments on an issue
+      parameters:
+        - $ref: "#/components/parameters/HeaderWorkspaceSlug"
+        - $ref: "#/components/parameters/HeaderWorkspaceID"
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Comment list, ordered by created_at ASC
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Comment" }
+    post:
+      tags: [Comments]
+      summary: Post a comment on an issue
+      description: |
+        Triggers `comment:created` over the workspace event bus, which
+        on_comment agents and the Feishu bridge consume.
+      parameters:
+        - $ref: "#/components/parameters/HeaderWorkspaceSlug"
+        - $ref: "#/components/parameters/HeaderWorkspaceID"
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:        { type: string, minLength: 1 }
+                parent_id:      { type: string, nullable: true }
+                attachment_ids: { type: array, items: { type: string } }
+      responses:
+        "201":
+          description: Created comment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Comment" }
+
+  /api/comments/{commentId}:
+    put:
+      tags: [Comments]
+      summary: Edit a comment (only your own)
+      parameters:
+        - $ref: "#/components/parameters/HeaderWorkspaceSlug"
+        - $ref: "#/components/parameters/HeaderWorkspaceID"
+        - in: path
+          name: commentId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Comment" }
+    delete:
+      tags: [Comments]
+      summary: Delete a comment (only your own)
+      parameters:
+        - $ref: "#/components/parameters/HeaderWorkspaceSlug"
+        - $ref: "#/components/parameters/HeaderWorkspaceID"
+        - in: path
+          name: commentId
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Deleted }
+
+  # ---------------- Projects ----------------
+  /api/projects:
+    get:
+      tags: [Projects]
+      summary: List projects
+      parameters:
+        - $ref: "#/components/parameters/HeaderWorkspaceSlug"
+        - $ref: "#/components/parameters/HeaderWorkspaceID"
+      responses:
+        "200":
+          description: Projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Project" }
+    post:
+      tags: [Projects]
+      summary: Create a project
+      parameters:
+        - $ref: "#/components/parameters/HeaderWorkspaceSlug"
+        - $ref: "#/components/parameters/HeaderWorkspaceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:        { type: string }
+                description: { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+
+  # ---------------- Agents ----------------
+  /api/agents:
+    get:
+      tags: [Agents]
+      summary: List agents in the workspace (for assignee selection)
+      parameters:
+        - $ref: "#/components/parameters/HeaderWorkspaceSlug"
+        - $ref: "#/components/parameters/HeaderWorkspaceID"
+      responses:
+        "200":
+          description: Agents
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Agent" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: PAT or JWT
+
+  parameters:
+    PathID:
+      in: path
+      name: id
+      required: true
+      schema: { type: string }
+    HeaderWorkspaceSlug:
+      in: header
+      name: X-Workspace-Slug
+      required: false
+      description: "Workspace slug. Provide this OR X-Workspace-ID, not both."
+      schema: { type: string }
+    HeaderWorkspaceID:
+      in: header
+      name: X-Workspace-ID
+      required: false
+      description: "Workspace UUID. Provide this OR X-Workspace-Slug, not both."
+      schema: { type: string, format: uuid }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+
+    LoginResponse:
+      type: object
+      properties:
+        token: { type: string, description: "JWT bearer token" }
+        user:  { $ref: "#/components/schemas/User" }
+
+    PersonalAccessToken:
+      type: object
+      properties:
+        id:           { type: string }
+        name:         { type: string }
+        token_prefix: { type: string, description: "First 10 chars, for identification in listings." }
+        expires_at:   { type: string, format: date-time, nullable: true }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        created_at:   { type: string, format: date-time }
+
+    User:
+      type: object
+      properties:
+        id:         { type: string }
+        name:       { type: string }
+        email:      { type: string, format: email }
+        avatar_url: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Workspace:
+      type: object
+      properties:
+        id:           { type: string }
+        name:         { type: string }
+        slug:         { type: string }
+        description:  { type: string, nullable: true }
+        context:      { type: string, nullable: true }
+        issue_prefix: { type: string, description: "e.g. 'WAR' — used to form issue identifier 'WAR-123'" }
+        settings:     { type: object }
+        repos:        { type: array, items: { type: object } }
+        created_at:   { type: string, format: date-time }
+        updated_at:   { type: string, format: date-time }
+
+    MemberWithUser:
+      type: object
+      properties:
+        id:           { type: string, description: "workspace_member row id" }
+        workspace_id: { type: string }
+        user_id:      { type: string }
+        role:         { type: string, enum: [owner, admin, member] }
+        name:         { type: string }
+        email:        { type: string, format: email }
+        avatar_url:   { type: string, nullable: true }
+        created_at:   { type: string, format: date-time }
+
+    IssueStatus:
+      type: string
+      enum: [backlog, todo, in_progress, in_review, done, cancelled, blocked]
+    IssuePriority:
+      type: string
+      enum: [urgent, high, medium, low, none]
+    IssueAssigneeType:
+      type: string
+      enum: [member, agent]
+
+    Issue:
+      type: object
+      properties:
+        id:              { type: string }
+        workspace_id:    { type: string }
+        number:          { type: integer }
+        identifier:      { type: string, description: "e.g. 'WAR-26'" }
+        title:           { type: string }
+        description:     { type: string, nullable: true }
+        status:          { $ref: "#/components/schemas/IssueStatus" }
+        priority:        { $ref: "#/components/schemas/IssuePriority" }
+        assignee_type:   { $ref: "#/components/schemas/IssueAssigneeType", nullable: true }
+        assignee_id:     { type: string, nullable: true }
+        creator_type:    { $ref: "#/components/schemas/IssueAssigneeType" }
+        creator_id:      { type: string }
+        parent_issue_id: { type: string, nullable: true }
+        project_id:      { type: string, nullable: true }
+        position:        { type: number }
+        due_date:        { type: string, format: date-time, nullable: true }
+        created_at:      { type: string, format: date-time }
+        updated_at:      { type: string, format: date-time }
+
+    CreateIssueRequest:
+      type: object
+      required: [title]
+      properties:
+        title:           { type: string, minLength: 1 }
+        description:     { type: string }
+        status:          { $ref: "#/components/schemas/IssueStatus" }
+        priority:        { $ref: "#/components/schemas/IssuePriority" }
+        assignee_type:   { $ref: "#/components/schemas/IssueAssigneeType" }
+        assignee_id:     { type: string }
+        parent_issue_id: { type: string }
+        project_id:      { type: string }
+        due_date:        { type: string, format: date-time }
+        attachment_ids:  { type: array, items: { type: string } }
+
+    UpdateIssueRequest:
+      description: |
+        Partial update — send only the fields to change. Nullable fields can
+        be explicitly set to null to clear (e.g. assignee_id).
+      type: object
+      properties:
+        title:           { type: string }
+        description:     { type: string }
+        status:          { $ref: "#/components/schemas/IssueStatus" }
+        priority:        { $ref: "#/components/schemas/IssuePriority" }
+        assignee_type:   { $ref: "#/components/schemas/IssueAssigneeType", nullable: true }
+        assignee_id:     { type: string, nullable: true }
+        position:        { type: number }
+        due_date:        { type: string, format: date-time, nullable: true }
+        parent_issue_id: { type: string, nullable: true }
+        project_id:      { type: string, nullable: true }
+
+    Comment:
+      type: object
+      properties:
+        id:          { type: string }
+        issue_id:    { type: string }
+        author_type: { type: string, enum: [member, agent] }
+        author_id:   { type: string, description: "member row id or agent id depending on author_type" }
+        content:     { type: string }
+        type:        { type: string, enum: [comment, status_change, progress_update, system] }
+        parent_id:   { type: string, nullable: true }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+
+    Project:
+      type: object
+      properties:
+        id:           { type: string }
+        workspace_id: { type: string }
+        name:         { type: string }
+        description:  { type: string, nullable: true }
+        created_at:   { type: string, format: date-time }
+        updated_at:   { type: string, format: date-time }
+
+    Agent:
+      type: object
+      properties:
+        id:                   { type: string }
+        workspace_id:         { type: string }
+        runtime_id:           { type: string }
+        name:                 { type: string }
+        description:          { type: string }
+        instructions:         { type: string }
+        avatar_url:           { type: string, nullable: true }
+        runtime_mode:         { type: string, enum: [local, cloud] }
+        visibility:           { type: string, enum: [workspace, private] }
+        status:               { type: string, enum: [idle, working, blocked, error, offline] }
+        max_concurrent_tasks: { type: integer }
+        model:                { type: string }
+        owner_id:             { type: string, nullable: true }
+        archived_at:          { type: string, format: date-time, nullable: true }
+        created_at:           { type: string, format: date-time }
+        updated_at:           { type: string, format: date-time }

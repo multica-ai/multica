@@ -1,0 +1,49 @@
+# Runs `./migrate up` once per rollout, before the server Deployment picks up
+# the new image. Apply this Job, wait for it to complete, THEN apply the
+# Deployment updates. CI/CD pipelines typically do:
+#
+#   kubectl apply -k deploy/k8s/overlays/prod --prune -l app.kubernetes.io/name=multica
+#   kubectl -n multica wait --for=condition=complete job/multica-migrate --timeout=5m
+#
+# We annotate with the image tag via Kustomize overlays so each rollout creates
+# a fresh Job (same name would clash; see overlay kustomization for the patch).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: multica-migrate
+  labels:
+    app.kubernetes.io/name: multica
+    app.kubernetes.io/component: migrate
+spec:
+  # Completed Job records garbage-collect after 1h so `kubectl get jobs` stays clean.
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: multica
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: regcred
+      containers:
+        - name: migrate
+          image: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-server:dev
+          command: ["./migrate", "up"]
+          envFrom:
+            - configMapRef:
+                name: multica-config
+            - secretRef:
+                name: multica-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

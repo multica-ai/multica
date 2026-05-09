@@ -1,0 +1,42 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@multica/ui/styles/tokens.css";
+@import "@multica/ui/styles/base.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Font stack: Inter for Latin UI text + system Chinese fonts for zh content.
+   Web app uses the same stack via next/font/google in apps/web/app/layout.tsx —
+   keep the CJK fallback tail in sync across both files. The Inter primary family
+   differs by design: next/font produces `__Inter_xxx` (with a synthetic size-adjusted
+   fallback face to prevent FOUT layout shift); desktop uses fontsource's "Inter Variable".
+   Both resolve to Inter glyphs, so rendering is identical in practice.
+   Currently covers English + Simplified Chinese. When ja/ko i18n lands, extend
+   the tail with Hiragino Kaku Gothic ProN / Yu Gothic / Apple SD Gothic Neo / Malgun Gothic.
+   Per-character fallback: Latin chars render with Inter, Chinese chars with
+   PingFang SC (macOS) / Microsoft YaHei (Windows) / Noto Sans CJK SC (Linux).
+
+   Mono font has no explicit CJK fallback: CJK chars in code blocks are inherently
+   non-aligned with a mono grid (Chinese is proportional), so listing CJK fonts
+   would falsely signal alignment guarantees. Browser default fallback handles
+   the rare mixed case correctly. */
+:root {
+  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
+               sans-serif;
+  --font-serif: "Source Serif 4 Variable", "Source Serif 4", "Iowan Old Style",
+                "Apple Garamond", Baskerville, "Times New Roman", serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+               monospace;
+}
+
+@source "../../../../../packages/ui/**/*.tsx";
+@source "../../../../../packages/core/**/*.{ts,tsx}";
+@source "../../../../../packages/views/**/*.{ts,tsx}";
+@source "./**/*.tsx";
+
+/* Desktop-specific: override sidebar container padding for traffic light layout */
+[data-slot="sidebar-container"] {
+  padding: 0 !important;
+}

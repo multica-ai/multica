@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multica-server
+  labels:
+    app.kubernetes.io/name: multica
+    app.kubernetes.io/component: server
+spec:
+  # Single replica: the realtime.Hub is an in-memory Go map with no cross-pod
+  # fanout (no Redis pubsub, no PG LISTEN/NOTIFY). Running >1 replica would
+  # split WebSocket rooms across pods and silently drop events for every user
+  # not connected to the originating pod. Scale vertically via resources below
+  # until Hub is pubsub-backed; then this can go horizontal.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: multica
+      app.kubernetes.io/component: server
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Briefly run 2 pods during rollout so WS clients fail over to the new
+      # pod before the old one drains. Expect a 5-10s reconnect flap.
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: multica
+        app.kubernetes.io/component: server
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      containers:
+        - name: server
+          image: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-server:v0.2.4-token
+          imagePullPolicy: IfNotPresent
+          # Override the docker entrypoint so each replica skips the inline
+          # `./migrate up` — migrations are run as a separate Job before rollout.
+          command: ["./server"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+          envFrom:
+            - configMapRef:
+                name: multica-config
+            - secretRef:
+                name: multica-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              # Sized for ~500 concurrent users: up to 4 vCPU burst and enough
+              # headroom for pgxpool + WS goroutines + task_message buffers.
+              cpu: 4000m
+              memory: 6Gi
+          # The upstream Dockerfile runs as root. Tighten here once the image
+          # adopts a non-root USER; until then enforcing runAsNonRoot would
+          # prevent the pod from starting.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

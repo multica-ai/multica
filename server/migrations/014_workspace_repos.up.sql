@@ -1,0 +1,1 @@
+ALTER TABLE workspace ADD COLUMN repos JSONB NOT NULL DEFAULT '[]';

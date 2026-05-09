@@ -1,0 +1,44 @@
+# Open Source License
+
+Multica is licensed under a modified version of the Apache License 2.0, with the following additional conditions:
+
+1. Multica may be utilized commercially, including as a backend service for
+   other applications or as a task management platform for enterprises.
+   Should the conditions below be met, a commercial license must be obtained
+   from the producer:
+
+   a. Hosted or embedded service: Unless explicitly authorized by Multica
+      in writing, you may not use the Multica source code to provide a
+      hosted service to third parties, or embed Multica as a component of
+      a product or service that is sold, licensed, or otherwise
+      commercially distributed to third parties.
+
+      - This restriction applies to offering Multica (in whole or
+        substantial part) as a SaaS platform, a managed service, or as
+        an integrated component within another commercial offering.
+      - Internal use within a single organization (including multiple
+        workspaces) does not require a commercial license.
+
+   b. LOGO and copyright information: In the process of using Multica's
+      frontend, you may not remove or modify the LOGO or copyright
+      information in the Multica console or applications. This restriction
+      is inapplicable to uses of Multica that do not involve its frontend.
+
+      - Frontend Definition: For the purposes of this license, the
+        "frontend" of Multica includes all components located in the
+        `apps/web/` directory when running Multica from the raw source
+        code, or the "web" image when running Multica with Docker.
+
+2. As a contributor, you should agree that:
+
+   a. The producer can adjust the open-source agreement to be more strict
+      or relaxed as deemed necessary.
+
+   b. Your contributed code may be used for commercial purposes, including
+      but not limited to its cloud business operations.
+
+Apart from the specific conditions mentioned above, all other rights and
+restrictions follow the Apache License 2.0. Detailed information about the
+Apache License 2.0 can be found at http://www.apache.org/licenses/LICENSE-2.0.
+
+© 2025 Multica, Inc.

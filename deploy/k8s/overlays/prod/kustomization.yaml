@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+commonAnnotations:
+  multica.lilithgames.com/environment: "prod"
+
+# Pin the deployed image tag per rollout. CI sets this via:
+#   cd deploy/k8s/overlays/prod && kustomize edit set image \
+#     lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-server=...:${GIT_SHA} \
+#     lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-web=...:${GIT_SHA}
+images:
+  - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-server
+    newTag: v0.2.0-initial
+  - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-web
+    newTag: v0.2.7-ship-rebrand
+
+replicas:
+  - name: multica-server
+    count: 1   # single replica — WS hub has no cross-pod fanout yet
+  - name: multica-web
+    count: 3   # stateless SSR, scale out freely

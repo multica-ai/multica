@@ -1,0 +1,111 @@
+---
+title: 守护进程与运行时
+description: 智能体不在 Multica 服务器上运行——它们跑在你自己的机器上。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Mermaid } from "@/components/mermaid";
+
+在 Multica 里，[智能体](/agents) **不**在我们的服务器上运行——它们跑在你自己的机器上，由一个叫**守护进程**（daemon）的小程序调用本地安装的 [AI 编程工具](/providers)。Multica 服务器只做协调：存 [issue](/issues)、排 [任务](/tasks)、派发给正确的**运行时**（runtime = 守护进程 × 一款 AI 编程工具）。
+
+这个结构带来 Multica 和 Linear / Jira 最大的差别：**你的 API 密钥、工具链、代码目录都留在本地**，Multica 服务器一个都看不到。"我的智能体不工作"类问题几乎都是本地问题——守护进程没启动、某款 AI 工具没装、密钥过期——请先从本地查起；定位指引见 [故障排查](/troubleshooting)。
+
+## 启动守护进程
+
+守护进程是 Multica CLI 的一部分。装好 [Multica CLI](/cli) 后，在自己机器上跑：
+
+```bash
+multica daemon start
+```
+
+启动后它会做四件事：
+
+1. 读取你登录时保存的凭证
+2. 探测本机 `PATH` 上已安装的 AI 编程工具（内置支持 11 款：[Claude Code](/providers#claude-code)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Gemini](/providers#gemini)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)）
+3. 向服务器注册自己，以及每款检测到的工具对应的运行时
+4. 持续**每 3 秒轮询一次**是否有任务要领，**每 15 秒发一次心跳**
+
+常用命令：
+
+| 命令 | 作用 |
+|---|---|
+| `multica daemon start` | 启动（默认后台，加 `--foreground` 前台运行）|
+| `multica daemon stop` | 停止 |
+| `multica daemon restart` | 重启 |
+| `multica daemon status` | 查看状态 |
+| `multica daemon logs` | 查看日志（加 `-f` 跟随）|
+
+完整 CLI 参考见 [CLI 命令速查](/cli)。
+
+**桌面应用自带守护进程。**用 [桌面应用](/desktop-app) 就不必手动 `multica daemon start`——它启动时会自动拉起守护进程。哪种方式更适合你的工作流，详见 [桌面应用](/desktop-app) 页面。
+
+## 为什么一台机器会有多个运行时
+
+运行时不是一个服务器，也不是一个容器——它是「**守护进程 × 一款 AI 编程工具**」的组合。举例：你在一台 MacBook 上启动守护进程，本机装了 Claude Code 和 Codex；你是两个工作区的成员。那么 Multica 会注册 4 个运行时：
+
+<Mermaid chart={`
+graph TD
+    D["你的守护进程<br/>MacBook"]
+    D --> R1["运行时<br/>工作区 A × Claude Code"]
+    D --> R2["运行时<br/>工作区 A × Codex"]
+    D --> R3["运行时<br/>工作区 B × Claude Code"]
+    D --> R4["运行时<br/>工作区 B × Codex"]
+`} />
+
+关键的点：
+
+- **一个守护进程可以对应多个运行时**——装了多款工具、加入了多个工作区，每个组合就各一个
+- **同一个守护进程在同一个工作区同一款工具上只会有一条运行时**——重启守护进程不会产生重复记录
+- Multica 界面的 **Runtimes** 页面列的就是这些行
+
+<Callout type="info">
+**云端运行时即将开放**，目前处于等待名单阶段。上线后，你无需在本地运行守护进程，即可在 Multica Cloud 上直接执行智能体任务。在 [下载页面](https://multica.ai/download) 登记邮箱以获取通知。
+</Callout>
+
+## 运行时什么时候被判定为离线
+
+Multica 用心跳判断运行时是否在线。三个关键数字：
+
+| 事件 | 阈值 |
+|---|---|
+| 守护进程心跳频率 | 每 **15 秒** |
+| 标记为失联 | 超过 **45 秒** 没心跳（漏了 3 次）|
+| 自动删除 | 失联且无关联智能体超过 **7 天** |
+
+失联不是永久的——守护进程只要再次发出心跳就立刻回到在线，运行时记录也会保留。重启守护进程不会丢运行时。
+
+<Callout type="warning">
+**失联的运行时上正在跑的执行任务会被标记为失败**（失败原因 `runtime_offline`）。对可重试的来源（issue、chat），Multica 会自动重新排队；Autopilots 触发的任务不自动重试。详见 [执行任务 → 哪些失败会自动重试](/tasks#哪些失败会自动重试哪些不会)。
+</Callout>
+
+## 一次能并发跑多少任务
+
+Multica 对并发有两层限额：
+
+- **守护进程层**：默认 **20 个执行任务并发**（环境变量 `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` 可调）
+- **智能体层**：每个智能体默认 **6 个执行任务并发**（智能体配置里改）
+
+两层中更紧的那层生效。如果你的守护进程已经在跑 20 个任务，即使某个智能体还有余量，新的任务也要等。
+
+如果你看到执行任务卡在 `queued` 状态不 `dispatched`，通常就是这两层里某一层打满了。
+
+## 守护进程崩溃后，没跑完的任务会怎样
+
+守护进程崩溃或被强行结束时，它领走的执行任务会停在 `dispatched` 或 `running` 状态。下次启动时，守护进程会告诉服务器：「这些任务不是我的了，请标记失败。」服务器把它们改成 `failed`，失败原因 `runtime_recovery`——对可重试的来源，任务自动重新排队。
+
+即使这一步因网络问题没完成，还有**每 30 秒**一次的服务器端扫描作为后备：超过 45 秒没心跳的运行时会被统一标记为失联，上面的任务也一并回收。
+
+## Agent 不工作怎么排查
+
+遇到「我的智能体不工作」类问题，先过一遍这三步：
+
+1. 跑 `multica daemon status`，确认守护进程在运行且在线
+2. 跑 `multica daemon logs -f`，看是否有错误
+3. 去 Multica 界面的 **Runtimes** 页面，确认你的运行时显示「在线」
+
+更多场景见 [Troubleshooting](/troubleshooting)。
+
+## 下一步
+
+- [执行任务](/tasks) —— 守护进程领到任务后，它的完整生命周期
+- [Providers Matrix](/providers) —— 11 款 AI 编程工具的能力差异对照

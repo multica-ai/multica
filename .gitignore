@@ -1,0 +1,60 @@
+node_modules
+dist
+*.log
+.DS_Store
+.envrc
+
+# build outputs
+.turbo
+.next
+out
+build
+bin
+dist-electron
+*.tsbuildinfo
+# ...except electron-builder's source resources dir, which holds tracked
+# config files (entitlements, icons) — not build output.
+!apps/desktop/build/
+!apps/desktop/build/**
+
+# env
+.env*
+!.env.example
+# Desktop production config is public (backend URL, etc.) — track it so
+# `pnpm package` produces a release-ready build without extra setup.
+!apps/desktop/.env.production
+
+# test coverage
+coverage
+
+# Go
+server/bin/
+server/tmp/
+server/migrate
+server/daemon
+server/multica
+
+# Test artifacts
+test-results/
+apps/web/test-results/
+
+# context (agent workspace)
+.context
+
+# local settings
+.claude/
+.tool-versions
+
+# feature tracking
+_features/
+
+# runtime
+*.pid
+
+# platform specific
+*.dmg
+*.app
+server/server
+data/
+.kilo
+.idea

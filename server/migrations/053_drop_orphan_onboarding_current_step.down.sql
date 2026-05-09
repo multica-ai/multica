@@ -1,0 +1,3 @@
+-- Irreversible cleanup: the column was never a shipped feature, so
+-- restoring it would only re-create a dead, never-read column.
+-- Down is intentionally a no-op.

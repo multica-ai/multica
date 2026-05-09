@@ -1,0 +1,75 @@
+version: 2
+
+project_name: multica
+
+builds:
+  - id: multica
+    main: ./cmd/multica
+    dir: server
+    binary: multica
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  # Legacy archive name kept so already-released CLIs (whose `multica update`
+  # looks for `multica_{os}_{arch}.{ext}`) can keep self-updating. Remove
+  # once those versions are no longer in use.
+  - id: legacy
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+  # Versioned archive name used by current CLI / install scripts /
+  # desktop bootstrap going forward.
+  - id: versioned
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}-cli-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+brews:
+  - name: multica
+    ids:
+      - versioned
+    repository:
+      owner: multica-ai
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/multica-ai/multica"
+    description: "Multica CLI — local agent runtime and management tool for the Multica platform"
+    license: "Apache-2.0"
+    install: |
+      bin.install "multica"
+    test: |
+      system "#{bin}/multica", "version"

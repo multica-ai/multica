@@ -1,0 +1,130 @@
+---
+title: CLI command reference
+description: One-page overview of every top-level Multica CLI command. For full usage, run `multica <command> --help`.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+The Multica CLI mirrors almost everything the Web UI can do (create [issues](/issues), assign [agents](/agents), start the [daemon](/daemon-runtimes), and more). This page lists every top-level command with a one-line description. For the full set of flags and examples, run `multica <command> --help`.
+
+## Getting authenticated
+
+Run this the first time you use the CLI to obtain a **personal access token (PAT)**:
+
+```bash
+multica login
+```
+
+Your browser opens automatically. After you approve in the web app, the CLI saves the PAT (prefixed with `mul_`) to `~/.multica/config.json`. Every subsequent command authenticates with that PAT.
+
+<Callout type="tip">
+For CI or headless environments, skip the browser flow: create a PAT in the web app under **Settings → Personal Access Tokens**, then run `multica login --token <mul_...>` to supply it directly.
+</Callout>
+
+For the difference between token types, see [Authentication and tokens](/auth-tokens).
+
+## Auth and setup
+
+| Command | Purpose |
+|---|---|
+| `multica login` | Log in and save a PAT |
+| `multica auth status` | Show current login status, user, and workspace |
+| `multica auth logout` | Clear the local PAT |
+| `multica setup cloud` | One-shot setup for Multica Cloud (login + install daemon) |
+| `multica setup self-host` | One-shot setup for a self-hosted backend |
+
+## Workspaces and members
+
+| Command | Purpose |
+|---|---|
+| `multica workspace list` | List every workspace you can access |
+| `multica workspace get <slug>` | Show details for one workspace |
+| `multica workspace members` | List members of the current workspace |
+| `multica workspace update <id> --name "..." [--description "..."] [--context "..."] [--issue-prefix "..."]` | Update workspace metadata (admin/owner). Long fields accept `--description-stdin` / `--context-stdin`. |
+
+## Issues and projects
+
+| Command | Purpose |
+|---|---|
+| `multica issue list` | List issues |
+| `multica issue get <id>` | Show a single issue |
+| `multica issue create --title "..."` | Create a new issue |
+| `multica issue update <id> ...` | Update an issue (status, priority, assignee, etc.) |
+| `multica issue assign <id> --agent <slug>` | Assign to an agent (triggers a task immediately) |
+| `multica issue status <id> --set <status>` | Shortcut to change status |
+| `multica issue search <query>` | Keyword search |
+| `multica issue runs <id>` | Show agent runs on an issue |
+| `multica issue rerun <id>` | Rerun the most recent agent task |
+| `multica issue comment <id> ...` | Nested: view / post comments |
+| `multica issue subscriber <id> ...` | Nested: subscribe / unsubscribe |
+| `multica project list/get/create/update/delete/status` | Project CRUD |
+
+## Agents and skills
+
+| Command | Purpose |
+|---|---|
+| `multica agent list` | List the workspace's agents |
+| `multica agent get <slug>` | Show an agent's configuration |
+| `multica agent create ...` | Create an agent |
+| `multica agent update <slug> ...` | Update an agent |
+| `multica agent archive <slug>` | Archive |
+| `multica agent restore <slug>` | Restore an archived agent |
+| `multica agent tasks <slug>` | Show an agent's task history |
+| `multica agent skills ...` | Nested: attach / detach skills |
+| `multica skill list/get/create/update/delete` | Skill CRUD |
+| `multica skill import ...` | Import a skill from GitHub, ClawHub, or the local machine |
+| `multica skill files ...` | Nested: manage a skill's files |
+
+## Autopilots
+
+| Command | Purpose |
+|---|---|
+| `multica autopilot list` | List every autopilot in the workspace |
+| `multica autopilot get <id>` | Show a single autopilot |
+| `multica autopilot create ...` | Create an autopilot |
+| `multica autopilot update <id> ...` | Update |
+| `multica autopilot delete <id>` | Delete |
+| `multica autopilot runs <id>` | Show run history |
+| `multica autopilot trigger <id>` | Trigger a run manually |
+
+## Daemon and runtimes
+
+| Command | Purpose |
+|---|---|
+| `multica daemon start` | Start the daemon (background by default; add `--foreground` to run in the foreground) |
+| `multica daemon stop` | Stop the daemon |
+| `multica daemon restart` | Restart the daemon |
+| `multica daemon status` | Check whether the daemon is online and its concurrency |
+| `multica daemon logs` | View daemon logs |
+| `multica runtime list` | List runtimes in the current workspace |
+| `multica runtime usage` | Show resource usage |
+| `multica runtime activity` | Recent activity log |
+| `multica runtime ping <id>` | Ping a runtime to check it's online |
+| `multica runtime update <id> ...` | Update a runtime's configuration |
+
+## Miscellaneous
+
+| Command | Purpose |
+|---|---|
+| `multica repo checkout <url>` | Clone a repo locally for agents to use |
+| `multica config` | View or edit local CLI configuration |
+| `multica version` | Print the CLI version |
+| `multica update` | Upgrade the CLI to the latest release |
+| `multica attachment download <id>` | Download an attachment from an issue or comment |
+
+## Getting full flags
+
+Every command supports `--help`:
+
+```bash
+multica issue create --help
+multica agent update --help
+```
+
+v2 will ship a dedicated detailed reference page for each command.
+
+## Next steps
+
+- [Authentication and tokens](/auth-tokens) — PAT vs. JWT vs. daemon token
+- [Daemon and runtimes](/daemon-runtimes) — how the `daemon` commands work under the hood
+- [Creating and configuring agents](/agents-create) — all options for `multica agent create`

@@ -1,0 +1,19 @@
+# Development override: build the backend/web images from the current checkout
+# instead of pulling the official GHCR images.
+
+services:
+  backend:
+    image: multica-backend:dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+  frontend:
+    image: multica-web:dev
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        REMOTE_API_URL: http://backend:8080
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
+        NEXT_PUBLIC_APP_VERSION: dev

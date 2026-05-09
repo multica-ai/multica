@@ -1,0 +1,1 @@
+ALTER TABLE agent ADD COLUMN instructions TEXT NOT NULL DEFAULT '';

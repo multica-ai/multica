@@ -1,0 +1,18 @@
+/* Title editor: minimal ProseMirror for single-line titles */
+
+.title-editor.ProseMirror {
+  outline: none;
+}
+
+.title-editor.ProseMirror p {
+  margin: 0;
+}
+
+/* Placeholder */
+.title-editor .is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--muted-foreground);
+  pointer-events: none;
+  height: 0;
+}

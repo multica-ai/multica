@@ -1,0 +1,12 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "../../../packages/ui/styles/tokens.css";
+@import "../../../packages/ui/styles/base.css";
+@import "./custom.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@source "../../../packages/ui/**/*.{ts,tsx}";
+@source "../../../packages/core/**/*.{ts,tsx}";
+@source "../../../packages/views/**/*.{ts,tsx}";

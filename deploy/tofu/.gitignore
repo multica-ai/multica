@@ -1,0 +1,17 @@
+# Local state contains the RDS password. Never commit.
+terraform.tfstate
+terraform.tfstate.backup
+*.tfstate
+*.tfstate.*
+
+# Variable overrides may contain secrets.
+terraform.tfvars
+*.auto.tfvars
+
+# Provider + module caches.
+.terraform/
+.terraform.lock.hcl
+
+# Plan outputs.
+*.tfplan
+*.plan

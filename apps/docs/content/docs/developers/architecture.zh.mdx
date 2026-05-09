@@ -1,0 +1,75 @@
+---
+title: Architecture
+description: Technical architecture of the Multica platform.
+---
+
+## Overview
+
+Multica is a Go backend + monorepo frontend (pnpm workspaces + Turborepo) with shared packages.
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────────┐
+│   Next.js    │────>│  Go Backend  │────>│   PostgreSQL     │
+│   Frontend   │<────│  (Chi + WS)  │<────│   (pgvector)     │
+└──────────────┘     └──────┬───────┘     └──────────────────┘
+                            │
+                     ┌──────┴───────┐
+                     │ Agent Daemon │  (runs on your machine)
+                     │Claude/Codex/ │
+                     │OpenClaw/Code │
+                     └──────────────┘
+```
+
+## Project Structure
+
+| Directory | Purpose | Technology |
+|-----------|---------|------------|
+| `server/` | Go backend | Chi router, sqlc for DB, gorilla/websocket |
+| `apps/web/` | Next.js frontend | App Router |
+| `apps/desktop/` | Electron desktop app | electron-vite |
+| `apps/docs/` | Documentation site | Fumadocs |
+| `packages/core/` | Headless business logic | Zero react-dom, all-platform reuse |
+| `packages/ui/` | Atomic UI components | Zero business logic, shadcn-based |
+| `packages/views/` | Shared business pages | Zero next/\*, zero react-router imports |
+| `packages/tsconfig/` | Shared TypeScript config | — |
+| `packages/eslint-config/` | Shared ESLint config | — |
+
+## Backend Structure
+
+- **Entry points** (`cmd/`): `server` (HTTP API), `multica` (CLI + daemon), `migrate`
+- **Handlers** (`internal/handler/`): One file per domain (issue, comment, agent, auth, daemon)
+- **Real-time** (`internal/realtime/`): Hub manages WebSocket clients, server broadcasts events
+- **Auth** (`internal/auth/` + `internal/middleware/`): JWT (HS256), middleware sets `X-User-ID` and `X-User-Email` headers
+- **Task lifecycle** (`internal/service/task.go`): enqueue → claim → start → complete/fail
+- **Agent SDK** (`pkg/agent/`): Unified `Backend` interface for executing prompts via Claude Code or Codex
+- **Daemon** (`internal/daemon/`): Auto-detects CLIs, registers runtimes, polls for tasks
+- **Database**: PostgreSQL 17 with pgvector, sqlc generates code from SQL in `pkg/db/queries/`
+
+## Frontend Architecture
+
+### Internal Packages Pattern
+
+All shared packages export raw `.ts`/`.tsx` files (no pre-compilation). The consuming app's bundler compiles them directly. This gives zero-config HMR and instant go-to-definition.
+
+### Package Boundaries
+
+- `packages/core/` — zero react-dom, zero localStorage, zero UI libs. All Zustand stores live here.
+- `packages/ui/` — pure UI components, zero business logic.
+- `packages/views/` — zero `next/*`, zero `react-router-dom`. Uses `NavigationAdapter` for routing.
+
+### State Management
+
+- **TanStack Query** owns all server state (issues, users, workspaces)
+- **Zustand** owns all client state (UI selections, filters, drafts)
+- **React Context** reserved for cross-cutting plumbing (`WorkspaceIdProvider`, `NavigationProvider`)
+
+### Data Flow
+
+```
+Browser → ApiClient (shared/api) → REST API (Chi handlers) → sqlc queries → PostgreSQL
+Browser ← WSClient (shared/api) ← WebSocket ← Hub.Broadcast() ← Handlers/TaskService
+```
+
+## Multi-tenancy
+
+All queries filter by `workspace_id`. Membership checks gate access. `X-Workspace-ID` header routes requests to the correct workspace.

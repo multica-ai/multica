@@ -1,0 +1,37 @@
+{
+  "name": "multica",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:web": "turbo dev --filter=@multica/web",
+    "dev:docs": "turbo dev --filter=@multica/docs",
+    "dev:desktop": "turbo dev --filter=@multica/desktop",
+    "dev:desktop:staging": "turbo dev:staging --filter=@multica/desktop",
+    "build": "turbo build",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "clean": "turbo clean && rm -rf node_modules",
+    "ui:add": "cd packages/ui && npx shadcn@latest add"
+  },
+  "packageManager": "pnpm@10.28.2",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "electron"
+    ],
+    "overrides": {
+      "@types/react": "catalog:",
+      "@types/react-dom": "catalog:"
+    }
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "catalog:",
+    "@types/pg": "^8.20.0",
+    "pg": "^8.20.0",
+    "turbo": "^2.5.4",
+    "typescript": "catalog:"
+  }
+}

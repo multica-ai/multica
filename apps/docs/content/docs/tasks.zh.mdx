@@ -1,0 +1,114 @@
+---
+title: 执行任务
+description: 智能体每一次工作的单位，有明确的状态机、超时和重试规则。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Mermaid } from "@/components/mermaid";
+
+**执行任务**（task）是 [智能体](/agents) 每一次工作的单位——把一个 [issue 分给智能体](/assigning-issues)、[在评论里 @提及智能体](/mentioning-agents)、在 [聊天](/chat) 里发一条消息、或者 [Autopilot](/autopilots) 到点触发，都会产生一个执行任务。Multica 把它放进队列，由 [守护进程](/daemon-runtimes) 领走后交给对应的 [AI 编程工具](/providers) 执行，结束时把结果写回服务器。
+
+执行任务和 [issue](/issues) 是两层不同对象：一个 issue 可以反复分配、反复 @提及、手动重跑——每次都产生一个**新的**执行任务。
+
+## 一个任务会经过哪些状态
+
+<Mermaid chart={`
+graph LR
+    Q["排队中<br/>queued"] -->|daemon 领取| D["已派发<br/>dispatched"]
+    D -->|agent 开始| R["运行中<br/>running"]
+    R -->|成功| C["完成<br/>completed"]
+    R -->|出错或超时| F["失败<br/>failed"]
+    Q -->|用户取消| X["取消<br/>cancelled"]
+    D -->|用户取消| X
+    R -->|用户取消| X
+    F -.可重试原因.-> Q
+`} />
+
+- **排队中（queued）**——任务刚创建，等待某个守护进程来领
+- **已派发（dispatched）**——守护进程领走了，正在启动对应的 AI 编程工具
+- **运行中（running）**——AI 编程工具在真正干活
+- **完成（completed）**——成功结束，产出（评论、代码提交、状态变化等）写回服务器
+- **失败（failed）**——出错或超时终止；如果失败原因可重试，会自动回到 `queued` 再来一次
+- **取消（cancelled）**——用户主动取消
+
+## 任务超时会怎样
+
+Multica 服务器每 30 秒扫描一次，有两种超时会触发失败：
+
+| 什么情况 | 超时阈值 |
+|---|---|
+| 派发后迟迟不开始（守护进程领走但没启动 AI 工具）| **5 分钟** |
+| 正在运行但跑得太久 | **2.5 小时** |
+
+两种超时的失败原因都是 `timeout`，**会自动重试**（下一节）。关联的运行时失联判定见 [守护进程与运行时 → 运行时什么时候被判定为离线](/daemon-runtimes#运行时什么时候被判定为离线)。
+
+## 哪些失败会自动重试，哪些不会
+
+失败分两类：**可重试**和**不可重试**。
+
+**可重试**（Multica 自动重排队）：
+
+- `runtime_offline`——任务派发后，守护进程失联了
+- `runtime_recovery`——守护进程崩溃重启，回收上次没跑完的任务
+- `timeout`——运行超时或派发超时
+
+**不可重试**（任务停在失败状态）：
+
+- `agent_error`——AI 编程工具自己报错（API 错误、超额度、内部 bug）。底层问题不重试，避免无限循环。
+
+自动重试有两个额外条件：
+
+1. **最多 2 次**——1 次原任务 + 1 次重试。重试也失败就不再重试，即使原因可重试。
+2. **只对 issue 和聊天触发的任务生效**——Autopilots 触发的任务**不自动重试**。
+
+<Callout type="warning">
+**Autopilots 任务不自动重试**是刻意设计。Autopilot 有自己的触发周期（例如每天一次）；如果失败又自动重试，会和下一个周期的任务重叠。需要失败后立即重跑，用手动重跑（下一节）。
+
+**怎么知道 Autopilot 失败了**：失败的 Autopilot 任务会在你的 [收件箱](/inbox) 里出现一条通知，关联的 issue 状态也会从 `in_progress` 退回 `todo`。直接打开 [Autopilots](/autopilots) 页面也能看到每条 autopilot 的最近运行结果。
+</Callout>
+
+## 手动重跑和自动重试的区别
+
+**手动重跑**（rerun）是你从 UI 或命令行主动发起的：
+
+```bash
+multica issue rerun <issue-id>
+```
+
+行为：
+
+- **取消**当前正在跑的任务（如果有）
+- 创建一个**全新**的执行任务——尝试次数重置为 1，即使原任务已达最大尝试
+- 继承上一次的会话 ID；如果对应的 AI 编程工具支持会话恢复，会接着上次的上下文继续
+
+对比：
+
+| 维度 | 自动重试 | 手动重跑 |
+|---|---|---|
+| 触发 | 系统基于失败原因自动执行 | 你主动发起 |
+| 上限 | 2 次 | 无上限 |
+| 适用来源 | issue、聊天 | 所有来源 |
+| 会话继承 | 是 | 是 |
+
+## 失败的任务对 issue 状态有什么影响
+
+如果一个 issue 因为分配给智能体而触发的任务失败了（且没有自动重试成功），**issue 的状态会自动从 `in_progress` 退回 `todo`**——这样你打开看板时能立刻看到「这条需要再看看」。详见 [Issue 与 project](/issues)。
+
+## 任务能接着上次的上下文继续吗
+
+可以——前提是对应的 AI 编程工具支持会话恢复。
+
+Multica 在任务过程中**两次**保存会话 ID——任务一开始（AI 工具返回第一条系统消息时）pin 一次，任务结束（完成或失败）时再 pin 一次。前者让守护进程中途崩溃时也能恢复，后者给之后的重跑用。下次重跑或自动重试时把这个 ID 传回去，智能体就能接着上次的对话、文件状态继续。
+
+但**哪些 AI 编程工具真的支持**差别很大：
+
+- ✅ **真支持**——Claude Code、Copilot、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi
+- ⚠️ **代码看起来支持但实际不可用**——Codex、Cursor
+- ❌ **不支持**——Gemini
+
+详见 [Providers Matrix → 会话恢复](/providers#会话恢复谁真的支持)。
+
+## 下一步
+
+- [Providers Matrix](/providers) —— 11 款 AI 编程工具的能力差异对照（包括会话恢复的精确状态）
+- [分配 issue 给智能体](/assigning-issues) / [在评论里 @智能体](/mentioning-agents) / [聊天](/chat) / [Autopilots](/autopilots) —— 触发执行任务的四种方式

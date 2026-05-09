@@ -1,0 +1,95 @@
+# ACK ALB Ingress. The actual ALB instance + listeners live in albconfig.yaml;
+# this resource only defines the host + path rules. Both are reconciled by the
+# ALB Ingress Controller.
+#
+# Routing strategy — path-based on a single host, single listener per protocol
+# (see albconfig.yaml):
+#   /api/*, /auth/*, /ws, /uploads/*   → multica-server:8080
+#   /                                  → multica-web:3000  (catch-all)
+#
+# WebSocket note: ACK ALB supports WS natively; no extra annotation needed.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: multica
+  annotations:
+    # HTTP 80 → HTTPS 443 with 301. Applies to every rule on the HTTP listener
+    # so a user hitting http://ship.lilithgames.com lands on https:// cleanly
+    # instead of the controller's default fake-svc (which 503s).
+    alb.ingress.kubernetes.io/force-override-https: "true"
+    # IP whitelist. The ACL was pre-created via Aliyun CLI + Python SDK
+    # (85 CIDRs covering Lilith office / VPN / cloud egress). Controller
+    # associates it with both listeners on apply.
+    alb.ingress.kubernetes.io/acl-id: "acl-ry04o6lyky6tmscnfu"
+    alb.ingress.kubernetes.io/acl-type: "White"
+spec:
+  ingressClassName: multica-alb
+  tls:
+    - hosts:
+        - ship.lilithgames.com
+      secretName: multica-tls
+  rules:
+    - host: ship.lilithgames.com
+      http:
+        paths:
+          # OAuth callback pages are Next.js routes in apps/web — match them
+          # first so they reach the web Deployment, not the backend (which
+          # only exposes POST /auth/<provider> for the code exchange).
+          - path: /auth/callback
+            pathType: Exact
+            backend:
+              service:
+                name: multica-web
+                port:
+                  number: 3000
+          - path: /auth/feishu/callback
+            pathType: Exact
+            backend:
+              service:
+                name: multica-web
+                port:
+                  number: 3000
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: multica-server
+                port:
+                  number: 8080
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: multica-server
+                port:
+                  number: 8080
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: multica-server
+                port:
+                  number: 8080
+          - path: /uploads
+            pathType: Prefix
+            backend:
+              service:
+                name: multica-server
+                port:
+                  number: 8080
+          # Meego (Feishu Project) webhook ingest. Routed to the bridge
+          # which captures the payload and (later) syncs to multica issues.
+          - path: /webhook/meego
+            pathType: Prefix
+            backend:
+              service:
+                name: multica-feishu-bridge
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: multica-web
+                port:
+                  number: 3000

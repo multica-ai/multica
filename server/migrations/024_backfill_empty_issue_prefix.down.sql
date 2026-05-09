@@ -1,0 +1,1 @@
+-- No-op: we cannot reliably determine which workspaces previously had empty prefixes.

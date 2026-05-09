@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: multica
+
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/name: multica
+      app.kubernetes.io/part-of: multica
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  # - secret.yaml   # Managed out-of-band via `kubectl create secret generic`;
+                   # keeping a template here would clobber real values on apply.
+                   # See deploy/k8s/README.md "Create the Secret".
+  - migrate-job.yaml
+  - server-deployment.yaml
+  - server-service.yaml
+  - web-deployment.yaml
+  - web-service.yaml
+  - albconfig.yaml
+  - ingress.yaml
+
+images:
+  - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-server
+    newTag: dev
+  - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-web
+    newTag: dev

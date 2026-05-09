@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multica-config
+data:
+  # --- DB pool ---
+  # Default pgxpool is 25. At ~500 concurrent users with mixed read/write plus
+  # agent task_message writes, 80 lets us hold connections under load and still
+  # stay well under the RDS instance's max_connections ceiling.
+  DATABASE_MAX_CONNS: "80"
+  DATABASE_MIN_CONNS: "10"
+
+  # --- Public HTTP surface ---
+  # PORT / FRONTEND_PORT intentionally NOT set here — both the Go server and
+  # Next.js respect the same env name `PORT`, so a shared value would collide.
+  # Each Deployment sets its own PORT explicitly in spec.containers[].env.
+  # Canonical public URL used for OAuth redirect construction and email links.
+  # Keep in sync with the Ingress host and the FEISHU_REDIRECT_URI in the Secret.
+  MULTICA_APP_URL: "https://ship.lilithgames.com"
+  FRONTEND_ORIGIN: "https://ship.lilithgames.com"
+  CORS_ALLOWED_ORIGINS: "https://ship.lilithgames.com,https://project.feishu.cn,https://projectplg.feishupkg.com"
+  # Inside the cluster the frontend talks to the backend over the Service DNS,
+  # not via ingress (avoids loopback through ALB, saves latency).
+  REMOTE_API_URL: "http://multica-server:8080"
+
+  # --- App env ---
+  # "production" disables the 888888 dev master code in email login.
+  APP_ENV: "production"
+  ALLOW_SIGNUP: "true"
+  NEXT_PUBLIC_ALLOW_SIGNUP: "true"
+
+  # --- Email (Resend) ---
+  # Leave RESEND_API_KEY empty in the Secret if you don't use email invites;
+  # shareable invitation links work without Resend.
+  RESEND_FROM_EMAIL: "noreply@ship.lilithgames.com"
+
+  # --- Feishu OAuth (public half) ---
+  # NEXT_PUBLIC_FEISHU_APP_ID is baked into the web bundle at build time via
+  # .env.production; duplicated here so the backend's os.Getenv path also sees
+  # the app_id for logging/routing purposes.
+  NEXT_PUBLIC_FEISHU_APP_ID: "cli_a739addb39e41013"
+  FEISHU_APP_ID: "cli_a739addb39e41013"
+  FEISHU_REDIRECT_URI: "https://ship.lilithgames.com/auth/feishu/callback"
+
+  # --- Google OAuth (public half, optional) ---
+  NEXT_PUBLIC_GOOGLE_CLIENT_ID: ""
+  GOOGLE_CLIENT_ID: ""
+  GOOGLE_REDIRECT_URI: "https://ship.lilithgames.com/auth/callback"
+
+  # --- Signup gating (optional; comma-separated) ---
+  ALLOWED_EMAIL_DOMAINS: ""
+  ALLOWED_EMAILS: ""
+
+  # --- Logging / analytics ---
+  POSTHOG_HOST: "https://us.i.posthog.com"
+  ANALYTICS_DISABLED: "true"
