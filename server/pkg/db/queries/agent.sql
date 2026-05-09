@@ -413,6 +413,26 @@ WHERE agent_id = $1 AND issue_id = $2 AND started_at IS NOT NULL
 ORDER BY started_at DESC
 LIMIT 1;
 
+-- name: GetLastChannelTaskSession :one
+-- Returns the session_id from the most recent channel-message task for a given
+-- (agent_id, channel_id) pair. Used to resume the Claude conversation across
+-- multiple turns in the same channel, avoiding a cold-start on every message.
+--
+-- channel_id is stored as a string inside the context JSONB column
+-- (see service.ChannelMessageContext). We deliberately match 'completed' and
+-- non-poisoned 'failed' tasks for the same reason as GetLastTaskSession.
+SELECT session_id, runtime_id FROM agent_task_queue
+WHERE agent_id = $1
+  AND context->>'channel_id' = sqlc.arg(channel_id)::text
+  AND context->>'type' = 'channel_message'
+  AND (
+    status = 'completed'
+    OR (status = 'failed' AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message'))
+  )
+  AND session_id IS NOT NULL
+ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+LIMIT 1;
+
 -- name: FailAgentTask :one
 -- Marks a task as failed. session_id and work_dir are merged via COALESCE so
 -- if the agent already established a real session before failing (e.g. it

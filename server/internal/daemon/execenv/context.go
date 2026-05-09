@@ -408,6 +408,9 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	if ctx.QuickCreatePrompt != "" {
 		return renderQuickCreateContext(ctx)
 	}
+	if ctx.ChannelMessageID != "" {
+		return renderChannelMessageContext(ctx)
+	}
 
 	var b strings.Builder
 
@@ -486,6 +489,66 @@ func renderAutopilotContext(ctx TaskContextForEnv) string {
 		b.WriteString(ctx.AutopilotDescription)
 		b.WriteString("\n\n")
 	}
+
+	if len(ctx.AgentSkills) > 0 {
+		b.WriteString("## Agent Skills\n\n")
+		b.WriteString("The following skills are available to you:\n\n")
+		for _, skill := range ctx.AgentSkills {
+			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+		}
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+// renderChannelMessageContext renders issue_context.md for channel message tasks.
+//
+// The server pre-injects up to channelContextWindow recent messages into the
+// task context (ChannelRecentMessages). This file renders them so the agent
+// has full conversation history without an extra API call.
+// The agent should only fall back to `multica channel messages` if it needs
+// older history beyond what is shown here.
+func renderChannelMessageContext(ctx TaskContextForEnv) string {
+	var b strings.Builder
+
+	b.WriteString("# Channel Message Task\n\n")
+	fmt.Fprintf(&b, "**Channel ID:** `%s`\n\n", ctx.ChannelID)
+	fmt.Fprintf(&b, "**Triggering message ID:** `%s`\n\n", ctx.ChannelMessageID)
+
+	// ── Pre-loaded conversation history ──────────────────────────────────
+	if len(ctx.ChannelRecentMessages) > 0 {
+		b.WriteString("## Conversation History (pre-loaded)\n\n")
+		b.WriteString("The following messages are from this channel, most recent last. ")
+		b.WriteString("**Use this history instead of calling `multica channel messages`.**\n\n")
+		for _, m := range ctx.ChannelRecentMessages {
+			ts := ""
+			if m.CreatedAt != "" {
+				ts = " (" + m.CreatedAt + ")"
+			}
+			fmt.Fprintf(&b, "**[%s]%s:**\n> %s\n\n", m.AuthorName, ts, m.Content)
+		}
+	} else {
+		b.WriteString("## Conversation History\n\n")
+		b.WriteString("(No previous messages — this channel may be new.)\n\n")
+		fmt.Fprintf(&b, "To load history: `multica channel messages %s --limit 20 --output json`\n\n", ctx.ChannelID)
+	}
+
+	// ── Triggering message (highlighted separately for clarity) ──────────
+	if ctx.ChannelContent != "" {
+		authorLabel := "A user"
+		if ctx.ChannelAuthorName != "" {
+			authorLabel = ctx.ChannelAuthorName
+		}
+		b.WriteString("## You Must Reply To\n\n")
+		fmt.Fprintf(&b, "**%s** sent:\n\n> %s\n\n", authorLabel, ctx.ChannelContent)
+	}
+
+	// ── Reply command ─────────────────────────────────────────────────────
+	b.WriteString("## How to Reply\n\n")
+	fmt.Fprintf(&b, "```\nmultica channel send %s --content \"<your response>\"\n```\n\n", ctx.ChannelID)
+	b.WriteString("If you need more history: ")
+	fmt.Fprintf(&b, "`multica channel messages %s --limit 50 --output json`\n\n", ctx.ChannelID)
 
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Agent Skills\n\n")

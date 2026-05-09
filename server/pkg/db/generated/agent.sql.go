@@ -1348,6 +1348,13 @@ type GetAgentTaskInWorkspaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+// Loads a task only when its owning agent lives in the given workspace.
+// agent_id is NOT NULL on every task row (and ON DELETE CASCADE, so the agent
+// always exists), which makes this the universal tenant guard for
+// user-initiated cancellation — independent of which optional source FK
+// (issue / chat_session / autopilot_run) happens to be set. It is what lets
+// run_only autopilot tasks and quick_create tasks (whose issue does not exist
+// yet) be cancelled at all, instead of 404-ing on a missing source FK.
 func (q *Queries) GetAgentTaskInWorkspace(ctx context.Context, arg GetAgentTaskInWorkspaceParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, getAgentTaskInWorkspace, arg.ID, arg.WorkspaceID)
 	var i AgentTaskQueue
@@ -1379,6 +1386,44 @@ func (q *Queries) GetAgentTaskInWorkspace(ctx context.Context, arg GetAgentTaskI
 		&i.IsLeaderTask,
 		&i.WaitReason,
 	)
+	return i, err
+}
+
+const getLastChannelTaskSession = `-- name: GetLastChannelTaskSession :one
+SELECT session_id, runtime_id FROM agent_task_queue
+WHERE agent_id = $1
+  AND context->>'channel_id' = $2::text
+  AND context->>'type' = 'channel_message'
+  AND (
+    status = 'completed'
+    OR (status = 'failed' AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message'))
+  )
+  AND session_id IS NOT NULL
+ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+LIMIT 1
+`
+
+type GetLastChannelTaskSessionParams struct {
+	AgentID   pgtype.UUID `json:"agent_id"`
+	ChannelID string      `json:"channel_id"`
+}
+
+type GetLastChannelTaskSessionRow struct {
+	SessionID pgtype.Text `json:"session_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+}
+
+// Returns the session_id from the most recent channel-message task for a given
+// (agent_id, channel_id) pair. Used to resume the Claude conversation across
+// multiple turns in the same channel, avoiding a cold-start on every message.
+//
+// channel_id is stored as a string inside the context JSONB column
+// (see service.ChannelMessageContext). We deliberately match 'completed' and
+// non-poisoned 'failed' tasks for the same reason as GetLastTaskSession.
+func (q *Queries) GetLastChannelTaskSession(ctx context.Context, arg GetLastChannelTaskSessionParams) (GetLastChannelTaskSessionRow, error) {
+	row := q.db.QueryRow(ctx, getLastChannelTaskSession, arg.AgentID, arg.ChannelID)
+	var i GetLastChannelTaskSessionRow
+	err := row.Scan(&i.SessionID, &i.RuntimeID)
 	return i, err
 }
 

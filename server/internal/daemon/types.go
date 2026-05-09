@@ -70,6 +70,11 @@ type Task struct {
 	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	SquadID                 string                `json:"squad_id,omitempty"`                  // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName               string                `json:"squad_name,omitempty"`                // display name for the picker squad, used in prompt text
+	ChannelID               string                `json:"channel_id,omitempty"`                // non-empty for channel message tasks
+	ChannelMessageID        string                `json:"channel_message_id,omitempty"`        // message that triggered this channel task
+	ChannelContent          string                `json:"channel_content,omitempty"`           // content of the triggering channel message
+	ChannelAuthorName       string                `json:"channel_author_name,omitempty"`       // display name of the channel message author
+	ChannelRecentMessages   []ChannelMessageEntry `json:"channel_recent_messages,omitempty"`   // pre-loaded conversation history injected by the server
 	ParentIssueID           string                `json:"parent_issue_id,omitempty"`           // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
 	ParentIssueIdentifier   string                `json:"parent_issue_identifier,omitempty"`   // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, used in prompt context
 	// RequestingUserName + RequestingUserProfileDescription describe the human
@@ -86,6 +91,17 @@ type Task struct {
 	// Empty when the server-side runtime has no owning user — the daemon
 	// then falls back to its own token. See MUL-2600.
 	AuthToken string `json:"auth_token,omitempty"`
+}
+
+// ChannelMessageEntry is a single resolved channel message, mirroring
+// service.ChannelMessageEntry. Duplicated here to keep the daemon package
+// free of handler/service imports.
+type ChannelMessageEntry struct {
+	ID         string `json:"id"`
+	AuthorName string `json:"author_name"`
+	AuthorType string `json:"author_type"` // "user" | "agent" | "system"
+	Content    string `json:"content"`
+	CreatedAt  string `json:"created_at"` // RFC3339
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

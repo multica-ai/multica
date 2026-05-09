@@ -27,6 +27,9 @@ func BuildPrompt(task Task, provider string) string {
 	if task.QuickCreatePrompt != "" {
 		return buildQuickCreatePrompt(task)
 	}
+	if task.ChannelMessageID != "" {
+		return buildChannelMessagePrompt(task)
+	}
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
@@ -232,6 +235,102 @@ func buildChatPrompt(task Task) string {
 		}
 		b.WriteString("Use `multica attachment download <id>` to fetch each file locally before referring to it.\n")
 	}
+	return b.String()
+}
+
+// buildChannelMessagePrompt constructs a prompt for channel message tasks.
+// The server pre-injects recent channel messages (ChannelRecentMessages) so the
+// agent can understand the conversation without an extra API call. The prompt
+// renders those messages inline and tells the agent to reply via the CLI.
+func buildChannelMessagePrompt(task Task) string {
+	var b strings.Builder
+
+	// ── Identity block ────────────────────────────────────────────────────
+	// Always tell the agent who it is. Without this, references like
+	// "assign to yourself" or "you just created X" are ambiguous.
+	agentName := ""
+	agentID := task.AgentID
+	if task.Agent != nil {
+		agentName = task.Agent.Name
+		if task.Agent.Instructions != "" {
+			fmt.Fprintf(&b, "%s\n\n", task.Agent.Instructions)
+		}
+	}
+	b.WriteString("You are participating in a team channel discussion.\n\n")
+	b.WriteString("## Your identity\n\n")
+	if agentName != "" {
+		fmt.Fprintf(&b, "- Your name: **%s**\n", agentName)
+	}
+	if agentID != "" {
+		fmt.Fprintf(&b, "- Your agent ID (use as `--assignee-id` when assigning to yourself): `%s`\n", agentID)
+	}
+	b.WriteString("\n")
+
+	// ── Conversation history ──────────────────────────────────────────────
+	// The server has already fetched the recent messages; we render them
+	// here so the agent does not need to call `multica channel messages`.
+	// Messages sent by YOU are marked "(you, previously)" — treat them as
+	// your own prior actions and build on them rather than re-doing them.
+	if len(task.ChannelRecentMessages) > 0 {
+		b.WriteString("## Recent conversation\n\n")
+		for _, m := range task.ChannelRecentMessages {
+			ts := ""
+			if m.CreatedAt != "" {
+				ts = " [" + m.CreatedAt + "]"
+			}
+			fmt.Fprintf(&b, "**%s**%s:\n> %s\n\n", m.AuthorName, ts, m.Content)
+		}
+	} else {
+		// Fallback: no messages were pre-loaded (e.g. channel was empty).
+		b.WriteString("(No previous messages in this channel.)\n\n")
+	}
+
+	// ── Triggering message (highlighted) ─────────────────────────────────
+	authorLabel := "A user"
+	if task.ChannelAuthorName != "" {
+		authorLabel = task.ChannelAuthorName
+	}
+	if task.ChannelContent != "" {
+		fmt.Fprintf(&b, "## New message you must respond to\n\n**%s** sent:\n\n> %s\n\n", authorLabel, task.ChannelContent)
+	}
+
+	// ── Channel mode constraint ───────────────────────────────────────────
+	// Channels are for EXPLORATION and DISCUSSION only.
+	// Substantive execution (writing code, producing PRDs, reviewing PRs,
+	// running tests, making architectural decisions) MUST NOT happen here.
+	b.WriteString("## Channel rules — READ CAREFULLY\n\n")
+	b.WriteString("This channel is for **exploration and discussion only**. Your role here is:\n\n")
+	b.WriteString("✅ **Allowed in channel:**\n")
+	b.WriteString("- Answer questions, explain concepts, share knowledge\n")
+	b.WriteString("- Search for and summarise existing information (`multica issue list`, `multica issue get`, etc.)\n")
+	b.WriteString("- Discuss approaches, trade-offs, and plans\n")
+	b.WriteString("- Create issues and assign them to the appropriate agent for execution\n")
+	b.WriteString("- Report back what an issue produced (fetch the issue/comments and summarise)\n\n")
+	b.WriteString("🚫 **NEVER do the following directly in a channel task:**\n")
+	b.WriteString("- Write, edit, or review code\n")
+	b.WriteString("- Author or refine a PRD / spec / design document\n")
+	b.WriteString("- Make architectural decisions or produce deliverables\n")
+	b.WriteString("- Run tests or execute long-running processes\n\n")
+	b.WriteString("**If the request requires any of the above:**\n")
+	b.WriteString("1. STOP — do not attempt the work yourself.\n")
+	b.WriteString("2. Create an issue with `multica issue create` describing the task clearly.\n")
+	b.WriteString("3. Assign the issue to the agent best suited for the job using `--assignee <agent-name>` or `--assignee-id <uuid>`.\n")
+	b.WriteString("4. Post a channel message confirming the issue was created (include the issue number/ID).\n")
+	b.WriteString("5. If the user later asks for the result, fetch the issue and its comments with `multica issue get <id> --output json` and `multica issue comment list <id>`, then summarise what was produced.\n\n")
+
+	// ── Instructions ─────────────────────────────────────────────────────
+	b.WriteString("## Steps for this turn\n\n")
+	b.WriteString("1. Read the conversation carefully, including your own previous messages (marked \"you, previously\").\n")
+	b.WriteString("2. Decide: is this a question/exploration request, or a request to DO something substantive?\n")
+	b.WriteString("   - **Question/exploration** → answer directly, search if needed, reply with findings.\n")
+	b.WriteString("   - **Substantive task** → create an issue, assign to the right agent, confirm in channel.\n")
+	fmt.Fprintf(&b, "3. Post your reply with: `multica channel send %s --content \"<your response>\"`\n\n", task.ChannelID)
+	b.WriteString("Additional rules:\n")
+	b.WriteString("- When the user says \"assign to yourself\" or similar, use YOUR agent ID above with `--assignee-id`.\n")
+	b.WriteString("- Reuse IDs from the conversation history instead of re-fetching when you already know them.\n")
+	b.WriteString("- Keep replies concise. If you created or updated something, confirm with the issue number.\n")
+	b.WriteString("- If you have nothing meaningful to add, exit without sending.\n")
+	b.WriteString("- For more channel history: `multica channel messages " + task.ChannelID + " --limit 50 --output json`\n")
 	return b.String()
 }
 

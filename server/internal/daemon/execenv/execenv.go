@@ -78,8 +78,13 @@ type TaskContextForEnv struct {
 	AutopilotDescription    string
 	AutopilotSource         string
 	AutopilotTriggerPayload string
-	QuickCreatePrompt       string // non-empty for quick-create tasks
-	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
+	QuickCreatePrompt       string                 // non-empty for quick-create tasks
+	ChannelID               string                 // non-empty for channel message tasks
+	ChannelMessageID        string                 // message that triggered this channel task
+	ChannelContent          string                 // content of the triggering channel message
+	ChannelAuthorName       string                 // display name of the channel message author
+	ChannelRecentMessages   []ChannelMessageForEnv // pre-loaded conversation history (server-injected)
+	IsSquadLeader           bool                   // true when the agent is acting as a squad leader (may exit silently on no_action)
 	// WorkspaceContext is the workspace-level system prompt (workspace.context
 	// in the DB). Rendered into the brief as `## Workspace Context` when
 	// non-empty so every agent in the workspace sees the same shared context,
@@ -93,6 +98,15 @@ type TaskContextForEnv struct {
 	// context and the agent stays anonymous-user mode.
 	RequestingUserName               string
 	RequestingUserProfileDescription string
+}
+
+// ChannelMessageForEnv is a single resolved channel message for environment context.
+type ChannelMessageForEnv struct {
+	ID         string
+	AuthorName string
+	AuthorType string // "user" | "agent" | "system"
+	Content    string
+	CreatedAt  string // RFC3339
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

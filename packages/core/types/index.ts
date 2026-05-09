@@ -159,3 +159,13 @@ export type {
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
 } from "./billing";
+
+export type {
+  Channel,
+  ChannelMember,
+  ChannelMessage,
+  CreateChannelRequest,
+  AddMemberRequest,
+  SendChannelMessageRequest,
+  ChannelReadState,
+} from "./channel";

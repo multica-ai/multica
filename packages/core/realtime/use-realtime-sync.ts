@@ -36,7 +36,9 @@ import { notificationPreferenceOptions } from "../notification-preferences/queri
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import type { Workspace } from "../types/workspace";
 import { chatKeys } from "../chat/queries";
+import { channelKeys } from "../channels/queries";
 import { useChatStore } from "../chat";
+import { useChannelStore } from "../channels/store";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
   MemberAddedPayload,
@@ -402,6 +404,8 @@ export function useRealtimeSync(
       // Chat events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:session_read", "chat:session_deleted",
       "chat:session_updated",
+      // Channel events are handled explicitly below; do not double-invalidate.
+      "channel:created", "channel:message",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -791,7 +795,19 @@ export function useRealtimeSync(
     // when reconnect replays the event for an already-running task).
     const unsubTaskQueued = ws.on("task:queued", (p) => {
       const payload = p as TaskQueuedPayload;
-      if (!payload.chat_session_id) return;
+      // Channel task: seed the pending task in the channel store.
+      if (payload.channel_id) {
+        useChannelStore.getState().setPendingTask(payload.channel_id, {
+          task_id: payload.task_id,
+          agent_id: payload.agent_id,
+          channel_id: payload.channel_id,
+          status: "queued",
+        });
+      }
+      if (!payload.chat_session_id) {
+        invalidatePendingAggregate();
+        return;
+      }
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),
         (old) => ({
@@ -811,6 +827,14 @@ export function useRealtimeSync(
     // taskMessages → "Thinking · Ns".
     const unsubTaskDispatch = ws.on("task:dispatch", (p) => {
       const payload = p as TaskDispatchPayload;
+      // Channel task: update status to running.
+      if (payload.channel_id) {
+        const channelStore = useChannelStore.getState();
+        const current = channelStore.pendingTasks[payload.channel_id];
+        if (current && current.task_id === payload.task_id) {
+          channelStore.setPendingTask(payload.channel_id, { ...current, status: "running" });
+        }
+      }
       if (!payload.chat_session_id) return;
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),
@@ -865,7 +889,16 @@ export function useRealtimeSync(
     //      forever in the second-tab scenario.
     const unsubTaskCancelled = ws.on("task:cancelled", (p) => {
       const payload = p as TaskCancelledPayload;
-      if (!payload.chat_session_id) return;
+      // Channel task: clear pending state and refresh messages.
+      if (payload.channel_id) {
+        useChannelStore.getState().clearPendingTask(payload.channel_id);
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.messages(wsId, payload.channel_id) });
+      }
+      if (!payload.chat_session_id) {
+        invalidatePendingAggregate();
+        return;
+      }
       chatWsLogger.info("task:cancelled (global, chat)", {
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
@@ -876,7 +909,16 @@ export function useRealtimeSync(
 
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
       const payload = p as TaskCompletedPayload;
-      if (!payload.chat_session_id) return; // issue tasks handled elsewhere
+      // Channel task: clear pending state and refresh messages so the reply appears.
+      if (payload.channel_id) {
+        useChannelStore.getState().clearPendingTask(payload.channel_id);
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.messages(wsId, payload.channel_id) });
+      }
+      if (!payload.chat_session_id) {
+        invalidatePendingAggregate();
+        return; // issue/channel tasks handled; not a chat task
+      }
       chatWsLogger.info("task:completed (global, chat)", {
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
@@ -892,7 +934,16 @@ export function useRealtimeSync(
 
     const unsubTaskFailed = ws.on("task:failed", (p) => {
       const payload = p as TaskFailedPayload;
-      if (!payload.chat_session_id) return;
+      // Channel task: clear pending state on failure too.
+      if (payload.channel_id) {
+        useChannelStore.getState().clearPendingTask(payload.channel_id);
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.messages(wsId, payload.channel_id) });
+      }
+      if (!payload.chat_session_id) {
+        invalidatePendingAggregate();
+        return;
+      }
       chatWsLogger.warn("task:failed (global, chat)", {
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
@@ -907,6 +958,21 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
+    });
+
+    // channel:created → invalidate channel list
+    const unsubChannelCreated = ws.on("channel:created", (_p) => {
+      const wsId = getCurrentWsId();
+      if (wsId) qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
+    });
+
+    // channel:message → invalidate channel messages
+    const unsubChannelMessage = ws.on("channel:message", (p) => {
+      const payload = p as { channel_id: string };
+      if (payload.channel_id) {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.messages(wsId, payload.channel_id) });
+      }
     });
 
     const unsubChatSessionRead = ws.on("chat:session_read", (p) => {
@@ -1004,6 +1070,8 @@ export function useRealtimeSync(
       unsubTaskCancelled();
       unsubTaskCompleted();
       unsubTaskFailed();
+      unsubChannelCreated();
+      unsubChannelMessage();
       unsubChatSessionRead();
       unsubChatSessionDeleted();
       unsubChatSessionUpdated();

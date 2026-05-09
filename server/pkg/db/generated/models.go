@@ -168,6 +168,49 @@ type AutopilotTrigger struct {
 	EventFilters   []byte             `json:"event_filters"`
 }
 
+type Channel struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Type        string             `json:"type"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ChannelMember struct {
+	ID         pgtype.UUID        `json:"id"`
+	ChannelID  pgtype.UUID        `json:"channel_id"`
+	MemberType string             `json:"member_type"`
+	MemberID   pgtype.UUID        `json:"member_id"`
+	Role       string             `json:"role"`
+	JoinedAt   pgtype.Timestamptz `json:"joined_at"`
+}
+
+type ChannelMessage struct {
+	ID           pgtype.UUID        `json:"id"`
+	ChannelID    pgtype.UUID        `json:"channel_id"`
+	AuthorType   string             `json:"author_type"`
+	AuthorID     pgtype.UUID        `json:"author_id"`
+	Content      string             `json:"content"`
+	ThreadRootID pgtype.UUID        `json:"thread_root_id"`
+	Status       string             `json:"status"`
+	Metadata     []byte             `json:"metadata"`
+	EditedAt     pgtype.Timestamptz `json:"edited_at"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	TaskID       pgtype.UUID        `json:"task_id"`
+}
+
+type ChannelReadState struct {
+	ChannelID         pgtype.UUID        `json:"channel_id"`
+	MemberType        string             `json:"member_type"`
+	MemberID          pgtype.UUID        `json:"member_id"`
+	LastReadMessageID pgtype.UUID        `json:"last_read_message_id"`
+	LastReadAt        pgtype.Timestamptz `json:"last_read_at"`
+}
+
 type ChatMessage struct {
 	ID            pgtype.UUID        `json:"id"`
 	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
@@ -357,6 +400,9 @@ type Issue struct {
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
 	StartDate          pgtype.Date        `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
+	SourceChannelID    pgtype.UUID        `json:"source_channel_id"`
+	SourceThreadRootID pgtype.UUID        `json:"source_thread_root_id"`
+	DiscussionSnapshot []byte             `json:"discussion_snapshot"`
 }
 
 type IssueDependency struct {
@@ -453,7 +499,6 @@ type LarkInstallation struct {
 	AppSecretEncrypted []byte             `json:"app_secret_encrypted"`
 	TenantKey          pgtype.Text        `json:"tenant_key"`
 	BotOpenID          string             `json:"bot_open_id"`
-	BotUnionID         pgtype.Text        `json:"bot_union_id"`
 	InstallerUserID    pgtype.UUID        `json:"installer_user_id"`
 	Status             string             `json:"status"`
 	WsLeaseToken       pgtype.Text        `json:"ws_lease_token"`
@@ -461,6 +506,7 @@ type LarkInstallation struct {
 	InstalledAt        pgtype.Timestamptz `json:"installed_at"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	BotUnionID         pgtype.Text        `json:"bot_union_id"`
 }
 
 type LarkOutboundCardMessage struct {

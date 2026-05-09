@@ -2540,6 +2540,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotSource:                  task.AutopilotSource,
 		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:                task.QuickCreatePrompt,
+		ChannelID:                        task.ChannelID,
+		ChannelMessageID:                 task.ChannelMessageID,
+		ChannelContent:                   task.ChannelContent,
+		ChannelAuthorName:                task.ChannelAuthorName,
+		ChannelRecentMessages:            convertChannelMessagesForEnv(task.ChannelRecentMessages),
 		IsSquadLeader:                    strings.Contains(instructions, "## Squad Operating Protocol"),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
@@ -3567,6 +3572,23 @@ func composeOpenclawIncludeRoots(addRoot, userValue string) (string, bool) {
 		parts = append(parts, p)
 	}
 	return strings.Join(parts, string(os.PathListSeparator)), true
+}
+
+func convertChannelMessagesForEnv(msgs []ChannelMessageEntry) []execenv.ChannelMessageForEnv {
+	if len(msgs) == 0 {
+		return nil
+	}
+	result := make([]execenv.ChannelMessageForEnv, len(msgs))
+	for i, m := range msgs {
+		result[i] = execenv.ChannelMessageForEnv{
+			ID:         m.ID,
+			AuthorName: m.AuthorName,
+			AuthorType: m.AuthorType,
+			Content:    m.Content,
+			CreatedAt:  m.CreatedAt,
+		}
+	}
+	return result
 }
 
 // isBlockedEnvKey returns true if the key must not be overridden by user-

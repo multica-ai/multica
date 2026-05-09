@@ -1559,6 +1559,35 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+		} else {
+			// Channel message task: context.type == "channel_message"
+			var cm service.ChannelMessageContext
+			if json.Unmarshal(task.Context, &cm) == nil && cm.Type == service.ChannelMessageContextType {
+				resp.ChannelID = cm.ChannelID
+				resp.ChannelMessageID = cm.MessageID
+				resp.ChannelContent = cm.Content
+				resp.ChannelAuthorName = cm.AuthorName
+				resp.ChannelRecentMessages = cm.RecentMessages
+				resp.WorkspaceID = cm.WorkspaceID
+				if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(cm.WorkspaceID)); err == nil && ws.Repos != nil {
+					var repos []RepoData
+					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+						resp.Repos = repos
+					}
+				}
+				// Resume the prior Claude session for this (agent, channel) pair so
+				// the agent keeps conversational memory across multiple messages.
+				// Only resume when the session came from the same runtime (the agent
+				// binary version must match) and the task is not a forced fresh run.
+				if !task.ForceFreshSession && resp.PriorSessionID == "" {
+					if prior, err := h.Queries.GetLastChannelTaskSession(r.Context(), db.GetLastChannelTaskSessionParams{
+						AgentID:   task.AgentID,
+						ChannelID: cm.ChannelID,
+					}); err == nil && prior.SessionID.Valid && prior.RuntimeID == task.RuntimeID {
+						resp.PriorSessionID = prior.SessionID.String
+					}
+				}
+			}
 		}
 	}
 
@@ -2020,16 +2049,13 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaceID := ""
-	if task.IssueID.Valid {
-		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
-			workspaceID = uuidToString(issue.WorkspaceID)
-		}
-	}
-	if workspaceID == "" && task.ChatSessionID.Valid {
-		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
-			workspaceID = uuidToString(cs.WorkspaceID)
-		}
+	// Resolve workspace ID and optional channel ID for broadcasting.
+	// Channel message tasks store both in the context JSONB — use the task
+	// service helper to avoid duplicating the parsing logic.
+	workspaceID := h.TaskService.ResolveTaskWorkspaceID(r.Context(), task)
+	channelID := ""
+	if cm, ok := h.TaskService.ParseChannelMessageContextPublic(task); ok {
+		channelID = cm.ChannelID
 	}
 
 	for _, msg := range req.Messages {
@@ -2054,14 +2080,15 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 
 		if workspaceID != "" {
 			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID, protocol.TaskMessagePayload{
-				TaskID:  taskID,
-				IssueID: uuidToString(task.IssueID),
-				Seq:     msg.Seq,
-				Type:    msg.Type,
-				Tool:    msg.Tool,
-				Content: msg.Content,
-				Input:   msg.Input,
-				Output:  msg.Output,
+				TaskID:    taskID,
+				IssueID:   uuidToString(task.IssueID),
+				ChannelID: channelID,
+				Seq:       msg.Seq,
+				Type:      msg.Type,
+				Tool:      msg.Tool,
+				Content:   msg.Content,
+				Input:     msg.Input,
+				Output:    msg.Output,
 			})
 		}
 	}
@@ -2245,6 +2272,10 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 	}
 
 	issueID := uuidToString(task.IssueID)
+	channelIDForResp := ""
+	if cm, ok := h.TaskService.ParseChannelMessageContextPublic(task); ok {
+		channelIDForResp = cm.ChannelID
+	}
 
 	resp := make([]protocol.TaskMessagePayload, len(messages))
 	for i, m := range messages {
@@ -2253,14 +2284,15 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 			json.Unmarshal(m.Input, &input)
 		}
 		resp[i] = protocol.TaskMessagePayload{
-			TaskID:  taskID,
-			IssueID: issueID,
-			Seq:     int(m.Seq),
-			Type:    m.Type,
-			Tool:    m.Tool.String,
-			Content: m.Content.String,
-			Input:   input,
-			Output:  m.Output.String,
+			TaskID:    taskID,
+			IssueID:   issueID,
+			ChannelID: channelIDForResp,
+			Seq:       int(m.Seq),
+			Type:      m.Type,
+			Tool:      m.Tool.String,
+			Content:   m.Content.String,
+			Input:     input,
+			Output:    m.Output.String,
 		}
 	}
 
