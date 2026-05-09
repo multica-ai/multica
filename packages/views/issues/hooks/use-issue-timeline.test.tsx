@@ -11,6 +11,7 @@ const stableHandles = vi.hoisted(() => ({
   createMutateAsync: vi.fn(async () => ({})),
   updateMutateAsync: vi.fn(async () => ({})),
   deleteMutateAsync: vi.fn(async () => ({})),
+  resolveMutateAsync: vi.fn(async () => ({})),
   toggleMutate: vi.fn(),
 }));
 
@@ -31,6 +32,11 @@ vi.mock("@multica/core/issues/mutations", () => ({
   }),
   useDeleteComment: () => ({
     mutateAsync: stableHandles.deleteMutateAsync,
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useResolveComment: () => ({
+    mutateAsync: stableHandles.resolveMutateAsync,
     mutate: vi.fn(),
     isPending: false,
   }),

@@ -181,7 +181,7 @@
       "collapse": "Collapse",
       "bar_one": "{{count}} resolved comment from {{authors}}",
       "bar_other": "{{count}} resolved comments from {{authors}}",
-      "bar_authors_more": "{{names}} and {{count}} other",
+      "bar_authors_more_one": "{{names}} and {{count}} other",
       "bar_authors_more_other": "{{names}} and {{count}} others",
       "resolve_failed": "Failed to resolve thread",
       "unresolve_failed": "Failed to unresolve thread"
