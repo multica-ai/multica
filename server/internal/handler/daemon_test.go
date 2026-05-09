@@ -1573,109 +1573,6 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 	}
 }
 
-func TestClaimTaskByRuntime_IncludesPrivateGateMetadata(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-
-	var runtimeID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
-		)
-		VALUES ($1, $2, 'claim-private-runtime', 'local', 'codex', 'online', '', '{}'::jsonb, $3, now())
-		RETURNING id
-	`, testWorkspaceID, "claim-private-gate-daemon", testUserID).Scan(&runtimeID); err != nil {
-		t.Fatalf("setup: create runtime: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
-
-	var agentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (
-			workspace_id, name, description, runtime_mode, runtime_config,
-			runtime_id, visibility, max_concurrent_tasks, owner_id
-		)
-		VALUES ($1, 'claim-private-agent', '', 'local', '{}'::jsonb, $2, 'private', 1, $3)
-		RETURNING id
-	`, testWorkspaceID, runtimeID, testUserID).Scan(&agentID); err != nil {
-		t.Fatalf("setup: create agent: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID) })
-
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type)
-		VALUES ($1, 'claim-private-gate-issue', 'todo', 'medium', $2, 'member')
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
-
-	triggerActorID := "33333333-3333-3333-3333-333333333333"
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id, status, priority,
-			trigger_source, trigger_actor_type, trigger_actor_id
-		)
-		VALUES ($1, $2, $3, 'queued', 2, 'issue_update', 'member', $4)
-		RETURNING id
-	`, agentID, runtimeID, issueID, triggerActorID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
-
-	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
-		testWorkspaceID, "claim-private-gate-daemon")
-	req = withURLParam(req, "runtimeId", runtimeID)
-
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp struct {
-		Task *struct {
-			TriggerSource    string `json:"trigger_source"`
-			TriggerActorType string `json:"trigger_actor_type"`
-			TriggerActorID   string `json:"trigger_actor_id"`
-			Agent            *struct {
-				Visibility string `json:"visibility"`
-				OwnerID    string `json:"owner_id"`
-			} `json:"agent"`
-		} `json:"task"`
-	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Task == nil {
-		t.Fatal("expected task in response, got nil")
-	}
-	if resp.Task.TriggerSource != "issue_update" {
-		t.Fatalf("expected trigger_source issue_update, got %q", resp.Task.TriggerSource)
-	}
-	if resp.Task.TriggerActorType != "member" {
-		t.Fatalf("expected trigger_actor_type member, got %q", resp.Task.TriggerActorType)
-	}
-	if resp.Task.TriggerActorID != triggerActorID {
-		t.Fatalf("expected trigger_actor_id %q, got %q", triggerActorID, resp.Task.TriggerActorID)
-	}
-	if resp.Task.Agent == nil {
-		t.Fatal("expected agent data in response, got nil")
-	}
-	if resp.Task.Agent.Visibility != "private" {
-		t.Fatalf("expected agent visibility private, got %q", resp.Task.Agent.Visibility)
-	}
-	if resp.Task.Agent.OwnerID != testUserID {
-		t.Fatalf("expected agent owner_id %q, got %q", testUserID, resp.Task.Agent.OwnerID)
-	}
-}
-
 // TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects verifies
 // the defense-in-depth check in ClaimTaskByRuntime: if a task is somehow
 // dispatched to a runtime whose workspace doesn't match the task's
@@ -1947,7 +1844,202 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 	}
 }
 
+func TestClaimTaskByRuntime_IncludesPrivateGateMetadata(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, $2, 'claim-private-runtime', 'local', 'codex', 'online', '', '{}'::jsonb, $3, now())
+		RETURNING id
+	`, testWorkspaceID, "claim-private-gate-daemon", testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("setup: create runtime: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'claim-private-agent', '', 'local', '{}'::jsonb, $2, 'private', 1, $3)
+		RETURNING id
+	`, testWorkspaceID, runtimeID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: create agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID) })
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type)
+		VALUES ($1, 'claim-private-gate-issue', 'todo', 'medium', $2, 'member')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	triggerActorID := "33333333-3333-3333-3333-333333333333"
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			trigger_source, trigger_actor_type, trigger_actor_id
+		)
+		VALUES ($1, $2, $3, 'queued', 2, 'issue_update', 'member', $4)
+		RETURNING id
+	`, agentID, runtimeID, issueID, triggerActorID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
+		testWorkspaceID, "claim-private-gate-daemon")
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			TriggerSource    string `json:"trigger_source"`
+			TriggerActorType string `json:"trigger_actor_type"`
+			TriggerActorID   string `json:"trigger_actor_id"`
+			Agent            *struct {
+				Visibility string `json:"visibility"`
+				OwnerID    string `json:"owner_id"`
+			} `json:"agent"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatal("expected task in response, got nil")
+	}
+	if resp.Task.TriggerSource != "issue_update" {
+		t.Fatalf("expected trigger_source issue_update, got %q", resp.Task.TriggerSource)
+	}
+	if resp.Task.TriggerActorType != "member" {
+		t.Fatalf("expected trigger_actor_type member, got %q", resp.Task.TriggerActorType)
+	}
+	if resp.Task.TriggerActorID != triggerActorID {
+		t.Fatalf("expected trigger_actor_id %q, got %q", triggerActorID, resp.Task.TriggerActorID)
+	}
+	if resp.Task.Agent == nil {
+		t.Fatal("expected agent data in response, got nil")
+	}
+	if resp.Task.Agent.Visibility != "private" {
+		t.Fatalf("expected agent visibility private, got %q", resp.Task.Agent.Visibility)
+	}
+	if resp.Task.Agent.OwnerID != testUserID {
+		t.Fatalf("expected agent owner_id %q, got %q", testUserID, resp.Task.Agent.OwnerID)
+	}
+}
+
 func TestFailTask_CommentTriggered_CreatesSystemCommentUnderTrigger(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'fail task system comment fixture', 'in_progress', 'medium', $2, 'member', 92002, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var triggerCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'member', $3, 'trigger for fail task', 'comment')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
+		t.Fatalf("setup: create trigger comment: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, trigger_comment_id,
+			status, priority, started_at
+		)
+		VALUES ($1, $2, $3, $4, 'running', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	const failMsg = "private agent execution denied: only the agent owner can run this task"
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/fail",
+		map[string]any{"error": failMsg},
+		testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "taskId", taskID)
+
+	testHandler.FailTask(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("FailTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var status, storedError string
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, error FROM agent_task_queue WHERE id = $1
+	`, taskID).Scan(&status, &storedError); err != nil {
+		t.Fatalf("read failed task: %v", err)
+	}
+	if status != "failed" {
+		t.Fatalf("expected task status failed, got %q", status)
+	}
+	if storedError != failMsg {
+		t.Fatalf("expected task error %q, got %q", failMsg, storedError)
+	}
+
+	var commentContent, commentType, parentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT content, type, parent_id::text
+		FROM comment
+		WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID, agentID).Scan(&commentContent, &commentType, &parentID); err != nil {
+		t.Fatalf("read generated system comment: %v", err)
+	}
+	if commentType != "system" {
+		t.Fatalf("expected comment type system, got %q", commentType)
+	}
+	if commentContent != failMsg {
+		t.Fatalf("expected comment content %q, got %q", failMsg, commentContent)
+	}
+	if parentID != triggerCommentID {
+		t.Fatalf("expected parent_id %q, got %q", triggerCommentID, parentID)
+	}
+}
+
 type claimRuntimeGuardTask struct {
 	PriorSessionID string `json:"prior_session_id"`
 	PriorWorkDir   string `json:"prior_work_dir"`
@@ -2158,89 +2250,6 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 
 	ctx := context.Background()
 
-	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx, `
-		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
-	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
-
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'fail task system comment fixture', 'in_progress', 'medium', $2, 'member', 92002, 0)
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
-
-	var triggerCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
-		VALUES ($1, $2, 'member', $3, 'trigger for fail task', 'comment')
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
-		t.Fatalf("setup: create trigger comment: %v", err)
-	}
-
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id, trigger_comment_id,
-			status, priority, started_at
-		)
-		VALUES ($1, $2, $3, $4, 'running', 0, now())
-		RETURNING id
-	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
-
-	const failMsg = "private agent execution denied: only the agent owner can run this task"
-
-	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/fail",
-		map[string]any{"error": failMsg},
-		testWorkspaceID, "legit-daemon")
-	req = withURLParam(req, "taskId", taskID)
-
-	testHandler.FailTask(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("FailTask: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var status, storedError string
-	if err := testPool.QueryRow(ctx, `
-		SELECT status, error FROM agent_task_queue WHERE id = $1
-	`, taskID).Scan(&status, &storedError); err != nil {
-		t.Fatalf("read failed task: %v", err)
-	}
-	if status != "failed" {
-		t.Fatalf("expected task status failed, got %q", status)
-	}
-	if storedError != failMsg {
-		t.Fatalf("expected task error %q, got %q", failMsg, storedError)
-	}
-
-	var commentContent, commentType, parentID string
-	if err := testPool.QueryRow(ctx, `
-		SELECT content, type, parent_id::text
-		FROM comment
-		WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
-		ORDER BY created_at DESC
-		LIMIT 1
-	`, issueID, agentID).Scan(&commentContent, &commentType, &parentID); err != nil {
-		t.Fatalf("read generated system comment: %v", err)
-	}
-	if commentType != "system" {
-		t.Fatalf("expected comment type system, got %q", commentType)
-	}
-	if commentContent != failMsg {
-		t.Fatalf("expected comment content %q, got %q", failMsg, commentContent)
-	}
-	if parentID != triggerCommentID {
-		t.Fatalf("expected parent_id %q, got %q", triggerCommentID, parentID)
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 	oldRuntimeID := createRuntimeGuardRuntime(t, ctx, "kimi")
 

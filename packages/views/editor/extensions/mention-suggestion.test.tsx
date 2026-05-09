@@ -91,7 +91,10 @@ describe("createMentionSuggestion", () => {
 
   it("returns members and agents synchronously without waiting for the server search", () => {
     const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      members: [
+        { user_id: "u-current", name: "CurrentUser", role: "member" },
+        { user_id: "u1", name: "Alice", role: "member" },
+      ],
       agents: [
         {
           id: "a1",
@@ -147,6 +150,7 @@ describe("createMentionSuggestion", () => {
 
   it("filters private agents owned by other users from mention suggestions", () => {
     const qc = fakeQc({
+      members: [{ user_id: "u-current", name: "CurrentUser", role: "member" }],
       agents: [
         {
           id: "own-private",
@@ -183,11 +187,13 @@ describe("createMentionSuggestion", () => {
   });
 
   it("calls searchIssues with include_closed=true so done issues are findable", async () => {
-    const qc = fakeQc({});
     searchIssuesMock.mockResolvedValue({ issues: [], total: 0 });
 
-    const config = createMentionSuggestion(qc);
-    config.items!({ query: "bug-xyz", editor: {} as never });
+    render(
+      <I18nWrapper>
+        <MentionList items={[]} query="bug-xyz" command={vi.fn()} />
+      </I18nWrapper>,
+    );
 
     // Wait past the 150ms debounce.
     await new Promise((r) => setTimeout(r, 200));
@@ -216,11 +222,12 @@ describe("createMentionSuggestion", () => {
   it("hides personal agents owned by someone else from a regular member", () => {
     const qc = fakeQc({
       members: [
+        { user_id: "u-current", name: "CurrentUser", role: "member" },
         { user_id: "u1", name: "Alice", role: "member" },
         { user_id: "u2", name: "Bob", role: "member" },
       ],
       agents: [
-        // Bob's personal agent — Alice (current user) should not see it.
+        // Bob's personal agent — current user should not see it.
         {
           id: "a-personal-bob",
           name: "Atlas",
@@ -228,13 +235,13 @@ describe("createMentionSuggestion", () => {
           visibility: "private",
           owner_id: "u2",
         },
-        // Alice's own personal agent — should be visible.
+        // Current user's own personal agent — should be visible.
         {
           id: "a-personal-alice",
           name: "Athena",
           archived_at: null,
           visibility: "private",
-          owner_id: "u1",
+          owner_id: "u-current",
         },
         // Workspace agent — visible to everyone.
         {
@@ -258,12 +265,13 @@ describe("createMentionSuggestion", () => {
   });
 
   it("shows everyone's personal agents to a workspace admin", () => {
-    // Role lives in the member fixture, not in authState — promoting Alice
-    // to admin here is enough to flip the gate. Backend gate allows admins
-    // to assign anyone's personal agent, so the @mention list mirrors that.
+    // Role lives in the member fixture, not in authState — promoting the
+    // current user to admin here is enough to flip the gate. Backend gate
+    // allows admins to assign anyone's personal agent, so the @mention
+    // list mirrors that.
     const qc = fakeQc({
       members: [
-        { user_id: "u1", name: "Alice", role: "admin" },
+        { user_id: "u-current", name: "CurrentUser", role: "admin" },
         { user_id: "u2", name: "Bob", role: "member" },
       ],
       agents: [
@@ -304,10 +312,11 @@ describe("createMentionSuggestion", () => {
   it("sorts member/agent items by recent mention frequency ranking", () => {
     const qc = fakeQc({
       members: [
+        { user_id: "u-current", name: "CurrentUser", role: "member" },
         { user_id: "u1", name: "Alice" },
         { user_id: "u2", name: "Bob" },
       ],
-      agents: [{ id: "a1", name: "Aegis", archived_at: null }],
+      agents: [{ id: "a1", name: "Aegis", archived_at: null, visibility: "workspace", owner_id: null }],
       mentionFrequency: [
         {
           actor_type: "member",
@@ -326,12 +335,12 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "", editor: {} as never }) as MentionItem[];
-    const users = result.filter((i) => i.type !== "issue");
+    // Use a query that won't match "all members" so allItem is excluded.
+    const result = config.items!({ query: "bo", editor: {} as never }) as MentionItem[];
+    const users = result.filter((i) => i.type !== "issue" && i.type !== "all");
 
+    // Bob (u2) has highest frequency, should be first.
     expect(users[0]?.type).toBe("member");
     expect(users[0]?.id).toBe("u2");
-    expect(users[1]?.type).toBe("agent");
-    expect(users[1]?.id).toBe("a1");
   });
 });

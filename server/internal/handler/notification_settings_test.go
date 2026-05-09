@@ -74,6 +74,27 @@ func TestNotificationPreferences_Defaults(t *testing.T) {
 				"enabled": false,
 				"binding_id": null,
 				"requires_binding": true
+			},
+			{
+				"channel": "custom_webhook",
+				"event_type": "mentioned",
+				"enabled": false,
+				"binding_id": null,
+				"requires_binding": false
+			},
+			{
+				"channel": "custom_webhook",
+				"event_type": "issue_assigned",
+				"enabled": false,
+				"binding_id": null,
+				"requires_binding": false
+			},
+			{
+				"channel": "custom_webhook",
+				"event_type": "subscribed_issue_updated",
+				"enabled": false,
+				"binding_id": null,
+				"requires_binding": false
 			}
 		]
 	}`)
@@ -187,6 +208,27 @@ func TestNotificationBindingsLifecycle(t *testing.T) {
 				"enabled": false,
 				"binding_id": null,
 				"requires_binding": true
+			},
+			{
+				"channel": "custom_webhook",
+				"event_type": "mentioned",
+				"enabled": false,
+				"binding_id": null,
+				"requires_binding": false
+			},
+			{
+				"channel": "custom_webhook",
+				"event_type": "issue_assigned",
+				"enabled": false,
+				"binding_id": null,
+				"requires_binding": false
+			},
+			{
+				"channel": "custom_webhook",
+				"event_type": "subscribed_issue_updated",
+				"enabled": false,
+				"binding_id": null,
+				"requires_binding": false
 			}
 		]
 	}`)

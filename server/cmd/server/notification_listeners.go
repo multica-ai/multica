@@ -230,13 +230,19 @@ func recordNotification(
 		payloadSnapshot = emptyDetails
 	}
 
+	// commentID may be empty for non-comment events (e.g. issue:created).
+	var commentUUID pgtype.UUID
+	if commentID != "" {
+		commentUUID = parseUUID(commentID)
+	}
+
 	event, err := queries.CreateNotificationEvent(ctx, db.CreateNotificationEventParams{
 		WorkspaceID:     parseUUID(e.WorkspaceID),
 		RecipientUserID: parseUUID(recipientID),
 		Type:            eventType,
 		Severity:        severity,
 		IssueID:         parseUUID(issueID),
-		CommentID:       parseUUID(commentID),
+		CommentID:       commentUUID,
 		ActorType:       util.StrToText(e.ActorType),
 		ActorID:         parseUUID(e.ActorID),
 		Title:           title,

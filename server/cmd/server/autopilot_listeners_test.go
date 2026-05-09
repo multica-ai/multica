@@ -78,7 +78,7 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 				}
 			})
 
-			run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+			run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil, service.TriggerActor{Source: "manual"})
 			if err != nil {
 				t.Fatalf("DispatchAutopilot: %v", err)
 			}

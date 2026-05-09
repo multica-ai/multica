@@ -1,7 +1,22 @@
-import { forwardRef, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../../locales/en/common.json";
+import enIssues from "../../locales/en/issues.json";
 import { CommentInput } from "./comment-input";
+
+const TEST_RESOURCES = {
+  en: { common: enCommon, issues: enIssues },
+};
+
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
 
 const draftKey = "multica:issue-comment-draft:user-1:issue-1";
 
@@ -127,7 +142,7 @@ describe("CommentInput drafts", () => {
 
   it("saves issue and user scoped drafts after a debounce", async () => {
     vi.useFakeTimers();
-    render(<CommentInput issueId="issue-1" onSubmit={vi.fn()} />);
+    render(<I18nWrapper><CommentInput issueId="issue-1" onSubmit={vi.fn()} /></I18nWrapper>);
 
     fireEvent.change(screen.getByPlaceholderText("Leave a comment..."), {
       target: { value: "draft text" },
@@ -154,7 +169,7 @@ describe("CommentInput drafts", () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     window.localStorage.setItem(draftKey, makeDraft("restored draft"));
 
-    render(<CommentInput issueId="issue-1" onSubmit={onSubmit} />);
+    render(<I18nWrapper><CommentInput issueId="issue-1" onSubmit={onSubmit} /></I18nWrapper>);
 
     expect(await screen.findByText("Restore draft?")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Restore"));
@@ -174,7 +189,7 @@ describe("CommentInput drafts", () => {
   it("keeps the saved draft when submit fails", async () => {
     vi.useFakeTimers();
     const onSubmit = vi.fn().mockRejectedValue(new Error("network failed"));
-    render(<CommentInput issueId="issue-1" onSubmit={onSubmit} />);
+    render(<I18nWrapper><CommentInput issueId="issue-1" onSubmit={onSubmit} /></I18nWrapper>);
 
     fireEvent.change(screen.getByPlaceholderText("Leave a comment..."), {
       target: { value: "do not lose me" },
@@ -195,7 +210,7 @@ describe("CommentInput drafts", () => {
   });
 
   it("prompts before applying a draft written from another tab", async () => {
-    render(<CommentInput issueId="issue-1" onSubmit={vi.fn()} />);
+    render(<I18nWrapper><CommentInput issueId="issue-1" onSubmit={vi.fn()} /></I18nWrapper>);
 
     act(() => {
       window.dispatchEvent(
