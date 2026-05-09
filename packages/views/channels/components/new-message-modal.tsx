@@ -1,10 +1,11 @@
 "use client";
 
-// CEREBRO-PATCH(new-message-modal-redesign): unified actor picker (no agent/member split),
-// multiselect, search, per-workspace favorites, mobile-friendly sizing — JEH-718.
+// CEREBRO-PATCH(new-message-modal-redesign): tap-to-start unified actor picker.
+// Single-tap a row to immediately start a DM (members) or AI chat session
+// (agents) — multi-select for groups is opt-in via the "Group" toggle. JEH-718.
 
 import { useMemo, useState } from "react";
-import { Lock, Search, Star, X } from "lucide-react";
+import { Lock, Search, Star, Users, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -36,20 +37,30 @@ interface Actor {
 export interface NewMessageModalProps {
   open: boolean;
   onClose: () => void;
-  /** Called when a channel/DM has been created. The caller can navigate to it. */
+  /** Called when a channel/DM has been created (caller navigates to it). */
   onCreated?: (channel: Channel) => void;
+  /**
+   * Single-agent tap dispatches here so the inbox can route into the chat
+   * flow (selectedAgentId + new-chat panel) instead of creating a one-agent
+   * channel. If omitted, agent taps fall back to a one-agent DM channel.
+   */
+  onAgentChatStarted?: (agentId: string) => void;
 }
 
-export function NewMessageModal({ open, onClose, onCreated }: NewMessageModalProps) {
+export function NewMessageModal({
+  open,
+  onClose,
+  onCreated,
+  onAgentChatStarted,
+}: NewMessageModalProps) {
   const wsId = useWorkspaceId();
   const user = useAuthStore((s) => s.user);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
 
   const [filter, setFilter] = useState("");
+  const [groupMode, setGroupMode] = useState(false);
   const [selected, setSelected] = useState<Actor[]>([]);
-  // Manual override of the auto-derived channel name. `null` means "use the
-  // auto-derived name"; once the user types, we lock to their text.
   const [nameOverride, setNameOverride] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -60,7 +71,6 @@ export function NewMessageModal({ open, onClose, onCreated }: NewMessageModalPro
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
 
-  // Build the unified list once: drop self, drop archived/inaccessible agents.
   const allActors = useMemo<Actor[]>(() => {
     const memberActors: Actor[] = members
       .filter((m) => m.user_id !== user?.id)
@@ -87,8 +97,6 @@ export function NewMessageModal({ open, onClose, onCreated }: NewMessageModalPro
     [allActors, query],
   );
 
-  // Pin favorites to the top, then everyone else. Order within each group is
-  // alphabetical (preserved from `allActors`).
   const { favoriteRows, otherRows } = useMemo(() => {
     const isFav = (a: Actor) => favorites.includes(actorKey(a.type, a.id));
     return {
@@ -113,21 +121,10 @@ export function NewMessageModal({ open, onClose, onCreated }: NewMessageModalPro
       prev.filter((p) => !(p.type === a.type && p.id === a.id)),
     );
 
-  // Default channel name = participants comma-separated. The user can edit
-  // this after the channel is created (or override it inline before creating).
-  const derivedName = selected.map((s) => s.name).join(", ");
-  const effectiveName = nameOverride ?? derivedName;
-
-  // A single-member, no-agent pick is a DM — the server derives the name from
-  // participants and ignores the name field. Anything else (incl. one agent)
-  // is a channel that needs a name.
-  const memberPicks = selected.filter((s) => s.type === "member");
-  const agentPicks = selected.filter((s) => s.type === "agent");
-  const isDm = memberPicks.length === 1 && agentPicks.length === 0;
-
   const reset = () => {
     setFilter("");
     setSelected([]);
+    setGroupMode(false);
     setNameOverride(null);
     setSubmitting(false);
   };
@@ -137,20 +134,20 @@ export function NewMessageModal({ open, onClose, onCreated }: NewMessageModalPro
     onClose();
   };
 
-  const canSubmit =
-    !submitting &&
-    selected.length > 0 &&
-    (isDm || effectiveName.trim().length > 0);
-
-  const handleSubmit = async () => {
-    if (!canSubmit) return;
+  const startDirect = async (actor: Actor) => {
+    if (submitting) return;
+    if (actor.type === "agent" && onAgentChatStarted) {
+      onAgentChatStarted(actor.id);
+      close();
+      return;
+    }
     setSubmitting(true);
     try {
       const channel = await createChannel.mutateAsync({
-        kind: isDm ? "dm" : "channel",
-        name: isDm ? "" : effectiveName.trim(),
-        member_ids: memberPicks.map((s) => s.id),
-        agent_ids: agentPicks.map((s) => s.id),
+        kind: "dm",
+        name: "",
+        member_ids: actor.type === "member" ? [actor.id] : [],
+        agent_ids: actor.type === "agent" ? [actor.id] : [],
       });
       onCreated?.(channel);
       close();
@@ -163,60 +160,115 @@ export function NewMessageModal({ open, onClose, onCreated }: NewMessageModalPro
     }
   };
 
+  const handleRowTap = (actor: Actor) => {
+    if (groupMode) {
+      togglePick(actor);
+    } else {
+      startDirect(actor);
+    }
+  };
+
+  const toggleGroupMode = () => {
+    setGroupMode((v) => {
+      if (v) {
+        setSelected([]);
+        setNameOverride(null);
+      }
+      return !v;
+    });
+  };
+
+  const derivedName = selected.map((s) => s.name).join(", ");
+  const effectiveName = nameOverride ?? derivedName;
+  const canSubmitGroup =
+    !submitting && selected.length > 0 && effectiveName.trim().length > 0;
+
+  const handleCreateGroup = async () => {
+    if (!canSubmitGroup) return;
+    setSubmitting(true);
+    try {
+      const channel = await createChannel.mutateAsync({
+        kind: "channel",
+        name: effectiveName.trim(),
+        member_ids: selected.filter((s) => s.type === "member").map((s) => s.id),
+        agent_ids: selected.filter((s) => s.type === "agent").map((s) => s.id),
+      });
+      onCreated?.(channel);
+      close();
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to create channel",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && close()}>
       <DialogContent
         showCloseButton={false}
-        // Roomier on every breakpoint than the prior `md`/256-tall list. On
-        // mobile we explicitly fill the viewport (minus a small inset) so the
-        // tap targets and the actor list both have space to breathe.
-        className="!max-w-lg !w-[calc(100vw-1.5rem)] gap-0 p-0 sm:!w-full"
+        className="!max-w-md gap-0 p-0"
       >
-        <DialogTitle className="sr-only">New message</DialogTitle>
+        <DialogTitle className="sr-only">
+          {groupMode ? "New group" : "New message"}
+        </DialogTitle>
 
-        <div className="flex items-center justify-between border-b px-4 py-3 sm:py-2.5">
-          <h2 className="text-base font-semibold sm:text-sm">New message</h2>
-          <button
-            onClick={close}
-            className="-mr-1.5 rounded-sm p-2 opacity-70 hover:bg-accent/60 hover:opacity-100 transition-all cursor-pointer sm:p-1.5"
-            type="button"
-            aria-label="Close"
-          >
-            <X className="size-4" />
-          </button>
+        <div className="flex items-center justify-between border-b px-4 py-2.5">
+          <h2 className="text-sm font-semibold">
+            {groupMode ? "New group" : "New message"}
+          </h2>
+          <div className="-mr-1 flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={toggleGroupMode}
+              className={`flex h-7 items-center gap-1.5 rounded-sm px-2 text-xs font-medium transition-colors ${
+                groupMode
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              }`}
+              aria-pressed={groupMode}
+            >
+              <Users className="size-3.5" />
+              {groupMode ? "Cancel" : "Group"}
+            </button>
+            <button
+              onClick={close}
+              className="rounded-sm p-1.5 text-muted-foreground hover:bg-accent/60 hover:text-foreground transition-colors cursor-pointer"
+              type="button"
+              aria-label="Close"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
         </div>
 
-        <div className="space-y-2 px-4 pt-3 pb-2">
-          {selected.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 pb-1">
-              {selected.map((a) => (
-                <SelectedChip
-                  key={`${a.type}:${a.id}`}
-                  actor={a}
-                  onRemove={() => removePick(a)}
-                />
-              ))}
-            </div>
-          )}
+        {groupMode && selected.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 border-b px-4 py-2">
+            {selected.map((a) => (
+              <SelectedChip
+                key={`${a.type}:${a.id}`}
+                actor={a}
+                onRemove={() => removePick(a)}
+              />
+            ))}
+          </div>
+        )}
+
+        <div className="border-b px-4 py-2">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
             <Input
               autoFocus
-              placeholder="Search people and agents…"
+              placeholder="Search…"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              // Bigger tap target on mobile; collapses to default on sm+.
-              className="h-11 pl-9 text-base sm:h-9 sm:text-sm"
+              className="h-9 pl-8 text-sm"
             />
           </div>
         </div>
 
-        {/*
-         * Adaptive list — caps at 60% of viewport on mobile, ~22rem on desktop —
-         * so the list always shows several rows without pushing the action bar
-         * off-screen.
-         */}
-        <div className="max-h-[min(60vh,22rem)] overflow-y-auto border-t">
+        <div className="max-h-[min(60vh,24rem)] overflow-y-auto py-1">
           {filtered.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">
               No matches.
@@ -229,9 +281,10 @@ export function NewMessageModal({ open, onClose, onCreated }: NewMessageModalPro
                     <PickerRow
                       key={`${a.type}:${a.id}`}
                       actor={a}
+                      groupMode={groupMode}
                       selected={isPicked(a)}
                       favorite
-                      onToggle={() => togglePick(a)}
+                      onTap={() => handleRowTap(a)}
                       onToggleFavorite={() =>
                         toggleFavorite(actorKey(a.type, a.id))
                       }
@@ -247,9 +300,10 @@ export function NewMessageModal({ open, onClose, onCreated }: NewMessageModalPro
                     <PickerRow
                       key={`${a.type}:${a.id}`}
                       actor={a}
+                      groupMode={groupMode}
                       selected={isPicked(a)}
                       favorite={false}
-                      onToggle={() => togglePick(a)}
+                      onTap={() => handleRowTap(a)}
                       onToggleFavorite={() =>
                         toggleFavorite(actorKey(a.type, a.id))
                       }
@@ -261,38 +315,33 @@ export function NewMessageModal({ open, onClose, onCreated }: NewMessageModalPro
           )}
         </div>
 
-        {/*
-         * Channel-name editor only matters once the selection is no longer a
-         * 1:1 DM. Reveal it inline so the user sees the auto-derived name and
-         * can rename before creating, but stays hidden in the simple case.
-         */}
-        {!isDm && selected.length > 0 && (
-          <div className="border-t px-4 pt-3 pb-1">
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              Channel name
-            </label>
-            <Input
-              value={effectiveName}
-              placeholder={derivedName || "Channel name"}
-              onChange={(e) => setNameOverride(e.target.value)}
-              className="h-11 text-base sm:h-9 sm:text-sm"
-            />
+        {groupMode && (
+          <div className="space-y-2 border-t px-4 py-2.5">
+            {selected.length > 0 && (
+              <Input
+                value={effectiveName}
+                placeholder={derivedName || "Channel name"}
+                onChange={(e) => setNameOverride(e.target.value)}
+                className="h-9 text-sm"
+                aria-label="Channel name"
+              />
+            )}
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                type="button"
+                onClick={handleCreateGroup}
+                disabled={!canSubmitGroup}
+              >
+                {submitting
+                  ? "Creating…"
+                  : selected.length > 0
+                    ? `Create channel (${selected.length})`
+                    : "Pick people to add"}
+              </Button>
+            </div>
           </div>
         )}
-
-        <div className="flex items-center justify-end gap-2 border-t px-4 py-3 sm:py-2.5">
-          <Button variant="ghost" size="sm" onClick={close} type="button">
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            type="button"
-            onClick={handleSubmit}
-            disabled={!canSubmit}
-          >
-            {submitting ? "Starting…" : isDm ? "Start chat" : "Create channel"}
-          </Button>
-        </div>
       </DialogContent>
     </Dialog>
   );
@@ -306,9 +355,9 @@ function PickerSection({
   children: React.ReactNode;
 }) {
   return (
-    <div className="py-1">
+    <div>
       {label && (
-        <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           {label}
         </div>
       )}
@@ -319,39 +368,41 @@ function PickerSection({
 
 function PickerRow({
   actor,
+  groupMode,
   selected,
   favorite,
-  onToggle,
+  onTap,
   onToggleFavorite,
 }: {
   actor: Actor;
+  groupMode: boolean;
   selected: boolean;
   favorite: boolean;
-  onToggle: () => void;
+  onTap: () => void;
   onToggleFavorite: () => void;
 }) {
   return (
     <div
-      className={`flex items-center gap-2 transition-colors ${
+      className={`group/row flex items-center transition-colors ${
         selected ? "bg-accent" : "hover:bg-accent/50"
       }`}
     >
       <button
         type="button"
-        onClick={onToggle}
-        // Generous tap target — at least 44px tall on mobile, the iOS HIG
-        // minimum. Collapses on sm+ to match the previous compact density.
-        className="flex flex-1 items-center gap-3 px-4 py-2.5 text-left text-sm sm:gap-2 sm:py-1.5"
+        onClick={onTap}
+        className="flex flex-1 items-center gap-2.5 px-4 py-1.5 text-left text-sm"
       >
-        <span
-          className={`flex size-4 shrink-0 items-center justify-center rounded-sm border text-[10px] sm:size-3.5 ${
-            selected
-              ? "border-primary bg-primary text-primary-foreground"
-              : "border-border"
-          }`}
-        >
-          {selected && "✓"}
-        </span>
+        {groupMode && (
+          <span
+            className={`flex size-3.5 shrink-0 items-center justify-center rounded-sm border text-[10px] ${
+              selected
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border"
+            }`}
+          >
+            {selected && "✓"}
+          </span>
+        )}
         <ActorAvatar actorType={actor.type} actorId={actor.id} size={24} />
         <span className="truncate flex-1">{actor.name}</span>
         {actor.locked && (
@@ -361,20 +412,17 @@ function PickerRow({
       <button
         type="button"
         onClick={onToggleFavorite}
-        // Star is a separate hit target so tapping it doesn't add the actor
-        // to the channel. Keep it 44px tall on mobile to stay tappable.
-        className={`mr-2 flex size-11 items-center justify-center rounded-sm transition-colors sm:size-7 ${
+        className={`mr-2 flex size-7 items-center justify-center rounded-sm transition-colors ${
           favorite
             ? "text-amber-500 hover:bg-amber-500/10"
-            : "text-muted-foreground/50 hover:bg-accent hover:text-foreground"
+            : "text-muted-foreground/40 hover:bg-accent hover:text-foreground sm:opacity-0 sm:group-hover/row:opacity-100"
         }`}
-        aria-label={favorite ? `Unfavorite ${actor.name}` : `Favorite ${actor.name}`}
+        aria-label={
+          favorite ? `Unfavorite ${actor.name}` : `Favorite ${actor.name}`
+        }
         aria-pressed={favorite}
       >
-        <Star
-          className="size-4"
-          fill={favorite ? "currentColor" : "none"}
-        />
+        <Star className="size-4" fill={favorite ? "currentColor" : "none"} />
       </button>
     </div>
   );
@@ -388,18 +436,17 @@ function SelectedChip({
   onRemove: () => void;
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border bg-accent/40 py-1 pl-1 pr-1 text-sm sm:py-0.5 sm:pr-2 sm:text-xs">
-      <ActorAvatar actorType={actor.type} actorId={actor.id} size={20} />
+    <span className="inline-flex items-center gap-1.5 rounded-full border bg-accent/40 py-0.5 pl-1 pr-1.5 text-xs">
+      <ActorAvatar actorType={actor.type} actorId={actor.id} size={18} />
       <span className="truncate max-w-[160px]">{actor.name}</span>
       <button
         type="button"
         onClick={onRemove}
-        className="rounded-full p-1 text-muted-foreground hover:bg-accent hover:text-foreground sm:p-0.5"
+        className="rounded-full p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
         aria-label={`Remove ${actor.name}`}
       >
-        <X className="size-3.5 sm:size-3" />
+        <X className="size-3" />
       </button>
     </span>
   );
 }
-

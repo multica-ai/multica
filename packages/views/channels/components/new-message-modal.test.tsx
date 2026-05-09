@@ -245,13 +245,12 @@ describe("NewMessageModal", () => {
     expect(screen.queryByText("Agents")).not.toBeInTheDocument();
   });
 
-  it("creates a DM (kind='dm') when only one member is picked", async () => {
+  it("tapping a member immediately creates a DM (no extra confirm step)", async () => {
     const user = userEvent.setup();
     const onCreated = vi.fn();
     render(<NewMessageModal open onClose={() => {}} onCreated={onCreated} />);
 
     await user.click(screen.getByText("Alice"));
-    await user.click(screen.getByText("Start chat"));
 
     await waitFor(() => {
       expect(mockCreateChannel).toHaveBeenCalledWith({
@@ -264,18 +263,55 @@ describe("NewMessageModal", () => {
     expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({ id: "ch1" }));
   });
 
-  it("creates a channel with comma-separated default name when multiple actors selected", async () => {
+  it("tapping an agent dispatches to the chat flow instead of creating a channel", async () => {
+    const user = userEvent.setup();
+    const onAgentChatStarted = vi.fn();
+    render(
+      <NewMessageModal
+        open
+        onClose={() => {}}
+        onAgentChatStarted={onAgentChatStarted}
+      />,
+    );
+
+    await user.click(screen.getByText("Reviewer"));
+
+    expect(onAgentChatStarted).toHaveBeenCalledWith("a1");
+    expect(mockCreateChannel).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a one-agent DM when no chat-start callback is provided", async () => {
     const user = userEvent.setup();
     render(<NewMessageModal open onClose={() => {}} />);
+
+    await user.click(screen.getByText("Reviewer"));
+
+    await waitFor(() => {
+      expect(mockCreateChannel).toHaveBeenCalledWith({
+        kind: "dm",
+        name: "",
+        member_ids: [],
+        agent_ids: ["a1"],
+      });
+    });
+  });
+
+  it("group mode reveals checkboxes and creates a channel for multi-select", async () => {
+    const user = userEvent.setup();
+    render(<NewMessageModal open onClose={() => {}} />);
+
+    // Default mode: no group footer present.
+    expect(screen.queryByText(/Pick people to add/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Group$/ }));
 
     await user.click(screen.getByText("Alice"));
     await user.click(screen.getByText("Mads"));
 
     // Inline name input shows the auto-derived value and stays editable.
-    const nameInput = screen.getByDisplayValue("Alice, Mads");
-    expect(nameInput).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Alice, Mads")).toBeInTheDocument();
 
-    await user.click(screen.getByText("Create channel"));
+    await user.click(screen.getByText("Create channel (2)"));
 
     await waitFor(() => {
       expect(mockCreateChannel).toHaveBeenCalledWith({
@@ -287,27 +323,11 @@ describe("NewMessageModal", () => {
     });
   });
 
-  it("falls back to a channel (not DM) when an agent is among the selection", async () => {
+  it("group mode supports the user-edited channel name", async () => {
     const user = userEvent.setup();
     render(<NewMessageModal open onClose={() => {}} />);
 
-    await user.click(screen.getByText("Alice"));
-    await user.click(screen.getByText("Reviewer"));
-    await user.click(screen.getByText("Create channel"));
-
-    await waitFor(() => {
-      expect(mockCreateChannel).toHaveBeenCalledWith({
-        kind: "channel",
-        name: "Alice, Reviewer",
-        member_ids: ["alice"],
-        agent_ids: ["a1"],
-      });
-    });
-  });
-
-  it("uses the user-edited channel name when overridden", async () => {
-    const user = userEvent.setup();
-    render(<NewMessageModal open onClose={() => {}} />);
+    await user.click(screen.getByRole("button", { name: /^Group$/ }));
 
     await user.click(screen.getByText("Alice"));
     await user.click(screen.getByText("Mads"));
@@ -316,7 +336,7 @@ describe("NewMessageModal", () => {
     await user.clear(nameInput);
     await user.type(nameInput, "release-train");
 
-    await user.click(screen.getByText("Create channel"));
+    await user.click(screen.getByText("Create channel (2)"));
 
     await waitFor(() => {
       expect(mockCreateChannel).toHaveBeenCalledWith(
@@ -328,14 +348,31 @@ describe("NewMessageModal", () => {
     });
   });
 
+  it("group mode mixes members and agents into a single channel", async () => {
+    const user = userEvent.setup();
+    render(<NewMessageModal open onClose={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: /^Group$/ }));
+
+    await user.click(screen.getByText("Alice"));
+    await user.click(screen.getByText("Reviewer"));
+    await user.click(screen.getByText("Create channel (2)"));
+
+    await waitFor(() => {
+      expect(mockCreateChannel).toHaveBeenCalledWith({
+        kind: "channel",
+        name: "Alice, Reviewer",
+        member_ids: ["alice"],
+        agent_ids: ["a1"],
+      });
+    });
+  });
+
   it("filters the list live by name", async () => {
     const user = userEvent.setup();
     render(<NewMessageModal open onClose={() => {}} />);
 
-    await user.type(
-      screen.getByPlaceholderText("Search people and agents…"),
-      "rev",
-    );
+    await user.type(screen.getByPlaceholderText("Search…"), "rev");
 
     expect(screen.getByText("Reviewer")).toBeInTheDocument();
     expect(screen.queryByText("Alice")).not.toBeInTheDocument();
@@ -357,9 +394,7 @@ describe("NewMessageModal", () => {
     await user.click(screen.getByLabelText("Favorite Alice"));
     expect(favoritesState.favorites).toEqual(["member:alice"]);
 
-    // Star toggle did not auto-select Alice — submit should still be disabled
-    // for an empty selection. With nothing picked the label reads
-    // "Create channel" (the DM heuristic only fires for exactly one member).
-    expect(screen.getByText("Create channel")).toBeDisabled();
+    // Star toggle did not start a DM either.
+    expect(mockCreateChannel).not.toHaveBeenCalled();
   });
 });
