@@ -1128,10 +1128,15 @@ export function InboxPage() {
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>
+      {/* CEREBRO-PATCH(inbox-desktop-agent-chat-start): JEH-846 — mirror mobile onAgentChatStarted so agent taps don't fall through to a rejected one-agent DM. */}
       <NewMessageModal
         open={showNewMessage}
         onClose={() => setShowNewMessage(false)}
         onCreated={(channel) => setSelectedKey("issue", channel.id)}
+        onAgentChatStarted={(agentId) => {
+          useChatStore.getState().setSelectedAgentId(agentId);
+          setSelectedKey("chat", "new-chat");
+        }}
       />
     </>
   );

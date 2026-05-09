@@ -3,9 +3,11 @@
 // CEREBRO-PATCH(new-message-modal-redesign): tap-to-start unified actor picker.
 // Single-tap a row to immediately start a DM (members) or AI chat session
 // (agents) — multi-select for groups is opt-in via the "Group" toggle. JEH-718.
+// CEREBRO-PATCH(new-message-modal-redesign): JEH-846 — toggle button labels its
+// destination ("Switch to channel" / "Switch to message") with matching icon.
 
 import { useMemo, useState } from "react";
-import { Lock, Search, Star, Users, X } from "lucide-react";
+import { Lock, MessageCircle, Search, Star, Users, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -222,15 +224,19 @@ export function NewMessageModal({
             <button
               type="button"
               onClick={toggleGroupMode}
-              className={`flex h-7 items-center gap-1.5 rounded-sm px-2 text-xs font-medium transition-colors ${
+              className={`flex h-7 items-center gap-1.5 rounded-sm border px-2 text-xs font-medium transition-colors ${
                 groupMode
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                  ? "border-border bg-accent text-foreground"
+                  : "border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground"
               }`}
               aria-pressed={groupMode}
             >
-              <Users className="size-3.5" />
-              {groupMode ? "Cancel" : "Group"}
+              {groupMode ? (
+                <MessageCircle className="size-3.5" />
+              ) : (
+                <Users className="size-3.5" />
+              )}
+              {groupMode ? "Switch to message" : "Switch to channel"}
             </button>
             <button
               onClick={close}

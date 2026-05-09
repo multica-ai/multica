@@ -303,7 +303,7 @@ describe("NewMessageModal", () => {
     // Default mode: no group footer present.
     expect(screen.queryByText(/Pick people to add/)).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /^Group$/ }));
+    await user.click(screen.getByRole("button", { name: /^Switch to channel$/ }));
 
     await user.click(screen.getByText("Alice"));
     await user.click(screen.getByText("Mads"));
@@ -327,7 +327,7 @@ describe("NewMessageModal", () => {
     const user = userEvent.setup();
     render(<NewMessageModal open onClose={() => {}} />);
 
-    await user.click(screen.getByRole("button", { name: /^Group$/ }));
+    await user.click(screen.getByRole("button", { name: /^Switch to channel$/ }));
 
     await user.click(screen.getByText("Alice"));
     await user.click(screen.getByText("Mads"));
@@ -352,7 +352,7 @@ describe("NewMessageModal", () => {
     const user = userEvent.setup();
     render(<NewMessageModal open onClose={() => {}} />);
 
-    await user.click(screen.getByRole("button", { name: /^Group$/ }));
+    await user.click(screen.getByRole("button", { name: /^Switch to channel$/ }));
 
     await user.click(screen.getByText("Alice"));
     await user.click(screen.getByText("Reviewer"));
