@@ -4,7 +4,7 @@ import { useEffect, useMemo } from "react";
 import { Rocket } from "lucide-react";
 import { useShipProjects, useShipSelection } from "@multica/core/ship";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { projectPullRequestsOptions } from "@multica/core/ship";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -112,8 +112,13 @@ export function ShipPage() {
       </div>
       {/* Phase 7a — selection footer. Self-hides when nothing is
           selected. Lives outside the scrollable region so it stays
-          visible while the user scrolls the project sections. */}
-      <ShipSelectionBarConsumer />
+          visible while the user scrolls the project sections.
+          Only mounted when the project-render branch is active —
+          the consumer calls useQueries which is a no-op when
+          there are zero projects, but mounting it pre-projects
+          would still require a QueryClient and the no-token /
+          empty / disabled branches don't need the bar. */}
+      {tokenSet && projects.length > 0 && <ShipSelectionBarConsumer projects={projects} />}
     </div>
   );
 }
@@ -121,22 +126,25 @@ export function ShipPage() {
 /** Consumer of every visible PR list across the workspace. The
  *  selection bar needs the union of PRs from every project section
  *  so it can derive `projectCount` + `highestRisk` without each
- *  section pushing into a side store. */
-function ShipSelectionBarConsumer() {
-  const { data } = useShipProjects(true);
-  const projects = data?.projects ?? [];
-  // Render one ProjectPRsBridge per project; each pushes its PR list
-  // into a shared `useState` mirror so the selection bar can render
-  // a unified summary. We keep this in the page component (rather
-  // than the bar itself) so the projects fetch hook only runs once.
+ *  section pushing into a side store.
+ *
+ *  Uses TanStack `useQueries` (plural) so the number of hook calls
+ *  is constant from React's perspective — `useQueries` itself is one
+ *  hook, with a variable-length array of inner queries. Calling
+ *  `useQuery` inside a .map() is a rules-of-hooks violation:
+ *  on the first render `projects` is empty (0 hooks), on the next
+ *  render N hooks fire, and React's hook dispatcher corrupts —
+ *  surfaces as a cryptic "Cannot read properties of undefined
+ *  (reading 'length')" error inside an internal useEffect. */
+function ShipSelectionBarConsumer({
+  projects,
+}: {
+  projects: { id: string }[];
+}) {
   const wsId = useWorkspaceId();
-  // Aggregate every project's open PRs. We DO this here (rather
-  // than in the bar) because the bar should not re-mount on every
-  // selection change.
-  const queries = projects.map((p) =>
-    // eslint-disable-next-line react-hooks/rules-of-hooks -- stable list per render
-    useQuery(projectPullRequestsOptions(wsId, p.id, "open")),
-  );
+  const queries = useQueries({
+    queries: projects.map((p) => projectPullRequestsOptions(wsId, p.id, "open")),
+  });
   const allPRs = useMemo<PullRequest[]>(() => {
     const out: PullRequest[] = [];
     for (const q of queries) {
