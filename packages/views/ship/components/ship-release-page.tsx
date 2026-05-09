@@ -22,6 +22,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   CircleDashed,
+  CornerDownRight,
   ExternalLink,
   FlaskConical,
   Hash,
@@ -412,6 +413,16 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
             />
           )}
 
+          {/* Phase 7c polish — "Next step" banner. The release page used to
+              leave users staring at the stage badge after the merge train
+              completed without telling them what's expected to happen
+              next or what action they could take. The banner names the
+              gating condition + the affordance, so an inert release
+              doesn't look like a halted one. */}
+          {isStagingOrVerifying && (
+            <NextStepBanner release={release} />
+          )}
+
           {/* Phase 7c — staging-stage panels. Each is conditional on
               the relevant signal being present, so a release in
               earlier stages doesn't render any of them. */}
@@ -549,28 +560,55 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
               </p>
             ) : (
               <ul className="space-y-1.5">
-                {data.events.map((event) => (
-                  <li
-                    key={event.id}
-                    className="flex items-start gap-2 text-xs text-muted-foreground"
-                  >
-                    <span className="mt-0.5 size-1.5 shrink-0 rounded-full bg-primary" />
-                    <span className="font-medium text-foreground">
-                      {translateEventType(
-                        // i18n.t is typed against the default namespace; the
-                        // signature for `(key)` is rejected by the strict
-                        // typed selector form, so we go through `as`.
-                        (k) =>
-                          (i18n as { t: (key: string, opts?: unknown) => string })
-                            .t(k, { ns: "ship" }),
-                        event.event_type,
+                {data.events.map((event) => {
+                  const label = translateEventType(
+                    (k) =>
+                      (i18n as { t: (key: string, opts?: unknown) => string })
+                        .t(k, { ns: "ship" }),
+                    event.event_type,
+                  );
+                  // Phase 7c polish — render a deep link when the event
+                  // payload carries a navigable id. Channel/issue events
+                  // are the most-clicked "where do I go next?" pivots
+                  // from the timeline; PR-add/remove + paused-PR get
+                  // links to the GitHub PR via the cached pull_requests
+                  // list. Falls through to plain text on any miss.
+                  const link = resolveEventLink(event, data, workspace?.slug ?? "");
+                  return (
+                    <li
+                      key={event.id}
+                      className="flex items-start gap-2 text-xs text-muted-foreground"
+                    >
+                      <span className="mt-0.5 size-1.5 shrink-0 rounded-full bg-primary" />
+                      {link ? (
+                        link.external ? (
+                          <a
+                            href={link.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-medium text-foreground hover:underline"
+                            data-testid="release-event-link"
+                          >
+                            {label}
+                          </a>
+                        ) : (
+                          <AppLink
+                            href={link.href}
+                            className="font-medium text-foreground hover:underline"
+                            data-testid="release-event-link"
+                          >
+                            {label}
+                          </AppLink>
+                        )
+                      ) : (
+                        <span className="font-medium text-foreground">{label}</span>
                       )}
-                    </span>
-                    <span className="ml-auto tabular-nums">
-                      {formatRelativeShort(event.created_at)}
-                    </span>
-                  </li>
-                ))}
+                      <span className="ml-auto tabular-nums">
+                        {formatRelativeShort(event.created_at)}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>
@@ -1074,6 +1112,53 @@ function StageProgressBar({
   );
 }
 
+/** Resolve a deep link for a timeline event when the payload carries
+ *  a navigable id. Returns null when nothing useful to link to.
+ *
+ *  Channel + issue events: link to the in-app channel/issue.
+ *  PR add/remove + merge_train_paused: link to the PR's GitHub URL
+ *    (we use the GitHub URL not the in-app card so the user goes to
+ *    the diff — same place the "View diff →" chip points). External.
+ *  Other events (release_verified, smoke_completed, etc.): no link.
+ */
+function resolveEventLink(
+  event: { event_type: string; payload?: unknown },
+  data: NonNullable<ReturnType<typeof useReleaseDetail>["data"]>,
+  slug: string,
+): { href: string; external: boolean } | null {
+  const payload = (event.payload ?? {}) as Record<string, unknown>;
+  const channelId = typeof payload.channel_id === "string" ? payload.channel_id : "";
+  const issueId = typeof payload.issue_id === "string" ? payload.issue_id : "";
+  const prId =
+    typeof payload.pull_request_id === "string"
+      ? payload.pull_request_id
+      : typeof payload.paused_pr_id === "string"
+        ? payload.paused_pr_id
+        : "";
+
+  if (channelId && slug) {
+    return {
+      href: `/${encodeURIComponent(slug)}/channels/${encodeURIComponent(channelId)}`,
+      external: false,
+    };
+  }
+  if (issueId && slug) {
+    return {
+      href: `/${encodeURIComponent(slug)}/issues/${encodeURIComponent(issueId)}`,
+      external: false,
+    };
+  }
+  if (prId) {
+    // Look up the PR in the release's join data so we can route to
+    // its GitHub URL (the "diff" pivot is what users want from the
+    // timeline). Skip silently if the PR isn't in the release set
+    // anymore (e.g. it was removed).
+    const pr = data.pull_requests.find((p) => p.id === prId);
+    if (pr?.html_url) return { href: pr.html_url, external: true };
+  }
+  return null;
+}
+
 /** Translate a release event_type to the user-facing label.
  *  We use the i18next instance directly (not a typed selector) so
  *  this helper stays decoupled from the namespace shape — the
@@ -1145,6 +1230,81 @@ function checkStartMergePreconditions(
 // ---------------------------------------------------------------------------
 // Phase 7c — staging-stage components.
 // ---------------------------------------------------------------------------
+
+/** Phase 7c polish — "Next step" banner that surfaces the gating
+ *  condition + the user's available action when the release is in
+ *  the staging stages. Without this the release page can look halted
+ *  to the user: the merge train completed, the page shows "IN STAGING",
+ *  and there's no obvious "what now?". The banner names exactly what
+ *  the system is waiting on and what the user can press to advance.
+ *
+ *  States covered:
+ *    in_staging + no merged_main_sha   → "Can't link a deploy to this
+ *                                         release; mark verified to
+ *                                         advance manually."
+ *    in_staging + no staging_deploy_id → "Waiting for the staging
+ *                                         deploy of {sha} to land.
+ *                                         Or mark verified manually."
+ *    in_staging + smoke=in_progress    → "Smoke tests running…"
+ *    in_staging + smoke=completed_failure → "Smoke failed; review +
+ *                                            re-run, manual-pass, or
+ *                                            mark verified."
+ *    in_staging + smoke=passing/skipped → "Ready to mark verified."
+ *    verifying                         → "Verified. Awaiting
+ *                                         promotion to production."
+ */
+function NextStepBanner({
+  release,
+}: {
+  release: import("@multica/core/types").Release;
+}) {
+  const { t } = useT("ship");
+  const stage = release.stage;
+  const smoke = release.smoke_status ?? "";
+  const hasSha = !!release.merged_main_sha;
+  const hasDeploy = !!release.staging_deploy_id;
+
+  let message = "";
+  let testId = "release-next-step-default";
+
+  if (stage === "verifying") {
+    message = t(($) => $.releases.next_step.verifying);
+    testId = "release-next-step-verifying";
+  } else if (!hasSha) {
+    message = t(($) => $.releases.next_step.no_merged_sha);
+    testId = "release-next-step-no-sha";
+  } else if (!hasDeploy) {
+    message = t(($) => $.releases.next_step.awaiting_deploy, {
+      sha: release.merged_main_sha?.slice(0, 7) ?? "",
+    });
+    testId = "release-next-step-awaiting-deploy";
+  } else if (smoke === "in_progress" || smoke === "queued") {
+    message = t(($) => $.releases.next_step.smoke_running);
+    testId = "release-next-step-smoke-running";
+  } else if (smoke === "completed_failure") {
+    message = t(($) => $.releases.next_step.smoke_failed);
+    testId = "release-next-step-smoke-failed";
+  } else if (
+    smoke === "completed_success" ||
+    smoke === "manual_pass" ||
+    smoke === "skipped" ||
+    smoke === ""
+  ) {
+    message = t(($) => $.releases.next_step.ready_to_verify);
+    testId = "release-next-step-ready";
+  }
+
+  if (!message) return null;
+  return (
+    <div
+      className="flex items-start gap-2 rounded border border-blue-500/40 bg-blue-500/10 p-3 text-sm text-blue-700 dark:text-blue-300"
+      data-testid={testId}
+    >
+      <CornerDownRight className="mt-0.5 size-4 shrink-0" aria-hidden />
+      <p className="flex-1">{message}</p>
+    </div>
+  );
+}
 
 /** StagingActionButtons renders the in_staging / verifying button row.
  *  We split this out of the header because the parent's button list

@@ -650,6 +650,39 @@ func reviewVerbDisplay(event gh.ReviewEvent) string {
 	}
 }
 
+// translateReviewSubmitError turns GitHub's verbose 422 payloads into a
+// short, user-friendly sentence. The ReviewDialog renders this string
+// inline, so we trade fidelity for readability — the raw error stays
+// in the ship_card_action audit row for forensics.
+//
+// Most common 422 we hit: "Review Cannot request changes on your own
+// pull request" / "Review Can not approve your own pull request" —
+// GitHub uses both phrasings across providers. We match on substrings
+// so a future wording shift still classifies correctly.
+func translateReviewSubmitError(err error, event gh.ReviewEvent) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	low := strings.ToLower(msg)
+	if strings.Contains(low, "your own pull request") ||
+		strings.Contains(low, "your own pr") {
+		switch event {
+		case gh.ReviewEventApprove:
+			return "GitHub doesn't let you approve your own pull request. Ask a teammate to review."
+		case gh.ReviewEventRequestChanges:
+			return "GitHub doesn't let you request changes on your own pull request. Ask a teammate to review, or use Comment only to leave notes."
+		default:
+			return "GitHub rejected this review on your own pull request."
+		}
+	}
+	if strings.Contains(low, "can not be blank") || strings.Contains(low, "body is required") {
+		return "GitHub requires a comment for this review type."
+	}
+	// Fall back to the raw error — better some signal than none.
+	return msg
+}
+
 // actionSubmitReview posts a PR review to GitHub then (best-effort) drops a
 // status line into the PR's Multica conversation channel so the team sees
 // the review without leaving Multica. The channel post is intentionally
@@ -690,8 +723,15 @@ func (s *Service) actionSubmitReview(
 
 	rev, err := s.Github.SubmitReview(ctx, owner, repo, int(pr.PrNumber), event, body)
 	if err != nil {
+		// Translate the most-hit GitHub 422 into a clean human message.
+		// "Cannot request changes / approve on your own pull request" is
+		// GitHub's default response when the reviewer is the author —
+		// the raw payload is JSON-shaped and not user-friendly. We keep
+		// the original error in the audit row but surface a clean
+		// message to the chip dialog.
+		clean := translateReviewSubmitError(err, event)
 		s.finishAction(ctx, row.ID, StatusFailed, map[string]any{"error": err.Error()})
-		result.Error = err.Error()
+		result.Error = clean
 		return result, err
 	}
 

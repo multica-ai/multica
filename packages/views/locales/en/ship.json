@@ -503,6 +503,14 @@
     "stage_panel": {
       "in_staging_title": "In staging",
       "verifying_title": "Verifying"
+    },
+    "next_step": {
+      "no_merged_sha": "No merged commit recorded for this release — the staging deploy can't auto-link. Mark verified manually to advance.",
+      "awaiting_deploy": "Waiting for the staging deploy of {{sha}} to land. The deploy webhook will link automatically; or mark verified manually.",
+      "smoke_running": "Smoke tests running. The release will advance to verifying when they pass.",
+      "smoke_failed": "Smoke tests failed. Review the run, re-run, mark a manual pass, or mark verified to override.",
+      "ready_to_verify": "Ready to verify. Click Mark verified to advance to the production gate.",
+      "verifying": "Verified. Awaiting promotion to production."
     }
   }
 }

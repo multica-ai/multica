@@ -72,38 +72,85 @@ function eligibilityReason(pr: PullRequest): string | null {
   return null;
 }
 
-/** Auto-suggest a release title from the PR set. We pick the
- *  longest common alphanumeric prefix of the PR titles, falling
- *  back to "Release {date}" when no useful overlap exists. The
- *  goal is "smart enough to remove busywork, not so smart it
- *  surprises you" — the user can always edit the field. */
+/** Auto-suggest a release title from the PR set.
+ *
+ *  Priority (most descriptive first):
+ *   1. Conventional-commit scope shared across PRs ("docs(auth):" → "auth")
+ *      → "{scope} release · {N} PRs"
+ *   2. Conventional-commit type shared ("feat:", "fix:") → "{type} release · {N} PRs"
+ *   3. Common leading word across ≥ half the titles → "{word} release · {N} PRs"
+ *   4. Single PR → use its title verbatim (truncated to 60)
+ *   5. Multi-PR with no overlap → "{N}-PR release · YYYY-MM-DD"
+ *
+ *  Earlier versions copied the first PR's title verbatim, which made
+ *  multi-PR releases misleading (a 3-PR release looked like one PR).
+ *  Goal: the suggestion is descriptive of the *whole batch* in one
+ *  glance — the user can always edit. */
 function suggestTitle(prs: PullRequest[]): string {
   if (prs.length === 0) return "";
   const titles = prs.map((p) => p.title.trim()).filter(Boolean);
   if (titles.length === 0) return "";
-  // Tokenize on whitespace and pick the most common leading token
-  // across the set. Cheap heuristic — beats anything more complex
-  // for the small-team workflow.
-  const heads = titles.map((t) => t.split(/\s+/)[0] ?? "");
-  const counts: Record<string, number> = {};
+  if (titles.length === 1) {
+    // Single PR — verbatim title (lightly trimmed) is the best signal.
+    const only = titles[0]!;
+    return only.length > 60 ? only.slice(0, 59) + "…" : only;
+  }
+
+  // Multi-PR — try to find a shared theme.
+  const N = titles.length;
+
+  // 1. Conventional-commit scope. Pattern: type(scope): subject.
+  //    If ≥ ceil(N/2) PRs share the same scope, use it.
+  const conventionalRe = /^([a-z]+)(?:\(([^)]+)\))?:/i;
+  const scopes: Record<string, number> = {};
+  const types: Record<string, number> = {};
+  for (const t of titles) {
+    const m = conventionalRe.exec(t);
+    if (!m) continue;
+    if (m[1]) types[m[1].toLowerCase()] = (types[m[1].toLowerCase()] ?? 0) + 1;
+    if (m[2]) scopes[m[2].toLowerCase()] = (scopes[m[2].toLowerCase()] ?? 0) + 1;
+  }
+  const halfCount = Math.ceil(N / 2);
+  const topScope = topEntry(scopes);
+  if (topScope && topScope[1] >= halfCount) {
+    return `${topScope[0]} release · ${N} PRs`;
+  }
+  const topType = topEntry(types);
+  if (topType && topType[1] >= halfCount) {
+    return `${topType[0]} release · ${N} PRs`;
+  }
+
+  // 2. Common leading word (non-conventional commits).
+  const heads = titles.map((t) => firstWord(t));
+  const headCounts: Record<string, number> = {};
   for (const h of heads) {
     if (!h) continue;
-    counts[h] = (counts[h] ?? 0) + 1;
+    headCounts[h.toLowerCase()] = (headCounts[h.toLowerCase()] ?? 0) + 1;
   }
-  let best = "";
-  let bestN = 0;
+  const topHead = topEntry(headCounts);
+  if (topHead && topHead[1] >= halfCount) {
+    return `${topHead[0]} release · ${N} PRs`;
+  }
+
+  // 3. No shared theme. Date-stamped fallback. Date in user-local
+  //    isoDate format (YYYY-MM-DD) so titles sort chronologically.
+  const today = new Date().toISOString().slice(0, 10);
+  return `${N}-PR release · ${today}`;
+}
+
+function topEntry(counts: Record<string, number>): [string, number] | null {
+  let best: [string, number] | null = null;
   for (const [k, v] of Object.entries(counts)) {
-    if (v > bestN) {
-      best = k;
-      bestN = v;
-    }
+    if (!best || v > best[1]) best = [k, v];
   }
-  if (bestN >= 2) {
-    return `${best} release`;
-  }
-  // Fall back: a short stable label.
-  const first = titles[0] ?? "";
-  return first.length > 40 ? first.slice(0, 39) + "…" : first;
+  return best;
+}
+
+function firstWord(s: string): string {
+  // Drop leading "type(scope):" prefix if present so the word
+  // detection doesn't pick the type as the theme.
+  const stripped = s.replace(/^[a-z]+(?:\([^)]+\))?:\s*/i, "");
+  return stripped.split(/\s+/)[0] ?? "";
 }
 
 export function CreateReleaseDialog({
