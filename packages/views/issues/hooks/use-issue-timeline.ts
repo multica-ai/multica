@@ -97,6 +97,18 @@ export function useIssueTimeline(
   // entries on the server — i.e. the user is looking at the live tail.
   const isAtLatest = data?.pages[0]?.has_more_after === false;
 
+  // Store volatile values in refs so WS handlers always read the latest
+  // snapshot without re-subscribing on every data change. This closes the
+  // stale-closure window between a React re-render (where isAtLatest flips
+  // from false→true after the first fetch) and the useEffect commit that
+  // re-registers the handler — during that gap, an incoming WS event would
+  // otherwise see the stale `false` and bump the "new entries" counter
+  // instead of inserting the comment into the cache.
+  const isAtLatestRef = useRef(isAtLatest);
+  isAtLatestRef.current = isAtLatest;
+  const aroundRef = useRef(around);
+  aroundRef.current = around;
+
   const [submitting, setSubmitting] = useState(false);
   const [newEntriesBelowCount, setNewEntriesBelowCount] = useState(0);
 
@@ -127,8 +139,10 @@ export function useIssueTimeline(
   // possibly-long disconnect — easier to start fresh.
   useWSReconnect(
     useCallback(() => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId, around) });
-    }, [qc, issueId, around]),
+      qc.invalidateQueries({
+        queryKey: issueKeys.timeline(issueId, aroundRef.current),
+      });
+    }, [qc, issueId]),
   );
 
   // --- WS event handlers ---
@@ -139,9 +153,11 @@ export function useIssueTimeline(
       (payload: unknown) => {
         const { comment } = payload as CommentCreatedPayload;
         if (comment.issue_id !== issueId) return;
-        if (isAtLatest) {
-          qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
-            prependToLatestPage(old, commentToTimelineEntry(comment)),
+        if (isAtLatestRef.current) {
+          qc.setQueryData<TLData>(
+            issueKeys.timeline(issueId, aroundRef.current),
+            (old: TLData | undefined) =>
+              prependToLatestPage(old, commentToTimelineEntry(comment)),
           );
         } else {
           // Reading older history — don't yank scroll position. Surface a
@@ -149,7 +165,7 @@ export function useIssueTimeline(
           setNewEntriesBelowCount((c) => c + 1);
         }
       },
-      [qc, issueId, around, isAtLatest],
+      [qc, issueId],
     ),
   );
 
@@ -159,13 +175,15 @@ export function useIssueTimeline(
       (payload: unknown) => {
         const { comment } = payload as CommentUpdatedPayload;
         if (comment.issue_id !== issueId) return;
-        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
-          mapAllEntries(old, (e) =>
-            e.id === comment.id ? commentToTimelineEntry(comment) : e,
-          ),
+        qc.setQueryData<TLData>(
+          issueKeys.timeline(issueId, aroundRef.current),
+          (old: TLData | undefined) =>
+            mapAllEntries(old, (e) =>
+              e.id === comment.id ? commentToTimelineEntry(comment) : e,
+            ),
         );
       },
-      [qc, issueId, around],
+      [qc, issueId],
     ),
   );
 
@@ -177,29 +195,32 @@ export function useIssueTimeline(
         if (issue_id !== issueId) return;
         // Cascade through replies. Walk pages collectively; a reply may live
         // on a different page than its parent.
-        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) => {
-          if (!old) return old;
-          const idsToRemove = new Set<string>([comment_id]);
-          let changed = true;
-          while (changed) {
-            changed = false;
-            for (const page of old.pages) {
-              for (const e of page.entries) {
-                if (
-                  e.parent_id &&
-                  idsToRemove.has(e.parent_id) &&
-                  !idsToRemove.has(e.id)
-                ) {
-                  idsToRemove.add(e.id);
-                  changed = true;
+        qc.setQueryData<TLData>(
+          issueKeys.timeline(issueId, aroundRef.current),
+          (old: TLData | undefined) => {
+            if (!old) return old;
+            const idsToRemove = new Set<string>([comment_id]);
+            let changed = true;
+            while (changed) {
+              changed = false;
+              for (const page of old.pages) {
+                for (const e of page.entries) {
+                  if (
+                    e.parent_id &&
+                    idsToRemove.has(e.parent_id) &&
+                    !idsToRemove.has(e.id)
+                  ) {
+                    idsToRemove.add(e.id);
+                    changed = true;
+                  }
                 }
               }
             }
-          }
-          return filterAllEntries(old, (e) => idsToRemove.has(e.id));
-        });
+            return filterAllEntries(old, (e) => idsToRemove.has(e.id));
+          },
+        );
       },
-      [qc, issueId, around],
+      [qc, issueId],
     ),
   );
 
@@ -211,15 +232,17 @@ export function useIssueTimeline(
         if (p.issue_id !== issueId) return;
         const entry = p.entry;
         if (!entry || !entry.id) return;
-        if (isAtLatest) {
-          qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
-            prependToLatestPage(old, entry),
+        if (isAtLatestRef.current) {
+          qc.setQueryData<TLData>(
+            issueKeys.timeline(issueId, aroundRef.current),
+            (old: TLData | undefined) =>
+              prependToLatestPage(old, entry),
           );
         } else {
           setNewEntriesBelowCount((c) => c + 1);
         }
       },
-      [qc, issueId, around, isAtLatest],
+      [qc, issueId],
     ),
   );
 
@@ -229,16 +252,18 @@ export function useIssueTimeline(
       (payload: unknown) => {
         const { reaction, issue_id } = payload as ReactionAddedPayload;
         if (issue_id !== issueId) return;
-        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
-          mapAllEntries(old, (e) => {
-            if (e.id !== reaction.comment_id) return e;
-            const existing = e.reactions ?? [];
-            if (existing.some((r) => r.id === reaction.id)) return e;
-            return { ...e, reactions: [...existing, reaction] };
-          }),
+        qc.setQueryData<TLData>(
+          issueKeys.timeline(issueId, aroundRef.current),
+          (old: TLData | undefined) =>
+            mapAllEntries(old, (e) => {
+              if (e.id !== reaction.comment_id) return e;
+              const existing = e.reactions ?? [];
+              if (existing.some((r) => r.id === reaction.id)) return e;
+              return { ...e, reactions: [...existing, reaction] };
+            }),
         );
       },
-      [qc, issueId, around],
+      [qc, issueId],
     ),
   );
 
@@ -248,24 +273,26 @@ export function useIssueTimeline(
       (payload: unknown) => {
         const p = payload as ReactionRemovedPayload;
         if (p.issue_id !== issueId) return;
-        qc.setQueryData<TLData>(issueKeys.timeline(issueId, around), (old: TLData | undefined) =>
-          mapAllEntries(old, (e) => {
-            if (e.id !== p.comment_id) return e;
-            return {
-              ...e,
-              reactions: (e.reactions ?? []).filter(
-                (r) =>
-                  !(
-                    r.emoji === p.emoji &&
-                    r.actor_type === p.actor_type &&
-                    r.actor_id === p.actor_id
-                  ),
-              ),
-            };
-          }),
+        qc.setQueryData<TLData>(
+          issueKeys.timeline(issueId, aroundRef.current),
+          (old: TLData | undefined) =>
+            mapAllEntries(old, (e) => {
+              if (e.id !== p.comment_id) return e;
+              return {
+                ...e,
+                reactions: (e.reactions ?? []).filter(
+                  (r) =>
+                    !(
+                      r.emoji === p.emoji &&
+                      r.actor_type === p.actor_type &&
+                      r.actor_id === p.actor_id
+                    ),
+                ),
+              };
+            }),
         );
       },
-      [qc, issueId, around],
+      [qc, issueId],
     ),
   );
 
