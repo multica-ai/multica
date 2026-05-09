@@ -187,4 +187,9 @@ export type {
   AbortMergeRequest,
   MergeStateResponse,
   ActiveReleaseRef,
+  // Phase 7c — staging-stage requests
+  RunReleaseSmokeTestsRequest,
+  MarkSmokePassRequest,
+  MarkReleaseVerifiedRequest,
+  UnverifyReleaseRequest,
 } from "./ship";

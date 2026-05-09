@@ -52,6 +52,19 @@ type WebhookOutcome struct {
 	// PR is the post-linkage row (after DetectMultiicaReferences and
 	// ApplyLinkage have run). Empty when Kind != "pr_state_changed".
 	PR db.PullRequest
+	// Phase 7c — populated for deployment_status outcomes so the handler
+	// layer can match the deploy back to a release via merged_main_sha.
+	// When EnvironmentKind == "staging" and DeployStatus == "succeeded",
+	// the handler invokes linkStagingDeployForRelease.
+	EnvironmentKind string
+	RepoURL         string
+	// Phase 7c — populated for check_run completions so the handler layer
+	// can match the run back to a release via smoke_run_id.
+	// CheckRunExternalID is GitHub's workflow_run_id for Actions-sourced
+	// check runs; empty for third-party CI providers (which we don't
+	// match against smoke triggers anyway).
+	CheckRunExternalID string
+	CheckRunConclusion string
 }
 
 // ProcessWebhook is the dispatcher. It mutates the DB and returns one
@@ -366,6 +379,12 @@ func (s *Service) recomputeReviewDecision(ctx context.Context, prID pgtype.UUID)
 
 // processCheckRun maps a check_run.completed event onto the
 // pull_request_check rows for any tracked PR sharing the head_sha.
+//
+// Phase 7c — additionally surfaces (CheckRunExternalID, conclusion)
+// in the outcome so the handler can match it back to a release's
+// smoke_run_id. The release-linkage path triggers regardless of PR
+// attachment because workflow_dispatch-triggered check_runs typically
+// carry no PR list.
 func (s *Service) processCheckRun(ctx context.Context, ev WebhookEvent) (WebhookOutcome, error) {
 	var payload gh.CheckRunEvent
 	if err := json.Unmarshal(ev.Body, &payload); err != nil {
@@ -373,6 +392,14 @@ func (s *Service) processCheckRun(ctx context.Context, ev WebhookEvent) (Webhook
 	}
 	if payload.Action != "completed" && payload.Action != "rerequested" && payload.Action != "created" {
 		return WebhookOutcome{Kind: "noop"}, nil
+	}
+	// Carry the check_run identity into the outcome upfront so even a
+	// PR-less check_run (the smoke-trigger case) reaches the
+	// release-linkage handler.
+	checkRunOutcome := WebhookOutcome{
+		Kind:               "noop",
+		CheckRunExternalID: payload.CheckRun.ExternalID,
+		CheckRunConclusion: payload.CheckRun.Conclusion,
 	}
 	repoURL := payload.Repository.HTMLURL
 	for _, attached := range payload.CheckRun.PullRequests {
@@ -413,16 +440,23 @@ func (s *Service) processCheckRun(ctx context.Context, ev WebhookEvent) (Webhook
 		}
 		// We only emit one outcome — even if multiple PRs share the head
 		// sha (rare), one signal is enough for the frontend to refresh.
+		// Carry the check_run identity along so the staging linkage
+		// runs in the same handler dispatch.
 		return WebhookOutcome{
-			Kind:      "pr_state_changed",
-			PRID:      updated.ID,
-			ProjectID: updated.ProjectID,
-			State:     string(updated.State),
-			CIStatus:  ciStatus,
-			ReviewDec: textValue(updated.ReviewDecision),
+			Kind:               "pr_state_changed",
+			PRID:               updated.ID,
+			ProjectID:          updated.ProjectID,
+			State:              string(updated.State),
+			CIStatus:           ciStatus,
+			ReviewDec:          textValue(updated.ReviewDecision),
+			CheckRunExternalID: payload.CheckRun.ExternalID,
+			CheckRunConclusion: payload.CheckRun.Conclusion,
 		}, nil
 	}
-	return WebhookOutcome{Kind: "noop"}, nil
+	// PR-less check_run — return the noop-but-carrying-check-run
+	// outcome so the handler still gets a chance to match it back to
+	// a release's smoke_run_id.
+	return checkRunOutcome, nil
 }
 
 // processStatus is the legacy combined-status sibling of check_run.
@@ -661,6 +695,12 @@ func (s *Service) processDeploymentStatus(ctx context.Context, ev WebhookEvent) 
 		DeployID:      updated.ID,
 		DeployStatus:  string(updated.Status),
 		SHA:           updated.Sha,
+		// Phase 7c — feed the staging-link handler the env kind +
+		// repo URL it needs to find the smoke workflow / dispatch
+		// the run. Empty for unconfigured envs (no harm — the
+		// handler bails on the noop case).
+		EnvironmentKind: string(env.Kind),
+		RepoURL:         repoURL,
 	}, nil
 }
 

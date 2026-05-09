@@ -453,6 +453,51 @@
       "merged": "已合并",
       "failed": "失败",
       "skipped": "已跳过"
+    },
+    "staging": {
+      "awaiting_deploy": "等待预发布部署",
+      "deploy_panel_title": "关联的预发布部署",
+      "deploy_at": "部署时间",
+      "smoke_panel_title": "冒烟测试",
+      "smoke_status_queued": "排队中",
+      "smoke_status_in_progress": "进行中",
+      "smoke_status_completed_success": "通过",
+      "smoke_status_completed_failure": "失败",
+      "smoke_status_skipped": "已跳过(未配置)",
+      "smoke_status_manual_pass": "手动通过",
+      "run_smoke_button": "运行冒烟测试",
+      "rerun_smoke_button": "重新运行冒烟测试",
+      "view_run_link": "在 GitHub 查看运行",
+      "manual_pass_button": "标记冒烟通过",
+      "manual_pass_dialog_title": "将冒烟标记为通过?",
+      "manual_pass_dialog_description": "此操作将覆盖自动门控。发布将进入验证阶段。该决策会记录到审计日志。",
+      "manual_pass_note_label": "备注 (可选)",
+      "manual_pass_submit": "标记为通过"
+    },
+    "verify": {
+      "button": "标记已验证",
+      "dialog_title": "将此发布标记为已验证?",
+      "dialog_description": "确认 QA 已对此发布签字。验证后即可晋升到生产环境。",
+      "note_label": "备注 (可选)",
+      "submit": "标记已验证",
+      "submitting": "正在标记…",
+      "verified_banner": "已由 {{user}} 验证",
+      "verified_at": "时间 {{time}}",
+      "smoke_required": "高风险或严重风险的发布需要冒烟测试通过后才能验证",
+      "approver_required": "在当前风险等级下,你没有验证此发布的权限"
+    },
+    "unverify": {
+      "button": "撤销验证",
+      "dialog_title": "撤销验证 {{title}}",
+      "dialog_description": "将此发布回退到预发布阶段。当 QA 在验证后发现问题时使用。",
+      "reason_label": "原因 (必填)",
+      "submit": "撤销验证",
+      "submitting": "撤销中…",
+      "reason_required": "撤销验证需要填写原因"
+    },
+    "stage_panel": {
+      "in_staging_title": "已部署预发布",
+      "verifying_title": "验证中"
     }
   }
 }

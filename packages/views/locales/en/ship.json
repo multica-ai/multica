@@ -458,6 +458,51 @@
       "merged": "merged",
       "failed": "failed",
       "skipped": "skipped"
+    },
+    "staging": {
+      "awaiting_deploy": "Awaiting staging deploy",
+      "deploy_panel_title": "Linked staging deploy",
+      "deploy_at": "Deployed",
+      "smoke_panel_title": "Smoke tests",
+      "smoke_status_queued": "Queued",
+      "smoke_status_in_progress": "In progress",
+      "smoke_status_completed_success": "Passed",
+      "smoke_status_completed_failure": "Failed",
+      "smoke_status_skipped": "Skipped (no workflow)",
+      "smoke_status_manual_pass": "Manual pass",
+      "run_smoke_button": "Run smoke tests",
+      "rerun_smoke_button": "Re-run smoke tests",
+      "view_run_link": "View run on GitHub",
+      "manual_pass_button": "Mark smoke pass",
+      "manual_pass_dialog_title": "Mark smoke as passing?",
+      "manual_pass_dialog_description": "This overrides the automated gate. The release will advance to verifying. The decision is recorded in the audit log.",
+      "manual_pass_note_label": "Note (optional)",
+      "manual_pass_submit": "Mark passing"
+    },
+    "verify": {
+      "button": "Mark verified",
+      "dialog_title": "Mark this release verified?",
+      "dialog_description": "Confirms QA has signed off on this release. After verification you can promote to production.",
+      "note_label": "Note (optional)",
+      "submit": "Mark verified",
+      "submitting": "Marking verified…",
+      "verified_banner": "Verified by {{user}}",
+      "verified_at": "at {{time}}",
+      "smoke_required": "Smoke tests must pass before verification (high or critical risk)",
+      "approver_required": "You aren't eligible to verify this release at the current risk tier"
+    },
+    "unverify": {
+      "button": "Unverify",
+      "dialog_title": "Unverify {{title}}",
+      "dialog_description": "Reverts this release to the in-staging stage. Use this if QA spots an issue post-verification.",
+      "reason_label": "Reason (required)",
+      "submit": "Unverify",
+      "submitting": "Unverifying…",
+      "reason_required": "A reason is required to unverify"
+    },
+    "stage_panel": {
+      "in_staging_title": "In staging",
+      "verifying_title": "Verifying"
     }
   }
 }

@@ -501,6 +501,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/releases/{id}/abort_merge", h.AbortMergeRelease)
 			r.Get("/api/releases/{id}/merge_state", h.GetReleaseMergeState)
 
+			// Phase 7c — Staging deploy linkage + smoke + verify gate.
+			r.Post("/api/releases/{id}/run_smoke_tests", h.RunSmokeTestsForRelease)
+			r.Post("/api/releases/{id}/mark_smoke_pass", h.MarkSmokePass)
+			r.Post("/api/releases/{id}/mark_verified", h.MarkReleaseVerified)
+			r.Post("/api/releases/{id}/unverify", h.UnverifyRelease)
+
 			// Channels (multi-participant chat + DMs).
 			// Endpoints respond 404 when workspace.channels_enabled is FALSE
 			// — the gate lives inside each handler so the surface is invisible

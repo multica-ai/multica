@@ -296,6 +296,13 @@ export function useRealtimeSync(
       "release:merge_paused",
       "release:merge_completed",
       "release:merge_aborted",
+      // Phase 7c — staging-stage events. Same scoping treatment as
+      // the merge events: per-release-detail invalidation plus the
+      // workspace rail when the stage transitions.
+      "release:staging_landed",
+      "release:smoke_updated",
+      "release:verified",
+      "release:unverified",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -792,6 +799,17 @@ export function useRealtimeSync(
     const unsubMergeCompleted = ws.on("release:merge_completed", onReleaseEvent);
     const unsubMergeAborted = ws.on("release:merge_aborted", onReleaseEvent);
 
+    // Phase 7c — staging-stage events. Same handler shape as the
+    // merge events: each carries `release_id` and the receiver
+    // re-fetches per-release detail + the workspace rail. The
+    // detail re-fetch picks up the new smoke_status / qa_verified_*
+    // columns, and the rail re-fetch reflects stage transitions
+    // (in_staging → verifying).
+    const unsubStagingLanded = ws.on("release:staging_landed", onReleaseEvent);
+    const unsubSmokeUpdated = ws.on("release:smoke_updated", onReleaseEvent);
+    const unsubVerified = ws.on("release:verified", onReleaseEvent);
+    const unsubUnverified = ws.on("release:unverified", onReleaseEvent);
+
     const unsubChatDone = ws.on("chat:done", (p) => {
       const payload = p as ChatDonePayload;
       chatWsLogger.info("chat:done (global)", {
@@ -974,6 +992,10 @@ export function useRealtimeSync(
       unsubMergePaused();
       unsubMergeCompleted();
       unsubMergeAborted();
+      unsubStagingLanded();
+      unsubSmokeUpdated();
+      unsubVerified();
+      unsubUnverified();
       unsubChatDone();
       unsubTaskQueued();
       unsubTaskDispatch();

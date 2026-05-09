@@ -29,6 +29,21 @@ const startMergeMutateAsync = vi.fn().mockResolvedValue({});
 const resumeMergeMutateAsync = vi.fn().mockResolvedValue({});
 const abortMergeMutateAsync = vi.fn().mockResolvedValue({});
 
+// Phase 7c — staging-stage mutations. Declared via vi.hoisted so the
+// vi.mock factory below (which executes before module-top declarations
+// in the runtime due to hoisting) sees these refs.
+const {
+  runSmokeMutateAsync,
+  markSmokePassMutateAsync,
+  markVerifiedMutateAsync,
+  unverifyMutateAsync,
+} = vi.hoisted(() => ({
+  runSmokeMutateAsync: vi.fn().mockResolvedValue({}),
+  markSmokePassMutateAsync: vi.fn().mockResolvedValue({}),
+  markVerifiedMutateAsync: vi.fn().mockResolvedValue({}),
+  unverifyMutateAsync: vi.fn().mockResolvedValue({}),
+}));
+
 vi.mock("@multica/core/ship", () => ({
   useReleaseDetail: () => ({
     data: detailFixture,
@@ -53,6 +68,24 @@ vi.mock("@multica/core/ship", () => ({
   }),
   useAbortMergeTrain: () => ({
     mutateAsync: abortMergeMutateAsync,
+    isPending: false,
+  }),
+  // Phase 7c — staging-stage mutations. Each test that exercises
+  // these overrides the spy via the shared module-scope refs below.
+  useRunSmokeTestsForRelease: () => ({
+    mutateAsync: runSmokeMutateAsync,
+    isPending: false,
+  }),
+  useMarkSmokeManualPass: () => ({
+    mutateAsync: markSmokePassMutateAsync,
+    isPending: false,
+  }),
+  useMarkReleaseVerified: () => ({
+    mutateAsync: markVerifiedMutateAsync,
+    isPending: false,
+  }),
+  useUnverifyRelease: () => ({
+    mutateAsync: unverifyMutateAsync,
     isPending: false,
   }),
 }));
@@ -336,5 +369,137 @@ describe("ShipReleasePage", () => {
     render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
     await user.click(screen.getByTestId("release-resume-button"));
     expect(resumeMergeMutateAsync).toHaveBeenCalledWith({});
+  });
+
+  // ---------------------------------------------------------------------
+  // Phase 7c — staging-stage rendering + interactions.
+  // ---------------------------------------------------------------------
+
+  it("renders the smoke-status pill in_staging based on smoke_status", () => {
+    detailFixture = {
+      release: makeRelease({
+        stage: "in_staging",
+        smoke_status: "queued",
+        merged_main_sha: "abc1234deadbeef",
+        staging_deploy_id: "deploy-1",
+        staged_at: "2026-05-09T00:30:00Z",
+      }),
+      pull_requests: [],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    const panel = screen.getByTestId("release-smoke-panel");
+    expect(panel).toHaveAttribute("data-smoke-status", "queued");
+  });
+
+  it("disables Run smoke when status is in_progress", () => {
+    detailFixture = {
+      release: makeRelease({
+        stage: "in_staging",
+        smoke_status: "in_progress",
+        merged_main_sha: "abc1234",
+        staging_deploy_id: "deploy-1",
+      }),
+      pull_requests: [],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    const btn = screen.getByTestId("release-run-smoke-button");
+    expect(btn).toBeDisabled();
+  });
+
+  it("renders Mark verified button gated by approver risk-tier (medium = enabled)", () => {
+    detailFixture = {
+      release: makeRelease({
+        stage: "in_staging",
+        risk_level: "medium",
+        smoke_status: "completed_success",
+        staging_deploy_id: "deploy-1",
+      }),
+      pull_requests: [],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    const btn = screen.getByTestId("release-verify-button");
+    // Medium risk doesn't enforce approver-equality at the UI level
+    // (the server still does); the button is enabled with smoke
+    // completed_success.
+    expect(btn).not.toBeDisabled();
+  });
+
+  it("disables Mark verified for high risk when smoke hasn't completed", () => {
+    detailFixture = {
+      release: makeRelease({
+        stage: "in_staging",
+        risk_level: "high",
+        smoke_status: "completed_failure",
+        staging_deploy_id: "deploy-1",
+      }),
+      pull_requests: [],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    const btn = screen.getByTestId("release-verify-button");
+    expect(btn).toBeDisabled();
+  });
+
+  it("renders verified banner + Unverify button in verifying stage", () => {
+    detailFixture = {
+      release: makeRelease({
+        stage: "verifying",
+        qa_verified_at: "2026-05-09T01:00:00Z",
+        qa_verified_by: "user-abcdef12",
+      }),
+      pull_requests: [],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    expect(screen.getByTestId("release-verified-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("release-unverify-button")).toBeInTheDocument();
+  });
+
+  it("submits Mark verified dialog with note", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const user = userEvent.setup();
+    markVerifiedMutateAsync.mockClear();
+    detailFixture = {
+      release: makeRelease({
+        stage: "in_staging",
+        smoke_status: "completed_success",
+        risk_level: "low",
+      }),
+      pull_requests: [],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    await user.click(screen.getByTestId("release-verify-button"));
+    await user.click(screen.getByTestId("release-verify-submit"));
+    expect(markVerifiedMutateAsync).toHaveBeenCalledWith({ note: "" });
+  });
+
+  it("Unverify dialog disables submit until reason is typed", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const user = userEvent.setup();
+    unverifyMutateAsync.mockClear();
+    detailFixture = {
+      release: makeRelease({
+        stage: "verifying",
+        qa_verified_at: "2026-05-09T01:00:00Z",
+        qa_verified_by: "user-abcdef12",
+      }),
+      pull_requests: [],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    await user.click(screen.getByTestId("release-unverify-button"));
+    const submit = screen.getByTestId("release-unverify-submit");
+    expect(submit).toBeDisabled();
+
+    const reasonInput = screen.getByTestId("release-unverify-reason");
+    await user.type(reasonInput, "found a bug");
+    expect(submit).not.toBeDisabled();
+
+    await user.click(submit);
+    expect(unverifyMutateAsync).toHaveBeenCalledWith({ reason: "found a bug" });
   });
 });

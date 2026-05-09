@@ -117,13 +117,19 @@ type CheckRunEvent struct {
 // nested inline so we can derive (pull_request, head_sha) without an
 // extra API call.
 type CheckRun struct {
-	ID           int64     `json:"id"`
-	Name         string    `json:"name"`
-	HeadSHA      string    `json:"head_sha"`
-	Status       string    `json:"status"`     // "queued" | "in_progress" | "completed"
-	Conclusion   string    `json:"conclusion"` // "" until status=completed
-	DetailsURL   string    `json:"details_url"`
-	HTMLURL      string    `json:"html_url"`
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	HeadSHA    string `json:"head_sha"`
+	Status     string `json:"status"`     // "queued" | "in_progress" | "completed"
+	Conclusion string `json:"conclusion"` // "" until status=completed
+	DetailsURL string `json:"details_url"`
+	HTMLURL    string `json:"html_url"`
+	// Phase 7c — populated by GitHub Actions for check_runs that
+	// represent a workflow run. Carries the workflow_run id so we can
+	// match a check_run.completed event back to the workflow_dispatch
+	// call that triggered it. Empty for non-Actions check runs (e.g.
+	// third-party CI providers).
+	ExternalID   string    `json:"external_id"`
 	StartedAt    time.Time `json:"started_at"`
 	CompletedAt  time.Time `json:"completed_at"`
 	PullRequests []struct {

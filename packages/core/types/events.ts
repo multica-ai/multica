@@ -94,7 +94,15 @@ export type WSEventType =
   | "release:merge_progress"
   | "release:merge_paused"
   | "release:merge_completed"
-  | "release:merge_aborted";
+  | "release:merge_aborted"
+  // Phase 7c — staging-stage events. staging_landed fires when a
+  // deploy whose sha matches the release's merged_main_sha lands
+  // successfully; smoke_updated fires on every smoke_status flip;
+  // verified / unverified fire from the manual QA gate.
+  | "release:staging_landed"
+  | "release:smoke_updated"
+  | "release:verified"
+  | "release:unverified";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;

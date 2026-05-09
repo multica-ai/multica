@@ -598,6 +598,16 @@ export const ReleaseSchema = z.object({
   // Phase 7b — merge train state.
   merge_paused: z.boolean().default(false),
   merge_method: z.string().default("merge"),
+  // Phase 7c — staging-stage signals. All optional + nullable so an
+  // older backend that doesn't carry them just renders the staging
+  // surface in its empty state.
+  smoke_run_id: z.string().nullable().optional(),
+  smoke_run_url: z.string().nullable().optional(),
+  smoke_status: z.string().nullable().optional(),
+  smoke_completed_at: z.string().nullable().optional(),
+  qa_verified_at: z.string().nullable().optional(),
+  qa_verified_by: z.string().nullable().optional(),
+  merged_main_sha: z.string().nullable().optional(),
 }).loose();
 
 const ReleasePullRequestSchema = PullRequestSchema.extend({

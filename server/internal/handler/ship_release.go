@@ -183,6 +183,15 @@ type releaseResponse struct {
 	// UI gates the Resume / Skip / Abort affordances on this flag.
 	MergePaused bool   `json:"merge_paused"`
 	MergeMethod string `json:"merge_method"`
+	// Phase 7c — staging-stage signals. All optional and additive
+	// per CLAUDE.md API drift contract.
+	SmokeRunID       *string `json:"smoke_run_id"`
+	SmokeRunURL      *string `json:"smoke_run_url"`
+	SmokeStatus      *string `json:"smoke_status"`
+	SmokeCompletedAt *string `json:"smoke_completed_at"`
+	QAVerifiedAt     *string `json:"qa_verified_at"`
+	QAVerifiedBy     *string `json:"qa_verified_by"`
+	MergedMainSHA    *string `json:"merged_main_sha"`
 }
 
 func releaseToResponse(r db.ShipRelease, prCount int) releaseResponse {
@@ -208,9 +217,16 @@ func releaseToResponse(r db.ShipRelease, prCount int) releaseResponse {
 		PromotedAt:         timestampToPtr(r.PromotedAt),
 		DoneAt:             timestampToPtr(r.DoneAt),
 		RollbackReason:     textToPtr(r.RollbackReason),
-		PRCount:            prCount,
-		MergePaused:        r.MergePaused,
-		MergeMethod:        r.MergeMethod,
+		PRCount:          prCount,
+		MergePaused:      r.MergePaused,
+		MergeMethod:      r.MergeMethod,
+		SmokeRunID:       textToPtr(r.SmokeRunID),
+		SmokeRunURL:      textToPtr(r.SmokeRunUrl),
+		SmokeStatus:      textToPtr(r.SmokeStatus),
+		SmokeCompletedAt: timestampToPtr(r.SmokeCompletedAt),
+		QAVerifiedAt:     timestampToPtr(r.QaVerifiedAt),
+		QAVerifiedBy:     uuidToPtr(r.QaVerifiedBy),
+		MergedMainSHA:    textToPtr(r.MergedMainSha),
 	}
 }
 

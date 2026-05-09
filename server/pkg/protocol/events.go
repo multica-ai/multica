@@ -180,6 +180,20 @@ const (
 	EventReleaseMergeCompleted = "release:merge_completed"
 	EventReleaseMergeAborted   = "release:merge_aborted"
 
+	// Phase 7c — staging-stage signals. The deployment_status webhook
+	// fires release:staging_landed when a deploy whose sha matches
+	// the release's merged_main_sha lands successfully; check_run
+	// completion fires release:smoke_updated; the manual verify gate
+	// fires release:verified / release:unverified. Payload conventions:
+	//   staging_landed   — { release_id, deploy_id, sha, smoke_status }
+	//   smoke_updated    — { release_id, smoke_status }
+	//   verified         — { release_id, verified_by, verified_at }
+	//   unverified       — { release_id, reason }
+	EventReleaseStagingLanded = "release:staging_landed"
+	EventReleaseSmokeUpdated  = "release:smoke_updated"
+	EventReleaseVerified      = "release:verified"
+	EventReleaseUnverified    = "release:unverified"
+
 	// Daemon events
 	EventDaemonHeartbeat     = "daemon:heartbeat"
 	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"

@@ -22,12 +22,15 @@ import {
   AlertTriangle,
   CheckCircle2,
   CircleDashed,
+  ExternalLink,
+  FlaskConical,
   Hash,
   Loader2,
   MessagesSquare,
   Pause,
   Play,
   Rocket,
+  ShieldCheck,
   Train,
   X,
   XCircle,
@@ -40,6 +43,10 @@ import {
   useStartMergeTrain,
   useResumeMergeTrain,
   useAbortMergeTrain,
+  useRunSmokeTestsForRelease,
+  useMarkSmokeManualPass,
+  useMarkReleaseVerified,
+  useUnverifyRelease,
 } from "@multica/core/ship";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import type { ReleasePullRequest } from "@multica/core/types";
@@ -97,11 +104,23 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
   const startMerge = useStartMergeTrain(releaseId);
   const resumeMerge = useResumeMergeTrain(releaseId);
   const abortMerge = useAbortMergeTrain(releaseId);
+  // Phase 7c — staging-stage mutations.
+  const runSmoke = useRunSmokeTestsForRelease(releaseId);
+  const markSmokePass = useMarkSmokeManualPass(releaseId);
+  const markVerified = useMarkReleaseVerified(releaseId);
+  const unverify = useUnverifyRelease(releaseId);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [abortOpen, setAbortOpen] = useState(false);
   const [abortReason, setAbortReason] = useState("");
   const [resumeOpen, setResumeOpen] = useState(false);
+  // Phase 7c — staging-stage dialog state.
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [verifyNote, setVerifyNote] = useState("");
+  const [unverifyOpen, setUnverifyOpen] = useState(false);
+  const [unverifyReason, setUnverifyReason] = useState("");
+  const [smokePassOpen, setSmokePassOpen] = useState(false);
+  const [smokePassNote, setSmokePassNote] = useState("");
 
   // Compute "first failed PR error message" for the paused banner.
   // Done as a useMemo so the same value drives both the banner copy
@@ -153,6 +172,13 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
   const isMergingActive = isMerging && !isPaused;
   const isCancelled = release.stage === "cancelled";
   const isRolledBack = release.stage === "rolled_back";
+  // Phase 7c — staging-stage flags. We split the in_staging stage
+  // into "deploy not yet landed" vs. "deploy landed; smoke pending"
+  // because they need different UI: the former renders a waiting
+  // state, the latter the smoke + verify panels.
+  const isInStaging = release.stage === "in_staging";
+  const isVerifying = release.stage === "verifying";
+  const isStagingOrVerifying = isInStaging || isVerifying;
   const slug = workspace?.slug ?? "";
 
   // Counts for the merge progress badge. Computed off the PR rows
@@ -292,6 +318,25 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                   </Button>
                 </>
               )}
+              {isStagingOrVerifying && (
+                <StagingActionButtons
+                  release={release}
+                  onRunSmoke={() => {
+                    runSmoke
+                      .mutateAsync(undefined)
+                      .then(() =>
+                        toast.success(t(($) => $.releases.staging.run_smoke_button)),
+                      )
+                      .catch((err: unknown) =>
+                        toast.error(err instanceof Error ? err.message : String(err)),
+                      );
+                  }}
+                  runSmokePending={runSmoke.isPending}
+                  onMarkSmokePass={() => setSmokePassOpen(true)}
+                  onMarkVerified={() => setVerifyOpen(true)}
+                  onUnverify={() => setUnverifyOpen(true)}
+                />
+              )}
             </div>
           </header>
 
@@ -365,6 +410,34 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
               currentStage={release.stage}
               merging={isMerging ? { merged: mergedCount, total: totalPRs } : null}
             />
+          )}
+
+          {/* Phase 7c — staging-stage panels. Each is conditional on
+              the relevant signal being present, so a release in
+              earlier stages doesn't render any of them. */}
+          {isStagingOrVerifying && <StagingPanels release={release} />}
+
+          {/* Verified banner — only when the release reached
+              verifying via mark_verified. */}
+          {isVerifying && release.qa_verified_at && (
+            <div
+              className="flex items-start gap-2 rounded border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-400"
+              data-testid="release-verified-banner"
+            >
+              <ShieldCheck className="mt-0.5 size-4" />
+              <div className="flex-1">
+                <p className="font-medium">
+                  {t(($) => $.releases.verify.verified_banner, {
+                    user: verifiedByLabel(release),
+                  })}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t(($) => $.releases.verify.verified_at, {
+                    time: formatRelativeShort(release.qa_verified_at),
+                  })}
+                </p>
+              </div>
+            </div>
           )}
 
           {/* Linked channel + issue chips. Each clickable to its own
@@ -606,6 +679,159 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
         }}
         submitting={resumeMerge.isPending}
       />
+
+      {/* Phase 7c — Mark verified dialog. */}
+      <Dialog open={verifyOpen} onOpenChange={setVerifyOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.releases.verify.dialog_title)}</DialogTitle>
+            <DialogDescription>
+              {t(($) => $.releases.verify.dialog_description)}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-1.5">
+            <Label htmlFor="verify-note">
+              {t(($) => $.releases.verify.note_label)}
+            </Label>
+            <Textarea
+              id="verify-note"
+              value={verifyNote}
+              onChange={(e) => setVerifyNote(e.target.value)}
+              rows={2}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setVerifyOpen(false)}
+              disabled={markVerified.isPending}
+            >
+              {t(($) => $.releases.create_dialog.cancel)}
+            </Button>
+            <Button
+              onClick={async () => {
+                try {
+                  await markVerified.mutateAsync({ note: verifyNote });
+                  toast.success(t(($) => $.releases.verify.submit));
+                  setVerifyOpen(false);
+                  setVerifyNote("");
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : String(err));
+                }
+              }}
+              disabled={markVerified.isPending}
+              data-testid="release-verify-submit"
+            >
+              {markVerified.isPending
+                ? t(($) => $.releases.verify.submitting)
+                : t(($) => $.releases.verify.submit)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Phase 7c — Mark smoke pass dialog. */}
+      <Dialog open={smokePassOpen} onOpenChange={setSmokePassOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {t(($) => $.releases.staging.manual_pass_dialog_title)}
+            </DialogTitle>
+            <DialogDescription>
+              {t(($) => $.releases.staging.manual_pass_dialog_description)}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-1.5">
+            <Label htmlFor="smoke-pass-note">
+              {t(($) => $.releases.staging.manual_pass_note_label)}
+            </Label>
+            <Textarea
+              id="smoke-pass-note"
+              value={smokePassNote}
+              onChange={(e) => setSmokePassNote(e.target.value)}
+              rows={2}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setSmokePassOpen(false)}
+              disabled={markSmokePass.isPending}
+            >
+              {t(($) => $.releases.create_dialog.cancel)}
+            </Button>
+            <Button
+              onClick={async () => {
+                try {
+                  await markSmokePass.mutateAsync({ note: smokePassNote });
+                  toast.success(t(($) => $.releases.staging.manual_pass_submit));
+                  setSmokePassOpen(false);
+                  setSmokePassNote("");
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : String(err));
+                }
+              }}
+              disabled={markSmokePass.isPending}
+              data-testid="release-smoke-pass-submit"
+            >
+              {t(($) => $.releases.staging.manual_pass_submit)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Phase 7c — Unverify destructive dialog. Reason is REQUIRED;
+          the submit stays disabled until the user types something. */}
+      <AlertDialog open={unverifyOpen} onOpenChange={setUnverifyOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t(($) => $.releases.unverify.dialog_title, { title: release.title })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.releases.unverify.dialog_description)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="grid gap-1.5">
+            <Label htmlFor="unverify-reason">
+              {t(($) => $.releases.unverify.reason_label)}
+            </Label>
+            <Textarea
+              id="unverify-reason"
+              value={unverifyReason}
+              onChange={(e) => setUnverifyReason(e.target.value)}
+              rows={2}
+              data-testid="release-unverify-reason"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              {t(($) => $.releases.create_dialog.cancel)}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={unverifyReason.trim() === "" || unverify.isPending}
+              data-testid="release-unverify-submit"
+              onClick={async (e) => {
+                if (unverifyReason.trim() === "") {
+                  e.preventDefault();
+                  toast.error(t(($) => $.releases.unverify.reason_required));
+                  return;
+                }
+                try {
+                  await unverify.mutateAsync({ reason: unverifyReason });
+                  toast.success(t(($) => $.releases.unverify.submit));
+                  setUnverifyOpen(false);
+                  setUnverifyReason("");
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : String(err));
+                }
+              }}
+            >
+              {t(($) => $.releases.unverify.submit)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -914,4 +1140,226 @@ function checkStartMergePreconditions(
       reasons.push("Critical risk requires a second approver");
   }
   return reasons;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7c — staging-stage components.
+// ---------------------------------------------------------------------------
+
+/** StagingActionButtons renders the in_staging / verifying button row.
+ *  We split this out of the header because the parent's button list
+ *  was already heavy with merge-train branches; keeping the staging
+ *  affordances colocated makes the gating logic easier to follow. */
+function StagingActionButtons({
+  release,
+  onRunSmoke,
+  runSmokePending,
+  onMarkSmokePass,
+  onMarkVerified,
+  onUnverify,
+}: {
+  release: import("@multica/core/types").Release;
+  onRunSmoke: () => void;
+  runSmokePending: boolean;
+  onMarkSmokePass: () => void;
+  onMarkVerified: () => void;
+  onUnverify: () => void;
+}) {
+  const { t } = useT("ship");
+  const smoke = release.smoke_status ?? "";
+  const isVerifying = release.stage === "verifying";
+  const canRunSmoke = smoke !== "in_progress" && smoke !== "queued";
+  const canManualPass =
+    smoke === "completed_failure" || smoke === "skipped" || smoke === "";
+  const smokePassedOrSkipped =
+    smoke === "completed_success" || smoke === "manual_pass" || smoke === "skipped";
+
+  if (isVerifying) {
+    return (
+      <Button
+        size="sm"
+        variant="destructive"
+        onClick={onUnverify}
+        data-testid="release-unverify-button"
+      >
+        {t(($) => $.releases.unverify.button)}
+      </Button>
+    );
+  }
+
+  return (
+    <>
+      {/* Run smoke is the primary affordance whenever it's not
+          mid-flight; the "Re-run" copy applies after a completed run. */}
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={onRunSmoke}
+        disabled={!canRunSmoke || runSmokePending}
+        data-testid="release-run-smoke-button"
+      >
+        <FlaskConical className="size-3.5" />
+        {smoke === "completed_failure" || smoke === "completed_success"
+          ? t(($) => $.releases.staging.rerun_smoke_button)
+          : t(($) => $.releases.staging.run_smoke_button)}
+      </Button>
+      {canManualPass && (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onMarkSmokePass}
+          data-testid="release-manual-pass-button"
+        >
+          {t(($) => $.releases.staging.manual_pass_button)}
+        </Button>
+      )}
+      <Button
+        size="sm"
+        onClick={onMarkVerified}
+        disabled={!smokePassedOrSkipped && release.risk_level !== "low" && release.risk_level !== "medium"}
+        data-testid="release-verify-button"
+      >
+        <ShieldCheck className="size-3.5" />
+        {t(($) => $.releases.verify.button)}
+      </Button>
+    </>
+  );
+}
+
+/** StagingPanels renders the Linked staging deploy + Smoke status
+ *  panels side-by-side when the release is in_staging or verifying.
+ *  Either panel renders an empty/awaiting state when its underlying
+ *  data isn't populated yet. */
+function StagingPanels({
+  release,
+}: {
+  release: import("@multica/core/types").Release;
+}) {
+  const { t } = useT("ship");
+  const smoke = release.smoke_status ?? "";
+  return (
+    <div className="grid gap-3 sm:grid-cols-2" data-testid="release-staging-panels">
+      {/* Deploy panel. */}
+      <div className="rounded border bg-card p-3 text-sm">
+        <div className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <Rocket className="size-3.5" />
+          {t(($) => $.releases.staging.deploy_panel_title)}
+        </div>
+        {release.staging_deploy_id ? (
+          <div className="space-y-1">
+            {release.merged_main_sha && (
+              <p className="font-mono text-xs">
+                {release.merged_main_sha.slice(0, 7)}
+              </p>
+            )}
+            {release.staged_at && (
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.releases.staging.deploy_at)}:{" "}
+                {formatRelativeShort(release.staged_at)}
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {t(($) => $.releases.staging.awaiting_deploy)}
+          </p>
+        )}
+      </div>
+
+      {/* Smoke panel. */}
+      <div
+        className="rounded border bg-card p-3 text-sm"
+        data-testid="release-smoke-panel"
+        data-smoke-status={smoke}
+      >
+        <div className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <FlaskConical className="size-3.5" />
+          {t(($) => $.releases.staging.smoke_panel_title)}
+        </div>
+        <SmokeStatusPill status={smoke} />
+        {release.smoke_run_url && (
+          <a
+            href={release.smoke_run_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+          >
+            <ExternalLink className="size-3" />
+            {t(($) => $.releases.staging.view_run_link)}
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** SmokeStatusPill — known-status switch with a generic fallback for
+ *  forward-compat. New backend smoke_status values render the raw
+ *  string rather than crashing. */
+function SmokeStatusPill({ status }: { status: string }) {
+  const { t } = useT("ship");
+  switch (status) {
+    case "queued":
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          <CircleDashed className="size-3" />
+          {t(($) => $.releases.staging.smoke_status_queued)}
+        </span>
+      );
+    case "in_progress":
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-400">
+          <Loader2 className="size-3 animate-spin" />
+          {t(($) => $.releases.staging.smoke_status_in_progress)}
+        </span>
+      );
+    case "completed_success":
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+          <CheckCircle2 className="size-3" />
+          {t(($) => $.releases.staging.smoke_status_completed_success)}
+        </span>
+      );
+    case "completed_failure":
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-destructive/20 px-1.5 py-0.5 text-[10px] font-medium text-destructive">
+          <XCircle className="size-3" />
+          {t(($) => $.releases.staging.smoke_status_completed_failure)}
+        </span>
+      );
+    case "skipped":
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          <SkipForward className="size-3" />
+          {t(($) => $.releases.staging.smoke_status_skipped)}
+        </span>
+      );
+    case "manual_pass":
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 dark:text-purple-400">
+          <ShieldCheck className="size-3" />
+          {t(($) => $.releases.staging.smoke_status_manual_pass)}
+        </span>
+      );
+    default:
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          {status || "—"}
+        </span>
+      );
+  }
+}
+
+/** verifiedByLabel produces a short identifier for the Verified
+ *  banner. The release row only carries qa_verified_by as a UUID;
+ *  we render an 8-char slice so the banner is meaningful without
+ *  requiring the caller to fetch the user's display name. The full
+ *  identity becomes available when we link out to the audit log. */
+function verifiedByLabel(
+  release: import("@multica/core/types").Release,
+): string {
+  if (release.qa_verified_by) {
+    return release.qa_verified_by.slice(0, 8);
+  }
+  return "—";
 }

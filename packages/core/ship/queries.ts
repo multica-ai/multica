@@ -24,6 +24,10 @@ import type {
   StartMergeRequest,
   ResumeMergeRequest,
   AbortMergeRequest,
+  RunReleaseSmokeTestsRequest,
+  MarkSmokePassRequest,
+  MarkReleaseVerifiedRequest,
+  UnverifyReleaseRequest,
 } from "../types";
 
 // Query key factory — workspace-scoped per CLAUDE.md so a workspace switch
@@ -809,6 +813,61 @@ export function useAbortMergeTrain(releaseId: string) {
   return useMutation({
     mutationFn: (data?: AbortMergeRequest) =>
       api.abortReleaseMerge(releaseId, data),
+    onSettled: () => invalidateReleaseMergeSurface(qc, wsId, releaseId),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7c — Staging deploy linkage + smoke + verify gate.
+//
+// All four mutations run against the per-release detail cache and
+// the workspace-active list. WS events (release:staging_landed,
+// release:smoke_updated, release:verified, release:unverified) keep
+// other clients in sync; these onSettled invalidations ensure the
+// caller sees the new state immediately, even before the WS
+// roundtrip completes.
+// ---------------------------------------------------------------------------
+
+/** Manually re-trigger smoke tests for a release. */
+export function useRunSmokeTestsForRelease(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data?: RunReleaseSmokeTestsRequest) =>
+      api.runReleaseSmokeTests(releaseId, data),
+    onSettled: () => invalidateReleaseMergeSurface(qc, wsId, releaseId),
+  });
+}
+
+/** Owner/admin override marking smoke as manually-passed. */
+export function useMarkSmokeManualPass(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data?: MarkSmokePassRequest) =>
+      api.markReleaseSmokePass(releaseId, data),
+    onSettled: () => invalidateReleaseMergeSurface(qc, wsId, releaseId),
+  });
+}
+
+/** Mark a release verified — transitions stage to verifying. */
+export function useMarkReleaseVerified(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data?: MarkReleaseVerifiedRequest) =>
+      api.markReleaseVerified(releaseId, data),
+    onSettled: () => invalidateReleaseMergeSurface(qc, wsId, releaseId),
+  });
+}
+
+/** Reverse a verification — flips back to in_staging. */
+export function useUnverifyRelease(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data: UnverifyReleaseRequest) =>
+      api.unverifyRelease(releaseId, data),
     onSettled: () => invalidateReleaseMergeSurface(qc, wsId, releaseId),
   });
 }

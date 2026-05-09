@@ -930,6 +930,13 @@ type ShipRelease struct {
 	RollbackReason     pgtype.Text        `json:"rollback_reason"`
 	MergePaused        bool               `json:"merge_paused"`
 	MergeMethod        string             `json:"merge_method"`
+	SmokeRunID         pgtype.Text        `json:"smoke_run_id"`
+	SmokeRunUrl        pgtype.Text        `json:"smoke_run_url"`
+	SmokeStatus        pgtype.Text        `json:"smoke_status"`
+	SmokeCompletedAt   pgtype.Timestamptz `json:"smoke_completed_at"`
+	QaVerifiedAt       pgtype.Timestamptz `json:"qa_verified_at"`
+	QaVerifiedBy       pgtype.UUID        `json:"qa_verified_by"`
+	MergedMainSha      pgtype.Text        `json:"merged_main_sha"`
 }
 
 type ShipReleaseEvent struct {

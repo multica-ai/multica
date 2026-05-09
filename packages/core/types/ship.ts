@@ -558,6 +558,25 @@ export interface Release {
   /** Phase 7b — workspace-default merge method ("merge" / "squash" /
    *  "rebase"). Stamped at start_merge time. */
   merge_method: string;
+  // ---- Phase 7c — staging-stage signals ----
+  /** GitHub Actions workflow run id for the most recent smoke test
+   *  trigger. Empty / null when no smoke has been run. */
+  smoke_run_id?: string | null;
+  /** Deep link to the smoke run on GitHub. */
+  smoke_run_url?: string | null;
+  /** "" | "queued" | "in_progress" | "completed_success" |
+   *  "completed_failure" | "skipped" | "manual_pass". Loose-typed
+   *  per the API drift contract. */
+  smoke_status?: string | null;
+  smoke_completed_at?: string | null;
+  /** When non-null, the release has been QA-verified by the user
+   *  whose id is qa_verified_by. */
+  qa_verified_at?: string | null;
+  qa_verified_by?: string | null;
+  /** SHA of the merge commit produced by the LAST PR in the train.
+   *  Used by the deploy webhook handler to link a deploy back to the
+   *  release. Surfaced in the linked-staging-deploy panel. */
+  merged_main_sha?: string | null;
 }
 
 /** Phase 7b — per-PR merge state values. Drives the pill rendering on
@@ -671,6 +690,34 @@ export interface ResumeMergeRequest {
 /** Body for POST /api/releases/{id}/abort_merge. */
 export interface AbortMergeRequest {
   reason?: string;
+}
+
+// --- Phase 7c — staging-stage requests --------------------------------------
+
+/** Body for POST /api/releases/{id}/run_smoke_tests. Server reads
+ *  the workspace's configured smoke workflow + the release's
+ *  merged_main_sha; today the body is empty. Typed as a
+ *  `Record<string, never>` rather than an empty `{}` so a future
+ *  optional field landing here doesn't silently widen the call sites
+ *  that pass an extra prop. */
+export type RunReleaseSmokeTestsRequest = Record<string, never>;
+
+/** Body for POST /api/releases/{id}/mark_smoke_pass. */
+export interface MarkSmokePassRequest {
+  /** Optional note recorded in the audit log + channel post. */
+  note?: string;
+}
+
+/** Body for POST /api/releases/{id}/mark_verified. */
+export interface MarkReleaseVerifiedRequest {
+  /** Optional note recorded in the audit log + channel post. */
+  note?: string;
+}
+
+/** Body for POST /api/releases/{id}/unverify. Reason is REQUIRED on
+ *  the wire — the server returns 400 if empty. */
+export interface UnverifyReleaseRequest {
+  reason: string;
 }
 
 /** Phase 7b — lightweight merge_state poll response. */

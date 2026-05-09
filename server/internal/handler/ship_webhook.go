@@ -184,7 +184,40 @@ func (h *Handler) dispatchWebhook(d WebhookDispatch) {
 	// (the WS event arrives via Mark*Processed → frontend re-fetches).
 	h.maybeManagePRConversationChannel(ctx, ws, outcome)
 
+	// Phase 7c — release-stage linkage. A successful staging deploy
+	// for a release-produced sha advances the release; a check_run
+	// completion for a known smoke_run_id flips smoke_status. Both
+	// are best-effort and silent on miss.
+	h.maybeLinkReleaseFromOutcome(ctx, d.WorkspaceID, outcome)
+
 	h.publishWebhookOutcome(d.WorkspaceID, outcome)
+}
+
+// maybeLinkReleaseFromOutcome inspects the webhook outcome for the
+// two Phase 7c trigger conditions:
+//
+//   1. A successful staging deploy whose sha matches a release's
+//      merged_main_sha — links staging_deploy_id and either kicks off
+//      smoke or transitions to verifying.
+//   2. A check_run completion whose external_id matches a release's
+//      smoke_run_id — flips smoke_status and (on pass) advances stage.
+//
+// Best-effort: any error path logs and returns; releases with no
+// matching sha / run id render the linkage as a no-op.
+func (h *Handler) maybeLinkReleaseFromOutcome(ctx context.Context, workspaceID pgtype.UUID, o ship.WebhookOutcome) {
+	// Branch 1 — staging deploy linkage. The webhook gives us the
+	// per-deploy outcome; we filter to "succeeded staging deploy"
+	// because anything else can't advance a release.
+	if o.Kind == "deploy_completed" && o.DeployStatus == string(db.DeployStatusSucceeded) &&
+		strings.EqualFold(o.EnvironmentKind, "staging") && o.SHA != "" {
+		h.linkStagingDeployForRelease(ctx, workspaceID, o.DeployID, o.SHA, o.RepoURL)
+	}
+
+	// Branch 2 — smoke check_run linkage. Only fire on completed
+	// (the Service code populates conclusion only on completion).
+	if o.CheckRunExternalID != "" && o.CheckRunConclusion != "" {
+		h.recordSmokeOutcomeForRelease(ctx, workspaceID, o.CheckRunExternalID, o.CheckRunConclusion)
+	}
 }
 
 // maybeManagePRConversationChannel inspects the webhook outcome and

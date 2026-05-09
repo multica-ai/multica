@@ -59,6 +59,11 @@ export {
   useStartMergeTrain,
   useResumeMergeTrain,
   useAbortMergeTrain,
+  // Phase 7c — Staging deploy linkage + smoke + verify gate
+  useRunSmokeTestsForRelease,
+  useMarkSmokeManualPass,
+  useMarkReleaseVerified,
+  useUnverifyRelease,
 } from "./queries";
 
 // Phase 7a — multi-select store. Lives next to the queries because

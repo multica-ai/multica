@@ -277,3 +277,121 @@ FROM ship_release_pull_request rpr
 WHERE rpr.release_id = $1
 ORDER BY rpr.position ASC;
 
+-- ---------------------------------------------------------------------------
+-- Phase 7c — Staging deploy linkage, smoke tests, manual verify gate.
+-- ---------------------------------------------------------------------------
+
+-- name: SetReleaseMergedMainSHA :one
+-- Stamps the SHA of the merge commit produced by the LAST PR in the
+-- train. Deploy webhook handlers match deploy.sha against this to
+-- discover the release a deploy belongs to. updated_at bumps so the
+-- workspace rail re-orders.
+UPDATE ship_release SET
+    merged_main_sha = $2,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: FindReleaseByMergedMainSHA :one
+-- Reverse lookup used by the deployment_status webhook: given a
+-- successful staging deploy's sha, find the release that produced
+-- it. Constrained to non-terminal releases so a stale sha from an
+-- old release doesn't get re-linked. The composite WHERE matches the
+-- partial index on merged_main_sha + the active-stage filter.
+SELECT * FROM ship_release
+WHERE workspace_id = $1
+  AND merged_main_sha = $2
+  AND merged_main_sha <> ''
+  AND stage IN ('merging', 'in_staging', 'verifying')
+ORDER BY updated_at DESC
+LIMIT 1;
+
+-- name: FindReleaseBySmokeRunID :one
+-- Reverse lookup used by the check_run webhook: given a workflow run
+-- id, find the release whose smoke_run_id matches. Workspace-scoped
+-- so we never match across tenants.
+SELECT * FROM ship_release
+WHERE workspace_id = $1
+  AND smoke_run_id = $2
+  AND smoke_run_id <> ''
+LIMIT 1;
+
+-- name: SetReleaseStagingDeploy :one
+-- Records the linked staging deploy + stamps staged_at. Called by the
+-- deployment_status webhook handler when it matches a deploy's sha
+-- to a release's merged_main_sha. staged_at is COALESCE'd so a
+-- delayed deploy_status doesn't overwrite a value the merge train
+-- might have already written.
+UPDATE ship_release SET
+    staging_deploy_id = $2,
+    staged_at = COALESCE(staged_at, $3),
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: SetReleaseSmokeRun :one
+-- Records the workflow_dispatch result so the UI can surface a deep
+-- link and the check_run webhook has something to match against.
+UPDATE ship_release SET
+    smoke_run_id = $2,
+    smoke_run_url = $3,
+    smoke_status = $4,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: SetReleaseSmokeStatus :one
+-- Lightweight smoke_status update. Used by the check_run webhook
+-- handler to flip from "queued" → "in_progress" → "completed_success"
+-- / "completed_failure", and by the manual_pass / unverify flows.
+-- smoke_completed_at gets COALESCE-narg'd so a status flip without a
+-- ts (in_progress, manual_pass-after-failure) leaves the prior ts
+-- intact rather than nulling it.
+UPDATE ship_release SET
+    smoke_status = $2,
+    smoke_completed_at = COALESCE(sqlc.narg('smoke_completed_at'), smoke_completed_at),
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: SetReleaseQAVerified :one
+-- Stamps the QA verification fields. Called by mark_verified;
+-- unverify clears via SetReleaseQAUnverified below. Caller is
+-- responsible for transitioning stage in a paired UpdateReleaseStage
+-- call so the audit log records both moves coherently.
+UPDATE ship_release SET
+    qa_verified_at = $2,
+    qa_verified_by = $3,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: SetReleaseQAUnverified :one
+-- Clears qa_verified_at + qa_verified_by. Caller flips stage back to
+-- in_staging via UpdateReleaseStage in the same service-layer flow.
+UPDATE ship_release SET
+    qa_verified_at = NULL,
+    qa_verified_by = NULL,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: GetLastMergedReleasePR :one
+-- Returns the highest-position membership row whose merge_state =
+-- 'merged'. Used by the merge train at completion time to derive the
+-- merged_main_sha — it's the LAST PR in the train (by position) that
+-- actually landed on main, not necessarily the highest position
+-- across all rows (skipped/failed don't produce a sha).
+SELECT
+    rpr.release_id,
+    rpr.pull_request_id,
+    rpr.position,
+    rpr.merged_sha
+FROM ship_release_pull_request rpr
+WHERE rpr.release_id = $1
+  AND rpr.merge_state = 'merged'
+  AND rpr.merged_sha IS NOT NULL
+  AND rpr.merged_sha <> ''
+ORDER BY rpr.position DESC
+LIMIT 1;
+

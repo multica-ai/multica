@@ -730,8 +730,27 @@ func (s *Service) completeMergeTrain(
 	if err != nil {
 		return fmt.Errorf("update stage to in_staging: %w", err)
 	}
+	// Phase 7c — stamp the merged_main_sha. The LAST merged PR's
+	// merge sha is the commit the project's CI/CD will deploy to
+	// staging; the deployment_status webhook handler matches deploys
+	// against this column to link them back to the release. We do
+	// this BEFORE emitting the completed event so a fast-arriving
+	// deploy_status webhook (which is what triggers the next stage
+	// transition) sees the column populated.
+	if last, err := s.Q.GetLastMergedReleasePR(ctx, releaseID); err == nil && last.MergedSha.Valid {
+		if u2, err := s.Q.SetReleaseMergedMainSHA(ctx, db.SetReleaseMergedMainSHAParams{
+			ID:            releaseID,
+			MergedMainSha: pgtype.Text{String: last.MergedSha.String, Valid: true},
+		}); err == nil {
+			updated = u2
+		} else {
+			slog.Warn("ship: set merged_main_sha failed",
+				"release_id", uuidString(releaseID), "error", err)
+		}
+	}
 	_, _ = s.insertReleaseEvent(ctx, releaseID, "merge_train_completed", actor, map[string]any{
-		"merged_at": now.Format(time.RFC3339),
+		"merged_at":       now.Format(time.RFC3339),
+		"merged_main_sha": textValue(updated.MergedMainSha),
 	})
 	if deps != nil && deps.Publisher != nil {
 		deps.Publisher.PublishMergeEvent(protocol.EventReleaseMergeCompleted, uuidString(updated.WorkspaceID), map[string]any{

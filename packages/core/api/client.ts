@@ -150,6 +150,10 @@ import type {
   ResumeMergeRequest,
   AbortMergeRequest,
   MergeStateResponse,
+  RunReleaseSmokeTestsRequest,
+  MarkSmokePassRequest,
+  MarkReleaseVerifiedRequest,
+  UnverifyReleaseRequest,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -1949,6 +1953,74 @@ export class ApiClient {
       MergeStateResponseSchema,
       EMPTY_MERGE_STATE_RESPONSE,
       { endpoint: "GET /api/releases/:id/merge_state" },
+    );
+  }
+
+  // Phase 7c — Staging deploy linkage + smoke + verify gate. Each
+  // mutation parses the response through ReleaseSchema so a server-
+  // side drift in one of the new fields downgrades to a usable shape
+  // rather than throwing at the call site.
+  async runReleaseSmokeTests(
+    releaseId: string,
+    data?: RunReleaseSmokeTestsRequest,
+  ): Promise<Release> {
+    const raw = await this.fetch<unknown>(
+      `/api/releases/${releaseId}/run_smoke_tests`,
+      { method: "POST", body: JSON.stringify(data ?? {}) },
+    );
+    return parseWithFallback(
+      raw,
+      ReleaseSchema,
+      EMPTY_RELEASE_DETAIL.release,
+      { endpoint: "POST /api/releases/:id/run_smoke_tests" },
+    );
+  }
+
+  async markReleaseSmokePass(
+    releaseId: string,
+    data?: MarkSmokePassRequest,
+  ): Promise<Release> {
+    const raw = await this.fetch<unknown>(
+      `/api/releases/${releaseId}/mark_smoke_pass`,
+      { method: "POST", body: JSON.stringify(data ?? {}) },
+    );
+    return parseWithFallback(
+      raw,
+      ReleaseSchema,
+      EMPTY_RELEASE_DETAIL.release,
+      { endpoint: "POST /api/releases/:id/mark_smoke_pass" },
+    );
+  }
+
+  async markReleaseVerified(
+    releaseId: string,
+    data?: MarkReleaseVerifiedRequest,
+  ): Promise<Release> {
+    const raw = await this.fetch<unknown>(
+      `/api/releases/${releaseId}/mark_verified`,
+      { method: "POST", body: JSON.stringify(data ?? {}) },
+    );
+    return parseWithFallback(
+      raw,
+      ReleaseSchema,
+      EMPTY_RELEASE_DETAIL.release,
+      { endpoint: "POST /api/releases/:id/mark_verified" },
+    );
+  }
+
+  async unverifyRelease(
+    releaseId: string,
+    data: UnverifyReleaseRequest,
+  ): Promise<Release> {
+    const raw = await this.fetch<unknown>(
+      `/api/releases/${releaseId}/unverify`,
+      { method: "POST", body: JSON.stringify(data) },
+    );
+    return parseWithFallback(
+      raw,
+      ReleaseSchema,
+      EMPTY_RELEASE_DETAIL.release,
+      { endpoint: "POST /api/releases/:id/unverify" },
     );
   }
 
