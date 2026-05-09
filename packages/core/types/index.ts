@@ -153,4 +153,12 @@ export type {
   TalkToAgentResponse,
   PullRequestStackNode,
   ListPullRequestStacksResponse,
+  // Phase 5
+  RiskLevel,
+  ShipHubSummary,
+  DeployPreflight,
+  CreatePreflightRequest,
+  UpdatePreflightRequest,
+  PromoteDeployPreflightResponse,
+  ShipSnapshotResponse,
 } from "./ship";

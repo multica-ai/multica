@@ -277,15 +277,52 @@ export function ShipPRCard({
         </div>
       )}
 
-      {/* Risk hint — phase 1 keyword detection. The chip shows up only for
-          true matches so it stays meaningful. */}
+      {/* Phase 5 — risk badge. Renders only when the classifier flagged
+          the PR as `medium-with-reasons`, `high`, or `critical`. The
+          badge is interactive: clicking opens the native <details>
+          tooltip with the verbatim reason list. We use <details>
+          rather than a portal-based popover so the chip works with
+          keyboard navigation and doesn't fight the enclosing anchor's
+          click. The summary's preventDefault keeps the card link
+          from firing when the user clicks the chip. */}
       {risk && (
-        <div className="mt-1.5 inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">
-          <AlertTriangle className="size-3" />
-          {risk === "schema"
-            ? t(($) => $.card.risk_schema)
-            : t(($) => $.card.risk_migration)}
-        </div>
+        <details
+          className="group/risk mt-1.5 inline-block"
+          data-testid="risk-badge"
+          // The card root is an <a>; without onClick stopping
+          // propagation the anchor would navigate before the user
+          // saw the popover content.
+          onClick={(e) => e.stopPropagation()}
+        >
+          <summary
+            onClick={(e) => e.preventDefault()}
+            className={cn(
+              "cursor-pointer list-none inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium",
+              risk.level === "critical" &&
+                "bg-destructive/15 text-destructive",
+              risk.level === "high" &&
+                "bg-orange-500/15 text-orange-700 dark:text-orange-400",
+              risk.level === "medium" &&
+                "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+            )}
+          >
+            <AlertTriangle className="size-3" />
+            {risk.level === "critical"
+              ? t(($) => $.card.risk_level_critical)
+              : risk.level === "high"
+                ? t(($) => $.card.risk_level_high)
+                : t(($) => $.card.risk_level_medium)}
+          </summary>
+          {risk.reasons.length > 0 && (
+            <ul className="mt-1 ml-2 max-w-[16rem] list-disc rounded border bg-popover p-2 text-[11px] text-muted-foreground shadow-sm">
+              {risk.reasons.map((reason, i) => (
+                <li key={`${reason}-${i}`} className="break-words">
+                  {reason}
+                </li>
+              ))}
+            </ul>
+          )}
+        </details>
       )}
 
       <div className="mt-1.5 text-[11px] text-muted-foreground">

@@ -76,7 +76,7 @@ import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
-import { shipProjectsOptions } from "@multica/core/ship";
+import { shipProjectsOptions, shipHubSummaryOptions } from "@multica/core/ship";
 import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
 import { ProjectIcon } from "../projects/components/project-icon";
@@ -358,6 +358,81 @@ interface AppSidebarProps {
   headerStyle?: React.CSSProperties;
 }
 
+// Phase 5 — ambient sidebar segment strip for the Ship Hub.
+//
+// Replaces the simple badge ("3") with a multi-segment status:
+// `🟢 4 staging · 🟡 2 to review · 🔴 1 failing`. The widget is
+// intentionally compact so it fits the narrow nav row; segments
+// with a count of 0 are hidden so the strip stays visually
+// uncluttered. When the workspace is fresh and every count is 0
+// we fall back to the legacy "open PRs" number so the badge area
+// isn't empty (matches the Phase 1 affordance).
+function ShipSidebarSegmentStrip({
+  summary,
+  fallbackCount,
+}: {
+  summary?: {
+    in_staging: number;
+    awaiting_review: number;
+    failing: number;
+    promotion_pending: number;
+  };
+  fallbackCount: number;
+}) {
+  // No summary yet → render the legacy single-number badge.
+  if (!summary) {
+    if (fallbackCount <= 0) return null;
+    return (
+      <span className="ml-auto text-xs">
+        {fallbackCount > 99 ? "99+" : fallbackCount}
+      </span>
+    );
+  }
+  const segments: Array<{ key: string; count: number; dotClass: string }> = [
+    {
+      key: "in_staging",
+      count: summary.in_staging,
+      dotClass: "bg-emerald-500",
+    },
+    {
+      key: "awaiting_review",
+      count: summary.awaiting_review,
+      dotClass: "bg-amber-500",
+    },
+    {
+      key: "failing",
+      count: summary.failing,
+      dotClass: "bg-destructive",
+    },
+  ];
+  const visible = segments.filter((s) => s.count > 0);
+  if (visible.length === 0) {
+    if (fallbackCount <= 0) return null;
+    return (
+      <span className="ml-auto text-xs">
+        {fallbackCount > 99 ? "99+" : fallbackCount}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="ml-auto inline-flex items-center gap-1 text-[11px] tabular-nums"
+      data-testid="ship-sidebar-segments"
+    >
+      {visible.map((s) => (
+        <span
+          key={s.key}
+          className="inline-flex items-center gap-0.5"
+          data-segment={s.key}
+        >
+          <span aria-hidden className={cn("size-1.5 rounded-full", s.dotClass)} />
+          {s.count > 99 ? "99+" : s.count}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }: AppSidebarProps = {}) {
   const { t } = useT("layout");
   const { pathname, push } = useNavigation();
@@ -395,6 +470,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
       ),
     [shipData],
   );
+  // Phase 5 — multi-segment ambient widget. The summary endpoint
+  // returns precomputed counts; the sidebar renders three small
+  // status dots when any segment is non-zero. We keep the legacy
+  // `shipOpenPrCount` as a fallback when the summary call fails so
+  // the badge never disappears entirely.
+  const { data: shipSummary } = useQuery({
+    ...shipHubSummaryOptions(wsId ?? "", shipEnabled && !!wsId),
+  });
   const { data: pinnedItems = EMPTY_PINS } = useQuery({
     ...pinListOptions(wsId ?? "", userId ?? ""),
     enabled: !!wsId && !!userId,
@@ -727,10 +810,20 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         >
                           <item.icon />
                           <span>{t(($) => $.nav[item.labelKey])}</span>
-                          {item.key === "ship" && shipOpenPrCount > 0 && (
-                            <span className="ml-auto text-xs">
-                              {shipOpenPrCount > 99 ? "99+" : shipOpenPrCount}
-                            </span>
+                          {item.key === "ship" && (
+                            <ShipSidebarSegmentStrip
+                              summary={
+                                shipSummary
+                                  ? {
+                                      in_staging: shipSummary.in_staging,
+                                      awaiting_review: shipSummary.awaiting_review,
+                                      failing: shipSummary.failing,
+                                      promotion_pending: shipSummary.promotion_pending,
+                                    }
+                                  : undefined
+                              }
+                              fallbackCount={shipOpenPrCount}
+                            />
                           )}
                         </SidebarMenuButton>
                       </SidebarMenuItem>

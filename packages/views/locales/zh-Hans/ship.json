@@ -57,7 +57,11 @@
     "files_count_other": "{{count}} 个文件",
     "updated_relative": "{{when}}更新",
     "risk_schema": "涉及表结构",
-    "risk_migration": "包含迁移"
+    "risk_migration": "包含迁移",
+    "risk_level_low": "低风险",
+    "risk_level_medium": "中等风险",
+    "risk_level_high": "高风险",
+    "risk_level_critical": "极高风险"
   },
   "chips": {
     "more_actions": "更多操作",

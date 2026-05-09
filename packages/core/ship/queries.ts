@@ -13,6 +13,8 @@ import type {
   NudgePullRequestAuthorRequest,
   RunSmokeTestsRequest,
   ClosePullRequestAsStaleRequest,
+  CreatePreflightRequest,
+  UpdatePreflightRequest,
 } from "../types";
 
 // Query key factory — workspace-scoped per CLAUDE.md so a workspace switch
@@ -41,6 +43,13 @@ export const shipKeys = {
   // the per-PR list. WS event `ship:card_action` triggers the same invalidation.
   cardActions: (wsId: string, prId: string) =>
     [...shipKeys.all(wsId), "card_actions", prId] as const,
+  // Phase 5 — workspace summary (ambient sidebar) + preflight per-env-sha
+  // + time-machine snapshots.
+  summary: (wsId: string) => [...shipKeys.all(wsId), "summary"] as const,
+  preflight: (wsId: string, envId: string, sha: string) =>
+    [...shipKeys.all(wsId), "preflight", envId, sha] as const,
+  snapshot: (wsId: string, projectId: string, at: string) =>
+    [...shipKeys.all(wsId), "snapshot", projectId, at] as const,
 };
 
 /** List of projects in the workspace that have ≥1 GitHub repo attached.
@@ -381,4 +390,96 @@ export function shipCardActionsOptions(wsId: string, prId: string, enabled: bool
 export function useShipCardActions(prId: string, enabled = false) {
   const wsId = useWorkspaceId();
   return useQuery(shipCardActionsOptions(wsId, prId, enabled));
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — workspace summary + pre-flight + time-machine.
+// ---------------------------------------------------------------------------
+
+/** Workspace-wide Ship Hub summary. Powers the multi-segment ambient
+ *  sidebar widget. Refetches every 30s (the same cadence as the rest
+ *  of the ship surface) — WS event invalidation tightens it further. */
+export function shipHubSummaryOptions(wsId: string, enabled: boolean) {
+  return queryOptions({
+    queryKey: shipKeys.summary(wsId),
+    queryFn: () => api.getShipHubSummary(),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+export function useShipHubSummary(enabled = true) {
+  const wsId = useWorkspaceId();
+  return useQuery(shipHubSummaryOptions(wsId, enabled));
+}
+
+/** Pre-flight checklist — get-or-create on mount of the dialog.
+ *  Mutation rather than query because the create endpoint is POST and
+ *  we want explicit fetch-on-open semantics. */
+export function useCreateOrGetDeployPreflight(environmentId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (body: CreatePreflightRequest) =>
+      api.createOrGetDeployPreflight(environmentId, body),
+    onSuccess: (preflight) => {
+      qc.setQueryData(
+        shipKeys.preflight(wsId, environmentId, preflight.target_sha),
+        preflight,
+      );
+    },
+  });
+}
+
+/** PATCH the preflight checklist. Server recomputes the gate on every
+ *  read so the response carries the up-to-date `gate_status` /
+ *  `gate_blocked_reasons` — we just store the response in the cache. */
+export function useUpdateDeployPreflight(preflightId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (body: UpdatePreflightRequest) =>
+      api.updateDeployPreflight(preflightId, body),
+    onSuccess: (preflight) => {
+      qc.setQueryData(
+        shipKeys.preflight(wsId, preflight.environment_id, preflight.target_sha),
+        preflight,
+      );
+      // The summary's "promotion_pending" segment is derived from
+      // preflight rows — invalidate so the sidebar re-counts.
+      qc.invalidateQueries({ queryKey: shipKeys.summary(wsId) });
+    },
+  });
+}
+
+export function usePromoteDeployPreflight(preflightId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.promoteDeployPreflight(preflightId),
+    onSettled: () => {
+      // Promote starts a deploy — every Ship Hub query needs to refresh.
+      qc.invalidateQueries({ queryKey: shipKeys.all(wsId) });
+    },
+  });
+}
+
+/** GET /api/projects/{id}/ship_snapshot?at=<RFC3339>. Cached by (project,
+ *  at) so dragging the slider doesn't re-fetch the same timestamp twice. */
+export function shipSnapshotOptions(
+  wsId: string,
+  projectId: string,
+  at: string | null,
+) {
+  return queryOptions({
+    queryKey: shipKeys.snapshot(wsId, projectId, at ?? ""),
+    queryFn: () => api.getProjectShipSnapshot(projectId, at!),
+    enabled: !!projectId && !!at,
+    staleTime: 60_000,
+  });
+}
+
+export function useShipSnapshot(projectId: string, at: string | null) {
+  const wsId = useWorkspaceId();
+  return useQuery(shipSnapshotOptions(wsId, projectId, at));
 }

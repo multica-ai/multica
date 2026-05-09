@@ -141,6 +141,50 @@ func (ns NullPullRequestState) Value() (driver.Value, error) {
 	return string(ns.PullRequestState), nil
 }
 
+type RiskLevel string
+
+const (
+	RiskLevelLow      RiskLevel = "low"
+	RiskLevelMedium   RiskLevel = "medium"
+	RiskLevelHigh     RiskLevel = "high"
+	RiskLevelCritical RiskLevel = "critical"
+)
+
+func (e *RiskLevel) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RiskLevel(s)
+	case string:
+		*e = RiskLevel(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RiskLevel: %T", src)
+	}
+	return nil
+}
+
+type NullRiskLevel struct {
+	RiskLevel RiskLevel `json:"risk_level"`
+	Valid     bool      `json:"valid"` // Valid is true if RiskLevel is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRiskLevel) Scan(value interface{}) error {
+	if value == nil {
+		ns.RiskLevel, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RiskLevel.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRiskLevel) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RiskLevel), nil
+}
+
 type ActivityLog struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -442,6 +486,37 @@ type DeployEnvironment struct {
 	UpdatedAt         pgtype.Timestamptz    `json:"updated_at"`
 }
 
+type DeployHealthSnapshot struct {
+	ID                    pgtype.UUID        `json:"id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	DeployID              pgtype.UUID        `json:"deploy_id"`
+	SnapshotAt            pgtype.Timestamptz `json:"snapshot_at"`
+	ErrorRateBaseline     pgtype.Float8      `json:"error_rate_baseline"`
+	ErrorRateCurrent      pgtype.Float8      `json:"error_rate_current"`
+	P99LatencyBaselineMs  pgtype.Float8      `json:"p99_latency_baseline_ms"`
+	P99LatencyCurrentMs   pgtype.Float8      `json:"p99_latency_current_ms"`
+	InboxIssuesSince      int32              `json:"inbox_issues_since"`
+	AgentFailureRateDelta pgtype.Float8      `json:"agent_failure_rate_delta"`
+}
+
+type DeployPreflight struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	EnvironmentID    pgtype.UUID        `json:"environment_id"`
+	TargetSha        string             `json:"target_sha"`
+	MigrationsOk     bool               `json:"migrations_ok"`
+	SmokeTestsOk     bool               `json:"smoke_tests_ok"`
+	QaVerifiedAt     pgtype.Timestamptz `json:"qa_verified_at"`
+	QaVerifiedBy     pgtype.UUID        `json:"qa_verified_by"`
+	RollbackPlan     pgtype.Text        `json:"rollback_plan"`
+	ApproverID       pgtype.UUID        `json:"approver_id"`
+	SecondApproverID pgtype.UUID        `json:"second_approver_id"`
+	ApprovedAt       pgtype.Timestamptz `json:"approved_at"`
+	PromotedAt       pgtype.Timestamptz `json:"promoted_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Feedback struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`
@@ -684,6 +759,9 @@ type PullRequest struct {
 	ConversationChannelID  pgtype.UUID        `json:"conversation_channel_id"`
 	StackParentPrID        pgtype.UUID        `json:"stack_parent_pr_id"`
 	Source                 string             `json:"source"`
+	RiskLevel              RiskLevel          `json:"risk_level"`
+	RiskReasons            []byte             `json:"risk_reasons"`
+	RiskClassifiedAt       pgtype.Timestamptz `json:"risk_classified_at"`
 }
 
 type PullRequestCheck struct {

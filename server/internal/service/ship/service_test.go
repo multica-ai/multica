@@ -24,6 +24,9 @@ type fakeGithub struct {
 	dismissReviewFn func(ctx context.Context, owner, repo string, prNumber int, reviewID int64, message string) error
 	closePRFn       func(ctx context.Context, owner, repo string, prNumber int) error
 	dispatchFn      func(ctx context.Context, owner, repo, workflowFile, ref string, inputs map[string]string) error
+	// Phase 5 — files lookup for the risk classifier. Default returns
+	// nil/nil so existing tests degrade to the title-only path.
+	listFilesFn func(ctx context.Context, owner, repo string, prNumber int) ([]gh.PullRequestFile, error)
 }
 
 type ghResponse struct {
@@ -87,6 +90,13 @@ func (f *fakeGithub) DispatchWorkflow(ctx context.Context, owner, repo, workflow
 		return f.dispatchFn(ctx, owner, repo, workflowFile, ref, inputs)
 	}
 	return nil
+}
+
+func (f *fakeGithub) ListPullRequestFiles(ctx context.Context, owner, repo string, prNumber int) ([]gh.PullRequestFile, error) {
+	if f.listFilesFn != nil {
+		return f.listFilesFn(ctx, owner, repo, prNumber)
+	}
+	return nil, nil
 }
 
 func TestMapPRState(t *testing.T) {

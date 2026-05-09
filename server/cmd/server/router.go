@@ -443,6 +443,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/issues/{id}/pull_requests", h.ListIssuePullRequests)
 			r.Get("/api/projects/{id}/pull_request_stacks", h.ListProjectPRStacks)
 
+			// Ship Hub Phase 5 — pre-flight gate + workspace summary +
+			// time-machine snapshot. Same ship_hub_enabled gate; no
+			// token required. The summary endpoint sits under
+			// /api/workspaces/{id} so it shares the existing workspace
+			// scoping middleware applied above.
+			r.Post("/api/deploy_environments/{id}/preflight", h.CreateOrGetDeployPreflight)
+			r.Patch("/api/deploy_preflight/{id}", h.UpdateDeployPreflight)
+			r.Post("/api/deploy_preflight/{id}/promote", h.PromoteDeployPreflight)
+			r.Get("/api/ship_hub/summary", h.GetShipHubSummary)
+			r.Get("/api/projects/{id}/ship_snapshot", h.GetProjectShipSnapshot)
+
 			// Channels (multi-participant chat + DMs).
 			// Endpoints respond 404 when workspace.channels_enabled is FALSE
 			// — the gate lives inside each handler so the surface is invisible

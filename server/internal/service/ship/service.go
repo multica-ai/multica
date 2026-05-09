@@ -34,6 +34,11 @@ type GithubClient interface {
 	DismissPullRequestReview(ctx context.Context, owner, repo string, prNumber int, reviewID int64, message string) error
 	ClosePullRequest(ctx context.Context, owner, repo string, prNumber int) error
 	DispatchWorkflow(ctx context.Context, owner, repo, workflowFile, ref string, inputs map[string]string) error
+	// Phase 5 — used by the risk classifier. Optional in spirit (the
+	// classifier degrades to a title-only heuristic when the call
+	// returns an error or empty list), but listed in the interface so
+	// the test mocks know they need to provide it.
+	ListPullRequestFiles(ctx context.Context, owner, repo string, prNumber int) ([]gh.PullRequestFile, error)
 }
 
 // Service is the Ship Hub entry point. Construct one per workspace token

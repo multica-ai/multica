@@ -250,20 +250,30 @@ describe("isFailingOrBlocked", () => {
   });
 });
 
-describe("deriveRiskHint", () => {
-  it("title contains 'migration' → 'migration'", () => {
-    expect(deriveRiskHint(makePR({ title: "Add user_id migration" }))).toBe(
-      "migration",
-    );
+// Phase 5 — deriveRiskHint now reads the server-classified risk_level
+// + risk_reasons from the PR row (the Phase 1 keyword-on-title scan
+// is gone). Tests pinned to the Phase 5 contract — see
+// ship/hooks/use-pr-state.test.ts for the canonical coverage.
+describe("deriveRiskHint (Phase 5)", () => {
+  it("returns null for low-risk PRs (no chip)", () => {
+    const pr = makePR({ risk_level: "low", risk_reasons: ["docs only"] });
+    expect(deriveRiskHint(pr)).toBeNull();
   });
 
-  it("label name 'schema' matches case-insensitively", () => {
-    const pr = makePR({ labels: [{ name: "Schema", color: "ff0000" }] });
-    expect(deriveRiskHint(pr)).toBe("schema");
+  it("returns null for medium-risk PR with no reasons", () => {
+    const pr = makePR({ risk_level: "medium", risk_reasons: [] });
+    expect(deriveRiskHint(pr)).toBeNull();
   });
 
-  it("no risk keywords → null", () => {
-    expect(deriveRiskHint(makePR({ title: "Add a button" }))).toBeNull();
+  it("returns a high-risk hint with the reasons array intact", () => {
+    const pr = makePR({
+      risk_level: "high",
+      risk_reasons: ["migration file", "auth handler change"],
+    });
+    expect(deriveRiskHint(pr)).toEqual({
+      level: "high",
+      reasons: ["migration file", "auth handler change"],
+    });
   });
 });
 

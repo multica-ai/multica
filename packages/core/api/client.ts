@@ -126,6 +126,12 @@ import type {
   TalkToAgentRequest,
   TalkToAgentResponse,
   ListPullRequestStacksResponse,
+  ShipHubSummary,
+  DeployPreflight,
+  CreatePreflightRequest,
+  UpdatePreflightRequest,
+  PromoteDeployPreflightResponse,
+  ShipSnapshotResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -160,6 +166,12 @@ import {
   EMPTY_LIST_PULL_REQUEST_STACKS_RESPONSE,
   TalkToAgentResponseSchema,
   EMPTY_TALK_TO_AGENT_RESPONSE,
+  ShipHubSummarySchema,
+  EMPTY_SHIP_HUB_SUMMARY,
+  DeployPreflightSchema,
+  PromoteDeployPreflightResponseSchema,
+  ShipSnapshotResponseSchema,
+  EMPTY_SHIP_SNAPSHOT_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1780,6 +1792,163 @@ export class ApiClient {
       ListShipCardActionsResponseSchema,
       EMPTY_LIST_SHIP_CARD_ACTIONS_RESPONSE,
       { endpoint: "GET /api/pull_requests/:id/actions" },
+    );
+  }
+
+  // Phase 5 — workspace-wide Ship Hub summary. Drives the multi-segment
+  // sidebar widget (`🟢 4 staging · 🟡 2 to review · 🔴 1 failing`).
+  async getShipHubSummary(): Promise<ShipHubSummary> {
+    const raw = await this.fetch<unknown>(`/api/ship_hub/summary`);
+    return parseWithFallback(
+      raw,
+      ShipHubSummarySchema,
+      EMPTY_SHIP_HUB_SUMMARY,
+      { endpoint: "GET /api/ship_hub/summary" },
+    );
+  }
+
+  // Phase 5 — pre-flight production gate. Three endpoints; the gate
+  // status is recomputed on every read so the frontend can poll a
+  // single endpoint after each PATCH and re-render the chip row.
+  async createOrGetDeployPreflight(
+    environmentId: string,
+    body: CreatePreflightRequest,
+  ): Promise<DeployPreflight> {
+    const raw = await this.fetch<unknown>(
+      `/api/deploy_environments/${environmentId}/preflight`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    return parseWithFallback(
+      raw,
+      DeployPreflightSchema,
+      // No "empty" preflight makes sense for a write endpoint — the
+      // server always returns a row. Leaving fallback explicit so a
+      // partial body still parses without crashing the dialog.
+      {
+        id: "",
+        workspace_id: "",
+        environment_id: environmentId,
+        target_sha: body.target_sha,
+        migrations_ok: false,
+        smoke_tests_ok: false,
+        qa_verified_at: null,
+        qa_verified_by: null,
+        rollback_plan: null,
+        approver_id: null,
+        second_approver_id: null,
+        approved_at: null,
+        promoted_at: null,
+        created_at: "",
+        updated_at: "",
+        required_risk_level: "high",
+        gate_status: "blocked",
+        gate_blocked_reasons: [],
+      },
+      { endpoint: "POST /api/deploy_environments/:id/preflight" },
+    );
+  }
+
+  async updateDeployPreflight(
+    preflightId: string,
+    body: UpdatePreflightRequest,
+  ): Promise<DeployPreflight> {
+    const raw = await this.fetch<unknown>(
+      `/api/deploy_preflight/${preflightId}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    );
+    return parseWithFallback(
+      raw,
+      DeployPreflightSchema,
+      {
+        id: preflightId,
+        workspace_id: "",
+        environment_id: "",
+        target_sha: "",
+        migrations_ok: false,
+        smoke_tests_ok: false,
+        qa_verified_at: null,
+        qa_verified_by: null,
+        rollback_plan: null,
+        approver_id: null,
+        second_approver_id: null,
+        approved_at: null,
+        promoted_at: null,
+        created_at: "",
+        updated_at: "",
+        required_risk_level: "high",
+        gate_status: "blocked",
+        gate_blocked_reasons: [],
+      },
+      { endpoint: "PATCH /api/deploy_preflight/:id" },
+    );
+  }
+
+  async promoteDeployPreflight(
+    preflightId: string,
+  ): Promise<PromoteDeployPreflightResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/deploy_preflight/${preflightId}/promote`,
+      { method: "POST" },
+    );
+    return parseWithFallback(
+      raw,
+      PromoteDeployPreflightResponseSchema,
+      // Conservative empty fallback — the UI checks gate_status to
+      // know it should re-fetch on success.
+      {
+        preflight: {
+          id: preflightId,
+          workspace_id: "",
+          environment_id: "",
+          target_sha: "",
+          migrations_ok: false,
+          smoke_tests_ok: false,
+          qa_verified_at: null,
+          qa_verified_by: null,
+          rollback_plan: null,
+          approver_id: null,
+          second_approver_id: null,
+          approved_at: null,
+          promoted_at: null,
+          created_at: "",
+          updated_at: "",
+          required_risk_level: "high",
+          gate_status: "blocked",
+          gate_blocked_reasons: [],
+        },
+        deploy: {
+          id: "",
+          workspace_id: "",
+          environment_id: "",
+          ref: "",
+          sha: "",
+          status: "pending",
+          triggered_by: null,
+          triggered_at: "",
+          started_at: null,
+          completed_at: null,
+          log_url: null,
+          error_message: null,
+          created_at: "",
+        },
+      },
+      { endpoint: "POST /api/deploy_preflight/:id/promote" },
+    );
+  }
+
+  // Phase 5 — time-machine snapshot.
+  async getProjectShipSnapshot(
+    projectId: string,
+    at: string,
+  ): Promise<ShipSnapshotResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/projects/${projectId}/ship_snapshot?at=${encodeURIComponent(at)}`,
+    );
+    return parseWithFallback(
+      raw,
+      ShipSnapshotResponseSchema,
+      EMPTY_SHIP_SNAPSHOT_RESPONSE,
+      { endpoint: "GET /api/projects/:id/ship_snapshot" },
     );
   }
 

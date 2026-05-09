@@ -188,6 +188,43 @@ func (c *Client) ListPullRequests(ctx context.Context, owner, repo string, opts 
 	return out, nil
 }
 
+// PullRequestFile is the entry shape for GET /repos/{owner}/{repo}/pulls/{n}/files.
+// Phase 5 — used by the risk classifier to inspect changed-file paths and
+// detect migration / Dockerfile / handler / infra changes. Only filename +
+// status + patch are needed today; the rest of the wire shape (sha, blob_url,
+// raw_url, contents_url, additions/deletions/changes counts) is ignored.
+type PullRequestFile struct {
+	// Repo-relative path. "server/migrations/083_x.up.sql" not "/repo/server/...".
+	Filename string `json:"filename"`
+	// "added" | "modified" | "removed" | "renamed" | "copied" |
+	// "changed" | "unchanged".
+	Status string `json:"status"`
+	// Unified-diff fragment. Capped server-side by GitHub. The classifier
+	// scans this for substring matches like "DELETE FROM" / "DROP TABLE"
+	// when looking at migration files.
+	Patch string `json:"patch"`
+	// PreviousFilename is set when the entry is a rename, so the classifier
+	// can include both old and new paths in pattern checks.
+	PreviousFilename string `json:"previous_filename,omitempty"`
+}
+
+// ListPullRequestFiles fetches the changed-file list for a PR. The endpoint
+// paginates at 30/page by default — we request 100/page since the classifier
+// only consults the first page (a PR with >100 changed files is already
+// flagged "high" by changed_files alone in upsertPR). page=1 is the only
+// caller we have today.
+func (c *Client) ListPullRequestFiles(ctx context.Context, owner, repo string, prNumber int) ([]PullRequestFile, error) {
+	path := fmt.Sprintf(
+		"/repos/%s/%s/pulls/%d/files?per_page=100&page=1",
+		url.PathEscape(owner), url.PathEscape(repo), prNumber,
+	)
+	var out []PullRequestFile
+	if err := c.do(ctx, "GET", path, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CombinedStatus is the wire shape returned by /repos/.../commits/{sha}/status.
 // We only project the State field today; the per-context list and total_count
 // are useful in a richer UI but not for the Ship Hub badge.

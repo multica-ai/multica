@@ -332,6 +332,11 @@ func main() {
 	// workspace with the feature enabled. Defensive — per-workspace errors
 	// are logged and skipped so one bad token can't starve the rest.
 	go runShipHubReconciler(sweepCtx, queries)
+	// Ship Hub Phase 5 health monitor: every 5 minutes, snapshot agent /
+	// inbox health for any deploy that succeeded in the last 24h so the
+	// "In Production" card can render error/latency Δ + a "Rollback?"
+	// chip when thresholds trip.
+	go runShipHubHealthMonitor(sweepCtx, queries)
 
 	if metricsServer != nil {
 		go func() {

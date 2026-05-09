@@ -198,6 +198,11 @@ const PullRequestSchema = z.object({
   conversation_channel_id: z.string().nullable().optional(),
   stack_parent_pr_id: z.string().nullable().optional(),
   source: z.string().optional(),
+  // Phase 5 — risk profile. Older backends omit these; we accept
+  // missing keys without complaint per the API compat contract.
+  risk_level: z.string().optional(),
+  risk_reasons: z.array(z.string()).optional(),
+  risk_classified_at: z.string().nullable().optional(),
 }).loose();
 
 export const ListPullRequestsResponseSchema = z.object({
@@ -210,7 +215,7 @@ export const EMPTY_LIST_PULL_REQUESTS_RESPONSE = {
   total: 0,
 };
 
-const DeployEnvironmentSchema = z.object({
+export const DeployEnvironmentSchema = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
   project_id: z.string(),
@@ -233,7 +238,7 @@ export const EMPTY_LIST_DEPLOY_ENVIRONMENTS_RESPONSE = {
   environments: [],
 };
 
-const DeploySchema = z.object({
+export const DeploySchema = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
   environment_id: z.string(),
@@ -422,4 +427,68 @@ export const TalkToAgentResponseSchema = z.object({
 export const EMPTY_TALK_TO_AGENT_RESPONSE = {
   chat_session_id: "",
   agent_id: "",
+};
+
+// Phase 5 — Ship Hub summary (sidebar widget).
+export const ShipHubSummarySchema = z.object({
+  in_staging: z.number().default(0),
+  awaiting_review: z.number().default(0),
+  failing: z.number().default(0),
+  in_production_24h: z.number().default(0),
+  promotion_pending: z.number().default(0),
+  open_pr_total: z.number().default(0),
+}).loose();
+
+export const EMPTY_SHIP_HUB_SUMMARY = {
+  in_staging: 0,
+  awaiting_review: 0,
+  failing: 0,
+  in_production_24h: 0,
+  promotion_pending: 0,
+  open_pr_total: 0,
+};
+
+// Phase 5 — pre-flight checklist row.
+export const DeployPreflightSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  environment_id: z.string().default(""),
+  target_sha: z.string().default(""),
+  migrations_ok: z.boolean().default(false),
+  smoke_tests_ok: z.boolean().default(false),
+  qa_verified_at: z.string().nullable().default(null),
+  qa_verified_by: z.string().nullable().default(null),
+  rollback_plan: z.string().nullable().default(null),
+  approver_id: z.string().nullable().default(null),
+  second_approver_id: z.string().nullable().default(null),
+  approved_at: z.string().nullable().default(null),
+  promoted_at: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  required_risk_level: z.string().default("medium"),
+  gate_status: z.string().default("blocked"),
+  gate_blocked_reasons: z.array(z.string()).default([]),
+}).loose();
+
+export const PromoteDeployPreflightResponseSchema = z.object({
+  preflight: DeployPreflightSchema,
+  // Existing DeploySchema is hoisted above so we reuse it. The
+  // promote endpoint always returns one — but the loose() wrapper
+  // means a stray missing field still parses.
+  deploy: DeploySchema,
+}).loose();
+
+// Phase 5 — time-machine snapshot.
+export const ShipSnapshotResponseSchema = z.object({
+  at: z.string().default(""),
+  pull_requests: z.array(PullRequestSchema).default([]),
+  environments: z.array(DeployEnvironmentSchema).default([]),
+  environment_shas_at_time: z.record(z.string(), z.string()).default({}),
+}).loose();
+
+export const EMPTY_SHIP_SNAPSHOT_RESPONSE = {
+  at: "",
+  pull_requests: [],
+  environments: [],
+  environment_shas_at_time: {},
 };

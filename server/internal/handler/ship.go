@@ -582,6 +582,17 @@ func (h *Handler) LogDeploy(w http.ResponseWriter, r *http.Request) {
 			CurrentSha:        pgtype.Text{String: deploy.Sha, Valid: true},
 			CurrentDeployedAt: deploy.TriggeredAt,
 		})
+		// Phase 5 — production deploy storytelling. The manual logging
+		// path is the most common way users record "we just shipped"
+		// today, so we run the same hook the webhook path runs.
+		if env.Kind == db.DeployEnvironmentKindProduction {
+			svc := &ship.Service{Q: h.Queries}
+			if err := svc.EmitDeployRunbook(r.Context(), wsID, env, deploy); err != nil {
+				// Non-fatal — the deploy already landed; the runbook
+				// is a nice-to-have.
+				_ = err
+			}
+		}
 	}
 
 	eventType := protocol.EventDeployStarted

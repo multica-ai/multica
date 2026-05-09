@@ -70,6 +70,11 @@ func (f *fakeShipGithub) DispatchWorkflow(ctx context.Context, owner, repo, work
 	}
 	return nil
 }
+func (f *fakeShipGithub) ListPullRequestFiles(_ context.Context, _, _ string, _ int) ([]gh.PullRequestFile, error) {
+	// Phase 5 — chip handler tests don't drive the risk classifier; return
+	// nil so the classifier degrades to its title-only path.
+	return nil, nil
+}
 
 // fakeShipTaskEnqueuer captures spawn calls so tests can assert on the
 // payload without standing up a real TaskService.

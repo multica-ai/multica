@@ -138,3 +138,47 @@ ORDER BY pr_created_at ASC;
 -- the conversation for PR #N" badge.
 SELECT * FROM pull_request
 WHERE conversation_channel_id = $1;
+
+-- name: UpdatePullRequestRiskProfile :one
+-- Phase 5 — persist the rule-based classifier verdict. risk_classified_at
+-- is stamped to NOW() on every call so an "is this stale?" check is a
+-- simple timestamp comparison. risk_reasons is the JSONB array from the
+-- classifier; storing verbatim avoids a parse step on the read path.
+UPDATE pull_request SET
+    risk_level         = $2,
+    risk_reasons       = $3,
+    risk_classified_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: ListPullRequestsForRiskBackfill :many
+-- The webhook path runs the classifier inline; this query backfills rows
+-- the reconciler imported before risk_classified_at was set. Open PRs
+-- only — closed/merged rows aren't actionable for the badge.
+SELECT * FROM pull_request
+WHERE workspace_id = $1
+  AND state = 'open'
+  AND risk_classified_at IS NULL
+ORDER BY pr_updated_at DESC
+LIMIT $2;
+
+-- name: CountWorkspacePullRequestsByRisk :many
+-- Powers the ambient sidebar widget's "failing" segment — high+critical
+-- open PRs are the urgent ones. Returns one row per risk tier present.
+SELECT risk_level, count(*)::bigint AS pr_count
+FROM pull_request
+WHERE workspace_id = $1 AND state = 'open'
+GROUP BY risk_level;
+
+-- name: ListPullRequestsCreatedAt :many
+-- Phase 5 time-machine: reconstruct the project's PR snapshot as of
+-- timestamp $2. We approximate "the row's state at that timestamp" with
+-- created_at <= $2 — the row's mutable fields will reflect the latest
+-- sync, but for the column-derivation surface (open vs merged etc.)
+-- the timestamp filter is enough. PRs that landed AFTER $2 are
+-- excluded entirely.
+SELECT * FROM pull_request
+WHERE project_id = $1
+  AND pr_created_at <= sqlc.arg('at')::timestamptz
+  AND (pr_closed_at IS NULL OR pr_closed_at > sqlc.arg('at')::timestamptz)
+ORDER BY pr_updated_at DESC;

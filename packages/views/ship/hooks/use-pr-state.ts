@@ -155,23 +155,49 @@ export function isFailingOrBlocked(pr: PullRequest): boolean {
   return false;
 }
 
-const RISK_KEYWORDS = ["migration", "schema"] as const;
+/** Risk tier rendered on the PR card. Phase 5 — backend-classified.
+ *  Treat the wire string as loose; unknown values fall back to medium
+ *  (the same neutral chip Phase 1's keyword heuristic produced).
+ *  See server/internal/service/ship/risk.go for the classifier rules. */
+export type CardRiskLevel = "low" | "medium" | "high" | "critical";
 
-/** Surface a small "touches schema / migration" warning chip on the PR card.
- *  Phase-1 heuristic — title substring or label name match. The full risk
- *  profiler lands in Phase 5; this gives a useful chip with zero backend
- *  work.
- *  Returns the matched keyword (caller uses it to pick a translation
- *  string) or null. */
-export function deriveRiskHint(
-  pr: PullRequest,
-): "schema" | "migration" | null {
-  const title = pr.title.toLowerCase();
-  const labels = pr.labels.map((l) => l.name.toLowerCase());
-  for (const kw of RISK_KEYWORDS) {
-    if (title.includes(kw) || labels.includes(kw)) return kw;
+export interface CardRiskHint {
+  level: CardRiskLevel;
+  reasons: string[];
+}
+
+/** Read the server-classified risk off the PR row. Returns null when
+ *  the level is medium AND there are no reasons — that's the "no
+ *  hint" state where we don't want a chip at all so the card stays
+ *  visually clean.
+ *
+ *  We deliberately don't render anything for "low" either: a docs PR
+ *  doesn't need a green badge cluttering the card. The risk chip is
+ *  for the surfaces that actually need attention. */
+export function deriveRiskHint(pr: PullRequest): CardRiskHint | null {
+  const raw = (pr.risk_level ?? "medium").toLowerCase();
+  const reasons = Array.isArray(pr.risk_reasons) ? pr.risk_reasons : [];
+  let level: CardRiskLevel;
+  switch (raw) {
+    case "low":
+      // Drop the chip entirely for low-risk PRs; the card stays clean.
+      return null;
+    case "high":
+      level = "high";
+      break;
+    case "critical":
+      level = "critical";
+      break;
+    case "medium":
+    default:
+      // Only show the medium chip when the classifier had something
+      // specific to say (e.g. "migration mentioned in title"). A
+      // bare medium with no reasons is the default state — no chip.
+      if (reasons.length === 0) return null;
+      level = "medium";
+      break;
   }
-  return null;
+  return { level, reasons };
 }
 
 /** Buckets a flat PR array into Kanban columns + the failing/blocked rail.

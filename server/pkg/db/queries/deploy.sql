@@ -119,3 +119,24 @@ UPDATE deploy SET
     error_message = COALESCE(sqlc.narg('error_message'), error_message)
 WHERE id = $1
 RETURNING *;
+
+-- name: ListDeploysByEnvironmentBefore :many
+-- Phase 5 time-machine — list every deploy attempt against an env up to
+-- timestamp $2. Used to reconstruct "what SHA was running on this env
+-- as of that moment". Ordered triggered_at DESC so the caller can take
+-- the first succeeded row as the active SHA at $2.
+SELECT * FROM deploy
+WHERE environment_id = $1
+  AND triggered_at <= sqlc.arg('at')::timestamptz
+ORDER BY triggered_at DESC;
+
+-- name: CountWorkspaceDeploysIn24h :one
+-- Phase 5 — backs the ambient sidebar's "in production last 24h" segment.
+SELECT count(*)::bigint AS count
+FROM deploy d
+JOIN deploy_environment de ON de.id = d.environment_id
+WHERE d.workspace_id = $1
+  AND de.kind = 'production'
+  AND d.status = 'succeeded'
+  AND d.completed_at IS NOT NULL
+  AND d.completed_at > NOW() - INTERVAL '24 hours';

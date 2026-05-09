@@ -57,8 +57,42 @@ func (q *Queries) CountOpenPullRequestsForProjects(ctx context.Context, projectI
 	return items, nil
 }
 
+const countWorkspacePullRequestsByRisk = `-- name: CountWorkspacePullRequestsByRisk :many
+SELECT risk_level, count(*)::bigint AS pr_count
+FROM pull_request
+WHERE workspace_id = $1 AND state = 'open'
+GROUP BY risk_level
+`
+
+type CountWorkspacePullRequestsByRiskRow struct {
+	RiskLevel RiskLevel `json:"risk_level"`
+	PrCount   int64     `json:"pr_count"`
+}
+
+// Powers the ambient sidebar widget's "failing" segment — high+critical
+// open PRs are the urgent ones. Returns one row per risk tier present.
+func (q *Queries) CountWorkspacePullRequestsByRisk(ctx context.Context, workspaceID pgtype.UUID) ([]CountWorkspacePullRequestsByRiskRow, error) {
+	rows, err := q.db.Query(ctx, countWorkspacePullRequestsByRisk, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountWorkspacePullRequestsByRiskRow{}
+	for rows.Next() {
+		var i CountWorkspacePullRequestsByRiskRow
+		if err := rows.Scan(&i.RiskLevel, &i.PrCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getPullRequest = `-- name: GetPullRequest :one
-SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source FROM pull_request
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source, risk_level, risk_reasons, risk_classified_at FROM pull_request
 WHERE id = $1
 `
 
@@ -101,12 +135,15 @@ func (q *Queries) GetPullRequest(ctx context.Context, id pgtype.UUID) (PullReque
 		&i.ConversationChannelID,
 		&i.StackParentPrID,
 		&i.Source,
+		&i.RiskLevel,
+		&i.RiskReasons,
+		&i.RiskClassifiedAt,
 	)
 	return i, err
 }
 
 const getPullRequestByConversationChannel = `-- name: GetPullRequestByConversationChannel :one
-SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source FROM pull_request
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source, risk_level, risk_reasons, risk_classified_at FROM pull_request
 WHERE conversation_channel_id = $1
 `
 
@@ -150,12 +187,15 @@ func (q *Queries) GetPullRequestByConversationChannel(ctx context.Context, conve
 		&i.ConversationChannelID,
 		&i.StackParentPrID,
 		&i.Source,
+		&i.RiskLevel,
+		&i.RiskReasons,
+		&i.RiskClassifiedAt,
 	)
 	return i, err
 }
 
 const getPullRequestByNumber = `-- name: GetPullRequestByNumber :one
-SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source FROM pull_request
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source, risk_level, risk_reasons, risk_classified_at FROM pull_request
 WHERE workspace_id = $1 AND repo_url = $2 AND pr_number = $3
 `
 
@@ -202,6 +242,9 @@ func (q *Queries) GetPullRequestByNumber(ctx context.Context, arg GetPullRequest
 		&i.ConversationChannelID,
 		&i.StackParentPrID,
 		&i.Source,
+		&i.RiskLevel,
+		&i.RiskReasons,
+		&i.RiskClassifiedAt,
 	)
 	return i, err
 }
@@ -253,7 +296,7 @@ func (q *Queries) ListOpenPullRequestsByProjectForStack(ctx context.Context, pro
 }
 
 const listPullRequestsByOriginatingIssue = `-- name: ListPullRequestsByOriginatingIssue :many
-SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source FROM pull_request
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source, risk_level, risk_reasons, risk_classified_at FROM pull_request
 WHERE workspace_id = $1 AND originating_issue_id = $2
 ORDER BY pr_updated_at DESC
 `
@@ -308,6 +351,9 @@ func (q *Queries) ListPullRequestsByOriginatingIssue(ctx context.Context, arg Li
 			&i.ConversationChannelID,
 			&i.StackParentPrID,
 			&i.Source,
+			&i.RiskLevel,
+			&i.RiskReasons,
+			&i.RiskClassifiedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -320,7 +366,7 @@ func (q *Queries) ListPullRequestsByOriginatingIssue(ctx context.Context, arg Li
 }
 
 const listPullRequestsByProject = `-- name: ListPullRequestsByProject :many
-SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source FROM pull_request
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source, risk_level, risk_reasons, risk_classified_at FROM pull_request
 WHERE project_id = $1
   AND ($2::pull_request_state IS NULL OR state = $2)
 ORDER BY pr_updated_at DESC
@@ -374,6 +420,9 @@ func (q *Queries) ListPullRequestsByProject(ctx context.Context, arg ListPullReq
 			&i.ConversationChannelID,
 			&i.StackParentPrID,
 			&i.Source,
+			&i.RiskLevel,
+			&i.RiskReasons,
+			&i.RiskClassifiedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -386,7 +435,7 @@ func (q *Queries) ListPullRequestsByProject(ctx context.Context, arg ListPullReq
 }
 
 const listPullRequestsByWorkspace = `-- name: ListPullRequestsByWorkspace :many
-SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source FROM pull_request
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source, risk_level, risk_reasons, risk_classified_at FROM pull_request
 WHERE workspace_id = $1
   AND ($2::pull_request_state IS NULL OR state = $2)
 ORDER BY pr_updated_at DESC
@@ -442,6 +491,159 @@ func (q *Queries) ListPullRequestsByWorkspace(ctx context.Context, arg ListPullR
 			&i.ConversationChannelID,
 			&i.StackParentPrID,
 			&i.Source,
+			&i.RiskLevel,
+			&i.RiskReasons,
+			&i.RiskClassifiedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPullRequestsCreatedAt = `-- name: ListPullRequestsCreatedAt :many
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source, risk_level, risk_reasons, risk_classified_at FROM pull_request
+WHERE project_id = $1
+  AND pr_created_at <= $2::timestamptz
+  AND (pr_closed_at IS NULL OR pr_closed_at > $2::timestamptz)
+ORDER BY pr_updated_at DESC
+`
+
+type ListPullRequestsCreatedAtParams struct {
+	ProjectID pgtype.UUID        `json:"project_id"`
+	At        pgtype.Timestamptz `json:"at"`
+}
+
+// Phase 5 time-machine: reconstruct the project's PR snapshot as of
+// timestamp $2. We approximate "the row's state at that timestamp" with
+// created_at <= $2 — the row's mutable fields will reflect the latest
+// sync, but for the column-derivation surface (open vs merged etc.)
+// the timestamp filter is enough. PRs that landed AFTER $2 are
+// excluded entirely.
+func (q *Queries) ListPullRequestsCreatedAt(ctx context.Context, arg ListPullRequestsCreatedAtParams) ([]PullRequest, error) {
+	rows, err := q.db.Query(ctx, listPullRequestsCreatedAt, arg.ProjectID, arg.At)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PullRequest{}
+	for rows.Next() {
+		var i PullRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.RepoUrl,
+			&i.PrNumber,
+			&i.Title,
+			&i.State,
+			&i.IsDraft,
+			&i.AuthorLogin,
+			&i.AuthorAvatarUrl,
+			&i.BaseRef,
+			&i.HeadRef,
+			&i.HeadSha,
+			&i.HtmlUrl,
+			&i.Body,
+			&i.CiStatus,
+			&i.ReviewDecision,
+			&i.Mergeable,
+			&i.Additions,
+			&i.Deletions,
+			&i.ChangedFiles,
+			&i.Labels,
+			&i.PrCreatedAt,
+			&i.PrUpdatedAt,
+			&i.PrMergedAt,
+			&i.PrClosedAt,
+			&i.FetchedAt,
+			&i.OriginatingIssueID,
+			&i.OriginatingAgentTaskID,
+			&i.AutoCloseIssueOnMerge,
+			&i.ConversationChannelID,
+			&i.StackParentPrID,
+			&i.Source,
+			&i.RiskLevel,
+			&i.RiskReasons,
+			&i.RiskClassifiedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPullRequestsForRiskBackfill = `-- name: ListPullRequestsForRiskBackfill :many
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source, risk_level, risk_reasons, risk_classified_at FROM pull_request
+WHERE workspace_id = $1
+  AND state = 'open'
+  AND risk_classified_at IS NULL
+ORDER BY pr_updated_at DESC
+LIMIT $2
+`
+
+type ListPullRequestsForRiskBackfillParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Limit       int32       `json:"limit"`
+}
+
+// The webhook path runs the classifier inline; this query backfills rows
+// the reconciler imported before risk_classified_at was set. Open PRs
+// only — closed/merged rows aren't actionable for the badge.
+func (q *Queries) ListPullRequestsForRiskBackfill(ctx context.Context, arg ListPullRequestsForRiskBackfillParams) ([]PullRequest, error) {
+	rows, err := q.db.Query(ctx, listPullRequestsForRiskBackfill, arg.WorkspaceID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PullRequest{}
+	for rows.Next() {
+		var i PullRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.RepoUrl,
+			&i.PrNumber,
+			&i.Title,
+			&i.State,
+			&i.IsDraft,
+			&i.AuthorLogin,
+			&i.AuthorAvatarUrl,
+			&i.BaseRef,
+			&i.HeadRef,
+			&i.HeadSha,
+			&i.HtmlUrl,
+			&i.Body,
+			&i.CiStatus,
+			&i.ReviewDecision,
+			&i.Mergeable,
+			&i.Additions,
+			&i.Deletions,
+			&i.ChangedFiles,
+			&i.Labels,
+			&i.PrCreatedAt,
+			&i.PrUpdatedAt,
+			&i.PrMergedAt,
+			&i.PrClosedAt,
+			&i.FetchedAt,
+			&i.OriginatingIssueID,
+			&i.OriginatingAgentTaskID,
+			&i.AutoCloseIssueOnMerge,
+			&i.ConversationChannelID,
+			&i.StackParentPrID,
+			&i.Source,
+			&i.RiskLevel,
+			&i.RiskReasons,
+			&i.RiskClassifiedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -459,7 +661,7 @@ UPDATE pull_request SET
     pr_closed_at = COALESCE($2::timestamptz, now()),
     fetched_at   = now()
 WHERE id = $1
-RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source
+RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source, risk_level, risk_reasons, risk_classified_at
 `
 
 type MarkPullRequestClosedParams struct {
@@ -506,6 +708,9 @@ func (q *Queries) MarkPullRequestClosed(ctx context.Context, arg MarkPullRequest
 		&i.ConversationChannelID,
 		&i.StackParentPrID,
 		&i.Source,
+		&i.RiskLevel,
+		&i.RiskReasons,
+		&i.RiskClassifiedAt,
 	)
 	return i, err
 }
@@ -516,7 +721,7 @@ UPDATE pull_request SET
     pr_merged_at = COALESCE($2::timestamptz, now()),
     fetched_at   = now()
 WHERE id = $1
-RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source
+RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source, risk_level, risk_reasons, risk_classified_at
 `
 
 type MarkPullRequestMergedParams struct {
@@ -566,6 +771,9 @@ func (q *Queries) MarkPullRequestMerged(ctx context.Context, arg MarkPullRequest
 		&i.ConversationChannelID,
 		&i.StackParentPrID,
 		&i.Source,
+		&i.RiskLevel,
+		&i.RiskReasons,
+		&i.RiskClassifiedAt,
 	)
 	return i, err
 }
@@ -592,7 +800,7 @@ UPDATE pull_request SET
     source                    = COALESCE($5::text, source),
     fetched_at                = now()
 WHERE id = $1
-RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source
+RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source, risk_level, risk_reasons, risk_classified_at
 `
 
 type UpdatePullRequestLinkageParams struct {
@@ -649,6 +857,72 @@ func (q *Queries) UpdatePullRequestLinkage(ctx context.Context, arg UpdatePullRe
 		&i.ConversationChannelID,
 		&i.StackParentPrID,
 		&i.Source,
+		&i.RiskLevel,
+		&i.RiskReasons,
+		&i.RiskClassifiedAt,
+	)
+	return i, err
+}
+
+const updatePullRequestRiskProfile = `-- name: UpdatePullRequestRiskProfile :one
+UPDATE pull_request SET
+    risk_level         = $2,
+    risk_reasons       = $3,
+    risk_classified_at = NOW()
+WHERE id = $1
+RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source, risk_level, risk_reasons, risk_classified_at
+`
+
+type UpdatePullRequestRiskProfileParams struct {
+	ID          pgtype.UUID `json:"id"`
+	RiskLevel   RiskLevel   `json:"risk_level"`
+	RiskReasons []byte      `json:"risk_reasons"`
+}
+
+// Phase 5 — persist the rule-based classifier verdict. risk_classified_at
+// is stamped to NOW() on every call so an "is this stale?" check is a
+// simple timestamp comparison. risk_reasons is the JSONB array from the
+// classifier; storing verbatim avoids a parse step on the read path.
+func (q *Queries) UpdatePullRequestRiskProfile(ctx context.Context, arg UpdatePullRequestRiskProfileParams) (PullRequest, error) {
+	row := q.db.QueryRow(ctx, updatePullRequestRiskProfile, arg.ID, arg.RiskLevel, arg.RiskReasons)
+	var i PullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.RepoUrl,
+		&i.PrNumber,
+		&i.Title,
+		&i.State,
+		&i.IsDraft,
+		&i.AuthorLogin,
+		&i.AuthorAvatarUrl,
+		&i.BaseRef,
+		&i.HeadRef,
+		&i.HeadSha,
+		&i.HtmlUrl,
+		&i.Body,
+		&i.CiStatus,
+		&i.ReviewDecision,
+		&i.Mergeable,
+		&i.Additions,
+		&i.Deletions,
+		&i.ChangedFiles,
+		&i.Labels,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.PrMergedAt,
+		&i.PrClosedAt,
+		&i.FetchedAt,
+		&i.OriginatingIssueID,
+		&i.OriginatingAgentTaskID,
+		&i.AutoCloseIssueOnMerge,
+		&i.ConversationChannelID,
+		&i.StackParentPrID,
+		&i.Source,
+		&i.RiskLevel,
+		&i.RiskReasons,
+		&i.RiskClassifiedAt,
 	)
 	return i, err
 }
@@ -702,7 +976,7 @@ ON CONFLICT (workspace_id, repo_url, pr_number) DO UPDATE SET
     pr_merged_at      = EXCLUDED.pr_merged_at,
     pr_closed_at      = EXCLUDED.pr_closed_at,
     fetched_at        = now()
-RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source
+RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source, risk_level, risk_reasons, risk_classified_at
 `
 
 type UpsertPullRequestParams struct {
@@ -799,6 +1073,9 @@ func (q *Queries) UpsertPullRequest(ctx context.Context, arg UpsertPullRequestPa
 		&i.ConversationChannelID,
 		&i.StackParentPrID,
 		&i.Source,
+		&i.RiskLevel,
+		&i.RiskReasons,
+		&i.RiskClassifiedAt,
 	)
 	return i, err
 }

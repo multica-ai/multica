@@ -75,6 +75,15 @@ export interface PullRequest {
    *  the UI maps `multica_agent | multica_human | external_tool |
    *  external_contributor` to icons and falls back generically. */
   source?: string;
+  // ---- Phase 5 — risk profile ----
+  /** "low" | "medium" | "high" | "critical". Loose-typed for drift —
+   *  see RiskLevel for the canonical literal union. */
+  risk_level?: string;
+  /** Free-form list of trigger strings — render verbatim in the
+   *  "Why this risk?" popover. Empty array when the classifier had
+   *  nothing to say (medium / pre-classification). */
+  risk_reasons?: string[];
+  risk_classified_at?: string | null;
 }
 
 /** Per-project deploy target (one staging + one production by convention). */
@@ -325,6 +334,87 @@ export interface PullRequestStackNode {
 
 export interface ListPullRequestStacksResponse {
   stacks: PullRequestStackNode[];
+}
+
+// --- Phase 5: risk profile, pre-flight, time-machine, summary ----------
+
+/** Risk tier as classified by server/internal/service/ship/risk.go.
+ *  Per CLAUDE.md "API Response Compatibility" the wire is loose — we
+ *  treat the literal union as advisory; the UI maps unknown values to
+ *  the same neutral fallback as `medium`. */
+export type RiskLevel = "low" | "medium" | "high" | "critical";
+
+/** GET /api/ship_hub/summary response. Each field is a count surfaced
+ *  in the multi-segment ambient sidebar widget. */
+export interface ShipHubSummary {
+  in_staging: number;
+  awaiting_review: number;
+  failing: number;
+  in_production_24h: number;
+  promotion_pending: number;
+  open_pr_total: number;
+}
+
+/** Pre-flight checklist row for a (env, sha) pair. Mirrors the
+ *  deploy_preflight Postgres table + the gate evaluation the server
+ *  runs on every read. */
+export interface DeployPreflight {
+  id: string;
+  workspace_id: string;
+  environment_id: string;
+  target_sha: string;
+  migrations_ok: boolean;
+  smoke_tests_ok: boolean;
+  qa_verified_at: string | null;
+  qa_verified_by: string | null;
+  rollback_plan: string | null;
+  approver_id: string | null;
+  second_approver_id: string | null;
+  approved_at: string | null;
+  promoted_at: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Risk tier the server derived from the linked PR. */
+  required_risk_level: RiskLevel | string;
+  /** "ready" when every required check passes for the risk tier;
+   *  "blocked" otherwise. Surfaced verbatim by the Promote button. */
+  gate_status: "ready" | "blocked" | string;
+  /** Human-readable reasons the gate is blocked. Empty when status
+   *  is "ready". */
+  gate_blocked_reasons: string[];
+}
+
+export interface CreatePreflightRequest {
+  target_sha: string;
+}
+
+export interface UpdatePreflightRequest {
+  migrations_ok?: boolean;
+  smoke_tests_ok?: boolean;
+  /** When set, server stamps qa_verified_at and qa_verified_by from
+   *  the requesting user. */
+  qa_verified?: boolean;
+  rollback_plan?: string;
+  /** First approver — server stamps approver_id with the requesting
+   *  user. Set to false to clear. */
+  approve?: boolean;
+  /** Second approver — required for critical-risk preflights. */
+  second_approve?: boolean;
+}
+
+export interface PromoteDeployPreflightResponse {
+  preflight: DeployPreflight;
+  deploy: Deploy;
+}
+
+/** GET /api/projects/{id}/ship_snapshot?at=<RFC3339>. */
+export interface ShipSnapshotResponse {
+  at: string;
+  pull_requests: PullRequest[];
+  environments: DeployEnvironment[];
+  /** Map of environment_id -> SHA running on that env at the moment
+   *  in time. */
+  environment_shas_at_time: Record<string, string>;
 }
 
 /** Response of POST /api/workspaces/{id}/ship_hub/regenerate_webhook_secret.

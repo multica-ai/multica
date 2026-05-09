@@ -74,18 +74,20 @@ describe("ShipPRCard", () => {
     expect(screen.getByText(/CI passing/i)).toBeInTheDocument();
   });
 
-  it("shows the schema risk hint when title contains 'schema'", () => {
-    render(<ShipPRCard pr={makePR({ title: "Refactor schema migration" })} />, {
-      wrapper: I18nWrapper,
-    });
-    // Both keywords match — implementation order picks the first match
-    // (migration) but either chip is fine; assert one of the two
-    // translations renders.
-    const matches = [
-      screen.queryByText(/Touches schema/i),
-      screen.queryByText(/Has migration/i),
-    ];
-    expect(matches.some((m) => !!m)).toBe(true);
+  it("shows a server-classified high-risk badge with reasons", () => {
+    // Phase 5 — risk derivation reads `risk_level` / `risk_reasons` off
+    // the PR row instead of scanning the title.
+    render(
+      <ShipPRCard
+        pr={makePR({
+          risk_level: "high",
+          risk_reasons: ["migration file: 083_x.up.sql"],
+        })}
+      />,
+      { wrapper: I18nWrapper },
+    );
+    expect(screen.getByTestId("risk-badge")).toBeInTheDocument();
+    expect(screen.getByText(/High risk/i)).toBeInTheDocument();
   });
 
   it("renders the conflict warning when mergeable is CONFLICTING", () => {

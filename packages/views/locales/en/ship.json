@@ -58,7 +58,11 @@
     "files_count_other": "{{count}} files",
     "updated_relative": "Updated {{when}}",
     "risk_schema": "Touches schema",
-    "risk_migration": "Has migration"
+    "risk_migration": "Has migration",
+    "risk_level_low": "Low risk",
+    "risk_level_medium": "Medium risk",
+    "risk_level_high": "High risk",
+    "risk_level_critical": "Critical risk"
   },
   "chips": {
     "more_actions": "More actions",

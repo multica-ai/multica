@@ -27,4 +27,12 @@ export {
   useClosePullRequestAsStale,
   useShipCardActions,
   shipCardActionsOptions,
+  // Phase 5
+  shipHubSummaryOptions,
+  useShipHubSummary,
+  useCreateOrGetDeployPreflight,
+  useUpdateDeployPreflight,
+  usePromoteDeployPreflight,
+  shipSnapshotOptions,
+  useShipSnapshot,
 } from "./queries";

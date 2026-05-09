@@ -144,6 +144,25 @@ func (s *Service) processPullRequest(ctx context.Context, ev WebhookEvent) (Webh
 			"pr_id", uuidString(row.ID), "error", err)
 	}
 
+	// Phase 5 — risk classification. Runs on opened / synchronize so
+	// the classifier sees the latest changed-file list. We skip on
+	// "closed" / "reopened" to keep webhook latency tight; the
+	// reconciler's backfill picks up any rows we miss.
+	switch payload.Action {
+	case "opened", "synchronize", "edited", "ready_for_review":
+		if err := s.FetchAndClassify(ctx, repoURL, row, pr); err != nil {
+			slog.Warn("ship: risk classify failed",
+				"pr_id", uuidString(row.ID), "error", err)
+		} else {
+			// Re-read the post-classifier row so the outcome carries
+			// the new risk_level (the WS event payload then surfaces
+			// it without a second trip).
+			if updated, err := s.Q.GetPullRequest(ctx, row.ID); err == nil {
+				row = updated
+			}
+		}
+	}
+
 	// Phase 4 — merge hooks. payload.Action == "closed" with merged_at
 	// non-nil is the merge signal. We delegate to handleMerge which
 	// posts the comment + (optionally) closes the linked issue.
@@ -628,6 +647,9 @@ func (s *Service) processDeploymentStatus(ctx context.Context, ev WebhookEvent) 
 			CurrentSha:        pgtype.Text{String: updated.Sha, Valid: true},
 			CurrentDeployedAt: now,
 		})
+		// Phase 5 — production deploy storytelling. Best-effort; a
+		// failed runbook write logs and continues.
+		s.emitRunbookFromOutcome(ctx, ev.WorkspaceID, env, updated)
 	}
 	kind := "deploy_progress"
 	if newStatus == db.DeployStatusSucceeded || newStatus == db.DeployStatusFailed || newStatus == db.DeployStatusRolledBack {

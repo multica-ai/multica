@@ -45,6 +45,25 @@ func (q *Queries) CountDeployEnvironmentsForProjects(ctx context.Context, projec
 	return items, nil
 }
 
+const countWorkspaceDeploysIn24h = `-- name: CountWorkspaceDeploysIn24h :one
+SELECT count(*)::bigint AS count
+FROM deploy d
+JOIN deploy_environment de ON de.id = d.environment_id
+WHERE d.workspace_id = $1
+  AND de.kind = 'production'
+  AND d.status = 'succeeded'
+  AND d.completed_at IS NOT NULL
+  AND d.completed_at > NOW() - INTERVAL '24 hours'
+`
+
+// Phase 5 — backs the ambient sidebar's "in production last 24h" segment.
+func (q *Queries) CountWorkspaceDeploysIn24h(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countWorkspaceDeploysIn24h, workspaceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteDeployEnvironment = `-- name: DeleteDeployEnvironment :exec
 DELETE FROM deploy_environment WHERE id = $1
 `
@@ -333,6 +352,56 @@ func (q *Queries) ListDeployEnvironmentsByWorkspace(ctx context.Context, workspa
 			&i.AutoPromote,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDeploysByEnvironmentBefore = `-- name: ListDeploysByEnvironmentBefore :many
+SELECT id, workspace_id, environment_id, ref, sha, status, triggered_by, triggered_at, started_at, completed_at, log_url, error_message, created_at FROM deploy
+WHERE environment_id = $1
+  AND triggered_at <= $2::timestamptz
+ORDER BY triggered_at DESC
+`
+
+type ListDeploysByEnvironmentBeforeParams struct {
+	EnvironmentID pgtype.UUID        `json:"environment_id"`
+	At            pgtype.Timestamptz `json:"at"`
+}
+
+// Phase 5 time-machine — list every deploy attempt against an env up to
+// timestamp $2. Used to reconstruct "what SHA was running on this env
+// as of that moment". Ordered triggered_at DESC so the caller can take
+// the first succeeded row as the active SHA at $2.
+func (q *Queries) ListDeploysByEnvironmentBefore(ctx context.Context, arg ListDeploysByEnvironmentBeforeParams) ([]Deploy, error) {
+	rows, err := q.db.Query(ctx, listDeploysByEnvironmentBefore, arg.EnvironmentID, arg.At)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Deploy{}
+	for rows.Next() {
+		var i Deploy
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.EnvironmentID,
+			&i.Ref,
+			&i.Sha,
+			&i.Status,
+			&i.TriggeredBy,
+			&i.TriggeredAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.LogUrl,
+			&i.ErrorMessage,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
