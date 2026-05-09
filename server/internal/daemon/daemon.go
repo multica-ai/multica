@@ -18,7 +18,9 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/daemon/trace"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // ErrRepoNotConfigured is returned by ensureRepoReady when the requested repo
@@ -38,10 +40,11 @@ type workspaceState struct {
 
 // Daemon is the local agent runtime that polls for and executes tasks.
 type Daemon struct {
-	cfg       Config
-	client    *Client
-	repoCache *repocache.Cache
-	logger    *slog.Logger
+	cfg        Config
+	client     *Client
+	repoCache  *repocache.Cache
+	traceStore trace.TraceStore
+	logger     *slog.Logger
 
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
@@ -59,11 +62,24 @@ type Daemon struct {
 
 // New creates a new Daemon instance.
 func New(cfg Config, logger *slog.Logger) *Daemon {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
+	var traceStore trace.TraceStore
+	if cfg.WorkspacesRoot != "" {
+		store, err := trace.NewJSONLStore(filepath.Join(cfg.WorkspacesRoot, ".traces"))
+		if err != nil {
+			logger.Warn("trace store disabled", "error", err)
+		} else {
+			traceStore = store
+		}
+	}
 	return &Daemon{
 		cfg:           cfg,
 		client:        NewClient(cfg.ServerBaseURL),
 		repoCache:     repocache.New(cacheRoot, logger),
+		traceStore:    traceStore,
 		logger:        logger,
 		workspaces:    make(map[string]*workspaceState),
 		runtimeIndex:  make(map[string]Runtime),
@@ -126,6 +142,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Deregister runtimes on shutdown (uses a fresh context since ctx will be cancelled).
 	defer d.deregisterRuntimes()
+	if d.traceStore != nil {
+		defer func() {
+			if err := d.traceStore.Close(); err != nil && !errors.Is(err, trace.ErrStoreClosed) {
+				d.logger.Warn("failed to close trace store", "error", err)
+			}
+		}()
+	}
 
 	// Start workspace sync loop to discover newly created workspaces.
 	go d.workspaceSyncLoop(ctx)
@@ -234,6 +257,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"device_name":       d.cfg.DeviceName,
 		"cli_version":       d.cfg.CLIVersion,
 		"launched_by":       d.cfg.LaunchedBy,
+		"health_port":       d.cfg.HealthPort,
 		"runtimes":          runtimes,
 	}
 
@@ -999,6 +1023,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 
 	prompt := BuildPrompt(task)
 
+	taskStart := time.Now()
+	traceRunID := newTraceRunID(taskStart)
+
 	// Pass the daemon's auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
 	agentEnv := map[string]string{
@@ -1009,6 +1036,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		"MULTICA_AGENT_NAME":   agentName,
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
+		"MULTICA_TASK_RUN_ID":  traceRunID,
 	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
@@ -1057,8 +1085,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		taskLog.Info("resuming session", "session_id", task.PriorSessionID)
 	}
 
-	taskStart := time.Now()
-
 	var customArgs []string
 	var mcpConfig json.RawMessage
 	if task.Agent != nil {
@@ -1089,6 +1115,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		CustomArgs:      customArgs,
 		McpConfig:       mcpConfig,
 	}
+	// Resolve approval policy from agent runtime_config and inject callback.
+	// Default is "auto" — nil callback preserves existing auto-approve behaviour.
+	{
+		var rtCfg json.RawMessage
+		if task.Agent != nil {
+			rtCfg = task.Agent.RuntimeConfig
+		}
+		policy := protocol.ResolveApprovalPolicy(rtCfg)
+		execOpts.OnApproval = BuildApprovalCallback(policy, task.ID, provider, d.client)
+		traceEnabled := protocol.ResolveTraceEnabled(rtCfg)
+		if traceEnabled {
+			execOpts.OnApproval = WithApprovalTrace(execOpts.OnApproval, d.traceStore, task.ID, traceRunID, provider)
+			execOpts.TraceCallback = BuildTraceCallback(d.traceStore, task.ID, traceRunID, provider)
+		}
+		if policy != protocol.ApprovalPolicyAuto {
+			taskLog.Info("approval policy active", "policy", policy)
+		}
+	}
+
 	// openclaw loads its bootstrap files (AGENTS.md, SOUL.md, ...) from its own
 	// workspace dir rather than the task workdir, so the AGENTS.md written by
 	// execenv.InjectRuntimeConfig is never read. Pass agent instructions inline
@@ -1228,6 +1273,24 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		var pendingThinking strings.Builder
 		var batch []TaskMessageData
 		callIDToTool := map[string]string{}
+		traceDisplay := func(eventType, title, content string, metadata map[string]any) {
+			if opts.TraceCallback == nil {
+				return
+			}
+			payload := map[string]any{
+				"type":    eventType,
+				"title":   title,
+				"content": content,
+			}
+			if len(metadata) > 0 {
+				payload["metadata"] = metadata
+			}
+			data, err := json.Marshal(payload)
+			if err != nil {
+				return
+			}
+			opts.TraceCallback(trace.ChannelDisplayEvent, string(data), "")
+		}
 
 		flush := func() {
 			mu.Lock()
@@ -1323,6 +1386,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					mu.Unlock()
 				case agent.MessageThinking:
 					if msg.Content != "" {
+						traceDisplay("thinking", "Thinking", msg.Content, map[string]any{"source": "daemon_message"})
 						mu.Lock()
 						pendingThinking.WriteString(msg.Content)
 						mu.Unlock()
@@ -1330,6 +1394,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				case agent.MessageText:
 					if msg.Content != "" {
 						taskLog.Debug("agent", "text", truncateLog(msg.Content, 200))
+						traceDisplay("assistant_text", "Assistant", msg.Content, map[string]any{"source": "daemon_message"})
 						mu.Lock()
 						pendingText.WriteString(msg.Content)
 						mu.Unlock()

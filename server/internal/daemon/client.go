@@ -331,3 +331,25 @@ func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
 	}
 	return json.NewDecoder(resp.Body).Decode(respBody)
 }
+
+// ReportInteraction creates a pending interaction on the server and returns its ID.
+func (c *Client) ReportInteraction(ctx context.Context, taskID string, req map[string]any) (string, error) {
+	var resp struct {
+		ID string `json:"id"`
+	}
+	if err := c.postJSON(ctx, "/api/daemon/tasks/"+taskID+"/interactions", req, &resp); err != nil {
+		return "", err
+	}
+	return resp.ID, nil
+}
+
+
+
+// GetInteraction polls the server for an interaction's current state.
+func (c *Client) GetInteraction(ctx context.Context, taskID, interactionID string) (map[string]any, error) {
+	var resp map[string]any
+	if err := c.getJSON(ctx, "/api/daemon/tasks/"+taskID+"/interactions/"+interactionID, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}

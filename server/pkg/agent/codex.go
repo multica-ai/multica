@@ -116,7 +116,11 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		cancel()
 		return nil, fmt.Errorf("codex stdin pipe: %w", err)
 	}
-	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[codex:stderr] "), codexStderrTailBytes)
+	stderrWriter := io.Writer(newLogWriter(b.cfg.Logger, "[codex:stderr] "))
+	if opts.TraceCallback != nil {
+		stderrWriter = io.MultiWriter(stderrWriter, newTraceWriter("raw_stderr", opts.TraceCallback))
+	}
+	stderrBuf := newStderrTail(stderrWriter, codexStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
 	if err := cmd.Start(); err != nil {
@@ -141,6 +145,10 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		stdin:                stdin,
 		pending:              make(map[int]*pendingRPC),
 		notificationProtocol: "unknown",
+		onApproval:           opts.OnApproval,
+		traceCallback:        opts.TraceCallback,
+
+		runCtx: runCtx,
 		onMessage: func(msg Message) {
 			if msg.Type == MessageText {
 				outputMu.Lock()
@@ -361,12 +369,20 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		}
 	}
 
+	// Determine approvalPolicy: when the caller provided an approval callback
+	// (prompt mode), tell Codex to ask for approval on commands/file changes;
+	// otherwise leave nil so Codex uses its default (auto-approve).
+	var approvalPolicy any
+	if c.onApproval != nil {
+		approvalPolicy = "on-request"
+	}
+
 	startResult, err := c.request(ctx, "thread/start", map[string]any{
 		"model":                  nilIfEmpty(opts.Model),
 		"modelProvider":          nil,
 		"profile":                nil,
 		"cwd":                    opts.Cwd,
-		"approvalPolicy":         nil,
+		"approvalPolicy":         approvalPolicy,
 		"sandbox":                nil,
 		"config":                 nil,
 		"baseInstructions":       nil,
@@ -389,15 +405,19 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 // ── codexClient: JSON-RPC 2.0 transport ──
 
 type codexClient struct {
-	cfg        Config
-	stdin      interface{ Write([]byte) (int, error) }
-	mu         sync.Mutex
-	nextID     int
-	pending    map[int]*pendingRPC
-	threadID   string
-	turnID     string
-	onMessage  func(Message)
-	onTurnDone func(aborted bool)
+	cfg           Config
+	stdin         interface{ Write([]byte) (int, error) }
+	mu            sync.Mutex
+	nextID        int
+	pending       map[int]*pendingRPC
+	threadID      string
+	turnID        string
+	onMessage     func(Message)
+	onTurnDone    func(aborted bool)
+	onApproval    ApprovalCallback
+	traceCallback TraceCallback
+
+	runCtx context.Context // for passing to approval callback
 
 	notificationProtocol string // "unknown", "legacy", "raw"
 	turnStarted          bool
@@ -513,6 +533,15 @@ func (c *codexClient) handleLine(line string) {
 		return
 	}
 
+	if c.traceCallback != nil {
+		c.traceCallback("raw_stdout", line, "")
+	}
+
+	// Trace: capture every valid JSON-RPC line as provider_event.
+	if c.traceCallback != nil {
+		c.traceCallback("provider_event", "", line)
+	}
+
 	// Check if it's a response to our request
 	if _, hasID := raw["id"]; hasID {
 		if _, hasResult := raw["result"]; hasResult {
@@ -572,12 +601,62 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 	var method string
 	_ = json.Unmarshal(raw["method"], &method)
 
-	// Auto-approve all exec/patch requests in daemon mode
+	// If no approval callback, auto-approve everything (current default).
+	if c.onApproval == nil {
+		switch method {
+		case "item/commandExecution/requestApproval", "execCommandApproval":
+			c.respond(id, map[string]any{"decision": "accept"})
+		case "item/fileChange/requestApproval", "applyPatchApproval":
+			c.respond(id, map[string]any{"decision": "accept"})
+		default:
+			c.respond(id, map[string]any{})
+		}
+		return
+	}
+
+	// Approval callback is set — route approval requests through it.
 	switch method {
 	case "item/commandExecution/requestApproval", "execCommandApproval":
-		c.respond(id, map[string]any{"decision": "accept"})
+		title := "Command execution"
+		detail := ""
+		if p, ok := raw["params"]; ok {
+			var params map[string]any
+			if json.Unmarshal(p, &params) == nil {
+				if cmd, _ := params["command"].(string); cmd != "" {
+					title = "Run: " + cmd
+				}
+				detail, _ = params["command"].(string)
+			}
+		}
+		_, approved, err := c.onApproval(c.runCtx, ApprovalRequest{
+			Type: "command_approval", Title: title, Detail: detail,
+		})
+		if err != nil || !approved {
+			c.respond(id, map[string]any{"decision": "reject"})
+		} else {
+			c.respond(id, map[string]any{"decision": "accept"})
+		}
 	case "item/fileChange/requestApproval", "applyPatchApproval":
-		c.respond(id, map[string]any{"decision": "accept"})
+		title := "File change"
+		detail := ""
+		if p, ok := raw["params"]; ok {
+			var params map[string]any
+			if json.Unmarshal(p, &params) == nil {
+				if path, _ := params["path"].(string); path != "" {
+					title = "Write: " + path
+				}
+				raw, _ := json.Marshal(params)
+				detail = string(raw)
+			}
+		}
+		_, approved, err := c.onApproval(c.runCtx, ApprovalRequest{
+			Type: "file_change_approval", Title: title, Detail: detail,
+		})
+		if err != nil || !approved {
+			c.respond(id, map[string]any{"decision": "reject"})
+		} else {
+			c.respond(id, map[string]any{"decision": "accept"})
+		}
 	default:
 		c.respond(id, map[string]any{})
 	}
@@ -630,10 +709,18 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 		if c.onMessage != nil {
 			c.onMessage(Message{Type: MessageStatus, Status: "running"})
 		}
+		emitDisplayEvent(c.traceCallback, "status", "Codex", "running", nil)
+
 	case "agent_message":
 		text, _ := msg["message"].(string)
 		if text != "" && c.onMessage != nil {
 			c.onMessage(Message{Type: MessageText, Content: text})
+		}
+		if text != "" && c.traceCallback != nil {
+			c.traceCallback("normalized", text, "")
+		}
+		if text != "" {
+			emitDisplayEvent(c.traceCallback, "assistant_text", "Codex", text, nil)
 		}
 	case "exec_command_begin":
 		callID, _ := msg["call_id"].(string)
@@ -646,6 +733,11 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 				Input:  map[string]any{"command": command},
 			})
 		}
+		if c.traceCallback != nil {
+			c.traceCallback("normalized", "[exec_command] "+command, "")
+		}
+		emitDisplayEvent(c.traceCallback, "command_start", "Command", command, map[string]any{"call_id": callID})
+
 	case "exec_command_end":
 		callID, _ := msg["call_id"].(string)
 		output, _ := msg["output"].(string)
@@ -657,6 +749,14 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 				Output: output,
 			})
 		}
+		if c.traceCallback != nil {
+			c.traceCallback("normalized", "[exec_command] finished", "")
+			if output != "" {
+				c.traceCallback("command_stdout", output, "")
+			}
+		}
+		emitDisplayEvent(c.traceCallback, "command_output", "Command output", output, map[string]any{"call_id": callID})
+
 	case "patch_apply_begin":
 		callID, _ := msg["call_id"].(string)
 		if c.onMessage != nil {
@@ -666,6 +766,8 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 				CallID: callID,
 			})
 		}
+		emitDisplayEvent(c.traceCallback, "file_change", "File change", "started", map[string]any{"call_id": callID})
+
 	case "patch_apply_end":
 		callID, _ := msg["call_id"].(string)
 		if c.onMessage != nil {
@@ -675,6 +777,8 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 				CallID: callID,
 			})
 		}
+		emitDisplayEvent(c.traceCallback, "file_change", "File change", "completed", map[string]any{"call_id": callID})
+
 	case "task_complete":
 		// Extract usage from legacy task_complete if present.
 		c.extractUsageFromMap(msg)
@@ -711,6 +815,7 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 		if c.onMessage != nil {
 			c.onMessage(Message{Type: MessageStatus, Status: "running"})
 		}
+		emitDisplayEvent(c.traceCallback, "status", "Codex", "running", nil)
 
 	case "turn/completed":
 		turnID := extractNestedString(params, "turn", "id")
@@ -726,6 +831,7 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 				errMsg = "codex turn failed"
 			}
 			c.setTurnError(errMsg)
+			emitDisplayEvent(c.traceCallback, "error", "Codex error", errMsg, nil)
 		}
 
 		if c.completedTurnIDs == nil {
@@ -746,6 +852,7 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 		if c.onTurnDone != nil {
 			c.onTurnDone(aborted)
 		}
+		emitDisplayEvent(c.traceCallback, "status", "Codex", status, map[string]any{"aborted": aborted})
 
 	case "error":
 		// Top-level protocol error. Retrying notifications (willRetry=true) are
@@ -760,6 +867,8 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 			c.cfg.Logger.Warn("codex error notification", "message", errMsg, "will_retry", willRetry)
 			if !willRetry {
 				c.setTurnError(errMsg)
+				emitDisplayEvent(c.traceCallback, "error", "Codex error", errMsg, map[string]any{"will_retry": willRetry})
+
 			}
 		}
 
@@ -798,6 +907,10 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 				Input:  map[string]any{"command": command},
 			})
 		}
+		if c.traceCallback != nil {
+			c.traceCallback("normalized", "[exec_command] "+command, "")
+		}
+		emitDisplayEvent(c.traceCallback, "command_start", "Command", command, map[string]any{"call_id": itemID})
 
 	case method == "item/completed" && itemType == "commandExecution":
 		output, _ := item["aggregatedOutput"].(string)
@@ -809,6 +922,13 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 				Output: output,
 			})
 		}
+		if c.traceCallback != nil {
+			c.traceCallback("normalized", "[exec_command] finished", "")
+			if output != "" {
+				c.traceCallback("command_stdout", output, "")
+			}
+		}
+		emitDisplayEvent(c.traceCallback, "command_output", "Command output", output, map[string]any{"call_id": itemID})
 
 	case method == "item/started" && itemType == "fileChange":
 		if c.onMessage != nil {
@@ -818,6 +938,10 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 				CallID: itemID,
 			})
 		}
+		if c.traceCallback != nil {
+			c.traceCallback("normalized", "[fileChange] started", "")
+		}
+		emitDisplayEvent(c.traceCallback, "file_change", "File change", "started", map[string]any{"call_id": itemID})
 
 	case method == "item/completed" && itemType == "fileChange":
 		if c.onMessage != nil {
@@ -827,11 +951,21 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 				CallID: itemID,
 			})
 		}
+		if c.traceCallback != nil {
+			c.traceCallback("normalized", "[fileChange] completed", "")
+		}
+		emitDisplayEvent(c.traceCallback, "file_change", "File change", "completed", map[string]any{"call_id": itemID})
 
 	case method == "item/completed" && itemType == "agentMessage":
 		text, _ := item["text"].(string)
 		if text != "" && c.onMessage != nil {
 			c.onMessage(Message{Type: MessageText, Content: text})
+		}
+		if text != "" && c.traceCallback != nil {
+			c.traceCallback("normalized", text, "")
+		}
+		if text != "" {
+			emitDisplayEvent(c.traceCallback, "assistant_text", "Codex", text, nil)
 		}
 		phase, _ := item["phase"].(string)
 		if phase == "final_answer" && c.turnStarted {

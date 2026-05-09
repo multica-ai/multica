@@ -82,7 +82,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			stdin = nil
 		}
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[claude:stderr] ")
+	if opts.TraceCallback != nil {
+		cmd.Stderr = io.MultiWriter(newLogWriter(b.cfg.Logger, "[claude:stderr] "), newTraceWriter("raw_stderr", opts.TraceCallback))
+	} else {
+		cmd.Stderr = newLogWriter(b.cfg.Logger, "[claude:stderr] ")
+	}
 
 	if err := cmd.Start(); err != nil {
 		closeStdin()
@@ -95,7 +99,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		_ = cmd.Wait()
 		return nil, fmt.Errorf("write claude input: %w", err)
 	}
-	closeStdin()
+	// In auto mode (no approval callback), close stdin immediately — Claude
+	// won't send control_requests with bypassPermissions. In prompt/deny mode,
+	// keep stdin open so we can write control_response messages back.
+	if opts.OnApproval == nil {
+		closeStdin()
+	}
 
 	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -109,6 +118,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
+		defer closeStdin() // ensure stdin is closed when goroutine exits (prompt mode keeps it open)
 		if mcpConfigPath != "" {
 			defer os.Remove(mcpConfigPath)
 		}
@@ -130,9 +140,18 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
 		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
+			rawLine := scanner.Text()
+			if opts.TraceCallback != nil {
+				opts.TraceCallback("raw_stdout", rawLine, "")
+			}
+			line := strings.TrimSpace(rawLine)
 			if line == "" {
 				continue
+			}
+
+			// Trace: capture every valid stream-json line as provider_event.
+			if opts.TraceCallback != nil {
+				opts.TraceCallback("provider_event", "", line)
 			}
 
 			var msg claudeSDKMessage
@@ -142,14 +161,16 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			switch msg.Type {
 			case "assistant":
-				b.handleAssistant(msg, msgCh, &output, usage)
+				b.handleAssistant(msg, msgCh, &output, usage, opts.TraceCallback)
 			case "user":
-				b.handleUser(msg, msgCh)
+				b.handleUser(msg, msgCh, opts.TraceCallback)
 			case "system":
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
 				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
+				emitDisplayEvent(opts.TraceCallback, "status", "Claude", "running", nil)
+
 			case "result":
 				closeStdin()
 				sessionID = msg.SessionID
@@ -161,6 +182,15 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					finalStatus = "failed"
 					finalError = msg.ResultText
 				}
+				// Trace: result/error as normalized.
+				if opts.TraceCallback != nil {
+					content := "result: " + finalStatus
+					if finalError != "" {
+						content = "error: " + finalError
+					}
+					opts.TraceCallback("normalized", content, "")
+				}
+				emitDisplayEvent(opts.TraceCallback, "status", "Claude", finalStatus, map[string]any{"error": finalError})
 			case "log":
 				if msg.Log != nil {
 					trySend(msgCh, Message{
@@ -168,7 +198,19 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 						Level:   msg.Log.Level,
 						Content: msg.Log.Message,
 					})
+
 				}
+			case "control_request":
+				// Only received when --permission-mode is not bypassPermissions.
+				if stdin != nil {
+					b.handleControlRequest(runCtx, msg, stdin, opts.OnApproval)
+				}
+				// Trace: control_request as normalized (approval_request/response
+				// are written by WithApprovalTrace separately).
+				if opts.TraceCallback != nil {
+					opts.TraceCallback("normalized", "[control_request]", line)
+				}
+				emitDisplayEvent(opts.TraceCallback, "approval_prompt", "Approval required", "", map[string]any{"provider": "claude"})
 			}
 		}
 
@@ -210,7 +252,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage) {
+func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage, trace TraceCallback) {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		return
@@ -232,10 +274,15 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 			if block.Text != "" {
 				output.WriteString(block.Text)
 				trySend(ch, Message{Type: MessageText, Content: block.Text})
+				if trace != nil {
+					trace("normalized", block.Text, "")
+				}
+				emitDisplayEvent(trace, "assistant_text", "Claude", block.Text, nil)
 			}
 		case "thinking":
 			if block.Text != "" {
 				trySend(ch, Message{Type: MessageThinking, Content: block.Text})
+				emitDisplayEvent(trace, "thinking", "Thinking", block.Text, nil)
 			}
 		case "tool_use":
 			var input map[string]any
@@ -248,11 +295,16 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 				CallID: block.ID,
 				Input:  input,
 			})
+			if trace != nil {
+				trace("normalized", "[tool_use: "+block.Name+"]", "")
+			}
+			emitDisplayEvent(trace, "tool_call", block.Name, "", map[string]any{"call_id": block.ID, "input": input})
+
 		}
 	}
 }
 
-func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) {
+func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message, trace TraceCallback) {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		return
@@ -269,12 +321,16 @@ func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) {
 				CallID: block.ToolUseID,
 				Output: resultStr,
 			})
+			if trace != nil {
+				trace("normalized", "[tool_result: "+block.ToolUseID+"]", resultStr)
+			}
+			emitDisplayEvent(trace, "tool_result", "Tool result", resultStr, map[string]any{"call_id": block.ToolUseID})
+
 		}
 	}
 }
 
-func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interface{ Write([]byte) (int, error) }) {
-	// Auto-approve all tool uses in autonomous/daemon mode.
+func (b *claudeBackend) handleControlRequest(ctx context.Context, msg claudeSDKMessage, stdin interface{ Write([]byte) (int, error) }, onApproval ApprovalCallback) {
 	var req claudeControlRequestPayload
 	if err := json.Unmarshal(msg.Request, &req); err != nil {
 		return
@@ -288,13 +344,34 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 		inputMap = map[string]any{}
 	}
 
+	// Determine behavior: auto-approve if no callback, otherwise ask.
+	behavior := "allow"
+	if onApproval != nil {
+		title := "Tool: " + req.ToolName
+		detail := ""
+		if req.Subtype != "" {
+			title = req.Subtype + ": " + req.ToolName
+		}
+		if raw, err := json.Marshal(inputMap); err == nil {
+			detail = string(raw)
+		}
+		_, approved, err := onApproval(ctx, ApprovalRequest{
+			Type:   "permission_request",
+			Title:  title,
+			Detail: detail,
+		})
+		if err != nil || !approved {
+			behavior = "deny"
+		}
+	}
+
 	response := map[string]any{
 		"type": "control_response",
 		"response": map[string]any{
 			"subtype":    "success",
 			"request_id": msg.RequestID,
 			"response": map[string]any{
-				"behavior":     "allow",
+				"behavior":     behavior,
 				"updatedInput": inputMap,
 			},
 		},
@@ -381,23 +458,34 @@ func trySend(ch chan<- Message, msg Message) {
 
 // claudeBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args. Overriding these would break
-// the daemon↔Claude communication protocol.
+// the daemon↔Claude communication protocol or approval policy enforcement.
+// --permission-mode is blocked in ALL modes because the daemon sets it based
+// on approval_policy (bypassPermissions for auto, default for prompt/deny).
+// Allowing custom_args to override it would silently break the prompt flow.
 var claudeBlockedArgs = map[string]blockedArgMode{
 	"-p":                blockedStandalone, // non-interactive mode
 	"--output-format":   blockedWithValue,  // stream-json protocol
 	"--input-format":    blockedWithValue,  // stream-json protocol
-	"--permission-mode": blockedWithValue,  // bypassPermissions for autonomous operation
+	"--permission-mode": blockedWithValue,  // set by daemon based on approval_policy
 	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
 }
 
 func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
+	// Determine permission mode: auto/nil callback → bypassPermissions,
+	// prompt/deny callback → default (so Claude emits control_request events
+	// for every bash command and file edit, allowing the user to Allow/Deny).
+	permMode := "bypassPermissions"
+	if opts.OnApproval != nil {
+		permMode = "default"
+	}
+
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
 		"--strict-mcp-config",
-		"--permission-mode", "bypassPermissions",
+		"--permission-mode", permMode,
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)

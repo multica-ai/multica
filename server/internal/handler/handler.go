@@ -50,6 +50,7 @@ type Handler struct {
 	PingStore        *PingStore
 	UpdateStore      *UpdateStore
 	ModelListStore   *ModelListStore
+	InteractionStore *InteractionStore
 	Storage          storage.Storage
 	CFSigner         *auth.CloudFrontSigner
 	Analytics        analytics.Client
@@ -79,6 +80,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		PingStore:        NewPingStore(),
 		UpdateStore:      NewUpdateStore(),
 		ModelListStore:   NewModelListStore(),
+		InteractionStore: NewInteractionStore(),
 		Storage:          store,
 		CFSigner:         cfSigner,
 		Analytics:        analyticsClient,

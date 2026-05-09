@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -26,7 +27,7 @@ func TestClaudeHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), nil)
 
 	if output.String() != "Hello world" {
 		t.Fatalf("expected output 'Hello world', got %q", output.String())
@@ -63,7 +64,7 @@ func TestClaudeHandleAssistantToolUse(t *testing.T) {
 		}),
 	}
 
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), nil)
 
 	if output.String() != "" {
 		t.Fatalf("tool_use should not add to output, got %q", output.String())
@@ -101,7 +102,7 @@ func TestClaudeHandleUserToolResult(t *testing.T) {
 		}),
 	}
 
-	b.handleUser(msg, ch)
+	b.handleUser(msg, ch, nil)
 
 	select {
 	case m := <-ch:
@@ -130,7 +131,8 @@ func TestClaudeHandleControlRequestAutoApproves(t *testing.T) {
 		}),
 	}
 
-	b.handleControlRequest(msg, &written)
+	// nil callback = auto mode
+	b.handleControlRequest(context.Background(), msg, &written, nil)
 
 	var resp map[string]any
 	if err := json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp); err != nil {
@@ -150,6 +152,69 @@ func TestClaudeHandleControlRequestAutoApproves(t *testing.T) {
 	}
 }
 
+func TestClaudeHandleControlRequestPromptAllow(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	var written bytes.Buffer
+
+	msg := claudeSDKMessage{
+		Type:      "control_request",
+		RequestID: "req-99",
+		Request: mustMarshal(t, claudeControlRequestPayload{
+			Subtype:  "tool_use",
+			ToolName: "Bash",
+			Input:    mustMarshal(t, map[string]any{"command": "rm -rf /tmp/test"}),
+		}),
+	}
+
+	callback := func(_ context.Context, req ApprovalRequest) (string, bool, error) {
+		if req.Type != "permission_request" {
+			t.Errorf("expected type permission_request, got %q", req.Type)
+		}
+		return "allow", true, nil
+	}
+
+	b.handleControlRequest(context.Background(), msg, &written, callback)
+
+	var resp map[string]any
+	json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp)
+	inner := resp["response"].(map[string]any)["response"].(map[string]any)
+	if inner["behavior"] != "allow" {
+		t.Fatalf("expected behavior allow, got %v", inner["behavior"])
+	}
+}
+
+func TestClaudeHandleControlRequestPromptDeny(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	var written bytes.Buffer
+
+	msg := claudeSDKMessage{
+		Type:      "control_request",
+		RequestID: "req-100",
+		Request: mustMarshal(t, claudeControlRequestPayload{
+			Subtype:  "tool_use",
+			ToolName: "Bash",
+			Input:    mustMarshal(t, map[string]any{"command": "rm -rf /"}),
+		}),
+	}
+
+	callback := func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+		return "deny", false, nil
+	}
+
+	b.handleControlRequest(context.Background(), msg, &written, callback)
+
+	var resp map[string]any
+	json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp)
+	inner := resp["response"].(map[string]any)["response"].(map[string]any)
+	if inner["behavior"] != "deny" {
+		t.Fatalf("expected behavior deny, got %v", inner["behavior"])
+	}
+}
+
 func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	t.Parallel()
 
@@ -163,7 +228,7 @@ func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	}
 
 	// Should not panic
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), nil)
 
 	if output.String() != "" {
 		t.Fatalf("expected empty output for invalid JSON, got %q", output.String())
@@ -215,6 +280,60 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 		if args[i] != want {
 			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
 		}
+	}
+}
+
+func TestBuildClaudeArgsPromptModeUsesDefault(t *testing.T) {
+	t.Parallel()
+
+	dummyCallback := func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+		return "allow", true, nil
+	}
+	args := buildClaudeArgs(ExecOptions{OnApproval: dummyCallback}, slog.Default())
+
+	foundDefault := false
+	for i, a := range args {
+		if a == "--permission-mode" && i+1 < len(args) {
+			if args[i+1] == "default" {
+				foundDefault = true
+			} else if args[i+1] == "bypassPermissions" {
+				t.Fatalf("prompt mode should not use bypassPermissions: %v", args)
+			}
+		}
+	}
+	if !foundDefault {
+		t.Fatalf("expected --permission-mode default in prompt mode args: %v", args)
+	}
+}
+
+func TestBuildClaudeArgsPromptModeBlocksCustomPermissionMode(t *testing.T) {
+	t.Parallel()
+
+	dummyCallback := func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+		return "allow", true, nil
+	}
+	args := buildClaudeArgs(ExecOptions{
+		OnApproval: dummyCallback,
+		CustomArgs: []string{"--permission-mode", "bypassPermissions", "--model", "o3"},
+	}, slog.Default())
+
+	// --permission-mode should be "default" (set by daemon), not "bypassPermissions" (from custom args).
+	for i, a := range args {
+		if a == "--permission-mode" && i+1 < len(args) {
+			if args[i+1] != "default" {
+				t.Fatalf("prompt mode should force --permission-mode default, got %q: %v", args[i+1], args)
+			}
+		}
+	}
+	// --model o3 should still pass through.
+	foundModel := false
+	for i, a := range args {
+		if a == "--model" && i+1 < len(args) && args[i+1] == "o3" {
+			foundModel = true
+		}
+	}
+	if !foundModel {
+		t.Fatalf("expected --model o3 to pass through: %v", args)
 	}
 }
 

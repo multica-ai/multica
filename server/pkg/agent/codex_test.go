@@ -169,6 +169,81 @@ func TestCodexHandleServerRequestFileChangeApproval(t *testing.T) {
 	}
 }
 
+func TestCodexHandleServerRequestPromptAllow(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	c.runCtx = context.Background()
+	c.onApproval = func(_ context.Context, req ApprovalRequest) (string, bool, error) {
+		if req.Type != "command_approval" {
+			t.Errorf("expected type command_approval, got %q", req.Type)
+		}
+		return "allow", true, nil
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","id":20,"method":"execCommandApproval","params":{"command":"ls -la"}}`)
+
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(lines))
+	}
+	var resp map[string]any
+	json.Unmarshal([]byte(lines[0]), &resp)
+	result := resp["result"].(map[string]any)
+	if result["decision"] != "accept" {
+		t.Fatalf("expected decision=accept, got %v", result["decision"])
+	}
+}
+
+func TestCodexHandleServerRequestPromptDeny(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	c.runCtx = context.Background()
+	c.onApproval = func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+		return "deny", false, nil
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","id":21,"method":"item/commandExecution/requestApproval","params":{}}`)
+
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(lines))
+	}
+	var resp map[string]any
+	json.Unmarshal([]byte(lines[0]), &resp)
+	result := resp["result"].(map[string]any)
+	if result["decision"] != "reject" {
+		t.Fatalf("expected decision=reject, got %v", result["decision"])
+	}
+}
+
+func TestCodexHandleServerRequestPromptFileChangeDeny(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	c.runCtx = context.Background()
+	c.onApproval = func(_ context.Context, req ApprovalRequest) (string, bool, error) {
+		if req.Type != "file_change_approval" {
+			t.Errorf("expected type file_change_approval, got %q", req.Type)
+		}
+		return "deny", false, nil
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","id":22,"method":"applyPatchApproval","params":{"path":"/tmp/test.go"}}`)
+
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(lines))
+	}
+	var resp map[string]any
+	json.Unmarshal([]byte(lines[0]), &resp)
+	result := resp["result"].(map[string]any)
+	if result["decision"] != "reject" {
+		t.Fatalf("expected decision=reject, got %v", result["decision"])
+	}
+}
+
 func TestCodexLegacyEventTaskStarted(t *testing.T) {
 	t.Parallel()
 
@@ -745,6 +820,10 @@ func TestCodexStartOrResumeThreadStartsFresh(t *testing.T) {
 				if params["persistExtendedHistory"] != true {
 					t.Error("expected persistExtendedHistory=true on thread/start")
 				}
+				// auto mode (no onApproval): approvalPolicy should be nil
+				if params["approvalPolicy"] != nil {
+					t.Errorf("auto mode should pass approvalPolicy=nil, got %v", params["approvalPolicy"])
+				}
 			},
 		},
 	})
@@ -759,6 +838,39 @@ func TestCodexStartOrResumeThreadStartsFresh(t *testing.T) {
 	}
 	if resumed {
 		t.Error("resumed should be false when no prior session is provided")
+	}
+}
+
+func TestCodexStartOrResumeThreadPromptPassesOnRequest(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	c.onApproval = func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+		return "allow", true, nil
+	}
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/start",
+			result: json.RawMessage(`{"thread":{"id":"thr_prompt"}}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if params["approvalPolicy"] != "on-request" {
+					t.Errorf("prompt mode should pass approvalPolicy=on-request, got %v", params["approvalPolicy"])
+				}
+			},
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(context.Background(), ExecOptions{Cwd: "/work"}, slog.Default())
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_prompt" {
+		t.Errorf("threadID = %q, want thr_prompt", threadID)
+	}
+	if resumed {
+		t.Error("resumed should be false")
 	}
 }
 

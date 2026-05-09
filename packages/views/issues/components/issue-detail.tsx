@@ -49,6 +49,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -69,6 +70,7 @@ import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
+import { AgentStreamSidebar } from "./agent-stream-sidebar";
 import { BacklogAgentHintDialog } from "./backlog-agent-hint-dialog";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -595,7 +597,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     );
   }
 
-  const sidebarContent = (
+  const propertiesContent = (
     <div className="space-y-5">
       {/* Properties */}
       <div>
@@ -702,6 +704,21 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         </div>
       )}
     </div>
+  );
+
+  const sidebarContent = (
+    <Tabs defaultValue="stream" className="flex h-full min-h-0 flex-col">
+      <TabsList className="mb-3 grid w-full grid-cols-2">
+        <TabsTrigger value="stream">Stream</TabsTrigger>
+        <TabsTrigger value="properties">Properties</TabsTrigger>
+      </TabsList>
+      <TabsContent value="stream" className="mt-0 min-h-0 flex-1">
+        <AgentStreamSidebar issueId={issue.id} />
+      </TabsContent>
+      <TabsContent value="properties" className="mt-0 min-h-0 flex-1 overflow-y-auto">
+        {propertiesContent}
+      </TabsContent>
+    </Tabs>
   );
 
   return (
@@ -1485,16 +1502,16 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       {!isMobile && (
         <ResizablePanel
           id="sidebar"
-          defaultSize={defaultSidebarOpen ? 320 : 0}
-          minSize={260}
-          maxSize={420}
+          defaultSize={defaultSidebarOpen ? 460 : 0}
+          minSize={340}
+          maxSize={640}
           collapsible
           groupResizeBehavior="preserve-pixel-size"
           panelRef={sidebarRef}
           onResize={(size) => setSidebarOpen(size.inPixels > 0)}
         >
-          <div className="overflow-y-auto border-l h-full">
-            <div className="p-4">
+          <div className="border-l h-full">
+            <div className="h-full p-3">
               {sidebarContent}
             </div>
           </div>
@@ -1502,7 +1519,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
       )}
       {isMobile && (
         <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-          <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
+          <SheetContent side="right" showCloseButton={false} className="w-[92vw] max-w-[560px] p-3">
             {sidebarContent}
           </SheetContent>
         </Sheet>

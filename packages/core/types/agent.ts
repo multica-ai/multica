@@ -235,3 +235,56 @@ export interface RuntimeModelsResult {
   models: RuntimeModel[];
   supported: boolean;
 }
+
+// Interaction (approval request from agent runtime)
+export interface TaskInteractionOption {
+  id: string;
+  label: string;
+}
+
+export interface TaskInteraction {
+  id: string;
+  task_id: string;
+  provider: string;
+  type: string;
+  title: string;
+  detail?: string;
+  options: TaskInteractionOption[];
+  default_option?: string;
+  status: "pending" | "approved" | "denied" | "timed_out" | "cancelled";
+  created_at: string;
+  expires_at: string;
+  responded_at?: string;
+  chosen_option?: string;
+}
+
+export type TaskTraceChannel =
+  | "raw_stdout"
+  | "raw_stderr"
+  | "provider_event"
+  | "command_stdout"
+  | "command_stderr"
+  | "approval_request"
+  | "approval_response"
+  | "normalized"
+  | "display_event";
+
+export interface TaskTraceLine {
+  seq: number;
+  task_id: string;
+  run_id: string;
+  provider?: string;
+  channel: TaskTraceChannel | string;
+  content?: string;
+  raw_payload?: string;
+  timestamp: string;
+  truncated?: boolean;
+  redacted?: boolean;
+}
+
+export interface TaskTraceResponse {
+  task_id: string;
+  run_id: string;
+  runs?: string[];
+  lines: TaskTraceLine[];
+}

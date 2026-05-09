@@ -15,6 +15,13 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@multica/ui/components/ui/select";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -46,6 +53,12 @@ export function SettingsTab({
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(agent.runtime_id);
   const [model, setModel] = useState(agent.model ?? "");
+  const [approvalPolicy, setApprovalPolicy] = useState<string>(
+    (agent.runtime_config?.approval_policy as string) || "auto",
+  );
+  const [traceEnabled, setTraceEnabled] = useState<string>(
+    agent.runtime_config?.trace_enabled === false ? "off" : "on",
+  );
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const { upload, uploading } = useFileUpload(api);
@@ -85,7 +98,9 @@ export function SettingsTab({
     visibility !== agent.visibility ||
     maxTasks !== agent.max_concurrent_tasks ||
     selectedRuntimeId !== agent.runtime_id ||
-    model !== (agent.model ?? "");
+    model !== (agent.model ?? "") ||
+    approvalPolicy !== ((agent.runtime_config?.approval_policy as string) || "auto") ||
+    traceEnabled !== (agent.runtime_config?.trace_enabled === false ? "off" : "on");
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -102,6 +117,11 @@ export function SettingsTab({
         max_concurrent_tasks: maxTasks,
         runtime_id: selectedRuntimeId,
         model,
+        runtime_config: {
+          ...agent.runtime_config,
+          approval_policy: approvalPolicy,
+          trace_enabled: traceEnabled === "on",
+        },
       });
       toast.success("Settings saved");
     } catch {
@@ -336,6 +356,47 @@ export function SettingsTab({
         onChange={setModel}
         disabled={readOnly || !selectedRuntime}
       />
+
+      <div>
+        <Label className="text-xs text-muted-foreground">Output Stream</Label>
+        <p className="mt-0.5 text-xs text-muted-foreground/70">
+          Controls whether the local daemon captures and streams agent execution output.
+        </p>
+        <Select
+          value={traceEnabled}
+          onValueChange={(v) => { if (!readOnly && v) setTraceEnabled(v); }}
+          disabled={readOnly}
+        >
+          <SelectTrigger className="mt-1.5 w-48">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="on">On</SelectItem>
+            <SelectItem value="off">Off</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <Label className="text-xs text-muted-foreground">Approval Mode</Label>
+        <p className="mt-0.5 text-xs text-muted-foreground/70">
+          Controls whether the agent asks for permission before running commands or modifying files.
+        </p>
+        <Select
+          value={approvalPolicy}
+          onValueChange={(v) => { if (!readOnly && v) setApprovalPolicy(v); }}
+          disabled={readOnly}
+        >
+          <SelectTrigger className="mt-1.5 w-48">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">Auto</SelectItem>
+            <SelectItem value="prompt">Ask me</SelectItem>
+            <SelectItem value="deny">Deny</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
       {!readOnly && (
         <Button onClick={handleSave} disabled={!dirty || saving} size="sm">

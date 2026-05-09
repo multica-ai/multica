@@ -20,6 +20,36 @@ type Backend interface {
 	Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error)
 }
 
+// ApprovalCallback is called by provider adapters when a tool/command/file
+// change needs user approval. The callback blocks until the user responds or
+// the context is cancelled.
+//
+// A nil ApprovalCallback is equivalent to auto-approve (current default).
+//
+// Parameters:
+//   - ctx: cancellation/timeout context
+//   - req: describes what needs approval (title, detail, options)
+//
+// Returns:
+//   - chosenOption: the option ID selected by the user (e.g. "allow", "deny")
+//   - approved: true if the request was approved
+//   - err: non-nil on timeout, cancellation, or communication failure
+type ApprovalCallback func(ctx context.Context, req ApprovalRequest) (chosenOption string, approved bool, err error)
+
+// ApprovalRequest describes a single approval prompt surfaced to the user.
+type ApprovalRequest struct {
+	Type   string // e.g. "command_approval", "file_change_approval", "permission_request"
+	Title  string
+	Detail string
+}
+
+// TraceCallback is called by provider adapters to record events in the local
+// daemon trace store. Channel identifies the trace channel (provider_event,
+// normalized, command_stdout, etc.). Content is the human-readable text.
+// RawPayload is the original unstructured data (e.g. raw JSON from a provider
+// stream). May be nil (no trace recording).
+type TraceCallback func(channel, content, rawPayload string)
+
 // ExecOptions configures a single execution.
 type ExecOptions struct {
 	Cwd             string
@@ -27,9 +57,11 @@ type ExecOptions struct {
 	SystemPrompt    string
 	MaxTurns        int
 	Timeout         time.Duration
-	ResumeSessionID string          // if non-empty, resume a previous agent session
-	CustomArgs      []string        // additional CLI arguments appended to the agent command
-	McpConfig       json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	ResumeSessionID string           // if non-empty, resume a previous agent session
+	CustomArgs      []string         // additional CLI arguments appended to the agent command
+	McpConfig       json.RawMessage  // if non-nil, MCP server config to pass via --mcp-config
+	OnApproval      ApprovalCallback // nil = auto-approve (default behaviour)
+	TraceCallback   TraceCallback    // nil = no trace recording (default)
 }
 
 // Session represents a running agent execution.
