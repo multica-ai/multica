@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@multica/core/auth";
 import { completeOnboarding } from "@multica/core/onboarding";
 import { setCurrentWorkspace } from "@multica/core/platform";
@@ -18,11 +19,14 @@ function slugify(value: string): string {
 }
 
 export function WorkspaceSetupScreen() {
+  const { t } = useTranslation();
   const user = useAuthStore((state) => state.user);
   const logout = useMobileLogout();
   const createWorkspace = useCreateWorkspace();
   const [name, setName] = useState(
-    user?.name ? `${user.name}'s Workspace` : "My Workspace",
+    user?.name
+      ? t("workspace_setup.user_workspace", { name: user.name })
+      : t("workspace_setup.default_name"),
   );
   const [slug, setSlug] = useState(() =>
     slugify(user?.name ? `${user.name}'s Workspace` : "my-workspace"),
@@ -61,7 +65,7 @@ export function WorkspaceSetupScreen() {
         void completeOnboarding().catch(() => {});
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to create workspace");
+      setError(err instanceof Error ? err.message : t("workspace_setup.unable_to_create"));
     }
   }
 
@@ -69,35 +73,37 @@ export function WorkspaceSetupScreen() {
     <Screen>
       <View style={styles.container}>
         <View style={styles.header}>
-          <Heading>Create workspace</Heading>
+          <Heading>{t("workspace_setup.title")}</Heading>
           <Text style={styles.subtitle}>
-            Set up a workspace to start using Multica on mobile.
+            {t("workspace_setup.subtitle")}
           </Text>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.label}>Workspace name</Text>
+          <Text style={styles.label}>{t("workspace_setup.name_label")}</Text>
           <Field
             autoCapitalize="words"
             onChangeText={handleNameChange}
-            placeholder="Workspace name"
+            placeholder={t("workspace_setup.name_placeholder")}
             value={name}
           />
-          <Text style={styles.label}>Workspace URL slug</Text>
+          <Text style={styles.label}>{t("workspace_setup.slug_label")}</Text>
           <Field
             autoCapitalize="none"
             onChangeText={handleSlugChange}
-            placeholder="workspace-slug"
+            placeholder={t("workspace_setup.slug_placeholder")}
             value={slug}
           />
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <Button disabled={!canSubmit} onPress={handleCreateWorkspace}>
-            {createWorkspace.isPending ? "Creating..." : "Create workspace"}
+            {createWorkspace.isPending
+              ? t("workspace_setup.creating")
+              : t("workspace_setup.create")}
           </Button>
         </View>
 
         <Button onPress={logout} variant="secondary">
-          Log out
+          {t("common.log_out")}
         </Button>
       </View>
     </Screen>

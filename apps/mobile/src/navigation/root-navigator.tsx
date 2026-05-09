@@ -7,6 +7,7 @@ import {
 } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { useTranslation } from "react-i18next";
 import { useAuthStore } from "@multica/core/auth";
 import { useCoreQueryClient } from "@multica/core/provider";
 import { setCurrentWorkspace } from "@multica/core/platform";
@@ -164,7 +165,7 @@ function WorkspaceGate({
     setWorkspace(first);
   }, [workspace, workspaces]);
 
-  if (!workspace) return <EmptyState title="No workspaces available" />;
+  if (!workspace) return <NoWorkspaceState />;
 
   return (
     <WorkspaceSlugProvider slug={workspace.slug}>
@@ -177,20 +178,26 @@ function WorkspaceGate({
 
 function SignedInErrorScreen() {
   const logout = useMobileLogout();
+  const { t } = useTranslation();
 
   return (
     <Screen>
       <View style={styles.errorState}>
         <EmptyState
-          detail="Check your connection and try again."
-          title="Unable to load workspaces"
+          detail={t("common.check_connection")}
+          title={t("common.unable_to_load_workspaces")}
         />
         <Button onPress={logout} style={styles.errorLogoutButton} variant="secondary">
-          Log out
+          {t("common.log_out")}
         </Button>
       </View>
     </Screen>
   );
+}
+
+function NoWorkspaceState() {
+  const { t } = useTranslation();
+  return <EmptyState title={t("common.no_workspaces_available")} />;
 }
 
 function MainTabs() {
@@ -209,6 +216,7 @@ function MainTabs() {
         component={IssuesScreen}
         name="Issues"
         options={{
+          tabBarLabel: "Issues",
           tabBarIcon: ({ color, size }) => <ListTodo color={color} size={size} />,
         }}
       />
@@ -216,6 +224,7 @@ function MainTabs() {
         component={MineScreen}
         name="Mine"
         options={{
+          tabBarLabel: "Mine",
           tabBarIcon: ({ color, size }) => <CircleUserRound color={color} size={size} />,
         }}
       />

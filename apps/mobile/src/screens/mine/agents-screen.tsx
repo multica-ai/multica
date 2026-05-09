@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useTranslation } from "react-i18next";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useCoreQuery, useCoreQueryClient } from "@multica/core/provider";
@@ -63,38 +64,45 @@ import { ScreenTitleBar } from "../../components/ui/screen-title-bar";
 import type { RootStackParamList } from "../../navigation/root-navigator";
 import { useMobileWorkspace } from "../../navigation/workspace-context";
 import { colors, radii, spacing } from "../../theme/tokens";
+import {
+  formatAgentStatus,
+  formatAgentTaskStatus,
+  formatAgentVisibility,
+  formatRuntimeMode,
+} from "../../i18n/format";
 
 type AgentsNavigation = NativeStackNavigationProp<RootStackParamList>;
 type AgentScope = "mine" | "all";
 type DetailTab = "overview" | "instructions" | "tasks" | "skills" | "settings" | "advanced";
 
-const detailTabs: Array<{ id: DetailTab; label: string; icon: typeof Bot }> = [
-  { id: "overview", label: "Overview", icon: Bot },
-  { id: "instructions", label: "Instructions", icon: FileText },
-  { id: "tasks", label: "Tasks", icon: ListTodo },
-  { id: "skills", label: "Skills", icon: BookOpenText },
-  { id: "settings", label: "Settings", icon: Settings },
-  { id: "advanced", label: "Advanced", icon: Terminal },
+const detailTabs: Array<{ id: DetailTab; labelKey: string; icon: typeof Bot }> = [
+  { id: "overview", labelKey: "agents.overview", icon: Bot },
+  { id: "instructions", labelKey: "agents.instructions", icon: FileText },
+  { id: "tasks", labelKey: "agents.tasks", icon: ListTodo },
+  { id: "skills", labelKey: "agents.skills", icon: BookOpenText },
+  { id: "settings", labelKey: "agents.settings", icon: Settings },
+  { id: "advanced", labelKey: "agents.advanced", icon: Terminal },
 ];
 
-const statusMeta: Record<AgentStatus, { label: string; color: string; muted?: boolean }> = {
-  idle: { label: "Idle", color: colors.mutedForeground },
-  working: { label: "Working", color: colors.success },
-  blocked: { label: "Blocked", color: colors.warning },
-  error: { label: "Error", color: colors.destructive },
-  offline: { label: "Offline", color: colors.mutedForeground, muted: true },
+const statusMeta: Record<AgentStatus, { color: string; muted?: boolean }> = {
+  idle: { color: colors.mutedForeground },
+  working: { color: colors.success },
+  blocked: { color: colors.warning },
+  error: { color: colors.destructive },
+  offline: { color: colors.mutedForeground, muted: true },
 };
 
-const taskStatusMeta: Record<AgentTask["status"], { label: string; color: string }> = {
-  queued: { label: "Queued", color: colors.mutedForeground },
-  dispatched: { label: "Dispatched", color: colors.info },
-  running: { label: "Running", color: colors.success },
-  completed: { label: "Completed", color: colors.success },
-  failed: { label: "Failed", color: colors.destructive },
-  cancelled: { label: "Cancelled", color: colors.mutedForeground },
+const taskStatusMeta: Record<AgentTask["status"], { color: string }> = {
+  queued: { color: colors.mutedForeground },
+  dispatched: { color: colors.info },
+  running: { color: colors.success },
+  completed: { color: colors.success },
+  failed: { color: colors.destructive },
+  cancelled: { color: colors.mutedForeground },
 };
 
 export function AgentsScreen() {
+  const { t } = useTranslation();
   const navigation = useNavigation<AgentsNavigation>();
   const qc = useCoreQueryClient();
   const currentUser = useAuthStore((state) => state.user);
@@ -166,10 +174,10 @@ export function AgentsScreen() {
   }
 
   async function archiveAgent(agent: Agent) {
-    Alert.alert("Archive agent?", `"${agent.name}" will stop being assignable.`, [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("agents.archive_title"), t("agents.archive_description", { name: agent.name }), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "Archive",
+        text: t("agents.archive"),
         style: "destructive",
         onPress: () => {
           void api.archiveAgent(agent.id).then(invalidateAgents);
@@ -194,8 +202,8 @@ export function AgentsScreen() {
   if (isError) {
     return (
       <Screen padded={false} safeArea={false}>
-        <ScreenTitleBar onBack={() => navigation.goBack()} title="Agents" />
-        <EmptyState detail="Pull to retry once the connection is available." title="Unable to load agents" />
+        <ScreenTitleBar onBack={() => navigation.goBack()} title={t("agents.title")} />
+        <EmptyState detail={t("common.pull_to_retry")} title={t("agents.unable_to_load")} />
       </Screen>
     );
   }
@@ -206,7 +214,7 @@ export function AgentsScreen() {
         onBack={() => navigation.goBack()}
         right={
           <Pressable
-            accessibilityLabel="Create agent"
+            accessibilityLabel={t("agents.create")}
             accessibilityRole="button"
             onPress={() => setCreateOpen(true)}
             style={({ pressed }) => [styles.titleIconButton, pressed && styles.pressed]}
@@ -214,7 +222,7 @@ export function AgentsScreen() {
             <Plus color={colors.foreground} size={20} />
           </Pressable>
         }
-        title="Agents"
+        title={t("agents.title")}
       />
       <View style={styles.toolbar}>
         <SegmentedControl
@@ -223,8 +231,8 @@ export function AgentsScreen() {
             setOwnerFilter(null);
           }}
           options={[
-            { label: "Mine", value: "mine" },
-            { label: "All", value: "all" },
+            { label: t("agents.scope_mine"), value: "mine" },
+            { label: t("agents.scope_all"), value: "all" },
           ]}
           value={scope}
         />
@@ -236,7 +244,7 @@ export function AgentsScreen() {
               style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
             >
               <Text numberOfLines={1} style={styles.filterButtonText}>
-                {selectedOwner?.name ?? "Owner"}
+                {selectedOwner?.name ?? t("agents.owner")}
               </Text>
               <ChevronDown color={colors.mutedForeground} size={14} />
             </Pressable>
@@ -258,7 +266,7 @@ export function AgentsScreen() {
                   showArchived && styles.filterButtonTextActive,
                 ]}
               >
-                {showArchived ? "Archived" : `${archivedCount}`}
+                {showArchived ? t("agents.archived") : `${archivedCount}`}
               </Text>
             </Pressable>
           ) : null}
@@ -337,8 +345,9 @@ function AgentRow({
   showOwner: boolean;
   onPress: () => void;
 }) {
+  const { t } = useTranslation();
   const archived = !!agent.archived_at;
-  const runtimeLabel = runtime?.name ?? (agent.runtime_mode === "cloud" ? "Cloud" : "Local");
+  const runtimeLabel = runtime?.name ?? formatRuntimeMode(t, agent.runtime_mode);
 
   return (
     <Pressable
@@ -358,18 +367,18 @@ function AgentRow({
             {agent.name}
           </Text>
           {archived ? (
-            <Badge label="Archived" muted />
+            <Badge label={t("agents.archived")} muted />
           ) : (
             <StatusBadge status={agent.status} />
           )}
         </View>
         <Text numberOfLines={1} style={styles.agentDescription}>
-          {agent.description || "No description"}
+          {agent.description || t("agents.no_description")}
         </Text>
         <View style={styles.agentMetaLine}>
           <RuntimeBadge mode={agent.runtime_mode} label={runtimeLabel} />
           <VisibilityBadge visibility={agent.visibility} />
-          {showOwner ? <Text numberOfLines={1} style={styles.agentMetaText}>{owner?.name ?? "Unknown"}</Text> : null}
+          {showOwner ? <Text numberOfLines={1} style={styles.agentMetaText}>{owner?.name ?? t("common.unknown")}</Text> : null}
         </View>
       </View>
     </Pressable>
@@ -389,13 +398,14 @@ function AgentsEmpty({
   showArchived: boolean;
   onCreate: () => void;
 }) {
+  const { t } = useTranslation();
   const title = showArchived
-    ? "No archived agents"
+    ? t("agents.no_archived")
     : ownerFiltered
-      ? "No agents for this owner"
+      ? t("agents.no_for_owner")
       : scope === "mine"
-        ? "No agents owned by you"
-        : "No agents yet";
+        ? t("agents.no_mine")
+        : t("agents.no_agents");
 
   return (
     <View style={styles.emptyState}>
@@ -405,11 +415,11 @@ function AgentsEmpty({
         <>
           <Text style={styles.emptyDetail}>
             {activeCount > 0
-              ? "Adjust filters to see other agents."
-              : "Create an agent from one of your runtimes."}
+              ? t("agents.empty_detail_filtered")
+              : t("agents.empty_detail_create")}
           </Text>
           <Button onPress={onCreate} style={styles.emptyButton}>
-            Create agent
+            {t("agents.create")}
           </Button>
         </>
       ) : null}
@@ -442,6 +452,7 @@ function AgentDetailModal({
   runtimes: RuntimeDevice[];
   workspaceId: string;
 }) {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   const runtime = agent
     ? runtimes.find((item) => item.id === agent.runtime_id) ?? null
@@ -473,21 +484,21 @@ function AgentDetailModal({
             <View style={styles.detailHeaderActions}>
               {canDuplicate ? (
                 <IconAction
-                  accessibilityLabel="Duplicate agent"
+                  accessibilityLabel={t("agents.duplicate")}
                   icon={Copy}
                   onPress={() => void onDuplicate(agent)}
                 />
               ) : null}
               {isArchived && isOwner ? (
                 <IconAction
-                  accessibilityLabel="Restore agent"
+                  accessibilityLabel={t("agents.restore")}
                   icon={RotateCcw}
                   onPress={() => void onRestore(agent)}
                 />
               ) : null}
               {!isArchived && isOwner ? (
                 <IconAction
-                  accessibilityLabel="Archive agent"
+                  accessibilityLabel={t("agents.archive")}
                   destructive
                   icon={Trash2}
                   onPress={() => void onArchive(agent)}
@@ -501,7 +512,7 @@ function AgentDetailModal({
           <View style={styles.archiveBanner}>
             <Archive color={colors.mutedForeground} size={14} />
             <Text style={styles.archiveBannerText}>
-              This agent is archived and cannot be assigned or mentioned.
+              {t("agents.archive_banner")}
             </Text>
           </View>
         ) : null}
@@ -523,7 +534,7 @@ function AgentDetailModal({
                 >
                   <Icon color={active ? colors.primaryForeground : colors.mutedForeground} size={15} />
                   <Text style={[styles.tabChipText, active && styles.tabChipTextActive]}>
-                    {tab.label}
+                    {t(tab.labelKey)}
                   </Text>
                 </Pressable>
               );
@@ -571,6 +582,7 @@ function OverviewTab({
   owner: MemberWithUser | null;
   runtime: RuntimeDevice | null;
 }) {
+  const { t } = useTranslation();
   return (
     <View style={styles.sectionStack}>
       <View style={styles.heroCard}>
@@ -579,18 +591,18 @@ function OverviewTab({
         </View>
         <View style={styles.heroText}>
           <Text numberOfLines={1} style={styles.heroTitle}>{agent.name}</Text>
-          <Text style={styles.heroSubtitle}>{agent.description || "No description"}</Text>
+          <Text style={styles.heroSubtitle}>{agent.description || t("agents.no_description")}</Text>
         </View>
       </View>
       <View style={styles.infoGrid}>
-        <InfoCell label="Status" value={agent.archived_at ? "Archived" : statusMeta[agent.status].label} />
-        <InfoCell label="Visibility" value={agent.visibility === "workspace" ? "Workspace" : "Private"} />
-        <InfoCell label="Runtime" value={runtime?.name ?? (agent.runtime_mode === "cloud" ? "Cloud" : "Local")} />
-        <InfoCell label="Mode" value={agent.runtime_mode === "cloud" ? "Cloud" : "Local"} />
-        <InfoCell label="Owner" value={owner?.name ?? "Unknown"} />
-        <InfoCell label="Model" value={agent.model || "Default"} />
-        <InfoCell label="Max tasks" value={String(agent.max_concurrent_tasks)} />
-        <InfoCell label="Skills" value={String(agent.skills.length)} />
+        <InfoCell label={t("agents.status")} value={agent.archived_at ? t("agents.archived") : formatAgentStatus(t, agent.status)} />
+        <InfoCell label={t("agents.visibility_label")} value={formatAgentVisibility(t, agent.visibility)} />
+        <InfoCell label={t("agents.runtime")} value={runtime?.name ?? formatRuntimeMode(t, agent.runtime_mode)} />
+        <InfoCell label={t("agents.mode")} value={formatRuntimeMode(t, agent.runtime_mode)} />
+        <InfoCell label={t("agents.owner")} value={owner?.name ?? t("common.unknown")} />
+        <InfoCell label={t("agents.model")} value={agent.model || t("agents.default_model")} />
+        <InfoCell label={t("agents.max_tasks")} value={String(agent.max_concurrent_tasks)} />
+        <InfoCell label={t("agents.skills")} value={String(agent.skills.length)} />
       </View>
     </View>
   );
@@ -605,6 +617,7 @@ function InstructionsTab({
   readOnly: boolean;
   onUpdate: (agentId: string, data: UpdateAgentRequest) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [value, setValue] = useState(agent.instructions ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -621,7 +634,7 @@ function InstructionsTab({
     try {
       await onUpdate(agent.id, { instructions: value });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to save instructions");
+      setError(err instanceof Error ? err.message : t("agents.unable_to_save_instructions"));
     } finally {
       setSaving(false);
     }
@@ -629,15 +642,15 @@ function InstructionsTab({
 
   return (
     <View style={styles.sectionStack}>
-      <Text style={styles.sectionTitle}>Instructions</Text>
+      <Text style={styles.sectionTitle}>{t("agents.instructions")}</Text>
       <Text style={styles.sectionDetail}>
-        {"Define this agent's identity and working style."}
+        {t("agents.instructions_detail")}
       </Text>
       <TextInput
         editable={!readOnly}
         multiline
         onChangeText={setValue}
-        placeholder={readOnly ? "No instructions set" : "Write instructions..."}
+        placeholder={readOnly ? t("agents.no_instructions") : t("agents.write_instructions")}
         placeholderTextColor={colors.mutedForeground}
         style={[styles.textArea, styles.instructionsInput, readOnly && styles.inputReadOnly]}
         textAlignVertical="top"
@@ -646,7 +659,7 @@ function InstructionsTab({
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
       {!readOnly ? (
         <Button disabled={saving || value === (agent.instructions ?? "")} onPress={() => void save()}>
-          {saving ? "Saving..." : "Save instructions"}
+          {saving ? t("agents.saving") : t("agents.save_instructions")}
         </Button>
       ) : null}
     </View>
@@ -654,6 +667,7 @@ function InstructionsTab({
 }
 
 function TasksTab({ agent, workspaceId }: { agent: Agent; workspaceId: string }) {
+  const { t } = useTranslation();
   const navigation = useNavigation<AgentsNavigation>();
   const { data: tasks = [], isError, isLoading, isRefetching, refetch } = useCoreQuery({
     queryKey: ["workspaces", workspaceId, "agents", agent.id, "tasks"],
@@ -674,20 +688,20 @@ function TasksTab({ agent, workspaceId }: { agent: Agent; workspaceId: string })
 
   if (isLoading) return <InlineLoading />;
   if (isError) {
-    return <InlineEmpty detail="Pull to retry once the connection is available." title="Unable to load tasks" />;
+    return <InlineEmpty detail={t("common.pull_to_retry")} title={t("agents.unable_to_load_tasks")} />;
   }
 
   return (
     <View style={styles.sectionStack}>
       <View style={styles.sectionHeaderLine}>
         <View>
-          <Text style={styles.sectionTitle}>Task Queue</Text>
-          <Text style={styles.sectionDetail}>Assigned issue execution status.</Text>
+          <Text style={styles.sectionTitle}>{t("agents.task_queue")}</Text>
+          <Text style={styles.sectionDetail}>{t("agents.task_queue_detail")}</Text>
         </View>
         {isRefetching ? <ActivityIndicator color={colors.mutedForeground} /> : null}
       </View>
       {sortedTasks.length === 0 ? (
-        <InlineEmpty detail="Assign an issue to this agent to get started." title="No tasks in queue" />
+        <InlineEmpty detail={t("agents.no_tasks_detail")} title={t("agents.no_tasks")} />
       ) : (
         sortedTasks.map((task) => (
           <TaskRow
@@ -702,24 +716,25 @@ function TasksTab({ agent, workspaceId }: { agent: Agent; workspaceId: string })
         ))
       )}
       <Button onPress={() => void refetch()} variant="secondary">
-        Refresh tasks
+        {t("agents.refresh_tasks")}
       </Button>
     </View>
   );
 }
 
 function TaskRow({ task, onPress }: { task: AgentTask; onPress?: () => void }) {
+  const { t } = useTranslation();
   const meta = taskStatusMeta[task.status];
   const content = (
     <>
       <View style={[styles.taskStatusDot, { backgroundColor: meta.color }]} />
       <View style={styles.taskText}>
         <Text numberOfLines={1} style={styles.taskTitle}>
-          {task.issue_id ? `Issue ${task.issue_id.slice(0, 8)}` : "Task without linked issue"}
+          {task.issue_id ? `${t("issues.issue")} ${task.issue_id.slice(0, 8)}` : t("agents.task_without_issue")}
         </Text>
         <Text style={styles.taskMeta}>{formatTaskTime(task)}</Text>
       </View>
-      <Text style={[styles.taskStatusLabel, { color: meta.color }]}>{meta.label}</Text>
+      <Text style={[styles.taskStatusLabel, { color: meta.color }]}>{formatAgentTaskStatus(t, task.status)}</Text>
     </>
   );
 
@@ -745,6 +760,7 @@ function SkillsTab({
   readOnly: boolean;
   workspaceId: string;
 }) {
+  const { t } = useTranslation();
   const qc = useCoreQueryClient();
   const { data: workspaceSkills = [], isLoading } = useCoreQuery(skillListOptions(workspaceId));
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -760,7 +776,7 @@ function SkillsTab({
       await api.setAgentSkills(agent.id, { skill_ids: skillIds });
       void qc.invalidateQueries({ queryKey: workspaceKeys.agents(workspaceId) });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to update skills");
+      setError(err instanceof Error ? err.message : t("agents.unable_to_update_skills"));
     } finally {
       setSaving(false);
       setPickerOpen(false);
@@ -771,8 +787,8 @@ function SkillsTab({
     <View style={styles.sectionStack}>
       <View style={styles.sectionHeaderLine}>
         <View style={styles.sectionHeaderText}>
-          <Text style={styles.sectionTitle}>Skills</Text>
-          <Text style={styles.sectionDetail}>Workspace skills assigned to this agent.</Text>
+          <Text style={styles.sectionTitle}>{t("agents.skills")}</Text>
+          <Text style={styles.sectionDetail}>{t("agents.skills_detail")}</Text>
         </View>
         {!readOnly ? (
           <Pressable
@@ -791,12 +807,12 @@ function SkillsTab({
       </View>
       <View style={styles.infoNotice}>
         <Text style={styles.infoNoticeText}>
-          Local runtime skills are available automatically. Add workspace skills here for shared team knowledge.
+          {t("agents.skills_notice")}
         </Text>
       </View>
       {isLoading ? <InlineLoading /> : null}
       {!isLoading && agent.skills.length === 0 ? (
-        <InlineEmpty detail="No workspace skills are assigned." title="No skills assigned" />
+        <InlineEmpty detail={t("agents.no_skills_detail")} title={t("agents.no_skills")} />
       ) : null}
       {agent.skills.map((skill) => (
         <SkillRow
@@ -866,6 +882,7 @@ function SettingsTab({
   runtimes: RuntimeDevice[];
   onUpdate: (agentId: string, data: UpdateAgentRequest) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
@@ -900,11 +917,11 @@ function SettingsTab({
   async function save() {
     const parsedMaxTasks = Number(maxTasks);
     if (!name.trim()) {
-      setError("Name is required.");
+      setError(t("agents.name_required"));
       return;
     }
     if (!Number.isInteger(parsedMaxTasks) || parsedMaxTasks < 1) {
-      setError("Max tasks must be a positive integer.");
+      setError(t("agents.max_tasks_invalid"));
       return;
     }
     setSaving(true);
@@ -919,7 +936,7 @@ function SettingsTab({
         max_concurrent_tasks: parsedMaxTasks,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to save settings");
+      setError(err instanceof Error ? err.message : t("agents.unable_to_save_settings"));
     } finally {
       setSaving(false);
     }
@@ -927,51 +944,51 @@ function SettingsTab({
 
   return (
     <View style={styles.sectionStack}>
-      <Text style={styles.sectionTitle}>Settings</Text>
-      <FormField editable={!readOnly} label="Name" onChangeText={setName} value={name} />
+      <Text style={styles.sectionTitle}>{t("agents.settings")}</Text>
+      <FormField editable={!readOnly} label={t("agents.name")} onChangeText={setName} value={name} />
       <FormField
         editable={!readOnly}
-        label="Description"
+        label={t("agents.description")}
         onChangeText={setDescription}
-        placeholder="What does this agent do?"
+        placeholder={t("agents.description_placeholder")}
         value={description}
       />
-      <OptionGroup label="Visibility">
+      <OptionGroup label={t("agents.visibility_label")}>
         <OptionChip
           active={visibility === "private"}
           disabled={readOnly}
           icon={Lock}
-          label="Private"
+          label={t("agents.visibility.private")}
           onPress={() => setVisibility("private")}
         />
         <OptionChip
           active={visibility === "workspace"}
           disabled={readOnly}
           icon={Globe}
-          label="Workspace"
+          label={t("agents.visibility.workspace")}
           onPress={() => setVisibility("workspace")}
         />
       </OptionGroup>
-      <OptionGroup label="Runtime">
+      <OptionGroup label={t("agents.runtime")}>
         <PickerTrigger
           disabled={readOnly}
-          label={selectedRuntime?.name ?? "No runtime"}
-          meta={selectedRuntime ? getRuntimeOwnerLabel(selectedRuntime, members) : "Select"}
+          label={selectedRuntime?.name ?? t("agents.no_runtime")}
+          meta={selectedRuntime ? getRuntimeOwnerLabel(selectedRuntime, members, t) : t("agents.select")}
           onPress={() => setRuntimePickerOpen(true)}
         />
       </OptionGroup>
-      <FormField editable={!readOnly} label="Model" onChangeText={setModel} placeholder="Default" value={model} />
+      <FormField editable={!readOnly} label={t("agents.model")} onChangeText={setModel} placeholder={t("agents.default_model")} value={model} />
       <FormField
         editable={!readOnly}
         keyboardType="number-pad"
-        label="Max concurrent tasks"
+        label={t("agents.max_concurrent_tasks")}
         onChangeText={setMaxTasks}
         value={maxTasks}
       />
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
       {!readOnly ? (
         <Button disabled={saving || !dirty} onPress={() => void save()}>
-          {saving ? "Saving..." : "Save settings"}
+          {saving ? t("agents.saving") : t("agents.save_settings")}
         </Button>
       ) : null}
       <RuntimePickerModal
@@ -995,6 +1012,7 @@ function AdvancedTab({
   readOnly: boolean;
   onUpdate: (agentId: string, data: UpdateAgentRequest) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [envText, setEnvText] = useState(envMapToText(agent.custom_env ?? {}));
   const [argsText, setArgsText] = useState((agent.custom_args ?? []).join("\n"));
   const [saving, setSaving] = useState(false);
@@ -1014,8 +1032,8 @@ function AdvancedTab({
     let customEnv: Record<string, string>;
     try {
       customEnv = parseEnvText(envText);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid environment variables");
+    } catch {
+      setError(t("agents.invalid_environment"));
       return;
     }
     setSaving(true);
@@ -1029,7 +1047,7 @@ function AdvancedTab({
           .filter(Boolean),
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to save advanced settings");
+      setError(err instanceof Error ? err.message : t("agents.unable_to_save_advanced"));
     } finally {
       setSaving(false);
     }
@@ -1037,15 +1055,15 @@ function AdvancedTab({
 
   return (
     <View style={styles.sectionStack}>
-      <Text style={styles.sectionTitle}>Advanced</Text>
+      <Text style={styles.sectionTitle}>{t("agents.advanced")}</Text>
       {agent.custom_env_copied_pending ? (
         <View style={styles.warningNotice}>
           <Text style={styles.warningNoticeText}>
-            This duplicated agent needs fresh secret values before launch.
+            {t("agents.copied_secret_notice")}
           </Text>
         </View>
       ) : null}
-      <Text style={styles.optionLabel}>Environment</Text>
+      <Text style={styles.optionLabel}>{t("agents.environment")}</Text>
       <TextInput
         autoCapitalize="none"
         autoCorrect={false}
@@ -1056,16 +1074,16 @@ function AdvancedTab({
         placeholderTextColor={colors.mutedForeground}
         style={[styles.textArea, envReadOnly && styles.inputReadOnly]}
         textAlignVertical="top"
-        value={agent.custom_env_redacted ? "Values are hidden for this agent." : envText}
+        value={agent.custom_env_redacted ? t("agents.hidden_values") : envText}
       />
-      <Text style={styles.optionLabel}>Custom args</Text>
+      <Text style={styles.optionLabel}>{t("agents.custom_args")}</Text>
       <TextInput
         autoCapitalize="none"
         autoCorrect={false}
         editable={!readOnly}
         multiline
         onChangeText={setArgsText}
-        placeholder="One argument per line"
+        placeholder={t("agents.one_argument_per_line")}
         placeholderTextColor={colors.mutedForeground}
         style={[styles.textArea, readOnly && styles.inputReadOnly]}
         textAlignVertical="top"
@@ -1074,7 +1092,7 @@ function AdvancedTab({
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
       {!readOnly ? (
         <Button disabled={saving || !dirty} onPress={() => void save()}>
-          {saving ? "Saving..." : "Save advanced settings"}
+          {saving ? t("agents.saving") : t("agents.save_advanced")}
         </Button>
       ) : null}
     </View>
@@ -1098,6 +1116,7 @@ function CreateAgentModal({
   runtimes: RuntimeDevice[];
   runtimesLoading: boolean;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<AgentVisibility>("private");
@@ -1138,7 +1157,7 @@ function CreateAgentModal({
       });
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to create agent");
+      setError(err instanceof Error ? err.message : t("agents.unable_to_create"));
     } finally {
       setCreating(false);
     }
@@ -1147,40 +1166,40 @@ function CreateAgentModal({
   return (
     <Modal animationType="slide" onRequestClose={onClose} visible={open}>
       <Screen padded={false} safeArea={false}>
-        <ScreenTitleBar onBack={onClose} title="New agent" />
+        <ScreenTitleBar onBack={onClose} title={t("agents.new_agent")} />
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.keyboardAvoiding}>
           <ScrollView contentContainerStyle={styles.detailContent} keyboardShouldPersistTaps="handled">
-            <Text style={styles.sectionTitle}>Create Agent</Text>
-            <Text style={styles.sectionDetail}>Create a workspace agent from one of your runtimes.</Text>
-            <FormField autoFocus label="Name" onChangeText={setName} placeholder="Deep Research Agent" value={name} />
-            <FormField label="Description" onChangeText={setDescription} placeholder="What does this agent do?" value={description} />
-            <OptionGroup label="Visibility">
-              <OptionChip active={visibility === "private"} icon={Lock} label="Private" onPress={() => setVisibility("private")} />
-              <OptionChip active={visibility === "workspace"} icon={Globe} label="Workspace" onPress={() => setVisibility("workspace")} />
+            <Text style={styles.sectionTitle}>{t("agents.create_title")}</Text>
+            <Text style={styles.sectionDetail}>{t("agents.create_detail")}</Text>
+            <FormField autoFocus label={t("agents.name")} onChangeText={setName} placeholder={t("agents.name_placeholder")} value={name} />
+            <FormField label={t("agents.description")} onChangeText={setDescription} placeholder={t("agents.description_placeholder")} value={description} />
+            <OptionGroup label={t("agents.visibility_label")}>
+              <OptionChip active={visibility === "private"} icon={Lock} label={t("agents.visibility.private")} onPress={() => setVisibility("private")} />
+              <OptionChip active={visibility === "workspace"} icon={Globe} label={t("agents.visibility.workspace")} onPress={() => setVisibility("workspace")} />
             </OptionGroup>
-            <OptionGroup label="Runtime">
+            <OptionGroup label={t("agents.runtime")}>
               <PickerTrigger
                 disabled={runtimesLoading || ownRuntimes.length === 0}
                 label={
                   runtimesLoading
-                    ? "Loading runtimes..."
-                    : selectedRuntime?.name ?? "No runtime available"
+                    ? t("agents.loading_runtimes")
+                    : selectedRuntime?.name ?? t("agents.no_runtime_available")
                 }
-                meta={selectedRuntime ? getRuntimeOwnerLabel(selectedRuntime, members) : "Register a runtime first"}
+                meta={selectedRuntime ? getRuntimeOwnerLabel(selectedRuntime, members, t) : t("agents.register_runtime_first")}
                 onPress={() => setRuntimePickerOpen(true)}
               />
             </OptionGroup>
-            <FormField label="Model" onChangeText={setModel} placeholder="Default" value={model} />
+            <FormField label={t("agents.model")} onChangeText={setModel} placeholder={t("agents.default_model")} value={model} />
             {ownRuntimes.length === 0 && !runtimesLoading ? (
               <View style={styles.warningNotice}>
                 <Text style={styles.warningNoticeText}>
-                  Register a runtime before creating an agent.
+                  {t("agents.register_runtime_notice")}
                 </Text>
               </View>
             ) : null}
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
             <Button disabled={creating || !name.trim() || !selectedRuntime} onPress={() => void submit()}>
-              {creating ? "Creating..." : "Create agent"}
+              {creating ? t("agents.creating") : t("agents.create")}
             </Button>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -1212,16 +1231,17 @@ function RuntimePickerModal({
   runtimes: RuntimeDevice[];
   selectedId: string;
 }) {
+  const { t } = useTranslation();
   return (
-    <SheetModal onClose={onClose} open={open} title="Runtime">
+    <SheetModal onClose={onClose} open={open} title={t("agents.runtime")}>
       {runtimes.length === 0 ? (
-        <Text style={styles.pickerEmpty}>No runtimes available</Text>
+        <Text style={styles.pickerEmpty}>{t("agents.no_runtimes_available")}</Text>
       ) : (
         runtimes.map((runtime) => (
           <PickerRow
             key={runtime.id}
             label={runtime.name}
-            meta={`${runtime.provider} / ${getRuntimeOwnerLabel(runtime, members)}`}
+            meta={`${runtime.provider} / ${getRuntimeOwnerLabel(runtime, members, t)}`}
             onPress={() => {
               onSelect(runtime.id);
               onClose();
@@ -1247,10 +1267,11 @@ function OwnerPickerModal({
   open: boolean;
   value: string | null;
 }) {
+  const { t } = useTranslation();
   return (
-    <SheetModal onClose={onClose} open={open} title="Owner">
+    <SheetModal onClose={onClose} open={open} title={t("agents.owner")}>
       <PickerRow
-        label="All owners"
+        label={t("agents.all_owners")}
         onPress={() => {
           onChange(null);
           onClose();
@@ -1286,10 +1307,11 @@ function SkillPickerModal({
   saving: boolean;
   skills: Skill[];
 }) {
+  const { t } = useTranslation();
   return (
-    <SheetModal onClose={onClose} open={open} title="Add skill">
+    <SheetModal onClose={onClose} open={open} title={t("agents.add_skill")}>
       {skills.length === 0 ? (
-        <Text style={styles.pickerEmpty}>All workspace skills are already assigned.</Text>
+        <Text style={styles.pickerEmpty}>{t("agents.all_skills_assigned")}</Text>
       ) : (
         skills.map((skill) => (
           <PickerRow
@@ -1317,6 +1339,7 @@ function SheetModal({
   open: boolean;
   title: string;
 }) {
+  const { t } = useTranslation();
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
       <View style={styles.sheetRoot}>
@@ -1324,7 +1347,7 @@ function SheetModal({
         <View style={styles.sheet}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{title}</Text>
-            <Button onPress={onClose} variant="ghost">Close</Button>
+            <Button onPress={onClose} variant="ghost">{t("common.close")}</Button>
           </View>
           <ScrollView contentContainerStyle={styles.sheetContent}>
             {children}
@@ -1494,11 +1517,12 @@ function PickerRow({
 }
 
 function StatusBadge({ status }: { status: AgentStatus }) {
+  const { t } = useTranslation();
   const meta = statusMeta[status];
   return (
     <View style={styles.statusBadge}>
       <View style={[styles.statusDot, { backgroundColor: meta.color, opacity: meta.muted ? 0.55 : 1 }]} />
-      <Text style={[styles.statusText, { color: meta.color }]}>{meta.label}</Text>
+      <Text style={[styles.statusText, { color: meta.color }]}>{formatAgentStatus(t, status)}</Text>
     </View>
   );
 }
@@ -1514,11 +1538,12 @@ function RuntimeBadge({ mode, label }: { mode: AgentRuntimeMode; label: string }
 }
 
 function VisibilityBadge({ visibility }: { visibility: AgentVisibility }) {
+  const { t } = useTranslation();
   const Icon = visibility === "workspace" ? Globe : Lock;
   return (
     <View style={styles.metaBadge}>
       <Icon color={colors.mutedForeground} size={13} />
-      <Text style={styles.metaBadgeText}>{visibility === "workspace" ? "Workspace" : "Private"}</Text>
+      <Text style={styles.metaBadgeText}>{formatAgentVisibility(t, visibility)}</Text>
     </View>
   );
 }
@@ -1581,11 +1606,15 @@ function InlineEmpty({ title, detail }: { title: string; detail?: string }) {
   );
 }
 
-function getRuntimeOwnerLabel(runtime: RuntimeDevice, members: MemberWithUser[]) {
+function getRuntimeOwnerLabel(
+  runtime: RuntimeDevice,
+  members: MemberWithUser[],
+  t: (key: string, options?: Record<string, unknown>) => string,
+) {
   const owner = runtime.owner_id
     ? members.find((member) => member.user_id === runtime.owner_id)
     : null;
-  return owner?.name ?? runtime.device_info ?? "Unknown";
+  return owner?.name ?? runtime.device_info ?? t("common.unknown");
 }
 
 function formatTaskTime(task: AgentTask) {
