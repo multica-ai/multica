@@ -53,6 +53,15 @@ vi.mock("@multica/core/ship", () => ({
   useSyncProject: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUpsertDeployEnvironment: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useLogDeploy: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  // Phase 7a — selection store + active releases hooks.
+  useShipSelection: (selector: (s: { clear: () => void; selected: Set<string> }) => unknown) =>
+    selector({ clear: vi.fn(), selected: new Set<string>() }),
+  useShipSelectionCount: () => 0,
+  useActiveReleases: () => ({ data: { releases: [] }, isLoading: false }),
+  projectPullRequestsOptions: () => ({
+    queryKey: ["pr-options"],
+    queryFn: async () => ({ pull_requests: [], total: 0 }),
+  }),
 }));
 
 vi.mock("@multica/core/projects/queries", () => ({

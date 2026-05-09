@@ -43,4 +43,24 @@ export {
   useConfigureDeployAdapter,
   usePollDeployEnvironment,
   useRollbackDeployEnvironment,
+  // Phase 7a — Releases
+  workspaceActiveReleasesOptions,
+  useActiveReleases,
+  projectReleasesOptions,
+  useProjectReleases,
+  releaseDetailOptions,
+  useReleaseDetail,
+  useCreateRelease,
+  useUpdateRelease,
+  useAddPullRequestToRelease,
+  useRemovePullRequestFromRelease,
+  useCancelRelease,
 } from "./queries";
+
+// Phase 7a — multi-select store. Lives next to the queries because
+// the selection drives a release-creation flow and the dialog wants
+// both the selected PR ids and the release mutations in one place.
+export {
+  useShipSelection,
+  useShipSelectionCount,
+} from "./selection";

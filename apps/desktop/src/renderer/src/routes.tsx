@@ -4,6 +4,7 @@ import {
   Navigate,
   Outlet,
   useMatches,
+  useParams,
 } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
@@ -18,7 +19,7 @@ import { ProjectsPage } from "@multica/views/projects/components";
 import { MemoryPage } from "@multica/views/memory/components";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
-import { ShipPage } from "@multica/views/ship";
+import { ShipPage, ShipReleasePage } from "@multica/views/ship";
 import { SkillsPage } from "@multica/views/skills";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { AgentsPage } from "@multica/views/agents";
@@ -58,6 +59,15 @@ function PageShell() {
       <Outlet />
     </>
   );
+}
+
+/** Phase 7a — desktop wrapper that pulls the :id param out of
+ *  react-router-dom and forwards it to the shared release page.
+ *  Same shape as RuntimeDetailPage's wrapper in pages/. */
+function ShipReleaseRouteWrapper() {
+  const { id } = useParams<{ id: string }>();
+  if (!id) return null;
+  return <ShipReleasePage releaseId={id} />;
 }
 
 /**
@@ -140,6 +150,14 @@ export const appRoutes: RouteObject[] = [
             path: "ship",
             element: <ShipPage />,
             handle: { title: "Ship" },
+          },
+          {
+            // Phase 7a — Release detail. The route param matches the
+            // /ship/release/:id path the shared dialog navigates to
+            // after a successful create.
+            path: "ship/release/:id",
+            element: <ShipReleaseRouteWrapper />,
+            handle: { title: "Release" },
           },
           {
             path: "runtimes",

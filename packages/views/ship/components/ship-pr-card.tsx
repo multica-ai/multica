@@ -14,10 +14,15 @@ import {
   Hash,
   MessagesSquare,
   ExternalLink,
+  Train,
 } from "lucide-react";
 import type { PullRequest } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import { useShipSelection, useShipSelectionCount } from "@multica/core/ship";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { useT } from "../../i18n";
+import { AppLink } from "../../navigation";
 import { deriveRiskHint } from "../hooks/use-pr-state";
 import { PrChipRow } from "./pr-chip-row";
 
@@ -171,6 +176,15 @@ export function ShipPRCard({
 }: ShipPRCardProps) {
   const { t, i18n } = useT("ship");
   const risk = deriveRiskHint(pr);
+  // Phase 7a — multi-select. The checkbox is hidden by default and
+  // revealed on hover (see CSS) OR when at least one PR is already
+  // selected (so the user can see what's selected at a glance).
+  const isSelected = useShipSelection((s) => s.selected.has(pr.id));
+  const selectionCount = useShipSelectionCount();
+  const toggleSelection = useShipSelection((s) => s.toggle);
+  const workspace = useCurrentWorkspace();
+  const slug = workspace?.slug ?? "";
+  const showCheckbox = isSelected || selectionCount > 0;
 
   return (
     <a
@@ -179,18 +193,43 @@ export function ShipPRCard({
       rel="noopener noreferrer"
       // Use semantic tokens for the card surface — explicit hover lift to
       // signal it's clickable. Phase 1 has no inline preview; click goes
-      // straight to GitHub in a new tab.
+      // straight to GitHub in a new tab. Group used so the checkbox
+      // can reveal on hover; ring highlights the selected state.
       className={cn(
-        "block rounded-md border bg-card p-3 text-card-foreground shadow-sm",
+        "group/card relative block rounded-md border bg-card p-3 text-card-foreground shadow-sm",
         "transition-colors hover:border-primary/40 hover:bg-accent/40",
+        isSelected && "ring-2 ring-primary",
         pr.is_draft && "opacity-80",
       )}
+      data-testid="ship-pr-card"
     >
+      {/* Phase 7a — multi-select checkbox. Always rendered to keep
+          DOM stable; visually hidden until hover or until something
+          else is selected. Click handling stops propagation so we
+          don't navigate to GitHub when toggling. */}
+      <div
+        className={cn(
+          "absolute left-2 top-2 transition-opacity",
+          showCheckbox
+            ? "opacity-100"
+            : "opacity-0 group-hover/card:opacity-100",
+        )}
+      >
+        <Checkbox
+          checked={isSelected}
+          onCheckedChange={() => toggleSelection(pr.id)}
+          onClick={(e) => {
+            e.stopPropagation();
+          }}
+          aria-label={`Select PR #${pr.number}`}
+          data-testid="ship-pr-card-checkbox"
+        />
+      </div>
       {/* Author + PR number row. Avatar is just the GitHub URL — no
           additional preflight; the user already trusts the destination.
           Phase 4 — the source icon sits to the LEFT of the avatar so the
           card's first visual signal is "where did this PR come from". */}
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="ml-6 flex items-center gap-2 text-xs text-muted-foreground">
         <SourceIcon source={pr.source} />
         {pr.author_avatar_url ? (
           <img
@@ -350,6 +389,24 @@ export function ShipPRCard({
           when: formatRelativeTime(pr.pr_updated_at, i18n.language),
         })}
       </div>
+
+      {/* Phase 7a — release badge. Renders only when this PR is part
+          of an active release. Click navigates to the release detail
+          page; stops propagation so the parent <a> doesn't open
+          GitHub at the same time. */}
+      {pr.active_release && slug && (
+        <AppLink
+          href={`/${slug}/ship/release/${pr.active_release.id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="mt-1.5 inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/20"
+          data-testid="ship-pr-card-release-badge"
+        >
+          <Train className="size-3" />
+          {t(($) => $.releases.detail.release_badge, {
+            title: pr.active_release.title,
+          })}
+        </AppLink>
+      )}
 
       {/* Phase 3 — smart action chips. Renders nothing when the PR doesn't
           qualify for any chip (open + clean / merged + on staging). The

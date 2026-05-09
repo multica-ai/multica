@@ -474,6 +474,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/deploy_environments/{id}/poll_now", h.PollDeployEnvironment)
 			r.Post("/api/deploy_environments/{id}/rollback", h.RollbackDeployEnvironment)
 
+			// Ship Hub Phase 7a — Releases. Same ship_hub_enabled gate; no
+			// GitHub token required for create/list/cancel because the
+			// service layer just reads the local pull_request rows. The
+			// merge-train (Phase 7b), staging promote (7c), and prod
+			// promote (7d) endpoints land later under similar paths.
+			r.Post("/api/projects/{id}/releases", h.CreateRelease)
+			r.Get("/api/projects/{id}/releases", h.ListProjectReleases)
+			r.Get("/api/workspaces/{id}/releases/active", h.ListWorkspaceActiveReleases)
+			r.Get("/api/releases/{id}", h.GetRelease)
+			r.Patch("/api/releases/{id}", h.UpdateRelease)
+			r.Post("/api/releases/{id}/pull_requests", h.AddPullRequestToRelease)
+			r.Delete("/api/releases/{id}/pull_requests/{pr_id}", h.RemovePullRequestFromRelease)
+			r.Post("/api/releases/{id}/cancel", h.CancelRelease)
+
 			// Channels (multi-participant chat + DMs).
 			// Endpoints respond 404 when workspace.channels_enabled is FALSE
 			// — the gate lives inside each handler so the surface is invisible

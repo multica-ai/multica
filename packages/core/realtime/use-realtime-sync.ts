@@ -196,6 +196,14 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: shipKeys.all(wsId) });
       },
+      // Phase 7a — release:* events fire on create/update/cancel. The
+      // specific handlers below narrow down to the affected detail
+      // page; this prefix entry serves as the safety net for any
+      // future release:* events.
+      release: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: shipKeys.all(wsId) });
+      },
       // Powers the agent presence cache: any task lifecycle change
       // (dispatch / completed / failed / cancelled) refreshes the
       // workspace-wide agent-task-snapshot query so per-agent presence
@@ -275,6 +283,10 @@ export function useRealtimeSync(
       // invalidation to the affected PR's audit footer + the workspace's
       // pull_requests prefix.
       "ship:card_action",
+      // Phase 7a — release lifecycle.
+      "release:created",
+      "release:updated",
+      "release:cancelled",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -735,6 +747,26 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: shipKeys.allPullRequests(wsId) });
     });
 
+    // Phase 7a — Release lifecycle. The three events all need to
+    // refresh the workspace-wide rail; created/updated additionally
+    // patch the per-detail page if the receiver currently has it
+    // open. Per-PR card decoration also picks up the badge.
+    const onReleaseEvent = (p: unknown) => {
+      const payload = p as { release_id?: string };
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      qc.invalidateQueries({ queryKey: shipKeys.workspaceActiveReleases(wsId) });
+      qc.invalidateQueries({ queryKey: shipKeys.allPullRequests(wsId) });
+      if (payload?.release_id) {
+        qc.invalidateQueries({
+          queryKey: shipKeys.releaseDetail(wsId, payload.release_id),
+        });
+      }
+    };
+    const unsubReleaseCreated = ws.on("release:created", onReleaseEvent);
+    const unsubReleaseUpdated = ws.on("release:updated", onReleaseEvent);
+    const unsubReleaseCancelled = ws.on("release:cancelled", onReleaseEvent);
+
     const unsubChatDone = ws.on("chat:done", (p) => {
       const payload = p as ChatDonePayload;
       chatWsLogger.info("chat:done (global)", {
@@ -909,6 +941,9 @@ export function useRealtimeSync(
       unsubDeployProgress();
       unsubDeployCompleted();
       unsubShipCardAction();
+      unsubReleaseCreated();
+      unsubReleaseUpdated();
+      unsubReleaseCancelled();
       unsubChatDone();
       unsubTaskQueued();
       unsubTaskDispatch();

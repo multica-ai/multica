@@ -169,4 +169,17 @@ export type {
   UpdatePreflightRequest,
   PromoteDeployPreflightResponse,
   ShipSnapshotResponse,
+  // Phase 7a — Releases
+  ReleaseStage,
+  Release,
+  ReleasePullRequest,
+  ReleaseEvent,
+  ReleaseDetailResponse,
+  CreateReleaseResponse,
+  ListReleasesResponse,
+  CreateReleaseRequest,
+  UpdateReleaseRequest,
+  AddPullRequestToReleaseRequest,
+  CancelReleaseRequest,
+  ActiveReleaseRef,
 } from "./ship";

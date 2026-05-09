@@ -1,14 +1,21 @@
 "use client";
 
+import { useEffect, useMemo } from "react";
 import { Rocket } from "lucide-react";
-import { useShipProjects } from "@multica/core/ship";
+import { useShipProjects, useShipSelection } from "@multica/core/ship";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { useQuery } from "@tanstack/react-query";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { projectPullRequestsOptions } from "@multica/core/ship";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { PageHeader } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { ShipEmptyState } from "./ship-empty-state";
 import { ShipNoTokenState } from "./ship-no-token-state";
 import { ShipProjectSection } from "./ship-project-section";
+import { ShipActiveReleasesRail } from "./ship-active-releases-rail";
+import { ShipSelectionBar } from "./ship-selection-bar";
+import type { PullRequest } from "@multica/core/types";
 
 /**
  * Ship Hub landing page.
@@ -34,6 +41,19 @@ export function ShipPage() {
   const enabled = workspace?.ship_hub_enabled === true;
   const tokenSet = workspace?.github_token_set === true;
   const { data, isLoading } = useShipProjects(enabled);
+  const clearSelection = useShipSelection((s) => s.clear);
+
+  // Phase 7a — clear the multi-select state on workspace switch.
+  // Selection is in-memory ephemeral state (per CLAUDE.md "Don't
+  // persist ephemeral UI state"); switching workspaces should not
+  // bring stale PR ids forward.
+  const wsId = useWorkspaceId();
+  useEffect(() => {
+    return () => {
+      clearSelection();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key is wsId
+  }, [wsId]);
 
   if (!enabled) {
     return (
@@ -75,16 +95,54 @@ export function ShipPage() {
         ) : projects.length === 0 ? (
           <ShipEmptyState />
         ) : (
-          <div className="space-y-8 p-5">
+          <div className="space-y-6 p-5">
             <p className="text-xs text-muted-foreground">
               {t(($) => $.page.subtitle)}
             </p>
-            {projects.map((project) => (
-              <ShipProjectSection key={project.id} project={project} />
-            ))}
+            {/* Phase 7a — active releases rail above the per-project
+                Kanban sections. Hidden when no active releases exist. */}
+            <ShipActiveReleasesRail />
+            <div className="space-y-8">
+              {projects.map((project) => (
+                <ShipProjectSection key={project.id} project={project} />
+              ))}
+            </div>
           </div>
         )}
       </div>
+      {/* Phase 7a — selection footer. Self-hides when nothing is
+          selected. Lives outside the scrollable region so it stays
+          visible while the user scrolls the project sections. */}
+      <ShipSelectionBarConsumer />
     </div>
   );
+}
+
+/** Consumer of every visible PR list across the workspace. The
+ *  selection bar needs the union of PRs from every project section
+ *  so it can derive `projectCount` + `highestRisk` without each
+ *  section pushing into a side store. */
+function ShipSelectionBarConsumer() {
+  const { data } = useShipProjects(true);
+  const projects = data?.projects ?? [];
+  // Render one ProjectPRsBridge per project; each pushes its PR list
+  // into a shared `useState` mirror so the selection bar can render
+  // a unified summary. We keep this in the page component (rather
+  // than the bar itself) so the projects fetch hook only runs once.
+  const wsId = useWorkspaceId();
+  // Aggregate every project's open PRs. We DO this here (rather
+  // than in the bar) because the bar should not re-mount on every
+  // selection change.
+  const queries = projects.map((p) =>
+    // eslint-disable-next-line react-hooks/rules-of-hooks -- stable list per render
+    useQuery(projectPullRequestsOptions(wsId, p.id, "open")),
+  );
+  const allPRs = useMemo<PullRequest[]>(() => {
+    const out: PullRequest[] = [];
+    for (const q of queries) {
+      if (q.data?.pull_requests) out.push(...q.data.pull_requests);
+    }
+    return out;
+  }, [queries]);
+  return <ShipSelectionBar pullRequests={allPRs} />;
 }

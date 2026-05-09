@@ -1,0 +1,203 @@
+-- Phase 7a — Release lifecycle (create / list / detail / mutate).
+--
+-- Naming convention:
+--   * `Create` for a single inserting query.
+--   * `List` returns multiple rows; ordering is the caller-friendly
+--     default for that surface (workspace rail = updated_at DESC).
+--   * `Update*` returns the updated row so the handler can echo it
+--     to the client without an extra GET.
+
+-- name: CreateRelease :one
+INSERT INTO ship_release (
+    workspace_id, project_id, title, description, risk_level,
+    approver_id, second_approver_id, created_by
+) VALUES (
+    $1, $2, $3, sqlc.narg('description'), $4,
+    sqlc.narg('approver_id'), sqlc.narg('second_approver_id'), sqlc.narg('created_by')
+)
+RETURNING *;
+
+-- name: GetRelease :one
+SELECT * FROM ship_release
+WHERE id = $1;
+
+-- name: GetReleaseInWorkspace :one
+SELECT * FROM ship_release
+WHERE id = $1 AND workspace_id = $2;
+
+-- name: ListActiveReleasesByWorkspace :many
+-- "Active" = anything not yet in a terminal stage. Drives the home-page
+-- "Active releases" rail. Newest activity first.
+SELECT * FROM ship_release
+WHERE workspace_id = $1
+  AND stage NOT IN ('done', 'rolled_back', 'cancelled')
+ORDER BY updated_at DESC;
+
+-- name: ListReleasesByProject :many
+-- Project-scoped list, defaults to active stages. Pass include_terminal=TRUE
+-- to include done / rolled_back / cancelled.
+SELECT * FROM ship_release
+WHERE project_id = $1
+  AND (
+      sqlc.arg('include_terminal')::bool = TRUE
+      OR stage NOT IN ('done', 'rolled_back', 'cancelled')
+  )
+ORDER BY updated_at DESC;
+
+-- name: ListRecentReleasesByProject :many
+-- Bounded "Recent" tail used by the project page footer. Includes every
+-- stage so a recently-shipped release stays visible for a few days.
+SELECT * FROM ship_release
+WHERE project_id = $1
+ORDER BY updated_at DESC
+LIMIT $2;
+
+-- name: UpdateReleaseMetadata :one
+-- COALESCE/narg pattern — caller leaves a field nil to leave it
+-- untouched. updated_at always bumps so the rail re-orders.
+UPDATE ship_release SET
+    title = COALESCE(sqlc.narg('title'), title),
+    description = COALESCE(sqlc.narg('description'), description),
+    approver_id = CASE
+        WHEN sqlc.arg('approver_id_set')::bool THEN sqlc.narg('approver_id')
+        ELSE approver_id
+    END,
+    second_approver_id = CASE
+        WHEN sqlc.arg('second_approver_id_set')::bool THEN sqlc.narg('second_approver_id')
+        ELSE second_approver_id
+    END,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateReleaseStage :one
+-- Stage transitions stamp the matching ladder timestamp when it
+-- becomes non-NULL. We pass the timestamp explicitly from the service
+-- layer instead of computing in SQL so the audit log carries the same
+-- value the row records (no clock skew).
+UPDATE ship_release SET
+    stage = $2,
+    merged_at = COALESCE(sqlc.narg('merged_at'), merged_at),
+    staged_at = COALESCE(sqlc.narg('staged_at'), staged_at),
+    promoted_at = COALESCE(sqlc.narg('promoted_at'), promoted_at),
+    done_at = COALESCE(sqlc.narg('done_at'), done_at),
+    rollback_reason = COALESCE(sqlc.narg('rollback_reason'), rollback_reason),
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateReleaseRiskLevel :one
+-- Aggregate-recompute path. Called after AddPullRequestToRelease /
+-- RemovePullRequestFromRelease to keep the denormalized risk_level
+-- column aligned with the join set.
+UPDATE ship_release SET
+    risk_level = $2,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateReleaseChannel :one
+UPDATE ship_release SET
+    channel_id = $2,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateReleaseIssue :one
+UPDATE ship_release SET
+    issue_id = $2,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: AddPullRequestToRelease :one
+-- Idempotent on (release_id, pull_request_id) via ON CONFLICT — repeat
+-- adds return the existing row instead of failing.
+INSERT INTO ship_release_pull_request (
+    release_id, pull_request_id, position, is_active
+) VALUES (
+    $1, $2, $3, TRUE
+)
+ON CONFLICT (release_id, pull_request_id) DO UPDATE SET
+    position = EXCLUDED.position,
+    is_active = EXCLUDED.is_active
+RETURNING *;
+
+-- name: RemovePullRequestFromRelease :exec
+-- Phase 7a removes the row outright; once a release leaves the
+-- assembling stage we instead flip is_active=FALSE (see
+-- DeactivateReleasePullRequests below).
+DELETE FROM ship_release_pull_request
+WHERE release_id = $1 AND pull_request_id = $2;
+
+-- name: ListReleasePullRequests :many
+-- Returns the PRs in this release joined with the membership row.
+-- We expose the join columns explicitly because the merged_sha /
+-- merge_error fields are release-specific (they don't live on
+-- pull_request itself).
+SELECT
+    pr.*,
+    rpr.position AS membership_position,
+    rpr.merged_sha AS membership_merged_sha,
+    rpr.merged_at AS membership_merged_at,
+    rpr.merge_error AS membership_merge_error,
+    rpr.added_at AS membership_added_at,
+    rpr.is_active AS membership_is_active
+FROM ship_release_pull_request rpr
+JOIN pull_request pr ON pr.id = rpr.pull_request_id
+WHERE rpr.release_id = $1
+ORDER BY rpr.position ASC, rpr.added_at ASC;
+
+-- name: GetActiveReleaseForPullRequest :one
+-- Returns the ACTIVE release a PR belongs to, if any. The partial
+-- unique index guarantees at most one row. Used by the per-PR card
+-- "release badge" — it surfaces "🚂 in <release_title>" on every
+-- card whose PR is currently in flight.
+SELECT r.*
+FROM ship_release_pull_request rpr
+JOIN ship_release r ON r.id = rpr.release_id
+WHERE rpr.pull_request_id = $1 AND rpr.is_active = TRUE
+LIMIT 1;
+
+-- name: ListActiveReleasesForPullRequests :many
+-- Batch variant: take a set of PR ids and return the active release
+-- for each (zero or one). Powers the bulk-decoration of the Kanban
+-- so we don't N+1.
+SELECT
+    rpr.pull_request_id,
+    r.id          AS release_id,
+    r.title       AS release_title,
+    r.stage       AS release_stage,
+    r.project_id  AS release_project_id
+FROM ship_release_pull_request rpr
+JOIN ship_release r ON r.id = rpr.release_id
+WHERE rpr.pull_request_id = ANY($1::uuid[])
+  AND rpr.is_active = TRUE;
+
+-- name: DeactivateReleasePullRequests :exec
+-- Flip is_active=FALSE on every join row for a release. Used when the
+-- release reaches a terminal stage so the partial unique index frees
+-- up those PRs for new releases.
+UPDATE ship_release_pull_request
+SET is_active = FALSE
+WHERE release_id = $1;
+
+-- name: CountActiveReleasePullRequests :one
+SELECT COUNT(*)::int AS pr_count
+FROM ship_release_pull_request
+WHERE release_id = $1;
+
+-- name: InsertReleaseEvent :one
+INSERT INTO ship_release_event (
+    release_id, event_type, actor_user_id, payload
+) VALUES (
+    $1, $2, sqlc.narg('actor_user_id'), sqlc.narg('payload')
+)
+RETURNING *;
+
+-- name: ListReleaseEvents :many
+-- Newest-first; the detail timeline panel renders top-down.
+SELECT * FROM ship_release_event
+WHERE release_id = $1
+ORDER BY created_at DESC
+LIMIT $2;

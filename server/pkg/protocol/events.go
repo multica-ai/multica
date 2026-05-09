@@ -151,6 +151,18 @@ const (
 	// the card's "recent actions" footer in real time.
 	EventCardAction = "ship:card_action"
 
+	// Phase 7a — Release lifecycle signals. created/updated/cancelled
+	// mirror the three CRUD verbs the dialog and detail page exercise;
+	// later phases (7b/c/d) reuse `:updated` for stage transitions
+	// rather than minting a separate event per stage. Payload always
+	// carries `release_id`; `created` also carries `project_id` and
+	// `stage` so the rail can decide whether to insert; `updated`
+	// carries `stage` so the cache can patch in place; `cancelled`
+	// carries only `release_id` (the receiver removes from the rail).
+	EventReleaseCreated   = "release:created"
+	EventReleaseUpdated   = "release:updated"
+	EventReleaseCancelled = "release:cancelled"
+
 	// Daemon events
 	EventDaemonHeartbeat     = "daemon:heartbeat"
 	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"

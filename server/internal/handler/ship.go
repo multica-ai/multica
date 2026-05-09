@@ -130,6 +130,21 @@ type pullRequestResponse struct {
 	ConversationChannelID  *string `json:"conversation_channel_id"`
 	StackParentPRID        *string `json:"stack_parent_pr_id"`
 	Source                 string  `json:"source"`
+	// Phase 7a — when this PR is in an active release, decorate with
+	// the release's id/title/stage so the card can render the
+	// "🚂 in <release>" badge without an extra round-trip. Optional
+	// per CLAUDE.md API Response Compatibility — older Electron
+	// builds that don't know the field simply ignore it.
+	ActiveRelease *activeReleaseRef `json:"active_release,omitempty"`
+}
+
+// activeReleaseRef is the minimal release descriptor attached to PR
+// responses. Stays small (id + title + stage) so the bulk-decoration
+// query stays cheap.
+type activeReleaseRef struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Stage string `json:"stage"`
 }
 
 func pullRequestToResponse(pr db.PullRequest) pullRequestResponse {
@@ -368,6 +383,12 @@ func (h *Handler) ListProjectPullRequests(w http.ResponseWriter, r *http.Request
 	for i, pr := range rows {
 		out[i] = pullRequestToResponse(pr)
 	}
+	// Phase 7a — bulk-decorate with active_release. One round-trip
+	// across every PR in the listing, so the card can render the
+	// "in release" badge without an N+1 lookup. Best-effort: a
+	// failure here drops the badge but renders the rest of the
+	// list normally.
+	h.attachActiveReleaseToPRList(r.Context(), out, rows)
 	writeJSON(w, http.StatusOK, map[string]any{"pull_requests": out, "total": len(out)})
 }
 
@@ -696,6 +717,39 @@ func normalizeDeployStatus(s string) (db.DeployStatus, bool) {
 		return db.DeployStatusRolledBack, true
 	default:
 		return "", false
+	}
+}
+
+// attachActiveReleaseToPRList bulk-decorates a slice of
+// pullRequestResponse with the ActiveRelease field. Mutates `out` in
+// place. Pass the source `db.PullRequest` slice so we can take the
+// IDs without re-parsing the response strings.
+func (h *Handler) attachActiveReleaseToPRList(ctx context.Context, out []pullRequestResponse, src []db.PullRequest) {
+	if len(src) == 0 {
+		return
+	}
+	ids := make([]pgtype.UUID, len(src))
+	for i, pr := range src {
+		ids[i] = pr.ID
+	}
+	rows, err := h.Queries.ListActiveReleasesForPullRequests(ctx, ids)
+	if err != nil {
+		// Non-fatal — the badge just doesn't render.
+		return
+	}
+	byPR := map[string]activeReleaseRef{}
+	for _, row := range rows {
+		byPR[uuidToString(row.PullRequestID)] = activeReleaseRef{
+			ID:    uuidToString(row.ReleaseID),
+			Title: row.ReleaseTitle,
+			Stage: string(row.ReleaseStage),
+		}
+	}
+	for i := range out {
+		if ref, ok := byPR[out[i].ID]; ok {
+			c := ref
+			out[i].ActiveRelease = &c
+		}
 	}
 }
 

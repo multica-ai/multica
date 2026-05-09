@@ -84,6 +84,11 @@ export interface PullRequest {
    *  nothing to say (medium / pre-classification). */
   risk_reasons?: string[];
   risk_classified_at?: string | null;
+  // ---- Phase 7a — release decoration ----
+  /** Set when this PR is part of an active release. Drives the
+   *  "🚂 in <release>" badge on the card. Optional + nullable so
+   *  older backends without the JOIN simply omit it. */
+  active_release?: { id: string; title: string; stage: string } | null;
 }
 
 /** Per-project deploy target (one staging + one production by convention). */
@@ -500,6 +505,141 @@ export interface ShipSnapshotResponse {
   /** Map of environment_id -> SHA running on that env at the moment
    *  in time. */
   environment_shas_at_time: Record<string, string>;
+}
+
+// --- Phase 7a: Releases -----------------------------------------------------
+
+/** All possible release stages — keep loose-typed at the wire (the
+ *  schema accepts any string) so a future server-side stage drop-in
+ *  doesn't crash older Electron builds. The strict literal union below
+ *  describes today's contract. */
+export type ReleaseStage =
+  | "assembling"
+  | "merging"
+  | "in_staging"
+  | "verifying"
+  | "promoting"
+  | "in_production"
+  | "done"
+  | "rolled_back"
+  | "cancelled";
+
+/** Release row returned by GET /api/releases/{id} (top-level `release`
+ *  field), plus the rail / project listings. PRs, events, channel,
+ *  and issue ride alongside as separate fields on the detail
+ *  response. */
+export interface Release {
+  id: string;
+  workspace_id: string;
+  project_id: string;
+  title: string;
+  description: string | null;
+  stage: ReleaseStage | string;
+  risk_level: RiskLevel | string;
+  channel_id: string | null;
+  issue_id: string | null;
+  approver_id: string | null;
+  second_approver_id: string | null;
+  staging_deploy_id: string | null;
+  production_deploy_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  merged_at: string | null;
+  staged_at: string | null;
+  promoted_at: string | null;
+  done_at: string | null;
+  rollback_reason: string | null;
+  pr_count: number;
+}
+
+/** Per-release PR row — extends the regular PullRequest shape with
+ *  membership-table columns (position in the merge train, per-PR
+ *  merge sha / error from Phase 7b). */
+export interface ReleasePullRequest extends PullRequest {
+  position: number;
+  merged_sha: string | null;
+  merged_at_release: string | null;
+  merge_error: string | null;
+  added_at: string;
+  is_active: boolean;
+}
+
+/** Audit-log row in the release timeline. event_type is loose-typed
+ *  per the API compat contract. */
+export interface ReleaseEvent {
+  id: string;
+  release_id: string;
+  event_type: string;
+  actor_user_id: string | null;
+  payload: unknown;
+  created_at: string;
+}
+
+/** GET /api/releases/{id} response. */
+export interface ReleaseDetailResponse {
+  release: Release;
+  pull_requests: ReleasePullRequest[];
+  events: ReleaseEvent[];
+  /** Auto-created discussion channel (when present). The shape
+   *  matches ChannelResponse in core/types/channel.ts; treated as
+   *  unknown here to avoid a circular import — consumers narrow at
+   *  the call site. */
+  channel?: { id: string; name: string; display_name?: string } | null;
+  /** Auto-created tracking issue. Same opaque-typed treatment. */
+  issue?: { id: string; identifier?: string; title?: string; status?: string } | null;
+}
+
+/** POST /api/projects/{id}/releases response. Same shape as the
+ *  detail page, plus `warnings` for the soft-gate concerns the
+ *  service layer surfaced. */
+export interface CreateReleaseResponse {
+  release: Release;
+  channel?: { id: string; name: string } | null;
+  issue?: { id: string; title: string } | null;
+  warnings: string[];
+}
+
+/** GET /api/workspaces/{id}/releases/active and GET /api/projects/{id}/releases. */
+export interface ListReleasesResponse {
+  releases: Release[];
+}
+
+/** Body for POST /api/projects/{id}/releases. */
+export interface CreateReleaseRequest {
+  title: string;
+  description?: string;
+  pull_request_ids: string[];
+  approver_id?: string | null;
+  second_approver_id?: string | null;
+}
+
+/** Body for PATCH /api/releases/{id}. Pointer-style nullables — null
+ *  on `approver_id` clears the field, undefined leaves it untouched. */
+export interface UpdateReleaseRequest {
+  title?: string;
+  description?: string;
+  approver_id?: string | null;
+  second_approver_id?: string | null;
+}
+
+/** Body for POST /api/releases/{id}/pull_requests. */
+export interface AddPullRequestToReleaseRequest {
+  pull_request_id: string;
+}
+
+/** Body for POST /api/releases/{id}/cancel. */
+export interface CancelReleaseRequest {
+  reason?: string;
+}
+
+/** Phase 7a — minimal release reference attached to a PullRequest
+ *  when it's part of an active release. Drives the per-card
+ *  "🚂 in <release>" badge. */
+export interface ActiveReleaseRef {
+  id: string;
+  title: string;
+  stage: ReleaseStage | string;
 }
 
 /** Response of POST /api/workspaces/{id}/ship_hub/regenerate_webhook_secret.

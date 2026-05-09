@@ -141,6 +141,55 @@ func (ns NullPullRequestState) Value() (driver.Value, error) {
 	return string(ns.PullRequestState), nil
 }
 
+type ReleaseStage string
+
+const (
+	ReleaseStageAssembling   ReleaseStage = "assembling"
+	ReleaseStageMerging      ReleaseStage = "merging"
+	ReleaseStageInStaging    ReleaseStage = "in_staging"
+	ReleaseStageVerifying    ReleaseStage = "verifying"
+	ReleaseStagePromoting    ReleaseStage = "promoting"
+	ReleaseStageInProduction ReleaseStage = "in_production"
+	ReleaseStageDone         ReleaseStage = "done"
+	ReleaseStageRolledBack   ReleaseStage = "rolled_back"
+	ReleaseStageCancelled    ReleaseStage = "cancelled"
+)
+
+func (e *ReleaseStage) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ReleaseStage(s)
+	case string:
+		*e = ReleaseStage(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ReleaseStage: %T", src)
+	}
+	return nil
+}
+
+type NullReleaseStage struct {
+	ReleaseStage ReleaseStage `json:"release_stage"`
+	Valid        bool         `json:"valid"` // Valid is true if ReleaseStage is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullReleaseStage) Scan(value interface{}) error {
+	if value == nil {
+		ns.ReleaseStage, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ReleaseStage.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullReleaseStage) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ReleaseStage), nil
+}
+
 type RiskLevel string
 
 const (
@@ -810,6 +859,50 @@ type ShipCardAction struct {
 	ResultPayload []byte             `json:"result_payload"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
+}
+
+type ShipRelease struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	ProjectID          pgtype.UUID        `json:"project_id"`
+	Title              string             `json:"title"`
+	Description        pgtype.Text        `json:"description"`
+	Stage              ReleaseStage       `json:"stage"`
+	RiskLevel          RiskLevel          `json:"risk_level"`
+	ChannelID          pgtype.UUID        `json:"channel_id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	ApproverID         pgtype.UUID        `json:"approver_id"`
+	SecondApproverID   pgtype.UUID        `json:"second_approver_id"`
+	StagingDeployID    pgtype.UUID        `json:"staging_deploy_id"`
+	ProductionDeployID pgtype.UUID        `json:"production_deploy_id"`
+	CreatedBy          pgtype.UUID        `json:"created_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	MergedAt           pgtype.Timestamptz `json:"merged_at"`
+	StagedAt           pgtype.Timestamptz `json:"staged_at"`
+	PromotedAt         pgtype.Timestamptz `json:"promoted_at"`
+	DoneAt             pgtype.Timestamptz `json:"done_at"`
+	RollbackReason     pgtype.Text        `json:"rollback_reason"`
+}
+
+type ShipReleaseEvent struct {
+	ID          pgtype.UUID        `json:"id"`
+	ReleaseID   pgtype.UUID        `json:"release_id"`
+	EventType   string             `json:"event_type"`
+	ActorUserID pgtype.UUID        `json:"actor_user_id"`
+	Payload     []byte             `json:"payload"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type ShipReleasePullRequest struct {
+	ReleaseID     pgtype.UUID        `json:"release_id"`
+	PullRequestID pgtype.UUID        `json:"pull_request_id"`
+	Position      int32              `json:"position"`
+	MergedSha     pgtype.Text        `json:"merged_sha"`
+	MergedAt      pgtype.Timestamptz `json:"merged_at"`
+	MergeError    pgtype.Text        `json:"merge_error"`
+	AddedAt       pgtype.Timestamptz `json:"added_at"`
+	IsActive      bool               `json:"is_active"`
 }
 
 type Skill struct {

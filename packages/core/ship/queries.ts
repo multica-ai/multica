@@ -18,6 +18,9 @@ import type {
   UpdatePreflightRequest,
   ConfigureDeployAdapterRequest,
   RollbackDeployRequest,
+  CreateReleaseRequest,
+  UpdateReleaseRequest,
+  CancelReleaseRequest,
 } from "../types";
 
 // Query key factory — workspace-scoped per CLAUDE.md so a workspace switch
@@ -57,6 +60,15 @@ export const shipKeys = {
   // workspace switch refetches (different adapters may be available
   // server-side in the future based on plan / feature flags).
   adapters: (wsId: string) => [...shipKeys.all(wsId), "adapters"] as const,
+  // Phase 7a — Releases. Workspace-prefixed so a switch wipes
+  // every release cache without manual invalidation.
+  releases: (wsId: string) => [...shipKeys.all(wsId), "releases"] as const,
+  releaseDetail: (wsId: string, releaseId: string) =>
+    [...shipKeys.releases(wsId), "detail", releaseId] as const,
+  workspaceActiveReleases: (wsId: string) =>
+    [...shipKeys.releases(wsId), "active"] as const,
+  projectReleases: (wsId: string, projectId: string, status: string) =>
+    [...shipKeys.releases(wsId), "by_project", projectId, status] as const,
 };
 
 /** List of projects in the workspace that have ≥1 GitHub repo attached.
@@ -593,6 +605,154 @@ export function useRollbackDeployEnvironment(environmentId: string, projectId: s
         queryKey: shipKeys.deploys(wsId, environmentId),
       });
       qc.invalidateQueries({ queryKey: shipKeys.summary(wsId) });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7a — Releases.
+//
+// A Release groups a set of PRs through merge → staging → production.
+// Phase 7a only implements create / read / cancel; phases 7b+ add stage
+// transitions and deploy automation.
+//
+// Cache layout:
+//   * shipKeys.workspaceActiveReleases(wsId) — workspace-wide rail.
+//   * shipKeys.projectReleases(wsId, projectId, status) — per-project lists.
+//   * shipKeys.releaseDetail(wsId, releaseId) — release detail page.
+//
+// WS events `release:created` / `release:updated` / `release:cancelled`
+// invalidate the rail + the affected detail (see use-realtime-sync.ts).
+// ---------------------------------------------------------------------------
+
+/** Workspace-wide active releases rail. Renders on the Ship Hub
+ *  landing page above the per-project sections. */
+export function workspaceActiveReleasesOptions(wsId: string, enabled: boolean) {
+  return queryOptions({
+    queryKey: shipKeys.workspaceActiveReleases(wsId),
+    queryFn: () => api.listWorkspaceActiveReleases(wsId),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+export function useActiveReleases(enabled = true) {
+  const wsId = useWorkspaceId();
+  return useQuery(workspaceActiveReleasesOptions(wsId, enabled));
+}
+
+/** Per-project release list (release detail's "siblings" rail in
+ *  Phase 7b+; for 7a it backs the project section's release list). */
+export function projectReleasesOptions(
+  wsId: string,
+  projectId: string,
+  status: "active" | "all" = "active",
+) {
+  return queryOptions({
+    queryKey: shipKeys.projectReleases(wsId, projectId, status),
+    queryFn: () => api.listProjectReleases(projectId, { status }),
+    enabled: !!projectId,
+    staleTime: 30_000,
+  });
+}
+
+export function useProjectReleases(
+  projectId: string,
+  status: "active" | "all" = "active",
+) {
+  const wsId = useWorkspaceId();
+  return useQuery(projectReleasesOptions(wsId, projectId, status));
+}
+
+/** Release detail. */
+export function releaseDetailOptions(
+  wsId: string,
+  releaseId: string,
+  enabled: boolean,
+) {
+  return queryOptions({
+    queryKey: shipKeys.releaseDetail(wsId, releaseId),
+    queryFn: () => api.getRelease(releaseId),
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+export function useReleaseDetail(releaseId: string, enabled = true) {
+  const wsId = useWorkspaceId();
+  return useQuery(releaseDetailOptions(wsId, releaseId, enabled && !!releaseId));
+}
+
+/** Create release. On success, navigates the caller to the new
+ *  detail page (the dialog wires this through). */
+export function useCreateRelease(projectId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data: CreateReleaseRequest) => api.createRelease(projectId, data),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: shipKeys.workspaceActiveReleases(wsId) });
+      qc.invalidateQueries({
+        queryKey: shipKeys.projectReleases(wsId, projectId, "active"),
+      });
+      // Per-PR card decoration also needs to refresh so the
+      // release badge shows up immediately on every Kanban card.
+      qc.invalidateQueries({ queryKey: shipKeys.allPullRequests(wsId) });
+    },
+  });
+}
+
+/** PATCH release metadata. */
+export function useUpdateRelease(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data: UpdateReleaseRequest) => api.updateRelease(releaseId, data),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: shipKeys.releaseDetail(wsId, releaseId) });
+      qc.invalidateQueries({ queryKey: shipKeys.workspaceActiveReleases(wsId) });
+    },
+  });
+}
+
+/** Add a PR to an assembling release. */
+export function useAddPullRequestToRelease(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data: { pull_request_id: string }) =>
+      api.addPullRequestToRelease(releaseId, data),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: shipKeys.releaseDetail(wsId, releaseId) });
+      qc.invalidateQueries({ queryKey: shipKeys.allPullRequests(wsId) });
+    },
+  });
+}
+
+/** Remove a PR from an assembling release. */
+export function useRemovePullRequestFromRelease(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (pullRequestId: string) =>
+      api.removePullRequestFromRelease(releaseId, pullRequestId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: shipKeys.releaseDetail(wsId, releaseId) });
+      qc.invalidateQueries({ queryKey: shipKeys.allPullRequests(wsId) });
+    },
+  });
+}
+
+/** Cancel an assembling release. */
+export function useCancelRelease(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data?: CancelReleaseRequest) => api.cancelRelease(releaseId, data),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: shipKeys.releaseDetail(wsId, releaseId) });
+      qc.invalidateQueries({ queryKey: shipKeys.workspaceActiveReleases(wsId) });
+      qc.invalidateQueries({ queryKey: shipKeys.allPullRequests(wsId) });
     },
   });
 }

@@ -203,6 +203,17 @@ const PullRequestSchema = z.object({
   risk_level: z.string().optional(),
   risk_reasons: z.array(z.string()).optional(),
   risk_classified_at: z.string().nullable().optional(),
+  // Phase 7a — release decoration. Older backends without the
+  // ListActiveReleasesForPullRequests JOIN simply omit this field.
+  active_release: z
+    .object({
+      id: z.string().default(""),
+      title: z.string().default(""),
+      stage: z.string().default(""),
+    })
+    .loose()
+    .nullable()
+    .optional(),
 }).loose();
 
 export const ListPullRequestsResponseSchema = z.object({
@@ -554,4 +565,125 @@ export const EMPTY_SHIP_SNAPSHOT_RESPONSE = {
   pull_requests: [],
   environments: [],
   environment_shas_at_time: {},
+};
+
+// Phase 7a — Release schemas. Every endpoint that returns a release
+// runs through one of these so a server-side schema drift (a new
+// stage value, a new optional field) downgrades to a usable shape
+// rather than throwing into the UI. Stage / risk_level stay as
+// `z.string()` per the API-compat contract.
+export const ReleaseSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  project_id: z.string().default(""),
+  title: z.string().default(""),
+  description: z.string().nullable().default(null),
+  stage: z.string().default("assembling"),
+  risk_level: z.string().default("medium"),
+  channel_id: z.string().nullable().default(null),
+  issue_id: z.string().nullable().default(null),
+  approver_id: z.string().nullable().default(null),
+  second_approver_id: z.string().nullable().default(null),
+  staging_deploy_id: z.string().nullable().default(null),
+  production_deploy_id: z.string().nullable().default(null),
+  created_by: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  merged_at: z.string().nullable().default(null),
+  staged_at: z.string().nullable().default(null),
+  promoted_at: z.string().nullable().default(null),
+  done_at: z.string().nullable().default(null),
+  rollback_reason: z.string().nullable().default(null),
+  pr_count: z.number().default(0),
+}).loose();
+
+const ReleasePullRequestSchema = PullRequestSchema.extend({
+  position: z.number().default(0),
+  merged_sha: z.string().nullable().default(null),
+  merged_at_release: z.string().nullable().default(null),
+  merge_error: z.string().nullable().default(null),
+  added_at: z.string().default(""),
+  is_active: z.boolean().default(true),
+}).loose();
+
+const ReleaseEventSchema = z.object({
+  id: z.string(),
+  release_id: z.string().default(""),
+  event_type: z.string().default(""),
+  actor_user_id: z.string().nullable().default(null),
+  payload: z.unknown().nullable().optional(),
+  created_at: z.string().default(""),
+}).loose();
+
+export const ListReleasesResponseSchema = z.object({
+  releases: z.array(ReleaseSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_RELEASES_RESPONSE = {
+  releases: [],
+};
+
+const ReleaseChannelRefSchema = z.object({
+  id: z.string().default(""),
+  name: z.string().default(""),
+  display_name: z.string().optional(),
+}).loose();
+
+const ReleaseIssueRefSchema = z.object({
+  id: z.string().default(""),
+  identifier: z.string().optional(),
+  title: z.string().optional(),
+  status: z.string().optional(),
+}).loose();
+
+export const ReleaseDetailResponseSchema = z.object({
+  release: ReleaseSchema,
+  pull_requests: z.array(ReleasePullRequestSchema).default([]),
+  events: z.array(ReleaseEventSchema).default([]),
+  channel: ReleaseChannelRefSchema.nullable().optional(),
+  issue: ReleaseIssueRefSchema.nullable().optional(),
+}).loose();
+
+// EMPTY_RELEASE_DETAIL is rendered when a malformed detail response
+// arrives — picks an empty release row with stage="assembling" so
+// the UI's switch statements have a defined branch.
+export const EMPTY_RELEASE_DETAIL = {
+  release: {
+    id: "",
+    workspace_id: "",
+    project_id: "",
+    title: "",
+    description: null,
+    stage: "assembling",
+    risk_level: "medium",
+    channel_id: null,
+    issue_id: null,
+    approver_id: null,
+    second_approver_id: null,
+    staging_deploy_id: null,
+    production_deploy_id: null,
+    created_by: null,
+    created_at: "",
+    updated_at: "",
+    merged_at: null,
+    staged_at: null,
+    promoted_at: null,
+    done_at: null,
+    rollback_reason: null,
+    pr_count: 0,
+  },
+  pull_requests: [],
+  events: [],
+};
+
+export const CreateReleaseResponseSchema = z.object({
+  release: ReleaseSchema,
+  channel: ReleaseChannelRefSchema.nullable().optional(),
+  issue: ReleaseIssueRefSchema.nullable().optional(),
+  warnings: z.array(z.string()).default([]),
+}).loose();
+
+export const EMPTY_CREATE_RELEASE_RESPONSE = {
+  release: EMPTY_RELEASE_DETAIL.release,
+  warnings: [],
 };

@@ -82,7 +82,10 @@ export type WSEventType =
   | "deploy:started"
   | "deploy:progress"
   | "deploy:completed"
-  | "ship:card_action";
+  | "ship:card_action"
+  | "release:created"
+  | "release:updated"
+  | "release:cancelled";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;

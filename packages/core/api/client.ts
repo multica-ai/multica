@@ -138,6 +138,14 @@ import type {
   UpdatePreflightRequest,
   PromoteDeployPreflightResponse,
   ShipSnapshotResponse,
+  CreateReleaseRequest,
+  CreateReleaseResponse,
+  Release,
+  ReleaseDetailResponse,
+  ListReleasesResponse,
+  UpdateReleaseRequest,
+  AddPullRequestToReleaseRequest,
+  CancelReleaseRequest,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -184,6 +192,13 @@ import {
   PromoteDeployPreflightResponseSchema,
   ShipSnapshotResponseSchema,
   EMPTY_SHIP_SNAPSHOT_RESPONSE,
+  CreateReleaseResponseSchema,
+  EMPTY_CREATE_RELEASE_RESPONSE,
+  ListReleasesResponseSchema,
+  EMPTY_LIST_RELEASES_RESPONSE,
+  ReleaseDetailResponseSchema,
+  EMPTY_RELEASE_DETAIL,
+  ReleaseSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1760,6 +1775,119 @@ export class ApiClient {
       ListDeploysResponseSchema,
       EMPTY_LIST_DEPLOYS_RESPONSE,
       { endpoint: "GET /api/deploy_environments/:id/deploys" },
+    );
+  }
+
+  // Phase 7a — Releases. The Ship Hub release object groups a set
+  // of PRs through staging → production. Phase 7a is read + create
+  // only; phases 7b/7c/7d add merge train + promotions.
+  async createRelease(
+    projectId: string,
+    data: CreateReleaseRequest,
+  ): Promise<CreateReleaseResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/projects/${projectId}/releases`,
+      { method: "POST", body: JSON.stringify(data) },
+    );
+    return parseWithFallback(
+      raw,
+      CreateReleaseResponseSchema,
+      EMPTY_CREATE_RELEASE_RESPONSE,
+      { endpoint: "POST /api/projects/:id/releases" },
+    );
+  }
+
+  async getRelease(releaseId: string): Promise<ReleaseDetailResponse> {
+    const raw = await this.fetch<unknown>(`/api/releases/${releaseId}`);
+    return parseWithFallback(
+      raw,
+      ReleaseDetailResponseSchema,
+      EMPTY_RELEASE_DETAIL,
+      { endpoint: "GET /api/releases/:id" },
+    );
+  }
+
+  async listProjectReleases(
+    projectId: string,
+    params?: { status?: "active" | "all" },
+  ): Promise<ListReleasesResponse> {
+    const search = new URLSearchParams();
+    if (params?.status) search.set("status", params.status);
+    const qs = search.toString();
+    const raw = await this.fetch<unknown>(
+      `/api/projects/${projectId}/releases${qs ? `?${qs}` : ""}`,
+    );
+    return parseWithFallback(
+      raw,
+      ListReleasesResponseSchema,
+      EMPTY_LIST_RELEASES_RESPONSE,
+      { endpoint: "GET /api/projects/:id/releases" },
+    );
+  }
+
+  async listWorkspaceActiveReleases(
+    workspaceId: string,
+  ): Promise<ListReleasesResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/releases/active`,
+    );
+    return parseWithFallback(
+      raw,
+      ListReleasesResponseSchema,
+      EMPTY_LIST_RELEASES_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/releases/active" },
+    );
+  }
+
+  async updateRelease(
+    releaseId: string,
+    data: UpdateReleaseRequest,
+  ): Promise<Release> {
+    const raw = await this.fetch<unknown>(`/api/releases/${releaseId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(
+      raw,
+      ReleaseSchema,
+      EMPTY_RELEASE_DETAIL.release,
+      { endpoint: "PATCH /api/releases/:id" },
+    );
+  }
+
+  async addPullRequestToRelease(
+    releaseId: string,
+    data: AddPullRequestToReleaseRequest,
+  ): Promise<unknown> {
+    return this.fetch(`/api/releases/${releaseId}/pull_requests`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async removePullRequestFromRelease(
+    releaseId: string,
+    pullRequestId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/releases/${releaseId}/pull_requests/${pullRequestId}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async cancelRelease(
+    releaseId: string,
+    data?: CancelReleaseRequest,
+  ): Promise<Release> {
+    const raw = await this.fetch<unknown>(`/api/releases/${releaseId}/cancel`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    });
+    return parseWithFallback(
+      raw,
+      ReleaseSchema,
+      EMPTY_RELEASE_DETAIL.release,
+      { endpoint: "POST /api/releases/:id/cancel" },
     );
   }
 

@@ -336,5 +336,81 @@
     "toast_generated": "已生成网络钩子密钥",
     "toast_rotated": "已轮换网络钩子密钥",
     "toast_failed": "生成网络钩子密钥失败"
+  },
+  "selection": {
+    "count_other": "已选 {{count}} 个 PR",
+    "create_release": "创建发布",
+    "add_to_release": "加入发布",
+    "clear": "取消选择",
+    "highest_risk": "最高风险：{{level}}",
+    "across_projects_other": "{{count}} 个项目"
+  },
+  "releases": {
+    "page_title": "进行中的发布",
+    "empty": "暂无进行中的发布。先选择 PR，再点击创建发布。",
+    "view_release": "查看",
+    "create_dialog": {
+      "title": "创建发布",
+      "description": "将这些 PR 组合为一次协调发布。系统会自动创建讨论频道与跟踪议题。",
+      "title_label": "发布标题",
+      "title_placeholder": "如：Memory KB 上线",
+      "description_label": "描述",
+      "description_placeholder": "本次发布包含什么？（选填）",
+      "approver_label": "审批人",
+      "approver_placeholder": "选择工作区成员",
+      "second_approver_label": "第二审批人（关键级风险必填）",
+      "prs_label": "本次发布的 PR",
+      "submit": "创建发布",
+      "submitting": "创建中…",
+      "cancel": "取消",
+      "warning_title": "软提醒",
+      "no_approver_required": "风险等级 {{level}} 需要先指定审批人才能启动合并列车",
+      "no_second_approver_required": "关键级风险需要第二审批人",
+      "ineligible_pr": "PR #{{number}} 不可加入：{{reason}}"
+    },
+    "detail": {
+      "stage_label": "阶段",
+      "risk_label": "风险",
+      "approver_label": "审批人",
+      "second_approver_label": "第二审批人",
+      "channel_link": "讨论频道",
+      "issue_link": "跟踪议题",
+      "prs_heading": "Pull request 列表",
+      "events_heading": "时间线",
+      "no_prs": "尚未关联任何 PR。",
+      "no_events": "暂无事件。",
+      "edit": "编辑",
+      "add_pr": "添加 PR",
+      "cancel_release": "取消此发布",
+      "cancel_confirm_title": "取消此发布？",
+      "cancel_confirm_description": "发布将标记为已取消，频道会归档，跟踪议题会被关闭。其下 PR 可加入新发布。",
+      "cancel_confirm_action": "取消发布",
+      "cancel_reason_label": "原因（选填）",
+      "remove_pr_tooltip": "从发布中移除",
+      "release_badge": "属于 {{title}}"
+    },
+    "stage": {
+      "assembling": "组装中",
+      "merging": "合并中",
+      "in_staging": "预发布",
+      "verifying": "验证中",
+      "promoting": "推送中",
+      "in_production": "已上线",
+      "done": "完成",
+      "rolled_back": "已回滚",
+      "cancelled": "已取消"
+    },
+    "event": {
+      "created": "发布已创建",
+      "pr_added": "已添加 PR",
+      "pr_removed": "已移除 PR",
+      "metadata_updated": "元数据已更新",
+      "approver_set": "审批人已变更",
+      "channel_created": "频道已创建",
+      "issue_created": "跟踪议题已创建",
+      "stage_changed": "阶段推进",
+      "cancelled": "发布已取消",
+      "warning": "警告"
+    }
   }
 }

@@ -37,3 +37,9 @@ export { PrChipRow } from "./components/pr-chip-row";
 export { ChipButton } from "./components/chip-button";
 // Phase 6.5 — submit-review dialog
 export { ReviewDialog } from "./components/review-dialog";
+
+// Phase 7a — Releases
+export { ShipReleasePage } from "./components/ship-release-page";
+export { ShipSelectionBar } from "./components/ship-selection-bar";
+export { CreateReleaseDialog } from "./components/create-release-dialog";
+export { ShipActiveReleasesRail } from "./components/ship-active-releases-rail";

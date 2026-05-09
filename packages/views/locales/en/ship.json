@@ -339,5 +339,83 @@
     "toast_generated": "Webhook secret generated",
     "toast_rotated": "Webhook secret rotated",
     "toast_failed": "Failed to generate webhook secret"
+  },
+  "selection": {
+    "count_one": "{{count}} PR selected",
+    "count_other": "{{count}} PRs selected",
+    "create_release": "Create release",
+    "add_to_release": "Add to release",
+    "clear": "Clear",
+    "highest_risk": "Highest risk: {{level}}",
+    "across_projects_one": "{{count}} project",
+    "across_projects_other": "{{count}} projects"
+  },
+  "releases": {
+    "page_title": "Active releases",
+    "empty": "No active releases. Select PRs and click Create release.",
+    "view_release": "View",
+    "create_dialog": {
+      "title": "Create release",
+      "description": "Group these PRs into a coordinated release. The release auto-creates a discussion channel and a tracking issue.",
+      "title_label": "Release title",
+      "title_placeholder": "e.g. Memory KB rollout",
+      "description_label": "Description",
+      "description_placeholder": "What ships in this release? (optional)",
+      "approver_label": "Approver",
+      "approver_placeholder": "Pick a workspace member",
+      "second_approver_label": "Second approver (required for critical risk)",
+      "prs_label": "Pull requests in this release",
+      "submit": "Create release",
+      "submitting": "Creating…",
+      "cancel": "Cancel",
+      "warning_title": "Soft warnings",
+      "no_approver_required": "Risk level {{level}} requires an approver to start the merge train",
+      "no_second_approver_required": "Critical risk requires a second approver",
+      "ineligible_pr": "PR #{{number}} is not eligible: {{reason}}"
+    },
+    "detail": {
+      "stage_label": "Stage",
+      "risk_label": "Risk",
+      "approver_label": "Approver",
+      "second_approver_label": "Second approver",
+      "channel_link": "Discussion channel",
+      "issue_link": "Tracking issue",
+      "prs_heading": "Pull requests",
+      "events_heading": "Timeline",
+      "no_prs": "No PRs in this release.",
+      "no_events": "No events yet.",
+      "edit": "Edit",
+      "add_pr": "Add PR",
+      "cancel_release": "Cancel release",
+      "cancel_confirm_title": "Cancel this release?",
+      "cancel_confirm_description": "The release will be marked cancelled, the channel will be archived, and the tracking issue will be closed. PRs become available for the next release.",
+      "cancel_confirm_action": "Cancel release",
+      "cancel_reason_label": "Reason (optional)",
+      "remove_pr_tooltip": "Remove from release",
+      "release_badge": "in {{title}}"
+    },
+    "stage": {
+      "assembling": "Assembling",
+      "merging": "Merging",
+      "in_staging": "In staging",
+      "verifying": "Verifying",
+      "promoting": "Promoting",
+      "in_production": "In production",
+      "done": "Done",
+      "rolled_back": "Rolled back",
+      "cancelled": "Cancelled"
+    },
+    "event": {
+      "created": "Release created",
+      "pr_added": "PR added",
+      "pr_removed": "PR removed",
+      "metadata_updated": "Metadata updated",
+      "approver_set": "Approver changed",
+      "channel_created": "Channel created",
+      "issue_created": "Tracking issue created",
+      "stage_changed": "Stage advanced",
+      "cancelled": "Release cancelled",
+      "warning": "Warning"
+    }
   }
 }
