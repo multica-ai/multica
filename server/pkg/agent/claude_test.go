@@ -199,10 +199,34 @@ func TestTrySendDropsWhenFull(t *testing.T) {
 	}
 }
 
-func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
+func TestBuildClaudeArgsOmitsStrictMCPConfigWithoutMcpConfig(t *testing.T) {
 	t.Parallel()
 
 	args := buildClaudeArgs(ExecOptions{}, slog.Default())
+	expected := []string{
+		"-p",
+		"--output-format", "stream-json",
+		"--input-format", "stream-json",
+		"--verbose",
+		"--permission-mode", "bypassPermissions",
+	}
+
+	if len(args) != len(expected) {
+		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
+		}
+	}
+}
+
+func TestBuildClaudeArgsIncludesStrictMCPConfigWithMcpConfig(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{
+		McpConfig: json.RawMessage(`{"mcpServers":{"test":{"command":"echo"}}}`),
+	}, slog.Default())
 	expected := []string{
 		"-p",
 		"--output-format", "stream-json",
