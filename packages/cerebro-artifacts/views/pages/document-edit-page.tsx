@@ -16,6 +16,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
+import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { ContentEditor, type ContentEditorRef } from "@multica/views/editor";
 
 export function DocumentEditPage({ artifactId }: { artifactId: string }) {
@@ -60,8 +61,13 @@ export function DocumentEditPage({ artifactId }: { artifactId: string }) {
 
   if (isLoading || !artifact || !canEdit) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading…
+      <div className="flex h-full flex-col">
+        <div className="flex h-12 shrink-0 items-center border-b px-4">
+          <MobileSidebarTrigger className="mr-0" />
+        </div>
+        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+          Loading…
+        </div>
       </div>
     );
   }
@@ -94,13 +100,16 @@ export function DocumentEditPage({ artifactId }: { artifactId: string }) {
     <div className="h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-5xl px-4 py-4 md:px-8 md:py-6">
         <div className="mb-3 flex items-center justify-between">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => router.push(wsPaths.documentDetail(artifact.id))}
-          >
-            <ArrowLeft className="mr-1 size-4" /> Cancel
-          </Button>
+          <div className="flex items-center gap-2">
+            <MobileSidebarTrigger className="mr-0" />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => router.push(wsPaths.documentDetail(artifact.id))}
+            >
+              <ArrowLeft className="mr-1 size-4" /> Cancel
+            </Button>
+          </div>
           <Button
             size="sm"
             onClick={handleSave}

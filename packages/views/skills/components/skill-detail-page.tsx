@@ -57,6 +57,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { AppLink, useNavigation } from "../../navigation";
+import { MobileSidebarTrigger } from "../../layout/page-header";
 import { useCanEditSkill } from "../hooks/use-can-edit-skill";
 import { useSkillPermissions } from "@multica/core/permissions";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
@@ -487,6 +488,8 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+          {/* CEREBRO-PATCH(skill-detail-mobile-nav): expose global nav on mobile loading state. */}
+          <MobileSidebarTrigger className="mr-0" />
           <Skeleton className="h-4 w-16" />
           <Skeleton className="h-3 w-3 rounded" />
           <Skeleton className="h-4 w-40" />
@@ -504,6 +507,8 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+          {/* CEREBRO-PATCH(skill-detail-mobile-nav): expose global nav on mobile not-found state. */}
+          <MobileSidebarTrigger className="mr-0" />
           <Button
             variant="ghost"
             size="xs"
@@ -549,6 +554,8 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     <div className="flex flex-1 min-h-0 flex-col">
       {/* Topbar */}
       <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+        {/* CEREBRO-PATCH(skill-detail-mobile-nav): expose global nav on mobile detail pages. */}
+        <MobileSidebarTrigger className="mr-0" />
         <Button
           variant="ghost"
           size="xs"

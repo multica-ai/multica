@@ -16,6 +16,7 @@ import type { InboxItem, InboxItemType } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "@multica/views/navigation";
+import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { StatusIcon } from "@multica/views/issues/components";
 import { useTimeAgo } from "@multica/views/inbox/components/inbox-list-item";
@@ -105,6 +106,7 @@ export function NotificationsPage() {
     <div className="flex h-full min-h-0 flex-col bg-background">
       <header className="flex items-center justify-between border-b px-6 py-4">
         <div className="flex items-center gap-2">
+          <MobileSidebarTrigger className="mr-0" />
           <Bell className="h-5 w-5 text-muted-foreground" />
           <h1 className="text-base font-semibold">Notifications</h1>
           {visible.length > 0 && (

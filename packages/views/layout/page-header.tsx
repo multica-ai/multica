@@ -5,13 +5,13 @@
 import { cn } from "@multica/ui/lib/utils";
 import { SidebarTrigger, useSidebar } from "@multica/ui/components/ui/sidebar";
 
-function MobileSidebarTrigger() {
+export function MobileSidebarTrigger({ className }: { className?: string }) {
   try {
     useSidebar();
   } catch {
     return null;
   }
-  return <SidebarTrigger className="mr-2 md:hidden" />;
+  return <SidebarTrigger className={cn("mr-2 md:hidden", className)} />;
 }
 
 interface PageHeaderProps {
@@ -21,7 +21,13 @@ interface PageHeaderProps {
 
 export function PageHeader({ children, className }: PageHeaderProps) {
   return (
-    <div className={cn("flex h-12 shrink-0 items-center border-b px-2 sm:px-4", className)}>
+    <div
+      className={cn(
+        "sticky top-0 z-10 flex h-12 shrink-0 items-center border-b bg-background px-2 sm:px-4",
+        className,
+      )}
+    >
+      {/* CEREBRO-PATCH(page-header-sticky): keep page headers pinned during mobile keyboard viewport changes. */}
       <MobileSidebarTrigger />
       {children}
     </div>

@@ -11,6 +11,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { api } from "@multica/core/api";
 import { useNavigation } from "@multica/views/navigation";
+import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { ArtifactBody } from "@multica/cerebro-artifacts/views/components";
 
 /**
@@ -67,20 +68,30 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
 
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading…
+      <div className="flex h-full flex-col">
+        <div className="flex h-12 shrink-0 items-center border-b px-4">
+          <MobileSidebarTrigger className="mr-0" />
+        </div>
+        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+          Loading…
+        </div>
       </div>
     );
   }
   if (isError || !attachment) {
     return (
-      <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
-        <Button variant="ghost" size="sm" onClick={() => router.back()}>
-          <ArrowLeft className="mr-1 size-4" /> Back
-        </Button>
-        <p className="mt-4 text-sm text-muted-foreground">
-          This attachment is not available.
-        </p>
+      <div className="h-full overflow-y-auto">
+        <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
+          <div className="mb-3 flex items-center gap-2">
+            <MobileSidebarTrigger className="mr-0" />
+            <Button variant="ghost" size="sm" onClick={() => router.back()}>
+              <ArrowLeft className="mr-1 size-4" /> Back
+            </Button>
+          </div>
+          <p className="mt-4 text-sm text-muted-foreground">
+            This attachment is not available.
+          </p>
+        </div>
       </div>
     );
   }
@@ -113,13 +124,16 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
     <div className="h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
         <div className="mb-3 flex items-center justify-between">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => (linkBackPath ? router.push(linkBackPath) : router.back())}
-          >
-            <ArrowLeft className="mr-1 size-4" /> Back
-          </Button>
+          <div className="flex items-center gap-2">
+            <MobileSidebarTrigger className="mr-0" />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => (linkBackPath ? router.push(linkBackPath) : router.back())}
+            >
+              <ArrowLeft className="mr-1 size-4" /> Back
+            </Button>
+          </div>
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" onClick={handleCopyLink}>
               <LinkIcon className="mr-1 size-4" /> Copy link

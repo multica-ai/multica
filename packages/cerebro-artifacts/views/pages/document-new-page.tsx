@@ -20,6 +20,7 @@ import {
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { ArtifactKind, ArtifactFormat } from "@multica/core/types";
 import { useNavigation } from "@multica/views/navigation";
+import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { KIND_LABELS } from "../components/kind-icon";
 import { KIND_TEMPLATES, KIND_HELP } from "../components/kind-templates";
 
@@ -96,13 +97,16 @@ export function DocumentNewPage(props: DocumentNewPageProps) {
     <div className="h-full overflow-y-auto">
     <div className="mx-auto w-full max-w-3xl px-4 py-4 md:px-8 md:py-6">
       <div className="mb-3 flex items-center justify-between">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.push(wsPaths.documents())}
-        >
-          <ArrowLeft className="mr-1 size-4" /> Documents
-        </Button>
+        <div className="flex items-center gap-2">
+          <MobileSidebarTrigger className="mr-0" />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => router.push(wsPaths.documents())}
+          >
+            <ArrowLeft className="mr-1 size-4" /> Documents
+          </Button>
+        </div>
         <Button size="sm" onClick={handleCreate} disabled={!canSubmit}>
           {create.isPending ? "Creating…" : "Create"}
         </Button>

@@ -30,6 +30,10 @@ import { NotificationsTab } from "@multica/cerebro-notifications/views/notificat
 // CEREBRO-PATCH(settings-page-agent-profile): cerebro agent profile tab
 import { AgentProfileTab } from "@multica/cerebro-profile/views";
 import { useT } from "../../i18n";
+import {
+  CerebroMobileTabNav,
+  type CerebroMobileTabNavGroup,
+} from "./cerebro-mobile-tab-nav";
 
 const ACCOUNT_TAB_KEYS = ["profile", "preferences", "notifications", "tokens"] as const;
 const ACCOUNT_TAB_ICONS = {
@@ -113,6 +117,59 @@ export function SettingsPage({
     navigation.replace(`${navigation.pathname}?${params.toString()}`);
   };
 
+  // CEREBRO-PATCH(settings-mobile-nav): collapse the long vertical tablist to
+  // a mobile Select so settings content is visible without scrolling past the
+  // entire inner sidebar first.
+  const mobileTabGroups = React.useMemo<CerebroMobileTabNavGroup[]>(() => {
+    const accountItems: CerebroMobileTabNavGroup["items"] = ACCOUNT_TAB_KEYS.map((key) => ({
+      value: key,
+      label: t(($) => $.page.tabs[key]),
+      icon: ACCOUNT_TAB_ICONS[key],
+    }));
+    accountItems.push({
+      value: AGENT_PROFILE_TAB_VALUE,
+      label: "Agent Profile",
+      icon: Sparkles,
+    });
+    extraAccountTabs?.forEach((tab) => {
+      accountItems.push({
+        value: tab.value,
+        label: tab.label,
+        icon: tab.icon,
+      });
+    });
+
+    const groups: CerebroMobileTabNavGroup[] = [
+      {
+        label: t(($) => $.page.my_account),
+        items: accountItems,
+      },
+      {
+        label: workspaceName ?? t(($) => $.page.workspace_fallback),
+        items: WORKSPACE_TAB_KEYS.map((key) => ({
+          value: WORKSPACE_TAB_VALUES[key],
+          label: t(($) => $.page.tabs[key]),
+          icon: WORKSPACE_TAB_ICONS[key],
+        })),
+      },
+    ];
+
+    if (documentationContent) {
+      groups.push({
+        label: "Resources",
+        items: [
+          {
+            value: "documentation",
+            label: "Documentation",
+            icon: BookText,
+          },
+        ],
+      });
+    }
+
+    return groups;
+  }, [documentationContent, extraAccountTabs, t, workspaceName]);
+
   return (
     <Tabs
       value={activeTab}
@@ -120,8 +177,13 @@ export function SettingsPage({
       orientation="vertical"
       className="flex-1 min-h-0 gap-0 flex flex-col md:flex-row md:overflow-hidden overflow-y-auto"
     >
+      <CerebroMobileTabNav
+        value={activeTab}
+        onValueChange={handleTabChange}
+        groups={mobileTabGroups}
+      />
       {/* Left nav (stacks on top on mobile, sidebar on md+) */}
-      <div className="shrink-0 md:w-52 border-b md:border-b-0 md:border-r md:overflow-y-auto p-3 md:p-4">
+      <div className="hidden shrink-0 border-b p-3 md:flex md:w-52 md:flex-col md:border-b-0 md:border-r md:overflow-y-auto md:p-4">
         <h1 className="text-sm font-semibold mb-4 px-2">{t(($) => $.page.title)}</h1>
         <TabsList variant="line" className="flex-col items-stretch w-full">
           {/* My Account group */}

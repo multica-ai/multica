@@ -47,6 +47,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { MobileSidebarTrigger } from "../../layout/page-header";
 import { AppLink } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
 import { formatLastSeen } from "../utils";
@@ -157,6 +158,8 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
           skill-detail-page topbar so users build one mental model for
           "go back to the index" across the dashboard. */}
       <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+        {/* CEREBRO-PATCH(runtime-detail-mobile-nav): expose global nav on mobile detail pages. */}
+        <MobileSidebarTrigger className="mr-0" />
         <Button
           variant="ghost"
           size="xs"
