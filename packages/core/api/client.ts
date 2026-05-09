@@ -39,6 +39,7 @@ import type {
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
   RuntimeUpdate,
+  CLIUpdateManifest,
   RuntimePing,
   RuntimeModelListRequest,
   RuntimeLocalSkillListRequest,
@@ -854,13 +855,21 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/ping/${pingId}`);
   }
 
+  async getCLIUpdateManifest(): Promise<CLIUpdateManifest> {
+    return this.fetch("/api/runtimes/cli-update-manifest");
+  }
+
   async initiateUpdate(
     runtimeId: string,
-    targetVersion: string,
+    targetVersion?: string,
   ): Promise<RuntimeUpdate> {
+    const body =
+      targetVersion && targetVersion.trim()
+        ? { target_version: targetVersion.trim() }
+        : {};
     return this.fetch(`/api/runtimes/${runtimeId}/update`, {
       method: "POST",
-      body: JSON.stringify({ target_version: targetVersion }),
+      body: JSON.stringify(body),
     });
   }
 

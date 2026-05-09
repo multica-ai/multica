@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -105,6 +108,36 @@ func TestShouldUpdate(t *testing.T) {
 	}
 	if should {
 		t.Fatal("expected update to be skipped for equal version")
+	}
+}
+
+func TestFetchUpdateManifestFromURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Accept") != "application/json" {
+			t.Errorf("Accept header = %q", r.Header.Get("Accept"))
+		}
+		fmt.Fprint(w, `{"version":"v1.2.3","published_at":"2026-05-09T00:00:00Z","assets":[]}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	manifest, err := FetchUpdateManifestFromURL(srv.URL)
+	if err != nil {
+		t.Fatalf("FetchUpdateManifestFromURL() error = %v", err)
+	}
+	if manifest.Version != "v1.2.3" {
+		t.Fatalf("Version = %q, want v1.2.3", manifest.Version)
+	}
+}
+
+func TestFetchUpdateManifestFromURLRequiresVersion(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"assets":[]}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := FetchUpdateManifestFromURL(srv.URL)
+	if err == nil {
+		t.Fatal("expected error for manifest without version")
 	}
 }
 

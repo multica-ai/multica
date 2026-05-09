@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	defaultUpdateManifestURL = "https://mock-oss.multica.local/cli/manifest.json"
+	DefaultUpdateManifestURL = "https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json"
 )
 
 type UpdateManifest struct {
@@ -108,12 +108,12 @@ func resolveUpdateManifestURL() string {
 	if err == nil && strings.TrimSpace(cfg.UpdateManifestURL) != "" {
 		return strings.TrimSpace(cfg.UpdateManifestURL)
 	}
-	return defaultUpdateManifestURL
+	return DefaultUpdateManifestURL
 }
 
-func FetchLatestRelease() (*UpdateManifest, error) {
+func FetchUpdateManifestFromURL(url string) (*UpdateManifest, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, resolveUpdateManifestURL(), nil)
+	req, err := http.NewRequest(http.MethodGet, strings.TrimSpace(url), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +137,10 @@ func FetchLatestRelease() (*UpdateManifest, error) {
 		return nil, fmt.Errorf("update manifest missing version")
 	}
 	return &manifest, nil
+}
+
+func FetchLatestRelease() (*UpdateManifest, error) {
+	return FetchUpdateManifestFromURL(resolveUpdateManifestURL())
 }
 
 func resolveManagedInstallPath() (string, error) {
