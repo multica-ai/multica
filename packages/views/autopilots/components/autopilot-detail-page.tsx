@@ -55,6 +55,7 @@ import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
+import { WebhookPayloadPreview } from "./webhook-payload-preview";
 import { useT } from "../../i18n";
 
 function formatDate(date: string): string {
@@ -135,6 +136,11 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
           agentName={agentName}
           isLive={run.status === "running"}
           title={t(($) => $.run.view_log)}
+          headerSlot={
+            run.source === "webhook" && run.trigger_payload != null ? (
+              <WebhookPayloadPreview payload={run.trigger_payload} />
+            ) : undefined
+          }
         />
       )}
     </>

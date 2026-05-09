@@ -109,6 +109,16 @@
       "summary": "{{count}} 条跳过的运行"
     }
   },
+  "webhook_payload": {
+    "label": "Webhook 事件：",
+    "unknown_event": "webhook.received",
+    "payload": "Payload",
+    "content_type": "Content-Type：{{type}}",
+    "copy": "复制",
+    "copied": "已复制 Webhook payload",
+    "copied_short": "已复制",
+    "copy_failed": "复制失败"
+  },
   "trigger_kind": {
     "schedule": "时间表",
     "webhook": "Webhook",

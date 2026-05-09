@@ -109,6 +109,16 @@
       "summary": "{{count}} skipped runs"
     }
   },
+  "webhook_payload": {
+    "label": "Webhook event:",
+    "unknown_event": "webhook.received",
+    "payload": "Payload",
+    "content_type": "Content-Type: {{type}}",
+    "copy": "Copy",
+    "copied": "Webhook payload copied",
+    "copied_short": "Copied",
+    "copy_failed": "Failed to copy"
+  },
   "trigger_kind": {
     "schedule": "Schedule",
     "webhook": "Webhook",
