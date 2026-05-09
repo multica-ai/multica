@@ -1,6 +1,6 @@
 ---
 title: Autopilots
-description: Let agents start work on a cron schedule — or trigger once manually via the UI or CLI.
+description: Let agents start work on a cron schedule, an inbound webhook, or trigger once manually via the UI or CLI.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -16,7 +16,7 @@ Create a new autopilot on the workspace's **Autopilot** page. You set:
 - **Priority** — inherited by the `task` it produces (same semantics as issue priority)
 - **Description / prompt** — the work description the agent receives each run
 - **Execution mode** — see below
-- **Triggers** — at least one `schedule` (cron + timezone)
+- **Triggers** — at least one `schedule` (cron + timezone) or `webhook`
 
 ## Pick an execution mode
 
@@ -50,15 +50,109 @@ multica autopilot trigger <autopilot-id>
 
 A manual trigger goes through the exact same execution flow as a `schedule` trigger — only the `source` field on the run record is marked `manual`.
 
+## Trigger from a webhook
+
+Autopilots can also fire on inbound HTTP webhooks. Add a **Webhook** trigger
+on the autopilot detail page; Multica generates a unique URL of the shape:
+
+```
+https://<your-multica-host>/api/webhooks/autopilots/awt_…
+```
+
+POST any JSON to that URL — Multica records a run with `source = webhook`,
+stores the body as the run's `trigger_payload`, and dispatches the agent
+exactly the way a schedule trigger would.
+
+```bash
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H "Content-Type: application/json" \
+  -d '{"event":"demo.received","eventPayload":{"message":"hello"}}'
+```
+
+In **create issue mode**, the inbound payload is appended to the new issue's
+description so the agent can read it inline. In **run-only mode**, the
+payload is part of the run context the daemon hands the agent.
+
+### Payload shape
+
+You can send your own envelope:
+
+```json
+{ "event": "github.pull_request.opened", "eventPayload": { } }
+```
+
+…or any JSON object/array. Multica normalizes it into an internal envelope:
+
+```json
+{
+  "event": "<inferred>",
+  "eventPayload": <your body>,
+  "request": { "receivedAt": "<rfc3339>", "contentType": "application/json" }
+}
+```
+
+When you don't provide an `event` field, Multica infers it from common
+headers and body fields (`X-GitHub-Event` + body `action`,
+`X-Gitlab-Event`, `X-Event-Type`, body `event`/`type`/`action`). When
+nothing matches, the event is `webhook.received`.
+
+When configuring GitHub or similar sources, set the content type to
+`application/json` — form-encoded webhook payloads are not accepted.
+
+### URL is a bearer secret
+
+The generated URL **is** the credential. Anyone with it can fire the
+autopilot. Treat it like a token:
+
+- **Don't paste it into public issue threads, screenshots, or chat history.**
+- **Rotate it if it leaks** — click "Rotate URL" on the trigger row, or run
+  `multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>`. The
+  old URL stops working immediately.
+- For sources that require strong source authentication, wait for
+  per-trigger HMAC signature verification; this v1 URL is bearer-only.
+- Workspace members who can view the autopilot can read its webhook URLs
+  for now — tighter per-role secret visibility is a follow-up.
+
+### Status-code semantics
+
+Multica returns `200 OK` with a `status` field for normal no-op outcomes so
+your provider's webhook-retry machinery doesn't keep hammering the URL:
+
+- `{"status":"accepted","run_id":"…","autopilot_id":"…","trigger_id":"…"}`
+  — a run was dispatched.
+- `{"status":"skipped","run_id":"…","reason":"agent runtime is offline at dispatch time"}`
+  — the assignee's runtime is offline; recorded as a `skipped` run.
+- `{"status":"ignored","reason":"trigger_disabled"}` — the trigger is disabled.
+- `{"status":"ignored","reason":"autopilot_paused"}` — the autopilot is paused.
+- `{"status":"ignored","reason":"autopilot_archived"}` — the autopilot is archived.
+
+Non-2xx responses cover real failures:
+
+- `400` — invalid JSON, scalar body, or empty body.
+- `404` — unknown token (`{"error":"webhook not found"}`).
+- `413` — payload exceeded 256 KiB.
+- `429` — per-token rate limit exceeded (defaults to 60 req/min).
+
+### Self-hosted: configure your public URL
+
+When `MULTICA_PUBLIC_URL` is set on the server (e.g. `https://multica.example.com`),
+the trigger response includes an absolute `webhook_url` and the UI shows a
+ready-to-copy URL. Without it, the UI composes the URL from the client's
+API origin — which is fine for desktop and same-origin web, but not for
+custom self-hosted reverse proxies. Multica deliberately does not derive
+the public host from `Host` / `X-Forwarded-Host` headers so a misconfigured
+reverse proxy cannot trick the server into minting webhook URLs pointing at
+an attacker-controlled host.
+
 ## View run history
 
 Every trigger produces a **run record**, visible on the "History" tab of the autopilot detail page:
 
-- Trigger source (`schedule` / `manual`)
+- Trigger source (`schedule` / `manual` / `webhook`)
 - Start time, completion time
-- Status (`issue_created` / `running` / `completed` / `failed`)
+- Status (`issue_created` / `running` / `completed` / `failed` / `skipped`)
 - The linked issue (create issue mode) or `task` (run-only mode)
-- Failure reason (if failed)
+- Failure reason (if failed or skipped)
 
 ## What happens when an autopilot fails
 
@@ -72,7 +166,11 @@ Why no auto-retry: autopilots are already periodic, so adding system-level retri
 
 ## What's not yet available
 
-**Webhook and API triggers are not available yet.** The autopilot trigger schema reserves `webhook` and `api` types, but **they are not wired up to any ingress route** — the UI can create triggers of either type, but they will not actually fire. Today, **only `schedule` and manual triggers are end-to-end usable.**
+**API-kind triggers are not wired up.** The trigger schema reserves an `api`
+kind, but no ingress route fires it; the UI shows a Deprecated badge for
+existing rows and offers no copy/rotate affordances. Per-trigger HMAC
+signature verification, IP allowlists, and provider-specific event presets
+are tracked as follow-ups; v1 URLs are bearer-only.
 
 ## Next
 
