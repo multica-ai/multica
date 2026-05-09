@@ -173,6 +173,7 @@ export type {
   ReleaseStage,
   Release,
   ReleasePullRequest,
+  ReleasePRMergeState,
   ReleaseEvent,
   ReleaseDetailResponse,
   CreateReleaseResponse,
@@ -181,5 +182,9 @@ export type {
   UpdateReleaseRequest,
   AddPullRequestToReleaseRequest,
   CancelReleaseRequest,
+  StartMergeRequest,
+  ResumeMergeRequest,
+  AbortMergeRequest,
+  MergeStateResponse,
   ActiveReleaseRef,
 } from "./ship";

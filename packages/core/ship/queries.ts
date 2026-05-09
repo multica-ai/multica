@@ -21,6 +21,9 @@ import type {
   CreateReleaseRequest,
   UpdateReleaseRequest,
   CancelReleaseRequest,
+  StartMergeRequest,
+  ResumeMergeRequest,
+  AbortMergeRequest,
 } from "../types";
 
 // Query key factory — workspace-scoped per CLAUDE.md so a workspace switch
@@ -754,5 +757,58 @@ export function useCancelRelease(releaseId: string) {
       qc.invalidateQueries({ queryKey: shipKeys.workspaceActiveReleases(wsId) });
       qc.invalidateQueries({ queryKey: shipKeys.allPullRequests(wsId) });
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7b — Merge train mutations.
+//
+// All three return 202 Accepted on the happy path; the orchestrator
+// runs server-side and pushes WS events. Each mutation invalidates
+// the per-release cache + workspace-active list so the rail picks up
+// the stage transition immediately even when the WS roundtrip is
+// slower than the HTTP response.
+// ---------------------------------------------------------------------------
+
+function invalidateReleaseMergeSurface(
+  qc: ReturnType<typeof useQueryClient>,
+  wsId: string,
+  releaseId: string,
+): void {
+  qc.invalidateQueries({ queryKey: shipKeys.releaseDetail(wsId, releaseId) });
+  qc.invalidateQueries({ queryKey: shipKeys.workspaceActiveReleases(wsId) });
+  qc.invalidateQueries({ queryKey: shipKeys.allPullRequests(wsId) });
+}
+
+/** Start the merge train for an assembling release. */
+export function useStartMergeTrain(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data?: StartMergeRequest) =>
+      api.startReleaseMerge(releaseId, data),
+    onSettled: () => invalidateReleaseMergeSurface(qc, wsId, releaseId),
+  });
+}
+
+/** Resume a paused merge train, optionally skipping specific PRs. */
+export function useResumeMergeTrain(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data?: ResumeMergeRequest) =>
+      api.resumeReleaseMerge(releaseId, data),
+    onSettled: () => invalidateReleaseMergeSurface(qc, wsId, releaseId),
+  });
+}
+
+/** Abort a merging release. PRs already merged stay merged. */
+export function useAbortMergeTrain(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data?: AbortMergeRequest) =>
+      api.abortReleaseMerge(releaseId, data),
+    onSettled: () => invalidateReleaseMergeSurface(qc, wsId, releaseId),
   });
 }

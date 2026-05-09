@@ -415,7 +415,49 @@
       "issue_created": "Tracking issue created",
       "stage_changed": "Stage advanced",
       "cancelled": "Release cancelled",
-      "warning": "Warning"
+      "warning": "Warning",
+      "merge_train_started": "Merge train started",
+      "merge_train_paused": "Merge train paused",
+      "merge_train_resumed": "Merge train resumed",
+      "merge_train_completed": "Merge train completed",
+      "merge_train_aborted": "Merge train aborted"
+    },
+    "merge": {
+      "start_button": "Start merge train",
+      "start_disabled_tooltip": "Resolve preconditions before starting the merge train",
+      "in_progress": "Merging {{merged}}/{{total}}",
+      "in_flight": "in flight: #{{number}}",
+      "paused_banner_title": "Merge train paused",
+      "paused_banner_description": "{{error}}",
+      "resume_button": "Resume",
+      "resume_with_skip_button": "Skip & resume",
+      "abort_button": "Abort",
+      "abort_confirm_title": "Abort merge train?",
+      "abort_confirm_description": "PRs already merged will stay merged — un-merging is not automatic. The release will be marked cancelled.",
+      "abort_reason_label": "Reason (optional)",
+      "abort_confirm_action": "Abort",
+      "resume_dialog_title": "Resume merge train",
+      "resume_dialog_description": "Pick whether to skip any failed PRs or retry them. Skipped PRs are abandoned for this release.",
+      "resume_dialog_skip_label": "Skip this PR",
+      "resume_dialog_submit": "Resume train",
+      "completed_toast": "Merge train completed",
+      "started_toast": "Merge train started",
+      "aborted_toast": "Merge train aborted",
+      "resumed_toast": "Resuming merge train",
+      "method_label": "Merge method",
+      "method_merge": "Merge commit",
+      "method_squash": "Squash & merge",
+      "method_rebase": "Rebase & merge",
+      "retry_button": "Retry",
+      "progress_inline": "{{merged}}/{{total}} merged",
+      "preconditions_failed_title": "Preconditions not met"
+    },
+    "merge_state": {
+      "queued": "queued",
+      "merging": "merging…",
+      "merged": "merged",
+      "failed": "failed",
+      "skipped": "skipped"
     }
   }
 }

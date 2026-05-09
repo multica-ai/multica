@@ -200,6 +200,8 @@ describe("CreateReleaseDialog", () => {
         done_at: null,
         rollback_reason: null,
         pr_count: 1,
+        merge_paused: false,
+        merge_method: "merge",
       },
       warnings: [],
     });

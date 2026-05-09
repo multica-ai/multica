@@ -98,6 +98,51 @@ func (ns NullDeployStatus) Value() (driver.Value, error) {
 	return string(ns.DeployStatus), nil
 }
 
+type PrMergeState string
+
+const (
+	PrMergeStateQueued  PrMergeState = "queued"
+	PrMergeStateMerging PrMergeState = "merging"
+	PrMergeStateMerged  PrMergeState = "merged"
+	PrMergeStateFailed  PrMergeState = "failed"
+	PrMergeStateSkipped PrMergeState = "skipped"
+)
+
+func (e *PrMergeState) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = PrMergeState(s)
+	case string:
+		*e = PrMergeState(s)
+	default:
+		return fmt.Errorf("unsupported scan type for PrMergeState: %T", src)
+	}
+	return nil
+}
+
+type NullPrMergeState struct {
+	PrMergeState PrMergeState `json:"pr_merge_state"`
+	Valid        bool         `json:"valid"` // Valid is true if PrMergeState is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullPrMergeState) Scan(value interface{}) error {
+	if value == nil {
+		ns.PrMergeState, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.PrMergeState.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullPrMergeState) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.PrMergeState), nil
+}
+
 type PullRequestState string
 
 const (
@@ -883,6 +928,8 @@ type ShipRelease struct {
 	PromotedAt         pgtype.Timestamptz `json:"promoted_at"`
 	DoneAt             pgtype.Timestamptz `json:"done_at"`
 	RollbackReason     pgtype.Text        `json:"rollback_reason"`
+	MergePaused        bool               `json:"merge_paused"`
+	MergeMethod        string             `json:"merge_method"`
 }
 
 type ShipReleaseEvent struct {
@@ -903,6 +950,7 @@ type ShipReleasePullRequest struct {
 	MergeError    pgtype.Text        `json:"merge_error"`
 	AddedAt       pgtype.Timestamptz `json:"added_at"`
 	IsActive      bool               `json:"is_active"`
+	MergeState    PrMergeState       `json:"merge_state"`
 }
 
 type Skill struct {

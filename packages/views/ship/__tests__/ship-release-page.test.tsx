@@ -21,6 +21,14 @@ import { ShipReleasePage } from "../components/ship-release-page";
 
 let detailFixture: ReleaseDetailResponse;
 
+// Phase 7b — the merge train mutations are added to the mock so the
+// release page renders the new buttons without exploding. Each
+// returns a stable object whose mutateAsync the tests can reach
+// through the exported handles below.
+const startMergeMutateAsync = vi.fn().mockResolvedValue({});
+const resumeMergeMutateAsync = vi.fn().mockResolvedValue({});
+const abortMergeMutateAsync = vi.fn().mockResolvedValue({});
+
 vi.mock("@multica/core/ship", () => ({
   useReleaseDetail: () => ({
     data: detailFixture,
@@ -33,6 +41,18 @@ vi.mock("@multica/core/ship", () => ({
   }),
   useRemovePullRequestFromRelease: () => ({
     mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useStartMergeTrain: () => ({
+    mutateAsync: startMergeMutateAsync,
+    isPending: false,
+  }),
+  useResumeMergeTrain: () => ({
+    mutateAsync: resumeMergeMutateAsync,
+    isPending: false,
+  }),
+  useAbortMergeTrain: () => ({
+    mutateAsync: abortMergeMutateAsync,
     isPending: false,
   }),
 }));
@@ -93,6 +113,8 @@ function makeRelease(overrides: Partial<Release> = {}): Release {
     done_at: null,
     rollback_reason: null,
     pr_count: 2,
+    merge_paused: false,
+    merge_method: "merge",
     ...overrides,
   };
 }
@@ -133,6 +155,7 @@ function makeReleasePR(overrides: Partial<ReleasePullRequest> = {}): ReleasePull
     merge_error: null,
     added_at: "",
     is_active: true,
+    merge_state: "queued",
     ...overrides,
   };
 }
@@ -204,5 +227,114 @@ describe("ShipReleasePage", () => {
     expect(screen.getByText("second PR")).toBeInTheDocument();
     expect(screen.getByText("Release created")).toBeInTheDocument();
     expect(screen.getByText("Channel created")).toBeInTheDocument();
+  });
+
+  // Phase 7b — start_merge button gating.
+  it("renders the start merge train button when the release is assembling", () => {
+    detailFixture = {
+      release: makeRelease({ stage: "assembling", risk_level: "low" }),
+      pull_requests: [makeReleasePR()],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    const btn = screen.getByTestId("release-start-merge-button");
+    expect(btn).toBeInTheDocument();
+    expect(btn).not.toBeDisabled();
+  });
+
+  it("disables the start merge train button when an approver is missing for medium risk", () => {
+    detailFixture = {
+      release: makeRelease({
+        stage: "assembling",
+        risk_level: "medium",
+        approver_id: null,
+      }),
+      pull_requests: [makeReleasePR()],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    const btn = screen.getByTestId("release-start-merge-button");
+    expect(btn).toBeDisabled();
+    expect(screen.getByTestId("release-start-preconditions")).toBeInTheDocument();
+  });
+
+  it("renders per-PR merge_state pills for merging release", () => {
+    detailFixture = {
+      release: makeRelease({ stage: "merging" }),
+      pull_requests: [
+        makeReleasePR({
+          id: "pr-a",
+          number: 101,
+          title: "first",
+          merge_state: "merged",
+          merged_sha: "abcdef1234567",
+        }),
+        makeReleasePR({
+          id: "pr-b",
+          number: 102,
+          title: "second",
+          merge_state: "merging",
+        }),
+        makeReleasePR({
+          id: "pr-c",
+          number: 103,
+          title: "third",
+          merge_state: "queued",
+        }),
+      ],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    const pills = screen.getAllByTestId("release-pr-merge-state");
+    expect(pills).toHaveLength(3);
+    expect(pills[0]).toHaveAttribute("data-state", "merged");
+    expect(pills[1]).toHaveAttribute("data-state", "merging");
+    expect(pills[2]).toHaveAttribute("data-state", "queued");
+    expect(screen.getByTestId("release-merging-progress")).toBeInTheDocument();
+    expect(screen.getByTestId("release-abort-button")).toBeInTheDocument();
+  });
+
+  it("renders the paused banner and resume controls when merge is paused", () => {
+    detailFixture = {
+      release: makeRelease({ stage: "merging", merge_paused: true }),
+      pull_requests: [
+        makeReleasePR({ id: "pr-a", number: 101, merge_state: "merged" }),
+        makeReleasePR({
+          id: "pr-b",
+          number: 102,
+          merge_state: "failed",
+          merge_error: "branch is not mergeable",
+        }),
+        makeReleasePR({ id: "pr-c", number: 103, merge_state: "queued" }),
+      ],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    expect(screen.getByTestId("release-paused-banner")).toBeInTheDocument();
+    expect(screen.getByText(/branch is not mergeable/)).toBeInTheDocument();
+    expect(screen.getByTestId("release-resume-button")).toBeInTheDocument();
+    expect(screen.getByTestId("release-resume-with-skip-button")).toBeInTheDocument();
+    expect(screen.getByTestId("release-abort-button")).toBeInTheDocument();
+  });
+
+  it("calls resume mutation when the Resume button is clicked", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const user = userEvent.setup();
+    resumeMergeMutateAsync.mockClear();
+    detailFixture = {
+      release: makeRelease({ stage: "merging", merge_paused: true }),
+      pull_requests: [
+        makeReleasePR({
+          id: "pr-b",
+          number: 102,
+          merge_state: "failed",
+          merge_error: "conflict",
+        }),
+      ],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    await user.click(screen.getByTestId("release-resume-button"));
+    expect(resumeMergeMutateAsync).toHaveBeenCalledWith({});
   });
 });

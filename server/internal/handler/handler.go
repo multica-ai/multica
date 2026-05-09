@@ -83,7 +83,13 @@ type Handler struct {
 	Analytics             analytics.Client
 	PATCache              *auth.PATCache
 	DaemonTokenCache      *auth.DaemonTokenCache
-	cfg                   Config
+	// ServiceCtx is a long-lived context (typically the cmd/server
+	// sweepCtx) handlers can hand to background goroutines that
+	// outlive the request (Phase 7b's merge train, future async
+	// flows). Nil = falls back to context.Background which is fine
+	// in tests but would never be cancelled in production.
+	ServiceCtx context.Context
+	cfg        Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {

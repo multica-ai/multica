@@ -163,6 +163,23 @@ const (
 	EventReleaseUpdated   = "release:updated"
 	EventReleaseCancelled = "release:cancelled"
 
+	// Phase 7b — merge train signals. The orchestrator emits these
+	// while a release is in stage=merging so the detail page can
+	// render live progress without polling. Payload conventions:
+	//   merge_started    — { release_id, total_prs }
+	//   merge_progress   — { release_id, pr_id, merge_state,
+	//                        merged_count, total }
+	//   merge_paused     — { release_id, paused_pr_id, error }
+	//   merge_completed  — { release_id }
+	//   merge_aborted    — { release_id, reason }
+	// EventReleaseUpdated still fires on stage transitions; these
+	// add the merge-specific granularity on top.
+	EventReleaseMergeStarted   = "release:merge_started"
+	EventReleaseMergeProgress  = "release:merge_progress"
+	EventReleaseMergePaused    = "release:merge_paused"
+	EventReleaseMergeCompleted = "release:merge_completed"
+	EventReleaseMergeAborted   = "release:merge_aborted"
+
 	// Daemon events
 	EventDaemonHeartbeat     = "daemon:heartbeat"
 	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"

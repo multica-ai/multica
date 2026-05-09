@@ -89,6 +89,8 @@ describe("ShipActiveReleasesRail", () => {
           done_at: null,
           rollback_reason: null,
           pr_count: 3,
+          merge_paused: false,
+          merge_method: "merge",
         },
       ],
     };

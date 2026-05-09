@@ -85,7 +85,16 @@ export type WSEventType =
   | "ship:card_action"
   | "release:created"
   | "release:updated"
-  | "release:cancelled";
+  | "release:cancelled"
+  // Phase 7b — merge train events fire while a release is in
+  // stage=merging so the detail page can render live progress
+  // without polling. release:updated still fires on stage
+  // transitions; these add the merge-specific granularity.
+  | "release:merge_started"
+  | "release:merge_progress"
+  | "release:merge_paused"
+  | "release:merge_completed"
+  | "release:merge_aborted";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;

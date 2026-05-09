@@ -410,7 +410,49 @@
       "issue_created": "跟踪议题已创建",
       "stage_changed": "阶段推进",
       "cancelled": "发布已取消",
-      "warning": "警告"
+      "warning": "警告",
+      "merge_train_started": "合并队列已启动",
+      "merge_train_paused": "合并队列已暂停",
+      "merge_train_resumed": "合并队列已恢复",
+      "merge_train_completed": "合并队列已完成",
+      "merge_train_aborted": "合并队列已中止"
+    },
+    "merge": {
+      "start_button": "启动合并队列",
+      "start_disabled_tooltip": "启动合并队列前请先解决前置条件",
+      "in_progress": "正在合并 {{merged}}/{{total}}",
+      "in_flight": "进行中:#{{number}}",
+      "paused_banner_title": "合并队列已暂停",
+      "paused_banner_description": "{{error}}",
+      "resume_button": "继续",
+      "resume_with_skip_button": "跳过并继续",
+      "abort_button": "中止",
+      "abort_confirm_title": "中止合并队列?",
+      "abort_confirm_description": "已合并的 PR 将保持已合并状态——不会自动还原。此发布将被标记为已取消。",
+      "abort_reason_label": "原因(可选)",
+      "abort_confirm_action": "中止",
+      "resume_dialog_title": "恢复合并队列",
+      "resume_dialog_description": "选择跳过失败的 PR 或重新尝试。跳过的 PR 在本次发布中将被舍弃。",
+      "resume_dialog_skip_label": "跳过此 PR",
+      "resume_dialog_submit": "恢复队列",
+      "completed_toast": "合并队列已完成",
+      "started_toast": "合并队列已启动",
+      "aborted_toast": "合并队列已中止",
+      "resumed_toast": "正在恢复合并队列",
+      "method_label": "合并方式",
+      "method_merge": "合并提交",
+      "method_squash": "压缩并合并",
+      "method_rebase": "变基并合并",
+      "retry_button": "重试",
+      "progress_inline": "已合并 {{merged}}/{{total}}",
+      "preconditions_failed_title": "前置条件未满足"
+    },
+    "merge_state": {
+      "queued": "排队中",
+      "merging": "合并中…",
+      "merged": "已合并",
+      "failed": "失败",
+      "skipped": "已跳过"
     }
   }
 }

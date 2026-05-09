@@ -287,6 +287,15 @@ export function useRealtimeSync(
       "release:created",
       "release:updated",
       "release:cancelled",
+      // Phase 7b — merge train granular events. Each fires up to
+      // many times during a single train run; specific handlers
+      // below scope the invalidation to just the affected release
+      // detail + workspace rail.
+      "release:merge_started",
+      "release:merge_progress",
+      "release:merge_paused",
+      "release:merge_completed",
+      "release:merge_aborted",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -767,6 +776,22 @@ export function useRealtimeSync(
     const unsubReleaseUpdated = ws.on("release:updated", onReleaseEvent);
     const unsubReleaseCancelled = ws.on("release:cancelled", onReleaseEvent);
 
+    // Phase 7b — merge train events. merge_started / completed /
+    // aborted fire once each per release; merge_progress fires N
+    // times (one per PR state transition) and merge_paused fires
+    // when the orchestrator stops on a failure.
+    //
+    // All five reuse onReleaseEvent's invalidation pattern: refresh
+    // the per-release detail + the workspace rail. merge_progress
+    // additionally picks up the per-PR pill via the same detail
+    // invalidation, which re-fetches list_release_pull_requests
+    // with the updated merge_state column.
+    const unsubMergeStarted = ws.on("release:merge_started", onReleaseEvent);
+    const unsubMergeProgress = ws.on("release:merge_progress", onReleaseEvent);
+    const unsubMergePaused = ws.on("release:merge_paused", onReleaseEvent);
+    const unsubMergeCompleted = ws.on("release:merge_completed", onReleaseEvent);
+    const unsubMergeAborted = ws.on("release:merge_aborted", onReleaseEvent);
+
     const unsubChatDone = ws.on("chat:done", (p) => {
       const payload = p as ChatDonePayload;
       chatWsLogger.info("chat:done (global)", {
@@ -944,6 +969,11 @@ export function useRealtimeSync(
       unsubReleaseCreated();
       unsubReleaseUpdated();
       unsubReleaseCancelled();
+      unsubMergeStarted();
+      unsubMergeProgress();
+      unsubMergePaused();
+      unsubMergeCompleted();
+      unsubMergeAborted();
       unsubChatDone();
       unsubTaskQueued();
       unsubTaskDispatch();

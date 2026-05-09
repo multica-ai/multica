@@ -146,6 +146,10 @@ import type {
   UpdateReleaseRequest,
   AddPullRequestToReleaseRequest,
   CancelReleaseRequest,
+  StartMergeRequest,
+  ResumeMergeRequest,
+  AbortMergeRequest,
+  MergeStateResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -199,6 +203,8 @@ import {
   ReleaseDetailResponseSchema,
   EMPTY_RELEASE_DETAIL,
   ReleaseSchema,
+  MergeStateResponseSchema,
+  EMPTY_MERGE_STATE_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1888,6 +1894,61 @@ export class ApiClient {
       ReleaseSchema,
       EMPTY_RELEASE_DETAIL.release,
       { endpoint: "POST /api/releases/:id/cancel" },
+    );
+  }
+
+  // Phase 7b — Merge train. start / resume / abort all return
+  // 202 Accepted with a small status payload; the actual orchestration
+  // runs server-side. Clients listen on WS or poll merge_state for
+  // progress.
+  async startReleaseMerge(
+    releaseId: string,
+    data?: StartMergeRequest,
+  ): Promise<unknown> {
+    return this.fetch(`/api/releases/${releaseId}/start_merge`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    });
+  }
+
+  async resumeReleaseMerge(
+    releaseId: string,
+    data?: ResumeMergeRequest,
+  ): Promise<unknown> {
+    return this.fetch(`/api/releases/${releaseId}/resume_merge`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    });
+  }
+
+  async abortReleaseMerge(
+    releaseId: string,
+    data?: AbortMergeRequest,
+  ): Promise<Release> {
+    const raw = await this.fetch<unknown>(
+      `/api/releases/${releaseId}/abort_merge`,
+      {
+        method: "POST",
+        body: JSON.stringify(data ?? {}),
+      },
+    );
+    return parseWithFallback(
+      raw,
+      ReleaseSchema,
+      EMPTY_RELEASE_DETAIL.release,
+      { endpoint: "POST /api/releases/:id/abort_merge" },
+    );
+  }
+
+  async getReleaseMergeState(releaseId: string): Promise<MergeStateResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/releases/${releaseId}/merge_state`,
+    );
+    return parseWithFallback(
+      raw,
+      MergeStateResponseSchema,
+      EMPTY_MERGE_STATE_RESPONSE,
+      { endpoint: "GET /api/releases/:id/merge_state" },
     );
   }
 

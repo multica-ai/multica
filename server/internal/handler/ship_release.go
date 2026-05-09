@@ -178,6 +178,11 @@ type releaseResponse struct {
 	DoneAt             *string `json:"done_at"`
 	RollbackReason     *string `json:"rollback_reason"`
 	PRCount            int     `json:"pr_count"`
+	// Phase 7b — merge train state. merge_paused signals "the
+	// orchestrator stopped on a failure; the user can resume". The
+	// UI gates the Resume / Skip / Abort affordances on this flag.
+	MergePaused bool   `json:"merge_paused"`
+	MergeMethod string `json:"merge_method"`
 }
 
 func releaseToResponse(r db.ShipRelease, prCount int) releaseResponse {
@@ -204,6 +209,8 @@ func releaseToResponse(r db.ShipRelease, prCount int) releaseResponse {
 		DoneAt:             timestampToPtr(r.DoneAt),
 		RollbackReason:     textToPtr(r.RollbackReason),
 		PRCount:            prCount,
+		MergePaused:        r.MergePaused,
+		MergeMethod:        r.MergeMethod,
 	}
 }
 
@@ -215,6 +222,10 @@ type releasePullRequestResponse struct {
 	MergeError  *string `json:"merge_error"`
 	AddedAt     string  `json:"added_at"`
 	IsActive    bool    `json:"is_active"`
+	// Phase 7b — per-PR merge state in the train. Possible values:
+	// queued | merging | merged | failed | skipped. Drives the UI
+	// pill rendering on the release detail page.
+	MergeState string `json:"merge_state"`
 }
 
 func releasePRRowToResponse(row db.ListReleasePullRequestsRow) releasePullRequestResponse {
@@ -264,6 +275,7 @@ func releasePRRowToResponse(row db.ListReleasePullRequestsRow) releasePullReques
 		MergeError:          textToPtr(row.MembershipMergeError),
 		AddedAt:             timestampToString(row.MembershipAddedAt),
 		IsActive:            row.MembershipIsActive,
+		MergeState:          string(row.MembershipMergeState),
 	}
 	return out
 }

@@ -133,8 +133,8 @@ WHERE release_id = $1 AND pull_request_id = $2;
 -- name: ListReleasePullRequests :many
 -- Returns the PRs in this release joined with the membership row.
 -- We expose the join columns explicitly because the merged_sha /
--- merge_error fields are release-specific (they don't live on
--- pull_request itself).
+-- merge_error / merge_state fields are release-specific (they don't
+-- live on pull_request itself).
 SELECT
     pr.*,
     rpr.position AS membership_position,
@@ -142,7 +142,8 @@ SELECT
     rpr.merged_at AS membership_merged_at,
     rpr.merge_error AS membership_merge_error,
     rpr.added_at AS membership_added_at,
-    rpr.is_active AS membership_is_active
+    rpr.is_active AS membership_is_active,
+    rpr.merge_state AS membership_merge_state
 FROM ship_release_pull_request rpr
 JOIN pull_request pr ON pr.id = rpr.pull_request_id
 WHERE rpr.release_id = $1
@@ -201,3 +202,78 @@ SELECT * FROM ship_release_event
 WHERE release_id = $1
 ORDER BY created_at DESC
 LIMIT $2;
+
+-- ---------------------------------------------------------------------------
+-- Phase 7b — Merge train orchestration.
+-- ---------------------------------------------------------------------------
+
+-- name: SetReleaseMergePaused :one
+-- Flip the soft-state pause flag. Used when a PR fails mid-train
+-- (paused=TRUE) and on resume (paused=FALSE). updated_at bumps so the
+-- workspace rail re-orders.
+UPDATE ship_release SET
+    merge_paused = $2,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: SetReleaseMergeMethod :one
+-- Stamps the merge method that the orchestrator will use for this
+-- release. Called once at start_merge time; ignored by the orchestrator
+-- thereafter. Returns the row so the handler can echo it.
+UPDATE ship_release SET
+    merge_method = $2,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: NextQueuedReleasePR :one
+-- Picks the next PR to merge from a release: the lowest-position row
+-- whose merge_state is still 'queued'. Bounded to one row by LIMIT 1.
+-- The orchestrator calls this in a loop until it returns no row.
+SELECT
+    rpr.release_id,
+    rpr.pull_request_id,
+    rpr.position
+FROM ship_release_pull_request rpr
+WHERE rpr.release_id = $1
+  AND rpr.merge_state = 'queued'
+ORDER BY rpr.position ASC
+LIMIT 1;
+
+-- name: SetReleasePRMergeState :one
+-- Drives the per-PR merge_state machine: queued → merging → merged
+-- (with sha + ts), failed (with error), or skipped. Caller passes the
+-- merge_state via the typed string; sqlc maps it through the enum.
+UPDATE ship_release_pull_request SET
+    merge_state = $3,
+    merged_sha = COALESCE(sqlc.narg('merged_sha'), merged_sha),
+    merged_at = COALESCE(sqlc.narg('merged_at'), merged_at),
+    merge_error = COALESCE(sqlc.narg('merge_error'), merge_error)
+WHERE release_id = $1 AND pull_request_id = $2
+RETURNING *;
+
+-- name: CountReleasePRsByMergeState :many
+-- Returns one row per merge_state value present in this release with
+-- a count. Used by the merge_state poll endpoint and by the WS
+-- payloads to surface "merged_count / total" without N round-trips.
+SELECT
+    merge_state,
+    COUNT(*)::int AS count
+FROM ship_release_pull_request
+WHERE release_id = $1
+GROUP BY merge_state;
+
+-- name: ListReleasePRsForMerge :many
+-- Lite shape for the merge orchestrator: ordered by position, with
+-- only the columns the goroutine actually needs. We avoid pulling
+-- the full PR row on every iteration because the orchestrator can
+-- pick the PR up via GetPullRequest only when it's about to merge it.
+SELECT
+    rpr.pull_request_id,
+    rpr.position,
+    rpr.merge_state
+FROM ship_release_pull_request rpr
+WHERE rpr.release_id = $1
+ORDER BY rpr.position ASC;
+

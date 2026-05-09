@@ -77,6 +77,10 @@ type RouterOptions struct {
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
 	// tests leave this nil and get the legacy synchronous behavior.
 	HeartbeatScheduler handler.HeartbeatScheduler
+	// ServiceCtx is a long-lived context handlers can hand to
+	// background goroutines (Phase 7b's merge train). Tests leave
+	// this nil and the handler falls back to context.Background.
+	ServiceCtx context.Context
 }
 
 func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) chi.Router {
@@ -120,6 +124,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
+	}
+	if opts.ServiceCtx != nil {
+		h.ServiceCtx = opts.ServiceCtx
 	}
 	// Auth caches: PAT cache is shared between the regular Auth middleware,
 	// the DaemonAuth fallback (mul_) path, and the revoke handler
@@ -487,6 +494,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/releases/{id}/pull_requests", h.AddPullRequestToRelease)
 			r.Delete("/api/releases/{id}/pull_requests/{pr_id}", h.RemovePullRequestFromRelease)
 			r.Post("/api/releases/{id}/cancel", h.CancelRelease)
+
+			// Phase 7b — Merge train orchestration.
+			r.Post("/api/releases/{id}/start_merge", h.StartMergeRelease)
+			r.Post("/api/releases/{id}/resume_merge", h.ResumeMergeRelease)
+			r.Post("/api/releases/{id}/abort_merge", h.AbortMergeRelease)
+			r.Get("/api/releases/{id}/merge_state", h.GetReleaseMergeState)
 
 			// Channels (multi-participant chat + DMs).
 			// Endpoints respond 404 when workspace.channels_enabled is FALSE

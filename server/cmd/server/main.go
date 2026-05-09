@@ -284,11 +284,19 @@ func main() {
 	// shutdown so any pending bumps are flushed before we exit.
 	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
 
+	// sweepCtx is constructed BEFORE the router so it can be handed to the
+	// handler as ServiceCtx. Phase 7b's merge-train orchestrator (and any
+	// future async flow) uses it as the parent context for goroutines that
+	// outlive an HTTP request — using r.Context() there would kill the
+	// goroutine the moment the response writes.
+	sweepCtx, sweepCancel := context.WithCancel(context.Background())
+
 	r := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:        httpMetrics,
 		DaemonHub:          daemonHub,
 		DaemonWakeup:       daemonWakeup,
 		HeartbeatScheduler: heartbeatScheduler,
+		ServiceCtx:         sweepCtx,
 	})
 
 	srv := &http.Server{
@@ -297,7 +305,6 @@ func main() {
 	}
 
 	// Start background workers.
-	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)

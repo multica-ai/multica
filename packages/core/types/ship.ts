@@ -551,7 +551,25 @@ export interface Release {
   done_at: string | null;
   rollback_reason: string | null;
   pr_count: number;
+  /** Phase 7b — soft-state flag set when the merge train hits a
+   *  failure mid-flight. The UI reads this AND `stage === "merging"`
+   *  to render the paused banner + Resume / Skip / Abort buttons. */
+  merge_paused: boolean;
+  /** Phase 7b — workspace-default merge method ("merge" / "squash" /
+   *  "rebase"). Stamped at start_merge time. */
+  merge_method: string;
 }
+
+/** Phase 7b — per-PR merge state values. Drives the pill rendering on
+ *  the release detail page. Treated as `string` everywhere downstream
+ *  per the API-compat contract; this type is exported so the few
+ *  switch statements in the UI can narrow safely. */
+export type ReleasePRMergeState =
+  | "queued"
+  | "merging"
+  | "merged"
+  | "failed"
+  | "skipped";
 
 /** Per-release PR row — extends the regular PullRequest shape with
  *  membership-table columns (position in the merge train, per-PR
@@ -563,6 +581,10 @@ export interface ReleasePullRequest extends PullRequest {
   merge_error: string | null;
   added_at: string;
   is_active: boolean;
+  /** Phase 7b — per-PR merge state. queued / merging / merged /
+   *  failed / skipped. Treated as `string` so a future server-side
+   *  enum value renders a generic fallback rather than crashing. */
+  merge_state: string;
 }
 
 /** Audit-log row in the release timeline. event_type is loose-typed
@@ -631,6 +653,41 @@ export interface AddPullRequestToReleaseRequest {
 /** Body for POST /api/releases/{id}/cancel. */
 export interface CancelReleaseRequest {
   reason?: string;
+}
+
+/** Body for POST /api/releases/{id}/start_merge. */
+export interface StartMergeRequest {
+  merge_method?: "merge" | "squash" | "rebase";
+}
+
+/** Body for POST /api/releases/{id}/resume_merge. */
+export interface ResumeMergeRequest {
+  /** PR ids to mark `skipped` before resuming the train. Use this
+   *  when a PR is hopelessly conflicting and the user wants to
+   *  abandon it rather than retrying. */
+  skip_pr_ids?: string[];
+}
+
+/** Body for POST /api/releases/{id}/abort_merge. */
+export interface AbortMergeRequest {
+  reason?: string;
+}
+
+/** Phase 7b — lightweight merge_state poll response. */
+export interface MergeStateResponse {
+  release_id: string;
+  stage: string;
+  merge_paused: boolean;
+  merge_method: string;
+  merged_count: number;
+  total: number;
+  pull_requests: Array<{
+    pull_request_id: string;
+    position: number;
+    merge_state: string;
+    merged_sha: string | null;
+    merge_error: string | null;
+  }>;
 }
 
 /** Phase 7a — minimal release reference attached to a PullRequest

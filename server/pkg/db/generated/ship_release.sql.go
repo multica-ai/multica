@@ -20,7 +20,7 @@ INSERT INTO ship_release_pull_request (
 ON CONFLICT (release_id, pull_request_id) DO UPDATE SET
     position = EXCLUDED.position,
     is_active = EXCLUDED.is_active
-RETURNING release_id, pull_request_id, position, merged_sha, merged_at, merge_error, added_at, is_active
+RETURNING release_id, pull_request_id, position, merged_sha, merged_at, merge_error, added_at, is_active, merge_state
 `
 
 type AddPullRequestToReleaseParams struct {
@@ -43,6 +43,7 @@ func (q *Queries) AddPullRequestToRelease(ctx context.Context, arg AddPullReques
 		&i.MergeError,
 		&i.AddedAt,
 		&i.IsActive,
+		&i.MergeState,
 	)
 	return i, err
 }
@@ -60,6 +61,43 @@ func (q *Queries) CountActiveReleasePullRequests(ctx context.Context, releaseID 
 	return pr_count, err
 }
 
+const countReleasePRsByMergeState = `-- name: CountReleasePRsByMergeState :many
+SELECT
+    merge_state,
+    COUNT(*)::int AS count
+FROM ship_release_pull_request
+WHERE release_id = $1
+GROUP BY merge_state
+`
+
+type CountReleasePRsByMergeStateRow struct {
+	MergeState PrMergeState `json:"merge_state"`
+	Count      int32        `json:"count"`
+}
+
+// Returns one row per merge_state value present in this release with
+// a count. Used by the merge_state poll endpoint and by the WS
+// payloads to surface "merged_count / total" without N round-trips.
+func (q *Queries) CountReleasePRsByMergeState(ctx context.Context, releaseID pgtype.UUID) ([]CountReleasePRsByMergeStateRow, error) {
+	rows, err := q.db.Query(ctx, countReleasePRsByMergeState, releaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountReleasePRsByMergeStateRow{}
+	for rows.Next() {
+		var i CountReleasePRsByMergeStateRow
+		if err := rows.Scan(&i.MergeState, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createRelease = `-- name: CreateRelease :one
 
 INSERT INTO ship_release (
@@ -69,7 +107,7 @@ INSERT INTO ship_release (
     $1, $2, $3, $5, $4,
     $6, $7, $8
 )
-RETURNING id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason
+RETURNING id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method
 `
 
 type CreateReleaseParams struct {
@@ -125,6 +163,8 @@ func (q *Queries) CreateRelease(ctx context.Context, arg CreateReleaseParams) (S
 		&i.PromotedAt,
 		&i.DoneAt,
 		&i.RollbackReason,
+		&i.MergePaused,
+		&i.MergeMethod,
 	)
 	return i, err
 }
@@ -144,7 +184,7 @@ func (q *Queries) DeactivateReleasePullRequests(ctx context.Context, releaseID p
 }
 
 const getActiveReleaseForPullRequest = `-- name: GetActiveReleaseForPullRequest :one
-SELECT r.id, r.workspace_id, r.project_id, r.title, r.description, r.stage, r.risk_level, r.channel_id, r.issue_id, r.approver_id, r.second_approver_id, r.staging_deploy_id, r.production_deploy_id, r.created_by, r.created_at, r.updated_at, r.merged_at, r.staged_at, r.promoted_at, r.done_at, r.rollback_reason
+SELECT r.id, r.workspace_id, r.project_id, r.title, r.description, r.stage, r.risk_level, r.channel_id, r.issue_id, r.approver_id, r.second_approver_id, r.staging_deploy_id, r.production_deploy_id, r.created_by, r.created_at, r.updated_at, r.merged_at, r.staged_at, r.promoted_at, r.done_at, r.rollback_reason, r.merge_paused, r.merge_method
 FROM ship_release_pull_request rpr
 JOIN ship_release r ON r.id = rpr.release_id
 WHERE rpr.pull_request_id = $1 AND rpr.is_active = TRUE
@@ -180,12 +220,14 @@ func (q *Queries) GetActiveReleaseForPullRequest(ctx context.Context, pullReques
 		&i.PromotedAt,
 		&i.DoneAt,
 		&i.RollbackReason,
+		&i.MergePaused,
+		&i.MergeMethod,
 	)
 	return i, err
 }
 
 const getRelease = `-- name: GetRelease :one
-SELECT id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason FROM ship_release
+SELECT id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method FROM ship_release
 WHERE id = $1
 `
 
@@ -214,12 +256,14 @@ func (q *Queries) GetRelease(ctx context.Context, id pgtype.UUID) (ShipRelease, 
 		&i.PromotedAt,
 		&i.DoneAt,
 		&i.RollbackReason,
+		&i.MergePaused,
+		&i.MergeMethod,
 	)
 	return i, err
 }
 
 const getReleaseInWorkspace = `-- name: GetReleaseInWorkspace :one
-SELECT id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason FROM ship_release
+SELECT id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method FROM ship_release
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -253,6 +297,8 @@ func (q *Queries) GetReleaseInWorkspace(ctx context.Context, arg GetReleaseInWor
 		&i.PromotedAt,
 		&i.DoneAt,
 		&i.RollbackReason,
+		&i.MergePaused,
+		&i.MergeMethod,
 	)
 	return i, err
 }
@@ -293,7 +339,7 @@ func (q *Queries) InsertReleaseEvent(ctx context.Context, arg InsertReleaseEvent
 }
 
 const listActiveReleasesByWorkspace = `-- name: ListActiveReleasesByWorkspace :many
-SELECT id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason FROM ship_release
+SELECT id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method FROM ship_release
 WHERE workspace_id = $1
   AND stage NOT IN ('done', 'rolled_back', 'cancelled')
 ORDER BY updated_at DESC
@@ -332,6 +378,8 @@ func (q *Queries) ListActiveReleasesByWorkspace(ctx context.Context, workspaceID
 			&i.PromotedAt,
 			&i.DoneAt,
 			&i.RollbackReason,
+			&i.MergePaused,
+			&i.MergeMethod,
 		); err != nil {
 			return nil, err
 		}
@@ -394,7 +442,7 @@ func (q *Queries) ListActiveReleasesForPullRequests(ctx context.Context, dollar_
 }
 
 const listRecentReleasesByProject = `-- name: ListRecentReleasesByProject :many
-SELECT id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason FROM ship_release
+SELECT id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method FROM ship_release
 WHERE project_id = $1
 ORDER BY updated_at DESC
 LIMIT $2
@@ -438,6 +486,8 @@ func (q *Queries) ListRecentReleasesByProject(ctx context.Context, arg ListRecen
 			&i.PromotedAt,
 			&i.DoneAt,
 			&i.RollbackReason,
+			&i.MergePaused,
+			&i.MergeMethod,
 		); err != nil {
 			return nil, err
 		}
@@ -489,6 +539,46 @@ func (q *Queries) ListReleaseEvents(ctx context.Context, arg ListReleaseEventsPa
 	return items, nil
 }
 
+const listReleasePRsForMerge = `-- name: ListReleasePRsForMerge :many
+SELECT
+    rpr.pull_request_id,
+    rpr.position,
+    rpr.merge_state
+FROM ship_release_pull_request rpr
+WHERE rpr.release_id = $1
+ORDER BY rpr.position ASC
+`
+
+type ListReleasePRsForMergeRow struct {
+	PullRequestID pgtype.UUID  `json:"pull_request_id"`
+	Position      int32        `json:"position"`
+	MergeState    PrMergeState `json:"merge_state"`
+}
+
+// Lite shape for the merge orchestrator: ordered by position, with
+// only the columns the goroutine actually needs. We avoid pulling
+// the full PR row on every iteration because the orchestrator can
+// pick the PR up via GetPullRequest only when it's about to merge it.
+func (q *Queries) ListReleasePRsForMerge(ctx context.Context, releaseID pgtype.UUID) ([]ListReleasePRsForMergeRow, error) {
+	rows, err := q.db.Query(ctx, listReleasePRsForMerge, releaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListReleasePRsForMergeRow{}
+	for rows.Next() {
+		var i ListReleasePRsForMergeRow
+		if err := rows.Scan(&i.PullRequestID, &i.Position, &i.MergeState); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReleasePullRequests = `-- name: ListReleasePullRequests :many
 SELECT
     pr.id, pr.workspace_id, pr.project_id, pr.repo_url, pr.pr_number, pr.title, pr.state, pr.is_draft, pr.author_login, pr.author_avatar_url, pr.base_ref, pr.head_ref, pr.head_sha, pr.html_url, pr.body, pr.ci_status, pr.review_decision, pr.mergeable, pr.additions, pr.deletions, pr.changed_files, pr.labels, pr.pr_created_at, pr.pr_updated_at, pr.pr_merged_at, pr.pr_closed_at, pr.fetched_at, pr.originating_issue_id, pr.originating_agent_task_id, pr.auto_close_issue_on_merge, pr.conversation_channel_id, pr.stack_parent_pr_id, pr.source, pr.risk_level, pr.risk_reasons, pr.risk_classified_at,
@@ -497,7 +587,8 @@ SELECT
     rpr.merged_at AS membership_merged_at,
     rpr.merge_error AS membership_merge_error,
     rpr.added_at AS membership_added_at,
-    rpr.is_active AS membership_is_active
+    rpr.is_active AS membership_is_active,
+    rpr.merge_state AS membership_merge_state
 FROM ship_release_pull_request rpr
 JOIN pull_request pr ON pr.id = rpr.pull_request_id
 WHERE rpr.release_id = $1
@@ -547,12 +638,13 @@ type ListReleasePullRequestsRow struct {
 	MembershipMergeError   pgtype.Text        `json:"membership_merge_error"`
 	MembershipAddedAt      pgtype.Timestamptz `json:"membership_added_at"`
 	MembershipIsActive     bool               `json:"membership_is_active"`
+	MembershipMergeState   PrMergeState       `json:"membership_merge_state"`
 }
 
 // Returns the PRs in this release joined with the membership row.
 // We expose the join columns explicitly because the merged_sha /
-// merge_error fields are release-specific (they don't live on
-// pull_request itself).
+// merge_error / merge_state fields are release-specific (they don't
+// live on pull_request itself).
 func (q *Queries) ListReleasePullRequests(ctx context.Context, releaseID pgtype.UUID) ([]ListReleasePullRequestsRow, error) {
 	rows, err := q.db.Query(ctx, listReleasePullRequests, releaseID)
 	if err != nil {
@@ -605,6 +697,7 @@ func (q *Queries) ListReleasePullRequests(ctx context.Context, releaseID pgtype.
 			&i.MembershipMergeError,
 			&i.MembershipAddedAt,
 			&i.MembershipIsActive,
+			&i.MembershipMergeState,
 		); err != nil {
 			return nil, err
 		}
@@ -617,7 +710,7 @@ func (q *Queries) ListReleasePullRequests(ctx context.Context, releaseID pgtype.
 }
 
 const listReleasesByProject = `-- name: ListReleasesByProject :many
-SELECT id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason FROM ship_release
+SELECT id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method FROM ship_release
 WHERE project_id = $1
   AND (
       $2::bool = TRUE
@@ -664,6 +757,8 @@ func (q *Queries) ListReleasesByProject(ctx context.Context, arg ListReleasesByP
 			&i.PromotedAt,
 			&i.DoneAt,
 			&i.RollbackReason,
+			&i.MergePaused,
+			&i.MergeMethod,
 		); err != nil {
 			return nil, err
 		}
@@ -673,6 +768,34 @@ func (q *Queries) ListReleasesByProject(ctx context.Context, arg ListReleasesByP
 		return nil, err
 	}
 	return items, nil
+}
+
+const nextQueuedReleasePR = `-- name: NextQueuedReleasePR :one
+SELECT
+    rpr.release_id,
+    rpr.pull_request_id,
+    rpr.position
+FROM ship_release_pull_request rpr
+WHERE rpr.release_id = $1
+  AND rpr.merge_state = 'queued'
+ORDER BY rpr.position ASC
+LIMIT 1
+`
+
+type NextQueuedReleasePRRow struct {
+	ReleaseID     pgtype.UUID `json:"release_id"`
+	PullRequestID pgtype.UUID `json:"pull_request_id"`
+	Position      int32       `json:"position"`
+}
+
+// Picks the next PR to merge from a release: the lowest-position row
+// whose merge_state is still 'queued'. Bounded to one row by LIMIT 1.
+// The orchestrator calls this in a loop until it returns no row.
+func (q *Queries) NextQueuedReleasePR(ctx context.Context, releaseID pgtype.UUID) (NextQueuedReleasePRRow, error) {
+	row := q.db.QueryRow(ctx, nextQueuedReleasePR, releaseID)
+	var i NextQueuedReleasePRRow
+	err := row.Scan(&i.ReleaseID, &i.PullRequestID, &i.Position)
+	return i, err
 }
 
 const removePullRequestFromRelease = `-- name: RemovePullRequestFromRelease :exec
@@ -693,12 +816,156 @@ func (q *Queries) RemovePullRequestFromRelease(ctx context.Context, arg RemovePu
 	return err
 }
 
+const setReleaseMergeMethod = `-- name: SetReleaseMergeMethod :one
+UPDATE ship_release SET
+    merge_method = $2,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method
+`
+
+type SetReleaseMergeMethodParams struct {
+	ID          pgtype.UUID `json:"id"`
+	MergeMethod string      `json:"merge_method"`
+}
+
+// Stamps the merge method that the orchestrator will use for this
+// release. Called once at start_merge time; ignored by the orchestrator
+// thereafter. Returns the row so the handler can echo it.
+func (q *Queries) SetReleaseMergeMethod(ctx context.Context, arg SetReleaseMergeMethodParams) (ShipRelease, error) {
+	row := q.db.QueryRow(ctx, setReleaseMergeMethod, arg.ID, arg.MergeMethod)
+	var i ShipRelease
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.Title,
+		&i.Description,
+		&i.Stage,
+		&i.RiskLevel,
+		&i.ChannelID,
+		&i.IssueID,
+		&i.ApproverID,
+		&i.SecondApproverID,
+		&i.StagingDeployID,
+		&i.ProductionDeployID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MergedAt,
+		&i.StagedAt,
+		&i.PromotedAt,
+		&i.DoneAt,
+		&i.RollbackReason,
+		&i.MergePaused,
+		&i.MergeMethod,
+	)
+	return i, err
+}
+
+const setReleaseMergePaused = `-- name: SetReleaseMergePaused :one
+
+UPDATE ship_release SET
+    merge_paused = $2,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method
+`
+
+type SetReleaseMergePausedParams struct {
+	ID          pgtype.UUID `json:"id"`
+	MergePaused bool        `json:"merge_paused"`
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7b — Merge train orchestration.
+// ---------------------------------------------------------------------------
+// Flip the soft-state pause flag. Used when a PR fails mid-train
+// (paused=TRUE) and on resume (paused=FALSE). updated_at bumps so the
+// workspace rail re-orders.
+func (q *Queries) SetReleaseMergePaused(ctx context.Context, arg SetReleaseMergePausedParams) (ShipRelease, error) {
+	row := q.db.QueryRow(ctx, setReleaseMergePaused, arg.ID, arg.MergePaused)
+	var i ShipRelease
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.Title,
+		&i.Description,
+		&i.Stage,
+		&i.RiskLevel,
+		&i.ChannelID,
+		&i.IssueID,
+		&i.ApproverID,
+		&i.SecondApproverID,
+		&i.StagingDeployID,
+		&i.ProductionDeployID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MergedAt,
+		&i.StagedAt,
+		&i.PromotedAt,
+		&i.DoneAt,
+		&i.RollbackReason,
+		&i.MergePaused,
+		&i.MergeMethod,
+	)
+	return i, err
+}
+
+const setReleasePRMergeState = `-- name: SetReleasePRMergeState :one
+UPDATE ship_release_pull_request SET
+    merge_state = $3,
+    merged_sha = COALESCE($4, merged_sha),
+    merged_at = COALESCE($5, merged_at),
+    merge_error = COALESCE($6, merge_error)
+WHERE release_id = $1 AND pull_request_id = $2
+RETURNING release_id, pull_request_id, position, merged_sha, merged_at, merge_error, added_at, is_active, merge_state
+`
+
+type SetReleasePRMergeStateParams struct {
+	ReleaseID     pgtype.UUID        `json:"release_id"`
+	PullRequestID pgtype.UUID        `json:"pull_request_id"`
+	MergeState    PrMergeState       `json:"merge_state"`
+	MergedSha     pgtype.Text        `json:"merged_sha"`
+	MergedAt      pgtype.Timestamptz `json:"merged_at"`
+	MergeError    pgtype.Text        `json:"merge_error"`
+}
+
+// Drives the per-PR merge_state machine: queued → merging → merged
+// (with sha + ts), failed (with error), or skipped. Caller passes the
+// merge_state via the typed string; sqlc maps it through the enum.
+func (q *Queries) SetReleasePRMergeState(ctx context.Context, arg SetReleasePRMergeStateParams) (ShipReleasePullRequest, error) {
+	row := q.db.QueryRow(ctx, setReleasePRMergeState,
+		arg.ReleaseID,
+		arg.PullRequestID,
+		arg.MergeState,
+		arg.MergedSha,
+		arg.MergedAt,
+		arg.MergeError,
+	)
+	var i ShipReleasePullRequest
+	err := row.Scan(
+		&i.ReleaseID,
+		&i.PullRequestID,
+		&i.Position,
+		&i.MergedSha,
+		&i.MergedAt,
+		&i.MergeError,
+		&i.AddedAt,
+		&i.IsActive,
+		&i.MergeState,
+	)
+	return i, err
+}
+
 const updateReleaseChannel = `-- name: UpdateReleaseChannel :one
 UPDATE ship_release SET
     channel_id = $2,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason
+RETURNING id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method
 `
 
 type UpdateReleaseChannelParams struct {
@@ -731,6 +998,8 @@ func (q *Queries) UpdateReleaseChannel(ctx context.Context, arg UpdateReleaseCha
 		&i.PromotedAt,
 		&i.DoneAt,
 		&i.RollbackReason,
+		&i.MergePaused,
+		&i.MergeMethod,
 	)
 	return i, err
 }
@@ -740,7 +1009,7 @@ UPDATE ship_release SET
     issue_id = $2,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason
+RETURNING id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method
 `
 
 type UpdateReleaseIssueParams struct {
@@ -773,6 +1042,8 @@ func (q *Queries) UpdateReleaseIssue(ctx context.Context, arg UpdateReleaseIssue
 		&i.PromotedAt,
 		&i.DoneAt,
 		&i.RollbackReason,
+		&i.MergePaused,
+		&i.MergeMethod,
 	)
 	return i, err
 }
@@ -791,7 +1062,7 @@ UPDATE ship_release SET
     END,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason
+RETURNING id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method
 `
 
 type UpdateReleaseMetadataParams struct {
@@ -839,6 +1110,8 @@ func (q *Queries) UpdateReleaseMetadata(ctx context.Context, arg UpdateReleaseMe
 		&i.PromotedAt,
 		&i.DoneAt,
 		&i.RollbackReason,
+		&i.MergePaused,
+		&i.MergeMethod,
 	)
 	return i, err
 }
@@ -848,7 +1121,7 @@ UPDATE ship_release SET
     risk_level = $2,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason
+RETURNING id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method
 `
 
 type UpdateReleaseRiskLevelParams struct {
@@ -884,6 +1157,8 @@ func (q *Queries) UpdateReleaseRiskLevel(ctx context.Context, arg UpdateReleaseR
 		&i.PromotedAt,
 		&i.DoneAt,
 		&i.RollbackReason,
+		&i.MergePaused,
+		&i.MergeMethod,
 	)
 	return i, err
 }
@@ -898,7 +1173,7 @@ UPDATE ship_release SET
     rollback_reason = COALESCE($7, rollback_reason),
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason
+RETURNING id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method
 `
 
 type UpdateReleaseStageParams struct {
@@ -948,6 +1223,8 @@ func (q *Queries) UpdateReleaseStage(ctx context.Context, arg UpdateReleaseStage
 		&i.PromotedAt,
 		&i.DoneAt,
 		&i.RollbackReason,
+		&i.MergePaused,
+		&i.MergeMethod,
 	)
 	return i, err
 }

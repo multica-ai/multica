@@ -55,6 +55,10 @@ export {
   useAddPullRequestToRelease,
   useRemovePullRequestFromRelease,
   useCancelRelease,
+  // Phase 7b — Merge train
+  useStartMergeTrain,
+  useResumeMergeTrain,
+  useAbortMergeTrain,
 } from "./queries";
 
 // Phase 7a — multi-select store. Lives next to the queries because

@@ -595,6 +595,9 @@ export const ReleaseSchema = z.object({
   done_at: z.string().nullable().default(null),
   rollback_reason: z.string().nullable().default(null),
   pr_count: z.number().default(0),
+  // Phase 7b — merge train state.
+  merge_paused: z.boolean().default(false),
+  merge_method: z.string().default("merge"),
 }).loose();
 
 const ReleasePullRequestSchema = PullRequestSchema.extend({
@@ -604,6 +607,10 @@ const ReleasePullRequestSchema = PullRequestSchema.extend({
   merge_error: z.string().nullable().default(null),
   added_at: z.string().default(""),
   is_active: z.boolean().default(true),
+  // Phase 7b — per-PR merge state. Default "queued" so older
+  // backends that don't include the field render as queued (a
+  // safe blank slate) rather than throwing.
+  merge_state: z.string().default("queued"),
 }).loose();
 
 const ReleaseEventSchema = z.object({
@@ -671,6 +678,8 @@ export const EMPTY_RELEASE_DETAIL = {
     done_at: null,
     rollback_reason: null,
     pr_count: 0,
+    merge_paused: false,
+    merge_method: "merge",
   },
   pull_requests: [],
   events: [],
@@ -686,4 +695,36 @@ export const CreateReleaseResponseSchema = z.object({
 export const EMPTY_CREATE_RELEASE_RESPONSE = {
   release: EMPTY_RELEASE_DETAIL.release,
   warnings: [],
+};
+
+// Phase 7b — lightweight merge_state poll response. Used by clients
+// that aren't on a WS socket (e.g. integration tests, future CLI
+// surfaces). Mirrors the per-PR merge_state pill shape without
+// re-shipping the full release detail.
+const MergeStatePullRequestSchema = z.object({
+  pull_request_id: z.string().default(""),
+  position: z.number().default(0),
+  merge_state: z.string().default("queued"),
+  merged_sha: z.string().nullable().default(null),
+  merge_error: z.string().nullable().default(null),
+}).loose();
+
+export const MergeStateResponseSchema = z.object({
+  release_id: z.string().default(""),
+  stage: z.string().default("assembling"),
+  merge_paused: z.boolean().default(false),
+  merge_method: z.string().default("merge"),
+  merged_count: z.number().default(0),
+  total: z.number().default(0),
+  pull_requests: z.array(MergeStatePullRequestSchema).default([]),
+}).loose();
+
+export const EMPTY_MERGE_STATE_RESPONSE = {
+  release_id: "",
+  stage: "assembling",
+  merge_paused: false,
+  merge_method: "merge",
+  merged_count: 0,
+  total: 0,
+  pull_requests: [],
 };
