@@ -121,6 +121,11 @@ import type {
   NudgePullRequestAuthorRequest,
   RunSmokeTestsRequest,
   ClosePullRequestAsStaleRequest,
+  UpdatePullRequestRequest,
+  LinkedIssuesResponse,
+  TalkToAgentRequest,
+  TalkToAgentResponse,
+  ListPullRequestStacksResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -149,6 +154,12 @@ import {
   EMPTY_ACTION_RESULT,
   ListShipCardActionsResponseSchema,
   EMPTY_LIST_SHIP_CARD_ACTIONS_RESPONSE,
+  LinkedIssuesResponseSchema,
+  EMPTY_LINKED_ISSUES_RESPONSE,
+  ListPullRequestStacksResponseSchema,
+  EMPTY_LIST_PULL_REQUEST_STACKS_RESPONSE,
+  TalkToAgentResponseSchema,
+  EMPTY_TALK_TO_AGENT_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1769,6 +1780,88 @@ export class ApiClient {
       ListShipCardActionsResponseSchema,
       EMPTY_LIST_SHIP_CARD_ACTIONS_RESPONSE,
       { endpoint: "GET /api/pull_requests/:id/actions" },
+    );
+  }
+
+  // Phase 4 — linkage spine. Each method goes through parseWithFallback so
+  // an older Electron build talking to a phase-4 server (or vice versa)
+  // never white-screens on a contract drift; the worst case is the chip
+  // simply doesn't render.
+
+  /** PATCH /api/pull_requests/{id} — manually override auto-detected linkage. */
+  async updatePullRequest(
+    prId: string,
+    body: UpdatePullRequestRequest,
+  ): Promise<unknown> {
+    return this.fetch(`/api/pull_requests/${prId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** GET /api/pull_requests/{id}/linked_issues. Returns null fields when
+   *  the PR isn't linked to anything. */
+  async getLinkedIssues(prId: string): Promise<LinkedIssuesResponse> {
+    const raw = await this.fetch<unknown>(`/api/pull_requests/${prId}/linked_issues`);
+    return parseWithFallback(
+      raw,
+      LinkedIssuesResponseSchema,
+      EMPTY_LINKED_ISSUES_RESPONSE,
+      { endpoint: "GET /api/pull_requests/:id/linked_issues" },
+    );
+  }
+
+  /** POST /api/pull_requests/{id}/talk_to_agent. Returns the new chat
+   *  session id; the frontend routes the user into the chat panel. */
+  async talkToAgent(
+    prId: string,
+    body?: TalkToAgentRequest,
+  ): Promise<TalkToAgentResponse> {
+    const raw = await this.fetch<unknown>(`/api/pull_requests/${prId}/talk_to_agent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+    });
+    return parseWithFallback(
+      raw,
+      TalkToAgentResponseSchema,
+      EMPTY_TALK_TO_AGENT_RESPONSE,
+      { endpoint: "POST /api/pull_requests/:id/talk_to_agent" },
+    );
+  }
+
+  /** GET /api/issues/{id}/pull_requests — PRs whose
+   *  originating_issue_id matches. */
+  async listIssuePullRequests(issueId: string): Promise<ListPullRequestsResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/pull_requests`);
+    return parseWithFallback(
+      raw,
+      ListPullRequestsResponseSchema,
+      EMPTY_LIST_PULL_REQUESTS_RESPONSE,
+      { endpoint: "GET /api/issues/:id/pull_requests" },
+    );
+  }
+
+  /** POST /api/pull_requests/{id}/conversation_channel — get or create
+   *  the per-PR Multica channel. Idempotent. */
+  async getOrCreatePRConversationChannel(prId: string): Promise<unknown> {
+    return this.fetch(`/api/pull_requests/${prId}/conversation_channel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+  }
+
+  /** GET /api/projects/{id}/pull_request_stacks — stack-tree shape for
+   *  the nested-card rendering in the Kanban. */
+  async listPullRequestStacks(projectId: string): Promise<ListPullRequestStacksResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/pull_request_stacks`);
+    return parseWithFallback(
+      raw,
+      ListPullRequestStacksResponseSchema,
+      EMPTY_LIST_PULL_REQUEST_STACKS_RESPONSE,
+      { endpoint: "GET /api/projects/:id/pull_request_stacks" },
     );
   }
 }

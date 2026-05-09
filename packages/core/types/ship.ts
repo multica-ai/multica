@@ -59,6 +59,22 @@ export interface PullRequest {
   pr_closed_at: string | null;
   /** When this row was last refreshed from GitHub by the sync service. */
   fetched_at: string;
+  // ---- Phase 4 — linkage spine ----
+  /** Multica issue this PR was opened against, if any. */
+  originating_issue_id?: string | null;
+  /** agent_task_queue row that produced this PR's commits, if any. */
+  originating_agent_task_id?: string | null;
+  /** When true, merging the PR also moves the originating issue to done. */
+  auto_close_issue_on_merge?: boolean;
+  /** PR-scoped Multica channel for the discussion, if one was opened. */
+  conversation_channel_id?: string | null;
+  /** Open PR this PR was rebased onto (stack visualization). */
+  stack_parent_pr_id?: string | null;
+  /** Source classifier — see ClassifySource in
+   *  server/internal/service/ship/linkage.go. Treat as a loose string;
+   *  the UI maps `multica_agent | multica_human | external_tool |
+   *  external_contributor` to icons and falls back generically. */
+  source?: string;
 }
 
 /** Per-project deploy target (one staging + one production by convention). */
@@ -252,6 +268,63 @@ export interface RunSmokeTestsRequest {
 
 export interface ClosePullRequestAsStaleRequest {
   reason?: string;
+}
+
+// --- Phase 4: linkage / talk-to-agent / stacks ----------------------
+
+export interface UpdatePullRequestRequest {
+  originating_issue_id?: string | null;
+  originating_agent_task_id?: string | null;
+  auto_close_issue_on_merge?: boolean;
+}
+
+/** GET /api/pull_requests/{id}/linked_issues. */
+export interface LinkedIssuesResponse {
+  /** Linked Multica issue, when originating_issue_id is set. */
+  issue: {
+    id: string;
+    identifier: string;
+    title: string;
+    status: string;
+    workspace_id: string;
+  } | null;
+  /** Originating agent task, with the prompt summary so the chat-with-agent
+   * chip can display it. */
+  agent_task: {
+    id: string;
+    agent_id: string;
+    agent_name: string;
+    status: string;
+    trigger_summary?: string | null;
+    issue_id?: string | null;
+  } | null;
+}
+
+/** POST /api/pull_requests/{id}/talk_to_agent body. */
+export interface TalkToAgentRequest {
+  /** Optional first message; the chat panel surfaces a textarea when omitted. */
+  message?: string;
+}
+
+/** POST /api/pull_requests/{id}/talk_to_agent response. */
+export interface TalkToAgentResponse {
+  chat_session_id: string;
+  agent_id: string;
+}
+
+/** GET /api/projects/{id}/pull_request_stacks response.
+ *
+ *  Each stack is a single root PR plus its (recursive) children. The
+ *  card list renders root + immediate children inline; deeper nesting
+ *  falls back to a "view stack" link.
+ */
+export interface PullRequestStackNode {
+  pr: PullRequest;
+  children: PullRequestStackNode[];
+}
+
+export interface ListPullRequestStacksResponse {
+  stacks: PullRequestStackNode[];
 }
 
 /** Response of POST /api/workspaces/{id}/ship_hub/regenerate_webhook_secret.

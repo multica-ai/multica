@@ -31,3 +31,11 @@ FROM member m
 JOIN "user" u ON u.id = m.user_id
 WHERE m.workspace_id = $1
 ORDER BY m.created_at ASC;
+
+-- name: ListWorkspaceMembersByRole :many
+-- Phase 4 — Ship Hub PR conversation channels add the workspace's owners
+-- to each new channel. role IN ('owner', 'admin') is the natural set;
+-- callers pass the role list as text[].
+SELECT * FROM member
+WHERE workspace_id = $1 AND role = ANY($2::text[])
+ORDER BY created_at ASC;

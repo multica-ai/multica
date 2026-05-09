@@ -121,7 +121,28 @@
       "confirm_title": "Close this pull request as stale?",
       "confirm_description": "Closing #{{number}} \"{{title}}\" leaves a courtesy comment for the author. They can reopen on GitHub.",
       "confirm_action": "Close as stale"
+    },
+    "talk_to_agent": {
+      "label": "Talk to {{agent}}",
+      "label_fallback": "Talk to agent",
+      "toast_success": "Chat session opened",
+      "toast_in_progress": "Opening chat…"
+    },
+    "pull_into_issue": {
+      "label": "Pull into a Multica issue",
+      "toast_success": "Issue draft opened",
+      "toast_in_progress": "Opening draft…"
     }
+  },
+  "linkage": {
+    "source_multica_agent": "Multica agent",
+    "source_multica_human": "Multica issue",
+    "source_external_tool": "External tool",
+    "source_external_contributor": "External contributor",
+    "linked_issue_label": "Linked: {{identifier}}",
+    "no_linked_issue": "No linked issue",
+    "open_conversation_channel": "Open PR conversation channel",
+    "linked_prs_panel_title": "Linked PRs"
   },
   "actions": {
     "recent_actions_label": "Recent actions"

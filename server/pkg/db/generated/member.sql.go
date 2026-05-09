@@ -167,6 +167,46 @@ func (q *Queries) ListMembersWithUser(ctx context.Context, workspaceID pgtype.UU
 	return items, nil
 }
 
+const listWorkspaceMembersByRole = `-- name: ListWorkspaceMembersByRole :many
+SELECT id, workspace_id, user_id, role, created_at FROM member
+WHERE workspace_id = $1 AND role = ANY($2::text[])
+ORDER BY created_at ASC
+`
+
+type ListWorkspaceMembersByRoleParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Column2     []string    `json:"column_2"`
+}
+
+// Phase 4 — Ship Hub PR conversation channels add the workspace's owners
+// to each new channel. role IN ('owner', 'admin') is the natural set;
+// callers pass the role list as text[].
+func (q *Queries) ListWorkspaceMembersByRole(ctx context.Context, arg ListWorkspaceMembersByRoleParams) ([]Member, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceMembersByRole, arg.WorkspaceID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Member{}
+	for rows.Next() {
+		var i Member
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.UserID,
+			&i.Role,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateMemberRole = `-- name: UpdateMemberRole :one
 UPDATE member SET role = $2
 WHERE id = $1

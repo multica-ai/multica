@@ -178,7 +178,42 @@ func (h *Handler) dispatchWebhook(d WebhookDispatch) {
 			"delivery_id", d.DeliveryID, "error", err)
 	}
 
+	// Phase 4 — channel auto-create on PR open / first detection,
+	// auto-archive on PR close+merge. Both run after the outcome is
+	// computed so the channel link is published in the next render
+	// (the WS event arrives via Mark*Processed → frontend re-fetches).
+	h.maybeManagePRConversationChannel(ctx, ws, outcome)
+
 	h.publishWebhookOutcome(d.WorkspaceID, outcome)
+}
+
+// maybeManagePRConversationChannel inspects the webhook outcome and
+// either creates or archives the PR's conversation channel. Best-effort:
+// every failure path logs and returns rather than propagating.
+func (h *Handler) maybeManagePRConversationChannel(ctx context.Context, ws db.Workspace, o ship.WebhookOutcome) {
+	if o.Kind != "pr_state_changed" || !o.PRID.Valid {
+		return
+	}
+	pr := o.PR
+	switch o.PRAction {
+	case "opened", "reopened":
+		// Re-read the PR to make sure linkage updates have flushed.
+		latest, err := h.Queries.GetPullRequest(ctx, pr.ID)
+		if err == nil {
+			pr = latest
+		}
+		if pr.ConversationChannelID.Valid {
+			return
+		}
+		if _, err := h.createPRConversationChannel(ctx, ws.ID, ws, pr); err != nil {
+			slog.Warn("ship webhook: auto-create conversation channel failed",
+				"pr_id", uuidToString(pr.ID), "error", err)
+		}
+	case "closed":
+		// On close (merged or not), archive + snapshot. The processPullRequest
+		// already handled the auto-close-issue branch.
+		h.archivePRConversationChannel(ctx, ws.ID, pr)
+	}
 }
 
 // publishWebhookOutcome translates a service outcome into the right WS

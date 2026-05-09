@@ -6,6 +6,8 @@ import {
   Bot,
   Bell,
   PlayCircle,
+  MessagesSquare,
+  ListPlus,
   type LucideIcon,
 } from "lucide-react";
 import type { PullRequest } from "@multica/core/types";
@@ -113,6 +115,31 @@ const NUDGE_AUTHOR_CHIP: PrChip = {
   action: "nudge_author",
   labelKey: "nudge_author",
   icon: Bell,
+  variant: "secondary",
+};
+
+/** Phase 4 — "Talk to {agent}" chip. Surfaces only when the PR has an
+ *  originating_agent_task_id; the chip click route opens a chat session
+ *  with that task's agent. State-agnostic on purpose: a user can chat
+ *  with the agent regardless of merge / close state. */
+const TALK_TO_AGENT_CHIP: PrChip = {
+  id: "talk_to_agent",
+  action: "talk_to_agent",
+  labelKey: "talk_to_agent",
+  icon: MessagesSquare,
+  variant: "secondary",
+};
+
+/** Phase 4 — "Pull into a Multica issue" chip. Available for PRs the
+ *  classifier flagged as `external_tool` (workspace member opened the
+ *  PR without an issue link); the click opens the existing
+ *  create-issue modal pre-filled with PR data so the user can rope
+ *  a real issue around the PR. */
+const PULL_INTO_ISSUE_CHIP: PrChip = {
+  id: "pull_into_issue",
+  action: "pull_into_issue",
+  labelKey: "pull_into_issue",
+  icon: ListPlus,
   variant: "secondary",
 };
 
@@ -238,6 +265,24 @@ export function derivePrChips(
     }
   }
 
+  // Phase 4 — talk-to-agent chip. State-agnostic: any PR with an
+  // originating_agent_task_id qualifies. We append it last in priority
+  // because the actionable chips (merge / rebase) should land first;
+  // chatting with the agent is a complementary action, not a primary
+  // one.
+  if (pr.originating_agent_task_id) {
+    chips.push(TALK_TO_AGENT_CHIP);
+  }
+
+  // Phase 4 — pull-into-issue chip for external_tool PRs (workspace
+  // member opened a PR without an issue link). The chip opens the
+  // create-issue modal pre-filled with the PR's title/body; the
+  // resulting issue gets back-linked to this PR via PATCH
+  // /api/pull_requests/{id}.
+  if (pr.source === "external_tool" && !pr.originating_issue_id) {
+    chips.push(PULL_INTO_ISSUE_CHIP);
+  }
+
   return chips;
 }
 
@@ -250,5 +295,7 @@ export const __testing__ = {
   MERGE_CHIP,
   SUMMARIZE_FEEDBACK_CHIP,
   NUDGE_AUTHOR_CHIP,
+  TALK_TO_AGENT_CHIP,
+  PULL_INTO_ISSUE_CHIP,
   AlertTriangleIcon: AlertTriangle,
 };

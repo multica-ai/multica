@@ -190,6 +190,14 @@ const PullRequestSchema = z.object({
   pr_merged_at: z.string().nullable().default(null),
   pr_closed_at: z.string().nullable().default(null),
   fetched_at: z.string().default(""),
+  // Phase 4 — linkage spine. Older backends omit these fields entirely;
+  // we mark them optional + nullable so a missing key is fine.
+  originating_issue_id: z.string().nullable().optional(),
+  originating_agent_task_id: z.string().nullable().optional(),
+  auto_close_issue_on_merge: z.boolean().optional(),
+  conversation_channel_id: z.string().nullable().optional(),
+  stack_parent_pr_id: z.string().nullable().optional(),
+  source: z.string().optional(),
 }).loose();
 
 export const ListPullRequestsResponseSchema = z.object({
@@ -351,4 +359,67 @@ export const EMPTY_WEBHOOK_SECRET_RESPONSE = {
   webhook_secret: "",
   webhook_url: "",
   webhook_secret_set: false,
+};
+
+// Phase 4 — linked_issues / stacks. Both endpoints land schema-validated
+// on the client so an older Electron build that calls a Phase-4 server
+// gracefully degrades when a field flips shape mid-flight.
+
+const LinkedIssueSchema = z.object({
+  id: z.string().default(""),
+  identifier: z.string().default(""),
+  title: z.string().default(""),
+  status: z.string().default(""),
+  workspace_id: z.string().default(""),
+}).loose();
+
+const LinkedAgentTaskSchema = z.object({
+  id: z.string().default(""),
+  agent_id: z.string().default(""),
+  agent_name: z.string().default(""),
+  status: z.string().default(""),
+  trigger_summary: z.string().nullable().optional(),
+  issue_id: z.string().nullable().optional(),
+}).loose();
+
+export const LinkedIssuesResponseSchema = z.object({
+  issue: LinkedIssueSchema.nullable().default(null),
+  agent_task: LinkedAgentTaskSchema.nullable().default(null),
+}).loose();
+
+export const EMPTY_LINKED_ISSUES_RESPONSE = {
+  issue: null,
+  agent_task: null,
+};
+
+// PullRequestStackNode is recursive: a node carries a `pr` plus a list
+// of children of the same shape. zod 4 expresses this as a `lazy` type.
+type PullRequestStackNodeShape = {
+  pr: unknown;
+  children: PullRequestStackNodeShape[];
+};
+export const PullRequestStackNodeSchema: z.ZodType<PullRequestStackNodeShape> =
+  z.lazy(() =>
+    z.object({
+      pr: PullRequestSchema,
+      children: z.array(PullRequestStackNodeSchema).default([]),
+    }).loose(),
+  );
+
+export const ListPullRequestStacksResponseSchema = z.object({
+  stacks: z.array(PullRequestStackNodeSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_PULL_REQUEST_STACKS_RESPONSE = {
+  stacks: [],
+};
+
+export const TalkToAgentResponseSchema = z.object({
+  chat_session_id: z.string().default(""),
+  agent_id: z.string().default(""),
+}).loose();
+
+export const EMPTY_TALK_TO_AGENT_RESPONSE = {
+  chat_session_id: "",
+  agent_id: "",
 };

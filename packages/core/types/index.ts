@@ -147,4 +147,10 @@ export type {
   NudgePullRequestAuthorRequest,
   RunSmokeTestsRequest,
   ClosePullRequestAsStaleRequest,
+  UpdatePullRequestRequest,
+  LinkedIssuesResponse,
+  TalkToAgentRequest,
+  TalkToAgentResponse,
+  PullRequestStackNode,
+  ListPullRequestStacksResponse,
 } from "./ship";

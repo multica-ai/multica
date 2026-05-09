@@ -96,3 +96,45 @@ SELECT project_id, count(*)::bigint AS open_count
 FROM pull_request
 WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[]) AND state = 'open'
 GROUP BY project_id;
+
+-- name: UpdatePullRequestLinkage :one
+-- Phase 4: persist the linkage classifier columns. nargs leave the column
+-- unchanged when absent so a partial PATCH from the manual-override
+-- endpoint doesn't clobber auto-detected fields.
+UPDATE pull_request SET
+    originating_issue_id      = sqlc.narg('originating_issue_id'),
+    originating_agent_task_id = sqlc.narg('originating_agent_task_id'),
+    auto_close_issue_on_merge = COALESCE(sqlc.narg('auto_close_issue_on_merge')::bool, auto_close_issue_on_merge),
+    source                    = COALESCE(sqlc.narg('source')::text, source),
+    fetched_at                = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdatePullRequestConversationChannel :exec
+UPDATE pull_request SET conversation_channel_id = $2, fetched_at = now() WHERE id = $1;
+
+-- name: UpdatePullRequestStackParent :exec
+UPDATE pull_request SET stack_parent_pr_id = sqlc.narg('stack_parent_pr_id'), fetched_at = now() WHERE id = $1;
+
+-- name: ListPullRequestsByOriginatingIssue :many
+-- Drives the "Linked PRs" panel on the issue detail page. Newest-first
+-- so a stack of related PRs surfaces the latest activity at the top.
+SELECT * FROM pull_request
+WHERE workspace_id = $1 AND originating_issue_id = $2
+ORDER BY pr_updated_at DESC;
+
+-- name: ListOpenPullRequestsByProjectForStack :many
+-- Stack detection scans every open PR in a project so the in-memory
+-- joiner can match each PR's base_ref against another PR's head_ref.
+-- Open-only because closed/merged PRs aren't part of the active stack.
+SELECT id, project_id, head_ref, base_ref, pr_number, title
+FROM pull_request
+WHERE project_id = $1 AND state = 'open'
+ORDER BY pr_created_at ASC;
+
+-- name: GetPullRequestByConversationChannel :one
+-- Reverse lookup: given a channel id, what PR (if any) is it attached
+-- to? Used by the channel page header to render the "this channel is
+-- the conversation for PR #N" badge.
+SELECT * FROM pull_request
+WHERE conversation_channel_id = $1;

@@ -87,6 +87,15 @@ type pullRequestResponse struct {
 	PRMergedAt      *string `json:"pr_merged_at"`
 	PRClosedAt      *string `json:"pr_closed_at"`
 	FetchedAt       string  `json:"fetched_at"`
+	// Phase 4 — linkage fields. Per CLAUDE.md "API Response Compatibility",
+	// these are appended at the end so an older Electron build that
+	// doesn't know the schema simply ignores them.
+	OriginatingIssueID     *string `json:"originating_issue_id"`
+	OriginatingAgentTaskID *string `json:"originating_agent_task_id"`
+	AutoCloseIssueOnMerge  bool    `json:"auto_close_issue_on_merge"`
+	ConversationChannelID  *string `json:"conversation_channel_id"`
+	StackParentPRID        *string `json:"stack_parent_pr_id"`
+	Source                 string  `json:"source"`
 }
 
 func pullRequestToResponse(pr db.PullRequest) pullRequestResponse {
@@ -125,6 +134,12 @@ func pullRequestToResponse(pr db.PullRequest) pullRequestResponse {
 		PRMergedAt:      timestampToPtr(pr.PrMergedAt),
 		PRClosedAt:      timestampToPtr(pr.PrClosedAt),
 		FetchedAt:       timestampToString(pr.FetchedAt),
+		OriginatingIssueID:     uuidToPtr(pr.OriginatingIssueID),
+		OriginatingAgentTaskID: uuidToPtr(pr.OriginatingAgentTaskID),
+		AutoCloseIssueOnMerge:  pr.AutoCloseIssueOnMerge,
+		ConversationChannelID:  uuidToPtr(pr.ConversationChannelID),
+		StackParentPRID:        uuidToPtr(pr.StackParentPrID),
+		Source:                 pr.Source,
 	}
 }
 

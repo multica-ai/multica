@@ -40,6 +40,13 @@ export function chipLabel(t: T, action: string): string {
       return t(($) => $.chips.run_smoke_tests.label);
     case "close_as_stale":
       return t(($) => $.chips.close_as_stale.label);
+    case "talk_to_agent":
+      // Caller may interpolate the agent name post-hoc; this returns the
+      // base fallback label so unknown agent names still produce
+      // useful copy.
+      return t(($) => $.chips.talk_to_agent.label_fallback);
+    case "pull_into_issue":
+      return t(($) => $.chips.pull_into_issue.label);
     default:
       // Unknown enum drift — render the action name itself rather than a
       // blank chip. The user can still read the affordance and cancel out.
@@ -67,6 +74,10 @@ export function chipSuccessToast(t: T, action: string): string {
       return t(($) => $.chips.run_smoke_tests.toast_success);
     case "close_as_stale":
       return t(($) => $.chips.close_as_stale.toast_success);
+    case "talk_to_agent":
+      return t(($) => $.chips.talk_to_agent.toast_success);
+    case "pull_into_issue":
+      return t(($) => $.chips.pull_into_issue.toast_success);
     default:
       return t(($) => $.chips.toast_generic_failure);
   }
@@ -92,6 +103,10 @@ export function chipInProgressToast(t: T, action: string): string {
       return t(($) => $.chips.run_smoke_tests.toast_in_progress);
     case "close_as_stale":
       return t(($) => $.chips.close_as_stale.toast_in_progress);
+    case "talk_to_agent":
+      return t(($) => $.chips.talk_to_agent.toast_in_progress);
+    case "pull_into_issue":
+      return t(($) => $.chips.pull_into_issue.toast_in_progress);
     default:
       return "";
   }

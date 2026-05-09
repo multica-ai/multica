@@ -120,7 +120,28 @@
       "confirm_title": "确定将此 PR 标记为已过期吗？",
       "confirm_description": "关闭 #{{number}}「{{title}}」会留下提示评论，作者可在 GitHub 上重新打开。",
       "confirm_action": "标记为已过期"
+    },
+    "talk_to_agent": {
+      "label": "与 {{agent}} 对话",
+      "label_fallback": "与代理对话",
+      "toast_success": "已打开聊天会话",
+      "toast_in_progress": "打开聊天中…"
+    },
+    "pull_into_issue": {
+      "label": "纳入 Multica 工单",
+      "toast_success": "工单草稿已打开",
+      "toast_in_progress": "打开草稿中…"
     }
+  },
+  "linkage": {
+    "source_multica_agent": "Multica 代理",
+    "source_multica_human": "Multica 工单",
+    "source_external_tool": "外部工具",
+    "source_external_contributor": "外部贡献者",
+    "linked_issue_label": "关联工单：{{identifier}}",
+    "no_linked_issue": "未关联工单",
+    "open_conversation_channel": "打开 PR 讨论频道",
+    "linked_prs_panel_title": "关联 PR"
   },
   "actions": {
     "recent_actions_label": "最近操作"

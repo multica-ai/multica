@@ -7,6 +7,12 @@ import {
   GitPullRequest,
   AlertTriangle,
   HelpCircle,
+  Bot,
+  User,
+  Wrench,
+  Globe,
+  Hash,
+  MessagesSquare,
 } from "lucide-react";
 import type { PullRequest } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
@@ -20,6 +26,31 @@ interface ShipPRCardProps {
    *  to decide whether to surface "Run smoke tests" for merged PRs whose
    *  head SHA isn't yet on staging. */
   stagingEnv?: { id: string; current_sha: string | null } | null;
+  /** Optional callback fired when the user clicks "Open PR conversation
+   *  channel". Apps wire this to their own navigation; if absent, the
+   *  link is hidden. */
+  onOpenConversationChannel?: (channelId: string) => void;
+  /** Optional callback fired when the user clicks the linked-issue chip.
+   *  Apps wire this to their issue navigation; if absent, the chip
+   *  renders as plain text. */
+  onOpenIssue?: (issueId: string) => void;
+}
+
+/** Source icon — derived from `pr.source` per CLAUDE.md "API Response
+ *  Compatibility". An unrecognized string downgrades to the generic
+ *  globe icon (external_contributor) rather than crashing. */
+function SourceIcon({ source }: { source: string | undefined }) {
+  switch (source) {
+    case "multica_agent":
+      return <Bot className="size-3.5 text-purple-600 dark:text-purple-400" aria-label="Multica agent" />;
+    case "multica_human":
+      return <User className="size-3.5 text-blue-600 dark:text-blue-400" aria-label="Multica issue" />;
+    case "external_tool":
+      return <Wrench className="size-3.5 text-amber-600 dark:text-amber-400" aria-label="External tool" />;
+    case "external_contributor":
+    default:
+      return <Globe className="size-3.5 text-muted-foreground" aria-label="External contributor" />;
+  }
 }
 
 function formatRelativeTime(iso: string, locale: string): string {
@@ -131,7 +162,12 @@ function ReviewBadge({ decision }: { decision: string }) {
   return null;
 }
 
-export function ShipPRCard({ pr, stagingEnv }: ShipPRCardProps) {
+export function ShipPRCard({
+  pr,
+  stagingEnv,
+  onOpenConversationChannel,
+  onOpenIssue,
+}: ShipPRCardProps) {
   const { t, i18n } = useT("ship");
   const risk = deriveRiskHint(pr);
 
@@ -150,8 +186,11 @@ export function ShipPRCard({ pr, stagingEnv }: ShipPRCardProps) {
       )}
     >
       {/* Author + PR number row. Avatar is just the GitHub URL — no
-          additional preflight; the user already trusts the destination. */}
+          additional preflight; the user already trusts the destination.
+          Phase 4 — the source icon sits to the LEFT of the avatar so the
+          card's first visual signal is "where did this PR come from". */}
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <SourceIcon source={pr.source} />
         {pr.author_avatar_url ? (
           <img
             src={pr.author_avatar_url}
@@ -181,6 +220,26 @@ export function ShipPRCard({ pr, stagingEnv }: ShipPRCardProps) {
       >
         {pr.title}
       </div>
+
+      {/* Phase 4 — linked issue chip. Renders only when the PR has an
+          originating issue. Click is intercepted (preventDefault) so the
+          enclosing anchor doesn't navigate to GitHub; the host app
+          decides where to route via onOpenIssue. */}
+      {pr.originating_issue_id && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onOpenIssue?.(pr.originating_issue_id!);
+          }}
+          className="mt-1 inline-flex items-center gap-1 rounded bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-500/20 dark:text-blue-400"
+          data-testid="linked-issue-chip"
+        >
+          <Hash className="size-3" />
+          {t(($) => $.linkage.linked_issue_label, { identifier: pr.originating_issue_id })}
+        </button>
+      )}
 
       {/* Diff stats — show only when at least one is non-zero. A brand-new
           PR with no diff loaded still has zeroes from the server, no point
@@ -246,6 +305,26 @@ export function ShipPRCard({ pr, stagingEnv }: ShipPRCardProps) {
           list endpoint isn't registered yet — the hook is in place
           (disabled by default) and ready to enable once the route lands. */}
       <PrChipRow pr={pr} stagingEnv={stagingEnv ?? null} />
+
+      {/* Phase 4 — open the per-PR Multica channel. Renders only when
+          the PR already has a conversation_channel_id (the get-or-create
+          handler attaches one on first use); the rest of the time the
+          link is silent because there's nothing to open yet. */}
+      {pr.conversation_channel_id && onOpenConversationChannel && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onOpenConversationChannel(pr.conversation_channel_id!);
+          }}
+          className="mt-2 inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+          data-testid="open-conversation-channel"
+        >
+          <MessagesSquare className="size-3" />
+          {t(($) => $.linkage.open_conversation_channel)}
+        </button>
+      )}
     </a>
   );
 }

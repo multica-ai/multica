@@ -58,7 +58,7 @@ func (q *Queries) CountOpenPullRequestsForProjects(ctx context.Context, projectI
 }
 
 const getPullRequest = `-- name: GetPullRequest :one
-SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at FROM pull_request
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source FROM pull_request
 WHERE id = $1
 `
 
@@ -95,12 +95,67 @@ func (q *Queries) GetPullRequest(ctx context.Context, id pgtype.UUID) (PullReque
 		&i.PrMergedAt,
 		&i.PrClosedAt,
 		&i.FetchedAt,
+		&i.OriginatingIssueID,
+		&i.OriginatingAgentTaskID,
+		&i.AutoCloseIssueOnMerge,
+		&i.ConversationChannelID,
+		&i.StackParentPrID,
+		&i.Source,
+	)
+	return i, err
+}
+
+const getPullRequestByConversationChannel = `-- name: GetPullRequestByConversationChannel :one
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source FROM pull_request
+WHERE conversation_channel_id = $1
+`
+
+// Reverse lookup: given a channel id, what PR (if any) is it attached
+// to? Used by the channel page header to render the "this channel is
+// the conversation for PR #N" badge.
+func (q *Queries) GetPullRequestByConversationChannel(ctx context.Context, conversationChannelID pgtype.UUID) (PullRequest, error) {
+	row := q.db.QueryRow(ctx, getPullRequestByConversationChannel, conversationChannelID)
+	var i PullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.RepoUrl,
+		&i.PrNumber,
+		&i.Title,
+		&i.State,
+		&i.IsDraft,
+		&i.AuthorLogin,
+		&i.AuthorAvatarUrl,
+		&i.BaseRef,
+		&i.HeadRef,
+		&i.HeadSha,
+		&i.HtmlUrl,
+		&i.Body,
+		&i.CiStatus,
+		&i.ReviewDecision,
+		&i.Mergeable,
+		&i.Additions,
+		&i.Deletions,
+		&i.ChangedFiles,
+		&i.Labels,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.PrMergedAt,
+		&i.PrClosedAt,
+		&i.FetchedAt,
+		&i.OriginatingIssueID,
+		&i.OriginatingAgentTaskID,
+		&i.AutoCloseIssueOnMerge,
+		&i.ConversationChannelID,
+		&i.StackParentPrID,
+		&i.Source,
 	)
 	return i, err
 }
 
 const getPullRequestByNumber = `-- name: GetPullRequestByNumber :one
-SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at FROM pull_request
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source FROM pull_request
 WHERE workspace_id = $1 AND repo_url = $2 AND pr_number = $3
 `
 
@@ -141,12 +196,131 @@ func (q *Queries) GetPullRequestByNumber(ctx context.Context, arg GetPullRequest
 		&i.PrMergedAt,
 		&i.PrClosedAt,
 		&i.FetchedAt,
+		&i.OriginatingIssueID,
+		&i.OriginatingAgentTaskID,
+		&i.AutoCloseIssueOnMerge,
+		&i.ConversationChannelID,
+		&i.StackParentPrID,
+		&i.Source,
 	)
 	return i, err
 }
 
+const listOpenPullRequestsByProjectForStack = `-- name: ListOpenPullRequestsByProjectForStack :many
+SELECT id, project_id, head_ref, base_ref, pr_number, title
+FROM pull_request
+WHERE project_id = $1 AND state = 'open'
+ORDER BY pr_created_at ASC
+`
+
+type ListOpenPullRequestsByProjectForStackRow struct {
+	ID        pgtype.UUID `json:"id"`
+	ProjectID pgtype.UUID `json:"project_id"`
+	HeadRef   string      `json:"head_ref"`
+	BaseRef   string      `json:"base_ref"`
+	PrNumber  int32       `json:"pr_number"`
+	Title     string      `json:"title"`
+}
+
+// Stack detection scans every open PR in a project so the in-memory
+// joiner can match each PR's base_ref against another PR's head_ref.
+// Open-only because closed/merged PRs aren't part of the active stack.
+func (q *Queries) ListOpenPullRequestsByProjectForStack(ctx context.Context, projectID pgtype.UUID) ([]ListOpenPullRequestsByProjectForStackRow, error) {
+	rows, err := q.db.Query(ctx, listOpenPullRequestsByProjectForStack, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOpenPullRequestsByProjectForStackRow{}
+	for rows.Next() {
+		var i ListOpenPullRequestsByProjectForStackRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.HeadRef,
+			&i.BaseRef,
+			&i.PrNumber,
+			&i.Title,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPullRequestsByOriginatingIssue = `-- name: ListPullRequestsByOriginatingIssue :many
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source FROM pull_request
+WHERE workspace_id = $1 AND originating_issue_id = $2
+ORDER BY pr_updated_at DESC
+`
+
+type ListPullRequestsByOriginatingIssueParams struct {
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+	OriginatingIssueID pgtype.UUID `json:"originating_issue_id"`
+}
+
+// Drives the "Linked PRs" panel on the issue detail page. Newest-first
+// so a stack of related PRs surfaces the latest activity at the top.
+func (q *Queries) ListPullRequestsByOriginatingIssue(ctx context.Context, arg ListPullRequestsByOriginatingIssueParams) ([]PullRequest, error) {
+	rows, err := q.db.Query(ctx, listPullRequestsByOriginatingIssue, arg.WorkspaceID, arg.OriginatingIssueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PullRequest{}
+	for rows.Next() {
+		var i PullRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.RepoUrl,
+			&i.PrNumber,
+			&i.Title,
+			&i.State,
+			&i.IsDraft,
+			&i.AuthorLogin,
+			&i.AuthorAvatarUrl,
+			&i.BaseRef,
+			&i.HeadRef,
+			&i.HeadSha,
+			&i.HtmlUrl,
+			&i.Body,
+			&i.CiStatus,
+			&i.ReviewDecision,
+			&i.Mergeable,
+			&i.Additions,
+			&i.Deletions,
+			&i.ChangedFiles,
+			&i.Labels,
+			&i.PrCreatedAt,
+			&i.PrUpdatedAt,
+			&i.PrMergedAt,
+			&i.PrClosedAt,
+			&i.FetchedAt,
+			&i.OriginatingIssueID,
+			&i.OriginatingAgentTaskID,
+			&i.AutoCloseIssueOnMerge,
+			&i.ConversationChannelID,
+			&i.StackParentPrID,
+			&i.Source,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPullRequestsByProject = `-- name: ListPullRequestsByProject :many
-SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at FROM pull_request
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source FROM pull_request
 WHERE project_id = $1
   AND ($2::pull_request_state IS NULL OR state = $2)
 ORDER BY pr_updated_at DESC
@@ -194,6 +368,12 @@ func (q *Queries) ListPullRequestsByProject(ctx context.Context, arg ListPullReq
 			&i.PrMergedAt,
 			&i.PrClosedAt,
 			&i.FetchedAt,
+			&i.OriginatingIssueID,
+			&i.OriginatingAgentTaskID,
+			&i.AutoCloseIssueOnMerge,
+			&i.ConversationChannelID,
+			&i.StackParentPrID,
+			&i.Source,
 		); err != nil {
 			return nil, err
 		}
@@ -206,7 +386,7 @@ func (q *Queries) ListPullRequestsByProject(ctx context.Context, arg ListPullReq
 }
 
 const listPullRequestsByWorkspace = `-- name: ListPullRequestsByWorkspace :many
-SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at FROM pull_request
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source FROM pull_request
 WHERE workspace_id = $1
   AND ($2::pull_request_state IS NULL OR state = $2)
 ORDER BY pr_updated_at DESC
@@ -256,6 +436,12 @@ func (q *Queries) ListPullRequestsByWorkspace(ctx context.Context, arg ListPullR
 			&i.PrMergedAt,
 			&i.PrClosedAt,
 			&i.FetchedAt,
+			&i.OriginatingIssueID,
+			&i.OriginatingAgentTaskID,
+			&i.AutoCloseIssueOnMerge,
+			&i.ConversationChannelID,
+			&i.StackParentPrID,
+			&i.Source,
 		); err != nil {
 			return nil, err
 		}
@@ -273,7 +459,7 @@ UPDATE pull_request SET
     pr_closed_at = COALESCE($2::timestamptz, now()),
     fetched_at   = now()
 WHERE id = $1
-RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at
+RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source
 `
 
 type MarkPullRequestClosedParams struct {
@@ -314,6 +500,12 @@ func (q *Queries) MarkPullRequestClosed(ctx context.Context, arg MarkPullRequest
 		&i.PrMergedAt,
 		&i.PrClosedAt,
 		&i.FetchedAt,
+		&i.OriginatingIssueID,
+		&i.OriginatingAgentTaskID,
+		&i.AutoCloseIssueOnMerge,
+		&i.ConversationChannelID,
+		&i.StackParentPrID,
+		&i.Source,
 	)
 	return i, err
 }
@@ -324,7 +516,7 @@ UPDATE pull_request SET
     pr_merged_at = COALESCE($2::timestamptz, now()),
     fetched_at   = now()
 WHERE id = $1
-RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at
+RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source
 `
 
 type MarkPullRequestMergedParams struct {
@@ -368,8 +560,111 @@ func (q *Queries) MarkPullRequestMerged(ctx context.Context, arg MarkPullRequest
 		&i.PrMergedAt,
 		&i.PrClosedAt,
 		&i.FetchedAt,
+		&i.OriginatingIssueID,
+		&i.OriginatingAgentTaskID,
+		&i.AutoCloseIssueOnMerge,
+		&i.ConversationChannelID,
+		&i.StackParentPrID,
+		&i.Source,
 	)
 	return i, err
+}
+
+const updatePullRequestConversationChannel = `-- name: UpdatePullRequestConversationChannel :exec
+UPDATE pull_request SET conversation_channel_id = $2, fetched_at = now() WHERE id = $1
+`
+
+type UpdatePullRequestConversationChannelParams struct {
+	ID                    pgtype.UUID `json:"id"`
+	ConversationChannelID pgtype.UUID `json:"conversation_channel_id"`
+}
+
+func (q *Queries) UpdatePullRequestConversationChannel(ctx context.Context, arg UpdatePullRequestConversationChannelParams) error {
+	_, err := q.db.Exec(ctx, updatePullRequestConversationChannel, arg.ID, arg.ConversationChannelID)
+	return err
+}
+
+const updatePullRequestLinkage = `-- name: UpdatePullRequestLinkage :one
+UPDATE pull_request SET
+    originating_issue_id      = $2,
+    originating_agent_task_id = $3,
+    auto_close_issue_on_merge = COALESCE($4::bool, auto_close_issue_on_merge),
+    source                    = COALESCE($5::text, source),
+    fetched_at                = now()
+WHERE id = $1
+RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source
+`
+
+type UpdatePullRequestLinkageParams struct {
+	ID                     pgtype.UUID `json:"id"`
+	OriginatingIssueID     pgtype.UUID `json:"originating_issue_id"`
+	OriginatingAgentTaskID pgtype.UUID `json:"originating_agent_task_id"`
+	AutoCloseIssueOnMerge  pgtype.Bool `json:"auto_close_issue_on_merge"`
+	Source                 pgtype.Text `json:"source"`
+}
+
+// Phase 4: persist the linkage classifier columns. nargs leave the column
+// unchanged when absent so a partial PATCH from the manual-override
+// endpoint doesn't clobber auto-detected fields.
+func (q *Queries) UpdatePullRequestLinkage(ctx context.Context, arg UpdatePullRequestLinkageParams) (PullRequest, error) {
+	row := q.db.QueryRow(ctx, updatePullRequestLinkage,
+		arg.ID,
+		arg.OriginatingIssueID,
+		arg.OriginatingAgentTaskID,
+		arg.AutoCloseIssueOnMerge,
+		arg.Source,
+	)
+	var i PullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.RepoUrl,
+		&i.PrNumber,
+		&i.Title,
+		&i.State,
+		&i.IsDraft,
+		&i.AuthorLogin,
+		&i.AuthorAvatarUrl,
+		&i.BaseRef,
+		&i.HeadRef,
+		&i.HeadSha,
+		&i.HtmlUrl,
+		&i.Body,
+		&i.CiStatus,
+		&i.ReviewDecision,
+		&i.Mergeable,
+		&i.Additions,
+		&i.Deletions,
+		&i.ChangedFiles,
+		&i.Labels,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.PrMergedAt,
+		&i.PrClosedAt,
+		&i.FetchedAt,
+		&i.OriginatingIssueID,
+		&i.OriginatingAgentTaskID,
+		&i.AutoCloseIssueOnMerge,
+		&i.ConversationChannelID,
+		&i.StackParentPrID,
+		&i.Source,
+	)
+	return i, err
+}
+
+const updatePullRequestStackParent = `-- name: UpdatePullRequestStackParent :exec
+UPDATE pull_request SET stack_parent_pr_id = $2, fetched_at = now() WHERE id = $1
+`
+
+type UpdatePullRequestStackParentParams struct {
+	ID              pgtype.UUID `json:"id"`
+	StackParentPrID pgtype.UUID `json:"stack_parent_pr_id"`
+}
+
+func (q *Queries) UpdatePullRequestStackParent(ctx context.Context, arg UpdatePullRequestStackParentParams) error {
+	_, err := q.db.Exec(ctx, updatePullRequestStackParent, arg.ID, arg.StackParentPrID)
+	return err
 }
 
 const upsertPullRequest = `-- name: UpsertPullRequest :one
@@ -407,7 +702,7 @@ ON CONFLICT (workspace_id, repo_url, pr_number) DO UPDATE SET
     pr_merged_at      = EXCLUDED.pr_merged_at,
     pr_closed_at      = EXCLUDED.pr_closed_at,
     fetched_at        = now()
-RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at
+RETURNING id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source
 `
 
 type UpsertPullRequestParams struct {
@@ -498,6 +793,12 @@ func (q *Queries) UpsertPullRequest(ctx context.Context, arg UpsertPullRequestPa
 		&i.PrMergedAt,
 		&i.PrClosedAt,
 		&i.FetchedAt,
+		&i.OriginatingIssueID,
+		&i.OriginatingAgentTaskID,
+		&i.AutoCloseIssueOnMerge,
+		&i.ConversationChannelID,
+		&i.StackParentPrID,
+		&i.Source,
 	)
 	return i, err
 }

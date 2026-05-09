@@ -431,6 +431,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/pull_requests/{id}/run_smoke_tests", h.RunSmokeTests)
 			r.Post("/api/pull_requests/{id}/close_as_stale", h.ClosePullRequestAsStale)
 
+			// Ship Hub Phase 4 — issue↔PR linkage + agent talk-back +
+			// PR conversation channels + stack visualization. None of
+			// these endpoints touch GitHub directly so they don't
+			// require the workspace token; the ship_hub_enabled gate
+			// still applies (handled per-handler).
+			r.Patch("/api/pull_requests/{id}", h.UpdatePullRequest)
+			r.Get("/api/pull_requests/{id}/linked_issues", h.GetLinkedIssues)
+			r.Post("/api/pull_requests/{id}/talk_to_agent", h.TalkToAgent)
+			r.Post("/api/pull_requests/{id}/conversation_channel", h.GetOrCreatePRConversationChannel)
+			r.Get("/api/issues/{id}/pull_requests", h.ListIssuePullRequests)
+			r.Get("/api/projects/{id}/pull_request_stacks", h.ListProjectPRStacks)
+
 			// Channels (multi-participant chat + DMs).
 			// Endpoints respond 404 when workspace.channels_enabled is FALSE
 			// — the gate lives inside each handler so the surface is invisible

@@ -44,6 +44,14 @@ type WebhookOutcome struct {
 	DeployID      pgtype.UUID
 	DeployStatus  string
 	SHA           string
+	// Phase 4 — populated for pull_request events so the handler layer
+	// can run channel auto-create / archive without re-reading the row.
+	// Action is one of GitHub's "opened" | "closed" | "synchronize" |
+	// "reopened" | "edited" | …; the handler dispatches on it.
+	PRAction string
+	// PR is the post-linkage row (after DetectMultiicaReferences and
+	// ApplyLinkage have run). Empty when Kind != "pr_state_changed".
+	PR db.PullRequest
 }
 
 // ProcessWebhook is the dispatcher. It mutates the DB and returns one
@@ -81,6 +89,17 @@ func (s *Service) ProcessWebhook(ctx context.Context, ev WebhookEvent) (WebhookO
 // processPullRequest handles pull_request.opened/synchronize/closed/...
 // We resolve the project by repo_url, upsert the PR row, then return
 // the state for the WS event.
+//
+// Phase 4 extends the path to:
+//   - run linkage detection (issue ref + agent task ref)
+//   - persist source classification + originating IDs
+//   - recompute stack_parent_pr_id against currently-open PRs in the project
+//   - on merge, run the auto-close-issue and "PR merged" comment hooks
+//
+// Channel auto-create + archive happens in the handler layer (see
+// HandleGitHubWebhook in handler/ship_webhook.go) because constructing a
+// channel requires the workspace ChannelService which isn't reachable
+// from this package without violating its no-handler-deps rule.
 func (s *Service) processPullRequest(ctx context.Context, ev WebhookEvent) (WebhookOutcome, error) {
 	var payload gh.PullRequestEvent
 	if err := json.Unmarshal(ev.Body, &payload); err != nil {
@@ -104,6 +123,37 @@ func (s *Service) processPullRequest(ctx context.Context, ev WebhookEvent) (Webh
 	if err != nil {
 		return WebhookOutcome{}, fmt.Errorf("re-read pr: %w", err)
 	}
+
+	// Phase 4 — linkage detection. The workspace's issue_prefix is the
+	// only piece of workspace state needed here; cache it once in the
+	// outcome instead of fetching it twice.
+	ws, wsErr := s.Q.GetWorkspace(ctx, ev.WorkspaceID)
+	if wsErr == nil {
+		linkage, _ := s.DetectMultiicaReferences(ctx, ev.WorkspaceID, ws.IssuePrefix, pr, /*commitMessage*/ "")
+		updated, applyErr := s.ApplyLinkage(ctx, row.ID, linkage)
+		if applyErr == nil {
+			row = updated
+		}
+	}
+
+	// Phase 4 — recompute stack parent. Always runs because base_ref
+	// can change on synchronize events. Best-effort: failures are
+	// logged, never block the webhook.
+	if err := s.recomputeStackParent(ctx, project.ID, row); err != nil {
+		slog.Warn("ship: recompute stack parent failed",
+			"pr_id", uuidString(row.ID), "error", err)
+	}
+
+	// Phase 4 — merge hooks. payload.Action == "closed" with merged_at
+	// non-nil is the merge signal. We delegate to handleMerge which
+	// posts the comment + (optionally) closes the linked issue.
+	if payload.Action == "closed" && pr.MergedAt != nil {
+		if err := s.handleMerge(ctx, ev.WorkspaceID, row); err != nil {
+			slog.Warn("ship: handle merge failed",
+				"pr_id", uuidString(row.ID), "error", err)
+		}
+	}
+
 	return WebhookOutcome{
 		Kind:      "pr_state_changed",
 		PRID:      row.ID,
@@ -111,7 +161,100 @@ func (s *Service) processPullRequest(ctx context.Context, ev WebhookEvent) (Webh
 		State:     string(row.State),
 		CIStatus:  textValue(row.CiStatus),
 		ReviewDec: textValue(row.ReviewDecision),
+		PRAction:  payload.Action,
+		PR:        row,
 	}, nil
+}
+
+// recomputeStackParent walks the project's other open PRs and finds the
+// one whose head_ref matches this PR's base_ref. That PR (if any) is
+// this PR's "stack parent" — the change it sits on top of. Stored
+// directly on the row so the per-project stacks endpoint is a single
+// query instead of an in-memory join on every read.
+//
+// We tolerate missing project_id (PR was synced before being attached
+// to a project): no parent gets recorded.
+func (s *Service) recomputeStackParent(ctx context.Context, projectID pgtype.UUID, pr db.PullRequest) error {
+	if !projectID.Valid {
+		return nil
+	}
+	// Default branch (main / master) is never a stack parent — it would
+	// cause every open PR to register as a child of the same imaginary
+	// row. The base_ref check below short-circuits on the well-known
+	// names; a workspace with a non-standard default branch falls
+	// through to the lookup, which will simply find no matching open
+	// PR and bail.
+	switch strings.ToLower(strings.TrimSpace(pr.BaseRef)) {
+	case "", "main", "master", "trunk", "develop":
+		// Clear any stale parent in case the PR was retargeted onto main.
+		_ = s.Q.UpdatePullRequestStackParent(ctx, db.UpdatePullRequestStackParentParams{
+			ID:              pr.ID,
+			StackParentPrID: pgtype.UUID{},
+		})
+		return nil
+	}
+	rows, err := s.Q.ListOpenPullRequestsByProjectForStack(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	var parentID pgtype.UUID
+	for _, candidate := range rows {
+		if uuidString(candidate.ID) == uuidString(pr.ID) {
+			continue
+		}
+		if candidate.HeadRef == pr.BaseRef {
+			parentID = candidate.ID
+			break
+		}
+	}
+	return s.Q.UpdatePullRequestStackParent(ctx, db.UpdatePullRequestStackParentParams{
+		ID:              pr.ID,
+		StackParentPrID: parentID,
+	})
+}
+
+// handleMerge runs the post-merge hooks: always post a "PR #N merged"
+// comment on the linked issue (if any), and optionally close the issue
+// when auto_close_issue_on_merge is set.
+//
+// The comment is attributed to the workspace's orchestrator agent
+// (which always exists — the platform creates one when ship_hub is
+// enabled) so it complies with the comment.author_type CHECK that
+// only allows 'member' or 'agent'. If posting the comment fails, the
+// auto-close path still runs: the user's intent ("close the issue
+// when this PR merges") shouldn't be blocked by a comment-timeline
+// hiccup.
+func (s *Service) handleMerge(ctx context.Context, workspaceID pgtype.UUID, pr db.PullRequest) error {
+	if !pr.OriginatingIssueID.Valid {
+		return nil
+	}
+	commentBody := fmt.Sprintf("PR #%d merged: %s", pr.PrNumber, pr.HtmlUrl)
+	if pr.AutoCloseIssueOnMerge {
+		commentBody = fmt.Sprintf("Closed by PR #%d: %s", pr.PrNumber, pr.HtmlUrl)
+	}
+	ws, err := s.Q.GetWorkspace(ctx, workspaceID)
+	if err == nil && ws.OrchestratorAgentID.Valid {
+		if _, err := s.Q.CreateComment(ctx, db.CreateCommentParams{
+			IssueID:     pr.OriginatingIssueID,
+			WorkspaceID: workspaceID,
+			AuthorType:  "agent",
+			AuthorID:    ws.OrchestratorAgentID,
+			Content:     commentBody,
+			Type:        "comment",
+		}); err != nil {
+			slog.Warn("ship: post PR-merged comment failed",
+				"issue_id", uuidString(pr.OriginatingIssueID), "error", err)
+		}
+	}
+	if pr.AutoCloseIssueOnMerge {
+		if _, err := s.Q.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ID:     pr.OriginatingIssueID,
+			Status: "done",
+		}); err != nil {
+			return fmt.Errorf("close originating issue: %w", err)
+		}
+	}
+	return nil
 }
 
 // processPullRequestReview persists the review and recomputes the PR's
