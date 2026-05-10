@@ -783,3 +783,132 @@ export const EMPTY_MERGE_STATE_RESPONSE = {
   total: 0,
   pull_requests: [],
 };
+
+// PR detail drawer — bundled response schema. Every optional section is
+// `.nullable().optional()` so a server-side bug that drops a field
+// degrades the section to "hidden" rather than crashing the drawer.
+// Arrays default to [] so the consumer never has to branch on null vs
+// empty.
+//
+// We intentionally don't reuse the full IssueSchema here because the
+// drawer only needs identifier + title + status. Defining a slim shape
+// in-line keeps the schema graph independent of issue-shape drift.
+const DrawerLinkedIssueSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  number: z.number().default(0),
+  identifier: z.string().default(""),
+  title: z.string().default(""),
+  status: z.string().default(""),
+  priority: z.string().default(""),
+}).loose();
+
+const DrawerAgentTaskRefSchema = z.object({
+  id: z.string().default(""),
+  agent_id: z.string().default(""),
+  agent_name: z.string().default(""),
+  title: z.string().default(""),
+  status: z.string().default(""),
+}).loose();
+
+const DrawerChannelRefSchema = z.object({
+  id: z.string().default(""),
+  name: z.string().default(""),
+  display_name: z.string().default(""),
+}).loose();
+
+const DrawerPullRequestRefSchema = z.object({
+  id: z.string().default(""),
+  number: z.number().default(0),
+  title: z.string().default(""),
+  state: z.string().default("open"),
+  html_url: z.string().default(""),
+}).loose();
+
+const DrawerReviewSchema = z.object({
+  id: z.string().default(""),
+  reviewer_login: z.string().default(""),
+  reviewer_avatar_url: z.string().nullable().default(null),
+  state: z.string().default(""),
+  body: z.string().nullable().default(null),
+  submitted_at: z.string().default(""),
+}).loose();
+
+const DrawerCheckSchema = z.object({
+  id: z.string().default(""),
+  name: z.string().default(""),
+  conclusion: z.string().nullable().default(null),
+  status: z.string().default(""),
+  details_url: z.string().nullable().default(null),
+  started_at: z.string().nullable().default(null),
+  completed_at: z.string().nullable().default(null),
+}).loose();
+
+const DrawerActionSchema = z.object({
+  id: z.string().default(""),
+  action: z.string().default(""),
+  result_status: z.string().default(""),
+  actor_user_id: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  completed_at: z.string().nullable().default(null),
+}).loose();
+
+const DrawerActiveReleaseSchema = z.object({
+  id: z.string().default(""),
+  title: z.string().default(""),
+  stage: z.string().default(""),
+}).loose();
+
+export const PullRequestDetailsResponseSchema = z.object({
+  pull_request: PullRequestSchema,
+  linked_issue: DrawerLinkedIssueSchema.nullable().optional(),
+  originating_agent_task: DrawerAgentTaskRefSchema.nullable().optional(),
+  active_release: DrawerActiveReleaseSchema.nullable().optional(),
+  conversation_channel: DrawerChannelRefSchema.nullable().optional(),
+  reviews: z.array(DrawerReviewSchema).default([]),
+  checks: z.array(DrawerCheckSchema).default([]),
+  recent_actions: z.array(DrawerActionSchema).default([]),
+  stack_parent: DrawerPullRequestRefSchema.nullable().optional(),
+  stack_children: z.array(DrawerPullRequestRefSchema).default([]),
+}).loose();
+
+// Defensive empty-state used by parseWithFallback. The PR sub-shape is
+// intentionally minimal — every PullRequestSchema field has its own
+// default so a fully empty object satisfies the parser. The drawer
+// renders the loading skeleton instead of this default 99% of the
+// time; this is only the "the wire shape went off the rails" branch.
+export const EMPTY_PULL_REQUEST_DETAILS_RESPONSE = {
+  pull_request: {
+    id: "",
+    workspace_id: "",
+    project_id: null as string | null,
+    repo_url: "",
+    number: 0,
+    title: "",
+    state: "open",
+    is_draft: false,
+    author_login: "",
+    author_avatar_url: null as string | null,
+    base_ref: "",
+    head_ref: "",
+    head_sha: "",
+    html_url: "",
+    body: null as string | null,
+    ci_status: "",
+    review_decision: "",
+    mergeable: "",
+    additions: 0,
+    deletions: 0,
+    changed_files: 0,
+    labels: [] as { name: string; color: string }[],
+    pr_created_at: "",
+    pr_updated_at: "",
+    pr_merged_at: null as string | null,
+    pr_closed_at: null as string | null,
+    fetched_at: "",
+  },
+  reviews: [] as never[],
+  checks: [] as never[],
+  recent_actions: [] as never[],
+  stack_children: [] as never[],
+};

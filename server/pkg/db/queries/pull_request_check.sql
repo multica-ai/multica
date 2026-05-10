@@ -24,6 +24,16 @@ SELECT * FROM pull_request_check
 WHERE pull_request_id = $1 AND head_sha = $2
 ORDER BY name ASC;
 
+-- name: ListChecksForPullRequest :many
+-- PR detail drawer surface — every check row for a PR regardless of
+-- head sha, newest started_at first. Distinct from ListChecksForPRHead
+-- (which only reads the active head_sha for the CI status rollup) so a
+-- PR that's been force-pushed still shows historical CI runs in the
+-- drawer.
+SELECT * FROM pull_request_check
+WHERE pull_request_id = $1
+ORDER BY started_at DESC NULLS LAST, name ASC;
+
 -- name: UpdatePullRequestCIStatus :one
 -- Targeted update so the webhook-driven derivation doesn't have to
 -- round-trip the entire row through UpsertPullRequest.

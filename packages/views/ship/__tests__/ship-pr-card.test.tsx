@@ -1,10 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { RESOURCES } from "../../locales";
 import type { PullRequest } from "@multica/core/types";
+import { useShipPrDetailStore } from "@multica/core/ship";
 import { ShipPRCard } from "../components/ship-pr-card";
 
 // Phase 3 added a chip row inside ShipPRCard whose mutation hooks call
@@ -102,6 +103,30 @@ describe("ShipPRCard", () => {
       wrapper: I18nWrapper,
     });
     expect(screen.getByText(/Draft/i)).toBeInTheDocument();
+  });
+
+  it("opens the PR detail drawer when the card body is clicked", () => {
+    // Reset the global store first so a previous test in this file
+    // doesn't leak openPrId state across runs.
+    useShipPrDetailStore.getState().close();
+
+    render(<ShipPRCard pr={makePR()} />, { wrapper: I18nWrapper });
+    const card = screen.getByTestId("ship-pr-card");
+    fireEvent.click(card);
+    expect(useShipPrDetailStore.getState().openPrId).toBe("pr-1");
+
+    // Cleanup so the next test sees a closed drawer.
+    useShipPrDetailStore.getState().close();
+  });
+
+  it("does NOT open the drawer when the View diff link is clicked", () => {
+    // The chip stops propagation so a click on it doesn't bubble to
+    // the card root. This is the load-bearing UX behavior — the user
+    // wants the diff fast, not the in-app drawer.
+    useShipPrDetailStore.getState().close();
+    render(<ShipPRCard pr={makePR()} />, { wrapper: I18nWrapper });
+    fireEvent.click(screen.getByTestId("ship-card-view-diff"));
+    expect(useShipPrDetailStore.getState().openPrId).toBeNull();
   });
 
   it("renders a 'View diff' link pointing at /files in a new tab", () => {

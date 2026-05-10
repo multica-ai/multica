@@ -83,6 +83,12 @@ export const shipKeys = {
   // refetches on focus so stale data from a sleeping tab catches up.
   releaseHealth: (wsId: string, releaseId: string) =>
     [...shipKeys.releases(wsId), "health", releaseId] as const,
+  // PR detail drawer — per-PR bundled response. WS events
+  // `pull_request:state_changed` and `ship:card_action` invalidate
+  // the row-level cache so the drawer reflects the latest PR shape
+  // while it stays open.
+  pullRequestDetails: (wsId: string, prId: string) =>
+    [...shipKeys.all(wsId), "pr_details", prId] as const,
 };
 
 /** List of projects in the workspace that have ≥1 GitHub repo attached.
@@ -972,4 +978,32 @@ export function releaseHealthOptions(
 export function useReleaseHealth(releaseId: string, enabled = true) {
   const wsId = useWorkspaceId();
   return useQuery(releaseHealthOptions(wsId, releaseId, enabled && !!releaseId));
+}
+
+// ---------------------------------------------------------------------------
+// PR detail drawer — bundled per-PR query.
+//
+// One round-trip on drawer open. Stale time is short (10s) so the
+// drawer feels live as the user toggles between cards; WS events
+// (pull_request:state_changed + ship:card_action) tighten this further.
+// The hook is workspace-scoped via shipKeys.pullRequestDetails so a
+// workspace switch wipes the cache automatically.
+// ---------------------------------------------------------------------------
+
+export function pullRequestDetailsOptions(
+  wsId: string,
+  prId: string,
+  enabled: boolean,
+) {
+  return queryOptions({
+    queryKey: shipKeys.pullRequestDetails(wsId, prId),
+    queryFn: () => api.getPullRequestDetails(prId),
+    enabled,
+    staleTime: 10_000,
+  });
+}
+
+export function usePullRequestDetails(prId: string, enabled = true) {
+  const wsId = useWorkspaceId();
+  return useQuery(pullRequestDetailsOptions(wsId, prId, enabled && !!prId));
 }

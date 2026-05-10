@@ -196,4 +196,13 @@ export type {
   PromoteReleaseRequest,
   RollbackReleaseRequest,
   ReleaseHealth,
+  // PR detail drawer — bundled response types
+  DrawerLinkedIssue,
+  DrawerAgentTaskRef,
+  DrawerChannelRef,
+  DrawerPullRequestRef,
+  DrawerReview,
+  DrawerCheck,
+  DrawerCardAction,
+  PullRequestDetailsResponse,
 } from "./ship";

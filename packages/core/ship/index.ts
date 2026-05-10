@@ -72,6 +72,9 @@ export {
   useMarkReleaseDone,
   useReleaseHealth,
   releaseHealthOptions,
+  // PR detail drawer — bundled per-PR query.
+  pullRequestDetailsOptions,
+  usePullRequestDetails,
 } from "./queries";
 
 // Phase 7a — multi-select store. Lives next to the queries because
@@ -81,3 +84,10 @@ export {
   useShipSelection,
   useShipSelectionCount,
 } from "./selection";
+
+// PR detail drawer — open/close state. Shared store so the Kanban
+// and the release page can both dispatch `open(prId)`.
+export {
+  useShipPrDetailStore,
+  useShipPrDetailOpenId,
+} from "./pr-detail-store";

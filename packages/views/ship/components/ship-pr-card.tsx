@@ -19,7 +19,11 @@ import {
 import type { PullRequest } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
-import { useShipSelection, useShipSelectionCount } from "@multica/core/ship";
+import {
+  useShipSelection,
+  useShipSelectionCount,
+  useShipPrDetailStore,
+} from "@multica/core/ship";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useT } from "../../i18n";
 import { AppLink } from "../../navigation";
@@ -182,26 +186,53 @@ export function ShipPRCard({
   const isSelected = useShipSelection((s) => s.selected.has(pr.id));
   const selectionCount = useShipSelectionCount();
   const toggleSelection = useShipSelection((s) => s.toggle);
+  const openDrawer = useShipPrDetailStore((s) => s.open);
   const workspace = useCurrentWorkspace();
   const slug = workspace?.slug ?? "";
   const showCheckbox = isSelected || selectionCount > 0;
 
+  // Click handler — opens the in-app PR detail drawer. The card was
+  // previously wrapped in a GitHub-deep-link anchor; user feedback
+  // wanted "more explanation on these PRs … without taking you away
+  // from the site," so the body click now opens the drawer. The
+  // explicit "View diff" chip up top still links out for users who
+  // want the diff fast.
+  //
+  // We attach the handler at the root, then EVERY interactive child
+  // (checkbox, chips, links, action buttons) calls
+  // e.stopPropagation() in its own handler so chip presses don't
+  // also open the drawer. The keyboard handler mirrors the click —
+  // Enter / Space on a `role="button"` element should match a real
+  // button.
+  const handleCardClick = () => {
+    openDrawer(pr.id);
+  };
+  const handleCardKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openDrawer(pr.id);
+    }
+  };
+
   return (
-    <a
-      href={pr.html_url}
-      target="_blank"
-      rel="noopener noreferrer"
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={handleCardClick}
+      onKeyDown={handleCardKeyDown}
       // Use semantic tokens for the card surface — explicit hover lift to
-      // signal it's clickable. Phase 1 has no inline preview; click goes
-      // straight to GitHub in a new tab. Group used so the checkbox
-      // can reveal on hover; ring highlights the selected state.
+      // signal it's clickable. Click opens the drawer; "View diff" still
+      // deep-links to GitHub. Group used so the checkbox can reveal
+      // on hover; ring highlights the selected state.
       className={cn(
-        "group/card relative block rounded-md border bg-card p-3 text-card-foreground shadow-sm",
+        "group/card relative block cursor-pointer rounded-md border bg-card p-3 text-card-foreground shadow-sm",
         "transition-colors hover:border-primary/40 hover:bg-accent/40",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isSelected && "ring-2 ring-primary",
         pr.is_draft && "opacity-80",
       )}
       data-testid="ship-pr-card"
+      aria-label={`Open details for PR #${pr.number} ${pr.title}`}
     >
       {/* Phase 7a — multi-select checkbox. Always rendered to keep
           DOM stable; visually hidden until hover or until something
@@ -439,6 +470,6 @@ export function ShipPRCard({
           {t(($) => $.linkage.open_conversation_channel)}
         </button>
       )}
-    </a>
+    </div>
   );
 }

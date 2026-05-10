@@ -123,6 +123,15 @@ SELECT * FROM pull_request
 WHERE workspace_id = $1 AND originating_issue_id = $2
 ORDER BY pr_updated_at DESC;
 
+-- name: ListPullRequestStackChildren :many
+-- PR detail drawer — every PR rebased onto the given parent. Ordered by
+-- pr_number ASC so the drawer renders children in the order the user
+-- opened them. Workspace-scoped so a stale FK from a deleted workspace
+-- can't surface a row that doesn't belong to the caller.
+SELECT * FROM pull_request
+WHERE workspace_id = $1 AND stack_parent_pr_id = $2
+ORDER BY pr_number ASC;
+
 -- name: ListOpenPullRequestsByProjectForStack :many
 -- Stack detection scans every open PR in a project so the in-memory
 -- joiner can match each PR's base_ref against another PR's head_ref.

@@ -295,6 +295,78 @@ func (q *Queries) ListOpenPullRequestsByProjectForStack(ctx context.Context, pro
 	return items, nil
 }
 
+const listPullRequestStackChildren = `-- name: ListPullRequestStackChildren :many
+SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source, risk_level, risk_reasons, risk_classified_at FROM pull_request
+WHERE workspace_id = $1 AND stack_parent_pr_id = $2
+ORDER BY pr_number ASC
+`
+
+type ListPullRequestStackChildrenParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	StackParentPrID pgtype.UUID `json:"stack_parent_pr_id"`
+}
+
+// PR detail drawer — every PR rebased onto the given parent. Ordered by
+// pr_number ASC so the drawer renders children in the order the user
+// opened them. Workspace-scoped so a stale FK from a deleted workspace
+// can't surface a row that doesn't belong to the caller.
+func (q *Queries) ListPullRequestStackChildren(ctx context.Context, arg ListPullRequestStackChildrenParams) ([]PullRequest, error) {
+	rows, err := q.db.Query(ctx, listPullRequestStackChildren, arg.WorkspaceID, arg.StackParentPrID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PullRequest{}
+	for rows.Next() {
+		var i PullRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.RepoUrl,
+			&i.PrNumber,
+			&i.Title,
+			&i.State,
+			&i.IsDraft,
+			&i.AuthorLogin,
+			&i.AuthorAvatarUrl,
+			&i.BaseRef,
+			&i.HeadRef,
+			&i.HeadSha,
+			&i.HtmlUrl,
+			&i.Body,
+			&i.CiStatus,
+			&i.ReviewDecision,
+			&i.Mergeable,
+			&i.Additions,
+			&i.Deletions,
+			&i.ChangedFiles,
+			&i.Labels,
+			&i.PrCreatedAt,
+			&i.PrUpdatedAt,
+			&i.PrMergedAt,
+			&i.PrClosedAt,
+			&i.FetchedAt,
+			&i.OriginatingIssueID,
+			&i.OriginatingAgentTaskID,
+			&i.AutoCloseIssueOnMerge,
+			&i.ConversationChannelID,
+			&i.StackParentPrID,
+			&i.Source,
+			&i.RiskLevel,
+			&i.RiskReasons,
+			&i.RiskClassifiedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPullRequestsByOriginatingIssue = `-- name: ListPullRequestsByOriginatingIssue :many
 SELECT id, workspace_id, project_id, repo_url, pr_number, title, state, is_draft, author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url, body, ci_status, review_decision, mergeable, additions, deletions, changed_files, labels, pr_created_at, pr_updated_at, pr_merged_at, pr_closed_at, fetched_at, originating_issue_id, originating_agent_task_id, auto_close_issue_on_merge, conversation_channel_id, stack_parent_pr_id, source, risk_level, risk_reasons, risk_classified_at FROM pull_request
 WHERE workspace_id = $1 AND originating_issue_id = $2

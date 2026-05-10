@@ -62,6 +62,13 @@ vi.mock("@multica/core/ship", () => ({
     queryKey: ["pr-options"],
     queryFn: async () => ({ pull_requests: [], total: 0 }),
   }),
+  // PR detail drawer — store + bundled-detail query stubs. The page
+  // mounts <ShipPrDetailDrawer /> at the root; the drawer reads from
+  // these hooks even when nothing is open.
+  useShipPrDetailOpenId: () => null,
+  useShipPrDetailStore: (selector: (s: { close: () => void }) => unknown) =>
+    selector({ close: vi.fn() }),
+  usePullRequestDetails: () => ({ data: null, isLoading: false, isError: false }),
 }));
 
 vi.mock("@multica/core/projects/queries", () => ({

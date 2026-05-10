@@ -426,6 +426,92 @@ export interface ListPullRequestStacksResponse {
   stacks: PullRequestStackNode[];
 }
 
+// --- PR detail drawer ------------------------------------------------------
+//
+// GET /api/pull_requests/{id}/details — bundled response so the drawer
+// renders without an N+1 fetch on open. Every optional section is
+// nullable so a freshly-opened PR with no enrichment renders gracefully.
+
+export interface DrawerLinkedIssue {
+  id: string;
+  workspace_id: string;
+  number: number;
+  identifier: string;
+  title: string;
+  status: string;
+  priority: string;
+}
+
+export interface DrawerAgentTaskRef {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  title: string;
+  status: string;
+}
+
+export interface DrawerChannelRef {
+  id: string;
+  name: string;
+  display_name: string;
+}
+
+export interface DrawerPullRequestRef {
+  id: string;
+  number: number;
+  title: string;
+  state: string;
+  html_url: string;
+}
+
+export interface DrawerReview {
+  id: string;
+  reviewer_login: string;
+  reviewer_avatar_url: string | null;
+  /** "APPROVED" / "CHANGES_REQUESTED" / "COMMENTED" / "DISMISSED" /
+   *  "PENDING" — loose-typed per the API drift contract. */
+  state: string;
+  body: string | null;
+  submitted_at: string;
+}
+
+export interface DrawerCheck {
+  id: string;
+  name: string;
+  /** "success" / "failure" / "neutral" / "cancelled" / "skipped" /
+   *  "timed_out" / "action_required" / null when still running. */
+  conclusion: string | null;
+  /** "queued" / "in_progress" / "completed". */
+  status: string;
+  details_url: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface DrawerCardAction {
+  id: string;
+  /** Mirrors ShipCardActionName but loose-typed for drift. */
+  action: string;
+  /** "succeeded" / "failed" / "in_progress". */
+  result_status: string;
+  actor_user_id: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface PullRequestDetailsResponse {
+  pull_request: PullRequest;
+  linked_issue?: DrawerLinkedIssue | null;
+  originating_agent_task?: DrawerAgentTaskRef | null;
+  active_release?: { id: string; title: string; stage: string } | null;
+  conversation_channel?: DrawerChannelRef | null;
+  reviews: DrawerReview[];
+  checks: DrawerCheck[];
+  recent_actions: DrawerCardAction[];
+  stack_parent?: DrawerPullRequestRef | null;
+  stack_children: DrawerPullRequestRef[];
+}
+
 // --- Phase 5: risk profile, pre-flight, time-machine, summary ----------
 
 /** Risk tier as classified by server/internal/service/ship/risk.go.

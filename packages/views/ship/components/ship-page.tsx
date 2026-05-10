@@ -15,6 +15,7 @@ import { ShipNoTokenState } from "./ship-no-token-state";
 import { ShipProjectSection } from "./ship-project-section";
 import { ShipActiveReleasesRail } from "./ship-active-releases-rail";
 import { ShipSelectionBar } from "./ship-selection-bar";
+import { ShipPrDetailDrawer } from "./ship-pr-detail-drawer";
 import type { PullRequest } from "@multica/core/types";
 
 /**
@@ -119,6 +120,11 @@ export function ShipPage() {
           would still require a QueryClient and the no-token /
           empty / disabled branches don't need the bar. */}
       {tokenSet && projects.length > 0 && <ShipSelectionBarConsumer projects={projects} />}
+      {/* PR detail drawer — mounted once at the page root so any card
+          on the Kanban (or any future PR list on this page) can open
+          it via the shared `useShipPrDetailStore.open(prId)`. The
+          drawer is invisible when no PR is selected. */}
+      <ShipPrDetailDrawer />
     </div>
   );
 }

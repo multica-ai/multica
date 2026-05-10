@@ -712,12 +712,21 @@ export function useRealtimeSync(
     const unsubPullRequestStateChanged = ws.on(
       "pull_request:state_changed",
       (p) => {
-        const payload = p as { project_id?: string };
+        const payload = p as { project_id?: string; pull_request_id?: string };
         const wsId = getCurrentWsId();
         if (!wsId) return;
         if (payload?.project_id) {
           qc.invalidateQueries({
             queryKey: shipKeys.pullRequestsForProject(wsId, payload.project_id),
+          });
+        }
+        // PR detail drawer — when a state_changed event names a specific
+        // PR, refresh its bundled details cache so an open drawer
+        // reflects the new CI / review / merge state without forcing
+        // the user to close + reopen.
+        if (payload?.pull_request_id) {
+          qc.invalidateQueries({
+            queryKey: shipKeys.pullRequestDetails(wsId, payload.pull_request_id),
           });
         }
         // Open-PR count on the projects list doesn't change on state_changed
@@ -764,6 +773,12 @@ export function useRealtimeSync(
       if (payload?.pull_request_id) {
         qc.invalidateQueries({
           queryKey: shipKeys.cardActions(wsId, payload.pull_request_id),
+        });
+        // Drawer's recent-actions tail and PR row both shift on a
+        // chip press — refresh the bundled query so an open drawer
+        // updates in step.
+        qc.invalidateQueries({
+          queryKey: shipKeys.pullRequestDetails(wsId, payload.pull_request_id),
         });
       }
       qc.invalidateQueries({ queryKey: shipKeys.allPullRequests(wsId) });

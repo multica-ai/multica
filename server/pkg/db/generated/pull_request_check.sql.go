@@ -56,6 +56,49 @@ func (q *Queries) ListChecksForPRHead(ctx context.Context, arg ListChecksForPRHe
 	return items, nil
 }
 
+const listChecksForPullRequest = `-- name: ListChecksForPullRequest :many
+SELECT id, workspace_id, pull_request_id, head_sha, name, conclusion, status, details_url, started_at, completed_at, updated_at FROM pull_request_check
+WHERE pull_request_id = $1
+ORDER BY started_at DESC NULLS LAST, name ASC
+`
+
+// PR detail drawer surface — every check row for a PR regardless of
+// head sha, newest started_at first. Distinct from ListChecksForPRHead
+// (which only reads the active head_sha for the CI status rollup) so a
+// PR that's been force-pushed still shows historical CI runs in the
+// drawer.
+func (q *Queries) ListChecksForPullRequest(ctx context.Context, pullRequestID pgtype.UUID) ([]PullRequestCheck, error) {
+	rows, err := q.db.Query(ctx, listChecksForPullRequest, pullRequestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PullRequestCheck{}
+	for rows.Next() {
+		var i PullRequestCheck
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.PullRequestID,
+			&i.HeadSha,
+			&i.Name,
+			&i.Conclusion,
+			&i.Status,
+			&i.DetailsUrl,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updatePullRequestCIStatus = `-- name: UpdatePullRequestCIStatus :one
 UPDATE pull_request SET
     ci_status  = $2,

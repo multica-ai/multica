@@ -459,6 +459,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/pull_requests/{id}/conversation_channel", h.GetOrCreatePRConversationChannel)
 			r.Get("/api/issues/{id}/pull_requests", h.ListIssuePullRequests)
 			r.Get("/api/projects/{id}/pull_request_stacks", h.ListProjectPRStacks)
+			// PR detail drawer — bundled response for the in-app
+			// drawer. Single round-trip so the Sheet renders without
+			// an N+1 fetch on open. Same workspace-member middleware
+			// as the Phase 4 endpoints above.
+			r.Get("/api/pull_requests/{id}/details", h.GetPullRequestDetails)
 
 			// Ship Hub Phase 5 — pre-flight gate + workspace summary +
 			// time-machine snapshot. Same ship_hub_enabled gate; no

@@ -157,6 +157,7 @@ import type {
   PromoteReleaseRequest,
   RollbackReleaseRequest,
   ReleaseHealth,
+  PullRequestDetailsResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -214,6 +215,8 @@ import {
   ReleaseHealthSchema,
   MergeStateResponseSchema,
   EMPTY_MERGE_STATE_RESPONSE,
+  PullRequestDetailsResponseSchema,
+  EMPTY_PULL_REQUEST_DETAILS_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -2437,6 +2440,20 @@ export class ApiClient {
       LinkedIssuesResponseSchema,
       EMPTY_LINKED_ISSUES_RESPONSE,
       { endpoint: "GET /api/pull_requests/:id/linked_issues" },
+    );
+  }
+
+  /** GET /api/pull_requests/{id}/details — bundled drawer payload.
+   *  Single round-trip so the Sheet renders without an N+1 fetch on
+   *  open. Every optional section degrades gracefully via
+   *  parseWithFallback's empty-response path. */
+  async getPullRequestDetails(prId: string): Promise<PullRequestDetailsResponse> {
+    const raw = await this.fetch<unknown>(`/api/pull_requests/${prId}/details`);
+    return parseWithFallback(
+      raw,
+      PullRequestDetailsResponseSchema,
+      EMPTY_PULL_REQUEST_DETAILS_RESPONSE as PullRequestDetailsResponse,
+      { endpoint: "GET /api/pull_requests/:id/details" },
     );
   }
 
