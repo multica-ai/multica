@@ -331,7 +331,13 @@ func (h *Handler) UnverifyRelease(w http.ResponseWriter, r *http.Request) {
 // linkage before forcing a new one. Phase 7d's rollback flow is the
 // path for re-staging a different sha.
 func (h *Handler) MarkReleaseStagingDeployed(w http.ResponseWriter, r *http.Request) {
-	rel, project, _, wsID, ok := h.loadReleaseAndProject(w, r)
+	// loadReleaseAndProject returns (release, workspace, project, wsID, ok)
+	// — note the ordering: workspace BEFORE project. Earlier I had the
+	// destructuring wrong here and `project` was actually the workspace
+	// struct, which made `project.ID` resolve to the workspace UUID and
+	// every downstream lookup-by-project failed (empty env list, then
+	// FK violation in the create path). Fixed.
+	rel, _, project, wsID, ok := h.loadReleaseAndProject(w, r)
 	if !ok {
 		return
 	}
