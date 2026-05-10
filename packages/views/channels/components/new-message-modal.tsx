@@ -3,10 +3,10 @@
 // CEREBRO-PATCH(new-message-modal-redesign): tap-to-start unified actor picker.
 // Single-tap a row to immediately start a DM (members) or AI chat session
 // (agents) — multi-select for groups is opt-in via the "Group" toggle. JEH-718.
-// CEREBRO-PATCH(new-message-modal-redesign): JEH-846 — toggle button labels its
-// destination ("Switch to channel" / "Switch to message") with matching icon,
-// and the modal renders full-screen on mobile (md breakpoint) so the actor
-// list isn't hidden by the keyboard.
+// CEREBRO-PATCH(new-message-modal-redesign): JEH-846 — destination-labelled
+// toggle ("Switch to channel" / "Switch to message") + matching icon.
+// CEREBRO-PATCH(new-message-modal-redesign): JEH-846 mobile — full-screen on
+// <md so the actor list isn't hidden behind the keyboard.
 
 import { useMemo, useState } from "react";
 import { Lock, MessageCircle, Search, Star, Users, X } from "lucide-react";
