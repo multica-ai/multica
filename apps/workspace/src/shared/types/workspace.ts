@@ -14,6 +14,8 @@ export interface Workspace {
   settings: Record<string, unknown>;
   repos: WorkspaceRepo[];
   issue_prefix: string;
+  /** Only present when fetched via admin/owner invite-link endpoints. */
+  invite_token: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -44,6 +46,13 @@ export interface MemberWithUser {
   name: string;
   email: string;
   avatar_url: string | null;
+  invited_by: string | null;
+}
+
+export interface WorkspaceInviteInfo {
+  id: string;
+  name: string;
+  slug: string;
 }
 
 
