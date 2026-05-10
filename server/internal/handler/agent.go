@@ -111,6 +111,9 @@ type AgentTaskResponse struct {
 	PriorSessionID   string         `json:"prior_session_id,omitempty"`    // session ID from a previous task on same issue
 	PriorWorkDir     string         `json:"prior_work_dir,omitempty"`     // work_dir from a previous task on same issue
 	TriggerCommentID *string        `json:"trigger_comment_id,omitempty"` // comment that triggered this task
+	// WorkspaceContext is the free-text context field from the workspace record,
+	// injected into the agent's runtime config so it has project-level guidance.
+	WorkspaceContext string `json:"workspace_context,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon

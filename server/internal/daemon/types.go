@@ -33,6 +33,9 @@ type Task struct {
 	PriorSessionID   string     `json:"prior_session_id,omitempty"`    // Claude session ID from a previous task on this issue
 	PriorWorkDir     string     `json:"prior_work_dir,omitempty"`     // work_dir from a previous task on this issue
 	TriggerCommentID string     `json:"trigger_comment_id,omitempty"` // comment that triggered this task
+	// WorkspaceContext is the free-text context from workspace.context, injected
+	// into the agent's runtime config so it has project-level guidance.
+	WorkspaceContext string `json:"workspace_context,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

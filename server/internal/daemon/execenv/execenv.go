@@ -34,6 +34,9 @@ type TaskContextForEnv struct {
 	AgentInstructions string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills       []SkillContextForEnv
 	Repos             []RepoContextForEnv // workspace repos available for checkout
+	// WorkspaceContext is injected into the runtime config so the agent has
+	// access to project-level guidance (design tokens, naming conventions, etc.).
+	WorkspaceContext string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
