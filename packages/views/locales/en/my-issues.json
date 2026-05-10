@@ -2,11 +2,13 @@
   "page": {
     "breadcrumb": "My Issues",
     "workspace_fallback": "Workspace",
-    "empty_title": "No issues assigned to you",
-    "empty_description": "Issues you create or are assigned to will appear here."
+    "empty_title": "No issues found",
+    "empty_description": "Issues assigned to you or created by you will appear here."
   },
   "header": {
     "scope": {
+      "my_label": "My Issues",
+      "my_description": "Issues assigned to me or created by me",
       "assigned_label": "Assigned",
       "assigned_description": "Issues assigned to me",
       "created_label": "Created",
