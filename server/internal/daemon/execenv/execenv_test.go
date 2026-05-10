@@ -585,6 +585,34 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 	}
 }
 
+// Regression test for #2347: the runtime config injected into agent harnesses
+// must advertise both autopilot execution modes on create AND update, so an
+// agent acting as a CLI user is not confined to create_issue.
+func TestInjectRuntimeConfigAutopilotAdvertisesBothModes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	if _, err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("failed to read CLAUDE.md: %v", err)
+	}
+
+	s := string(content)
+	for _, want := range []string{
+		"multica autopilot create --title \"...\" --agent <name> --mode create_issue|run_only",
+		"multica autopilot update <id>",
+		"[--mode create_issue|run_only]",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing %q", want)
+		}
+	}
+}
+
 func TestInjectRuntimeConfigGemini(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -146,8 +146,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("  - The same rule applies to `--description` on `multica issue create` and `multica issue update` — use `--description-stdin` and pipe a HEREDOC for any multi-line description; the inline `--description \"...\"` form is for short single-line text only.\n")
 	b.WriteString("- `multica issue comment delete <comment-id>` — Delete a comment\n")
 	b.WriteString("- `multica label create --name \"...\" --color \"#hex\"` — Define a new workspace label (use this only when the label you need does not exist yet; reuse existing labels via `multica label list` first)\n")
-	b.WriteString("- `multica autopilot create --title \"...\" --agent <name> --mode create_issue [--description \"...\"]` — Create an autopilot\n")
-	b.WriteString("- `multica autopilot update <id> [--title X] [--description X] [--status active|paused]` — Update an autopilot\n")
+	b.WriteString("- `multica autopilot create --title \"...\" --agent <name> --mode create_issue|run_only [--description \"...\"]` — Create an autopilot\n")
+	b.WriteString("- `multica autopilot update <id> [--title X] [--description X] [--status active|paused] [--mode create_issue|run_only]` — Update an autopilot\n")
 	b.WriteString("- `multica autopilot trigger <id>` — Manually trigger an autopilot to run once\n")
 	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n\n")
 
