@@ -2517,6 +2517,16 @@ export class ApiClient {
     });
   }
 
+  /** POST /api/releases/{id}/channel — get or create the release's
+   *  discussion channel. Idempotent. Returns the channel object. */
+  async openReleaseChannel(releaseId: string): Promise<unknown> {
+    return this.fetch(`/api/releases/${releaseId}/channel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+  }
+
   /** GET /api/projects/{id}/pull_request_stacks — stack-tree shape for
    *  the nested-card rendering in the Kanban. */
   async listPullRequestStacks(projectId: string): Promise<ListPullRequestStacksResponse> {

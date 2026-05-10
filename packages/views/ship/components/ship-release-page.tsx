@@ -57,6 +57,7 @@ import {
   useMarkReleaseProductionDeployed,
   useRollbackRelease,
   useMarkReleaseDone,
+  useOpenReleaseChannel,
   useReleaseHealth,
 } from "@multica/core/ship";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -87,7 +88,7 @@ import { Label } from "@multica/ui/components/ui/label";
 import { cn } from "@multica/ui/lib/utils";
 import { PageHeader } from "../../layout/page-header";
 import { useT } from "../../i18n";
-import { AppLink } from "../../navigation";
+import { AppLink, useNavigation } from "../../navigation";
 
 // Stage order for the progress bar. Mirrors the Postgres release_stage
 // enum, but cancelled / rolled_back are NOT on the bar — they're
@@ -749,17 +750,25 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
           )}
 
           {/* Linked channel + issue chips. Each clickable to its own
-              workspace-scoped page. */}
+              workspace-scoped page. The channel slot also doubles as
+              the "Open discussion channel" affordance — channels are
+              now opt-in (no longer auto-created on release create), so
+              we render the chip when one exists and a button when one
+              doesn't. The release issue is always present (still
+              auto-created — the canonical tracked record).  */}
           <div className="flex flex-wrap items-center gap-3 text-sm">
-            {data.channel && slug && (
+            {data.channel && slug ? (
               <AppLink
                 href={`/${slug}/channels/${data.channel.id}`}
                 className="inline-flex items-center gap-1.5 rounded bg-muted px-2 py-1 hover:bg-accent"
+                data-testid="release-channel-link"
               >
                 <MessagesSquare className="size-3.5" />
                 <span>{t(($) => $.releases.detail.channel_link)}</span>
                 <span className="text-muted-foreground">{`#${data.channel.name}`}</span>
               </AppLink>
+            ) : (
+              <OpenReleaseChannelButton releaseId={data.release.id} />
             )}
             {data.issue && slug && (
               <AppLink
@@ -2401,4 +2410,50 @@ function pendingSecondApproverName(
   const pendingId = filledFirst ? release.second_approver_id : release.approver_id;
   if (pendingId) return pendingId.slice(0, 8);
   return "—";
+}
+
+/** Manual "Open discussion channel" button for the release detail
+ *  page. Renders in place of the linked-channel chip when the release
+ *  has no channel yet. Navigates to the new channel on success.
+ *
+ *  Replaces the auto-create-on-CreateRelease path: most releases ship
+ *  without needing a chat surface (the tracking issue covers the
+ *  decisions / state / rollback record). The user clicks here only
+ *  when broad-team chat actually warrants it (multi-day verifies,
+ *  high-stakes rollouts). */
+function OpenReleaseChannelButton({ releaseId }: { releaseId: string }) {
+  const { t } = useT("ship");
+  const open = useOpenReleaseChannel(releaseId);
+  const navigation = useNavigation();
+  const workspace = useCurrentWorkspace();
+  const slug = workspace?.slug ?? "";
+
+  const handleClick = async () => {
+    try {
+      const res = (await open.mutateAsync()) as { name?: string } | null;
+      const name = res?.name;
+      if (slug && name) {
+        navigation.push(`/${slug}/channels/${name}`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="inline-flex items-center gap-1.5"
+      onClick={handleClick}
+      disabled={open.isPending}
+      data-testid="release-open-channel"
+    >
+      <MessagesSquare className="size-3.5" aria-hidden />
+      {open.isPending
+        ? t(($) => $.releases.detail.opening_channel)
+        : t(($) => $.releases.detail.open_discussion_channel)}
+    </Button>
+  );
 }

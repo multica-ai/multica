@@ -783,6 +783,46 @@ func (h *Handler) RemovePullRequestFromRelease(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// OpenReleaseChannel handles POST /api/releases/{id}/channel.
+//
+// Idempotent — if the release already has a channel linked, returns
+// it without creating a new one. Otherwise creates a discussion
+// channel using the same name + member-seeding logic the prior
+// auto-create path used (members: creator, approver(s), orchestrator
+// agent), persists the link onto the release row, and emits a
+// `channel_created` release event with `trigger=manual`.
+//
+// This replaces the auto-create-on-CreateRelease path that was
+// removed because most releases ship without needing a chat surface.
+// The tracking issue stays the canonical record; this endpoint fires
+// only when the user explicitly clicks "Open discussion channel" on
+// the release detail page.
+func (h *Handler) OpenReleaseChannel(w http.ResponseWriter, r *http.Request) {
+	rel, wsID, ok := h.loadRelease(w, r)
+	if !ok {
+		return
+	}
+	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(wsID), "workspace not found"); !ok {
+		return
+	}
+	userID, _ := requireUserID(w, r)
+	requesterID, _ := h.parseUserUUIDOrZero(userID)
+
+	svc := &ship.Service{Q: h.Queries}
+	ch, updatedRelease, err := svc.OpenReleaseChannel(
+		r.Context(), rel.ID, requesterID, &releaseChannelOps{h: h},
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.publish(protocol.EventReleaseUpdated, uuidToString(wsID), "member", userID, map[string]any{
+		"release_id": uuidToString(updatedRelease.ID),
+		"stage":      string(updatedRelease.Stage),
+	})
+	writeJSON(w, http.StatusOK, channelToResponse(*ch))
+}
+
 // CancelReleaseRequest is the body for POST /api/releases/{id}/cancel.
 type CancelReleaseRequest struct {
 	Reason string `json:"reason"`

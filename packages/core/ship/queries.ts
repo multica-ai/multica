@@ -722,6 +722,36 @@ export function useCreateRelease(projectId: string) {
   });
 }
 
+/** POST /api/releases/{id}/channel — manually open + link a discussion
+ *  channel to a release. Replaces the auto-create-on-CreateRelease path
+ *  for the (rare) cases where a release actually needs broad chat.
+ *  Idempotent: returns the existing channel if one is already linked. */
+export function useOpenReleaseChannel(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.openReleaseChannel(releaseId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: shipKeys.releaseDetail(wsId, releaseId) });
+    },
+  });
+}
+
+/** POST /api/pull_requests/{id}/conversation_channel — manually open +
+ *  link a discussion channel to a PR. Replaces the auto-create-on-PR-
+ *  open webhook path. Idempotent. */
+export function useOpenPRConversationChannel(prId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.getOrCreatePRConversationChannel(prId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: shipKeys.pullRequestDetails(wsId, prId) });
+      qc.invalidateQueries({ queryKey: shipKeys.allPullRequests(wsId) });
+    },
+  });
+}
+
 /** PATCH release metadata. */
 export function useUpdateRelease(releaseId: string) {
   const qc = useQueryClient();

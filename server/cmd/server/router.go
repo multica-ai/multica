@@ -499,6 +499,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/releases/{id}/pull_requests", h.AddPullRequestToRelease)
 			r.Delete("/api/releases/{id}/pull_requests/{pr_id}", h.RemovePullRequestFromRelease)
 			r.Post("/api/releases/{id}/cancel", h.CancelRelease)
+			r.Post("/api/releases/{id}/channel", h.OpenReleaseChannel)
 
 			// Phase 7b — Merge train orchestration.
 			r.Post("/api/releases/{id}/start_merge", h.StartMergeRelease)

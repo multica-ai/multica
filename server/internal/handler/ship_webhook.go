@@ -239,21 +239,24 @@ func (h *Handler) maybeManagePRConversationChannel(ctx context.Context, ws db.Wo
 	pr := o.PR
 	switch o.PRAction {
 	case "opened", "reopened":
-		// Re-read the PR to make sure linkage updates have flushed.
-		latest, err := h.Queries.GetPullRequest(ctx, pr.ID)
-		if err == nil {
-			pr = latest
-		}
-		if pr.ConversationChannelID.Valid {
-			return
-		}
-		if _, err := h.createPRConversationChannel(ctx, ws.ID, ws, pr); err != nil {
-			slog.Warn("ship webhook: auto-create conversation channel failed",
-				"pr_id", uuidToString(pr.ID), "error", err)
-		}
+		// Per-PR conversation channels used to auto-create here on
+		// every PR open / reopen. For most teams this produced empty
+		// "ghost" channels — the PR's GitHub thread + the linked
+		// Multica issue's comments cover discussion already, and an
+		// auto-created Multica channel just adds another notification
+		// surface no one posts to. Channels are now opt-in: the user
+		// clicks "Open discussion channel" on the PR detail drawer
+		// when they actually want one.
+		//
+		// The HTTP endpoint at POST /api/pull-requests/{id}/channel
+		// reuses the same `createPRConversationChannel` helper, so
+		// manual creation works exactly the same as auto-create did
+		// — just gated on user intent.
+		return
 	case "closed":
-		// On close (merged or not), archive + snapshot. The processPullRequest
-		// already handled the auto-close-issue branch.
+		// On close (merged or not), archive + snapshot any channel
+		// that was manually opened. The processPullRequest already
+		// handled the auto-close-issue branch.
 		h.archivePRConversationChannel(ctx, ws.ID, pr)
 	}
 }
