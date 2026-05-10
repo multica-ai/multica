@@ -1,6 +1,6 @@
 "use client";
 
-import { User, Palette, Key, Settings, Users, FolderGit2, Bot, Tag, Bell } from "lucide-react";
+import { User, Palette, Key, Settings, Users, FolderGit2, Bot, Tag, Bell, Zap } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useWorkspaceStore } from "@/features/workspace";
@@ -13,6 +13,7 @@ import { RepositoriesTab } from "./repositories-tab";
 import { AITab } from "./ai-tab";
 import { LabelsTab } from "./labels-tab";
 import { NotificationsTab } from "./notifications-tab";
+import { AutomationTab } from "@/features/automation";
 
 const accountTabs = [
   { value: "profile", label: "Profile", icon: User },
@@ -27,6 +28,7 @@ const workspaceTabs = [
   { value: "members", label: "Members", icon: Users },
   { value: "labels", label: "Labels", icon: Tag },
   { value: "ai", label: "AI", icon: Bot },
+  { value: "automation", label: "Automation", icon: Zap },
 ];
 
 const mobileTabs = [...accountTabs, ...workspaceTabs];
@@ -114,6 +116,7 @@ export default function SettingsPage() {
           <TabsContent value="labels"><LabelsTab /></TabsContent>
           <TabsContent value="ai"><AITab /></TabsContent>
           <TabsContent value="notifications"><NotificationsTab /></TabsContent>
+          <TabsContent value="automation"><AutomationTab /></TabsContent>
         </div>
       </div>
     </Tabs>

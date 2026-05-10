@@ -210,3 +210,46 @@ export function useAISettingsMutations(workspaceId: string | null) {
     updating: updateMutation.isPending,
   };
 }
+
+export function useInviteLinkMutations() {
+  const workspaceId = useWorkspaceStore((state) => state.workspace?.id ?? null);
+
+  const resetMutation = useMutation({
+    mutationFn: async () => {
+      if (!workspaceId) throw new Error("No workspace selected");
+      return api.resetInviteLink(workspaceId);
+    },
+    onSuccess: (workspace) => {
+      useWorkspaceStore.getState().updateWorkspace(workspace);
+    },
+  });
+
+  const disableMutation = useMutation({
+    mutationFn: async () => {
+      if (!workspaceId) throw new Error("No workspace selected");
+      return api.disableInviteLink(workspaceId);
+    },
+    onSuccess: (workspace) => {
+      useWorkspaceStore.getState().updateWorkspace(workspace);
+    },
+  });
+
+  const loadMutation = useMutation({
+    mutationFn: async () => {
+      if (!workspaceId) throw new Error("No workspace selected");
+      return api.getWorkspaceWithInviteToken(workspaceId);
+    },
+    onSuccess: (workspace) => {
+      useWorkspaceStore.getState().updateWorkspace(workspace);
+    },
+  });
+
+  return {
+    resetInviteLink: () => resetMutation.mutateAsync(),
+    disableInviteLink: () => disableMutation.mutateAsync(),
+    loadInviteToken: () => loadMutation.mutateAsync(),
+    resetting: resetMutation.isPending,
+    disabling: disableMutation.isPending,
+    loading: loadMutation.isPending,
+  };
+}
