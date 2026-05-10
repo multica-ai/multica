@@ -694,6 +694,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/chat/sessions", func(r chi.Router) {
 				r.Post("/", h.CreateChatSession)
 				r.Get("/", h.ListChatSessions)
+				// CEREBRO-PATCH(chat-search-route): JEH-901 Cmd+K chat session search.
+				// Must precede the /{sessionId} subtree — once a flat /{sessionId}
+				// GET exists, chi greedily routes /search → GetChatSession with
+				// sessionId="search". Same trap as SearchIssues / SearchProjects.
+				r.Get("/search", h.SearchChatSessions)
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
 					r.Delete("/", h.DeleteChatSession)

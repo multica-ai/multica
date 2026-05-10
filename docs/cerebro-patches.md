@@ -137,6 +137,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `chat-window-cerebro` | packages/views/chat/components/chat-window.tsx | 7 | Chat view cerebro additions (MCP onboarding, status, archive) |
 | `chat-actions-cerebro` | server/internal/handler/chat_actions_cerebro.go | ~210 | JEH-799 — net-new fork file: handlers for chat-session header actions (PATCH /api/chat/sessions/{id} for rename/archive, POST /convert-to-issue for issue conversion) |
 | `chat-session-actions-routes` | server/cmd/server/router.go | 2 | JEH-799 — register PATCH and convert-to-issue routes for the chat-session header |
+| `chat-search-cerebro` | server/internal/handler/chat_search_cerebro.go | ~240 | JEH-901 — net-new fork file: SearchChatSessions endpoint backing Cmd+K, mirrors SearchIssues / SearchProjects (LIKE on LOWER(content) + pg_bigm trigram) |
+| `chat-search-route` | server/cmd/server/router.go | 5 | JEH-901 — register GET /api/chat/sessions/search before the {sessionId} subtree (chi greedy-routing trap) |
 | `chat-session-updated-event` | server/pkg/protocol/events.go<br>server/pkg/protocol/messages.go<br>packages/core/types/events.ts | 1 + 7 + 2 | JEH-799 — new `chat:session_updated` WS event so other tabs sync title/status changes from the session header |
 | `api-chat-session-actions` | packages/core/api/client.ts | 18 | JEH-799 — chat-session API methods: `updateChatSession`, `convertChatSessionToIssue` |
 | `chat-session-header` | packages/views/chat/components/chat-window.tsx | 2 | JEH-799 — mount `<ChatSessionHeader />` (from `@multica/cerebro-chat`) above the message list |
