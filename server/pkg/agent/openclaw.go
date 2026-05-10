@@ -445,22 +445,32 @@ func tryParseOpenclawEvent(line string) (openclawEvent, bool) {
 	return event, true
 }
 
-// tryParseOpenclawResult attempts to parse a line as a final result blob
-// (the legacy format with payloads + meta). Lines must start with '{' to be
-// considered — we no longer scan for braces at arbitrary positions, which
-// avoids false matches on log lines containing JSON fragments.
+// tryParseOpenclawResult attempts to parse a line as a final result blob.
+// OpenClaw has emitted both the legacy direct format (`payloads` + `meta`) and
+// a newer run wrapper (`runId`, `status`, `result`). Lines must start with '{'
+// to be considered so log lines containing JSON fragments are not false
+// positives.
 func tryParseOpenclawResult(raw string) (openclawResult, bool) {
 	if len(raw) == 0 || raw[0] != '{' {
 		return openclawResult{}, false
 	}
 	var result openclawResult
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+	if err := json.Unmarshal([]byte(raw), &result); err == nil && hasOpenclawResultData(result) {
+		return result, true
+	}
+
+	var wrapped openclawRunResult
+	if err := json.Unmarshal([]byte(raw), &wrapped); err != nil {
 		return openclawResult{}, false
 	}
-	if result.Payloads == nil && result.Meta.DurationMs == 0 {
+	if wrapped.Result == nil || !hasOpenclawResultData(*wrapped.Result) {
 		return openclawResult{}, false
 	}
-	return result, true
+	return *wrapped.Result, true
+}
+
+func hasOpenclawResultData(result openclawResult) bool {
+	return result.Payloads != nil || result.Meta.DurationMs != 0 || result.Meta.AgentMeta != nil
 }
 
 // buildOpenclawEventResult extracts text and metadata from a final result blob.
@@ -617,6 +627,13 @@ type openclawErrorData struct {
 type openclawResult struct {
 	Payloads []openclawPayload `json:"payloads"`
 	Meta     openclawMeta      `json:"meta"`
+}
+
+// openclawRunResult is the newer OpenClaw wrapper around the legacy result.
+// The user-visible answer still lives under result.payloads; the rest of the
+// wrapper is run diagnostics that must not be surfaced as the assistant reply.
+type openclawRunResult struct {
+	Result *openclawResult `json:"result"`
 }
 
 type openclawPayload struct {
