@@ -28,6 +28,8 @@ import type {
   MarkSmokePassRequest,
   MarkReleaseVerifiedRequest,
   UnverifyReleaseRequest,
+  PromoteReleaseRequest,
+  RollbackReleaseRequest,
 } from "../types";
 
 // Query key factory — workspace-scoped per CLAUDE.md so a workspace switch
@@ -76,6 +78,11 @@ export const shipKeys = {
     [...shipKeys.releases(wsId), "active"] as const,
   projectReleases: (wsId: string, projectId: string, status: string) =>
     [...shipKeys.releases(wsId), "by_project", projectId, status] as const,
+  // Phase 7d — release health rollup. Per-release scope. WS event
+  // release:health_updated invalidates this on demand; the query also
+  // refetches on focus so stale data from a sleeping tab catches up.
+  releaseHealth: (wsId: string, releaseId: string) =>
+    [...shipKeys.releases(wsId), "health", releaseId] as const,
 };
 
 /** List of projects in the workspace that have ≥1 GitHub repo attached.
@@ -883,4 +890,86 @@ export function useMarkReleaseStagingDeployed(releaseId: string) {
     mutationFn: () => api.markReleaseStagingDeployed(releaseId),
     onSettled: () => invalidateReleaseMergeSurface(qc, wsId, releaseId),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7d — Production promotion + rollback + health rollup.
+//
+// Mutations follow the same shape as Phase 7c: invalidate the release
+// detail + workspace-active list on settle. WS events
+// (release:promoted, release:in_production, release:rollback_initiated,
+// release:health_updated) keep other clients in sync; these
+// invalidations are what the caller sees instantly.
+// ---------------------------------------------------------------------------
+
+/** Promote a verifying release into production. Returns 202; the
+ *  actual deploy lands via the user's CI/CD and the deployment_status
+ *  webhook (or manual mark_production_deployed) flips the stage to
+ *  in_production. */
+export function usePromoteRelease(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data?: PromoteReleaseRequest) =>
+      api.promoteRelease(releaseId, data),
+    onSettled: () => invalidateReleaseMergeSurface(qc, wsId, releaseId),
+  });
+}
+
+/** Manual escape hatch when the production deploy webhook doesn't
+ *  fire (Vercel/Netlify/Cloudflare/custom CI). Mirrors
+ *  useMarkReleaseStagingDeployed. */
+export function useMarkReleaseProductionDeployed(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.markReleaseProductionDeployed(releaseId),
+    onSettled: () => invalidateReleaseMergeSurface(qc, wsId, releaseId),
+  });
+}
+
+/** Roll back a promoted/in-production release. Records intent + posts
+ *  the rollback instructions to the channel; v1 leaves the actual
+ *  revert PRs to the user (manual click of GitHub's per-PR Revert
+ *  button). */
+export function useRollbackRelease(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data: RollbackReleaseRequest) =>
+      api.rollbackRelease(releaseId, data),
+    onSettled: () => invalidateReleaseMergeSurface(qc, wsId, releaseId),
+  });
+}
+
+/** Fast-forward the 24h post-deploy window. Idempotent on already-done
+ *  releases. */
+export function useMarkReleaseDone(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.markReleaseDone(releaseId),
+    onSettled: () => invalidateReleaseMergeSurface(qc, wsId, releaseId),
+  });
+}
+
+/** GET the release health rollup. Auto-refetch on focus so a tab
+ *  that's been backgrounded picks up the latest snapshot. The WS
+ *  release:health_updated event also invalidates this. */
+export function releaseHealthOptions(
+  wsId: string,
+  releaseId: string,
+  enabled: boolean,
+) {
+  return queryOptions({
+    queryKey: shipKeys.releaseHealth(wsId, releaseId),
+    queryFn: () => api.getReleaseHealth(releaseId),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+export function useReleaseHealth(releaseId: string, enabled = true) {
+  const wsId = useWorkspaceId();
+  return useQuery(releaseHealthOptions(wsId, releaseId, enabled && !!releaseId));
 }

@@ -303,6 +303,12 @@ export function useRealtimeSync(
       "release:smoke_updated",
       "release:verified",
       "release:unverified",
+      // Phase 7d — production-stage events. Mirrors the staging set:
+      // per-release-detail invalidation + workspace rail.
+      "release:promoted",
+      "release:in_production",
+      "release:rollback_initiated",
+      "release:health_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -810,6 +816,31 @@ export function useRealtimeSync(
     const unsubVerified = ws.on("release:verified", onReleaseEvent);
     const unsubUnverified = ws.on("release:unverified", onReleaseEvent);
 
+    // Phase 7d — production-stage events. promoted / in_production /
+    // rollback_initiated all use the same release-detail invalidation
+    // pattern. health_updated additionally invalidates the per-release
+    // health rollup so the panel pill flips on the next render.
+    const onReleaseHealthEvent = (p: unknown) => {
+      onReleaseEvent(p);
+      const payload = p as { release_id?: string };
+      const wsId = getCurrentWsId();
+      if (wsId && payload?.release_id) {
+        qc.invalidateQueries({
+          queryKey: shipKeys.releaseHealth(wsId, payload.release_id),
+        });
+      }
+    };
+    const unsubPromoted = ws.on("release:promoted", onReleaseEvent);
+    const unsubInProduction = ws.on("release:in_production", onReleaseHealthEvent);
+    const unsubRollbackInitiated = ws.on(
+      "release:rollback_initiated",
+      onReleaseHealthEvent,
+    );
+    const unsubHealthUpdated = ws.on(
+      "release:health_updated",
+      onReleaseHealthEvent,
+    );
+
     const unsubChatDone = ws.on("chat:done", (p) => {
       const payload = p as ChatDonePayload;
       chatWsLogger.info("chat:done (global)", {
@@ -996,6 +1027,10 @@ export function useRealtimeSync(
       unsubSmokeUpdated();
       unsubVerified();
       unsubUnverified();
+      unsubPromoted();
+      unsubInProduction();
+      unsubRollbackInitiated();
+      unsubHealthUpdated();
       unsubChatDone();
       unsubTaskQueued();
       unsubTaskDispatch();

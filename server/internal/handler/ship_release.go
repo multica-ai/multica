@@ -192,6 +192,12 @@ type releaseResponse struct {
 	QAVerifiedAt     *string `json:"qa_verified_at"`
 	QAVerifiedBy     *string `json:"qa_verified_by"`
 	MergedMainSHA    *string `json:"merged_main_sha"`
+	// Phase 7d — production-stage signals. Same additive treatment;
+	// older clients ignore the extra fields.
+	PromotedBy            *string `json:"promoted_by"`
+	ProductionMainSHA     *string `json:"production_main_sha"`
+	RolledBackBy          *string `json:"rolled_back_by"`
+	RolledBackCompletedAt *string `json:"rolled_back_completed_at"`
 }
 
 func releaseToResponse(r db.ShipRelease, prCount int) releaseResponse {
@@ -227,6 +233,10 @@ func releaseToResponse(r db.ShipRelease, prCount int) releaseResponse {
 		QAVerifiedAt:     timestampToPtr(r.QaVerifiedAt),
 		QAVerifiedBy:     uuidToPtr(r.QaVerifiedBy),
 		MergedMainSHA:    textToPtr(r.MergedMainSha),
+		PromotedBy:            uuidToPtr(r.PromotedBy),
+		ProductionMainSHA:     textToPtr(r.ProductionMainSha),
+		RolledBackBy:          uuidToPtr(r.RolledBackBy),
+		RolledBackCompletedAt: timestampToPtr(r.RolledBackCompletedAt),
 	}
 }
 

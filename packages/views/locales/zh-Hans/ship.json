@@ -508,7 +508,66 @@
       "smoke_running": "冒烟测试运行中。通过后将进入验证阶段。",
       "smoke_failed": "冒烟测试失败。复查运行结果后,可重新运行、人工通过,或直接标记为已验证以覆盖。",
       "ready_to_verify": "可以验证了。点击「标记为已验证」进入上线准入。",
-      "verifying": "已验证。等待上线到生产环境。"
+      "verifying": "已验证。等待上线到生产环境。",
+      "promoting": "正在上线到生产环境。等待部署完成。",
+      "in_production": "已上线生产环境。监控发布后 24 小时的健康指标。",
+      "rolled_back": "已回滚。请到频道查看需要手动回滚的 PR 列表。",
+      "done": "发布已完成。24 小时观察期内未出现回滚。"
+    },
+    "promote": {
+      "button": "上线生产",
+      "dialog_title": "上线到生产环境?",
+      "dialog_description": "将本次发布部署到生产环境。在生产部署 webhook 确认前,发布会处于推送中状态。如果你的 CI 不发送 deployment_status 事件,可使用「标记为已上线」手动关联。",
+      "summary_label": "概要",
+      "summary_prs": "共 {{count}} 个 PR 即将上线",
+      "summary_sha": "提交",
+      "rollback_plan_label": "回滚预案(高/关键风险必填)",
+      "rollback_plan_placeholder": "如果上线后出问题,如何回滚?",
+      "ack_label": "我了解这将部署到生产环境。",
+      "submit": "上线",
+      "submitting": "上线中…",
+      "promoted_toast": "已上线生产环境",
+      "rollback_plan_required": "高/关键风险发布必须填写回滚预案。",
+      "ack_required": "请确认上线意图后再继续。",
+      "approver_required": "当前风险等级下,你没有权限上线此发布。"
+    },
+    "production": {
+      "live_banner": "自 {{time}} 起在生产环境",
+      "deploy_panel_title": "生产部署",
+      "deploy_at": "部署时间",
+      "awaiting_deploy": "等待生产部署。如 CI 不触发 webhook,可使用「标记为已上线」。",
+      "promoting_progress": "上线中…",
+      "mark_deployed_button": "标记为已上线",
+      "mark_deployed_toast": "已关联生产部署。",
+      "mark_done_button": "标记为完成",
+      "mark_done_toast": "发布已结束。"
+    },
+    "rollback": {
+      "button": "回滚",
+      "dialog_title": "回滚此次发布?",
+      "dialog_description": "发布将被标记为已回滚。需要回滚的 PR 列表如下,请到 GitHub 上为每个 PR 点击「Revert」按钮以创建回滚 PR。自动回滚将在 7e 阶段实现。",
+      "reason_label": "原因(必填)",
+      "reason_placeholder": "为什么要回滚?",
+      "submit": "回滚",
+      "submitting": "回滚中…",
+      "rolled_back_banner": "{{time}} 由 {{user}} 回滚",
+      "rolled_back_reason": "原因:{{reason}}",
+      "merged_prs_heading": "需要回滚的 PR(从新到旧):",
+      "github_revert_hint": "点击每个 PR 在 GitHub 上的「Revert」按钮创建回滚 PR。",
+      "reason_required": "回滚必须填写原因。",
+      "no_target": "没有可回滚的 PR(无已合并 PR)。"
+    },
+    "health": {
+      "panel_title": "上线后健康度",
+      "status_ok": "健康",
+      "status_warning": "关注",
+      "status_alert": "告警",
+      "error_rate_label": "错误率 Δ",
+      "p99_latency_label": "p99 延迟 Δ",
+      "inbox_label": "发布后收件箱新增",
+      "agent_failure_label": "Agent 失败率 Δ",
+      "no_signal": "—",
+      "awaiting_first_snapshot": "发布上线生产环境后开始监控。"
     }
   }
 }

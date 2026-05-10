@@ -16,9 +16,10 @@
 //       merging (paused) → paused banner + Resume / Skip & resume / Abort
 //       in_staging+ → Phase 7c+ controls (none here)
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
+  Activity,
   AlertTriangle,
   CheckCircle2,
   CircleDashed,
@@ -26,13 +27,16 @@ import {
   ExternalLink,
   FlaskConical,
   Hash,
+  Heart,
   Loader2,
   MessagesSquare,
   Pause,
   Play,
   Rocket,
+  RotateCcw,
   ShieldCheck,
   Train,
+  TrendingUp,
   X,
   XCircle,
   SkipForward,
@@ -49,6 +53,11 @@ import {
   useMarkReleaseVerified,
   useUnverifyRelease,
   useMarkReleaseStagingDeployed,
+  usePromoteRelease,
+  useMarkReleaseProductionDeployed,
+  useRollbackRelease,
+  useMarkReleaseDone,
+  useReleaseHealth,
 } from "@multica/core/ship";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import type { ReleasePullRequest } from "@multica/core/types";
@@ -112,6 +121,14 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
   const markVerified = useMarkReleaseVerified(releaseId);
   const unverify = useUnverifyRelease(releaseId);
   const markStaged = useMarkReleaseStagingDeployed(releaseId);
+  // Phase 7d — production-stage mutations + health rollup query.
+  const promote = usePromoteRelease(releaseId);
+  const markProdDeployed = useMarkReleaseProductionDeployed(releaseId);
+  const rollback = useRollbackRelease(releaseId);
+  const markDone = useMarkReleaseDone(releaseId);
+  // Health query is enabled when the release reaches in_production
+  // (the rollup row is empty until then; we still let the panel render
+  // the "monitoring will begin" empty state for verifying / promoting).
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [abortOpen, setAbortOpen] = useState(false);
@@ -124,6 +141,18 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
   const [unverifyReason, setUnverifyReason] = useState("");
   const [smokePassOpen, setSmokePassOpen] = useState(false);
   const [smokePassNote, setSmokePassNote] = useState("");
+  // Phase 7d — production dialog state.
+  const [promoteOpen, setPromoteOpen] = useState(false);
+  const [promoteRollbackPlan, setPromoteRollbackPlan] = useState("");
+  const [promoteAck, setPromoteAck] = useState(false);
+  const [rollbackOpen, setRollbackOpen] = useState(false);
+  const [rollbackReason, setRollbackReason] = useState("");
+  // Mark-production-deployed is debounced behind a 30s waiting state
+  // so users don't click before a webhook lands. Tracks "stage entered
+  // promoting at" — once 30s have elapsed since that, the affordance
+  // appears.
+  const [promotingSince, setPromotingSince] = useState<number | null>(null);
+  const [showProductionEscapeHatch, setShowProductionEscapeHatch] = useState(false);
 
   // Compute "first failed PR error message" for the paused banner.
   // Done as a useMemo so the same value drives both the banner copy
@@ -138,6 +167,42 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
     () => (data?.pull_requests ?? []).filter((pr) => pr.merge_state === "failed"),
     [data?.pull_requests],
   );
+
+  // Stage flags. We compute these from `data?.release.stage` so they
+  // can be used by hooks BEFORE the loading/isError early returns.
+  // Rules-of-hooks: every hook in this component must run on every
+  // render in the same order — pulling these out of the post-return
+  // body and placing them here is what keeps useReleaseHealth +
+  // the effect below at a stable position in the call list.
+  const stage = data?.release.stage ?? "assembling";
+  const isPromotingStage = stage === "promoting";
+  const isHealthEnabled =
+    stage === "in_production" || stage === "rolled_back" || stage === "done";
+
+  // Health rollup is fetched once the release reaches in_production
+  // (the monitor only writes rows for that stage); for earlier stages
+  // we still let the panel render an empty state via the disabled
+  // query (it returns an empty default).
+  const releaseHealth = useReleaseHealth(releaseId, isHealthEnabled);
+
+  // Phase 7d UX: the "Mark production deployed" escape hatch is
+  // hidden for the first 30s after entering the promoting stage so
+  // the user doesn't click before the deploy webhook has had a chance
+  // to land.
+  useEffect(() => {
+    if (isPromotingStage) {
+      const enteredAt = Date.now();
+      setPromotingSince(enteredAt);
+      setShowProductionEscapeHatch(false);
+      const timer = window.setTimeout(() => {
+        setShowProductionEscapeHatch(true);
+      }, 30_000);
+      return () => window.clearTimeout(timer);
+    }
+    setPromotingSince(null);
+    setShowProductionEscapeHatch(false);
+    return undefined;
+  }, [isPromotingStage]);
 
   if (isLoading) {
     return (
@@ -182,7 +247,15 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
   const isInStaging = release.stage === "in_staging";
   const isVerifying = release.stage === "verifying";
   const isStagingOrVerifying = isInStaging || isVerifying;
+  // Phase 7d — production-stage flags.
+  const isPromoting = release.stage === "promoting";
+  const isInProduction = release.stage === "in_production";
+  const isDone = release.stage === "done";
   const slug = workspace?.slug ?? "";
+  // promotingSince is read by the effect above; suppress the
+  // unused-binding warning here since the state setter is what the
+  // 30s debounce relies on for re-render gating.
+  void promotingSince;
 
   // Counts for the merge progress badge. Computed off the PR rows
   // because the release row only carries pr_count (total).
@@ -358,6 +431,98 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                   markStagedPending={markStaged.isPending}
                 />
               )}
+              {/* Phase 7d — Promote button on verifying stage. */}
+              {isVerifying && (
+                <Button
+                  size="sm"
+                  onClick={() => setPromoteOpen(true)}
+                  data-testid="release-promote-button"
+                >
+                  <Rocket className="size-3.5" />
+                  {t(($) => $.releases.promote.button)}
+                </Button>
+              )}
+              {/* Phase 7d — promoting stage actions. Show progress + the
+                  manual escape-hatch (after 30s) + a destructive
+                  Cancel-and-rollback. */}
+              {isPromoting && (
+                <>
+                  <span
+                    className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
+                    data-testid="release-promoting-progress"
+                  >
+                    <Loader2 className="size-3 animate-spin" />
+                    {t(($) => $.releases.production.promoting_progress)}
+                  </span>
+                  {showProductionEscapeHatch && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        markProdDeployed
+                          .mutateAsync()
+                          .then(() =>
+                            toast.success(
+                              t(($) => $.releases.production.mark_deployed_toast),
+                            ),
+                          )
+                          .catch((err: unknown) =>
+                            toast.error(
+                              err instanceof Error ? err.message : String(err),
+                            ),
+                          );
+                      }}
+                      disabled={markProdDeployed.isPending}
+                      data-testid="release-mark-prod-deployed-button"
+                    >
+                      <Rocket className="size-3.5" />
+                      {t(($) => $.releases.production.mark_deployed_button)}
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => setRollbackOpen(true)}
+                    data-testid="release-rollback-button"
+                  >
+                    <RotateCcw className="size-3.5" />
+                    {t(($) => $.releases.rollback.button)}
+                  </Button>
+                </>
+              )}
+              {/* Phase 7d — in_production actions: Rollback + Mark done. */}
+              {isInProduction && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      markDone
+                        .mutateAsync()
+                        .then(() =>
+                          toast.success(t(($) => $.releases.production.mark_done_toast)),
+                        )
+                        .catch((err: unknown) =>
+                          toast.error(err instanceof Error ? err.message : String(err)),
+                        );
+                    }}
+                    disabled={markDone.isPending}
+                    data-testid="release-mark-done-button"
+                  >
+                    <CheckCircle2 className="size-3.5" />
+                    {t(($) => $.releases.production.mark_done_button)}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => setRollbackOpen(true)}
+                    data-testid="release-rollback-button"
+                  >
+                    <RotateCcw className="size-3.5" />
+                    {t(($) => $.releases.rollback.button)}
+                  </Button>
+                </>
+              )}
             </div>
           </header>
 
@@ -439,8 +604,59 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
               next or what action they could take. The banner names the
               gating condition + the affordance, so an inert release
               doesn't look like a halted one. */}
-          {isStagingOrVerifying && (
+          {(isStagingOrVerifying || isPromoting || isInProduction || isDone) && (
             <NextStepBanner release={release} />
+          )}
+
+          {/* Phase 7d — production live banner. Appears once the
+              release reaches in_production; renders alongside the
+              health panel below. */}
+          {isInProduction && release.promoted_at && (
+            <div
+              className="flex items-start gap-2 rounded border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-400"
+              data-testid="release-live-banner"
+            >
+              <Rocket className="mt-0.5 size-4" />
+              <p className="flex-1 font-medium">
+                {t(($) => $.releases.production.live_banner, {
+                  time: formatRelativeShort(release.promoted_at ?? ""),
+                })}
+              </p>
+            </div>
+          )}
+
+          {/* Phase 7d — rolled-back banner. Read-only. */}
+          {isRolledBack && (
+            <div
+              className="flex items-start gap-2 rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+              data-testid="release-rolled-back-banner"
+            >
+              <RotateCcw className="mt-0.5 size-4" />
+              <div className="flex-1">
+                <p className="font-medium">
+                  {t(($) => $.releases.rollback.rolled_back_banner, {
+                    time: formatRelativeShort(release.rolled_back_completed_at ?? ""),
+                    user: rolledBackByLabel(release),
+                  })}
+                </p>
+                {release.rollback_reason && (
+                  <p className="text-xs text-muted-foreground">
+                    {t(($) => $.releases.rollback.rolled_back_reason, {
+                      reason: release.rollback_reason ?? "",
+                    })}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Phase 7d — production deploy panel + health rollup. Only
+              renders for the production-stage flows. */}
+          {(isPromoting || isInProduction || isRolledBack || isDone) && (
+            <ProductionPanels
+              release={release}
+              health={releaseHealth.data ?? null}
+            />
           )}
 
           {/* Phase 7c — staging-stage panels. Each is conditional on
@@ -897,8 +1113,436 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Phase 7d — Promote dialog. Captures the rollback plan and the
+          deploy-intent acknowledgement before submitting. The submit
+          stays disabled when the rollback plan is required (high /
+          critical risk) but missing, or the ack hasn't been checked. */}
+      <Dialog open={promoteOpen} onOpenChange={setPromoteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.releases.promote.dialog_title)}</DialogTitle>
+            <DialogDescription>
+              {t(($) => $.releases.promote.dialog_description)}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="text-xs">
+              <span className="text-muted-foreground">
+                {t(($) => $.releases.promote.summary_label)}:{" "}
+              </span>
+              <span className="text-foreground">
+                {t(($) => $.releases.promote.summary_prs, {
+                  count: data.pull_requests.length,
+                })}
+              </span>
+              {release.merged_main_sha && (
+                <>
+                  {" · "}
+                  <span className="text-muted-foreground">
+                    {t(($) => $.releases.promote.summary_sha)}:{" "}
+                  </span>
+                  <code className="text-foreground">
+                    {release.merged_main_sha.slice(0, 7)}
+                  </code>
+                </>
+              )}
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="promote-rollback-plan">
+                {t(($) => $.releases.promote.rollback_plan_label)}
+              </Label>
+              <Textarea
+                id="promote-rollback-plan"
+                value={promoteRollbackPlan}
+                onChange={(e) => setPromoteRollbackPlan(e.target.value)}
+                placeholder={t(($) => $.releases.promote.rollback_plan_placeholder)}
+                rows={3}
+                data-testid="release-promote-rollback-plan"
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={promoteAck}
+                onCheckedChange={(c) => setPromoteAck(c === true)}
+                data-testid="release-promote-ack"
+              />
+              <span>{t(($) => $.releases.promote.ack_label)}</span>
+            </label>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setPromoteOpen(false)}
+              disabled={promote.isPending}
+            >
+              {t(($) => $.releases.create_dialog.cancel)}
+            </Button>
+            <Button
+              disabled={
+                promote.isPending ||
+                !promoteAck ||
+                ((release.risk_level === "high" || release.risk_level === "critical") &&
+                  promoteRollbackPlan.trim() === "")
+              }
+              data-testid="release-promote-submit"
+              onClick={async () => {
+                if (!promoteAck) {
+                  toast.error(t(($) => $.releases.promote.ack_required));
+                  return;
+                }
+                if (
+                  (release.risk_level === "high" || release.risk_level === "critical") &&
+                  promoteRollbackPlan.trim() === ""
+                ) {
+                  toast.error(t(($) => $.releases.promote.rollback_plan_required));
+                  return;
+                }
+                try {
+                  await promote.mutateAsync({
+                    rollback_plan: promoteRollbackPlan.trim() || undefined,
+                  });
+                  toast.success(t(($) => $.releases.promote.promoted_toast));
+                  setPromoteOpen(false);
+                  setPromoteRollbackPlan("");
+                  setPromoteAck(false);
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : String(err));
+                }
+              }}
+            >
+              {promote.isPending
+                ? t(($) => $.releases.promote.submitting)
+                : t(($) => $.releases.promote.submit)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Phase 7d — Rollback dialog. Reason REQUIRED. Lists the merged
+          PRs in reverse-merge order with deep links so the user can
+          click GitHub's per-PR Revert button. */}
+      <RollbackDialog
+        open={rollbackOpen}
+        onOpenChange={setRollbackOpen}
+        mergedPRs={data.pull_requests.filter((pr) => pr.merge_state === "merged")}
+        reason={rollbackReason}
+        onReasonChange={setRollbackReason}
+        onSubmit={async () => {
+          if (rollbackReason.trim() === "") {
+            toast.error(t(($) => $.releases.rollback.reason_required));
+            return;
+          }
+          try {
+            await rollback.mutateAsync({ reason: rollbackReason.trim() });
+            toast.success(t(($) => $.releases.rollback.submit));
+            setRollbackOpen(false);
+            setRollbackReason("");
+          } catch (err) {
+            toast.error(err instanceof Error ? err.message : String(err));
+          }
+        }}
+        submitting={rollback.isPending}
+      />
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7d — production-stage components.
+// ---------------------------------------------------------------------------
+
+interface RollbackDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  mergedPRs: ReleasePullRequest[];
+  reason: string;
+  onReasonChange: (v: string) => void;
+  onSubmit: () => Promise<void>;
+  submitting: boolean;
+}
+
+function RollbackDialog({
+  open,
+  onOpenChange,
+  mergedPRs,
+  reason,
+  onReasonChange,
+  onSubmit,
+  submitting,
+}: RollbackDialogProps) {
+  const { t } = useT("ship");
+  // Reverse merge order — last merged appears first. The mergedPRs
+  // input is already filtered to merge_state="merged"; we just sort
+  // by position descending to mirror the backend's
+  // ListReleasePRsByMergeOrderDesc.
+  const ordered = useMemo(
+    () => [...mergedPRs].sort((a, b) => b.position - a.position),
+    [mergedPRs],
+  );
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {t(($) => $.releases.rollback.dialog_title)}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {t(($) => $.releases.rollback.dialog_description)}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="grid gap-1.5">
+          <Label htmlFor="rollback-reason">
+            {t(($) => $.releases.rollback.reason_label)}
+          </Label>
+          <Textarea
+            id="rollback-reason"
+            value={reason}
+            onChange={(e) => onReasonChange(e.target.value)}
+            placeholder={t(($) => $.releases.rollback.reason_placeholder)}
+            rows={2}
+            data-testid="release-rollback-reason"
+          />
+        </div>
+        {ordered.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-foreground">
+              {t(($) => $.releases.rollback.merged_prs_heading)}
+            </p>
+            <ul
+              className="max-h-48 space-y-1 overflow-y-auto text-xs"
+              data-testid="release-rollback-pr-list"
+            >
+              {ordered.map((pr) => (
+                <li key={pr.id} className="flex items-center gap-2">
+                  <span className="tabular-nums text-muted-foreground">
+                    #{pr.number}
+                  </span>
+                  <a
+                    href={pr.html_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 truncate hover:underline"
+                    title={t(($) => $.releases.rollback.github_revert_hint)}
+                  >
+                    {pr.title}
+                  </a>
+                  <ExternalLink className="size-3 text-muted-foreground" aria-hidden />
+                </li>
+              ))}
+            </ul>
+            <p className="text-[11px] text-muted-foreground">
+              {t(($) => $.releases.rollback.github_revert_hint)}
+            </p>
+          </div>
+        )}
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={submitting}>
+            {t(($) => $.releases.create_dialog.cancel)}
+          </AlertDialogCancel>
+          <AlertDialogAction
+            disabled={reason.trim() === "" || submitting}
+            data-testid="release-rollback-submit"
+            onClick={(e) => {
+              e.preventDefault();
+              void onSubmit();
+            }}
+          >
+            {submitting
+              ? t(($) => $.releases.rollback.submitting)
+              : t(($) => $.releases.rollback.submit)}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+/** ProductionPanels renders the production deploy summary + the
+ *  health rollup. Both render through their own empty states for
+ *  releases that haven't reached in_production yet. */
+function ProductionPanels({
+  release,
+  health,
+}: {
+  release: import("@multica/core/types").Release;
+  health: import("@multica/core/types").ReleaseHealth | null;
+}) {
+  const { t } = useT("ship");
+  return (
+    <div className="grid gap-3 sm:grid-cols-2" data-testid="release-production-panels">
+      <div className="rounded border bg-card p-3 text-sm">
+        <div className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <Rocket className="size-3.5" />
+          {t(($) => $.releases.production.deploy_panel_title)}
+        </div>
+        {release.production_deploy_id ? (
+          <div className="space-y-1">
+            {(release.production_main_sha || release.merged_main_sha) && (
+              <p className="font-mono text-xs">
+                {(release.production_main_sha ?? release.merged_main_sha ?? "").slice(0, 7)}
+              </p>
+            )}
+            {release.promoted_at && (
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.releases.production.deploy_at)}:{" "}
+                {formatRelativeShort(release.promoted_at)}
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {t(($) => $.releases.production.awaiting_deploy)}
+          </p>
+        )}
+      </div>
+      <HealthRollupPanel health={health} stage={release.stage} />
+    </div>
+  );
+}
+
+/** HealthRollupPanel — three-tier status pill + per-metric mini
+ *  deltas. When `health` is null OR overall_status is "ok" with no
+ *  signal, the panel renders a calm baseline state. Forward-compat:
+ *  unknown status strings render the raw value (per the API drift
+ *  rules). */
+function HealthRollupPanel({
+  health,
+  stage,
+}: {
+  health: import("@multica/core/types").ReleaseHealth | null;
+  stage: string;
+}) {
+  const { t } = useT("ship");
+  const status = health?.overall_status ?? "ok";
+  const hasAnySignal = !!health && (
+    health.error_rate_delta !== null ||
+    health.p99_latency_delta_ms !== null ||
+    health.inbox_issues_since_promote > 0 ||
+    health.agent_failure_rate_delta !== null
+  );
+  return (
+    <div
+      className="rounded border bg-card p-3 text-sm"
+      data-testid="release-health-panel"
+      data-overall-status={status}
+    >
+      <div className="mb-2 flex items-center justify-between gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <Heart className="size-3.5" />
+          {t(($) => $.releases.health.panel_title)}
+        </span>
+        <HealthStatusPill status={status} />
+      </div>
+      {!hasAnySignal && stage !== "in_production" && stage !== "rolled_back" && stage !== "done" ? (
+        <p className="text-xs text-muted-foreground">
+          {t(($) => $.releases.health.awaiting_first_snapshot)}
+        </p>
+      ) : (
+        <ul className="space-y-1 text-xs">
+          <HealthRow
+            icon={<TrendingUp className="size-3" />}
+            label={t(($) => $.releases.health.error_rate_label)}
+            value={formatDelta(health?.error_rate_delta ?? null, "%")}
+          />
+          <HealthRow
+            icon={<Activity className="size-3" />}
+            label={t(($) => $.releases.health.p99_latency_label)}
+            value={formatDelta(health?.p99_latency_delta_ms ?? null, "ms")}
+          />
+          <HealthRow
+            icon={<MessagesSquare className="size-3" />}
+            label={t(($) => $.releases.health.inbox_label)}
+            value={String(health?.inbox_issues_since_promote ?? 0)}
+          />
+          <HealthRow
+            icon={<AlertTriangle className="size-3" />}
+            label={t(($) => $.releases.health.agent_failure_label)}
+            value={formatDelta(health?.agent_failure_rate_delta ?? null, "%")}
+          />
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function HealthRow({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}) {
+  return (
+    <li className="flex items-center justify-between gap-2 text-muted-foreground">
+      <span className="flex items-center gap-1.5">
+        {icon}
+        {label}
+      </span>
+      <span className="tabular-nums text-foreground">{value}</span>
+    </li>
+  );
+}
+
+function HealthStatusPill({ status }: { status: string }) {
+  const { t } = useT("ship");
+  switch (status) {
+    case "alert":
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-destructive/20 px-1.5 py-0.5 text-[10px] font-medium text-destructive">
+          <AlertTriangle className="size-3" />
+          {t(($) => $.releases.health.status_alert)}
+        </span>
+      );
+    case "warning":
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+          <AlertTriangle className="size-3" />
+          {t(($) => $.releases.health.status_warning)}
+        </span>
+      );
+    case "ok":
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+          <CheckCircle2 className="size-3" />
+          {t(($) => $.releases.health.status_ok)}
+        </span>
+      );
+    default:
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          {status}
+        </span>
+      );
+  }
+}
+
+/** formatDelta renders a delta with an explicit sign + unit. Returns
+ *  "—" for null. Percentages multiply by 100 (the wire shape carries
+ *  fractions like 0.05 = 5pp). */
+function formatDelta(v: number | null, unit: "%" | "ms"): string {
+  if (v === null || !Number.isFinite(v)) return "—";
+  if (unit === "%") {
+    const pct = v * 100;
+    const sign = pct > 0 ? "+" : "";
+    return `${sign}${pct.toFixed(1)}%`;
+  }
+  const sign = v > 0 ? "+" : "";
+  return `${sign}${v.toFixed(0)}ms`;
+}
+
+/** rolledBackByLabel renders the user who rolled back. Same shape as
+ *  verifiedByLabel — short hex slice as a fallback when display name
+ *  isn't available. */
+function rolledBackByLabel(
+  release: import("@multica/core/types").Release,
+): string {
+  if (release.rolled_back_by) {
+    return release.rolled_back_by.slice(0, 8);
+  }
+  return "—";
 }
 
 interface ResumeMergeDialogProps {
@@ -1294,7 +1938,19 @@ function NextStepBanner({
   let message = "";
   let testId = "release-next-step-default";
 
-  if (stage === "verifying") {
+  if (stage === "promoting") {
+    message = t(($) => $.releases.next_step.promoting);
+    testId = "release-next-step-promoting";
+  } else if (stage === "in_production") {
+    message = t(($) => $.releases.next_step.in_production);
+    testId = "release-next-step-in-production";
+  } else if (stage === "rolled_back") {
+    message = t(($) => $.releases.next_step.rolled_back);
+    testId = "release-next-step-rolled-back";
+  } else if (stage === "done") {
+    message = t(($) => $.releases.next_step.done);
+    testId = "release-next-step-done";
+  } else if (stage === "verifying") {
     message = t(($) => $.releases.next_step.verifying);
     testId = "release-next-step-verifying";
   } else if (!hasSha) {

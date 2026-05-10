@@ -102,7 +102,16 @@ export type WSEventType =
   | "release:staging_landed"
   | "release:smoke_updated"
   | "release:verified"
-  | "release:unverified";
+  | "release:unverified"
+  // Phase 7d — production-stage events. promoted fires on stage
+  // transition verifying → promoting; in_production fires when the
+  // production deploy webhook confirms; rollback_initiated fires when
+  // the user clicks Rollback; health_updated fires on every 5-min
+  // monitor pass that writes a fresh release_health row.
+  | "release:promoted"
+  | "release:in_production"
+  | "release:rollback_initiated"
+  | "release:health_updated";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;

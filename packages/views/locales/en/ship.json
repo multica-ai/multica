@@ -513,7 +513,66 @@
       "smoke_running": "Smoke tests running. The release will advance to verifying when they pass.",
       "smoke_failed": "Smoke tests failed. Review the run, re-run, mark a manual pass, or mark verified to override.",
       "ready_to_verify": "Ready to verify. Click Mark verified to advance to the production gate.",
-      "verifying": "Verified. Awaiting promotion to production."
+      "verifying": "Verified. Awaiting promotion to production.",
+      "promoting": "Promoting to production. Awaiting deploy.",
+      "in_production": "Live in production. Monitoring health for 24 hours.",
+      "rolled_back": "Release rolled back. See channel for the merged PRs to revert manually.",
+      "done": "Release complete. 24-hour post-deploy window elapsed without rollback."
+    },
+    "promote": {
+      "button": "Promote to production",
+      "dialog_title": "Promote to production?",
+      "dialog_description": "Deploy this release to production. The release transitions to promoting until the production deploy webhook confirms — or use Mark production deployed if your CI doesn't fire deployment_status events.",
+      "summary_label": "Summary",
+      "summary_prs": "{{count}} PR(s) to deploy",
+      "summary_sha": "Commit",
+      "rollback_plan_label": "Rollback plan (required for high/critical risk)",
+      "rollback_plan_placeholder": "How would you roll this back if something breaks?",
+      "ack_label": "I understand this will deploy to production.",
+      "submit": "Promote",
+      "submitting": "Promoting…",
+      "promoted_toast": "Release promoted to production",
+      "rollback_plan_required": "A rollback plan is required for high/critical risk releases.",
+      "ack_required": "Confirm the deployment intent to continue.",
+      "approver_required": "You aren't eligible to promote this release at the current risk tier."
+    },
+    "production": {
+      "live_banner": "Live in production since {{time}}",
+      "deploy_panel_title": "Production deploy",
+      "deploy_at": "Deployed",
+      "awaiting_deploy": "Awaiting production deploy. Use Mark production deployed if your CI doesn't fire webhooks.",
+      "promoting_progress": "Promoting…",
+      "mark_deployed_button": "Mark production deployed",
+      "mark_deployed_toast": "Production deploy linked.",
+      "mark_done_button": "Mark done",
+      "mark_done_toast": "Release closed."
+    },
+    "rollback": {
+      "button": "Rollback",
+      "dialog_title": "Roll back this release?",
+      "dialog_description": "The release will be marked rolled back. The merged PRs are listed below — open each on GitHub and click 'Revert' to create the revert PRs. Auto-revert is on the Phase 7e roadmap.",
+      "reason_label": "Reason (required)",
+      "reason_placeholder": "Why are we rolling back?",
+      "submit": "Roll back",
+      "submitting": "Rolling back…",
+      "rolled_back_banner": "Rolled back at {{time}} by {{user}}",
+      "rolled_back_reason": "Reason: {{reason}}",
+      "merged_prs_heading": "PRs to revert (newest first):",
+      "github_revert_hint": "Click each PR's 'Revert' button on GitHub to create the revert PR.",
+      "reason_required": "A reason is required to roll back.",
+      "no_target": "Nothing to roll back (no merged PRs)."
+    },
+    "health": {
+      "panel_title": "Post-deploy health",
+      "status_ok": "Healthy",
+      "status_warning": "Watch",
+      "status_alert": "Alert",
+      "error_rate_label": "Error rate Δ",
+      "p99_latency_label": "p99 latency Δ",
+      "inbox_label": "Inbox since promote",
+      "agent_failure_label": "Agent failures Δ",
+      "no_signal": "—",
+      "awaiting_first_snapshot": "Monitoring will begin once this release reaches production."
     }
   }
 }

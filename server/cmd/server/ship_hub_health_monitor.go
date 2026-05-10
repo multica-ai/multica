@@ -71,6 +71,10 @@ func runShipHubHealthOnce(ctx context.Context, queries *db.Queries) {
 				"deploy_id", d.ID, "error", err)
 		}
 	}
+	// Phase 7d — release-level rollup. After per-deploy snapshots are
+	// fresh, walk every in_production release and write/refresh its
+	// ship_release_health row. The release page renders this directly.
+	rollupReleaseHealth(ctx, queries)
 }
 
 // snapshotDeployHealth computes one row's worth of data and writes it.
@@ -144,4 +148,131 @@ func failureRate(
 		return 0, false
 	}
 	return float64(row.Failed) / float64(row.Total), true
+}
+
+// rollupReleaseHealth — Phase 7d. Walks every in_production release
+// and writes/refreshes its ship_release_health row. The aggregation
+// is straightforward today:
+//
+//   - error_rate / p99 latency deltas: pulled from the most recent
+//     deploy_health_snapshot for the release's production_deploy_id,
+//     when present. (Phase 5 only populates these when the workspace
+//     has a real APM signal — most workspaces leave them NULL today.)
+//   - inbox_issues_since_promote: count of inbox_item rows in the
+//     workspace created since release.promoted_at. This is a coarse
+//     "post-deploy noise" signal — Phase 7e can refine to keyword
+//     matching when we have a corpus of "broken"/"crash"/etc to
+//     calibrate against.
+//   - agent_failure_rate_delta: also from the per-deploy snapshot.
+//
+// overall_status: "ok" by default; "warning" when ANY metric is >=
+// 1.5x its baseline (or, for inbox/failure, exceeds a small absolute
+// threshold); "alert" when >= 3x or strongly elevated. The release
+// page renders the pill + the rollback affordance is highlighted on
+// "alert".
+//
+// Best-effort throughout — every failure path falls back to "ok" and
+// continues to the next release, so one bad row doesn't poison the
+// entire pass.
+func rollupReleaseHealth(ctx context.Context, queries *db.Queries) {
+	releases, err := queries.ListInProductionReleases(ctx)
+	if err != nil {
+		slog.Warn("ship hub health monitor: list in-production releases failed",
+			"error", err)
+		return
+	}
+	for _, rel := range releases {
+		if err := snapshotReleaseHealth(ctx, queries, rel); err != nil {
+			slog.Warn("ship hub health monitor: release snapshot failed",
+				"release_id", rel.ID, "error", err)
+		}
+	}
+}
+
+// snapshotReleaseHealth computes one release's rollup and writes it.
+func snapshotReleaseHealth(ctx context.Context, queries *db.Queries, rel db.ShipRelease) error {
+	// 1. Inbox-since-promote count. promoted_at MUST be set for an
+	// in_production release (the stage flip stamps it), but be
+	// defensive — fall back to merged_at if missing.
+	since := rel.PromotedAt
+	if !since.Valid {
+		since = rel.MergedAt
+	}
+	var inboxSince int32
+	if since.Valid {
+		if c, err := queries.ListRecentInboxOpensSinceForWorkspace(ctx, db.ListRecentInboxOpensSinceForWorkspaceParams{
+			WorkspaceID: rel.WorkspaceID,
+			CreatedAt:   since,
+		}); err == nil {
+			inboxSince = int32(c)
+		}
+	}
+
+	// 2. Per-deploy snapshot deltas (when we have a linked deploy).
+	var errorRateDelta, latencyDelta, agentDelta pgtype.Float8
+	if rel.ProductionDeployID.Valid {
+		if snap, err := queries.GetLatestDeployHealthSnapshot(ctx, rel.ProductionDeployID); err == nil {
+			if snap.ErrorRateBaseline.Valid && snap.ErrorRateCurrent.Valid {
+				errorRateDelta = pgtype.Float8{
+					Float64: snap.ErrorRateCurrent.Float64 - snap.ErrorRateBaseline.Float64,
+					Valid:   true,
+				}
+			}
+			if snap.P99LatencyBaselineMs.Valid && snap.P99LatencyCurrentMs.Valid {
+				latencyDelta = pgtype.Float8{
+					Float64: snap.P99LatencyCurrentMs.Float64 - snap.P99LatencyBaselineMs.Float64,
+					Valid:   true,
+				}
+			}
+			if snap.AgentFailureRateDelta.Valid {
+				agentDelta = snap.AgentFailureRateDelta
+			}
+		}
+	}
+
+	overall := computeReleaseHealthStatus(errorRateDelta, latencyDelta, inboxSince, agentDelta)
+
+	if _, err := queries.UpsertReleaseHealth(ctx, db.UpsertReleaseHealthParams{
+		ReleaseID:               rel.ID,
+		WorkspaceID:             rel.WorkspaceID,
+		InboxIssuesSincePromote: inboxSince,
+		OverallStatus:           overall,
+		ErrorRateDelta:          errorRateDelta,
+		P99LatencyDeltaMs:       latencyDelta,
+		AgentFailureRateDelta:   agentDelta,
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// computeReleaseHealthStatus collapses the four signal channels into
+// a single 3-tier status. Conservative defaults: when no signals are
+// available, return "ok" rather than misleading the user with a
+// false-warning state.
+//
+// Heuristic (deliberately simple — Phase 7e can refine):
+//   - alert: error rate Δ > 0.05 (5pp absolute), latency Δ > 200ms,
+//     inbox > 10 since promote, agent failure Δ > 0.10
+//   - warning: error rate Δ > 0.01, latency Δ > 50ms, inbox > 3,
+//     agent failure Δ > 0.03
+//   - ok: everything else (including all-NULL signals)
+func computeReleaseHealthStatus(
+	errDelta, latDelta pgtype.Float8,
+	inboxSince int32,
+	agentDelta pgtype.Float8,
+) string {
+	if (errDelta.Valid && errDelta.Float64 > 0.05) ||
+		(latDelta.Valid && latDelta.Float64 > 200) ||
+		inboxSince > 10 ||
+		(agentDelta.Valid && agentDelta.Float64 > 0.10) {
+		return "alert"
+	}
+	if (errDelta.Valid && errDelta.Float64 > 0.01) ||
+		(latDelta.Valid && latDelta.Float64 > 50) ||
+		inboxSince > 3 ||
+		(agentDelta.Valid && agentDelta.Float64 > 0.03) {
+		return "warning"
+	}
+	return "ok"
 }

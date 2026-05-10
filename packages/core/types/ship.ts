@@ -577,6 +577,19 @@ export interface Release {
    *  Used by the deploy webhook handler to link a deploy back to the
    *  release. Surfaced in the linked-staging-deploy panel. */
   merged_main_sha?: string | null;
+  // ---- Phase 7d — production-stage signals ----
+  /** User who clicked Promote. */
+  promoted_by?: string | null;
+  /** SHA that landed in production. Usually equals merged_main_sha;
+   *  diverges when a hotfix or revert sha lands in prod that's
+   *  different from what was originally merged. */
+  production_main_sha?: string | null;
+  /** User who initiated the rollback. */
+  rolled_back_by?: string | null;
+  /** When the rollback completed (v1: same instant as
+   *  rolled_back_by — the user-driven flow records the decision and
+   *  the channel post lists the merged PRs to revert manually). */
+  rolled_back_completed_at?: string | null;
 }
 
 /** Phase 7b — per-PR merge state values. Drives the pill rendering on
@@ -718,6 +731,38 @@ export interface MarkReleaseVerifiedRequest {
  *  the wire — the server returns 400 if empty. */
 export interface UnverifyReleaseRequest {
   reason: string;
+}
+
+// --- Phase 7d — production-stage requests + health rollup -------------------
+
+/** Body for POST /api/releases/{id}/promote. rollback_plan is captured
+ *  at click-time and stored in the audit log; it's surfaced in the
+ *  Promote dialog and required for high/critical risk releases (the
+ *  client gates the submit button on it). */
+export interface PromoteReleaseRequest {
+  rollback_plan?: string;
+}
+
+/** Body for POST /api/releases/{id}/rollback. Reason REQUIRED. */
+export interface RollbackReleaseRequest {
+  reason: string;
+}
+
+/** Phase 7d — release health rollup. Each Δ is the delta vs baseline;
+ *  null means "no signal" (the metric isn't being collected for this
+ *  workspace, OR the release just promoted and the monitor hasn't
+ *  written a row yet). The UI renders "—" for null. */
+export interface ReleaseHealth {
+  release_id: string;
+  /** "ok" | "warning" | "alert" — drives the pill color and whether
+   *  the rollback affordance is highlighted. Loose-typed per the API
+   *  drift contract. */
+  overall_status: string;
+  snapshot_at: string;
+  error_rate_delta: number | null;
+  p99_latency_delta_ms: number | null;
+  inbox_issues_since_promote: number;
+  agent_failure_rate_delta: number | null;
 }
 
 /** Phase 7b — lightweight merge_state poll response. */

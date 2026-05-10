@@ -349,6 +349,11 @@ func main() {
 	// the current deployed SHA so the swimlane stays accurate even when
 	// a webhook delivery is missed (provider hiccup, Multica downtime).
 	go runShipHubAdapterPoller(sweepCtx, queries)
+	// Ship Hub Phase 7d release finalizer: every 15 minutes, transition
+	// in_production releases past the 24h monitoring window to "done".
+	// The bus adapter publishes the resulting release:updated WS event
+	// so connected clients see the badge flip without a refresh.
+	go runShipHubReleaseFinalizer(sweepCtx, queries, &finalizerBusAdapter{bus: bus})
 
 	if metricsServer != nil {
 		go func() {

@@ -143,6 +143,51 @@ func (ns NullPrMergeState) Value() (driver.Value, error) {
 	return string(ns.PrMergeState), nil
 }
 
+type PrRevertState string
+
+const (
+	PrRevertStatePending    PrRevertState = "pending"
+	PrRevertStateInProgress PrRevertState = "in_progress"
+	PrRevertStateReverted   PrRevertState = "reverted"
+	PrRevertStateFailed     PrRevertState = "failed"
+	PrRevertStateSkipped    PrRevertState = "skipped"
+)
+
+func (e *PrRevertState) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = PrRevertState(s)
+	case string:
+		*e = PrRevertState(s)
+	default:
+		return fmt.Errorf("unsupported scan type for PrRevertState: %T", src)
+	}
+	return nil
+}
+
+type NullPrRevertState struct {
+	PrRevertState PrRevertState `json:"pr_revert_state"`
+	Valid         bool          `json:"valid"` // Valid is true if PrRevertState is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullPrRevertState) Scan(value interface{}) error {
+	if value == nil {
+		ns.PrRevertState, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.PrRevertState.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullPrRevertState) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.PrRevertState), nil
+}
+
 type PullRequestState string
 
 const (
@@ -907,36 +952,40 @@ type ShipCardAction struct {
 }
 
 type ShipRelease struct {
-	ID                 pgtype.UUID        `json:"id"`
-	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
-	ProjectID          pgtype.UUID        `json:"project_id"`
-	Title              string             `json:"title"`
-	Description        pgtype.Text        `json:"description"`
-	Stage              ReleaseStage       `json:"stage"`
-	RiskLevel          RiskLevel          `json:"risk_level"`
-	ChannelID          pgtype.UUID        `json:"channel_id"`
-	IssueID            pgtype.UUID        `json:"issue_id"`
-	ApproverID         pgtype.UUID        `json:"approver_id"`
-	SecondApproverID   pgtype.UUID        `json:"second_approver_id"`
-	StagingDeployID    pgtype.UUID        `json:"staging_deploy_id"`
-	ProductionDeployID pgtype.UUID        `json:"production_deploy_id"`
-	CreatedBy          pgtype.UUID        `json:"created_by"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	MergedAt           pgtype.Timestamptz `json:"merged_at"`
-	StagedAt           pgtype.Timestamptz `json:"staged_at"`
-	PromotedAt         pgtype.Timestamptz `json:"promoted_at"`
-	DoneAt             pgtype.Timestamptz `json:"done_at"`
-	RollbackReason     pgtype.Text        `json:"rollback_reason"`
-	MergePaused        bool               `json:"merge_paused"`
-	MergeMethod        string             `json:"merge_method"`
-	SmokeRunID         pgtype.Text        `json:"smoke_run_id"`
-	SmokeRunUrl        pgtype.Text        `json:"smoke_run_url"`
-	SmokeStatus        pgtype.Text        `json:"smoke_status"`
-	SmokeCompletedAt   pgtype.Timestamptz `json:"smoke_completed_at"`
-	QaVerifiedAt       pgtype.Timestamptz `json:"qa_verified_at"`
-	QaVerifiedBy       pgtype.UUID        `json:"qa_verified_by"`
-	MergedMainSha      pgtype.Text        `json:"merged_main_sha"`
+	ID                    pgtype.UUID        `json:"id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	ProjectID             pgtype.UUID        `json:"project_id"`
+	Title                 string             `json:"title"`
+	Description           pgtype.Text        `json:"description"`
+	Stage                 ReleaseStage       `json:"stage"`
+	RiskLevel             RiskLevel          `json:"risk_level"`
+	ChannelID             pgtype.UUID        `json:"channel_id"`
+	IssueID               pgtype.UUID        `json:"issue_id"`
+	ApproverID            pgtype.UUID        `json:"approver_id"`
+	SecondApproverID      pgtype.UUID        `json:"second_approver_id"`
+	StagingDeployID       pgtype.UUID        `json:"staging_deploy_id"`
+	ProductionDeployID    pgtype.UUID        `json:"production_deploy_id"`
+	CreatedBy             pgtype.UUID        `json:"created_by"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	MergedAt              pgtype.Timestamptz `json:"merged_at"`
+	StagedAt              pgtype.Timestamptz `json:"staged_at"`
+	PromotedAt            pgtype.Timestamptz `json:"promoted_at"`
+	DoneAt                pgtype.Timestamptz `json:"done_at"`
+	RollbackReason        pgtype.Text        `json:"rollback_reason"`
+	MergePaused           bool               `json:"merge_paused"`
+	MergeMethod           string             `json:"merge_method"`
+	SmokeRunID            pgtype.Text        `json:"smoke_run_id"`
+	SmokeRunUrl           pgtype.Text        `json:"smoke_run_url"`
+	SmokeStatus           pgtype.Text        `json:"smoke_status"`
+	SmokeCompletedAt      pgtype.Timestamptz `json:"smoke_completed_at"`
+	QaVerifiedAt          pgtype.Timestamptz `json:"qa_verified_at"`
+	QaVerifiedBy          pgtype.UUID        `json:"qa_verified_by"`
+	MergedMainSha         pgtype.Text        `json:"merged_main_sha"`
+	PromotedBy            pgtype.UUID        `json:"promoted_by"`
+	ProductionMainSha     pgtype.Text        `json:"production_main_sha"`
+	RolledBackBy          pgtype.UUID        `json:"rolled_back_by"`
+	RolledBackCompletedAt pgtype.Timestamptz `json:"rolled_back_completed_at"`
 }
 
 type ShipReleaseEvent struct {
@@ -948,16 +997,31 @@ type ShipReleaseEvent struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type ShipReleaseHealth struct {
+	ReleaseID               pgtype.UUID        `json:"release_id"`
+	WorkspaceID             pgtype.UUID        `json:"workspace_id"`
+	SnapshotAt              pgtype.Timestamptz `json:"snapshot_at"`
+	ErrorRateDelta          pgtype.Float8      `json:"error_rate_delta"`
+	P99LatencyDeltaMs       pgtype.Float8      `json:"p99_latency_delta_ms"`
+	InboxIssuesSincePromote int32              `json:"inbox_issues_since_promote"`
+	AgentFailureRateDelta   pgtype.Float8      `json:"agent_failure_rate_delta"`
+	OverallStatus           string             `json:"overall_status"`
+}
+
 type ShipReleasePullRequest struct {
-	ReleaseID     pgtype.UUID        `json:"release_id"`
-	PullRequestID pgtype.UUID        `json:"pull_request_id"`
-	Position      int32              `json:"position"`
-	MergedSha     pgtype.Text        `json:"merged_sha"`
-	MergedAt      pgtype.Timestamptz `json:"merged_at"`
-	MergeError    pgtype.Text        `json:"merge_error"`
-	AddedAt       pgtype.Timestamptz `json:"added_at"`
-	IsActive      bool               `json:"is_active"`
-	MergeState    PrMergeState       `json:"merge_state"`
+	ReleaseID      pgtype.UUID        `json:"release_id"`
+	PullRequestID  pgtype.UUID        `json:"pull_request_id"`
+	Position       int32              `json:"position"`
+	MergedSha      pgtype.Text        `json:"merged_sha"`
+	MergedAt       pgtype.Timestamptz `json:"merged_at"`
+	MergeError     pgtype.Text        `json:"merge_error"`
+	AddedAt        pgtype.Timestamptz `json:"added_at"`
+	IsActive       bool               `json:"is_active"`
+	MergeState     PrMergeState       `json:"merge_state"`
+	RevertState    NullPrRevertState  `json:"revert_state"`
+	RevertPrNumber pgtype.Int4        `json:"revert_pr_number"`
+	RevertPrUrl    pgtype.Text        `json:"revert_pr_url"`
+	RevertError    pgtype.Text        `json:"revert_error"`
 }
 
 type Skill struct {

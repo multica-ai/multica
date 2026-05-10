@@ -608,7 +608,38 @@ export const ReleaseSchema = z.object({
   qa_verified_at: z.string().nullable().optional(),
   qa_verified_by: z.string().nullable().optional(),
   merged_main_sha: z.string().nullable().optional(),
+  // Phase 7d — production-stage signals. All optional+nullable so an
+  // older backend rendering pre-7d data downgrades cleanly to the
+  // existing UI states.
+  promoted_by: z.string().nullable().optional(),
+  production_main_sha: z.string().nullable().optional(),
+  rolled_back_by: z.string().nullable().optional(),
+  rolled_back_completed_at: z.string().nullable().optional(),
 }).loose();
+
+// Phase 7d — release health rollup schema. Each Δ is nullable (no
+// signal); overall_status defaults to "ok" so a fresh release with no
+// snapshot yet renders the panel in its baseline state instead of
+// throwing.
+export const ReleaseHealthSchema = z.object({
+  release_id: z.string().default(""),
+  overall_status: z.string().default("ok"),
+  snapshot_at: z.string().default(""),
+  error_rate_delta: z.number().nullable().default(null),
+  p99_latency_delta_ms: z.number().nullable().default(null),
+  inbox_issues_since_promote: z.number().default(0),
+  agent_failure_rate_delta: z.number().nullable().default(null),
+}).loose();
+
+export const EMPTY_RELEASE_HEALTH = {
+  release_id: "",
+  overall_status: "ok",
+  snapshot_at: "",
+  error_rate_delta: null,
+  p99_latency_delta_ms: null,
+  inbox_issues_since_promote: 0,
+  agent_failure_rate_delta: null,
+};
 
 const ReleasePullRequestSchema = PullRequestSchema.extend({
   position: z.number().default(0),

@@ -37,11 +37,19 @@ const {
   markSmokePassMutateAsync,
   markVerifiedMutateAsync,
   unverifyMutateAsync,
+  promoteMutateAsync,
+  rollbackMutateAsync,
+  markDoneMutateAsync,
+  markProdDeployedMutateAsync,
 } = vi.hoisted(() => ({
   runSmokeMutateAsync: vi.fn().mockResolvedValue({}),
   markSmokePassMutateAsync: vi.fn().mockResolvedValue({}),
   markVerifiedMutateAsync: vi.fn().mockResolvedValue({}),
   unverifyMutateAsync: vi.fn().mockResolvedValue({}),
+  promoteMutateAsync: vi.fn().mockResolvedValue({}),
+  rollbackMutateAsync: vi.fn().mockResolvedValue({}),
+  markDoneMutateAsync: vi.fn().mockResolvedValue({}),
+  markProdDeployedMutateAsync: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock("@multica/core/ship", () => ({
@@ -91,6 +99,28 @@ vi.mock("@multica/core/ship", () => ({
   useMarkReleaseStagingDeployed: () => ({
     mutateAsync: vi.fn().mockResolvedValue({}),
     isPending: false,
+  }),
+  // Phase 7d — production-stage mutations.
+  usePromoteRelease: () => ({
+    mutateAsync: promoteMutateAsync,
+    isPending: false,
+  }),
+  useMarkReleaseProductionDeployed: () => ({
+    mutateAsync: markProdDeployedMutateAsync,
+    isPending: false,
+  }),
+  useRollbackRelease: () => ({
+    mutateAsync: rollbackMutateAsync,
+    isPending: false,
+  }),
+  useMarkReleaseDone: () => ({
+    mutateAsync: markDoneMutateAsync,
+    isPending: false,
+  }),
+  useReleaseHealth: () => ({
+    data: null,
+    isLoading: false,
+    isError: false,
   }),
 }));
 
@@ -513,5 +543,152 @@ describe("ShipReleasePage", () => {
 
     await user.click(submit);
     expect(unverifyMutateAsync).toHaveBeenCalledWith({ reason: "found a bug" });
+  });
+
+  // ---- Phase 7d — production-stage UI -------------------------------------
+
+  it("renders the Promote button on the verifying stage", () => {
+    detailFixture = {
+      release: makeRelease({ stage: "verifying", risk_level: "low" }),
+      pull_requests: [],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    expect(screen.getByTestId("release-promote-button")).toBeInTheDocument();
+    // Mark verified should NOT show — only Promote at this point.
+    expect(screen.queryByTestId("release-verify-button")).not.toBeInTheDocument();
+  });
+
+  it("Promote dialog gates submit on the ack checkbox + rollback plan for high risk", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const user = userEvent.setup();
+    promoteMutateAsync.mockClear();
+    detailFixture = {
+      release: makeRelease({
+        stage: "verifying",
+        risk_level: "high",
+        approver_id: "user-7d-aaa",
+      }),
+      pull_requests: [],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    await user.click(screen.getByTestId("release-promote-button"));
+    const submit = screen.getByTestId("release-promote-submit");
+    // Ack unchecked → disabled.
+    expect(submit).toBeDisabled();
+    await user.click(screen.getByTestId("release-promote-ack"));
+    // Ack checked but rollback plan empty (high risk) → still disabled.
+    expect(submit).toBeDisabled();
+    await user.type(
+      screen.getByTestId("release-promote-rollback-plan"),
+      "revert the migration",
+    );
+    expect(submit).not.toBeDisabled();
+    await user.click(submit);
+    expect(promoteMutateAsync).toHaveBeenCalledWith({
+      rollback_plan: "revert the migration",
+    });
+  });
+
+  it("renders the Live banner + production panels on in_production", () => {
+    detailFixture = {
+      release: makeRelease({
+        stage: "in_production",
+        promoted_at: "2026-05-09T00:00:00Z",
+        production_deploy_id: "deploy-prod-1",
+        production_main_sha: "abcdef1234567",
+      }),
+      pull_requests: [],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    expect(screen.getByTestId("release-live-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("release-production-panels")).toBeInTheDocument();
+    expect(screen.getByTestId("release-rollback-button")).toBeInTheDocument();
+    expect(screen.getByTestId("release-mark-done-button")).toBeInTheDocument();
+  });
+
+  it("Rollback dialog disables submit until a reason is typed", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const user = userEvent.setup();
+    rollbackMutateAsync.mockClear();
+    detailFixture = {
+      release: makeRelease({
+        stage: "in_production",
+        promoted_at: "2026-05-09T00:00:00Z",
+      }),
+      pull_requests: [
+        makeReleasePR({
+          id: "pr-rb",
+          number: 200,
+          title: "broken feature",
+          merge_state: "merged",
+          position: 0,
+        }),
+      ],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    await user.click(screen.getByTestId("release-rollback-button"));
+    const submit = screen.getByTestId("release-rollback-submit");
+    expect(submit).toBeDisabled();
+    expect(screen.getByTestId("release-rollback-pr-list")).toBeInTheDocument();
+    // The PR appears both in the rollback dialog list and in the page's
+    // PR table, so query within the dialog's pr list.
+    const dialogList = screen.getByTestId("release-rollback-pr-list");
+    expect(dialogList.textContent).toMatch(/broken feature/);
+
+    await user.type(
+      screen.getByTestId("release-rollback-reason"),
+      "p99 latency spike",
+    );
+    expect(submit).not.toBeDisabled();
+    await user.click(submit);
+    expect(rollbackMutateAsync).toHaveBeenCalledWith({
+      reason: "p99 latency spike",
+    });
+  });
+
+  it("renders the rolled-back banner read-only on rolled_back stage", () => {
+    detailFixture = {
+      release: makeRelease({
+        stage: "rolled_back",
+        rollback_reason: "p99 spike",
+        rolled_back_by: "user-aabbcc11",
+        rolled_back_completed_at: "2026-05-09T03:00:00Z",
+      }),
+      pull_requests: [],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    const banner = screen.getByTestId("release-rolled-back-banner");
+    expect(banner).toBeInTheDocument();
+    expect(banner.textContent).toMatch(/p99 spike/);
+    // No promote / rollback buttons in rolled_back state.
+    expect(screen.queryByTestId("release-promote-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("release-rollback-button")).not.toBeInTheDocument();
+  });
+
+  it("hides the Mark production deployed escape hatch for the first 30s of promoting", () => {
+    detailFixture = {
+      release: makeRelease({
+        stage: "promoting",
+        promoted_at: "2026-05-09T03:00:00Z",
+      }),
+      pull_requests: [],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    // Right after entering the promoting stage, the escape hatch is
+    // hidden; the progress chip is visible. The button appears only
+    // after a 30s setTimeout fires, which we don't advance here.
+    expect(screen.getByTestId("release-promoting-progress")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("release-mark-prod-deployed-button"),
+    ).not.toBeInTheDocument();
+    // Rollback (always-on escape) is still shown so a stuck promotion
+    // can be aborted.
+    expect(screen.getByTestId("release-rollback-button")).toBeInTheDocument();
   });
 });

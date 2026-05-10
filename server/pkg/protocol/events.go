@@ -194,6 +194,20 @@ const (
 	EventReleaseVerified      = "release:verified"
 	EventReleaseUnverified    = "release:unverified"
 
+	// Phase 7d — production-stage signals. The user clicks Promote
+	// (release:promoted), the deploy webhook auto-links the production
+	// deploy (release:in_production), the user clicks Rollback
+	// (release:rollback_initiated), or the health monitor recomputes
+	// the rollup (release:health_updated). Payload conventions:
+	//   promoted             — { release_id, sha, by_user_id }
+	//   in_production        — { release_id, deploy_id, sha }
+	//   rollback_initiated   — { release_id, reason, by_user_id }
+	//   health_updated       — { release_id, overall_status }
+	EventReleasePromoted          = "release:promoted"
+	EventReleaseInProduction      = "release:in_production"
+	EventReleaseRollbackInitiated = "release:rollback_initiated"
+	EventReleaseHealthUpdated     = "release:health_updated"
+
 	// Daemon events
 	EventDaemonHeartbeat     = "daemon:heartbeat"
 	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"

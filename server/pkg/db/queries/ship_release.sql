@@ -395,3 +395,172 @@ WHERE rpr.release_id = $1
 ORDER BY rpr.position DESC
 LIMIT 1;
 
+-- ---------------------------------------------------------------------------
+-- Phase 7d — Production promotion, post-deploy health, rollback.
+-- ---------------------------------------------------------------------------
+
+-- name: SetReleasePromoted :one
+-- Stamps the production deploy linkage + the promoted_at / promoted_by
+-- pair when the user clicks Promote (or when a webhook auto-links).
+-- production_deploy_id may be the zero UUID at click-time (we record
+-- the intent before any deploy lands) and gets filled by
+-- LinkProductionDeploy when the deployment_status webhook arrives.
+UPDATE ship_release SET
+    production_deploy_id = COALESCE(sqlc.narg('production_deploy_id'), production_deploy_id),
+    production_main_sha  = COALESCE(sqlc.narg('production_main_sha'), production_main_sha),
+    promoted_at          = COALESCE(promoted_at, $2),
+    promoted_by          = COALESCE(promoted_by, sqlc.narg('promoted_by')),
+    updated_at           = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: SetReleaseInProduction :one
+-- Final flip when the production deploy is confirmed landed. Caller
+-- pairs with UpdateReleaseStage(stage='in_production') in the same
+-- service-layer flow.
+UPDATE ship_release SET
+    promoted_at = COALESCE(promoted_at, $2),
+    updated_at  = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: SetReleaseRolledBack :one
+-- Records the user's decision to roll back. Phase 7d v1 sets BOTH
+-- rolled_back_at and rolled_back_completed_at to the same timestamp
+-- because we don't auto-revert — the moment the user clicks, the
+-- release is treated as rolled back. v2's auto-revert orchestrator
+-- will instead set rolled_back_at on click and let
+-- SetReleaseRolledBackComplete fill the completed_at when the reverts
+-- merge.
+UPDATE ship_release SET
+    rolled_back_by           = COALESCE(rolled_back_by, sqlc.narg('rolled_back_by')),
+    rollback_reason          = COALESCE(sqlc.narg('rollback_reason'), rollback_reason),
+    rolled_back_completed_at = $2,
+    updated_at               = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: SetReleaseRolledBackComplete :one
+-- Phase 7e hook — sets rolled_back_completed_at when the v2 orchestrator
+-- finishes merging revert PRs. v1 doesn't call this directly but the
+-- column needs the targeted update path so the orchestrator can land
+-- without further migrations.
+UPDATE ship_release SET
+    rolled_back_completed_at = $2,
+    updated_at               = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: SetReleaseDone :one
+-- Final flip when 24h elapses post-promote without a rollback.
+UPDATE ship_release SET
+    done_at    = $2,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: FindReleaseByProductionMainSHA :one
+-- Webhook linkage lookup — given a successful production deploy's sha,
+-- find the release that produced it. Mirrors FindReleaseByMergedMainSHA
+-- but constrained to production-side stages so a stale sha from an old
+-- release doesn't get re-linked.
+SELECT * FROM ship_release
+WHERE workspace_id = $1
+  AND (
+      production_main_sha = $2
+      OR (
+          (production_main_sha IS NULL OR production_main_sha = '')
+          AND merged_main_sha = $2
+      )
+  )
+  AND $2 <> ''
+  AND stage IN ('verifying', 'promoting', 'in_production')
+ORDER BY updated_at DESC
+LIMIT 1;
+
+-- name: ListReleasesPastMonitoringWindow :many
+-- The release finalizer goroutine reads this every 15 minutes. Returns
+-- in_production releases whose promoted_at is older than the supplied
+-- threshold AND have no rolled_back_at set. Caller transitions each
+-- to stage='done'.
+SELECT * FROM ship_release
+WHERE stage = 'in_production'
+  AND promoted_at IS NOT NULL
+  AND promoted_at < $1
+  AND rolled_back_completed_at IS NULL;
+
+-- name: ListInProductionReleases :many
+-- Used by the health monitor rollup goroutine. Cheap because in_production
+-- releases are at most a handful per workspace at any time. We scope by
+-- the ship_release table directly rather than joining workspaces.
+SELECT * FROM ship_release
+WHERE stage = 'in_production'
+ORDER BY promoted_at DESC NULLS LAST;
+
+-- name: UpdatePRRevertState :one
+-- Used by a future revert orchestrator. v1 calls this once on
+-- rollback initiation to mark every still-merged PR as 'pending', so
+-- the UI can show "revert needed" affordances per-PR.
+UPDATE ship_release_pull_request SET
+    revert_state     = $3,
+    revert_pr_number = COALESCE(sqlc.narg('revert_pr_number'), revert_pr_number),
+    revert_pr_url    = COALESCE(sqlc.narg('revert_pr_url'), revert_pr_url),
+    revert_error     = COALESCE(sqlc.narg('revert_error'), revert_error)
+WHERE release_id = $1 AND pull_request_id = $2
+RETURNING *;
+
+-- name: ListReleasePRsByMergeOrderDesc :many
+-- For rollback. Returns the merged PRs in REVERSE merge order so the
+-- caller (or the user clicking GitHub's Revert button per-PR) reverts
+-- the last-merged commit first. Skipped / failed PRs aren't reverted —
+-- they didn't land.
+SELECT
+    rpr.release_id,
+    rpr.pull_request_id,
+    rpr.position,
+    rpr.merged_sha,
+    rpr.merged_at,
+    rpr.merge_state,
+    rpr.revert_state,
+    rpr.revert_pr_number,
+    rpr.revert_pr_url,
+    pr.pr_number,
+    pr.title,
+    pr.html_url
+FROM ship_release_pull_request rpr
+JOIN pull_request pr ON pr.id = rpr.pull_request_id
+WHERE rpr.release_id = $1
+  AND rpr.merge_state = 'merged'
+ORDER BY rpr.position DESC, rpr.merged_at DESC;
+
+-- name: UpsertReleaseHealth :one
+-- Health rollup write. Idempotent on release_id (PRIMARY KEY) so the
+-- 5-minute health monitor can simply call this with each tick's
+-- computed values.
+INSERT INTO ship_release_health (
+    release_id, workspace_id,
+    error_rate_delta, p99_latency_delta_ms,
+    inbox_issues_since_promote, agent_failure_rate_delta,
+    overall_status, snapshot_at
+) VALUES (
+    $1, $2,
+    sqlc.narg('error_rate_delta'), sqlc.narg('p99_latency_delta_ms'),
+    $3, sqlc.narg('agent_failure_rate_delta'),
+    $4, NOW()
+)
+ON CONFLICT (release_id) DO UPDATE SET
+    workspace_id              = EXCLUDED.workspace_id,
+    error_rate_delta          = EXCLUDED.error_rate_delta,
+    p99_latency_delta_ms      = EXCLUDED.p99_latency_delta_ms,
+    inbox_issues_since_promote = EXCLUDED.inbox_issues_since_promote,
+    agent_failure_rate_delta  = EXCLUDED.agent_failure_rate_delta,
+    overall_status            = EXCLUDED.overall_status,
+    snapshot_at               = NOW()
+RETURNING *;
+
+-- name: GetReleaseHealth :one
+-- Reads the latest rollup for a release. Returns pgx.ErrNoRows when
+-- the monitor hasn't written one yet (release just promoted).
+SELECT * FROM ship_release_health
+WHERE release_id = $1;
+

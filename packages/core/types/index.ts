@@ -192,4 +192,8 @@ export type {
   MarkSmokePassRequest,
   MarkReleaseVerifiedRequest,
   UnverifyReleaseRequest,
+  // Phase 7d — production-stage requests + health rollup
+  PromoteReleaseRequest,
+  RollbackReleaseRequest,
+  ReleaseHealth,
 } from "./ship";

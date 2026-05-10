@@ -154,6 +154,9 @@ import type {
   MarkSmokePassRequest,
   MarkReleaseVerifiedRequest,
   UnverifyReleaseRequest,
+  PromoteReleaseRequest,
+  RollbackReleaseRequest,
+  ReleaseHealth,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -206,7 +209,9 @@ import {
   EMPTY_LIST_RELEASES_RESPONSE,
   ReleaseDetailResponseSchema,
   EMPTY_RELEASE_DETAIL,
+  EMPTY_RELEASE_HEALTH,
   ReleaseSchema,
+  ReleaseHealthSchema,
   MergeStateResponseSchema,
   EMPTY_MERGE_STATE_RESPONSE,
 } from "./schemas";
@@ -2038,6 +2043,78 @@ export class ApiClient {
       ReleaseSchema,
       EMPTY_RELEASE_DETAIL.release,
       { endpoint: "POST /api/releases/:id/mark_staging_deployed" },
+    );
+  }
+
+  // Phase 7d — production-stage mutations. Same response-validation
+  // pattern as the Phase 7c mutations.
+  async promoteRelease(
+    releaseId: string,
+    data?: PromoteReleaseRequest,
+  ): Promise<Release> {
+    const raw = await this.fetch<unknown>(
+      `/api/releases/${releaseId}/promote`,
+      { method: "POST", body: JSON.stringify(data ?? {}) },
+    );
+    return parseWithFallback(
+      raw,
+      ReleaseSchema,
+      EMPTY_RELEASE_DETAIL.release,
+      { endpoint: "POST /api/releases/:id/promote" },
+    );
+  }
+
+  async markReleaseProductionDeployed(releaseId: string): Promise<Release> {
+    const raw = await this.fetch<unknown>(
+      `/api/releases/${releaseId}/mark_production_deployed`,
+      { method: "POST", body: "{}" },
+    );
+    return parseWithFallback(
+      raw,
+      ReleaseSchema,
+      EMPTY_RELEASE_DETAIL.release,
+      { endpoint: "POST /api/releases/:id/mark_production_deployed" },
+    );
+  }
+
+  async rollbackRelease(
+    releaseId: string,
+    data: RollbackReleaseRequest,
+  ): Promise<Release> {
+    const raw = await this.fetch<unknown>(
+      `/api/releases/${releaseId}/rollback`,
+      { method: "POST", body: JSON.stringify(data) },
+    );
+    return parseWithFallback(
+      raw,
+      ReleaseSchema,
+      EMPTY_RELEASE_DETAIL.release,
+      { endpoint: "POST /api/releases/:id/rollback" },
+    );
+  }
+
+  async markReleaseDone(releaseId: string): Promise<Release> {
+    const raw = await this.fetch<unknown>(
+      `/api/releases/${releaseId}/mark_done`,
+      { method: "POST", body: "{}" },
+    );
+    return parseWithFallback(
+      raw,
+      ReleaseSchema,
+      EMPTY_RELEASE_DETAIL.release,
+      { endpoint: "POST /api/releases/:id/mark_done" },
+    );
+  }
+
+  async getReleaseHealth(releaseId: string): Promise<ReleaseHealth> {
+    const raw = await this.fetch<unknown>(
+      `/api/releases/${releaseId}/health`,
+    );
+    return parseWithFallback(
+      raw,
+      ReleaseHealthSchema,
+      EMPTY_RELEASE_HEALTH,
+      { endpoint: "GET /api/releases/:id/health" },
     );
   }
 

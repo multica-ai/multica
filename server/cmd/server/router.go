@@ -511,6 +511,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// a deploy row + runs the same linkage flow.
 			r.Post("/api/releases/{id}/mark_staging_deployed", h.MarkReleaseStagingDeployed)
 
+			// Phase 7d — Production promotion + post-deploy + rollback.
+			r.Post("/api/releases/{id}/promote", h.PromoteRelease)
+			r.Post("/api/releases/{id}/mark_production_deployed", h.MarkReleaseProductionDeployed)
+			r.Post("/api/releases/{id}/rollback", h.RollbackRelease)
+			r.Post("/api/releases/{id}/mark_done", h.MarkReleaseDone)
+			r.Get("/api/releases/{id}/health", h.GetReleaseHealth)
+
 			// Channels (multi-participant chat + DMs).
 			// Endpoints respond 404 when workspace.channels_enabled is FALSE
 			// — the gate lives inside each handler so the surface is invisible

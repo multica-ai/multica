@@ -65,6 +65,13 @@ export {
   useMarkReleaseVerified,
   useUnverifyRelease,
   useMarkReleaseStagingDeployed,
+  // Phase 7d — Production promotion + rollback + health rollup
+  usePromoteRelease,
+  useMarkReleaseProductionDeployed,
+  useRollbackRelease,
+  useMarkReleaseDone,
+  useReleaseHealth,
+  releaseHealthOptions,
 } from "./queries";
 
 // Phase 7a — multi-select store. Lives next to the queries because

@@ -213,6 +213,15 @@ func (h *Handler) maybeLinkReleaseFromOutcome(ctx context.Context, workspaceID p
 		h.linkStagingDeployForRelease(ctx, workspaceID, o.DeployID, o.SHA, o.RepoURL)
 	}
 
+	// Branch 1b — Phase 7d production deploy linkage. Same shape as
+	// staging but matches against the production_main_sha column (or
+	// merged_main_sha when the production_main_sha hasn't been set
+	// yet — the FindReleaseByProductionMainSHA query handles both).
+	if o.Kind == "deploy_completed" && o.DeployStatus == string(db.DeployStatusSucceeded) &&
+		strings.EqualFold(o.EnvironmentKind, "production") && o.SHA != "" {
+		h.linkProductionDeployForRelease(ctx, workspaceID, o.DeployID, o.SHA)
+	}
+
 	// Branch 2 — smoke check_run linkage. Only fire on completed
 	// (the Service code populates conclusion only on completion).
 	if o.CheckRunExternalID != "" && o.CheckRunConclusion != "" {
