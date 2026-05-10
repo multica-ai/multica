@@ -8,10 +8,16 @@ import { forwardRef, useImperativeHandle, type Ref } from "react";
 // markdown payload and a click target ("trigger-submit") so tests can fire
 // the editor's onSubmit at will. The store mocks default to "no active
 // session" / "no draft", which matches the brand-new-chat path.
+//
+// JEH-756: focus is now Tiptap-native, configured via the `autoFocus` prop
+// on ContentEditor (see content-editor.tsx). The chat-input layer only
+// decides whether to set the prop; ContentEditor handles the timing. The
+// mock therefore exposes the received `autoFocus` value so tests can
+// assert the prop contract.
 // ---------------------------------------------------------------------------
 
 const editorMarkdown = vi.hoisted(() => ({ value: "hello agent" }));
-const editorFocus = vi.hoisted(() => vi.fn());
+const lastAutoFocus = vi.hoisted(() => ({ value: undefined as boolean | undefined }));
 const chatStoreMock = vi.hoisted(() => {
   const setInputDraft = vi.fn();
   const clearInputDraft = vi.fn();
@@ -60,9 +66,11 @@ vi.mock("../../editor", () => {
         onUpdate?: (md: string) => void;
         defaultValue?: string;
         placeholder?: string;
+        autoFocus?: boolean;
       },
       ref: Ref<{ getMarkdown: () => string; clearContent: () => void; uploadFile: () => void; blur: () => void; focus: () => void }>,
     ) => {
+      lastAutoFocus.value = props.autoFocus;
       useImperativeHandle(ref, () => ({
         getMarkdown: () => editorMarkdown.value,
         clearContent: () => {
@@ -70,7 +78,7 @@ vi.mock("../../editor", () => {
         },
         uploadFile: () => {},
         blur: () => {},
-        focus: () => editorFocus(),
+        focus: () => {},
       }));
       return (
         <div>
@@ -102,7 +110,7 @@ import { ChatInput } from "./chat-input";
 
 beforeEach(() => {
   editorMarkdown.value = "hello agent";
-  editorFocus.mockClear();
+  lastAutoFocus.value = undefined;
   chatStoreMock.state.activeSessionId = null;
   chatStoreMock.state.selectedAgentId = null;
   chatStoreMock.state.inputDrafts = {};
@@ -171,52 +179,28 @@ describe("ChatInput — JEH-806 session-scoped drafts", () => {
   });
 });
 
-describe("ChatInput — JEH-756 autofocus", () => {
-  // Resolve the next requestAnimationFrame so the autofocus effect can run.
-  const flushRaf = () =>
-    new Promise<void>((resolve) =>
-      requestAnimationFrame(() => resolve()),
-    );
+describe("ChatInput — JEH-756 autofocus prop wiring", () => {
+  // The chat-input layer only decides whether to ask Tiptap for autofocus.
+  // The actual focus call lives in ContentEditor (driven by Tiptap's
+  // `autofocus` option). These tests pin the parent's gating contract.
 
-  it("focuses the editor on mount when autoFocus is set", async () => {
+  it("forwards autoFocus={true} to ContentEditor when the prop is set", () => {
     render(<ChatInput onSend={vi.fn()} autoFocus />);
-    await flushRaf();
-    expect(editorFocus).toHaveBeenCalled();
+    expect(lastAutoFocus.value).toBe(true);
   });
 
-  it("does not focus on mount when autoFocus is omitted", async () => {
+  it("forwards autoFocus={false} when the prop is omitted", () => {
     render(<ChatInput onSend={vi.fn()} />);
-    await flushRaf();
-    expect(editorFocus).not.toHaveBeenCalled();
+    expect(lastAutoFocus.value).toBe(false);
   });
 
-  it("does not focus when the session is archived (disabled)", async () => {
+  it("suppresses autoFocus when the session is archived (disabled)", () => {
     render(<ChatInput onSend={vi.fn()} autoFocus disabled />);
-    await flushRaf();
-    expect(editorFocus).not.toHaveBeenCalled();
+    expect(lastAutoFocus.value).toBe(false);
   });
 
-  it("does not focus when no agent is available", async () => {
+  it("suppresses autoFocus when no agent is available", () => {
     render(<ChatInput onSend={vi.fn()} autoFocus noAgent />);
-    await flushRaf();
-    expect(editorFocus).not.toHaveBeenCalled();
-  });
-
-  it("yields focus to an open dialog (does not steal from a focus-trapping overlay)", async () => {
-    // Simulate an open dialog with the active element inside it. Tiptap's
-    // editor is portaled into our component, but document.activeElement
-    // points at the dialog's input — the autofocus effect should bail.
-    const dialog = document.createElement("div");
-    dialog.setAttribute("role", "dialog");
-    const dialogInput = document.createElement("input");
-    dialog.appendChild(dialogInput);
-    document.body.appendChild(dialog);
-    dialogInput.focus();
-
-    render(<ChatInput onSend={vi.fn()} autoFocus />);
-    await flushRaf();
-    expect(editorFocus).not.toHaveBeenCalled();
-
-    document.body.removeChild(dialog);
+    expect(lastAutoFocus.value).toBe(false);
   });
 });

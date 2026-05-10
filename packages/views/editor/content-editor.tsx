@@ -35,6 +35,7 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -92,6 +93,22 @@ interface ContentEditorProps {
    * system prompts, where the content is fed to an LLM as plain text).
    */
   disableMentions?: boolean;
+  /**
+   * CEREBRO-PATCH(input-autofocus): JEH-756 — when true, focus the editor
+   * once it finishes initialising. Routed through Tiptap's `autofocus`
+   * option (not a post-mount RAF) because `immediatelyRender: false` defers
+   * editor creation; an effect that calls `editor.commands.focus()` runs
+   * before the editor exists and silently no-ops. Tiptap fires its own
+   * focus call after `onCreate`, so the timing is guaranteed.
+   *
+   * Static at create time — re-keying the parent (e.g. `key={draftKey}`)
+   * remounts the editor and re-applies the prop on session/agent switch.
+   *
+   * If a focus-trapping dialog (`[role="dialog"]` / `[role="alertdialog"]`)
+   * owns focus when the editor is created, the editor yields and blurs
+   * itself so the dialog keeps focus.
+   */
+  autoFocus?: boolean;
 }
 
 interface ContentEditorRef {
@@ -128,6 +145,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       submitOnEnter = false,
       currentIssueId,
       disableMentions = false,
+      autoFocus = false,
     },
     ref,
   ) {
@@ -153,11 +171,35 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
 
     const queryClient = useQueryClient();
 
+    // CEREBRO-PATCH(input-autofocus): JEH-756 — decide once, at mount, whether
+    // Tiptap should autofocus. If a focus-trapping dialog already owns focus
+    // we yield silently. Lazy `useState` init runs once per editor instance;
+    // remounting the parent (e.g. via `key={draftKey}`) re-evaluates the
+    // check for the new mount.
+    const [autoFocusAtMount] = useState(() => {
+      if (!autoFocus) return false;
+      if (typeof document === "undefined") return false;
+      const active = document.activeElement;
+      if (
+        active &&
+        active !== document.body &&
+        active.closest('[role="dialog"], [role="alertdialog"]')
+      ) {
+        return false;
+      }
+      return true;
+    });
+
     const editor = useEditor({
       immediatelyRender: false,
       // Note: in v3.22.1 the default is already false/undefined (same behavior).
       // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
       shouldRerenderOnTransaction: false,
+      // CEREBRO-PATCH(input-autofocus): JEH-756 — route autofocus through
+      // Tiptap so the focus call fires after the editor is created. A
+      // post-mount RAF effect calling `editor.commands.focus()` no-ops when
+      // `immediatelyRender: false` defers editor creation past the effect.
+      autofocus: autoFocusAtMount ? "end" : false,
       onCreate: ({ editor: ed }) => {
         lastEmittedRef.current = stripBlobUrls(ed.getMarkdown()).trimEnd();
       },

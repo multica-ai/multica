@@ -2,7 +2,7 @@
 
 // CEREBRO-PATCH(comment-input-cerebro): cerebro modification of upstream file
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback } from "react";
 import { ArrowUp, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -44,26 +44,6 @@ function CommentInput({ issueId, onSubmit, autoFocus = false }: CommentInputProp
     return result;
   }, [uploadWithToast, issueId]);
 
-  // CEREBRO-PATCH(input-autofocus): JEH-756 — focus the editor on mount and
-  // when switching between channels/DMs so the user can start typing right
-  // away. Skipped if an open dialog is trapping focus.
-  useEffect(() => {
-    if (!autoFocus) return;
-    const id = requestAnimationFrame(() => {
-      const active =
-        typeof document !== "undefined" ? document.activeElement : null;
-      if (
-        active &&
-        active !== document.body &&
-        active.closest('[role="dialog"], [role="alertdialog"]')
-      ) {
-        return;
-      }
-      editorRef.current?.focus();
-    });
-    return () => cancelAnimationFrame(id);
-  }, [autoFocus, issueId]);
-
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
@@ -94,6 +74,10 @@ function CommentInput({ issueId, onSubmit, autoFocus = false }: CommentInputProp
     >
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
         <ContentEditor
+          // CEREBRO-PATCH(input-autofocus): JEH-756 — remount on
+          // channel/DM switch so Tiptap re-evaluates `autoFocus` for
+          // the new context (autofocus is read once at create time).
+          key={issueId}
           ref={editorRef}
           placeholder={t(($) => $.comment.leave_comment_placeholder)}
           onUpdate={(md) => setIsEmpty(!md.trim())}
@@ -102,6 +86,10 @@ function CommentInput({ issueId, onSubmit, autoFocus = false }: CommentInputProp
           debounceMs={100}
           currentIssueId={issueId}
           submitOnEnter={submitOnEnter}
+          // CEREBRO-PATCH(input-autofocus): JEH-756 — Tiptap-native
+          // autofocus. Issue pages stay opt-out (read-first); channel
+          // and DM views opt in.
+          autoFocus={autoFocus}
         />
       </div>
       {/* CEREBRO-PATCH(file-upload-button-api): paperclip on the left, well

@@ -3,7 +3,7 @@
 // CEREBRO-PATCH(chat-input-mcp-onboarding): cerebro modification of upstream file
 
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ContentEditor,
@@ -91,26 +91,6 @@ export function ChatInput({
     [uploadWithToast],
   );
 
-  // CEREBRO-PATCH(input-autofocus): JEH-756 — autofocus on mount + on
-  // session/agent switch. RAF defers past the agent-picker dropdown's
-  // close + focus restoration so the focus lands on the editor, not the
-  // trigger button. Skipped if an open dialog is trapping focus.
-  useEffect(() => {
-    if (!autoFocus || disabled || noAgent) return;
-    const id = requestAnimationFrame(() => {
-      const active =
-        typeof document !== "undefined" ? document.activeElement : null;
-      if (
-        active &&
-        active !== document.body &&
-        active.closest('[role="dialog"], [role="alertdialog"]')
-      ) {
-        return;
-      }
-      editorRef.current?.focus();
-    });
-    return () => cancelAnimationFrame(id);
-  }, [autoFocus, draftKey, disabled, noAgent]);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
     enabled: !disabled,
@@ -186,6 +166,8 @@ export function ChatInput({
           <ContentEditor
             // Remount the editor when the active session changes so its
             // uncontrolled defaultValue picks up the new session's draft.
+            // Also re-evaluates `autoFocus` for the new session/agent —
+            // Tiptap reads autofocus once at create time.
             key={draftKey}
             ref={editorRef}
             defaultValue={inputDraft}
@@ -204,6 +186,10 @@ export function ChatInput({
             //   true  → Enter sends, Shift+Enter inserts newline
             //   false → Cmd/Ctrl+Enter sends, Enter inserts newline
             submitOnEnter={submitOnEnter}
+            // CEREBRO-PATCH(input-autofocus): JEH-756 — Tiptap-native
+            // autofocus. Gated here so archived sessions and no-agent
+            // surfaces don't pull focus into a non-functional editor.
+            autoFocus={autoFocus && !disabled && !noAgent}
           />
         </div>
         {leftAdornment && (

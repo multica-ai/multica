@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "@testing-library/react";
 import { forwardRef, useImperativeHandle, type Ref } from "react";
 
-const editorFocus = vi.hoisted(() => vi.fn());
+// JEH-756: focus is now Tiptap-native, configured via the `autoFocus` prop
+// on ContentEditor. The comment-input layer only forwards the prop and
+// remounts the editor on `issueId` change so Tiptap re-applies it for the
+// new context.
+
+const autoFocusEvents = vi.hoisted(() => [] as Array<boolean | undefined>);
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: vi.fn() }),
@@ -17,7 +22,7 @@ vi.mock("@multica/cerebro-preferences/views", () => ({
 vi.mock("../../editor", () => {
   const ContentEditor = forwardRef(
     (
-      _props: Record<string, unknown>,
+      props: { autoFocus?: boolean },
       ref: Ref<{
         getMarkdown: () => string;
         clearContent: () => void;
@@ -25,11 +30,12 @@ vi.mock("../../editor", () => {
         focus: () => void;
       }>,
     ) => {
+      autoFocusEvents.push(props.autoFocus);
       useImperativeHandle(ref, () => ({
         getMarkdown: () => "",
         clearContent: () => {},
         uploadFile: () => {},
-        focus: () => editorFocus(),
+        focus: () => {},
       }));
       return <div data-testid="content-editor" />;
     },
@@ -44,52 +50,33 @@ vi.mock("../../editor", () => {
 
 import { CommentInput } from "./comment-input";
 
-const flushRaf = () =>
-  new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-
 beforeEach(() => {
-  editorFocus.mockClear();
+  autoFocusEvents.length = 0;
 });
 
-describe("CommentInput — JEH-756 autofocus", () => {
-  it("focuses the editor on mount when autoFocus is set", async () => {
-    render(
-      <CommentInput issueId="c1" onSubmit={vi.fn()} autoFocus />,
-    );
-    await flushRaf();
-    expect(editorFocus).toHaveBeenCalled();
+describe("CommentInput — JEH-756 autofocus prop wiring", () => {
+  it("forwards autoFocus={true} to ContentEditor when the prop is set", () => {
+    render(<CommentInput issueId="c1" onSubmit={vi.fn()} autoFocus />);
+    expect(autoFocusEvents).toContain(true);
   });
 
-  it("does not focus on mount when autoFocus is omitted", async () => {
+  it("forwards autoFocus={false} when the prop is omitted", () => {
     render(<CommentInput issueId="c1" onSubmit={vi.fn()} />);
-    await flushRaf();
-    expect(editorFocus).not.toHaveBeenCalled();
+    expect(autoFocusEvents.every((v) => v === false)).toBe(true);
   });
 
-  it("re-focuses when issueId changes (channel switch)", async () => {
+  it("remounts the editor when issueId changes (channel switch)", () => {
     const { rerender } = render(
       <CommentInput issueId="c1" onSubmit={vi.fn()} autoFocus />,
     );
-    await flushRaf();
-    expect(editorFocus).toHaveBeenCalledTimes(1);
+    const mountsBeforeSwitch = autoFocusEvents.length;
 
     rerender(<CommentInput issueId="c2" onSubmit={vi.fn()} autoFocus />);
-    await flushRaf();
-    expect(editorFocus).toHaveBeenCalledTimes(2);
-  });
 
-  it("yields focus when an open dialog is trapping focus", async () => {
-    const dialog = document.createElement("div");
-    dialog.setAttribute("role", "dialog");
-    const dialogInput = document.createElement("input");
-    dialog.appendChild(dialogInput);
-    document.body.appendChild(dialog);
-    dialogInput.focus();
-
-    render(<CommentInput issueId="c1" onSubmit={vi.fn()} autoFocus />);
-    await flushRaf();
-    expect(editorFocus).not.toHaveBeenCalled();
-
-    document.body.removeChild(dialog);
+    // The `key={issueId}` on ContentEditor unmounts the previous instance
+    // and mounts a new one — that re-evaluation is what re-applies
+    // Tiptap's `autofocus` for the new channel/DM.
+    expect(autoFocusEvents.length).toBeGreaterThan(mountsBeforeSwitch);
+    expect(autoFocusEvents[autoFocusEvents.length - 1]).toBe(true);
   });
 });
