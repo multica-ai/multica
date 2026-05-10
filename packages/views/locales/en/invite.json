@@ -28,7 +28,13 @@
     "decline": "Decline",
     "declining": "Declining...",
     "accept": "Accept & Join",
-    "joining": "Joining..."
+    "joining": "Joining...",
+    "login_to_join": "Log in to join",
+    "join_as_admin": "You can join as an admin.",
+    "join_as_member": "You can join as a member.",
+    "link_expired": "This invite link has expired.",
+    "link_revoked": "This invite link has been revoked.",
+    "link_used_up": "This invite link has been fully used."
   },
   "errors": {
     "accept_failed": "Failed to accept invitation",

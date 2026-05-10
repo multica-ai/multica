@@ -28,7 +28,13 @@
     "decline": "拒绝",
     "declining": "拒绝中...",
     "accept": "接受并加入",
-    "joining": "加入中..."
+    "joining": "加入中...",
+    "login_to_join": "登录以加入",
+    "join_as_admin": "你可以以管理员身份加入。",
+    "join_as_member": "你可以以成员身份加入。",
+    "link_expired": "此邀请链接已过期。",
+    "link_revoked": "此邀请链接已被撤销。",
+    "link_used_up": "此邀请链接已被用完。"
   },
   "errors": {
     "accept_failed": "接受邀请失败",
