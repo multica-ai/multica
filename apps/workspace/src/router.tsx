@@ -36,7 +36,9 @@ import { ProjectBoardPage } from "@/features/projects/components/project-board-p
 import { SkillsPage } from "@/features/skills";
 import { MyTimePage } from "@/features/time-tracking/pages/MyTimePage";
 import { MyTimeCalendarPage } from "@/features/time-tracking/pages/MyTimeCalendarPage";
+import { TeamTimePage } from "@/features/time-tracking/pages/TeamTimePage";
 import { IssueCalendarPage } from "@/features/issues/components/IssueCalendarPage";
+import { InvitePage } from "@/features/invite";
 
 function LoadingScreen() {
   return (
@@ -291,15 +293,33 @@ const myTimeCalendarRoute = createRoute({
   component: MyTimeCalendarPage,
 });
 
+const teamTimeRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "team-time",
+  component: TeamTimePage,
+});
+
 const issueCalendarRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: "calendar",
   component: IssueCalendarPage,
 });
 
+function InvitePageRoute() {
+  const { token } = inviteRoute.useParams();
+  return <InvitePage token={token} />;
+}
+
+const inviteRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "invite/$token",
+  component: InvitePageRoute,
+});
+
 const routeTree = rootRoute.addChildren([
   homeRoute,
   loginRoute,
+  inviteRoute,
   protectedRoute.addChildren([
     issuesRoute,
     issueDetailRoute,
@@ -321,6 +341,7 @@ const routeTree = rootRoute.addChildren([
     settingsRoute,
     myTimeRoute,
     myTimeCalendarRoute,
+    teamTimeRoute,
     issueCalendarRoute,
   ]),
 ]);

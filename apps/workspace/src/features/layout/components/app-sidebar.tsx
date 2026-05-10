@@ -6,6 +6,7 @@ import {
   Plus,
   Check,
   SquarePen,
+  Search,
 } from "lucide-react";
 import { WorkspaceAvatar } from "@/features/workspace";
 import { useIssueDraftStore } from "@/features/issues/stores/draft-store";
@@ -37,6 +38,7 @@ import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
 import { useInboxStore } from "@/features/inbox";
 import { useModalStore } from "@/features/modals";
+import { useSearchStore } from "@/features/search";
 import { Link, usePathname, useRouter } from "@/shared/router";
 import {
   isWorkspaceNavActive,
@@ -141,6 +143,19 @@ export function AppSidebar() {
               </DropdownMenu>
             </SidebarMenuItem>
           </SidebarMenu>
+          <Tooltip>
+            <TooltipTrigger
+              className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-background text-foreground shadow-sm hover:bg-accent"
+              aria-label="Search"
+              onClick={() => {
+                closeMobileSidebar();
+                useSearchStore.getState().open();
+              }}
+            >
+              <Search className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Search (⌘K)</TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger
               className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-background text-foreground shadow-sm hover:bg-accent"

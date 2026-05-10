@@ -24,7 +24,7 @@ export type {
   RuntimeUpdate,
   RuntimeUpdateStatus,
 } from "./agent";
-export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, AISettingsResponse, UpdateAISettingsRequest } from "./workspace";
+export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, WorkspaceInviteInfo, AISettingsResponse, UpdateAISettingsRequest } from "./workspace";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
 export type { TimelineEntry } from "./activity";
@@ -41,4 +41,7 @@ export type * from "./events";
 export type * from "./api";
 export type { Attachment } from "./attachment";
 export type { NotificationPreference, UpdateNotificationPreferenceRequest, TestNotificationPreferenceRequest } from "./notification-preference";
-export type { TimeEntry, CreateTimeEntryRequest, UpdateTimeEntryRequest, ListTimeEntriesResponse } from "./time-entry";
+export type { TimeEntry, CreateTimeEntryRequest, UpdateTimeEntryRequest, ListTimeEntriesResponse, TeamTimeUserStat, TeamTimeProjectStat, TeamTimeStats } from "./time-entry";
+export type { DailyReview, DailyPlan } from "./daily";
+export type { AutomationTemplate, StandupSummaryResult } from "./automation";
+export type { PomodoroPhase, PomodoroStatus, PomodoroSession } from "./pomodoro";

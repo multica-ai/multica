@@ -70,7 +70,7 @@ func TestMain(m *testing.M) {
 
 	bus := events.New()
 	registerListeners(bus, hub)
-	router := NewRouter(pool, hub, bus)
+	router, _ := NewRouter(pool, hub, bus)
 	testServer = httptest.NewServer(router)
 
 	// Generate a JWT token directly for the test user

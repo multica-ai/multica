@@ -701,6 +701,130 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 	return items, nil
 }
 
+const listOpenIssuesForMember = `-- name: ListOpenIssuesForMember :many
+
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, start_date, end_date, project_id FROM issue
+WHERE workspace_id = $1
+  AND assignee_type = 'member'
+  AND assignee_id = $2
+  AND status NOT IN ('done', 'cancelled')
+ORDER BY
+  CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END,
+  due_date ASC NULLS LAST
+LIMIT 20
+`
+
+type ListOpenIssuesForMemberParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AssigneeID  pgtype.UUID `json:"assignee_id"`
+}
+
+// SearchIssues: moved to handler (dynamic SQL for multi-word search support).
+// Fetches open issues assigned to a member, ordered by priority then due date.
+// Used by daily review / plan generation services.
+func (q *Queries) ListOpenIssuesForMember(ctx context.Context, arg ListOpenIssuesForMemberParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listOpenIssuesForMember, arg.WorkspaceID, arg.AssigneeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.StartDate,
+			&i.EndDate,
+			&i.ProjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentlyCompletedIssuesForMember = `-- name: ListRecentlyCompletedIssuesForMember :many
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, start_date, end_date, project_id FROM issue
+WHERE workspace_id = $1
+  AND assignee_type = 'member'
+  AND assignee_id = $2
+  AND status = 'done'
+  AND updated_at >= $3
+ORDER BY updated_at DESC
+LIMIT 10
+`
+
+type ListRecentlyCompletedIssuesForMemberParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AssigneeID  pgtype.UUID        `json:"assignee_id"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Fetches issues completed by a member after a given timestamp.
+// Used by daily review generation to summarise what was done today.
+func (q *Queries) ListRecentlyCompletedIssuesForMember(ctx context.Context, arg ListRecentlyCompletedIssuesForMemberParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listRecentlyCompletedIssuesForMember, arg.WorkspaceID, arg.AssigneeID, arg.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.StartDate,
+			&i.EndDate,
+			&i.ProjectID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateIssue = `-- name: UpdateIssue :one
 UPDATE issue SET
     title = COALESCE($2, title),

@@ -20,6 +20,7 @@ import type {
   Workspace,
   WorkspaceRepo,
   MemberWithUser,
+  WorkspaceInviteInfo,
   User,
   Skill,
   CreateSkillRequest,
@@ -50,6 +51,12 @@ import type {
   TimeEntry,
   CreateTimeEntryRequest,
   UpdateTimeEntryRequest,
+  TeamTimeStats,
+  DailyReview,
+  DailyPlan,
+  AutomationTemplate,
+  StandupSummaryResult,
+  PomodoroSession,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
@@ -631,6 +638,35 @@ export class ApiClient {
     });
   }
 
+  // Invite link management (admin/owner only)
+  async getWorkspaceWithInviteToken(workspaceId: string): Promise<Workspace> {
+    return this.fetch(`/api/workspaces/${workspaceId}/invite-link`);
+  }
+
+  async resetInviteLink(workspaceId: string): Promise<Workspace> {
+    return this.fetch(`/api/workspaces/${workspaceId}/invite-link/reset`, {
+      method: "POST",
+    });
+  }
+
+  async disableInviteLink(workspaceId: string): Promise<Workspace> {
+    return this.fetch(`/api/workspaces/${workspaceId}/invite-link`, {
+      method: "DELETE",
+    });
+  }
+
+  // Get workspace info by invite token (public, no auth required)
+  async getInviteInfo(token: string): Promise<WorkspaceInviteInfo> {
+    return this.fetch(`/api/invite/${token}`);
+  }
+
+  // Join workspace via invite token (requires auth)
+  async joinByInviteToken(token: string): Promise<MemberWithUser> {
+    return this.fetch(`/api/invite/${token}/join`, {
+      method: "POST",
+    });
+  }
+
   async getAISettings(workspaceId: string): Promise<AISettingsResponse> {
     return this.fetch(`/api/workspaces/${workspaceId}/ai/settings`);
   }
@@ -846,5 +882,120 @@ export class ApiClient {
   /** Delete a time entry. */
   async deleteTimeEntry(entryId: string): Promise<void> {
     await this.fetch(`/api/time-entries/${entryId}`, { method: "DELETE" });
+  }
+
+  /** Get workspace-level time aggregation (by member and by project) for a date range. */
+  async getTeamTimeStats(params: { since: string; until: string }): Promise<TeamTimeStats> {
+    const search = new URLSearchParams({ since: params.since, until: params.until });
+    return this.fetch(`/api/time-entries/team-stats?${search}`);
+  }
+
+  /** Get total time spent for a project (all time, all members). */
+  async getProjectTimeStats(projectId: string): Promise<{ total_seconds: number }> {
+    return this.fetch(`/api/projects/${projectId}/time-stats`);
+  }
+
+  // Daily Reviews
+
+  /** Trigger (or regenerate) today's review draft for the current user. */
+  async generateDailyReview(): Promise<DailyReview> {
+    return this.fetch("/api/daily-reviews/generate", { method: "POST" });
+  }
+
+  /** Get today's review draft. Returns null (undefined from 204) if none exists. */
+  async getTodayReview(): Promise<DailyReview | null> {
+    return this.fetch<DailyReview | null>("/api/daily-reviews/today");
+  }
+
+  /** List the most recent daily reviews for the current user. */
+  async listDailyReviews(limit = 30): Promise<DailyReview[]> {
+    return this.fetch(`/api/daily-reviews?limit=${limit}`);
+  }
+
+  /** Confirm (sign off) a specific daily review. */
+  async confirmDailyReview(reviewId: string): Promise<DailyReview> {
+    return this.fetch(`/api/daily-reviews/${reviewId}/confirm`, { method: "POST" });
+  }
+
+  // Daily Plans
+
+  /** Trigger (or regenerate) tomorrow's plan draft for the current user. */
+  async generateDailyPlan(planDate?: string): Promise<DailyPlan> {
+    return this.fetch("/api/daily-plans/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: planDate ? JSON.stringify({ plan_date: planDate }) : undefined,
+    });
+  }
+
+  /** Get tomorrow's plan draft. Returns null (undefined from 204) if none exists. */
+  async getTomorrowPlan(): Promise<DailyPlan | null> {
+    return this.fetch<DailyPlan | null>("/api/daily-plans/tomorrow");
+  }
+
+  /** List the most recent daily plans for the current user. */
+  async listDailyPlans(limit = 30): Promise<DailyPlan[]> {
+    return this.fetch(`/api/daily-plans?limit=${limit}`);
+  }
+
+  /** Confirm (sign off) a specific daily plan. */
+  async confirmDailyPlan(planId: string): Promise<DailyPlan> {
+    return this.fetch(`/api/daily-plans/${planId}/confirm`, { method: "POST" });
+  }
+
+  // Automation Templates
+
+  /** List all built-in automation templates with their workspace enablement state. */
+  async listAutomationTemplates(): Promise<AutomationTemplate[]> {
+    return this.fetch("/api/automation/templates");
+  }
+
+  /** Enable a built-in automation template for the current workspace. */
+  async enableAutomationRule(templateId: string): Promise<unknown> {
+    return this.fetch("/api/automation/rules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ template_id: templateId }),
+    });
+  }
+
+  /** Disable (remove) an automation rule for the current workspace. */
+  async disableAutomationRule(templateId: string): Promise<void> {
+    return this.fetch(`/api/automation/rules/${templateId}`, { method: "DELETE" });
+  }
+
+  /** Manually run a manual-trigger automation template. */
+  async runAutomationTemplate(templateId: string): Promise<StandupSummaryResult> {
+    return this.fetch(`/api/automation/rules/${templateId}/run`, { method: "POST" });
+  }
+
+  // Pomodoro
+
+  /** Get the current pomodoro session (or an idle default if none exists). */
+  async getPomodoroSession(): Promise<PomodoroSession> {
+    return this.fetch("/api/pomodoro/current");
+  }
+
+  /** Start or resume the pomodoro timer. */
+  async startPomodoro(): Promise<PomodoroSession> {
+    return this.fetch("/api/pomodoro/start", { method: "POST" });
+  }
+
+  /** Pause the running pomodoro timer (backend records elapsed time). */
+  async pausePomodoro(): Promise<PomodoroSession> {
+    return this.fetch("/api/pomodoro/pause", { method: "POST" });
+  }
+
+  /**
+   * Complete the current phase.
+   * Work-phase completion auto-creates a time_entry with type='pomodoro'.
+   */
+  async completePomodoro(): Promise<PomodoroSession> {
+    return this.fetch("/api/pomodoro/complete", { method: "POST" });
+  }
+
+  /** Reset the pomodoro session back to idle. */
+  async resetPomodoro(): Promise<PomodoroSession> {
+    return this.fetch("/api/pomodoro/reset", { method: "POST" });
   }
 }
