@@ -48,6 +48,12 @@ vi.mock("@multica/core/ship", () => ({
   useShipSelection: <T,>(
     selector: (state: { selected: Set<string>; toggle: (id: string) => void }) => T,
   ): T => selector(selectionStateRef.current),
+  // Channel decoupling — PRs no longer auto-create a conversation
+  // channel; the drawer header always renders an Open/Go-to button.
+  useOpenPRConversationChannel: () => ({
+    mutateAsync: vi.fn().mockResolvedValue({ name: "pr-acme-app-42" }),
+    isPending: false,
+  }),
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -68,6 +74,7 @@ vi.mock("../../navigation", async () => {
       ...props
     }: { href: string; children: React.ReactNode; [k: string]: unknown }) =>
       React.createElement("a", { href, ...props }, children),
+    useNavigation: () => ({ push: () => {}, replace: () => {} }),
   };
 });
 

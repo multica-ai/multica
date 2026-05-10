@@ -41,12 +41,16 @@ import { ScrollArea } from "@multica/ui/components/ui/scroll-area";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import {
+  useOpenPRConversationChannel,
   usePullRequestDetails,
   useShipPrDetailOpenId,
   useShipPrDetailStore,
   useShipSelection,
 } from "@multica/core/ship";
+import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import { toast } from "sonner";
+import { useNavigation } from "../../navigation";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import type {
   DrawerCheck,
@@ -207,9 +211,13 @@ function actionLabel(action: string): string {
 interface DrawerHeaderProps {
   pr: PullRequest;
   locale: string;
+  /** Already-linked conversation channel, if any — drives whether the
+   *  header's channel button reads "Open discussion channel" or "Go
+   *  to channel". */
+  channel?: { id: string; name: string } | null;
 }
 
-function DrawerHeader({ pr, locale }: DrawerHeaderProps) {
+function DrawerHeader({ pr, locale, channel }: DrawerHeaderProps) {
   const { t } = useT("ship");
   // Prefer pr_merged_at for description when present — same logic as
   // the card. Closed (not merged) renders the close timestamp; open
@@ -299,6 +307,7 @@ function DrawerHeader({ pr, locale }: DrawerHeaderProps) {
               <ExternalLink className="size-3" aria-hidden />
               {t(($) => $.pr_detail.view_diff)}
             </a>
+            <OpenPRChannelButton prId={pr.id} existingChannel={channel} />
           </div>
         </div>
       </div>
@@ -482,7 +491,11 @@ function DrawerBody({ prId }: DrawerBodyProps) {
   const locale = i18n.language;
   return (
     <>
-      <DrawerHeader pr={pr} locale={locale} />
+      <DrawerHeader
+        pr={pr}
+        locale={locale}
+        channel={data.conversation_channel ?? null}
+      />
       <DrawerSections data={data} pr={pr} slug={slug} locale={locale} />
     </>
   );
@@ -709,5 +722,73 @@ export function ShipPrDetailDrawer() {
         {openPrId ? <DrawerBody prId={openPrId} /> : null}
       </SheetContent>
     </Sheet>
+  );
+}
+
+/** Button rendered in place of the linked-channel chip when a PR has
+ *  no conversation channel yet. Calls the manual-open endpoint and
+ *  navigates to the new channel on success.
+ *
+ *  Replaces the old auto-create-on-PR-open path: most PRs don't need
+ *  a Multica channel (the GitHub thread + linked issue cover
+ *  discussion). The user clicks here only when they actually want
+ *  one. Idempotent on the server: if a channel was already opened
+ *  via another path the existing one is returned. */
+function OpenPRChannelButton({
+  prId,
+  existingChannel,
+}: {
+  prId: string;
+  existingChannel?: { id: string; name: string } | null;
+}) {
+  const { t } = useT("ship");
+  const open = useOpenPRConversationChannel(prId);
+  const navigation = useNavigation();
+  const workspace = useCurrentWorkspace();
+  const slug = workspace?.slug ?? "";
+
+  // Already linked? Link straight there — skip the round-trip.
+  if (existingChannel && slug) {
+    return (
+      <AppLink
+        href={`/${slug}/channels/${existingChannel.name}`}
+        className="inline-flex items-center gap-1 rounded border px-2 py-1 text-[11px] hover:bg-accent"
+        data-testid="drawer-open-channel"
+      >
+        <MessagesSquare className="size-3" aria-hidden />
+        {t(($) => $.pr_detail.go_to_discussion_channel)}
+      </AppLink>
+    );
+  }
+
+  const handleClick = async () => {
+    try {
+      const res = (await open.mutateAsync()) as { name?: string } | null;
+      const name = res?.name;
+      if (slug && name) {
+        navigation.push(`/${slug}/channels/${name}`);
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="inline-flex h-auto items-center gap-1 rounded border px-2 py-1 text-[11px] font-normal hover:bg-accent"
+      onClick={handleClick}
+      disabled={open.isPending}
+      data-testid="drawer-open-channel"
+    >
+      <MessagesSquare className="size-3" aria-hidden />
+      {open.isPending
+        ? t(($) => $.pr_detail.opening_channel)
+        : t(($) => $.pr_detail.open_discussion_channel)}
+    </Button>
   );
 }

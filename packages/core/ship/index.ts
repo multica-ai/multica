@@ -51,6 +51,8 @@ export {
   releaseDetailOptions,
   useReleaseDetail,
   useCreateRelease,
+  useOpenReleaseChannel,
+  useOpenPRConversationChannel,
   useUpdateRelease,
   useAddPullRequestToRelease,
   useRemovePullRequestFromRelease,

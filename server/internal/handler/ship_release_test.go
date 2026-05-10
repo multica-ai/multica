@@ -136,11 +136,82 @@ func TestRelease_Create_HappyPath(t *testing.T) {
 	if resp.Release.PRCount != 2 {
 		t.Fatalf("expected pr_count=2, got %d", resp.Release.PRCount)
 	}
-	if !strings.HasPrefix(resp.Channel.Name, "release-") {
-		t.Fatalf("expected channel name to start with 'release-', got %q", resp.Channel.Name)
+	// Channel auto-create was removed — releases ship without a
+	// discussion channel by default. The slot is empty until the
+	// user explicitly clicks "Open discussion channel" (covered by
+	// TestRelease_OpenChannel below).
+	if resp.Channel.ID != "" {
+		t.Fatalf("expected empty channel slot (auto-create removed), got %+v", resp.Channel)
 	}
 	if resp.Issue.Title != "Memory KB rollout" {
 		t.Fatalf("expected issue title to mirror release title, got %q", resp.Issue.Title)
+	}
+}
+
+// TestRelease_OpenChannel covers the manual "Open discussion channel"
+// flow that replaces the removed auto-create-on-CreateRelease path.
+// First call creates + links the channel; second call is idempotent.
+func TestRelease_OpenChannel(t *testing.T) {
+	enableShipReleaseTest(t)
+	projectID := createShipProject(t, "https://github.com/multica-ai/multica-rel-chan")
+	pr := seedReleasePR(t, projectID, "https://github.com/multica-ai/multica-rel-chan", 601)
+
+	// Create the release (channel slot starts empty).
+	body, _ := json.Marshal(map[string]any{
+		"title":            "Channel-open test release",
+		"pull_request_ids": []string{pr},
+	})
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects/"+projectID+"/releases", body)
+	req = withURLParam(req, "id", projectID)
+	testHandler.CreateRelease(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateRelease: %d %s", w.Code, w.Body.String())
+	}
+	var createResp struct {
+		Release struct {
+			ID string `json:"id"`
+		} `json:"release"`
+		Channel *struct {
+			ID string `json:"id"`
+		} `json:"channel"`
+	}
+	json.NewDecoder(w.Body).Decode(&createResp)
+	if createResp.Channel != nil && createResp.Channel.ID != "" {
+		t.Fatalf("expected nil channel slot before manual open, got %+v", createResp.Channel)
+	}
+
+	// First open — creates + links a channel.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/releases/"+createResp.Release.ID+"/channel", nil)
+	req = withURLParam(req, "id", createResp.Release.ID)
+	testHandler.OpenReleaseChannel(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("OpenReleaseChannel: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var openResp struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	json.NewDecoder(w.Body).Decode(&openResp)
+	if openResp.ID == "" || !strings.HasPrefix(openResp.Name, "release-") {
+		t.Fatalf("expected new channel with release- prefix, got %+v", openResp)
+	}
+
+	// Second open — idempotent, returns the same channel.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/releases/"+createResp.Release.ID+"/channel", nil)
+	req = withURLParam(req, "id", createResp.Release.ID)
+	testHandler.OpenReleaseChannel(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("second OpenReleaseChannel: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var openResp2 struct {
+		ID string `json:"id"`
+	}
+	json.NewDecoder(w.Body).Decode(&openResp2)
+	if openResp2.ID != openResp.ID {
+		t.Fatalf("expected idempotent return of same channel; got %s vs %s", openResp2.ID, openResp.ID)
 	}
 }
 
@@ -263,12 +334,20 @@ func TestRelease_GetRelease_ReturnsPRsAndEvents(t *testing.T) {
 	if len(getResp.PullRequests) != 1 {
 		t.Fatalf("expected 1 PR in detail, got %d", len(getResp.PullRequests))
 	}
-	// We expect at least 3 events: created, channel_created, issue_created.
-	if len(getResp.Events) < 3 {
-		t.Fatalf("expected at least 3 events, got %d", len(getResp.Events))
+	// We expect at least 2 events: created + issue_created. The
+	// channel auto-create on CreateRelease was removed in favor of
+	// an explicit "Open discussion channel" affordance — most
+	// releases ship without a chat channel. The third event
+	// (`channel_created`) only appears after the user clicks the
+	// manual button, which has its own coverage in
+	// TestRelease_OpenChannel below.
+	if len(getResp.Events) < 2 {
+		t.Fatalf("expected at least 2 events (created + issue_created), got %d", len(getResp.Events))
 	}
-	if getResp.Channel == nil || getResp.Channel["id"] == nil {
-		t.Fatalf("expected channel reference in detail, got %+v", getResp.Channel)
+	// Channel slot is null by default — only populated after manual
+	// open. TestRelease_OpenChannel covers the populated path.
+	if getResp.Channel != nil {
+		t.Fatalf("expected nil channel reference (channel auto-create removed), got %+v", getResp.Channel)
 	}
 	if getResp.Issue == nil || getResp.Issue["id"] == nil {
 		t.Fatalf("expected issue reference in detail, got %+v", getResp.Issue)

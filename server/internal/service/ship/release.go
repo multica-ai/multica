@@ -303,30 +303,25 @@ func (s *Service) CreateRelease(
 		events = append(events, createdEvent)
 	}
 
-	// Step 7 — auto-create channel + issue. Best effort; failures are
-	// logged into Warnings rather than failing the whole call.
+	// Step 7 — auto-create issue. The release tracking issue is the
+	// canonical record (state, decisions, rollback plan) and is always
+	// created. The discussion channel used to also auto-create here,
+	// but for small teams that produced two notification surfaces per
+	// release (issue comments + channel messages) covering the same
+	// content. Channels are now opt-in: the user clicks "Open
+	// discussion channel" on the release page when a release actually
+	// merits broad chat (multi-day verifies, high-stakes rollouts,
+	// etc.). Most releases ship without one.
+	//
+	// `channelOps` is still passed all the way through `CreateRelease`
+	// because the manual-link endpoint at POST /api/releases/{id}/channel
+	// reuses the same `autoCreateReleaseChannel` helper. Stage-transition
+	// callbacks (`PostToReleaseChannel`) are already guarded by
+	// `release.channel_id.Valid` and no-op when null, so this change
+	// requires no downstream edits to release_staging.go / release_merge.go.
 	var channelOut *db.Channel
 	var issueOut *db.Issue
-	if channelOps != nil {
-		ch, w := s.autoCreateReleaseChannel(ctx, release, prs, params, channelOps)
-		warnings = append(warnings, w...)
-		if ch != nil {
-			channelOut = ch
-			// Persist the link onto the release row.
-			if updated, err := s.Q.UpdateReleaseChannel(ctx, db.UpdateReleaseChannelParams{
-				ID:        release.ID,
-				ChannelID: ch.ID,
-			}); err == nil {
-				release = updated
-			}
-			if ev, err := s.insertReleaseEvent(ctx, release.ID, "channel_created", params.CreatedBy, map[string]any{
-				"channel_id": uuidString(ch.ID),
-				"name":       ch.Name,
-			}); err == nil {
-				events = append(events, ev)
-			}
-		}
-	}
+	_ = channelOps
 	if issueOps != nil {
 		issue, w := s.autoCreateReleaseIssue(ctx, release, prs, params, channelOut, issueOps)
 		warnings = append(warnings, w...)
@@ -355,6 +350,98 @@ func (s *Service) CreateRelease(
 		Events:   events,
 		Warnings: warnings,
 	}, nil
+}
+
+// OpenReleaseChannel manually creates + links a discussion channel for
+// a release. Backs the POST /api/releases/{id}/channel endpoint. Used
+// in place of the old auto-create-on-CreateRelease path: most releases
+// don't need a chat surface (the tracking issue covers structured
+// discussion), so the user explicitly clicks "Open discussion channel"
+// when one is actually warranted.
+//
+// Idempotent: if `release.channel_id` is already set, returns the
+// existing channel without creating a new one or emitting another
+// `channel_created` event.
+func (s *Service) OpenReleaseChannel(
+	ctx context.Context,
+	releaseID pgtype.UUID,
+	requesterID pgtype.UUID,
+	channelOps ChannelOps,
+) (*db.Channel, db.ShipRelease, error) {
+	release, err := s.Q.GetRelease(ctx, releaseID)
+	if err != nil {
+		return nil, db.ShipRelease{}, fmt.Errorf("get release: %w", err)
+	}
+	if channelOps == nil {
+		return nil, release, errors.New("release: channel ops unavailable")
+	}
+	// Already linked? Return the existing row idempotently.
+	if release.ChannelID.Valid {
+		ch, err := s.Q.GetChannel(ctx, release.ChannelID)
+		if err == nil {
+			return &ch, release, nil
+		}
+		// Dangling FK (channel hard-deleted) — fall through to recreation.
+	}
+
+	// Re-load PR set + approver context the same way CreateRelease did.
+	// The row alias `r.ID` IS the pull_request id (the join already
+	// returned PR rows with their canonical id) — see the symmetric
+	// usage in `refreshReleaseRiskLevel` below.
+	rprs, err := s.Q.ListReleasePullRequests(ctx, release.ID)
+	if err != nil {
+		return nil, release, fmt.Errorf("list release PRs: %w", err)
+	}
+	prs := make([]db.PullRequest, 0, len(rprs))
+	for _, rp := range rprs {
+		pr, err := s.Q.GetPullRequest(ctx, rp.ID)
+		if err == nil {
+			prs = append(prs, pr)
+		}
+	}
+
+	params := CreateReleaseParams{
+		WorkspaceID: release.WorkspaceID,
+		ProjectID:   release.ProjectID,
+		Title:       release.Title,
+		CreatedBy:   requesterID,
+	}
+	if release.ApproverID.Valid {
+		ap := release.ApproverID
+		params.ApproverID = &ap
+	}
+	if release.SecondApproverID.Valid {
+		ap := release.SecondApproverID
+		params.SecondApproverID = &ap
+	}
+
+	ch, warnings := s.autoCreateReleaseChannel(ctx, release, prs, params, channelOps)
+	if ch == nil {
+		// autoCreateReleaseChannel returns warnings for the soft-fail path;
+		// surface the first one as the error.
+		msg := "release: failed to create discussion channel"
+		if len(warnings) > 0 {
+			msg = "release: " + warnings[0]
+		}
+		return nil, release, errors.New(msg)
+	}
+
+	updated, err := s.Q.UpdateReleaseChannel(ctx, db.UpdateReleaseChannelParams{
+		ID:        release.ID,
+		ChannelID: ch.ID,
+	})
+	if err != nil {
+		return ch, release, fmt.Errorf("link channel to release: %w", err)
+	}
+	if _, err := s.insertReleaseEvent(ctx, release.ID, "channel_created", requesterID, map[string]any{
+		"channel_id": uuidString(ch.ID),
+		"name":       ch.Name,
+		"trigger":    "manual",
+	}); err != nil {
+		// Non-fatal — the link is persisted; the timeline just misses
+		// one entry.
+	}
+	return ch, updated, nil
 }
 
 // AddPullRequestToRelease attaches a PR to an existing release. Only

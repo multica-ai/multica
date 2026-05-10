@@ -122,6 +122,12 @@ vi.mock("@multica/core/ship", () => ({
     isLoading: false,
     isError: false,
   }),
+  // Channel decoupling — releases no longer auto-create a discussion
+  // channel; the page shows a manual button when none is linked.
+  useOpenReleaseChannel: () => ({
+    mutateAsync: vi.fn().mockResolvedValue({ name: "release-2026-05-10" }),
+    isPending: false,
+  }),
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -149,6 +155,7 @@ vi.mock("../../navigation", () => ({
       {children}
     </a>
   ),
+  useNavigation: () => ({ push: () => {}, replace: () => {} }),
 }));
 
 function Wrapper({ children }: { children: ReactNode }) {
