@@ -648,6 +648,15 @@ func (h *Handler) LogDeploy(w http.ResponseWriter, r *http.Request) {
 				_ = err
 			}
 		}
+		// Phase 7c polish — manual deploy logging now triggers the
+		// release-staging linkage so a release whose merged_main_sha
+		// matches this deploy's sha advances out of in_staging without
+		// requiring a GitHub deployment_status webhook (CI providers
+		// like Vercel / Netlify / Cloudflare don't fire those by
+		// default). Mirrors the webhook code path.
+		if status == db.DeployStatusSucceeded && env.Kind == db.DeployEnvironmentKindStaging {
+			h.linkStagingDeployForRelease(r.Context(), wsID, deploy.ID, deploy.Sha, "")
+		}
 	}
 
 	eventType := protocol.EventDeployStarted

@@ -471,6 +471,8 @@
       "smoke_status_skipped": "Skipped (no workflow)",
       "smoke_status_manual_pass": "Manual pass",
       "smoke_not_configured": "Not configured for this workspace. Use Mark smoke pass to advance manually, or set ship_hub_smoke_workflow in workspace settings.",
+      "mark_staged_button": "Mark deploy as landed",
+      "mark_staged_toast": "Staging deploy linked. Smoke step is next.",
       "run_smoke_button": "Run smoke tests",
       "rerun_smoke_button": "Re-run smoke tests",
       "view_run_link": "View run on GitHub",

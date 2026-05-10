@@ -506,6 +506,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/releases/{id}/mark_smoke_pass", h.MarkSmokePass)
 			r.Post("/api/releases/{id}/mark_verified", h.MarkReleaseVerified)
 			r.Post("/api/releases/{id}/unverify", h.UnverifyRelease)
+			// Phase 7c polish — manual escape hatch for repos whose CI
+			// doesn't fire GitHub deployment_status events. Synthesizes
+			// a deploy row + runs the same linkage flow.
+			r.Post("/api/releases/{id}/mark_staging_deployed", h.MarkReleaseStagingDeployed)
 
 			// Channels (multi-participant chat + DMs).
 			// Endpoints respond 404 when workspace.channels_enabled is FALSE

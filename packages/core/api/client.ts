@@ -2024,6 +2024,23 @@ export class ApiClient {
     );
   }
 
+  // Phase 7c polish — manual escape hatch for repos whose CI doesn't
+  // fire GitHub deployment_status events (Vercel / Netlify / Cloudflare /
+  // custom CI). Synthesizes a deploy row with the release's
+  // merged_main_sha and runs the same linkage flow the webhook path runs.
+  async markReleaseStagingDeployed(releaseId: string): Promise<Release> {
+    const raw = await this.fetch<unknown>(
+      `/api/releases/${releaseId}/mark_staging_deployed`,
+      { method: "POST", body: "{}" },
+    );
+    return parseWithFallback(
+      raw,
+      ReleaseSchema,
+      EMPTY_RELEASE_DETAIL.release,
+      { endpoint: "POST /api/releases/:id/mark_staging_deployed" },
+    );
+  }
+
   // Phase 2 — mints a fresh GitHub webhook secret for the workspace's
   // Ship Hub config. The response carries the plaintext secret EXACTLY
   // ONCE (mirrors PAT-create UX); subsequent reads of the workspace

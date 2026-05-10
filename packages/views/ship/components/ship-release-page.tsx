@@ -48,6 +48,7 @@ import {
   useMarkSmokeManualPass,
   useMarkReleaseVerified,
   useUnverifyRelease,
+  useMarkReleaseStagingDeployed,
 } from "@multica/core/ship";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import type { ReleasePullRequest } from "@multica/core/types";
@@ -110,6 +111,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
   const markSmokePass = useMarkSmokeManualPass(releaseId);
   const markVerified = useMarkReleaseVerified(releaseId);
   const unverify = useUnverifyRelease(releaseId);
+  const markStaged = useMarkReleaseStagingDeployed(releaseId);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [abortOpen, setAbortOpen] = useState(false);
@@ -339,6 +341,21 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                   onMarkSmokePass={() => setSmokePassOpen(true)}
                   onMarkVerified={() => setVerifyOpen(true)}
                   onUnverify={() => setUnverifyOpen(true)}
+                  onMarkStaged={() => {
+                    markStaged
+                      .mutateAsync()
+                      .then(() =>
+                        toast.success(
+                          t(($) => $.releases.staging.mark_staged_toast),
+                        ),
+                      )
+                      .catch((err: unknown) =>
+                        toast.error(
+                          err instanceof Error ? err.message : String(err),
+                        ),
+                      );
+                  }}
+                  markStagedPending={markStaged.isPending}
                 />
               )}
             </div>
@@ -1328,6 +1345,8 @@ function StagingActionButtons({
   onMarkSmokePass,
   onMarkVerified,
   onUnverify,
+  onMarkStaged,
+  markStagedPending,
 }: {
   release: import("@multica/core/types").Release;
   /** True when the workspace has a smoke-test workflow configured.
@@ -1340,6 +1359,12 @@ function StagingActionButtons({
   onMarkSmokePass: () => void;
   onMarkVerified: () => void;
   onUnverify: () => void;
+  /** Manual escape hatch: synthesize a successful staging deploy with
+   *  the release's merged_main_sha. Only meaningful when stage is
+   *  in_staging AND staging_deploy_id IS NULL AND merged_main_sha
+   *  is set. The button hides otherwise. */
+  onMarkStaged: () => void;
+  markStagedPending: boolean;
 }) {
   const { t } = useT("ship");
   const smoke = release.smoke_status ?? "";
@@ -1363,8 +1388,29 @@ function StagingActionButtons({
     );
   }
 
+  // Phase 7c polish — show the "Mark deploy as landed" affordance
+  // whenever the release is in_staging without a linked deploy AND
+  // has a merged_main_sha to deploy. This is the manual escape
+  // hatch for repos whose CI doesn't fire GitHub deployment_status
+  // events (Vercel/Netlify/Cloudflare/custom CI).
+  const canMarkStaged =
+    !isVerifying &&
+    !release.staging_deploy_id &&
+    !!release.merged_main_sha;
+
   return (
     <>
+      {canMarkStaged && (
+        <Button
+          size="sm"
+          onClick={onMarkStaged}
+          disabled={markStagedPending}
+          data-testid="release-mark-staged-button"
+        >
+          <Rocket className="size-3.5" />
+          {t(($) => $.releases.staging.mark_staged_button)}
+        </Button>
+      )}
       {/* Run smoke is the primary affordance whenever it's not
           mid-flight; the "Re-run" copy applies after a completed run.
           Phase 7c polish — hidden entirely when the workspace hasn't

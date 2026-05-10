@@ -88,6 +88,10 @@ vi.mock("@multica/core/ship", () => ({
     mutateAsync: unverifyMutateAsync,
     isPending: false,
   }),
+  useMarkReleaseStagingDeployed: () => ({
+    mutateAsync: vi.fn().mockResolvedValue({}),
+    isPending: false,
+  }),
 }));
 
 vi.mock("@multica/core/paths", () => ({

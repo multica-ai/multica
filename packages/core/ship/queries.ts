@@ -871,3 +871,16 @@ export function useUnverifyRelease(releaseId: string) {
     onSettled: () => invalidateReleaseMergeSurface(qc, wsId, releaseId),
   });
 }
+
+/** Phase 7c polish — manual "the deploy landed" escape hatch for
+ *  workspaces whose CI doesn't fire GitHub deployment_status events.
+ *  Synthesizes a staging deploy with the release's merged_main_sha
+ *  and runs the same linkage flow the webhook path runs. */
+export function useMarkReleaseStagingDeployed(releaseId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.markReleaseStagingDeployed(releaseId),
+    onSettled: () => invalidateReleaseMergeSurface(qc, wsId, releaseId),
+  });
+}

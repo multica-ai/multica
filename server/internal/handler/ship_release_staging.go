@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -303,6 +304,123 @@ func (h *Handler) UnverifyRelease(w http.ResponseWriter, r *http.Request) {
 		default:
 			writeError(w, http.StatusInternalServerError, "failed to unverify release: "+err.Error())
 		}
+		return
+	}
+	count, _ := h.Queries.CountActiveReleasePullRequests(r.Context(), updated.ID)
+	h.publish(protocol.EventReleaseUpdated, uuidToString(wsID), "member", userID, map[string]any{
+		"release_id": uuidToString(updated.ID),
+		"stage":      string(updated.Stage),
+	})
+	writeJSON(w, http.StatusOK, releaseToResponse(updated, int(count)))
+}
+
+// MarkReleaseStagingDeployed is the manual escape-hatch when GitHub
+// deployment_status webhooks aren't firing for a workspace's repo
+// (common when CI deploys via Vercel / Netlify / Cloudflare / custom
+// scripts that don't use GitHub's Deployments API). It synthesizes
+// a staging deploy row with the release's merged_main_sha and
+// triggers the same linkage flow the webhook path runs.
+//
+// Auth: workspace member. The action is destructive in the
+// "advances the release state machine" sense, but only the user's
+// own workspace's data is mutated; an audit row is written via
+// release_event.
+//
+// Idempotent: if the release already has a staging_deploy_id, returns
+// 409 Conflict — the user should refresh and verify the existing
+// linkage before forcing a new one. Phase 7d's rollback flow is the
+// path for re-staging a different sha.
+func (h *Handler) MarkReleaseStagingDeployed(w http.ResponseWriter, r *http.Request) {
+	rel, project, _, wsID, ok := h.loadReleaseAndProject(w, r)
+	if !ok {
+		return
+	}
+	if _, memberOK := h.requireWorkspaceMember(w, r, uuidToString(wsID), "workspace not found"); !memberOK {
+		return
+	}
+	userID, _ := requireUserID(w, r)
+	requestedBy, _ := h.parseUserUUIDOrZero(userID)
+
+	if rel.Stage != db.ReleaseStageInStaging {
+		writeError(w, http.StatusConflict, "release is not in_staging")
+		return
+	}
+	if rel.StagingDeployID.Valid {
+		writeError(w, http.StatusConflict, "release already has a linked staging deploy")
+		return
+	}
+	if !rel.MergedMainSha.Valid || rel.MergedMainSha.String == "" {
+		writeError(w, http.StatusBadRequest,
+			"release has no merged_main_sha — manual deploy linkage requires a recorded merge commit")
+		return
+	}
+
+	// Find or create the staging deploy environment for the project.
+	// Most projects already configured one in the deploy strip, but
+	// a brand-new project that just landed its first release may not
+	// have. We create a minimal one in that case so the deploy row
+	// has a parent.
+	envs, err := h.Queries.ListDeployEnvironmentsByProject(r.Context(), project.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load deploy environments")
+		return
+	}
+	var stagingEnv *db.DeployEnvironment
+	for i := range envs {
+		if envs[i].Kind == db.DeployEnvironmentKindStaging {
+			stagingEnv = &envs[i]
+			break
+		}
+	}
+	if stagingEnv == nil {
+		created, err := h.Queries.UpsertDeployEnvironment(r.Context(), db.UpsertDeployEnvironmentParams{
+			WorkspaceID:  wsID,
+			ProjectID:    project.ID,
+			Kind:         db.DeployEnvironmentKindStaging,
+			Name:         "Staging",
+			TargetBranch: "main",
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create staging environment")
+			return
+		}
+		stagingEnv = &created
+	}
+
+	// Synthesize a successful deploy. Sha = the release's merged
+	// main commit; ref = the env's target branch. timestamps = now.
+	now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
+	deploy, err := h.Queries.InsertDeploy(r.Context(), db.InsertDeployParams{
+		WorkspaceID:   wsID,
+		EnvironmentID: stagingEnv.ID,
+		Ref:           stagingEnv.TargetBranch,
+		Sha:           rel.MergedMainSha.String,
+		Status:        db.DeployStatusSucceeded,
+		TriggeredBy:   requestedBy,
+		StartedAt:     now,
+		CompletedAt:   now,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to record deploy")
+		return
+	}
+	// Bump the env's current_sha so the deploy strip reflects what
+	// just landed.
+	_, _ = h.Queries.UpdateDeployEnvironmentCurrent(r.Context(), db.UpdateDeployEnvironmentCurrentParams{
+		ID:                stagingEnv.ID,
+		CurrentSha:        pgtype.Text{String: deploy.Sha, Valid: true},
+		CurrentDeployedAt: deploy.TriggeredAt,
+	})
+
+	// Reuse the webhook-path linkage so smoke triggers / stage
+	// transitions / channel posts all fire consistently.
+	h.linkStagingDeployForRelease(r.Context(), wsID, deploy.ID, deploy.Sha, "")
+
+	// Re-fetch the release for the response so the caller sees the
+	// post-linkage state.
+	updated, err := h.Queries.GetRelease(r.Context(), rel.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to reload release")
 		return
 	}
 	count, _ := h.Queries.CountActiveReleasePullRequests(r.Context(), updated.ID)

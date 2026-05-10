@@ -64,6 +64,7 @@ export {
   useMarkSmokeManualPass,
   useMarkReleaseVerified,
   useUnverifyRelease,
+  useMarkReleaseStagingDeployed,
 } from "./queries";
 
 // Phase 7a — multi-select store. Lives next to the queries because
