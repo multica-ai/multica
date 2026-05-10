@@ -676,6 +676,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
             <ProductionPanels
               release={release}
               health={releaseHealth.data ?? null}
+              repoUrl={data.pull_requests[0]?.repo_url}
               productionPollerOn={
                 workspace?.ship_hub_deploy_workflow_production_set === true
               }
@@ -688,6 +689,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
           {isStagingOrVerifying && (
             <StagingPanels
               release={release}
+              repoUrl={data.pull_requests[0]?.repo_url}
               smokeWorkflowConfigured={
                 workspace?.ship_hub_smoke_workflow_set === true
               }
@@ -802,12 +804,17 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                       href={pr.html_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex flex-1 items-center gap-2 hover:underline"
+                      className="group/prlink flex flex-1 items-center gap-2 hover:underline"
+                      data-testid="release-pr-row-link"
                     >
                       <span className="tabular-nums text-muted-foreground">
                         #{pr.number}
                       </span>
                       <span className="truncate">{pr.title}</span>
+                      <ExternalLink
+                        className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/prlink:opacity-100"
+                        aria-hidden
+                      />
                     </a>
                     <MergeStatePill pr={pr} />
                     {pr.merge_state === "failed" && isPaused && (
@@ -1209,9 +1216,11 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                   <span className="text-muted-foreground">
                     {t(($) => $.releases.promote.summary_sha)}:{" "}
                   </span>
-                  <code className="text-foreground">
-                    {release.merged_main_sha.slice(0, 7)}
-                  </code>
+                  <CommitLink
+                    repoUrl={data.pull_requests[0]?.repo_url}
+                    sha={release.merged_main_sha}
+                    className="text-foreground"
+                  />
                 </>
               )}
             </div>
@@ -1431,10 +1440,15 @@ function RollbackDialog({
 function ProductionPanels({
   release,
   health,
+  repoUrl,
   productionPollerOn,
 }: {
   release: import("@multica/core/types").Release;
   health: import("@multica/core/types").ReleaseHealth | null;
+  /** Project repo URL — used to render the deployed-SHA chip as a
+   *  link to the GitHub commit. Optional because empty releases
+   *  (no PRs) can't supply one; the chip falls back to plain text. */
+  repoUrl?: string;
   /** Phase 7d follow-up — workspace has auto-detect deploys
    *  configured for production. Same UX rationale as the staging
    *  variant: the empty-deploy copy mentions polling so the user
@@ -1442,6 +1456,7 @@ function ProductionPanels({
   productionPollerOn?: boolean;
 }) {
   const { t } = useT("ship");
+  const sha = release.production_main_sha || release.merged_main_sha;
   return (
     <div className="grid gap-3 sm:grid-cols-2" data-testid="release-production-panels">
       <div className="rounded border bg-card p-3 text-sm">
@@ -1451,9 +1466,9 @@ function ProductionPanels({
         </div>
         {release.production_deploy_id ? (
           <div className="space-y-1">
-            {(release.production_main_sha || release.merged_main_sha) && (
-              <p className="font-mono text-xs">
-                {(release.production_main_sha ?? release.merged_main_sha ?? "").slice(0, 7)}
+            {sha && (
+              <p className="text-xs">
+                <CommitLink repoUrl={repoUrl} sha={sha} />
               </p>
             )}
             {release.promoted_at && (
@@ -1762,7 +1777,10 @@ function MergeStatePill({ pr }: { pr: ReleasePullRequest }) {
         </span>
       );
     case "merged": {
-      const shortSha = pr.merged_sha ? pr.merged_sha.slice(0, 7) : null;
+      // The pill itself is non-interactive; the SHA inside opens the
+      // squash-merge commit on GitHub in a new tab. Click landing on
+      // the SHA stops propagation so it doesn't also fire the row
+      // click handler (open PR drawer).
       return (
         <span
           className="inline-flex items-center gap-1 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
@@ -1771,7 +1789,18 @@ function MergeStatePill({ pr }: { pr: ReleasePullRequest }) {
         >
           <CheckCircle2 className="size-3" />
           {t(($) => $.releases.merge_state.merged)}
-          {shortSha && <span className="font-mono">{shortSha}</span>}
+          {pr.merged_sha && (
+            <span
+              onClick={(e) => e.stopPropagation()}
+              className="contents"
+            >
+              <CommitLink
+                repoUrl={pr.repo_url}
+                sha={pr.merged_sha}
+                className="text-emerald-700 dark:text-emerald-400"
+              />
+            </span>
+          )}
         </span>
       );
     }
@@ -1920,6 +1949,53 @@ function translateEventType(
   // i18next returns the key verbatim when missing — surface the
   // raw event_type as a defensive fallback in that case.
   return translated === key ? eventType : translated;
+}
+
+/** CommitLink — renders a clickable monospace short-SHA chip that
+ *  opens the commit on GitHub in a new tab.
+ *
+ *  Why: every release page section that shows a SHA used to render
+ *  it as plain text. Users had no fast path from "this release is in
+ *  production at ca30f18" to GitHub's commit view to verify what
+ *  actually shipped. The release page is the natural ground-truth
+ *  surface, but its tracking value drops sharply if every commit
+ *  reference is a copy-paste dance.
+ *
+ *  Repo URL discovery: we accept it as a prop because the release
+ *  detail response doesn't carry the project's repo URL directly.
+ *  Callers derive it from `data.pull_requests[0]?.repo_url` — every
+ *  PR in a release shares the same project + repo. When no repo URL
+ *  is available (empty release, server drift), we render the SHA as
+ *  plain text without a link. */
+function CommitLink({
+  repoUrl,
+  sha,
+  className,
+}: {
+  repoUrl?: string | null;
+  sha: string | null | undefined;
+  className?: string;
+}) {
+  if (!sha) return null;
+  const short = sha.slice(0, 7);
+  if (!repoUrl) {
+    return <span className={cn("font-mono", className)}>{short}</span>;
+  }
+  return (
+    <a
+      href={`${repoUrl}/commit/${sha}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={cn(
+        "inline-flex items-center gap-0.5 font-mono hover:underline",
+        className,
+      )}
+      data-testid="commit-link"
+    >
+      {short}
+      <ExternalLink className="size-3 opacity-60" aria-hidden />
+    </a>
+  );
 }
 
 function formatRelativeShort(iso: string): string {
@@ -2241,10 +2317,14 @@ function StagingActionButtons({
  *  data isn't populated yet. */
 function StagingPanels({
   release,
+  repoUrl,
   smokeWorkflowConfigured,
   stagingPollerOn,
 }: {
   release: import("@multica/core/types").Release;
+  /** Project repo URL — used to render the deployed-SHA chip as a
+   *  link to the GitHub commit. Optional; falls back to plain text. */
+  repoUrl?: string;
   smokeWorkflowConfigured: boolean;
   /** Phase 7d follow-up — workspace has auto-detect deploys
    *  configured for staging. When true, the empty-deploy copy mentions
@@ -2265,8 +2345,8 @@ function StagingPanels({
         {release.staging_deploy_id ? (
           <div className="space-y-1">
             {release.merged_main_sha && (
-              <p className="font-mono text-xs">
-                {release.merged_main_sha.slice(0, 7)}
+              <p className="text-xs">
+                <CommitLink repoUrl={repoUrl} sha={release.merged_main_sha} />
               </p>
             )}
             {release.staged_at && (
