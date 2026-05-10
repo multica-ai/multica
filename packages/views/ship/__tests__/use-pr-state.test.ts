@@ -228,6 +228,101 @@ describe("deriveShipKanbanColumn — merged PRs through deploy lanes", () => {
       "merged_pre_staging",
     );
   });
+
+  // Bug fix — squash-merging changes the resulting commit SHA, so a
+  // PR's head_sha never matches main's deploy SHA. The bucket logic
+  // used to leave such PRs stuck in "merged_pre_staging" even when
+  // they'd been deployed to production via a release. The release's
+  // own stage is the source of truth in that case.
+  describe("merged PRs fall back to release stage when SHA matching has nothing", () => {
+    it("active_release.stage = in_production → in_production", () => {
+      const pr = makePR({
+        state: "merged",
+        pr_merged_at: "2026-05-09T11:00:00Z",
+        active_release: {
+          id: "r-1",
+          title: "Big rollout",
+          stage: "in_production",
+        },
+      });
+      expect(deriveShipKanbanColumn(pr, EMPTY_DEPLOY_SNAPSHOT, NOW)).toBe(
+        "in_production",
+      );
+    });
+
+    it("active_release.stage = in_staging → in_staging", () => {
+      const pr = makePR({
+        state: "merged",
+        pr_merged_at: "2026-05-09T11:00:00Z",
+        active_release: { id: "r-1", title: "x", stage: "in_staging" },
+      });
+      expect(deriveShipKanbanColumn(pr, EMPTY_DEPLOY_SNAPSHOT, NOW)).toBe(
+        "in_staging",
+      );
+    });
+
+    it("active_release.stage = verifying → in_staging", () => {
+      const pr = makePR({
+        state: "merged",
+        pr_merged_at: "2026-05-09T11:00:00Z",
+        active_release: { id: "r-1", title: "x", stage: "verifying" },
+      });
+      expect(deriveShipKanbanColumn(pr, EMPTY_DEPLOY_SNAPSHOT, NOW)).toBe(
+        "in_staging",
+      );
+    });
+
+    it("active_release.stage = promoting → promoting", () => {
+      const pr = makePR({
+        state: "merged",
+        pr_merged_at: "2026-05-09T11:00:00Z",
+        active_release: { id: "r-1", title: "x", stage: "promoting" },
+      });
+      expect(deriveShipKanbanColumn(pr, EMPTY_DEPLOY_SNAPSHOT, NOW)).toBe(
+        "promoting",
+      );
+    });
+
+    it("terminal release stages don't override the age-based default", () => {
+      const recent = makePR({
+        state: "merged",
+        pr_merged_at: "2026-05-09T11:00:00Z",
+        active_release: { id: "r-1", title: "x", stage: "cancelled" },
+      });
+      expect(deriveShipKanbanColumn(recent, EMPTY_DEPLOY_SNAPSHOT, NOW)).toBe(
+        "merged_pre_staging",
+      );
+    });
+
+    it("unknown release stages don't override (enum drift downgrade)", () => {
+      const pr = makePR({
+        state: "merged",
+        pr_merged_at: "2026-05-09T11:00:00Z",
+        active_release: { id: "r-1", title: "x", stage: "future_stage_xyz" },
+      });
+      expect(deriveShipKanbanColumn(pr, EMPTY_DEPLOY_SNAPSHOT, NOW)).toBe(
+        "merged_pre_staging",
+      );
+    });
+
+    it("snapshot-based in_production wins over a stale release stage", () => {
+      const pr = makePR({
+        state: "merged",
+        head_sha: "shafedeb",
+        pr_merged_at: "2026-05-09T11:00:00Z",
+        active_release: { id: "r-1", title: "x", stage: "in_staging" },
+      });
+      const snapshot: ShipDeploySnapshot = {
+        production: makeEnv({
+          kind: "production",
+          current_sha: "shafedeb",
+          current_deployed_at: "2026-05-09T11:30:00Z",
+        }),
+        productionInFlightShas: new Set(),
+      };
+      expect(deriveShipKanbanColumn(pr, snapshot, NOW)).toBe("in_production");
+    });
+  });
 });
 
 describe("isFailingOrBlocked", () => {

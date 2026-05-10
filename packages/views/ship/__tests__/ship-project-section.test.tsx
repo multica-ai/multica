@@ -52,6 +52,19 @@ vi.mock("@multica/core/ship", () => ({
   useConfigureDeployAdapter: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePollDeployEnvironment: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRollbackDeployEnvironment: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  // Bug fix — collapse state moved from local useState to a Zustand
+  // store so it persists across page loads. Tests don't exercise the
+  // collapse interaction; default to "expanded for every project."
+  useCollapsedProjects: <T,>(
+    selector: (state: {
+      collapsed: Set<string>;
+      toggle: (id: string) => void;
+    }) => T,
+  ): T =>
+    selector({
+      collapsed: new Set<string>(),
+      toggle: () => {},
+    }),
 }));
 
 vi.mock("@tanstack/react-query", async () => {
