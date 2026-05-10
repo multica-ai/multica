@@ -142,8 +142,16 @@ function ShipSelectionBarConsumer({
   projects: { id: string }[];
 }) {
   const wsId = useWorkspaceId();
+  // Phase 7e fix — query "all" PR states (not just open). The Kanban
+  // shows PRs in MERGED · PRE-STAGING / IN STAGING / PROMOTING /
+  // IN PRODUCTION columns alongside open ones, and the user can
+  // multi-select any of them to create a "tracking-only" release
+  // for already-merged PRs that need to be shipped together.
+  // Querying just "open" meant selected merged-PR ids didn't match
+  // the visible-PR set, projectCount resolved to 0, and the
+  // "Create release" button stayed disabled with no obvious cause.
   const queries = useQueries({
-    queries: projects.map((p) => projectPullRequestsOptions(wsId, p.id, "open")),
+    queries: projects.map((p) => projectPullRequestsOptions(wsId, p.id, "all")),
   });
   const allPRs = useMemo<PullRequest[]>(() => {
     const out: PullRequest[] = [];

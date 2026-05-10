@@ -60,9 +60,26 @@ const RISK_RANK: Record<string, number> = {
  *  in server/internal/service/ship/release.go so the dialog can
  *  disable submit before round-tripping. The server still re-checks;
  *  this is purely UX. Returns the raw reason string; the caller
- *  formats it with the i18n template. */
+ *  formats it with the i18n template.
+ *
+ *  Two valid release modes:
+ *    - merge-train: all PRs are open + mergeable + green + approved.
+ *      Release starts at "assembling", user starts the merge train.
+ *    - tracking-only: all PRs are already merged (state="merged").
+ *      Release starts at "in_staging" with merged_main_sha set —
+ *      no merge train. Useful for bundling already-merged PRs
+ *      sitting in MERGED · PRE-STAGING into a coordinated rollout.
+ *
+ *  Mixed selections (some open, some merged) are rejected because
+ *  the merge train can't operate on already-merged PRs and tracking-
+ *  only mode can't merge open ones. */
 function eligibilityReason(pr: PullRequest): string | null {
-  if (pr.state !== "open") return "is not open";
+  if (pr.state === "merged") {
+    // Merged PRs are eligible by construction — they already cleared
+    // GitHub's own merge gate. Skip the rest of the open-PR rules.
+    return null;
+  }
+  if (pr.state === "closed") return "is closed";
   if (pr.is_draft) return "is a draft";
   if (pr.mergeable === "CONFLICTING") return "has merge conflicts";
   if (pr.ci_status && pr.ci_status !== "success") return `CI ${pr.ci_status}`;

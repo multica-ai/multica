@@ -244,6 +244,51 @@ func (s *Service) CreateRelease(
 		}
 	}
 
+	// Phase 7e — tracking-only release shape. When every selected PR is
+	// already merged, we skip the merge train and land at stage=in_staging
+	// directly. The user's case: a batch of PRs sitting in MERGED · PRE-
+	// STAGING that need to be tracked through staging→prod as a unit.
+	//
+	// Steps:
+	//   - Mark each join row's merge_state="merged" + merged_sha = pr.head_sha
+	//   - Set release.merged_main_sha = the latest merged PR's head_sha
+	//   - Transition release.stage = "in_staging" + stamp merged_at
+	if allMerged(prs) {
+		mergedAt := pgtype.Timestamptz{Time: time.Now(), Valid: true}
+		for _, pr := range prs {
+			_, _ = s.Q.SetReleasePRMergeState(ctx, db.SetReleasePRMergeStateParams{
+				ReleaseID:     release.ID,
+				PullRequestID: pr.ID,
+				MergeState:    db.PrMergeStateMerged,
+				MergedSha:     pgtype.Text{String: pr.HeadSha, Valid: pr.HeadSha != ""},
+				MergedAt:      mergedAt,
+			})
+		}
+		if sha := pickLatestMergedMainSHA(prs); sha != "" {
+			if updated, err := s.Q.SetReleaseMergedMainSHA(ctx, db.SetReleaseMergedMainSHAParams{
+				ID:            release.ID,
+				MergedMainSha: pgtype.Text{String: sha, Valid: true},
+			}); err == nil {
+				release = updated
+			}
+		}
+		// UpdateReleaseStage accepts an optional merged_at param (it
+		// also handles staged/promoted/done/rollback timestamps). We
+		// stamp merged_at = staged_at = now so the timeline reads
+		// correctly even though we skipped the merge_train_completed
+		// event.
+		if updated, err := s.Q.UpdateReleaseStage(ctx, db.UpdateReleaseStageParams{
+			ID:       release.ID,
+			Stage:    db.ReleaseStageInStaging,
+			MergedAt: mergedAt,
+			StagedAt: mergedAt,
+		}); err == nil {
+			release = updated
+		}
+		warnings = append(warnings,
+			"All selected PRs are already merged. Release created in tracking-only mode (skipped merge train; landed directly in staging).")
+	}
+
 	// Step 6 — audit log: "created" event with PR set + risk + approvers.
 	createdEvent, err := s.insertReleaseEvent(ctx, release.ID, "created", params.CreatedBy, map[string]any{
 		"title":              title,
@@ -503,9 +548,22 @@ func (s *Service) UpdateReleaseMetadata(
 // a release, or (reason, false) describing why not. We err on the
 // side of strict — the dialog hides ineligible PRs from the picker
 // anyway, so this is the defensive layer.
+//
+// Two valid PR states for a release:
+//   - "open" with mergeable + CI green + APPROVED — feeds the merge
+//     train (CreateRelease lands stage="assembling")
+//   - "merged" — already on main; tracking-only mode (CreateRelease
+//     auto-skips the merge train and lands stage="in_staging" with
+//     merged_main_sha populated)
+//
+// "closed" PRs are always rejected; they were intentionally dropped.
 func releaseEligibilityReason(pr db.PullRequest) (string, bool) {
+	if pr.State == db.PullRequestStateMerged {
+		// Already on main — release tracks it through staging→prod.
+		return "", true
+	}
 	if pr.State != db.PullRequestStateOpen {
-		return "is not open", false
+		return "is not open or merged", false
 	}
 	if pr.IsDraft {
 		return "is a draft", false
@@ -520,6 +578,43 @@ func releaseEligibilityReason(pr db.PullRequest) (string, bool) {
 		return "review status: " + pr.ReviewDecision.String, false
 	}
 	return "", true
+}
+
+// allMerged returns true when every PR in the set is already merged.
+// Drives the "tracking-only" release shape: CreateRelease auto-skips
+// the merge train and starts the release at stage=in_staging.
+func allMerged(prs []db.PullRequest) bool {
+	if len(prs) == 0 {
+		return false
+	}
+	for _, pr := range prs {
+		if pr.State != db.PullRequestStateMerged {
+			return false
+		}
+	}
+	return true
+}
+
+// pickLatestMergedMainSHA returns the merged-commit sha of the
+// most recently merged PR in the set. Used to populate
+// release.merged_main_sha when CreateRelease detects a tracking-
+// only release. We pick the latest by pr_merged_at (newest sha
+// is what staging will pick up).
+func pickLatestMergedMainSHA(prs []db.PullRequest) string {
+	var latest *db.PullRequest
+	for i := range prs {
+		pr := prs[i]
+		if pr.State != db.PullRequestStateMerged || !pr.PrMergedAt.Valid {
+			continue
+		}
+		if latest == nil || pr.PrMergedAt.Time.After(latest.PrMergedAt.Time) {
+			latest = &pr
+		}
+	}
+	if latest == nil {
+		return ""
+	}
+	return latest.HeadSha
 }
 
 // highestRisk returns the max risk_level across the PR set. Risk
