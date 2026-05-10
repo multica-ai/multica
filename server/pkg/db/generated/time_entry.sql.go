@@ -21,9 +21,9 @@ func (q *Queries) ClearRunningTimerByUser(ctx context.Context, userID pgtype.UUI
 }
 
 const createTimeEntry = `-- name: CreateTimeEntry :one
-INSERT INTO time_entry (workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at
+INSERT INTO time_entry (workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, type)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type
 `
 
 type CreateTimeEntryParams struct {
@@ -34,6 +34,7 @@ type CreateTimeEntryParams struct {
 	StartTime       pgtype.Timestamptz `json:"start_time"`
 	StopTime        pgtype.Timestamptz `json:"stop_time"`
 	DurationSeconds int64              `json:"duration_seconds"`
+	Type            string             `json:"type"`
 }
 
 func (q *Queries) CreateTimeEntry(ctx context.Context, arg CreateTimeEntryParams) (TimeEntry, error) {
@@ -45,6 +46,7 @@ func (q *Queries) CreateTimeEntry(ctx context.Context, arg CreateTimeEntryParams
 		arg.StartTime,
 		arg.StopTime,
 		arg.DurationSeconds,
+		arg.Type,
 	)
 	var i TimeEntry
 	err := row.Scan(
@@ -58,6 +60,7 @@ func (q *Queries) CreateTimeEntry(ctx context.Context, arg CreateTimeEntryParams
 		&i.DurationSeconds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Type,
 	)
 	return i, err
 }
@@ -78,7 +81,7 @@ func (q *Queries) DeleteTimeEntry(ctx context.Context, arg DeleteTimeEntryParams
 }
 
 const getRunningTimerByUser = `-- name: GetRunningTimerByUser :one
-SELECT te.id, te.workspace_id, te.user_id, te.issue_id, te.description, te.start_time, te.stop_time, te.duration_seconds, te.created_at, te.updated_at
+SELECT te.id, te.workspace_id, te.user_id, te.issue_id, te.description, te.start_time, te.stop_time, te.duration_seconds, te.created_at, te.updated_at, te.type
 FROM running_timer rt
 JOIN time_entry te ON te.id = rt.time_entry_id
 WHERE rt.user_id = $1 AND te.workspace_id = $2
@@ -103,12 +106,13 @@ func (q *Queries) GetRunningTimerByUser(ctx context.Context, arg GetRunningTimer
 		&i.DurationSeconds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Type,
 	)
 	return i, err
 }
 
 const getTimeEntryByID = `-- name: GetTimeEntryByID :one
-SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at FROM time_entry
+SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type FROM time_entry
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -131,12 +135,13 @@ func (q *Queries) GetTimeEntryByID(ctx context.Context, arg GetTimeEntryByIDPara
 		&i.DurationSeconds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Type,
 	)
 	return i, err
 }
 
 const listTimeEntriesByIssue = `-- name: ListTimeEntriesByIssue :many
-SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at FROM time_entry
+SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type FROM time_entry
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY start_time DESC
 `
@@ -166,6 +171,7 @@ func (q *Queries) ListTimeEntriesByIssue(ctx context.Context, arg ListTimeEntrie
 			&i.DurationSeconds,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Type,
 		); err != nil {
 			return nil, err
 		}
@@ -178,7 +184,7 @@ func (q *Queries) ListTimeEntriesByIssue(ctx context.Context, arg ListTimeEntrie
 }
 
 const listTimeEntriesByUser = `-- name: ListTimeEntriesByUser :many
-SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at FROM time_entry
+SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type FROM time_entry
 WHERE workspace_id = $1 AND user_id = $2
 ORDER BY start_time DESC
 LIMIT $3 OFFSET $4
@@ -216,6 +222,7 @@ func (q *Queries) ListTimeEntriesByUser(ctx context.Context, arg ListTimeEntries
 			&i.DurationSeconds,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Type,
 		); err != nil {
 			return nil, err
 		}
@@ -228,7 +235,7 @@ func (q *Queries) ListTimeEntriesByUser(ctx context.Context, arg ListTimeEntries
 }
 
 const listTimeEntriesByUserRange = `-- name: ListTimeEntriesByUserRange :many
-SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at FROM time_entry
+SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type FROM time_entry
 WHERE workspace_id = $1
   AND user_id = $2
   AND start_time >= $3
@@ -269,6 +276,7 @@ func (q *Queries) ListTimeEntriesByUserRange(ctx context.Context, arg ListTimeEn
 			&i.DurationSeconds,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Type,
 		); err != nil {
 			return nil, err
 		}
@@ -304,7 +312,7 @@ SET stop_time = $3,
     duration_seconds = $4,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at
+RETURNING id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type
 `
 
 type StopTimeEntryParams struct {
@@ -333,8 +341,120 @@ func (q *Queries) StopTimeEntry(ctx context.Context, arg StopTimeEntryParams) (T
 		&i.DurationSeconds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Type,
 	)
 	return i, err
+}
+
+const sumTimeEntriesByProjectInWorkspace = `-- name: SumTimeEntriesByProjectInWorkspace :many
+SELECT i.project_id, SUM(te.duration_seconds)::BIGINT AS total_seconds
+FROM time_entry te
+LEFT JOIN issue i ON i.id = te.issue_id
+WHERE te.workspace_id = $1
+  AND te.start_time >= $2
+  AND te.start_time < $3
+  AND te.stop_time IS NOT NULL
+GROUP BY i.project_id
+ORDER BY total_seconds DESC
+`
+
+type SumTimeEntriesByProjectInWorkspaceParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	StartTime   pgtype.Timestamptz `json:"start_time"`
+	StartTime_2 pgtype.Timestamptz `json:"start_time_2"`
+}
+
+type SumTimeEntriesByProjectInWorkspaceRow struct {
+	ProjectID    pgtype.UUID `json:"project_id"`
+	TotalSeconds int64       `json:"total_seconds"`
+}
+
+// Returns total stopped duration per project for a workspace within [since, until).
+// Entries not linked to any issue, or whose issues have no project, are grouped under NULL project_id.
+func (q *Queries) SumTimeEntriesByProjectInWorkspace(ctx context.Context, arg SumTimeEntriesByProjectInWorkspaceParams) ([]SumTimeEntriesByProjectInWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, sumTimeEntriesByProjectInWorkspace, arg.WorkspaceID, arg.StartTime, arg.StartTime_2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SumTimeEntriesByProjectInWorkspaceRow{}
+	for rows.Next() {
+		var i SumTimeEntriesByProjectInWorkspaceRow
+		if err := rows.Scan(&i.ProjectID, &i.TotalSeconds); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const sumTimeEntriesByUserInWorkspace = `-- name: SumTimeEntriesByUserInWorkspace :many
+SELECT user_id, SUM(duration_seconds)::BIGINT AS total_seconds
+FROM time_entry
+WHERE workspace_id = $1
+  AND start_time >= $2
+  AND start_time < $3
+  AND stop_time IS NOT NULL
+GROUP BY user_id
+ORDER BY total_seconds DESC
+`
+
+type SumTimeEntriesByUserInWorkspaceParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	StartTime   pgtype.Timestamptz `json:"start_time"`
+	StartTime_2 pgtype.Timestamptz `json:"start_time_2"`
+}
+
+type SumTimeEntriesByUserInWorkspaceRow struct {
+	UserID       pgtype.UUID `json:"user_id"`
+	TotalSeconds int64       `json:"total_seconds"`
+}
+
+// Returns total stopped duration (seconds) grouped by user for all members in a workspace
+// within [since, until). Running entries (stop_time IS NULL) are excluded.
+func (q *Queries) SumTimeEntriesByUserInWorkspace(ctx context.Context, arg SumTimeEntriesByUserInWorkspaceParams) ([]SumTimeEntriesByUserInWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, sumTimeEntriesByUserInWorkspace, arg.WorkspaceID, arg.StartTime, arg.StartTime_2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SumTimeEntriesByUserInWorkspaceRow{}
+	for rows.Next() {
+		var i SumTimeEntriesByUserInWorkspaceRow
+		if err := rows.Scan(&i.UserID, &i.TotalSeconds); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const sumTimeEntriesForProject = `-- name: SumTimeEntriesForProject :one
+SELECT COALESCE(SUM(te.duration_seconds), 0)::BIGINT AS total_seconds
+FROM time_entry te
+JOIN issue i ON i.id = te.issue_id
+WHERE i.project_id = $1
+  AND te.workspace_id = $2
+  AND te.stop_time IS NOT NULL
+`
+
+type SumTimeEntriesForProjectParams struct {
+	ProjectID   pgtype.UUID `json:"project_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Returns the total stopped duration for all time entries linked to issues under a project.
+func (q *Queries) SumTimeEntriesForProject(ctx context.Context, arg SumTimeEntriesForProjectParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumTimeEntriesForProject, arg.ProjectID, arg.WorkspaceID)
+	var total_seconds int64
+	err := row.Scan(&total_seconds)
+	return total_seconds, err
 }
 
 const updateTimeEntry = `-- name: UpdateTimeEntry :one
@@ -346,7 +466,7 @@ SET description      = COALESCE($3, description),
     duration_seconds = COALESCE($7, duration_seconds),
     updated_at       = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at
+RETURNING id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type
 `
 
 type UpdateTimeEntryParams struct {
@@ -381,6 +501,7 @@ func (q *Queries) UpdateTimeEntry(ctx context.Context, arg UpdateTimeEntryParams
 		&i.DurationSeconds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Type,
 	)
 	return i, err
 }

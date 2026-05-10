@@ -95,6 +95,16 @@ type Attachment struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
+type AutomationRule struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	TemplateID  string             `json:"template_id"`
+	Enabled     bool               `json:"enabled"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Comment struct {
 	ID          pgtype.UUID        `json:"id"`
 	IssueID     pgtype.UUID        `json:"issue_id"`
@@ -136,6 +146,33 @@ type DaemonToken struct {
 	DaemonID    string             `json:"daemon_id"`
 	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type DailyPlan struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	UserID       pgtype.UUID        `json:"user_id"`
+	PlanDate     pgtype.Date        `json:"plan_date"`
+	DraftContent string             `json:"draft_content"`
+	TopIssueIds  []pgtype.UUID      `json:"top_issue_ids"`
+	Status       string             `json:"status"`
+	ConfirmedAt  pgtype.Timestamptz `json:"confirmed_at"`
+	GeneratedBy  string             `json:"generated_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DailyReview struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	UserID       pgtype.UUID        `json:"user_id"`
+	ReviewDate   pgtype.Date        `json:"review_date"`
+	DraftContent string             `json:"draft_content"`
+	Status       string             `json:"status"`
+	ConfirmedAt  pgtype.Timestamptz `json:"confirmed_at"`
+	GeneratedBy  string             `json:"generated_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type InboxItem struct {
@@ -223,6 +260,7 @@ type Member struct {
 	UserID      pgtype.UUID        `json:"user_id"`
 	Role        string             `json:"role"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	InvitedBy   pgtype.UUID        `json:"invited_by"`
 }
 
 type NotificationPreference struct {
@@ -244,6 +282,19 @@ type PersonalAccessToken struct {
 	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
 	Revoked     bool               `json:"revoked"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type PomodoroSession struct {
+	ID                   pgtype.UUID        `json:"id"`
+	UserID               pgtype.UUID        `json:"user_id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	Phase                string             `json:"phase"`
+	PhaseDurationSeconds int32              `json:"phase_duration_seconds"`
+	Status               string             `json:"status"`
+	ElapsedSeconds       int32              `json:"elapsed_seconds"`
+	StartedAt            pgtype.Timestamptz `json:"started_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Project struct {
@@ -323,6 +374,7 @@ type TimeEntry struct {
 	DurationSeconds int64              `json:"duration_seconds"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Type            string             `json:"type"`
 }
 
 type User struct {
@@ -377,4 +429,5 @@ type Workspace struct {
 	Repos        []byte             `json:"repos"`
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
+	InviteToken  pgtype.Text        `json:"invite_token"`
 }

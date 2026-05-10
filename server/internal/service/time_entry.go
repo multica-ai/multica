@@ -87,6 +87,7 @@ func (s *TimeEntryService) StartTimer(
 		StartTime:       pgtype.Timestamptz{Time: startTime, Valid: true},
 		StopTime:        pgtype.Timestamptz{}, // NULL: timer is running
 		DurationSeconds: durationSeconds,
+		Type:            "manual",
 	})
 	if err != nil {
 		return db.TimeEntry{}, fmt.Errorf("start timer: create entry: %w", err)

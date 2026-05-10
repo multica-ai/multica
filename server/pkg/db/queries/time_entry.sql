@@ -1,6 +1,6 @@
 -- name: CreateTimeEntry :one
-INSERT INTO time_entry (workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO time_entry (workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, type)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: GetTimeEntryByID :one
@@ -65,3 +65,37 @@ WHERE rt.user_id = $1 AND te.workspace_id = $2;
 
 -- name: ClearRunningTimerByUser :exec
 DELETE FROM running_timer WHERE user_id = $1;
+
+-- name: SumTimeEntriesByUserInWorkspace :many
+-- Returns total stopped duration (seconds) grouped by user for all members in a workspace
+-- within [since, until). Running entries (stop_time IS NULL) are excluded.
+SELECT user_id, SUM(duration_seconds)::BIGINT AS total_seconds
+FROM time_entry
+WHERE workspace_id = $1
+  AND start_time >= $2
+  AND start_time < $3
+  AND stop_time IS NOT NULL
+GROUP BY user_id
+ORDER BY total_seconds DESC;
+
+-- name: SumTimeEntriesByProjectInWorkspace :many
+-- Returns total stopped duration per project for a workspace within [since, until).
+-- Entries not linked to any issue, or whose issues have no project, are grouped under NULL project_id.
+SELECT i.project_id, SUM(te.duration_seconds)::BIGINT AS total_seconds
+FROM time_entry te
+LEFT JOIN issue i ON i.id = te.issue_id
+WHERE te.workspace_id = $1
+  AND te.start_time >= $2
+  AND te.start_time < $3
+  AND te.stop_time IS NOT NULL
+GROUP BY i.project_id
+ORDER BY total_seconds DESC;
+
+-- name: SumTimeEntriesForProject :one
+-- Returns the total stopped duration for all time entries linked to issues under a project.
+SELECT COALESCE(SUM(te.duration_seconds), 0)::BIGINT AS total_seconds
+FROM time_entry te
+JOIN issue i ON i.id = te.issue_id
+WHERE i.project_id = $1
+  AND te.workspace_id = $2
+  AND te.stop_time IS NOT NULL;

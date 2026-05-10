@@ -137,6 +137,7 @@ func (h *Handler) CreateTimeEntry(w http.ResponseWriter, r *http.Request) {
 			StartTime:       pgTimestamp(startTime),
 			StopTime:        pgTimestamp(stopTime),
 			DurationSeconds: elapsed,
+			Type:            "manual",
 		})
 		if err != nil {
 			slog.Warn("create manual time entry failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -360,6 +361,108 @@ func (h *Handler) DeleteTimeEntry(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// TeamTimeUserStatResponse is one row in the by_user slice of GetTeamTimeStats.
+type TeamTimeUserStatResponse struct {
+	UserID       string `json:"user_id"`
+	TotalSeconds int64  `json:"total_seconds"`
+}
+
+// TeamTimeProjectStatResponse is one row in the by_project slice of GetTeamTimeStats.
+type TeamTimeProjectStatResponse struct {
+	// ProjectID is nil for time entries not linked to any project.
+	ProjectID    *string `json:"project_id"`
+	TotalSeconds int64   `json:"total_seconds"`
+}
+
+// TeamTimeStatsResponse is returned by GET /api/time-entries/team-stats.
+type TeamTimeStatsResponse struct {
+	Since     string                        `json:"since"`
+	Until     string                        `json:"until"`
+	ByUser    []TeamTimeUserStatResponse    `json:"by_user"`
+	ByProject []TeamTimeProjectStatResponse `json:"by_project"`
+}
+
+// GetTeamTimeStats handles GET /api/time-entries/team-stats?since=RFC3339&until=RFC3339.
+// Returns aggregated time data for all members in the workspace grouped by user and by project.
+// Only stopped entries are counted. Requires workspace membership.
+func (h *Handler) GetTeamTimeStats(w http.ResponseWriter, r *http.Request) {
+	workspaceID := resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
+	sinceStr := r.URL.Query().Get("since")
+	untilStr := r.URL.Query().Get("until")
+	if sinceStr == "" || untilStr == "" {
+		writeError(w, http.StatusBadRequest, "since and until are required (RFC 3339)")
+		return
+	}
+
+	since, err := time.Parse(time.RFC3339, sinceStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid since format (use RFC 3339)")
+		return
+	}
+	until, err := time.Parse(time.RFC3339, untilStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid until format (use RFC 3339)")
+		return
+	}
+
+	wsUUID := parseUUID(workspaceID)
+	pgSince := pgTimestamp(since)
+	pgUntil := pgTimestamp(until)
+
+	// Aggregate by user.
+	userRows, err := h.Queries.SumTimeEntriesByUserInWorkspace(r.Context(), db.SumTimeEntriesByUserInWorkspaceParams{
+		WorkspaceID: wsUUID,
+		StartTime:   pgSince,
+		StartTime_2: pgUntil,
+	})
+	if err != nil {
+		slog.Warn("team time stats by user failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to fetch team time stats")
+		return
+	}
+
+	// Aggregate by project.
+	projectRows, err := h.Queries.SumTimeEntriesByProjectInWorkspace(r.Context(), db.SumTimeEntriesByProjectInWorkspaceParams{
+		WorkspaceID: wsUUID,
+		StartTime:   pgSince,
+		StartTime_2: pgUntil,
+	})
+	if err != nil {
+		slog.Warn("team time stats by project failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to fetch team time stats")
+		return
+	}
+
+	// Build response — convert pgtype UUIDs to strings.
+	byUser := make([]TeamTimeUserStatResponse, len(userRows))
+	for i, row := range userRows {
+		byUser[i] = TeamTimeUserStatResponse{
+			UserID:       uuidToString(row.UserID),
+			TotalSeconds: row.TotalSeconds,
+		}
+	}
+
+	byProject := make([]TeamTimeProjectStatResponse, len(projectRows))
+	for i, row := range projectRows {
+		byProject[i] = TeamTimeProjectStatResponse{
+			ProjectID:    uuidToPtr(row.ProjectID),
+			TotalSeconds: row.TotalSeconds,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, TeamTimeStatsResponse{
+		Since:     sinceStr,
+		Until:     untilStr,
+		ByUser:    byUser,
+		ByProject: byProject,
+	})
+}
 
 // pgTimestamp converts a time.Time to pgtype.Timestamptz.
 func pgTimestamp(t time.Time) pgtype.Timestamptz {
