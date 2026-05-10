@@ -656,3 +656,130 @@ Worktree:
 ```bash
 make check-worktree
 ```
+
+## Submitting Changes (Internal Contributors)
+
+This section covers conventions for submitting code to the **internal Lilith fork** of Multica. If you're contributing back to the upstream OSS project on GitHub, follow `multica-ai/multica`'s own contributing guide instead.
+
+### Scope: Extend, Don't Rewrite
+
+We **sync from upstream `multica-ai/multica` weekly** (the sync lands as a single merge commit on `develop`, e.g. `9b1578cb Merge upstream multica-ai/main into develop (v0.2.9 → v0.2.26)`). Every internal change you write has to survive that sync — and the more you rewrite upstream code, the more painful the next sync becomes.
+
+So bias your changes toward **extension over modification**:
+
+- **Prefer**:
+  - Adding new files (new handler, new component, new package) that import upstream surfaces
+  - New columns / new tables / new migrations (additive schema)
+  - New API routes, new query options, new optional props
+  - Wrapping an upstream component with a thin adapter rather than editing it
+  - Behind a flag / capability check, so upstream and our path can co-exist
+- **Avoid unless necessary**:
+  - Reformatting / renaming things upstream owns (every line you touch is a potential conflict next Monday)
+  - Deleting upstream code paths — comment why a path is dead instead, or feature-flag it off
+  - Sweeping refactors across files you didn't otherwise need to change
+  - Cherry-picking unmerged upstream PRs verbatim — adapt them to our tree, keep the diff minimal, and credit the upstream PR in the commit message (`Refs multica-ai/multica#NNNN`) so the next sync can detect the duplicate
+
+When you genuinely have to modify upstream code (e.g. fixing a bug, hardening a check), keep the diff small and surgical, write a comment explaining why the change can't live in a separate file, and flag it in the MR description so it gets extra reviewer attention. If your change is also a fit for upstream, **consider opening a PR there too** — it eventually merges back via the weekly sync and our local diff disappears, which is the best outcome.
+
+If a sync produces conflicts in *your* recent change, you are the right person to resolve them — not the syncer.
+
+### Repo Layout
+
+The repo is mirrored across three remotes. Make sure your local clone has them all:
+
+```
+gitlab  → gitlab.lilithgame.com/devops/multica       ← internal primary; all MRs go here
+origin  → github.com/multica-ai/multica              ← upstream OSS, read-only for syncs
+fork    → github.com/<your-handle>/multica           ← optional, your personal GitHub fork
+```
+
+If `git remote -v` is missing one, add it. Most internal work pushes to `gitlab`.
+
+### Branching
+
+- **Always cut your branch from `develop`** (`git fetch gitlab && git checkout -b feat/... gitlab/develop`).
+- **MRs target `develop`**, never `main`. `main` exists only for upstream CLI releases and our production tags — it lags `develop` by thousands of commits, so a stray MR against `main` will produce a wall of bogus conflicts. **If you see conflicts you can't explain, check the target branch first.**
+- Branch names: `feat/<topic>`, `fix/<topic>`, `chore/<topic>`, `docs/<topic>`, `refactor/<topic>`, `test/<topic>`. One branch = one intent.
+
+### Commits
+
+Conventional commits, English-only commit body:
+
+```
+feat(scope): short imperative summary
+
+<paragraph explaining why this change exists, what trade-off it makes,
+or what bug it fixes — not a restatement of the diff>
+```
+
+Allowed types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `style`, `build`, `ci`. Common scopes: `agent`, `runtime`, `views`, `desktop`, `web`, `daemon`, `deploy`. Keep commits atomic and grouped by intent — don't bundle a refactor with the bug fix it enabled.
+
+### Pre-MR Checklist
+
+Run only the checks that match your diff; finish with a full `make check` if you touched cross-cutting code.
+
+| You changed | You must run |
+|---|---|
+| TypeScript / any frontend | `pnpm typecheck` + `pnpm test` |
+| Go backend | `cd server && go build ./... && go test ./...` |
+| `server/pkg/db/queries/*.sql` | `make sqlc` then re-build |
+| `server/migrations/*.sql` | `make migrate-up` locally; `make db-reset` to verify clean from scratch |
+| User-visible UI flow | `make dev` and walk the flow in a real browser; never claim a UI fix works from typecheck alone |
+| E2E coverage | `pnpm exec playwright test e2e/tests/your-spec.spec.ts` (needs backend + frontend running) |
+| Cross-cutting / unsure | `make check` |
+
+If you add a new test fixture, prefer the patterns in `server/internal/handler/handler_test.go` (Go) and `packages/views/.../*.test.tsx` (TS). For where tests should live, see [CLAUDE.md → Testing Rules](CLAUDE.md#testing-rules) — the placement matters and is enforced by code review.
+
+### Submitting the MR
+
+```bash
+git push gitlab feat/your-branch
+# GitLab prints an MR creation URL — open it and confirm:
+#   • Source branch: feat/your-branch
+#   • Target branch: develop          ← MUST be develop
+#   • Title:         feat(scope): same as the lead commit summary
+```
+
+### MR Description Template
+
+Paste this into the MR description and fill it in. A reviewer should be able to read just this and decide "approve / request changes" without scrolling through every diff.
+
+```markdown
+## Background
+<What problem are you solving? Why now?>
+
+## Changes
+- <commit 1 — one line>
+- <commit 2 — one line>
+
+## Impact
+- **DB**: <new migration? backfill? legacy compat?>
+- **API**: <new / modified / removed endpoints; breaking?>
+- **Frontend**: <pages / components touched; UX visible?>
+- **Production data audit** (if relevant): <how many rows would be affected by the new behavior; how you checked>
+
+## Testing
+- [ ] `pnpm typecheck`
+- [ ] `pnpm test` — N new cases
+- [ ] `go test ./...` — N new cases
+- [ ] Manual verification: <which flow, which browser, edge cases tried>
+
+## Rollout Notes
+<Anything the deployer needs to know: data migration timing, feature flag, follow-up PR needed, etc. "Nothing special" is also a valid answer.>
+
+## Refs
+multica-ai/multica#XXXX   (link the upstream issue / PR if this mirrors or inherits one)
+```
+
+### Code Review Expectations
+
+- **Self-review first** — open the diff in GitLab and read it like a stranger would; fix obvious issues before assigning a reviewer.
+- **Address comments by pushing fix-up commits**, don't force-push over them — reviewers need to see what changed in response to feedback.
+- **Don't squash on merge** unless the MR is actually a single logical change; preserving the commit-by-intent split makes `git blame` and reverts easier.
+- **Link prior art**: if your change extends or fixes something from upstream, reference the upstream issue/PR (`multica-ai/multica#NNNN`).
+
+### After Merge
+
+- Once your MR lands on `develop`, you're done — don't `kubectl apply` to production.
+- Production rollouts are cut by the release owner from `main` via a tag (e.g. `0.0.1`). The deployer updates `deploy/k8s/overlays/prod/kustomization.yaml`, builds & pushes the image, and applies. See `deploy/k8s/README.md` for the playbook.
+- If your change requires the rollout to be staged or coordinated (data backfill, feature flag flip, daemon CLI update), say so explicitly in the MR's "Rollout Notes" so the release owner schedules it correctly.
