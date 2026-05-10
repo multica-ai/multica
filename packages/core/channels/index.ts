@@ -27,6 +27,7 @@ export {
   useToggleChannelReaction,
   useUpdateChannelMessage,
   useDeleteChannelMessage,
+  useDispatchThreadIssueTask,
 } from "./mutations";
 
 import type { createChannelsStore as CreateChannelsStoreFn } from "./store";

@@ -552,6 +552,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Patch("/", h.UpdateChannelMessage)
 						r.Delete("/", h.DeleteChannelMessage)
 						r.Get("/thread", h.ListChannelMessageThread)
+						// "Convert thread → issue" dispatch. The picker
+						// sits in the ThreadPanel; POST creates a queued
+						// thread-issue task that runs the agent in full
+						// issue-task mode against the embedded thread.
+						r.Post("/dispatch-issue-task", h.DispatchThreadIssueTask)
 						r.Post("/reactions", h.AddChannelReaction)
 						r.Delete("/reactions", h.RemoveChannelReaction)
 					})

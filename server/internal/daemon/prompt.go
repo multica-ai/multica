@@ -11,7 +11,15 @@ import (
 // Keep this minimal — detailed instructions live in CLAUDE.md / AGENTS.md
 // injected by execenv.InjectRuntimeConfig.
 func BuildPrompt(task Task) string {
-	// Channel-mention check goes FIRST: a channel-mention task has neither
+	// Thread → issue dispatch goes BEFORE the channel-mention branch:
+	// thread-issue tasks also have ChannelID populated (the channel is
+	// the source of the thread), but the prompt must NOT route through
+	// buildChannelMentionPrompt (which forbids `multica issue ...`). The
+	// hydrator marks thread-issue tasks with TaskKind == "thread_issue".
+	if task.TaskKind == "thread_issue" {
+		return buildThreadIssuePrompt(task)
+	}
+	// Channel-mention check goes next: a channel-mention task has neither
 	// IssueID nor ChatSessionID, but it shouldn't fall through to the
 	// quick-create or default-issue branches. The hydrator on the server
 	// only populates ChannelID when context.type == "channel_mention".
@@ -274,5 +282,134 @@ func buildChannelMentionPrompt(task Task) string {
 	if task.ChannelID != "" {
 		fmt.Fprintf(&b, "- If the user references a message older than the window above, run `multica channel history %s --before <oldest-timestamp-you-have> --output json` to fetch more.\n", task.ChannelID)
 	}
+	return b.String()
+}
+
+// buildThreadIssuePrompt constructs a prompt for tasks dispatched from
+// the channel ThreadPanel's "Convert thread → issue" flow. Unlike the
+// channel-mention prompt, this prompt is in full issue-task mode: the
+// agent is explicitly permitted (and required) to call
+// `multica issue create` one or more times to distill the embedded
+// thread into well-formed issues. There is NO chat reply — the output
+// is purely the list of issues created.
+func buildThreadIssuePrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are running as an issue-creation assistant for a Multica workspace, dispatched from a channel thread.\n\n")
+	b.WriteString("A teammate clicked \"Convert thread → issue\" on a channel thread. Your job is to distill the discussion below into one or more well-formed Multica issues by calling `multica issue create`. Group related points; split unrelated points across separate issues. Do not create issues for pure chatter.\n\n")
+
+	if task.ChannelName != "" {
+		fmt.Fprintf(&b, "**Channel:** #%s\n", task.ChannelName)
+	}
+	if task.ChannelID != "" {
+		fmt.Fprintf(&b, "**Channel ID:** `%s`\n", task.ChannelID)
+	}
+	if task.Agent != nil && task.Agent.Name != "" {
+		fmt.Fprintf(&b, "**You are:** %s\n", task.Agent.Name)
+	}
+	if task.ThreadIssueProjectTitle != "" || task.ThreadIssueProjectID != "" {
+		title := task.ThreadIssueProjectTitle
+		if title == "" {
+			title = "(unknown)"
+		}
+		fmt.Fprintf(&b, "**Target project:** %s", title)
+		if task.ThreadIssueProjectID != "" {
+			fmt.Fprintf(&b, " (id: `%s`)", task.ThreadIssueProjectID)
+		}
+		b.WriteString("\n")
+	}
+	if task.ThreadIssueParentIssueKey != "" || task.ThreadIssueParentIssueID != "" {
+		key := task.ThreadIssueParentIssueKey
+		if key == "" {
+			key = "(unknown)"
+		}
+		fmt.Fprintf(&b, "**Parent issue:** %s", key)
+		if task.ThreadIssueParentIssueID != "" {
+			fmt.Fprintf(&b, " (id: `%s`)", task.ThreadIssueParentIssueID)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+
+	if strings.TrimSpace(task.ThreadIssueInstruction) != "" {
+		b.WriteString("**Requester's instruction (treat as authoritative when it conflicts with your own reading of the thread):**\n\n")
+		b.WriteString("> ")
+		b.WriteString(strings.ReplaceAll(strings.TrimSpace(task.ThreadIssueInstruction), "\n", "\n> "))
+		b.WriteString("\n\n")
+	}
+
+	// Embed the thread (parent + replies, oldest first) in ChannelHistory.
+	// The server hydrator pre-populates this with loadThreadHistoryForTask
+	// so the agent doesn't need to fetch the channel transcript.
+	if len(task.ChannelHistory) > 0 {
+		b.WriteString("Thread (oldest first; first row is the parent message, the rest are replies):\n\n")
+		for _, m := range task.ChannelHistory {
+			who := m.AuthorName
+			if m.AuthorType == "agent" {
+				who += " (agent)"
+			}
+			ts := m.CreatedAt
+			if len(ts) >= 19 {
+				ts = ts[:19] + "Z"
+			}
+			fmt.Fprintf(&b, "[%s] %s:\n", ts, who)
+			b.WriteString("> ")
+			b.WriteString(strings.ReplaceAll(m.Content, "\n", "\n> "))
+			b.WriteString("\n\n")
+		}
+	}
+
+	b.WriteString("Issue creation rules:\n\n")
+	b.WriteString("- Use `multica issue create` with `--title` (required) and `--description` (required). Title is concise; description faithfully captures the thread's intent with enough context that a reader who never saw the channel can act on it. Quote the most relevant lines from the thread inline.\n")
+	if task.ThreadIssueProjectID != "" || task.ThreadIssueProjectTitle != "" {
+		// Prefer --project-id when available — UUID matching is unambiguous
+		// even if multiple workspaces have similarly-named projects. Fall
+		// back to --project (name) when only the title is known.
+		if task.ThreadIssueProjectID != "" {
+			fmt.Fprintf(&b, "- Pass `--project-id %q` on EVERY `multica issue create` invocation so each new issue lands in the requested project.\n", task.ThreadIssueProjectID)
+		} else {
+			fmt.Fprintf(&b, "- Pass `--project %q` on EVERY `multica issue create` invocation so each new issue lands in the requested project.\n", task.ThreadIssueProjectTitle)
+		}
+	} else {
+		b.WriteString("- Do not pass `--project` / `--project-id`. The platform routes new issues to the workspace default.\n")
+	}
+	if task.ThreadIssueParentIssueID != "" || task.ThreadIssueParentIssueKey != "" {
+		// CLI accepts both UUID and `<PREFIX>-<n>` keys for --parent; prefer
+		// the human-readable key when present because it's stable across
+		// log re-reads and easier to verify in CI output.
+		ref := task.ThreadIssueParentIssueKey
+		if ref == "" {
+			ref = task.ThreadIssueParentIssueID
+		}
+		fmt.Fprintf(&b, "- Pass `--parent %q` on EVERY `multica issue create` invocation so each new issue is nested under the requested parent.\n", ref)
+	}
+
+	// Assignee — mirror buildQuickCreatePrompt's three-regime logic so
+	// orchestrator personas can still route, single-agent workspaces
+	// self-assign by UUID, and the legacy fallback uses --assignee <name>.
+	agentID := ""
+	agentName := ""
+	if task.Agent != nil {
+		agentID = task.Agent.ID
+		agentName = task.Agent.Name
+	}
+	hasPeers := len(task.PeerAgents) > 0
+	switch {
+	case agentName != "" && hasPeers:
+		fmt.Fprintf(&b, "- Assignee: pick exactly one based on the work AND your role described in the Agent Identity section. If your persona delegates this kind of task to a peer (peers are listed in the \"Peer Agents in this Workspace\" section above, with each peer's role one-liner), pass `--assignee \"<peer name>\"`. Otherwise keep it yourself: pass `--assignee %q`. Never leave an issue unassigned.\n", agentName)
+	case agentID != "":
+		fmt.Fprintf(&b, "- Assignee: default to YOURSELF: pass `--assignee-id %q` (your agent UUID). The picker agent is the expected owner because the user opened this dispatch with you selected — never leave an issue unassigned. Use the UUID flag, not `--assignee <name>`, so the assignment is unambiguous even when other agents share part of your name.\n", agentID)
+	case agentName != "":
+		fmt.Fprintf(&b, "- Assignee: default to YOURSELF: pass `--assignee %q`. The picker agent is the expected owner because the user opened this dispatch with you selected — never leave an issue unassigned.\n", agentName)
+	default:
+		b.WriteString("- Assignee: default to YOURSELF (the picker agent): pass `--assignee-id <your agent UUID>` (preferred) or `--assignee <your agent name>`. Never leave an issue unassigned.\n")
+	}
+	b.WriteString("- Priority: use your judgment. Map P0/P1 → urgent/high; obvious bugs → high; vague exploration → low; routine work → medium; omit when truly unclear.\n")
+	b.WriteString("- Do NOT pass `--attachment` — the flag only accepts local file paths; any image URL in the thread is already markdown and can be embedded inline in `--description`.\n\n")
+
+	b.WriteString("Output format:\n")
+	b.WriteString("- For each issue created, print exactly one line: `Created MUL-<n>: <title>` (substitute the workspace's issue prefix the CLI returned).\n")
+	b.WriteString("- After the last `Created ...` line, exit. No commentary, no follow-up tool calls.\n")
+	b.WriteString("- Do NOT post a chat reply — your output is a list of created issues, surfaced to the requester via task completion notifications. There is no channel-message side effect on completion for this task variant.\n")
+	b.WriteString("- On CLI error, exit with the error as the only output. The platform writes a failure notification automatically.\n")
 	return b.String()
 }

@@ -199,14 +199,28 @@ export function useUpdateChannelMessage(channelId: string) {
 // renders the "[message deleted]" placeholder instantly. The thread
 // cache (if any) is also flipped so a panel that's currently displaying
 // the message gets the placeholder treatment.
+/** Soft-delete a channel message. Accepts the message id alone (back-
+ *  compat for callers that only know that) or an object carrying the
+ *  parent's message id when the row being deleted is a thread reply.
+ *  When `parentMessageId` is provided we also invalidate the parent's
+ *  thread cache on settle, so the side panel removes the deleted reply
+ *  without a WS round-trip — bug fix for "delete in thread doesn't
+ *  appear to work." */
 export function useDeleteChannelMessage(channelId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (messageId: string) => api.deleteChannelMessage(channelId, messageId),
-    onMutate: async (messageId) => {
+    mutationFn: (vars: string | { messageId: string; parentMessageId?: string }) => {
+      const id = typeof vars === "string" ? vars : vars.messageId;
+      return api.deleteChannelMessage(channelId, id);
+    },
+    onMutate: async (vars) => {
+      const messageId = typeof vars === "string" ? vars : vars.messageId;
+      const parentMessageId =
+        typeof vars === "string" ? undefined : vars.parentMessageId;
       await qc.cancelQueries({ queryKey: channelKeys.messages(channelId) });
       const prev = qc.getQueryData<ChannelMessage[]>(channelKeys.messages(channelId));
       const stamp = new Date().toISOString();
+      // Optimistic patch on the timeline cache (top-level rows).
       qc.setQueryData<ChannelMessage[]>(channelKeys.messages(channelId), (old) =>
         old?.filter((m) => m.id !== messageId).concat(
           (old ?? [])
@@ -214,14 +228,46 @@ export function useDeleteChannelMessage(channelId: string) {
             .map((m) => ({ ...m, deleted_at: stamp })),
         ),
       );
-      return { prev };
+      // Optimistic patch on the parent's thread cache when this is a
+      // reply — flip deleted_at on the matching row so the panel shows
+      // the "[deleted]" placeholder instantly.
+      let prevThread: unknown = undefined;
+      if (parentMessageId) {
+        const key = channelKeys.thread(parentMessageId);
+        prevThread = qc.getQueryData(key);
+        qc.setQueryData<{
+          parent: ChannelMessage;
+          replies: ChannelMessage[];
+        } | undefined>(key, (old) => {
+          if (!old) return old;
+          return {
+            ...old,
+            replies: old.replies.map((r) =>
+              r.id === messageId ? { ...r, deleted_at: stamp } : r,
+            ),
+          };
+        });
+      }
+      return { prev, prevThread, parentMessageId };
     },
-    onError: (_err, _messageId, ctx) => {
+    onError: (_err, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(channelKeys.messages(channelId), ctx.prev);
+      if (ctx?.parentMessageId && ctx.prevThread !== undefined) {
+        qc.setQueryData(channelKeys.thread(ctx.parentMessageId), ctx.prevThread);
+      }
     },
-    onSettled: (_data, _err, messageId) => {
+    onSettled: (_data, _err, vars) => {
+      const messageId = typeof vars === "string" ? vars : vars.messageId;
+      const parentMessageId =
+        typeof vars === "string" ? undefined : vars.parentMessageId;
       qc.invalidateQueries({ queryKey: channelKeys.messages(channelId) });
+      // Invalidate the deleted message's OWN thread (in case it was a
+      // parent whose panel is open) AND its parent's thread (so the
+      // reply disappears from the side panel).
       qc.invalidateQueries({ queryKey: channelKeys.thread(messageId) });
+      if (parentMessageId) {
+        qc.invalidateQueries({ queryKey: channelKeys.thread(parentMessageId) });
+      }
     },
   });
 }
@@ -286,6 +332,28 @@ export function useToggleChannelReaction(channelId: string) {
       qc.invalidateQueries({ queryKey: channelKeys.messages(channelId) });
       qc.invalidateQueries({ queryKey: channelKeys.thread(params.messageId) });
     },
+  });
+}
+
+/** Dispatch an issue-creation task to an agent, with the contents of a
+ *  channel thread (parent + replies) as context. Used by the
+ *  ThreadPanel "Convert to issue task" affordance.
+ *
+ *  The agent runs in full issue-task mode (free to call `multica issue
+ *  create/update/comment`), unlike a channel @-mention which is
+ *  prompt-constrained to chat-only. Returns the queued task id so the
+ *  caller can show "dispatched" feedback or link to a follow-up view. */
+export function useDispatchThreadIssueTask(
+  channelId: string,
+  messageId: string,
+) {
+  return useMutation({
+    mutationFn: (data: {
+      agent_id: string;
+      project_id?: string;
+      parent_issue_id?: string;
+      instruction?: string;
+    }) => api.dispatchThreadIssueTask(channelId, messageId, data),
   });
 }
 

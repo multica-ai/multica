@@ -285,6 +285,33 @@ type ChannelMentionContext struct {
 // ChannelMentionContextType marks a task as a channel-mention job.
 const ChannelMentionContextType = "channel_mention"
 
+// ThreadIssueTaskContext is the JSON payload for tasks dispatched from
+// a channel thread → issue creation flow. The agent runs in full
+// issue-task mode (free to call multica issue create/update/comment)
+// with the thread embedded as context.
+//
+// The handler picks an agent, optionally a project, optionally a parent
+// issue, and optionally an instruction. The daemon detects this variant
+// via context.type == "thread_issue_task" and renders a prompt that
+// tells the agent to distill the thread into one or more issues.
+type ThreadIssueTaskContext struct {
+	Type            string `json:"type"`
+	WorkspaceID     string `json:"workspace_id"`
+	RequesterID     string `json:"requester_id"`
+	ChannelID       string `json:"channel_id"`
+	ChannelName     string `json:"channel_name"`
+	ChannelKind     string `json:"channel_kind"`
+	ParentMessageID string `json:"parent_message_id"`
+	ProjectID       string `json:"project_id,omitempty"`
+	ProjectTitle    string `json:"project_title,omitempty"`
+	ParentIssueID   string `json:"parent_issue_id,omitempty"`
+	ParentIssueKey  string `json:"parent_issue_key,omitempty"`
+	Instruction     string `json:"instruction,omitempty"`
+}
+
+// ThreadIssueTaskContextType marks a task as a thread → issue creation job.
+const ThreadIssueTaskContextType = "thread_issue_task"
+
 // ShipCardActionContext is the JSON payload stored on a Ship Hub card-
 // action task's context column. The chip handler enqueues one of these
 // when the user presses "diagnose CI failure" or "summarize review
@@ -383,6 +410,104 @@ func (s *TaskService) EnqueueTaskForChannelMention(ctx context.Context, p Enqueu
 	)
 	// Match every other Enqueue* path: kick the daemon WS so the task
 	// gets claimed promptly instead of waiting for the next poll.
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.notifyTaskAvailable(task)
+	return task, nil
+}
+
+// EnqueueTaskForThreadIssueParams is the input shape for
+// EnqueueTaskForThreadIssue. Zero/invalid pgtype.UUID values for the
+// optional fields (ProjectID, ParentIssueID) are treated as "unset" and
+// omitted from the serialized context.
+type EnqueueTaskForThreadIssueParams struct {
+	WorkspaceID     pgtype.UUID
+	RequesterID     pgtype.UUID
+	AgentID         pgtype.UUID
+	ChannelID       pgtype.UUID
+	ChannelName     string
+	ChannelKind     string
+	ParentMessageID pgtype.UUID
+	ProjectID       pgtype.UUID // zero/invalid OK
+	ProjectTitle    string
+	ParentIssueID   pgtype.UUID // zero/invalid OK
+	ParentIssueKey  string
+	Instruction     string
+}
+
+// EnqueueTaskForThreadIssue creates a queued task for an agent dispatched
+// from a channel thread → issue creation flow. The task carries the
+// channel + parent message id + optional project / parent-issue / user
+// instruction in its JSONB context (no issue_id, no chat_session_id) —
+// the daemon's thread-issue dispatcher recognizes the variant via
+// context.type == "thread_issue_task" and routes through
+// buildThreadIssuePrompt, which permits full `multica issue ...` access.
+//
+// Pre-validates that the agent is reachable (not archived, has a runtime)
+// so the handler can fail fast instead of queueing a task that will never
+// claim. The handler is responsible for verifying channel access, parent
+// message existence, and any project/parent-issue id resolution before
+// calling this method.
+func (s *TaskService) EnqueueTaskForThreadIssue(ctx context.Context, p EnqueueTaskForThreadIssueParams) (db.AgentTaskQueue, error) {
+	agent, err := s.Queries.GetAgent(ctx, p.AgentID)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+
+	payload := ThreadIssueTaskContext{
+		Type:            ThreadIssueTaskContextType,
+		WorkspaceID:     util.UUIDToString(p.WorkspaceID),
+		RequesterID:     util.UUIDToString(p.RequesterID),
+		ChannelID:       util.UUIDToString(p.ChannelID),
+		ChannelName:     p.ChannelName,
+		ChannelKind:     p.ChannelKind,
+		ParentMessageID: util.UUIDToString(p.ParentMessageID),
+		Instruction:     p.Instruction,
+	}
+	if p.ProjectID.Valid {
+		payload.ProjectID = util.UUIDToString(p.ProjectID)
+		payload.ProjectTitle = p.ProjectTitle
+	}
+	if p.ParentIssueID.Valid {
+		payload.ParentIssueID = util.UUIDToString(p.ParentIssueID)
+		payload.ParentIssueKey = p.ParentIssueKey
+	}
+	contextJSON, err := json.Marshal(payload)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("marshal thread-issue context: %w", err)
+	}
+
+	// Reuse CreateChannelMentionTask — the SQL shape is generic enough
+	// (no issue_id, queued status, priority + JSONB context) for any
+	// no-issue/no-chat task variant. Adding a new query just for this
+	// would duplicate the same INSERT verbatim.
+	task, err := s.Queries.CreateChannelMentionTask(ctx, db.CreateChannelMentionTaskParams{
+		AgentID:   p.AgentID,
+		RuntimeID: agent.RuntimeID,
+		Priority:  priorityToInt("medium"),
+		Context:   contextJSON,
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("create thread-issue task: %w", err)
+	}
+
+	slog.Info("thread-issue task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"agent_id", util.UUIDToString(p.AgentID),
+		"channel_id", util.UUIDToString(p.ChannelID),
+		"parent_message_id", util.UUIDToString(p.ParentMessageID),
+		"requester_id", util.UUIDToString(p.RequesterID),
+		"has_project", p.ProjectID.Valid,
+		"has_parent_issue", p.ParentIssueID.Valid,
+	)
+	// Same ordering rationale as EnqueueTaskForChannelMention: broadcast
+	// before kicking the daemon so the WS event is visible before the
+	// daemon races to claim.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.notifyTaskAvailable(task)
 	return task, nil

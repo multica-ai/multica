@@ -816,6 +816,193 @@ func (h *Handler) ListChannelMessageThread(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// DispatchThreadIssueTaskRequest is the body for POST
+// /api/channels/{channelId}/messages/{messageId}/dispatch-issue-task.
+//
+// The user picks an agent in the ThreadPanel's "Convert thread → issue"
+// dialog, optionally a target project, optionally a parent issue (by id
+// — the UI resolves the human-readable key first), and optionally types
+// an instruction. Everything except AgentID is optional.
+type DispatchThreadIssueTaskRequest struct {
+	AgentID       string `json:"agent_id"`
+	ProjectID     string `json:"project_id,omitempty"`
+	ParentIssueID string `json:"parent_issue_id,omitempty"`
+	Instruction   string `json:"instruction,omitempty"`
+}
+
+// DispatchThreadIssueTaskResponse echoes the queued task id so the
+// frontend can correlate the eventual inbox item, even though
+// completion is fully async.
+type DispatchThreadIssueTaskResponse struct {
+	TaskID string `json:"task_id"`
+}
+
+// DispatchThreadIssueTask handles POST
+// /api/channels/{channelId}/messages/{messageId}/dispatch-issue-task.
+//
+// Validates the channel + parent message + agent + optional project /
+// parent issue, then enqueues a thread-issue task carrying the relevant
+// ids in its JSONB context. Returns 202 with the task id. The agent
+// runs the task in full issue-task mode (full `multica issue ...`
+// access) and creates one or more issues distilling the thread.
+//
+// Distinct from CreateChannelMessage's mention-trigger path: there is
+// no @-mention, no chat reply, no dedup window — the user clicked an
+// explicit button and we always enqueue.
+func (h *Handler) DispatchThreadIssueTask(w http.ResponseWriter, r *http.Request) {
+	wsID, _, ok := h.requireChannelsEnabled(w, r)
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	channelUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "channelId"), "channel id")
+	if !ok {
+		return
+	}
+	messageUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "messageId"), "message id")
+	if !ok {
+		return
+	}
+
+	var req DispatchThreadIssueTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	agentUUID, ok := parseUUIDOrBadRequest(w, req.AgentID, "agent_id")
+	if !ok {
+		return
+	}
+
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(wsID))
+	actorUUID, ok := parseUUIDOrBadRequest(w, actorID, "actor id")
+	if !ok {
+		return
+	}
+	ch, ok := h.requireChannelAccess(w, r, channelUUID, wsID, channel.Actor{Type: actorType, ID: actorUUID})
+	if !ok {
+		return
+	}
+
+	// Cross-channel defense: the {messageId} URL segment must actually
+	// belong to the {channelId} segment, otherwise the user could dispatch
+	// a thread from a private channel they can't read.
+	parent, err := h.ChannelMessageService.Get(r.Context(), messageUUID)
+	if err != nil || parent.ChannelID.Bytes != channelUUID.Bytes {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	// Validate the picked agent the same way QuickCreateIssue does:
+	// workspace membership, archived check, private-agent visibility, and
+	// runtime liveness.
+	wsIDStr := uuidToString(wsID)
+	if status, msg := h.validateAssigneePair(
+		r.Context(), r, wsIDStr,
+		pgtype.Text{String: "agent", Valid: true},
+		agentUUID,
+	); status != 0 {
+		writeError(w, status, msg)
+		return
+	}
+	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          agentUUID,
+		WorkspaceID: wsID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if !agent.RuntimeID.Valid {
+		writeAgentUnavailable(w, "agent has no runtime")
+		return
+	}
+	if !h.isRuntimeOnline(r.Context(), agent.RuntimeID) {
+		writeAgentUnavailable(w, "agent's runtime is offline")
+		return
+	}
+
+	// Resolve optional project + parent issue. Done up front so a bad id
+	// fails the dispatch with a clean 400/404 instead of surfacing as an
+	// inbox failure twenty seconds later when the agent runs.
+	var (
+		projectUUID    pgtype.UUID
+		projectTitle   string
+		parentIssueUUID pgtype.UUID
+		parentIssueKey string
+	)
+	if req.ProjectID != "" {
+		pid, ok := parseUUIDOrBadRequest(w, req.ProjectID, "project_id")
+		if !ok {
+			return
+		}
+		project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+			ID:          pid,
+			WorkspaceID: wsID,
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		projectUUID = pid
+		projectTitle = project.Title
+	}
+	if req.ParentIssueID != "" {
+		iid, ok := parseUUIDOrBadRequest(w, req.ParentIssueID, "parent_issue_id")
+		if !ok {
+			return
+		}
+		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID:          iid,
+			WorkspaceID: wsID,
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "parent issue not found")
+			return
+		}
+		parentIssueUUID = iid
+		ws, err := h.Queries.GetWorkspace(r.Context(), wsID)
+		if err == nil {
+			parentIssueKey = fmt.Sprintf("%s-%d", ws.IssuePrefix, issue.Number)
+		}
+	}
+
+	requesterUUID, ok := parseUUIDOrBadRequest(w, userID, "requester_id")
+	if !ok {
+		return
+	}
+
+	task, err := h.TaskService.EnqueueTaskForThreadIssue(r.Context(), service.EnqueueTaskForThreadIssueParams{
+		WorkspaceID:     wsID,
+		RequesterID:     requesterUUID,
+		AgentID:         agentUUID,
+		ChannelID:       ch.ID,
+		ChannelName:     ch.Name,
+		ChannelKind:     ch.Kind,
+		ParentMessageID: messageUUID,
+		ProjectID:       projectUUID,
+		ProjectTitle:    projectTitle,
+		ParentIssueID:   parentIssueUUID,
+		ParentIssueKey:  parentIssueKey,
+		Instruction:     req.Instruction,
+	})
+	if err != nil {
+		slog.Warn("dispatch thread-issue task: enqueue failed",
+			"channel_id", uuidToString(ch.ID),
+			"message_id", uuidToString(messageUUID),
+			"agent_id", uuidToString(agentUUID),
+			"error", err,
+		)
+		writeError(w, http.StatusInternalServerError, "failed to enqueue thread-issue task")
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, DispatchThreadIssueTaskResponse{TaskID: uuidToString(task.ID)})
+}
+
 // UpdateChannelMessageRequest is the body for PATCH
 // /api/channels/{channelId}/messages/{messageId}.
 type UpdateChannelMessageRequest struct {
@@ -933,11 +1120,20 @@ func (h *Handler) DeleteChannelMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Include parent_message_id so the client can invalidate the parent's
+	// thread cache — without it, deleting a reply leaves the side panel
+	// showing the now-deleted reply until a manual refresh.
+	var parentRef *string
+	if deleted.ParentMessageID.Valid {
+		p := uuidToString(deleted.ParentMessageID)
+		parentRef = &p
+	}
 	h.publish(protocol.EventChannelMessageDeleted, uuidToString(wsID), actorType, actorID, map[string]any{
-		"channel_id": uuidToString(channelUUID),
-		"message_id": uuidToString(messageUUID),
-		"deleted_at": timestampToString(deleted.DeletedAt),
-		"reason":     deleted.DeletionReason.String,
+		"channel_id":        uuidToString(channelUUID),
+		"message_id":        uuidToString(messageUUID),
+		"parent_message_id": parentRef,
+		"deleted_at":        timestampToString(deleted.DeletedAt),
+		"reason":            deleted.DeletionReason.String,
 	})
 	w.WriteHeader(http.StatusNoContent)
 }

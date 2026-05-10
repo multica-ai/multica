@@ -155,7 +155,27 @@
     "reply_count_other": "{{count}} 条回复",
     "reply_placeholder": "在话题中回复…",
     "sending": "发送中…",
-    "reply": "回复"
+    "reply": "回复",
+    "convert_to_issue_aria": "将话题转为议题任务",
+    "convert_to_issue_button": "议题任务"
+  },
+  "thread_to_issue_dialog": {
+    "title": "将话题转为议题任务",
+    "description": "派发一个智能体根据该话题创建议题。智能体以议题任务模式运行，可调用 multica issue create / update / comment。",
+    "agent_label": "受派智能体",
+    "agent_placeholder": "选择一个智能体",
+    "no_agents": "当前工作区暂无可用的智能体。",
+    "project_label": "项目（可选）",
+    "project_none": "不指定",
+    "parent_issue_label": "父议题（可选）",
+    "parent_issue_placeholder": "MUL-123 或议题 UUID",
+    "instruction_label": "指令（可选）",
+    "instruction_placeholder": "希望智能体重点捕捉什么？留空则由智能体自行判断。",
+    "submit": "派发",
+    "submitting": "派发中…",
+    "cancel": "取消",
+    "dispatched_toast": "已将议题任务派发给 {{agent}}。",
+    "dispatch_failed": "派发失败：{{message}}"
   },
   "attachments": {
     "download_aria": "下载 {{filename}}",

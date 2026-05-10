@@ -207,7 +207,18 @@ type AgentTaskResponse struct {
 	// to 50 and is overridable via CHANNEL_AGENT_CONTEXT_MESSAGES on the
 	// server. The daemon renders these into issue_context.md.
 	ChannelHistory []ChannelHistoryMessage `json:"channel_history,omitempty"`
-	Kind           string                  `json:"kind"` // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "channel_mention" | "direct" — used by the activity row to label tasks that have no linked issue
+	// Channels thread → issue dispatch. Populated when the daemon claims
+	// a task whose JSONB context.type == "thread_issue_task". Hydrated
+	// by ClaimTaskByRuntime from service.ThreadIssueTaskContext. The
+	// daemon dispatches via TaskKind == "thread_issue" instead of via
+	// ChannelID alone (channel-mention tasks also have ChannelID).
+	TaskKind                  string `json:"task_kind,omitempty"`
+	ThreadIssueInstruction    string `json:"thread_issue_instruction,omitempty"`
+	ThreadIssueProjectID      string `json:"thread_issue_project_id,omitempty"`
+	ThreadIssueProjectTitle   string `json:"thread_issue_project_title,omitempty"`
+	ThreadIssueParentIssueID  string `json:"thread_issue_parent_issue_id,omitempty"`
+	ThreadIssueParentIssueKey string `json:"thread_issue_parent_issue_key,omitempty"`
+	Kind                      string `json:"kind"` // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "channel_mention" | "thread_issue" | "direct" — used by the activity row to label tasks that have no linked issue
 }
 
 // ChannelHistoryMessage is the minimal shape the daemon needs to render
@@ -299,6 +310,22 @@ func computeTaskKind(t db.AgentTaskQueue) string {
 		return "autopilot"
 	}
 	if uuidToString(t.IssueID) == "" {
+		// No issue / chat / autopilot link — three task variants share
+		// this shape, distinguished only by context.type. Sniff it
+		// before defaulting to quick_create.
+		if t.Context != nil {
+			var probe struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(t.Context, &probe) == nil {
+				switch probe.Type {
+				case service.ChannelMentionContextType:
+					return "channel_mention"
+				case service.ThreadIssueTaskContextType:
+					return "thread_issue"
+				}
+			}
+		}
 		return "quick_create"
 	}
 	if uuidToString(t.TriggerCommentID) != "" {

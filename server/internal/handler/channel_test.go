@@ -1342,3 +1342,221 @@ func testAgentID() string {
 	_ = row.Scan(&id)
 	return id
 }
+
+// ---------------------------------------------------------------------------
+// Convert thread → issue dispatch
+// ---------------------------------------------------------------------------
+
+// dispatchThreadIssue is a small helper that wires up the chi URL params
+// and posts the dispatch-issue-task body. Returns the recorder so the
+// caller can assert on status / body.
+func dispatchThreadIssue(t *testing.T, channelID, messageID string, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels/"+channelID+"/messages/"+messageID+"/dispatch-issue-task", body)
+	req = withURLParams(req, "channelId", channelID, "messageId", messageID)
+	testHandler.DispatchThreadIssueTask(w, req)
+	return w
+}
+
+// TestDispatchThreadIssueTask_Success exercises the happy path: create a
+// channel + agent membership + parent message + a reply, POST the
+// dispatch endpoint with the agent id, and verify a thread_issue_task
+// row landed in agent_task_queue with the right context shape.
+func TestDispatchThreadIssueTask_Success(t *testing.T) {
+	enableChannels(t)
+	ctx := context.Background()
+
+	// Create a channel and add the test agent so it's a workspace-visible
+	// assignee for validateAssigneePair to clear.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "thread-dispatch", "display_name": "ThreadDispatch", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create channel: %d %s", w.Code, w.Body.String())
+	}
+	ch := decodeChannel(t, w)
+
+	// Post a parent + one reply so the thread is non-trivial. The
+	// handler doesn't require any replies (an empty-thread dispatch is
+	// also legal), but having a reply lets us confirm the hydrator path
+	// later.
+	parent := postChannelMessage(t, ch.ID, "we should track auth bugs separately")
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels/"+ch.ID+"/messages", map[string]any{
+		"content":           "agreed — also bug #2 in login",
+		"parent_message_id": parent.ID,
+	})
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.CreateChannelMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create reply: %d %s", w.Code, w.Body.String())
+	}
+
+	// Clean any prior tasks to avoid cross-test pollution on the queue.
+	testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE agent_id = $1`, testAgentID())
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE agent_id = $1`, testAgentID())
+	})
+
+	w = dispatchThreadIssue(t, ch.ID, parent.ID, map[string]any{
+		"agent_id":    testAgentID(),
+		"instruction": "Split into one issue per bug",
+	})
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("dispatch: %d %s", w.Code, w.Body.String())
+	}
+	var resp DispatchThreadIssueTaskResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.TaskID == "" {
+		t.Fatalf("expected non-empty task id in response, got %+v", resp)
+	}
+
+	// Verify the row in agent_task_queue carries the expected context shape.
+	var (
+		ctxType         string
+		ctxAgentID      string
+		ctxParentMsgID  string
+		ctxChannelID    string
+		ctxInstruction  string
+		taskAgentID     string
+		taskRuntimeID   sql.NullString
+		taskIssueID     sql.NullString
+		taskPriority    int32
+		taskStatus      string
+	)
+	if err := testPool.QueryRow(ctx, `
+		SELECT
+			context->>'type',
+			COALESCE(context->>'agent_id', ''),
+			context->>'parent_message_id',
+			context->>'channel_id',
+			COALESCE(context->>'instruction', ''),
+			agent_id::text,
+			runtime_id::text,
+			issue_id::text,
+			priority,
+			status
+		FROM agent_task_queue
+		WHERE id = $1
+	`, resp.TaskID).Scan(&ctxType, &ctxAgentID, &ctxParentMsgID, &ctxChannelID, &ctxInstruction,
+		&taskAgentID, &taskRuntimeID, &taskIssueID, &taskPriority, &taskStatus); err != nil {
+		t.Fatalf("fetch task row: %v", err)
+	}
+	if ctxType != "thread_issue_task" {
+		t.Fatalf("context.type = %q, want \"thread_issue_task\"", ctxType)
+	}
+	if ctxParentMsgID != parent.ID {
+		t.Fatalf("context.parent_message_id = %q, want %q", ctxParentMsgID, parent.ID)
+	}
+	if ctxChannelID != ch.ID {
+		t.Fatalf("context.channel_id = %q, want %q", ctxChannelID, ch.ID)
+	}
+	if ctxInstruction != "Split into one issue per bug" {
+		t.Fatalf("context.instruction = %q, want passthrough", ctxInstruction)
+	}
+	if taskAgentID != testAgentID() {
+		t.Fatalf("agent_id column = %q, want %q", taskAgentID, testAgentID())
+	}
+	if !taskRuntimeID.Valid || taskRuntimeID.String == "" {
+		t.Fatalf("runtime_id should be set on the task row, got %+v", taskRuntimeID)
+	}
+	if taskIssueID.Valid && taskIssueID.String != "" {
+		t.Fatalf("issue_id should be NULL on a thread-issue task, got %q", taskIssueID.String)
+	}
+	if taskStatus != "queued" {
+		t.Fatalf("status = %q, want \"queued\"", taskStatus)
+	}
+	if taskPriority < 1 {
+		t.Fatalf("priority = %d, want a sane positive value", taskPriority)
+	}
+}
+
+// TestDispatchThreadIssueTask_InvalidAgent — bogus agent_id should fail
+// without enqueuing a task. 400 (bad UUID) and 4xx (no such agent in this
+// workspace) are both acceptable failure modes; we just need the queue
+// to stay empty.
+func TestDispatchThreadIssueTask_InvalidAgent(t *testing.T) {
+	enableChannels(t)
+	ctx := context.Background()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "invalid-agent", "display_name": "InvalidAgent", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create channel: %d %s", w.Code, w.Body.String())
+	}
+	ch := decodeChannel(t, w)
+	parent := postChannelMessage(t, ch.ID, "parent")
+
+	// Baseline: agent_task_queue may have residue from sibling tests, so
+	// snapshot the count for this workspace before dispatch and assert
+	// it does NOT grow.
+	var before int
+	testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE context->>'channel_id' = $1
+	`, ch.ID).Scan(&before)
+
+	// Random UUID that won't resolve to an agent in this workspace.
+	bogusAgentID := uuid.New().String()
+	w = dispatchThreadIssue(t, ch.ID, parent.ID, map[string]any{
+		"agent_id": bogusAgentID,
+	})
+	if w.Code < 400 || w.Code >= 500 {
+		t.Fatalf("expected a 4xx for unknown agent, got %d %s", w.Code, w.Body.String())
+	}
+
+	var after int
+	testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE context->>'channel_id' = $1
+	`, ch.ID).Scan(&after)
+	if after != before {
+		t.Fatalf("queue size changed (%d → %d) on a failed dispatch", before, after)
+	}
+}
+
+// TestDispatchThreadIssueTask_ChannelMismatch — when {messageId} belongs to
+// a different channel than {channelId}, the handler must 404 rather than
+// leak the message's existence or dispatch a task that misroutes the
+// thread on the daemon side.
+func TestDispatchThreadIssueTask_ChannelMismatch(t *testing.T) {
+	enableChannels(t)
+
+	// Channel A — has the message we'll point at.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "mismatch-a", "display_name": "MismatchA", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create channel A: %d %s", w.Code, w.Body.String())
+	}
+	chA := decodeChannel(t, w)
+	parent := postChannelMessage(t, chA.ID, "lives in A")
+
+	// Channel B — the path's {channelId} segment.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels", map[string]any{
+		"name": "mismatch-b", "display_name": "MismatchB", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create channel B: %d %s", w.Code, w.Body.String())
+	}
+	chB := decodeChannel(t, w)
+
+	w = dispatchThreadIssue(t, chB.ID, parent.ID, map[string]any{
+		"agent_id": testAgentID(),
+	})
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-channel dispatch: want 404, got %d %s", w.Code, w.Body.String())
+	}
+}
