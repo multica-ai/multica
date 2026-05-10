@@ -4,7 +4,9 @@
 // Single-tap a row to immediately start a DM (members) or AI chat session
 // (agents) — multi-select for groups is opt-in via the "Group" toggle. JEH-718.
 // CEREBRO-PATCH(new-message-modal-redesign): JEH-846 — toggle button labels its
-// destination ("Switch to channel" / "Switch to message") with matching icon.
+// destination ("Switch to channel" / "Switch to message") with matching icon,
+// and the modal renders full-screen on mobile (md breakpoint) so the actor
+// list isn't hidden by the keyboard.
 
 import { useMemo, useState } from "react";
 import { Lock, MessageCircle, Search, Star, Users, X } from "lucide-react";
@@ -210,7 +212,7 @@ export function NewMessageModal({
     <Dialog open={open} onOpenChange={(v) => !v && close()}>
       <DialogContent
         showCloseButton={false}
-        className="!max-w-md gap-0 p-0"
+        className="flex flex-col gap-0 p-0 max-md:inset-0 max-md:top-0 max-md:left-0 max-md:right-0 max-md:bottom-0 max-md:max-w-none max-md:w-full max-md:h-[100dvh] max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none md:max-w-md"
       >
         <DialogTitle className="sr-only">
           {groupMode ? "New group" : "New message"}
@@ -274,7 +276,7 @@ export function NewMessageModal({
           </div>
         </div>
 
-        <div className="max-h-[min(60vh,24rem)] overflow-y-auto py-1">
+        <div className="flex-1 min-h-0 overflow-y-auto py-1 md:flex-none md:max-h-[min(60vh,24rem)]">
           {filtered.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">
               No matches.
