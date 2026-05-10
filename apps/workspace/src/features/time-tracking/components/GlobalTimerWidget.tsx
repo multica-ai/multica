@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Clock, Square, Play, X } from "lucide-react";
+import { Clock, Square, Play, X, Timer } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 import { useCurrentTimerQuery, useStartTimerMutation, useStopTimerMutation } from "../hooks/use-time-tracking";
 import { LiveDuration } from "./LiveDuration";
+import { PomodoroTimer } from "./PomodoroTimer";
 
 /**
  * Compact timer widget shown in the sidebar footer.
@@ -20,6 +21,24 @@ import { LiveDuration } from "./LiveDuration";
 export function GlobalTimerWidget() {
   const [expanded, setExpanded] = useState(false);
   const [description, setDescription] = useState("");
+  // Toggles between normal time-tracking mode and Pomodoro mode.
+  // Persisted in localStorage so the mode survives page refreshes.
+  const [pomodoroMode, setPomodoroMode] = useState(() => {
+    try {
+      return localStorage.getItem("pomodoro-mode") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const handleSetPomodoroMode = (val: boolean) => {
+    setPomodoroMode(val);
+    try {
+      localStorage.setItem("pomodoro-mode", String(val));
+    } catch {
+      // noop — localStorage unavailable in restricted environments
+    }
+  };
   const inputRef = useRef<HTMLInputElement>(null);
 
   const { data: currentEntry } = useCurrentTimerQuery();
@@ -83,6 +102,28 @@ export function GlobalTimerWidget() {
       onError: () => toast.error("Failed to stop timer"),
     });
   };
+
+  // ── Pomodoro mode ───────────────────────────────────────────────────────────
+  if (pomodoroMode) {
+    return (
+      <SidebarMenuItem>
+        <div className="space-y-1">
+          <PomodoroTimer onWorkComplete={() => { if (isRunning && currentEntry) handleStop(); }} />
+          <div className="px-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 w-full text-xs text-muted-foreground justify-start"
+              onClick={() => handleSetPomodoroMode(false)}
+            >
+              <Clock className="mr-1 size-3" />
+              切换为普通计时
+            </Button>
+          </div>
+        </div>
+      </SidebarMenuItem>
+    );
+  }
 
   // ── Running state ───────────────────────────────────────────────────────────
   if (isRunning && currentEntry) {
@@ -158,13 +199,24 @@ export function GlobalTimerWidget() {
   // ── Idle / collapsed ────────────────────────────────────────────────────────
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton
-        className="text-muted-foreground"
-        onClick={() => setExpanded(true)}
-      >
-        <Clock />
-        <span>Track time</span>
-      </SidebarMenuButton>
+      <div className="space-y-0.5">
+        <SidebarMenuButton
+          className="text-muted-foreground"
+          onClick={() => setExpanded(true)}
+        >
+          <Clock />
+          <span>Track time</span>
+        </SidebarMenuButton>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 w-full text-xs text-muted-foreground justify-start px-2"
+          onClick={() => handleSetPomodoroMode(true)}
+        >
+          <Timer className="mr-1 size-3" />
+          番茄钟
+        </Button>
+      </div>
     </SidebarMenuItem>
   );
 }

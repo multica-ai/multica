@@ -18,7 +18,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+import { DailyReviewPanel } from "@/features/daily-review";
+import { DailyPlanPanel } from "@/features/daily-plan";
 
 /** Returns "YYYY-MM-DD" in local time for the given ISO timestamp. */
 function localDateKey(isoString: string): string {
@@ -175,6 +176,9 @@ function EntryRow({
         ) : (
           <span className="text-muted-foreground italic">No description</span>
         )}
+        {entry.type === "pomodoro" && (
+          <span className="ml-1.5 text-xs" title="Pomodoro">🍅</span>
+        )}
       </div>
       {isRunning ? (
         <LiveDuration entry={entry} className="shrink-0 font-mono text-sm text-brand" />
@@ -244,6 +248,12 @@ export function MyTimePage() {
 
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto max-w-2xl space-y-6">
+          {/* Daily review and plan panels */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <DailyReviewPanel />
+            <DailyPlanPanel />
+          </div>
+
           {/* Running timer card or start timer bar */}
           {currentEntry ? (
             <RunningTimerCard entry={currentEntry} />

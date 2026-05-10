@@ -15,6 +15,8 @@ export interface TimeEntry {
    * Elapsed seconds = Date.now() / 1000 + duration_seconds when duration_seconds < 0.
    */
   duration_seconds: number;
+  /** Entry type: "manual" (default) or "pomodoro" (auto-created by the pomodoro work-phase complete). */
+  type: string;
   created_at: string;
   updated_at: string;
 }
@@ -38,4 +40,26 @@ export interface UpdateTimeEntryRequest {
 
 export interface ListTimeEntriesResponse {
   entries: TimeEntry[];
+}
+
+// ── Team time stats ────────────────────────────────────────────────────────────
+
+/** Aggregated time for one workspace member within a date range. */
+export interface TeamTimeUserStat {
+  user_id: string;
+  total_seconds: number;
+}
+
+/** Aggregated time per project within a date range. project_id is null for unlinked entries. */
+export interface TeamTimeProjectStat {
+  project_id: string | null;
+  total_seconds: number;
+}
+
+/** Response from GET /api/time-entries/team-stats */
+export interface TeamTimeStats {
+  since: string;
+  until: string;
+  by_user: TeamTimeUserStat[];
+  by_project: TeamTimeProjectStat[];
 }

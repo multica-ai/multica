@@ -70,6 +70,20 @@ export function useIssueTimeEntriesQuery(issueId: string) {
   });
 }
 
+/**
+ * Fetches workspace-level time aggregation grouped by member and by project.
+ * Used by the Team Time review page.
+ */
+export function useTeamTimeStatsQuery(params: { since: string; until: string }) {
+  const workspaceId = useWorkspaceStore((s) => s.workspace?.id ?? "");
+  return useQuery({
+    queryKey: queryKeys.timeTracking.teamStats(workspaceId, { since: params.since, until: params.until }),
+    queryFn: () => api.getTeamTimeStats(params),
+    enabled: !!workspaceId && !!params.since && !!params.until,
+    staleTime: 60_000,
+  });
+}
+
 // ── Mutations ─────────────────────────────────────────────────────────────────
 
 /**
@@ -102,6 +116,7 @@ export function useStartTimerMutation() {
         stop_time: null,
         // Toggl running convention: duration = -start.Unix()
         duration_seconds: -Math.floor(now.getTime() / 1000),
+        type: "manual",
         created_at: data.start_time,
         updated_at: data.start_time,
       };

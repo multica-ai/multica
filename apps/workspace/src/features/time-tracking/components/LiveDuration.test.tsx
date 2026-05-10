@@ -86,6 +86,7 @@ describe("LiveDuration", () => {
       start_time: new Date().toISOString(),
       stop_time: null,
       duration_seconds: 0,
+      type: "manual",
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       ...overrides,

@@ -38,6 +38,8 @@ export const queryKeys = {
       ["projects", "lists", workspaceId, params ?? {}] as const,
     detail: (workspaceId: string, projectId: string) =>
       ["projects", "detail", workspaceId, projectId] as const,
+    timeStats: (workspaceId: string, projectId: string) =>
+      ["projects", "time-stats", workspaceId, projectId] as const,
   },
   inbox: {
     all: (workspaceId: string) => ["inbox", workspaceId] as const,
@@ -66,10 +68,27 @@ export const queryKeys = {
     entriesParams: (workspaceId: string, params: Record<string, unknown>) =>
       ["time-tracking", "entries", workspaceId, params] as const,
     issueEntries: (issueId: string) => ["time-tracking", "issue", issueId] as const,
+    // Workspace-level aggregation for team time review page.
+    teamStats: (workspaceId: string, params: Record<string, string>) =>
+      ["time-tracking", "team-stats", workspaceId, params] as const,
+  },
+  dailyReview: {
+    today: (workspaceId: string) => ["daily-review", "today", workspaceId] as const,
+    list: (workspaceId: string) => ["daily-review", "list", workspaceId] as const,
+  },
+  dailyPlan: {
+    tomorrow: (workspaceId: string) => ["daily-plan", "tomorrow", workspaceId] as const,
+    list: (workspaceId: string) => ["daily-plan", "list", workspaceId] as const,
+  },
+  automation: {
+    templates: (workspaceId: string) => ["automation", "templates", workspaceId] as const,
+  },
+  pomodoro: {
+    current: (workspaceId: string) => ["pomodoro", "current", workspaceId] as const,
   },
 } as const;
 
-const WORKSPACE_SCOPED_ROOTS = new Set(["workspace", "issues", "projects", "inbox", "runtimes", "tasks", "time-tracking"]);
+const WORKSPACE_SCOPED_ROOTS = new Set(["workspace", "issues", "projects", "inbox", "runtimes", "tasks", "time-tracking", "pomodoro"]);
 
 export function isWorkspaceScopedQueryKey(queryKey: readonly unknown[]): boolean {
   const root = queryKey[0];
