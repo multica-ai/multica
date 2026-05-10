@@ -60,3 +60,20 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 if (typeof document.elementFromPoint !== "function") {
   document.elementFromPoint = () => null;
 }
+
+// jsdom doesn't implement Element.getAnimations / Document.getAnimations;
+// Base UI's ScrollArea Viewport polls these on debounced re-measure ticks
+// and otherwise crashes a setTimeout with TypeError. Returning [] is the
+// "no in-flight animations" answer the polling code expects.
+if (typeof Element.prototype.getAnimations !== "function") {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (Element.prototype as any).getAnimations = function getAnimations() {
+    return [];
+  };
+}
+if (typeof (document as Document & { getAnimations?: unknown }).getAnimations !== "function") {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (document as any).getAnimations = function getAnimations() {
+    return [];
+  };
+}
