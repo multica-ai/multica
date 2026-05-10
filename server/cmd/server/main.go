@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -169,6 +170,17 @@ func main() {
 	}
 	slog.Info("connected to database")
 	logPoolConfig(pool)
+
+	// Single-user mode bootstrap: ensure the local user has at least one
+	// workspace so the frontend skips the onboarding wizard. Idempotent —
+	// no-op when single-user mode is off, no-op when a workspace already
+	// exists. Failure here is fatal because the rest of single-user mode
+	// (auth bypass against a userless DB, redirects to a workspace) all
+	// assume this state is set up.
+	if err := auth.BootstrapSingleUser(ctx, pool); err != nil {
+		slog.Error("single-user bootstrap failed", "error", err)
+		os.Exit(1)
+	}
 
 	bus := events.New()
 	hub := realtime.NewHub()

@@ -3,11 +3,14 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -21,6 +24,18 @@ const SingleUserEmail = "local@multica.local"
 
 // SingleUserName is the display name applied to the auto-created user.
 const SingleUserName = "Local User"
+
+// Defaults for the auto-created workspace that BootstrapSingleUser creates
+// when single-user mode starts up against an empty database. The slug is
+// short, memorable, and not in reserved_slugs.json. The user can rename
+// any of these from the workspace settings page once they're inside the
+// app — these values exist purely to skip the onboarding wizard, not to
+// be permanent.
+const (
+	SingleUserWorkspaceName = "Local"
+	SingleUserWorkspaceSlug = "local"
+	SingleUserIssuePrefix   = "LOC"
+)
 
 // SingleUserMode reports whether MULTICA_SINGLE_USER is enabled. The check is
 // case-insensitive and accepts the common truthy spellings ("true", "1",
@@ -112,4 +127,95 @@ func ResetSingleUserCacheForTesting() {
 	singleUserState.mu.Lock()
 	singleUserState.id = ""
 	singleUserState.mu.Unlock()
+}
+
+// BootstrapSingleUser is called once at server startup. When single-user
+// mode is on, it ensures the local user has at least one workspace so the
+// frontend skips the onboarding wizard entirely on first load.
+//
+// What it does, in order:
+//
+//  1. If MULTICA_SINGLE_USER is off, no-op.
+//  2. Resolve (or create) the single local user via EnsureSingleUser.
+//  3. If that user already has any workspace, stop — onboarding has
+//     already happened, either through this function on a previous run
+//     or through the normal handler.CreateWorkspace flow.
+//  4. Otherwise open a single transaction and run the same three writes
+//     that handler.CreateWorkspace runs for new signups: insert the
+//     workspace, insert the owner member row, mark the user onboarded.
+//     COALESCE in MarkUserOnboarded keeps it idempotent on re-runs.
+//
+// It is safe to call this on every server start. The check at step 3
+// makes subsequent invocations no-ops, and step 4 is wrapped in a
+// transaction so a half-finished bootstrap never leaves the DB in a
+// partial state.
+//
+// pool must not be nil when single-user mode is on. Returning an error
+// from this function should be treated as fatal at startup — without
+// the local user / default workspace, the rest of single-user mode
+// can't function correctly.
+func BootstrapSingleUser(ctx context.Context, pool *pgxpool.Pool) error {
+	if !SingleUserMode() {
+		return nil
+	}
+	if pool == nil {
+		return errors.New("single-user bootstrap: nil pool")
+	}
+
+	queries := db.New(pool)
+
+	userIDStr, err := EnsureSingleUser(ctx, queries)
+	if err != nil {
+		return fmt.Errorf("single-user bootstrap: ensure user: %w", err)
+	}
+	userID, err := util.ParseUUID(userIDStr)
+	if err != nil {
+		return fmt.Errorf("single-user bootstrap: parse user uuid %q: %w", userIDStr, err)
+	}
+
+	workspaces, err := queries.ListWorkspaces(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("single-user bootstrap: list workspaces: %w", err)
+	}
+	if len(workspaces) > 0 {
+		// Already bootstrapped (this run or any previous one). Nothing to do.
+		return nil
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("single-user bootstrap: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := queries.WithTx(tx)
+
+	ws, err := qtx.CreateWorkspace(ctx, db.CreateWorkspaceParams{
+		Name:        SingleUserWorkspaceName,
+		Slug:        SingleUserWorkspaceSlug,
+		IssuePrefix: SingleUserIssuePrefix,
+	})
+	if err != nil {
+		return fmt.Errorf("single-user bootstrap: create workspace: %w", err)
+	}
+
+	if _, err := qtx.CreateMember(ctx, db.CreateMemberParams{
+		WorkspaceID: ws.ID,
+		UserID:      userID,
+		Role:        "owner",
+	}); err != nil {
+		return fmt.Errorf("single-user bootstrap: create member: %w", err)
+	}
+
+	if _, err := qtx.MarkUserOnboarded(ctx, userID); err != nil {
+		return fmt.Errorf("single-user bootstrap: mark onboarded: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("single-user bootstrap: commit: %w", err)
+	}
+
+	slog.Info("single-user mode: bootstrapped default workspace",
+		"slug", ws.Slug,
+		"user_email", SingleUserEmail)
+	return nil
 }
