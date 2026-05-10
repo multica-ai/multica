@@ -196,7 +196,7 @@ func TestMergeTrain_HappyPath_ThreePRs(t *testing.T) {
 	pub := &recordingPublisher{}
 	deps := &ship.MergeTrainDeps{Publisher: pub, ParentCtx: context.Background()}
 
-	if err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "merge", deps); err != nil {
+	if err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "merge", "", deps); err != nil {
 		t.Fatalf("StartMerge: %v", err)
 	}
 	waitFor(t, "stage=in_staging", func() bool {
@@ -253,7 +253,7 @@ func TestMergeTrain_ConflictMidTrain_PausesAtPR2(t *testing.T) {
 	svc := &ship.Service{Q: testHandler.Queries, Github: ghClient}
 	deps := &ship.MergeTrainDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
 
-	if err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "", deps); err != nil {
+	if err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "", "", deps); err != nil {
 		t.Fatalf("StartMerge: %v", err)
 	}
 	waitFor(t, "release paused", func() bool { return readReleasePaused(t, releaseID) })
@@ -298,7 +298,7 @@ func TestMergeTrain_Resume_AfterConflictResolved(t *testing.T) {
 	svc := &ship.Service{Q: testHandler.Queries, Github: ghClient}
 	deps := &ship.MergeTrainDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
 
-	if err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "", deps); err != nil {
+	if err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "", "", deps); err != nil {
 		t.Fatalf("StartMerge: %v", err)
 	}
 	waitFor(t, "paused", func() bool { return readReleasePaused(t, releaseID) })
@@ -338,7 +338,7 @@ func TestMergeTrain_Resume_WithSkip(t *testing.T) {
 	svc := &ship.Service{Q: testHandler.Queries, Github: ghClient}
 	deps := &ship.MergeTrainDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
 
-	if err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "", deps); err != nil {
+	if err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "", "", deps); err != nil {
 		t.Fatalf("StartMerge: %v", err)
 	}
 	waitFor(t, "paused", func() bool { return readReleasePaused(t, releaseID) })
@@ -378,7 +378,7 @@ func TestMergeTrain_Abort_WhilePaused(t *testing.T) {
 	svc := &ship.Service{Q: testHandler.Queries, Github: ghClient}
 	deps := &ship.MergeTrainDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
 
-	if err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "", deps); err != nil {
+	if err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "", "", deps); err != nil {
 		t.Fatalf("StartMerge: %v", err)
 	}
 	waitFor(t, "paused", func() bool { return readReleasePaused(t, releaseID) })
@@ -411,7 +411,7 @@ func TestMergeTrain_StartFromInStaging_ReturnsStageMismatch(t *testing.T) {
 
 	ghClient := &fakeShipGithub{}
 	svc := &ship.Service{Q: testHandler.Queries, Github: ghClient}
-	err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "", &ship.MergeTrainDeps{ParentCtx: context.Background()})
+	err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "", "", &ship.MergeTrainDeps{ParentCtx: context.Background()})
 	if !errors.Is(err, ship.ErrReleaseStageMismatch) {
 		t.Fatalf("expected ErrReleaseStageMismatch, got %v", err)
 	}
@@ -432,7 +432,7 @@ func TestMergeTrain_TokenRevokedMidTrain_Pauses(t *testing.T) {
 	svc := &ship.Service{Q: testHandler.Queries, Github: ghClient}
 	deps := &ship.MergeTrainDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
 
-	if err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "", deps); err != nil {
+	if err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "", "", deps); err != nil {
 		t.Fatalf("StartMerge: %v", err)
 	}
 	waitFor(t, "paused", func() bool { return readReleasePaused(t, releaseID) })
@@ -477,7 +477,7 @@ func TestMergeTrain_TransientErrorRetries(t *testing.T) {
 	svc := &ship.Service{Q: testHandler.Queries, Github: ghClient}
 	deps := &ship.MergeTrainDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
 
-	if err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "", deps); err != nil {
+	if err := svc.StartMerge(context.Background(), parseUUID(releaseID), parseUUID(testUserID), "", "", deps); err != nil {
 		t.Fatalf("StartMerge: %v", err)
 	}
 	waitFor(t, "stage=in_staging or paused", func() bool {

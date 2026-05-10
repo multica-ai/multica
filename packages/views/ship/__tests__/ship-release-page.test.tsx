@@ -139,6 +139,14 @@ vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({
     slug: "acme",
     ship_hub_smoke_workflow_set: true,
+    // Approval rule configuration — medium-risk releases now require
+    // an explicit `approver` rule for the start-merge gate to bite.
+    // The legacy hardcoded "medium+high require approver" was removed
+    // in favor of the per-workspace setting. The "disables start
+    // merge train when approver is missing for medium risk" test
+    // depends on this rule being explicitly set; the default would
+    // be `member` (no approver required).
+    ship_hub_approval_medium: "approver",
   }),
 }));
 

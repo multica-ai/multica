@@ -141,7 +141,8 @@ func (h *Handler) StartMergeRelease(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deps := h.mergeTrainDeps(wsID)
-	if err := svc.StartMerge(r.Context(), rel.ID, requestedBy, req.MergeMethod, deps); err != nil {
+	approvalRule := approvalRuleForRisk(ws, rel.RiskLevel)
+	if err := svc.StartMerge(r.Context(), rel.ID, requestedBy, req.MergeMethod, approvalRule, deps); err != nil {
 		// Translate typed errors into the appropriate HTTP status.
 		switch {
 		case errors.Is(err, ship.ErrInvalidMergeMethod):
