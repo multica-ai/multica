@@ -12,21 +12,29 @@ import { forwardRef, useImperativeHandle, type Ref } from "react";
 
 const editorMarkdown = vi.hoisted(() => ({ value: "hello agent" }));
 const editorFocus = vi.hoisted(() => vi.fn());
+const chatStoreMock = vi.hoisted(() => {
+  const setInputDraft = vi.fn();
+  const clearInputDraft = vi.fn();
+  return {
+    setInputDraft,
+    clearInputDraft,
+    state: {
+      activeSessionId: null as string | null,
+      selectedAgentId: null as string | null,
+      inputDrafts: {} as Record<string, string>,
+      setInputDraft,
+      clearInputDraft,
+    },
+  };
+});
 
 vi.mock("@multica/core/chat", () => ({
   DRAFT_NEW_SESSION: "draft:new-session",
   useChatStore: Object.assign(
     (selector?: (s: any) => unknown) => {
-      const state = {
-        activeSessionId: null,
-        selectedAgentId: null,
-        inputDrafts: {} as Record<string, string>,
-        setInputDraft: vi.fn(),
-        clearInputDraft: vi.fn(),
-      };
-      return selector ? selector(state) : state;
+      return selector ? selector(chatStoreMock.state) : chatStoreMock.state;
     },
-    { getState: () => ({}) },
+    { getState: () => chatStoreMock.state },
   ),
 }));
 
@@ -67,6 +75,10 @@ vi.mock("../../editor", () => {
       return (
         <div>
           <div data-testid="placeholder">{props.placeholder}</div>
+          <div data-testid="default-value">{props.defaultValue}</div>
+          <button type="button" data-testid="trigger-update" onClick={() => props.onUpdate?.("updated draft")}>
+            update
+          </button>
           <button type="button" data-testid="trigger-submit" onClick={() => props.onSubmit?.()}>
             submit
           </button>
@@ -91,6 +103,11 @@ import { ChatInput } from "./chat-input";
 beforeEach(() => {
   editorMarkdown.value = "hello agent";
   editorFocus.mockClear();
+  chatStoreMock.state.activeSessionId = null;
+  chatStoreMock.state.selectedAgentId = null;
+  chatStoreMock.state.inputDrafts = {};
+  chatStoreMock.setInputDraft.mockClear();
+  chatStoreMock.clearInputDraft.mockClear();
 });
 
 describe("ChatInput — JEH-330 lock removal", () => {
@@ -134,6 +151,23 @@ describe("ChatInput — JEH-330 lock removal", () => {
   it("hides the Stop button when no turn is in flight", () => {
     render(<ChatInput onSend={vi.fn()} isRunning={false} onStop={vi.fn()} />);
     expect(screen.queryByRole("button", { name: /stop/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatInput — JEH-806 session-scoped drafts", () => {
+  it("uses the explicit draft session instead of the global active session", async () => {
+    const user = userEvent.setup();
+    chatStoreMock.state.activeSessionId = "session-a";
+    chatStoreMock.state.inputDrafts = {
+      "session-a": "draft from A",
+      "session-b": "draft from B",
+    };
+
+    render(<ChatInput onSend={vi.fn()} draftSessionId="session-b" />);
+
+    expect(screen.getByTestId("default-value")).toHaveTextContent("draft from B");
+    await user.click(screen.getByTestId("trigger-update"));
+    expect(chatStoreMock.setInputDraft).toHaveBeenCalledWith("session-b", "updated draft");
   });
 });
 

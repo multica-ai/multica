@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ---- Lightweight mocks ------------------------------------------------------
@@ -21,7 +21,9 @@ vi.mock("./chat-message-list", () => ({
 }));
 
 vi.mock("./chat-input", () => ({
-  ChatInput: () => <div data-testid="chat-input" />,
+  ChatInput: ({ agentName }: { agentName?: string }) => (
+    <div data-testid="chat-input">{agentName}</div>
+  ),
 }));
 
 vi.mock("./chat-resize-handles", () => ({
@@ -37,6 +39,10 @@ vi.mock("./context-anchor", () => ({
 
 vi.mock("./chat-session-history", () => ({
   ChatSessionHistory: () => null,
+}));
+
+vi.mock("../../common/actor-avatar", () => ({
+  ActorAvatar: () => <span data-testid="actor-avatar" />,
 }));
 
 vi.mock("../../i18n", () => ({
@@ -137,10 +143,28 @@ vi.mock("@multica/core/logger", () => ({
 // Pre-seed the pending-task cache so the status line is visible during render.
 import { ChatWindow } from "./chat-window";
 
-function renderChatWindow() {
+beforeEach(() => {
+  chatState.isOpen = true;
+  chatState.activeSessionId = "session-1";
+  chatState.selectedAgentId = "agent-1";
+  chatState.hideFloatingChat = false;
+  vi.clearAllMocks();
+});
+
+function renderChatWindow({
+  agents = [],
+  sessions = [],
+}: {
+  agents?: unknown[];
+  sessions?: unknown[];
+} = {}) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
+  qc.setQueryData(["agents"], agents);
+  qc.setQueryData(["members"], [{ user_id: "user-1", role: "owner" }]);
+  qc.setQueryData(["sessions"], sessions);
+  qc.setQueryData(["sessions", "all"], sessions);
   qc.setQueryData(["pending-task"], { task_id: "task-live", status: "running" });
   return render(
     <QueryClientProvider client={qc}>
@@ -153,5 +177,29 @@ describe("ChatWindow", () => {
   it("renders exactly one ChatStatusLine (regression: duplicated block)", () => {
     const { queryAllByTestId } = renderChatWindow();
     expect(queryAllByTestId("chat-status-line")).toHaveLength(1);
+  });
+
+  it("uses the active session's agent instead of the stale global selection", () => {
+    chatState.activeSessionId = "session-charlotte";
+    chatState.selectedAgentId = "agent-sara";
+
+    renderChatWindow({
+      agents: [
+        { id: "agent-sara", name: "Sara", owner_id: "user-1", archived_at: null },
+        { id: "agent-charlotte", name: "Charlotte", owner_id: "user-1", archived_at: null },
+      ],
+      sessions: [
+        {
+          id: "session-charlotte",
+          agent_id: "agent-charlotte",
+          title: "Charlotte conversation",
+          has_unread: false,
+          status: "active",
+        },
+      ],
+    });
+
+    expect(screen.getByTestId("chat-input")).toHaveTextContent("Charlotte");
+    expect(chatState.setSelectedAgentId).toHaveBeenCalledWith("agent-charlotte");
   });
 });
