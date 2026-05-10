@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multica-frontend
+  namespace: multica
+  labels:
+    app: multica-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: multica-frontend
+  template:
+    metadata:
+      labels:
+        app: multica-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ghcr.io/multica-ai/multica-web:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: PORT
+              value: "3000"
+            # Override the build-time default ("http://backend:8080") so the
+            # Next.js standalone server proxies API/WS/auth/uploads to the
+            # in-cluster backend Service.
+            - name: REMOTE_API_URL
+              value: "http://multica-backend:8080"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: multica-frontend
+  namespace: multica
+spec:
+  type: ClusterIP
+  selector:
+    app: multica-frontend
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http

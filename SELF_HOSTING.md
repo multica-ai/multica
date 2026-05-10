@@ -135,6 +135,145 @@ multica daemon status
 3. Go to **Settings → Agents** and create a new agent
 4. Create an issue and assign it to your agent — it will pick up the task automatically
 
+---
+
+## Kubernetes Deployment (Alternative)
+
+If you already run a Kubernetes cluster, you can deploy Multica there instead of Docker Compose. The manifests under [`deploy/k8s/`](deploy/k8s/) target a typical k3s / k8s setup with an Ingress controller and a default `ReadWriteOnce` StorageClass — they were authored against k3s + Traefik + `local-path`, and should work on any cluster with minor tweaks.
+
+The deployment creates a dedicated `multica` namespace with:
+
+- `multica-postgres` — `pgvector/pgvector:pg17` backed by a 10Gi PVC
+- `multica-backend` — Go API/WS server backed by a 5Gi uploads PVC
+- `multica-frontend` — Next.js standalone server
+- Two `Ingress` resources: `multica.dev.lan` (web) and `api.multica.dev.lan` (backend)
+- `multica-config` ConfigMap + `multica-secrets` Secret
+
+> **Prerequisites:** `kubectl` configured for the target cluster, an Ingress controller (Traefik / NGINX), and a default StorageClass.
+
+### Step 1 — Point hostnames at the cluster
+
+The bundled Ingress uses `multica.dev.lan` (web) and `api.multica.dev.lan` (backend). Pick one of:
+
+- **`/etc/hosts`** on every machine that needs access (developer laptops + the machine running the daemon):
+
+  ```text
+  192.168.1.206  multica.dev.lan api.multica.dev.lan
+  ```
+
+  Replace `192.168.1.206` with any node IP where your Ingress controller's Service is reachable.
+
+- **Local DNS** (Pi-hole, Unbound, etc.): add A records for both hostnames pointing at the cluster Ingress IP.
+
+To use different hostnames, edit `deploy/k8s/ingress.yaml` and the matching `MULTICA_APP_URL`, `FRONTEND_ORIGIN`, `LOCAL_UPLOAD_BASE_URL`, and `GOOGLE_REDIRECT_URI` values in `deploy/k8s/configmap.yaml`.
+
+### Step 2 — Create the namespace and Secret
+
+```bash
+kubectl apply -f deploy/k8s/namespace.yaml
+
+kubectl -n multica create secret generic multica-secrets \
+  --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
+  --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+  --from-literal=RESEND_API_KEY="" \
+  --from-literal=GOOGLE_CLIENT_SECRET="" \
+  --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
+  --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
+```
+
+Leave optional values empty for now — you can fill them in later (see [Step 4 — Log In](#step-4--log-in)).
+
+> The Secret is intentionally not part of the kustomize bundle so real values never land in git. See [`deploy/k8s/secret.example.yaml`](deploy/k8s/secret.example.yaml) for the schema.
+
+### Step 3 — Apply the rest of the manifests
+
+```bash
+kubectl apply -k deploy/k8s/
+```
+
+This applies the ConfigMap, PVCs, Deployments, Services, and Ingresses. Watch the pods come up:
+
+```bash
+kubectl -n multica get pods -w
+```
+
+The backend may restart once or twice while it waits on PostgreSQL — that is expected. Once the backend is `Running`, migrations have completed and `/healthz` returns OK:
+
+```bash
+curl -H "Host: api.multica.dev.lan" http://<ingress-ip>/healthz
+# {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+```
+
+Then open http://multica.dev.lan in your browser.
+
+### Step 4 — Log In
+
+The Kubernetes manifests default to `APP_ENV=production` (set in `deploy/k8s/configmap.yaml`), and there is no fixed verification code by default. Pick one of the following to log in — the same three options as the Docker setup:
+
+- **Recommended (production):** patch the Secret with a real Resend key, then restart the backend:
+
+  ```bash
+  kubectl -n multica patch secret multica-secrets --type=merge \
+    -p '{"stringData":{"RESEND_API_KEY":"re_xxx"}}'
+  kubectl -n multica rollout restart deploy/multica-backend
+  ```
+
+  Real verification codes will be sent to the email address you enter. See [Advanced Configuration → Email](SELF_HOSTING_ADVANCED.md#email-required-for-authentication).
+
+- **Without email configured:** the verification code is generated server-side and printed to the backend pod logs (look for `[DEV] Verification code for ...:`). Useful for one-off testing.
+
+  ```bash
+  kubectl -n multica logs -f deploy/multica-backend | grep "Verification code"
+  ```
+
+- **Deterministic local/private testing:** set `APP_ENV=development` in the ConfigMap and `MULTICA_DEV_VERIFICATION_CODE=888888` in the Secret, then restart the backend. This fixed code is ignored when `APP_ENV=production`.
+
+  ```bash
+  kubectl -n multica patch configmap multica-config --type=merge \
+    -p '{"data":{"APP_ENV":"development"}}'
+  kubectl -n multica patch secret multica-secrets --type=merge \
+    -p '{"stringData":{"MULTICA_DEV_VERIFICATION_CODE":"888888"}}'
+  kubectl -n multica rollout restart deploy/multica-backend
+  ```
+
+Changes to `ALLOW_SIGNUP` and `GOOGLE_CLIENT_ID` in the ConfigMap also take effect after restarting the backend. The web UI reads both from `/api/config` at runtime, so no web rebuild is needed.
+
+> **Warning:** do **not** set `MULTICA_DEV_VERIFICATION_CODE` on a publicly reachable instance — anyone who knows an email address can then log in with that fixed code.
+
+### Step 5 — Install CLI & Start Daemon
+
+The daemon runs on your local machine, not in the cluster. Install the CLI and an AI agent as in [Step 3](#step-3--install-cli--start-daemon) above, then point the CLI at your Ingress hostnames:
+
+```bash
+multica setup self-host \
+  --server-url http://api.multica.dev.lan \
+  --app-url http://multica.dev.lan
+```
+
+Make sure the machine running the daemon has the same `/etc/hosts` (or DNS) entries from [Step 1](#step-1--point-hostnames-at-the-cluster).
+
+### Updating
+
+To pull the latest images:
+
+```bash
+kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend
+```
+
+To pin a specific version, edit the `image:` tags in `deploy/k8s/backend.yaml` and `deploy/k8s/frontend.yaml` (replace `:latest` with `:v0.2.4` etc.) and re-apply.
+
+### Tearing down
+
+```bash
+# Remove the workloads but keep the namespace and the PVCs
+kubectl delete -k deploy/k8s/
+
+# Or wipe everything, including PostgreSQL data and uploads
+kubectl delete namespace multica
+```
+
+---
+
 ## Stopping Services
 
 If you installed via the install script:

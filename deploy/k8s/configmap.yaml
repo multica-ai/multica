@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multica-config
+  namespace: multica
+data:
+  # --- Backend (server/) ---
+  PORT: "8080"
+  APP_ENV: "production"
+  MULTICA_APP_URL: "http://multica.dev.lan"
+  FRONTEND_ORIGIN: "http://multica.dev.lan"
+  CORS_ALLOWED_ORIGINS: ""
+  COOKIE_DOMAIN: ""
+  RESEND_FROM_EMAIL: "noreply@multica.ai"
+  ALLOW_SIGNUP: "true"
+  ALLOWED_EMAILS: ""
+  ALLOWED_EMAIL_DOMAINS: ""
+  GOOGLE_CLIENT_ID: ""
+  GOOGLE_REDIRECT_URI: "http://multica.dev.lan/auth/callback"
+  S3_BUCKET: ""
+  S3_REGION: "us-west-2"
+  CLOUDFRONT_DOMAIN: ""
+  CLOUDFRONT_KEY_PAIR_ID: ""
+  LOCAL_UPLOAD_BASE_URL: "http://api.multica.dev.lan"
+
+  # --- PostgreSQL ---
+  POSTGRES_DB: "multica"
+  POSTGRES_USER: "multica"
+
+  # --- Frontend (apps/web) ---
+  # REMOTE_API_URL tells the Next.js standalone server where to proxy
+  # /api, /ws, /auth, /uploads. In-cluster it points at the backend Service.
+  REMOTE_API_URL: "http://multica-backend:8080"
+  HOSTNAME: "0.0.0.0"
