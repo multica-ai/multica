@@ -152,6 +152,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `core-chat-queries` | packages/core/chat/queries.ts | 19 | Cerebro chat-archive/coalesce additions |
 | `dashboard-nav` | packages/views/layout/app-sidebar.tsx | 4 | JEH-684 — sidebar entry for the cerebro dashboard at /:workspace/dashboard. Imports `<DashboardNavItem />` from `@multica/cerebro-dashboard` and renders it as the first item in the Workspace nav group. Gated on `cerebro_dashboard` feature flag. |
 | `cerebro-dashboard-route` | server/cmd/server/router.go | 4 | JEH-684 — mounts `/api/cerebro/dashboard` overview endpoint. Two patch lines: one import (`cerebrodashboard`) and one handler instantiation; one route registration. Handler lives in `server/internal/cerebro/dashboard/`. |
+| `cerebro-groups-routes` | server/cmd/server/router.go | 4 | JEH-721 — mounts Cerebro workspace group CRUD and membership endpoints. Handler/service live in `server/internal/cerebro/groups/`. |
+| `cerebro-groups-router-tests` | server/cmd/server/integration_test.go | 137 | JEH-721 — integration coverage for Cerebro group CRUD, member management, validation, and cross-workspace visibility. |
 | `cerebro-dashboard-client` | packages/core/api/client.ts | 4 | JEH-684 — `getCerebroDashboardOverview` typed wrapper around `/api/cerebro/dashboard`. The `fetch<T>` helper is private so cerebro-only callers go through this method instead of duplicating the auth/credentials handling. |
 | `core-chat-store` | packages/core/chat/store.ts | 5 | Cerebro chat-archive/coalesce additions |
 | `core-inbox-folders` | packages/core/inbox/folders.ts | 194 | Cerebro inbox-folder/archive additions |

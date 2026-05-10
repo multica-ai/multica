@@ -165,6 +165,10 @@ func cleanupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) erro
 
 // Helper to make authenticated requests
 func authRequest(t *testing.T, method, path string, body any) *http.Response {
+	return authRequestWithWorkspace(t, method, path, testWorkspaceID, body)
+}
+
+func authRequestWithWorkspace(t *testing.T, method, path, workspaceID string, body any) *http.Response {
 	t.Helper()
 	var bodyReader io.Reader
 	if body != nil {
@@ -177,7 +181,7 @@ func authRequest(t *testing.T, method, path string, body any) *http.Response {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+testToken)
-	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req.Header.Set("X-Workspace-ID", workspaceID)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -793,6 +797,241 @@ func TestWorkspacesThroughRouter(t *testing.T) {
 	if members[0]["role"] == nil || members[0]["role"] == "" {
 		t.Fatal("member should have role field")
 	}
+}
+
+// CEREBRO-PATCH(cerebro-groups-router-tests): JEH-721 groups endpoint coverage.
+func TestCerebroGroupsThroughRouter(t *testing.T) {
+	ctx := context.Background()
+
+	memberEmail := fmt.Sprintf("group-member-%d@multica.ai", time.Now().UnixNano())
+	var memberUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ($1, $2)
+		RETURNING id
+	`, "Group Member", memberEmail).Scan(&memberUserID); err != nil {
+		t.Fatalf("create member user: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, memberUserID)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, testWorkspaceID, memberUserID); err != nil {
+		t.Fatalf("create workspace member: %v", err)
+	}
+
+	resp := authRequest(t, "POST", "/api/workspaces/"+testWorkspaceID+"/groups", map[string]any{
+		"name":        "Router Group",
+		"description": "Created by integration test",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("CreateGroup: expected 201, got %d", resp.StatusCode)
+	}
+	var created map[string]any
+	readJSON(t, resp, &created)
+	groupID := created["id"].(string)
+	if created["name"] != "Router Group" {
+		t.Fatalf("CreateGroup name = %v", created["name"])
+	}
+	if created["created_by"] != testUserID {
+		t.Fatalf("CreateGroup created_by = %v, want %s", created["created_by"], testUserID)
+	}
+
+	resp = authRequest(t, "GET", "/api/workspaces/"+testWorkspaceID+"/groups", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("ListGroups: expected 200, got %d", resp.StatusCode)
+	}
+	var groups []map[string]any
+	readJSON(t, resp, &groups)
+	found := false
+	for _, group := range groups {
+		if group["id"] == groupID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("ListGroups did not include created group %s", groupID)
+	}
+
+	resp = authRequest(t, "GET", "/api/groups/"+groupID, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GetGroup: expected 200, got %d", resp.StatusCode)
+	}
+	var fetched map[string]any
+	readJSON(t, resp, &fetched)
+	if fetched["id"] != groupID {
+		t.Fatalf("GetGroup id = %v, want %s", fetched["id"], groupID)
+	}
+
+	resp = authRequest(t, "PATCH", "/api/groups/"+groupID, map[string]any{
+		"name": "Updated Router Group",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("UpdateGroup: expected 200, got %d", resp.StatusCode)
+	}
+	var updated map[string]any
+	readJSON(t, resp, &updated)
+	if updated["name"] != "Updated Router Group" {
+		t.Fatalf("UpdateGroup name = %v", updated["name"])
+	}
+
+	resp = authRequest(t, "POST", "/api/groups/"+groupID+"/members", map[string]any{
+		"user_id": memberUserID,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("AddGroupMember: expected 201, got %d", resp.StatusCode)
+	}
+	var added map[string]any
+	readJSON(t, resp, &added)
+	if added["user_id"] != memberUserID {
+		t.Fatalf("AddGroupMember user_id = %v, want %s", added["user_id"], memberUserID)
+	}
+
+	resp = authRequest(t, "GET", "/api/groups/"+groupID+"/members", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("ListGroupMembers: expected 200, got %d", resp.StatusCode)
+	}
+	var members []map[string]any
+	readJSON(t, resp, &members)
+	found = false
+	for _, member := range members {
+		if member["user_id"] == memberUserID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("ListGroupMembers did not include %s", memberUserID)
+	}
+
+	resp = authRequest(t, "DELETE", "/api/groups/"+groupID+"/members/"+memberUserID, nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("RemoveGroupMember: expected 204, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	resp = authRequest(t, "GET", "/api/groups/"+groupID+"/members", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("ListGroupMembers after remove: expected 200, got %d", resp.StatusCode)
+	}
+	readJSON(t, resp, &members)
+	for _, member := range members {
+		if member["user_id"] == memberUserID {
+			t.Fatalf("ListGroupMembers still includes removed user %s", memberUserID)
+		}
+	}
+
+	resp = authRequest(t, "DELETE", "/api/groups/"+groupID, nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("DeleteGroup: expected 204, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	resp = authRequest(t, "GET", "/api/groups/"+groupID, nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GetGroup after delete: expected 404, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+func TestCerebroGroupsVisibilityAndValidation(t *testing.T) {
+	ctx := context.Background()
+
+	resp := authRequest(t, "POST", "/api/workspaces/"+testWorkspaceID+"/groups", map[string]any{
+		"name": " ",
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("CreateGroup empty name: expected 400, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	resp = authRequest(t, "POST", "/api/workspaces/"+testWorkspaceID+"/groups", map[string]any{
+		"name": "Validation Group",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("CreateGroup validation fixture: expected 201, got %d", resp.StatusCode)
+	}
+	var group map[string]any
+	readJSON(t, resp, &group)
+	groupID := group["id"].(string)
+
+	nonMemberEmail := fmt.Sprintf("group-non-member-%d@multica.ai", time.Now().UnixNano())
+	var nonMemberUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ($1, $2)
+		RETURNING id
+	`, "Group Non Member", nonMemberEmail).Scan(&nonMemberUserID); err != nil {
+		t.Fatalf("create non-member user: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, nonMemberUserID)
+	})
+
+	resp = authRequest(t, "POST", "/api/groups/"+groupID+"/members", map[string]any{
+		"user_id": nonMemberUserID,
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("AddGroupMember non-workspace user: expected 400, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	noAccessSlug := fmt.Sprintf("group-no-access-%d", time.Now().UnixNano())
+	var noAccessWorkspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description)
+		VALUES ($1, $2, $3)
+		RETURNING id
+	`, "Group No Access", noAccessSlug, "No membership for integration user").Scan(&noAccessWorkspaceID); err != nil {
+		t.Fatalf("create no-access workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, noAccessWorkspaceID)
+	})
+
+	resp = authRequest(t, "GET", "/api/workspaces/"+noAccessWorkspaceID+"/groups", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("ListGroups non-member workspace: expected 404, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	otherSlug := fmt.Sprintf("group-other-%d", time.Now().UnixNano())
+	var otherWorkspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description)
+		VALUES ($1, $2, $3)
+		RETURNING id
+	`, "Group Other Workspace", otherSlug, "Cross-workspace visibility fixture").Scan(&otherWorkspaceID); err != nil {
+		t.Fatalf("create other workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, otherWorkspaceID)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'owner')
+	`, otherWorkspaceID, testUserID); err != nil {
+		t.Fatalf("create other workspace membership: %v", err)
+	}
+
+	resp = authRequestWithWorkspace(t, "POST", "/api/workspaces/"+otherWorkspaceID+"/groups", otherWorkspaceID, map[string]any{
+		"name": "Other Workspace Group",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("CreateGroup other workspace: expected 201, got %d", resp.StatusCode)
+	}
+	var otherGroup map[string]any
+	readJSON(t, resp, &otherGroup)
+	otherGroupID := otherGroup["id"].(string)
+
+	resp = authRequest(t, "GET", "/api/groups/"+otherGroupID, nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GetGroup cross-workspace: expected 404, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
 }
 
 // TestDeleteWorkspaceRequiresOwner is a defense-in-depth regression test for the

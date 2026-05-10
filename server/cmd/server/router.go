@@ -21,6 +21,8 @@ import (
 	cerebrodashboard "github.com/multica-ai/multica/server/internal/cerebro/dashboard"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/feature_flags"
+	// CEREBRO-PATCH(cerebro-groups-routes): JEH-721 group handler import
+	cerebrogroups "github.com/multica-ai/multica/server/internal/cerebro/groups"
 	cerebroinbox "github.com/multica-ai/multica/server/internal/cerebro/inbox"
 	cerebronotifications "github.com/multica-ai/multica/server/internal/cerebro/notifications"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -167,6 +169,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroInboxHandler := cerebroinbox.New(queries, cerebroQueries)
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler instance
 	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
+	// CEREBRO-PATCH(cerebro-groups-routes): JEH-721 workspace groups handler
+	cerebroGroupsHandler := cerebrogroups.New(cerebroQueries, queries, bus)
 
 	r := chi.NewRouter()
 
@@ -387,6 +391,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(feature-flags-routes): per-user feature-flag overrides
 					r.Get("/feature-flags", featureFlagsHandler.List)
 					r.Put("/feature-flags/{key}", featureFlagsHandler.Upsert)
+					// CEREBRO-PATCH(cerebro-groups-routes): workspace group CRUD entrypoint.
+					r.Get("/groups", cerebroGroupsHandler.List)
+					r.Post("/groups", cerebroGroupsHandler.Create)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -431,6 +438,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
+
+			// CEREBRO-PATCH(cerebro-groups-routes): group CRUD and membership endpoints.
+			r.Route("/api/groups", func(r chi.Router) {
+				r.Get("/{id}", cerebroGroupsHandler.Get)
+				r.Patch("/{id}", cerebroGroupsHandler.Update)
+				r.Delete("/{id}", cerebroGroupsHandler.Delete)
+				r.Get("/{id}/members", cerebroGroupsHandler.ListMembers)
+				r.Post("/{id}/members", cerebroGroupsHandler.AddMember)
+				r.Delete("/{id}/members/{userId}", cerebroGroupsHandler.RemoveMember)
+			})
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {

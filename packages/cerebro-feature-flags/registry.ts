@@ -18,7 +18,8 @@ export type CerebroFlagKey =
   | "cerebro_voice_dictation_enabled"
   | "cerebro_voice_output_enabled"
   | "cerebro_voice_summary_enabled"
-  | "cerebro_autopilot_scopes";
+  | "cerebro_autopilot_scopes"
+  | "cerebro_groups_enabled";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -41,6 +42,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_voice_output_enabled: false,
   cerebro_voice_summary_enabled: false,
   cerebro_autopilot_scopes: true,
+  cerebro_groups_enabled: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -125,5 +127,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Autopilot scopes",
     description:
       "Enable scoped autopilots (workspace, personal, group) — gated visibility on top of the workspace-wide default.",
+  },
+  {
+    key: "cerebro_groups_enabled",
+    label: "Groups",
+    description:
+      "Enable workspace groups: named collections of members used by Cerebro features such as scoped resources.",
   },
 ];

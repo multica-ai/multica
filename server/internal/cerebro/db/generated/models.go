@@ -239,6 +239,23 @@ type CerebroFeatureFlag struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroGroup struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Description pgtype.Text        `json:"description"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroGroupMember struct {
+	GroupID pgtype.UUID        `json:"group_id"`
+	UserID  pgtype.UUID        `json:"user_id"`
+	AddedBy pgtype.UUID        `json:"added_by"`
+	AddedAt pgtype.Timestamptz `json:"added_at"`
+}
+
 type ChatMessage struct {
 	ID            pgtype.UUID        `json:"id"`
 	ChatSessionID pgtype.UUID        `json:"chat_session_id"`

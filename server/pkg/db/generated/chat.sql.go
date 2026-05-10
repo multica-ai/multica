@@ -750,6 +750,7 @@ type UpdateChatSessionStatusParams struct {
 	Status string      `json:"status"`
 }
 
+// CEREBRO-PATCH(sqlc-chat-update-status): JEH-799 chat-session header archive/restore.
 // Used by the cerebro session-header archive/restore action. Allowed values are
 // enforced by the existing CHECK constraint ('active' | 'archived').
 func (q *Queries) UpdateChatSessionStatus(ctx context.Context, arg UpdateChatSessionStatusParams) (ChatSession, error) {
