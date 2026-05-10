@@ -39,7 +39,7 @@ import { isViewableAttachment } from "@multica/cerebro-attachments/core/viewable
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
-import { IssueMentionCard } from "../issues/components/issue-mention-card";
+import { IssueChip } from "../issues/components/issue-chip";
 import { ImageLightbox } from "./extensions/image-view";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
@@ -99,27 +99,39 @@ function urlTransform(url: string): string {
 // Custom react-markdown components
 // ---------------------------------------------------------------------------
 
+// CEREBRO-PATCH(issue-mention-new-tab): always open issue mentions inside
+// readonly content (comments, descriptions) in a new tab/window with a full
+// https:// href, so the user keeps the current context and right-click →
+// Copy Link returns a shareable URL — Electron's renderer origin would
+// otherwise leak a non-https:// link.
 function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
-  const { push, openInNewTab } = useNavigation();
+  const { openInNewTab, getShareableUrl } = useNavigation();
   const p = useWorkspacePaths();
   const path = p.issueDetail(issueId);
+  const shareableUrl = getShareableUrl
+    ? getShareableUrl(path)
+    : typeof window !== "undefined"
+      ? window.location.origin + path
+      : path;
   return (
-    <span
-      className="inline align-middle"
+    <a
+      href={shareableUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="issue-mention not-prose inline-flex"
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (e.metaKey || e.ctrlKey || e.shiftKey) {
-          if (openInNewTab) {
-            openInNewTab(path, label);
-          }
-          return;
-        }
-        push(path);
+        if (openInNewTab) openInNewTab(path, label);
+        else window.open(shareableUrl, "_blank", "noopener,noreferrer");
       }}
     >
-      <IssueMentionCard issueId={issueId} fallbackLabel={label} />
-    </span>
+      <IssueChip
+        issueId={issueId}
+        fallbackLabel={label}
+        className="cursor-pointer hover:bg-accent transition-colors"
+      />
+    </a>
   );
 }
 

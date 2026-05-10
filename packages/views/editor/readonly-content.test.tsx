@@ -12,9 +12,9 @@ vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: vi.fn(), openInNewTab: vi.fn() }),
 }));
 
-vi.mock("../issues/components/issue-mention-card", () => ({
-  IssueMentionCard: ({ issueId, fallbackLabel }: { issueId: string; fallbackLabel?: string }) => (
-    <span data-testid="issue-mention-card">{fallbackLabel ?? issueId}</span>
+vi.mock("../issues/components/issue-chip", () => ({
+  IssueChip: ({ issueId, fallbackLabel }: { issueId: string; fallbackLabel?: string }) => (
+    <span data-testid="issue-chip">{fallbackLabel ?? issueId}</span>
   ),
 }));
 
