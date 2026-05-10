@@ -159,6 +159,99 @@ func TestGetCombinedStatus(t *testing.T) {
 	}
 }
 
+// TestListWorkflowRuns_HappyPath verifies the deploy poller's read
+// path — branch/status/per_page query params, the workflow file name
+// in the URL path, the wrapper-object decode (GitHub returns
+// `{ "workflow_runs": [...] }` not a bare array).
+func TestListWorkflowRuns_HappyPath(t *testing.T) {
+	body := `{
+        "total_count": 1,
+        "workflow_runs": [{
+            "id": 9876,
+            "name": "Deploy production",
+            "head_sha": "deadbeef",
+            "head_branch": "main",
+            "status": "completed",
+            "conclusion": "success",
+            "html_url": "https://github.com/o/r/actions/runs/9876",
+            "created_at": "2026-05-09T10:00:00Z",
+            "updated_at": "2026-05-09T10:05:00Z",
+            "run_started_at": "2026-05-09T10:00:01Z"
+        }]
+    }`
+	var seenPath, seenBranch, seenStatus, seenPerPage string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPath = r.URL.Path
+		seenBranch = r.URL.Query().Get("branch")
+		seenStatus = r.URL.Query().Get("status")
+		seenPerPage = r.URL.Query().Get("per_page")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := NewClient("test-token")
+	c.BaseURL = srv.URL
+	runs, err := c.ListWorkflowRuns(context.Background(), "o", "r", "production.yml", ListWorkflowRunsOptions{
+		Branch:  "main",
+		Status:  "completed",
+		PerPage: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListWorkflowRuns: %v", err)
+	}
+	if seenPath != "/repos/o/r/actions/workflows/production.yml/runs" {
+		t.Errorf("path: got %q", seenPath)
+	}
+	if seenBranch != "main" || seenStatus != "completed" || seenPerPage != "10" {
+		t.Errorf("query: branch=%q status=%q per_page=%q", seenBranch, seenStatus, seenPerPage)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("len(runs): got %d", len(runs))
+	}
+	r := runs[0]
+	if r.ID != 9876 || r.HeadSHA != "deadbeef" || r.Conclusion != "success" || r.HeadBranch != "main" {
+		t.Errorf("unexpected run: %+v", r)
+	}
+}
+
+// TestListWorkflowRuns_EmptyWorkflowName guards the error path that
+// keeps the poller from accidentally hitting `/runs?...` (no workflow
+// id) which would 404 against every GitHub repo and burn rate budget.
+func TestListWorkflowRuns_EmptyWorkflowName(t *testing.T) {
+	c := NewClient("t")
+	if _, err := c.ListWorkflowRuns(context.Background(), "o", "r", "", ListWorkflowRunsOptions{}); err == nil {
+		t.Fatal("expected error for empty workflow name")
+	}
+}
+
+// TestListWorkflowRuns_DefaultPerPage ensures the per_page default is
+// applied when the caller passes 0 (and clamped to 100 when > 100).
+func TestListWorkflowRuns_DefaultPerPage(t *testing.T) {
+	var seenPerPage string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPerPage = r.URL.Query().Get("per_page")
+		w.Write([]byte(`{"workflow_runs":[]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient("t")
+	c.BaseURL = srv.URL
+	if _, err := c.ListWorkflowRuns(context.Background(), "o", "r", "p.yml", ListWorkflowRunsOptions{}); err != nil {
+		t.Fatalf("ListWorkflowRuns: %v", err)
+	}
+	if seenPerPage != "10" {
+		t.Errorf("default per_page: got %q, want 10", seenPerPage)
+	}
+
+	if _, err := c.ListWorkflowRuns(context.Background(), "o", "r", "p.yml", ListWorkflowRunsOptions{PerPage: 500}); err != nil {
+		t.Fatalf("ListWorkflowRuns clamp: %v", err)
+	}
+	if seenPerPage != "100" {
+		t.Errorf("clamp per_page: got %q, want 100", seenPerPage)
+	}
+}
+
 // TestUnauthClientNoAuthHeader verifies we don't accidentally send a bare
 // "Bearer " (which some servers reject) when no token is set.
 func TestUnauthClientNoAuthHeader(t *testing.T) {

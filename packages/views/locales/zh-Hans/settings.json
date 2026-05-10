@@ -234,6 +234,21 @@
       "saving": "保存中…",
       "toast_saved": "审批规则已保存",
       "toast_save_failed": "保存审批规则失败"
+    },
+    "deploy_workflow": {
+      "section_title": "自动检测部署",
+      "section_description": "设置后，Multica 会每 2 分钟轮询一次 GitHub Actions，查找该工作流在 main 上的成功运行,并按 SHA 自动关联到对应发布。留空则改用手动「标记部署已上线」按钮。",
+      "staging_label": "预发布部署工作流",
+      "staging_placeholder": "staging.yml",
+      "production_label": "生产部署工作流",
+      "production_placeholder": "production.yml",
+      "status_on": "自动检测：开",
+      "status_off": "自动检测：关",
+      "save": "保存部署工作流",
+      "saving": "保存中…",
+      "toast_saved": "部署工作流设置已保存",
+      "toast_save_failed": "保存部署工作流设置失败",
+      "help_text": "路径相对于仓库的 `.github/workflows/` 目录。工作流在 main 上完成后,2 分钟内会触发自动关联。"
     }
   },
   "delete_workspace_dialog": {

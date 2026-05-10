@@ -53,6 +53,22 @@ export interface Workspace {
    * and the smoke pill renders "Not configured" instead of empty. */
   ship_hub_smoke_workflow_set: boolean;
   /**
+   * Auto-detect deploys via GitHub Actions polling. When true, the
+   * server polls completed runs of the configured workflow on `main`
+   * every 2 minutes and auto-links matching releases by sha — no
+   * manual "Mark deploy as landed" click required. The release page's
+   * "awaiting deploy" copy is swapped to mention the polling cadence
+   * when these are set, so the user knows the link is being watched
+   * rather than wondering if the feature is broken.
+   *
+   * Optional in the type (drift safety) — older Electron builds
+   * fetching a fresh server response see the field; older servers
+   * returning a stale row without the column degrade to the
+   * pre-poller copy.
+   */
+  ship_hub_deploy_workflow_staging_set?: boolean;
+  ship_hub_deploy_workflow_production_set?: boolean;
+  /**
    * Per-risk-tier approval rule (Phase 7d follow-up — configurable
    * approvals). One of `"member" | "admin" | "approver" | "two"`.
    *

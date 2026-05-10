@@ -616,7 +616,15 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
               gating condition + the affordance, so an inert release
               doesn't look like a halted one. */}
           {(isStagingOrVerifying || isPromoting || isInProduction || isDone) && (
-            <NextStepBanner release={release} />
+            <NextStepBanner
+              release={release}
+              stagingPollerOn={
+                workspace?.ship_hub_deploy_workflow_staging_set === true
+              }
+              productionPollerOn={
+                workspace?.ship_hub_deploy_workflow_production_set === true
+              }
+            />
           )}
 
           {/* Phase 7d — production live banner. Appears once the
@@ -667,6 +675,9 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
             <ProductionPanels
               release={release}
               health={releaseHealth.data ?? null}
+              productionPollerOn={
+                workspace?.ship_hub_deploy_workflow_production_set === true
+              }
             />
           )}
 
@@ -678,6 +689,9 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
               release={release}
               smokeWorkflowConfigured={
                 workspace?.ship_hub_smoke_workflow_set === true
+              }
+              stagingPollerOn={
+                workspace?.ship_hub_deploy_workflow_staging_set === true
               }
             />
           )}
@@ -1404,9 +1418,15 @@ function RollbackDialog({
 function ProductionPanels({
   release,
   health,
+  productionPollerOn,
 }: {
   release: import("@multica/core/types").Release;
   health: import("@multica/core/types").ReleaseHealth | null;
+  /** Phase 7d follow-up — workspace has auto-detect deploys
+   *  configured for production. Same UX rationale as the staging
+   *  variant: the empty-deploy copy mentions polling so the user
+   *  knows the link IS being watched. */
+  productionPollerOn?: boolean;
 }) {
   const { t } = useT("ship");
   return (
@@ -1432,7 +1452,9 @@ function ProductionPanels({
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">
-            {t(($) => $.releases.production.awaiting_deploy)}
+            {productionPollerOn === true
+              ? t(($) => $.releases.production.awaiting_deploy_with_poller)
+              : t(($) => $.releases.production.awaiting_deploy)}
           </p>
         )}
       </div>
@@ -1966,14 +1988,29 @@ function checkStartMergePreconditions(
  */
 function NextStepBanner({
   release,
+  stagingPollerOn,
+  productionPollerOn,
 }: {
   release: import("@multica/core/types").Release;
+  /** True when the workspace has configured an auto-detect staging
+   *  deploy workflow. Swaps the "awaiting deploy" copy to mention
+   *  the polling cadence so the user knows the link IS being watched
+   *  rather than wondering if the feature is broken. */
+  stagingPollerOn?: boolean;
+  /** Same as stagingPollerOn, for production deploys. We don't
+   *  currently render a "promoting awaiting prod deploy" banner here
+   *  (the promoting copy is generic), but the prop is plumbed for
+   *  symmetry / future use. */
+  productionPollerOn?: boolean;
 }) {
   const { t } = useT("ship");
   const stage = release.stage;
   const smoke = release.smoke_status ?? "";
   const hasSha = !!release.merged_main_sha;
   const hasDeploy = !!release.staging_deploy_id;
+  // Suppress the unused-var warning until we wire productionPollerOn
+  // into the promoting branch. Stays referenced for forward-compat.
+  void productionPollerOn;
 
   let message = "";
   let testId = "release-next-step-default";
@@ -1997,9 +2034,19 @@ function NextStepBanner({
     message = t(($) => $.releases.next_step.no_merged_sha);
     testId = "release-next-step-no-sha";
   } else if (!hasDeploy) {
-    message = t(($) => $.releases.next_step.awaiting_deploy, {
-      sha: release.merged_main_sha?.slice(0, 7) ?? "",
-    });
+    // When the workspace has the auto-detect poller configured, swap
+    // the copy from "click Mark deploy as landed" to "polling, link
+    // should land within 4min" — signals to the user that the wait is
+    // expected, not a broken state.
+    message = t(
+      ($) =>
+        stagingPollerOn === true
+          ? $.releases.next_step.awaiting_deploy_with_poller
+          : $.releases.next_step.awaiting_deploy,
+      {
+        sha: release.merged_main_sha?.slice(0, 7) ?? "",
+      },
+    );
     testId = "release-next-step-awaiting-deploy";
   } else if (smoke === "in_progress" || smoke === "queued") {
     message = t(($) => $.releases.next_step.smoke_running);
@@ -2158,9 +2205,15 @@ function StagingActionButtons({
 function StagingPanels({
   release,
   smokeWorkflowConfigured,
+  stagingPollerOn,
 }: {
   release: import("@multica/core/types").Release;
   smokeWorkflowConfigured: boolean;
+  /** Phase 7d follow-up — workspace has auto-detect deploys
+   *  configured for staging. When true, the empty-deploy copy mentions
+   *  the polling cadence so the user understands "the link IS being
+   *  watched" instead of treating the empty state as broken. */
+  stagingPollerOn?: boolean;
 }) {
   const { t } = useT("ship");
   const smoke = release.smoke_status ?? "";
@@ -2188,7 +2241,9 @@ function StagingPanels({
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">
-            {t(($) => $.releases.staging.awaiting_deploy)}
+            {stagingPollerOn === true
+              ? t(($) => $.releases.staging.awaiting_deploy_with_poller)
+              : t(($) => $.releases.staging.awaiting_deploy)}
           </p>
         )}
       </div>

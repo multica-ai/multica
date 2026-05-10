@@ -835,6 +835,14 @@ function ShipHubSettings({ workspace }: ShipHubSettingsProps) {
           ship to production; admins can reach everything else but the
           policy decision belongs to ownership. */}
       {enabled && <ApprovalSettings workspace={workspace} />}
+
+      {/* Phase 7d follow-up — auto-detect deploys via GitHub Actions
+          polling. When configured, removes the need for the user to
+          click "Mark deploy as landed" because the server polls
+          completed runs of the workflow on main and auto-links by
+          sha. Mirrors the structure of ApprovalSettings — paired-bool
+          PATCH that only sends the fields the user actually changed. */}
+      {enabled && <DeployWorkflowSettings workspace={workspace} />}
     </div>
   );
 }
@@ -1295,6 +1303,229 @@ function ApprovalSettings({ workspace }: ApprovalSettingsProps) {
         >
           <Save className="h-3 w-3" />
           {saving ? t(($) => $.ship_hub.approval.saving) : t(($) => $.ship_hub.approval.save)}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+interface DeployWorkflowSettingsProps {
+  workspace: Workspace;
+}
+
+/**
+ * DeployWorkflowSettings — workspace owner/admin controls for the
+ * Phase 7d follow-up auto-detect-deploys feature. The user sets two
+ * optional GitHub Actions workflow filenames (staging / production);
+ * when set, the server polls every 2 minutes and auto-links matching
+ * deploys by sha, removing the need to click Mark-deploy-as-landed.
+ *
+ * The on/off pill next to each input mirrors the smoke-workflow
+ * status-pill pattern: presence of the field on the server response
+ * (`ship_hub_deploy_workflow_*_set`) is the source of truth, NOT the
+ * locally-typed input value (which can be midway through a save).
+ *
+ * Saves via paired-bool PATCH per field — same pattern as
+ * ApprovalSettings — so a concurrent edit from another tab can't be
+ * clobbered by an "echo back" of cached state.
+ */
+function DeployWorkflowSettings({ workspace }: DeployWorkflowSettingsProps) {
+  const { t } = useT("settings");
+  const qc = useQueryClient();
+
+  // The actual filename strings aren't returned by the server (only
+  // the *_set boolean), so we don't pre-populate the input when the
+  // workspace already has one configured. Empty input + on-pill is
+  // the legitimate "configured, leave alone" state; a non-empty input
+  // is treated as "rename / overwrite". This mirrors the GitHub
+  // token's write-only contract.
+  const [staging, setStaging] = useState("");
+  const [production, setProduction] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const stagingSet = workspace.ship_hub_deploy_workflow_staging_set === true;
+  const productionSet = workspace.ship_hub_deploy_workflow_production_set === true;
+
+  const handleSave = async () => {
+    if (saving) return;
+    const trimmedStaging = staging.trim();
+    const trimmedProduction = production.trim();
+    if (!trimmedStaging && !trimmedProduction) return;
+    setSaving(true);
+    try {
+      const payload: Parameters<typeof api.updateWorkspace>[1] = {};
+      if (trimmedStaging) {
+        payload.ship_hub_deploy_workflow_staging = trimmedStaging;
+        payload.ship_hub_deploy_workflow_staging_set = true;
+      }
+      if (trimmedProduction) {
+        payload.ship_hub_deploy_workflow_production = trimmedProduction;
+        payload.ship_hub_deploy_workflow_production_set = true;
+      }
+      const updated = await api.updateWorkspace(workspace.id, payload);
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((w) => (w.id === updated.id ? updated : w)),
+      );
+      setStaging("");
+      setProduction("");
+      toast.success(t(($) => $.ship_hub.deploy_workflow.toast_saved));
+    } catch (e) {
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : t(($) => $.ship_hub.deploy_workflow.toast_save_failed),
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClear = async (field: "staging" | "production") => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const payload: Parameters<typeof api.updateWorkspace>[1] = {};
+      if (field === "staging") {
+        payload.ship_hub_deploy_workflow_staging = null;
+        payload.ship_hub_deploy_workflow_staging_set = true;
+      } else {
+        payload.ship_hub_deploy_workflow_production = null;
+        payload.ship_hub_deploy_workflow_production_set = true;
+      }
+      const updated = await api.updateWorkspace(workspace.id, payload);
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((w) => (w.id === updated.id ? updated : w)),
+      );
+      if (field === "staging") setStaging("");
+      else setProduction("");
+      toast.success(t(($) => $.ship_hub.deploy_workflow.toast_saved));
+    } catch (e) {
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : t(($) => $.ship_hub.deploy_workflow.toast_save_failed),
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const dirty = staging.trim().length > 0 || production.trim().length > 0;
+
+  return (
+    <div className="space-y-3 border-t border-border pt-3">
+      <div className="text-sm font-medium">
+        {t(($) => $.ship_hub.deploy_workflow.section_title)}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {t(($) => $.ship_hub.deploy_workflow.section_description)}
+      </p>
+
+      {/* Staging field. */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <Label
+            className="text-xs text-muted-foreground"
+            htmlFor="deploy-workflow-staging"
+          >
+            {t(($) => $.ship_hub.deploy_workflow.staging_label)}
+          </Label>
+          <span
+            className={
+              stagingSet
+                ? "rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300"
+                : "rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+            }
+            data-testid="deploy-workflow-staging-pill"
+          >
+            {stagingSet
+              ? t(($) => $.ship_hub.deploy_workflow.status_on)
+              : t(($) => $.ship_hub.deploy_workflow.status_off)}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Input
+            id="deploy-workflow-staging"
+            data-testid="deploy-workflow-staging-input"
+            value={staging}
+            onChange={(e) => setStaging(e.target.value)}
+            placeholder={t(($) => $.ship_hub.deploy_workflow.staging_placeholder)}
+            disabled={saving}
+          />
+          {stagingSet && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => handleClear("staging")}
+              disabled={saving}
+              data-testid="deploy-workflow-staging-clear"
+            >
+              {t(($) => $.ship_hub.token_clear)}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Production field. */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <Label
+            className="text-xs text-muted-foreground"
+            htmlFor="deploy-workflow-production"
+          >
+            {t(($) => $.ship_hub.deploy_workflow.production_label)}
+          </Label>
+          <span
+            className={
+              productionSet
+                ? "rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300"
+                : "rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+            }
+            data-testid="deploy-workflow-production-pill"
+          >
+            {productionSet
+              ? t(($) => $.ship_hub.deploy_workflow.status_on)
+              : t(($) => $.ship_hub.deploy_workflow.status_off)}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Input
+            id="deploy-workflow-production"
+            data-testid="deploy-workflow-production-input"
+            value={production}
+            onChange={(e) => setProduction(e.target.value)}
+            placeholder={t(($) => $.ship_hub.deploy_workflow.production_placeholder)}
+            disabled={saving}
+          />
+          {productionSet && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => handleClear("production")}
+              disabled={saving}
+              data-testid="deploy-workflow-production-clear"
+            >
+              {t(($) => $.ship_hub.token_clear)}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        {t(($) => $.ship_hub.deploy_workflow.help_text)}
+      </p>
+
+      <div className="pt-1">
+        <Button
+          size="sm"
+          onClick={handleSave}
+          disabled={!dirty || saving}
+          data-testid="deploy-workflow-save-button"
+        >
+          <Save className="h-3 w-3" />
+          {saving
+            ? t(($) => $.ship_hub.deploy_workflow.saving)
+            : t(($) => $.ship_hub.deploy_workflow.save)}
         </Button>
       </div>
     </div>

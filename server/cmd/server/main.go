@@ -354,6 +354,14 @@ func main() {
 	// The bus adapter publishes the resulting release:updated WS event
 	// so connected clients see the badge flip without a refresh.
 	go runShipHubReleaseFinalizer(sweepCtx, queries, &finalizerBusAdapter{bus: bus})
+	// Ship Hub Phase 7d follow-up — auto-detect deploys via GitHub
+	// Actions polling. Every 2 minutes, for workspaces with a
+	// configured deploy workflow filename, scan completed runs of
+	// that workflow on main and auto-link the matching release. This
+	// removes the need for users to click Mark-deployed when their
+	// CI provider (Vercel / Netlify / Cloudflare / custom) doesn't
+	// fire GitHub deployment_status webhooks.
+	go runShipHubDeployWorkflowPoller(sweepCtx, queries, bus)
 
 	if metricsServer != nil {
 		go func() {

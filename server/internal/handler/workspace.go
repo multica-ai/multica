@@ -96,6 +96,19 @@ type WorkspaceResponse struct {
 	// is enforced: a verifier in the release's PR-author set is
 	// rejected. Defaults to true (small teams typically self-verify).
 	ShipHubApproverCanBeAuthor bool `json:"ship_hub_approver_can_be_author"`
+	// ShipHubDeployWorkflowStagingSet — true when a staging deploy
+	// workflow filename is configured. When set, the deploy poller
+	// goroutine watches GitHub Actions for completed runs of that
+	// workflow on main and auto-links matching releases by sha.
+	// The release page UI reads this flag to swap the "awaiting deploy"
+	// copy from "click Mark deploy as landed" to "polling — link should
+	// land within 4min of the workflow completing".
+	//
+	// We surface the boolean only (not the filename) for parity with
+	// ShipHubSmokeWorkflowSet — the filename isn't a secret but
+	// consistency keeps the response shape predictable.
+	ShipHubDeployWorkflowStagingSet    bool `json:"ship_hub_deploy_workflow_staging_set"`
+	ShipHubDeployWorkflowProductionSet bool `json:"ship_hub_deploy_workflow_production_set"`
 }
 
 // shipHubSettingsKey is the JSON object inside workspace.settings that holds
@@ -243,6 +256,10 @@ func workspaceToResponseWithSecretFlags(w db.Workspace, flags secretFlags) Works
 		ShipHubApprovalHigh:        w.ShipHubApprovalHigh,
 		ShipHubApprovalCritical:    w.ShipHubApprovalCritical,
 		ShipHubApproverCanBeAuthor: w.ShipHubApproverCanBeAuthor,
+		ShipHubDeployWorkflowStagingSet: w.ShipHubDeployWorkflowStaging.Valid &&
+			w.ShipHubDeployWorkflowStaging.String != "",
+		ShipHubDeployWorkflowProductionSet: w.ShipHubDeployWorkflowProduction.Valid &&
+			w.ShipHubDeployWorkflowProduction.String != "",
 	}
 }
 
@@ -469,6 +486,17 @@ type UpdateWorkspaceRequest struct {
 	// "verifier may have authored a release PR" toggle.
 	ShipHubApproverCanBeAuthor    *bool `json:"ship_hub_approver_can_be_author,omitempty"`
 	ShipHubApproverCanBeAuthorSet bool  `json:"ship_hub_approver_can_be_author_set,omitempty"`
+	// Phase 7d follow-up — auto-detect deploys by polling GitHub
+	// Actions. The poller watches completed runs of these workflow
+	// files on main and auto-links matching releases by sha. nil
+	// pointer = "do nothing"; empty/whitespace string clears (auto-
+	// detection turns off; the manual Mark-deployed button is the
+	// fallback). Path is relative to the repo's `.github/workflows/`,
+	// e.g. "production.yml".
+	ShipHubDeployWorkflowStaging       *string `json:"ship_hub_deploy_workflow_staging,omitempty"`
+	ShipHubDeployWorkflowStagingSet    bool    `json:"ship_hub_deploy_workflow_staging_set,omitempty"`
+	ShipHubDeployWorkflowProduction    *string `json:"ship_hub_deploy_workflow_production,omitempty"`
+	ShipHubDeployWorkflowProductionSet bool    `json:"ship_hub_deploy_workflow_production_set,omitempty"`
 }
 
 // validApprovalRule is the single source of truth for accepted rule
@@ -626,6 +654,33 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		params.ShipHubApproverCanBeAuthorSet = true
 		if req.ShipHubApproverCanBeAuthor != nil {
 			params.ShipHubApproverCanBeAuthor = pgtype.Bool{Bool: *req.ShipHubApproverCanBeAuthor, Valid: true}
+		}
+	}
+	// Deploy-workflow patches — paired-bool gate per environment.
+	// nil pointer with set=true clears the column (auto-detection off);
+	// non-empty string sets it. We TrimSpace to keep accidental newlines
+	// (common when the user pastes from a YAML file) from breaking the
+	// poller's URL path.
+	if req.ShipHubDeployWorkflowStagingSet {
+		params.ShipHubDeployWorkflowStagingSet = true
+		if req.ShipHubDeployWorkflowStaging != nil {
+			trimmed := strings.TrimSpace(*req.ShipHubDeployWorkflowStaging)
+			if trimmed == "" {
+				params.ShipHubDeployWorkflowStaging = pgtype.Text{}
+			} else {
+				params.ShipHubDeployWorkflowStaging = pgtype.Text{String: trimmed, Valid: true}
+			}
+		}
+	}
+	if req.ShipHubDeployWorkflowProductionSet {
+		params.ShipHubDeployWorkflowProductionSet = true
+		if req.ShipHubDeployWorkflowProduction != nil {
+			trimmed := strings.TrimSpace(*req.ShipHubDeployWorkflowProduction)
+			if trimmed == "" {
+				params.ShipHubDeployWorkflowProduction = pgtype.Text{}
+			} else {
+				params.ShipHubDeployWorkflowProduction = pgtype.Text{String: trimmed, Valid: true}
+			}
 		}
 	}
 	if req.OrchestratorAgentIDSet {

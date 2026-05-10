@@ -82,6 +82,14 @@ UPDATE workspace SET
         WHEN sqlc.arg('ship_hub_approver_can_be_author_set')::bool THEN COALESCE(sqlc.narg('ship_hub_approver_can_be_author'), ship_hub_approver_can_be_author)
         ELSE ship_hub_approver_can_be_author
     END,
+    ship_hub_deploy_workflow_staging = CASE
+        WHEN sqlc.arg('ship_hub_deploy_workflow_staging_set')::bool THEN sqlc.narg('ship_hub_deploy_workflow_staging')
+        ELSE ship_hub_deploy_workflow_staging
+    END,
+    ship_hub_deploy_workflow_production = CASE
+        WHEN sqlc.arg('ship_hub_deploy_workflow_production_set')::bool THEN sqlc.narg('ship_hub_deploy_workflow_production')
+        ELSE ship_hub_deploy_workflow_production
+    END,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

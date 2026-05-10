@@ -14,7 +14,7 @@ import (
 const createWorkspace = `-- name: CreateWorkspace :one
 INSERT INTO workspace (name, slug, description, context, issue_prefix)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled, ship_hub_webhook_secret, ship_hub_smoke_workflow, ship_hub_approval_low, ship_hub_approval_medium, ship_hub_approval_high, ship_hub_approval_critical, ship_hub_approver_can_be_author
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled, ship_hub_webhook_secret, ship_hub_smoke_workflow, ship_hub_approval_low, ship_hub_approval_medium, ship_hub_approval_high, ship_hub_approval_critical, ship_hub_approver_can_be_author, ship_hub_deploy_workflow_staging, ship_hub_deploy_workflow_production
 `
 
 type CreateWorkspaceParams struct {
@@ -57,6 +57,8 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		&i.ShipHubApprovalHigh,
 		&i.ShipHubApprovalCritical,
 		&i.ShipHubApproverCanBeAuthor,
+		&i.ShipHubDeployWorkflowStaging,
+		&i.ShipHubDeployWorkflowProduction,
 	)
 	return i, err
 }
@@ -71,7 +73,7 @@ func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getWorkspace = `-- name: GetWorkspace :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled, ship_hub_webhook_secret, ship_hub_smoke_workflow, ship_hub_approval_low, ship_hub_approval_medium, ship_hub_approval_high, ship_hub_approval_critical, ship_hub_approver_can_be_author FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled, ship_hub_webhook_secret, ship_hub_smoke_workflow, ship_hub_approval_low, ship_hub_approval_medium, ship_hub_approval_high, ship_hub_approval_critical, ship_hub_approver_can_be_author, ship_hub_deploy_workflow_staging, ship_hub_deploy_workflow_production FROM workspace
 WHERE id = $1
 `
 
@@ -101,12 +103,14 @@ func (q *Queries) GetWorkspace(ctx context.Context, id pgtype.UUID) (Workspace, 
 		&i.ShipHubApprovalHigh,
 		&i.ShipHubApprovalCritical,
 		&i.ShipHubApproverCanBeAuthor,
+		&i.ShipHubDeployWorkflowStaging,
+		&i.ShipHubDeployWorkflowProduction,
 	)
 	return i, err
 }
 
 const getWorkspaceBySlug = `-- name: GetWorkspaceBySlug :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled, ship_hub_webhook_secret, ship_hub_smoke_workflow, ship_hub_approval_low, ship_hub_approval_medium, ship_hub_approval_high, ship_hub_approval_critical, ship_hub_approver_can_be_author FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled, ship_hub_webhook_secret, ship_hub_smoke_workflow, ship_hub_approval_low, ship_hub_approval_medium, ship_hub_approval_high, ship_hub_approval_critical, ship_hub_approver_can_be_author, ship_hub_deploy_workflow_staging, ship_hub_deploy_workflow_production FROM workspace
 WHERE slug = $1
 `
 
@@ -136,6 +140,8 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 		&i.ShipHubApprovalHigh,
 		&i.ShipHubApprovalCritical,
 		&i.ShipHubApproverCanBeAuthor,
+		&i.ShipHubDeployWorkflowStaging,
+		&i.ShipHubDeployWorkflowProduction,
 	)
 	return i, err
 }
@@ -154,7 +160,7 @@ func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (in
 }
 
 const listWorkspaces = `-- name: ListWorkspaces :many
-SELECT w.id, w.name, w.slug, w.description, w.settings, w.created_at, w.updated_at, w.context, w.repos, w.issue_prefix, w.issue_counter, w.channel_retention_days, w.channels_enabled, w.orchestrator_agent_id, w.ship_hub_enabled, w.ship_hub_webhook_secret, w.ship_hub_smoke_workflow, w.ship_hub_approval_low, w.ship_hub_approval_medium, w.ship_hub_approval_high, w.ship_hub_approval_critical, w.ship_hub_approver_can_be_author FROM workspace w
+SELECT w.id, w.name, w.slug, w.description, w.settings, w.created_at, w.updated_at, w.context, w.repos, w.issue_prefix, w.issue_counter, w.channel_retention_days, w.channels_enabled, w.orchestrator_agent_id, w.ship_hub_enabled, w.ship_hub_webhook_secret, w.ship_hub_smoke_workflow, w.ship_hub_approval_low, w.ship_hub_approval_medium, w.ship_hub_approval_high, w.ship_hub_approval_critical, w.ship_hub_approver_can_be_author, w.ship_hub_deploy_workflow_staging, w.ship_hub_deploy_workflow_production FROM workspace w
 JOIN member m ON m.workspace_id = w.id
 WHERE m.user_id = $1
 ORDER BY w.created_at ASC
@@ -192,6 +198,8 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 			&i.ShipHubApprovalHigh,
 			&i.ShipHubApprovalCritical,
 			&i.ShipHubApproverCanBeAuthor,
+			&i.ShipHubDeployWorkflowStaging,
+			&i.ShipHubDeployWorkflowProduction,
 		); err != nil {
 			return nil, err
 		}
@@ -204,7 +212,7 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 }
 
 const listWorkspacesWithShipHubEnabled = `-- name: ListWorkspacesWithShipHubEnabled :many
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled, ship_hub_webhook_secret, ship_hub_smoke_workflow, ship_hub_approval_low, ship_hub_approval_medium, ship_hub_approval_high, ship_hub_approval_critical, ship_hub_approver_can_be_author FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled, ship_hub_webhook_secret, ship_hub_smoke_workflow, ship_hub_approval_low, ship_hub_approval_medium, ship_hub_approval_high, ship_hub_approval_critical, ship_hub_approver_can_be_author, ship_hub_deploy_workflow_staging, ship_hub_deploy_workflow_production FROM workspace
 WHERE ship_hub_enabled = TRUE
 ORDER BY id ASC
 `
@@ -243,6 +251,8 @@ func (q *Queries) ListWorkspacesWithShipHubEnabled(ctx context.Context) ([]Works
 			&i.ShipHubApprovalHigh,
 			&i.ShipHubApprovalCritical,
 			&i.ShipHubApproverCanBeAuthor,
+			&i.ShipHubDeployWorkflowStaging,
+			&i.ShipHubDeployWorkflowProduction,
 		); err != nil {
 			return nil, err
 		}
@@ -299,37 +309,49 @@ UPDATE workspace SET
         WHEN $24::bool THEN COALESCE($25, ship_hub_approver_can_be_author)
         ELSE ship_hub_approver_can_be_author
     END,
+    ship_hub_deploy_workflow_staging = CASE
+        WHEN $26::bool THEN $27
+        ELSE ship_hub_deploy_workflow_staging
+    END,
+    ship_hub_deploy_workflow_production = CASE
+        WHEN $28::bool THEN $29
+        ELSE ship_hub_deploy_workflow_production
+    END,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled, ship_hub_webhook_secret, ship_hub_smoke_workflow, ship_hub_approval_low, ship_hub_approval_medium, ship_hub_approval_high, ship_hub_approval_critical, ship_hub_approver_can_be_author
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, channel_retention_days, channels_enabled, orchestrator_agent_id, ship_hub_enabled, ship_hub_webhook_secret, ship_hub_smoke_workflow, ship_hub_approval_low, ship_hub_approval_medium, ship_hub_approval_high, ship_hub_approval_critical, ship_hub_approver_can_be_author, ship_hub_deploy_workflow_staging, ship_hub_deploy_workflow_production
 `
 
 type UpdateWorkspaceParams struct {
-	ID                            pgtype.UUID `json:"id"`
-	Name                          pgtype.Text `json:"name"`
-	Description                   pgtype.Text `json:"description"`
-	Context                       pgtype.Text `json:"context"`
-	Settings                      []byte      `json:"settings"`
-	Repos                         []byte      `json:"repos"`
-	IssuePrefix                   pgtype.Text `json:"issue_prefix"`
-	ChannelsEnabledSet            bool        `json:"channels_enabled_set"`
-	ChannelsEnabled               pgtype.Bool `json:"channels_enabled"`
-	ChannelRetentionDaysSet       bool        `json:"channel_retention_days_set"`
-	ChannelRetentionDays          pgtype.Int4 `json:"channel_retention_days"`
-	ShipHubEnabledSet             bool        `json:"ship_hub_enabled_set"`
-	ShipHubEnabled                pgtype.Bool `json:"ship_hub_enabled"`
-	OrchestratorAgentIDSet        bool        `json:"orchestrator_agent_id_set"`
-	OrchestratorAgentID           pgtype.UUID `json:"orchestrator_agent_id"`
-	ShipHubApprovalLowSet         bool        `json:"ship_hub_approval_low_set"`
-	ShipHubApprovalLow            pgtype.Text `json:"ship_hub_approval_low"`
-	ShipHubApprovalMediumSet      bool        `json:"ship_hub_approval_medium_set"`
-	ShipHubApprovalMedium         pgtype.Text `json:"ship_hub_approval_medium"`
-	ShipHubApprovalHighSet        bool        `json:"ship_hub_approval_high_set"`
-	ShipHubApprovalHigh           pgtype.Text `json:"ship_hub_approval_high"`
-	ShipHubApprovalCriticalSet    bool        `json:"ship_hub_approval_critical_set"`
-	ShipHubApprovalCritical       pgtype.Text `json:"ship_hub_approval_critical"`
-	ShipHubApproverCanBeAuthorSet bool        `json:"ship_hub_approver_can_be_author_set"`
-	ShipHubApproverCanBeAuthor    pgtype.Bool `json:"ship_hub_approver_can_be_author"`
+	ID                                 pgtype.UUID `json:"id"`
+	Name                               pgtype.Text `json:"name"`
+	Description                        pgtype.Text `json:"description"`
+	Context                            pgtype.Text `json:"context"`
+	Settings                           []byte      `json:"settings"`
+	Repos                              []byte      `json:"repos"`
+	IssuePrefix                        pgtype.Text `json:"issue_prefix"`
+	ChannelsEnabledSet                 bool        `json:"channels_enabled_set"`
+	ChannelsEnabled                    pgtype.Bool `json:"channels_enabled"`
+	ChannelRetentionDaysSet            bool        `json:"channel_retention_days_set"`
+	ChannelRetentionDays               pgtype.Int4 `json:"channel_retention_days"`
+	ShipHubEnabledSet                  bool        `json:"ship_hub_enabled_set"`
+	ShipHubEnabled                     pgtype.Bool `json:"ship_hub_enabled"`
+	OrchestratorAgentIDSet             bool        `json:"orchestrator_agent_id_set"`
+	OrchestratorAgentID                pgtype.UUID `json:"orchestrator_agent_id"`
+	ShipHubApprovalLowSet              bool        `json:"ship_hub_approval_low_set"`
+	ShipHubApprovalLow                 pgtype.Text `json:"ship_hub_approval_low"`
+	ShipHubApprovalMediumSet           bool        `json:"ship_hub_approval_medium_set"`
+	ShipHubApprovalMedium              pgtype.Text `json:"ship_hub_approval_medium"`
+	ShipHubApprovalHighSet             bool        `json:"ship_hub_approval_high_set"`
+	ShipHubApprovalHigh                pgtype.Text `json:"ship_hub_approval_high"`
+	ShipHubApprovalCriticalSet         bool        `json:"ship_hub_approval_critical_set"`
+	ShipHubApprovalCritical            pgtype.Text `json:"ship_hub_approval_critical"`
+	ShipHubApproverCanBeAuthorSet      bool        `json:"ship_hub_approver_can_be_author_set"`
+	ShipHubApproverCanBeAuthor         pgtype.Bool `json:"ship_hub_approver_can_be_author"`
+	ShipHubDeployWorkflowStagingSet    bool        `json:"ship_hub_deploy_workflow_staging_set"`
+	ShipHubDeployWorkflowStaging       pgtype.Text `json:"ship_hub_deploy_workflow_staging"`
+	ShipHubDeployWorkflowProductionSet bool        `json:"ship_hub_deploy_workflow_production_set"`
+	ShipHubDeployWorkflowProduction    pgtype.Text `json:"ship_hub_deploy_workflow_production"`
 }
 
 // Multiple paired-bool fields use the same "leave alone" / "explicitly write" pattern:
@@ -379,6 +401,10 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		arg.ShipHubApprovalCritical,
 		arg.ShipHubApproverCanBeAuthorSet,
 		arg.ShipHubApproverCanBeAuthor,
+		arg.ShipHubDeployWorkflowStagingSet,
+		arg.ShipHubDeployWorkflowStaging,
+		arg.ShipHubDeployWorkflowProductionSet,
+		arg.ShipHubDeployWorkflowProduction,
 	)
 	var i Workspace
 	err := row.Scan(
@@ -404,6 +430,8 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		&i.ShipHubApprovalHigh,
 		&i.ShipHubApprovalCritical,
 		&i.ShipHubApproverCanBeAuthor,
+		&i.ShipHubDeployWorkflowStaging,
+		&i.ShipHubDeployWorkflowProduction,
 	)
 	return i, err
 }

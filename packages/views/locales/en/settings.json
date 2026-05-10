@@ -234,6 +234,21 @@
       "saving": "Saving…",
       "toast_saved": "Approval rules saved",
       "toast_save_failed": "Failed to save approval rules"
+    },
+    "deploy_workflow": {
+      "section_title": "Auto-detect deploys",
+      "section_description": "When set, Multica polls GitHub Actions every 2 minutes for completed runs of this workflow on main and auto-links matching deploys to releases. Leave blank to use the manual \"Mark deploy as landed\" button instead.",
+      "staging_label": "Staging deploy workflow",
+      "staging_placeholder": "staging.yml",
+      "production_label": "Production deploy workflow",
+      "production_placeholder": "production.yml",
+      "status_on": "Auto-detect: on",
+      "status_off": "Auto-detect: off",
+      "save": "Save deploy workflows",
+      "saving": "Saving…",
+      "toast_saved": "Deploy workflow settings saved",
+      "toast_save_failed": "Failed to save deploy workflow settings",
+      "help_text": "Path is relative to the repo's `.github/workflows/` directory. Auto-detect kicks in within 2 minutes of the workflow completing on main."
     }
   },
   "delete_workspace_dialog": {

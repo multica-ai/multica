@@ -456,6 +456,7 @@
     },
     "staging": {
       "awaiting_deploy": "等待预发布部署",
+      "awaiting_deploy_with_poller": "等待预发布部署。自动检测每 2 分钟轮询一次。",
       "deploy_panel_title": "关联的预发布部署",
       "deploy_at": "部署时间",
       "smoke_panel_title": "冒烟测试",
@@ -515,6 +516,8 @@
     "next_step": {
       "no_merged_sha": "本次发布没有记录合并提交,预发布部署无法自动关联。手动标记为已验证以继续推进。",
       "awaiting_deploy": "等待 {{sha}} 的预发布部署到位。部署 webhook 会自动关联;也可以手动标记为已验证。",
+      "awaiting_deploy_with_poller": "等待 {{sha}} 的预发布部署到位。Multica 每 2 分钟轮询一次 GitHub Actions — 工作流完成后 4 分钟内会自动关联。",
+      "awaiting_production_deploy_with_poller": "等待 {{sha}} 的生产部署到位。Multica 每 2 分钟轮询一次 GitHub Actions — 工作流完成后 4 分钟内会自动关联。",
       "smoke_running": "冒烟测试运行中。通过后将进入验证阶段。",
       "smoke_failed": "冒烟测试失败。复查运行结果后,可重新运行、人工通过,或直接标记为已验证以覆盖。",
       "ready_to_verify": "可以验证了。点击「标记为已验证」进入上线准入。",
@@ -546,6 +549,7 @@
       "deploy_panel_title": "生产部署",
       "deploy_at": "部署时间",
       "awaiting_deploy": "等待生产部署。如 CI 不触发 webhook,可使用「标记为已上线」。",
+      "awaiting_deploy_with_poller": "等待生产部署。Multica 每 2 分钟轮询一次 GitHub Actions — 工作流完成后 4 分钟内会自动关联。",
       "promoting_progress": "上线中…",
       "mark_deployed_button": "标记为已上线",
       "mark_deployed_toast": "已关联生产部署。",

@@ -1,0 +1,520 @@
+// Phase 7d follow-up Ship Hub — auto-detect deploys via GitHub Actions.
+//
+// Most CI providers (Vercel, Netlify, Cloudflare Pages, custom CI) do
+// NOT fire GitHub `deployment_status` webhooks when a deploy lands.
+// Without those webhooks, the release page sits forever in "Awaiting
+// staging deploy" / "Awaiting production deploy" until the user clicks
+// the manual Mark-deployed button. That UX is bad — the deploy IS
+// landing, Multica just can't see it.
+//
+// This goroutine fixes that: every 2 minutes, for every workspace
+// with `ship_hub_enabled = TRUE` AND a configured deploy workflow
+// filename, list the last 10 completed runs of that workflow on
+// `main` via the GitHub Actions API, and for any run with
+// `conclusion="success"` whose head_sha matches a release's
+// merged_main_sha, synthesize a deploy row + run the same linkage
+// flow the webhook path runs. The release advances without a manual
+// click.
+//
+// Cadence: 2 minutes. Tighter than the 5-min reconciler / health
+// monitor because the user perception of "deploy lag" is direct —
+// they pushed, the release page should reflect it within a couple
+// minutes. With the GitHub Actions API limits (5,000 req/hr per
+// token), one poll per workspace per environment per 2min works
+// out to <2 req/min/workspace, well under the budget for any team
+// running Ship Hub.
+//
+// Per-workspace + per-project errors are logged and skipped so one
+// bad token / archived repo doesn't starve the rest of the fleet.
+//
+// Long-lived sweepCtx — see CLAUDE.md goroutine context rule. The
+// linkage callbacks below outlive any individual HTTP request.
+
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/service/ship"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	gh "github.com/multica-ai/multica/server/pkg/github"
+	"github.com/multica-ai/multica/server/pkg/protocol"
+)
+
+// shipHubDeployWorkflowPollInterval — every 2 minutes. See file header
+// for the rate-budget math. Exposed as a const so tests can override
+// when driving runShipHubDeployWorkflowPollOnce directly.
+const shipHubDeployWorkflowPollInterval = 2 * time.Minute
+
+// shipHubDeployWorkflowRunsPerPoll — how many recent runs to fetch per
+// (workspace, project, environment) tick. 10 covers the worst case of
+// "we restarted, missed 4 minutes of CI, and three releases landed in
+// quick succession" without paginating. Anything older than 10 runs
+// will simply have to wait for the manual Mark-deployed button.
+const shipHubDeployWorkflowRunsPerPoll = 10
+
+// pollerBusAdapter wraps an *events.Bus to expose the slim shape the
+// service-layer publisher contract expects. Same pattern as
+// finalizerBusAdapter — keeping each adapter file-local prevents
+// importers from accidentally taking a runtime dependency on
+// *events.Bus, which the test fakes don't satisfy.
+type pollerBusAdapter struct{ bus *events.Bus }
+
+func (a *pollerBusAdapter) PublishMergeEvent(eventType, workspaceID string, payload map[string]any) {
+	if a == nil || a.bus == nil {
+		return
+	}
+	a.bus.Publish(events.Event{
+		Type:        eventType,
+		WorkspaceID: workspaceID,
+		ActorType:   "system",
+		Payload:     payload,
+	})
+}
+
+// runShipHubDeployWorkflowPoller is the goroutine entry. Boots a
+// 2-minute ticker; the per-tick body is extracted into
+// runShipHubDeployWorkflowPollOnce so a future test can drive it
+// deterministically without leaking a goroutine.
+func runShipHubDeployWorkflowPoller(ctx context.Context, queries *db.Queries, bus *events.Bus) {
+	slog.Info("ship hub deploy workflow poller started",
+		"interval", shipHubDeployWorkflowPollInterval.String())
+	t := time.NewTicker(shipHubDeployWorkflowPollInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("ship hub deploy workflow poller stopped")
+			return
+		case <-t.C:
+			runShipHubDeployWorkflowPollOnce(ctx, queries, bus)
+		}
+	}
+}
+
+// runShipHubDeployWorkflowPollOnce — one pass over every workspace
+// with ship_hub_enabled and at least one deploy workflow configured.
+// Defensive throughout: every workspace / project / run is wrapped
+// so a single failure logs + continues to the next.
+func runShipHubDeployWorkflowPollOnce(ctx context.Context, queries *db.Queries, bus *events.Bus) {
+	workspaces, err := queries.ListWorkspacesWithShipHubEnabled(ctx)
+	if err != nil {
+		slog.Warn("ship hub deploy poller: list workspaces failed", "error", err)
+		return
+	}
+	for _, ws := range workspaces {
+		stagingWf := ""
+		if ws.ShipHubDeployWorkflowStaging.Valid {
+			stagingWf = ws.ShipHubDeployWorkflowStaging.String
+		}
+		prodWf := ""
+		if ws.ShipHubDeployWorkflowProduction.Valid {
+			prodWf = ws.ShipHubDeployWorkflowProduction.String
+		}
+		if stagingWf == "" && prodWf == "" {
+			// Workspace enabled the feature but didn't configure
+			// auto-detection — the manual Mark-deployed button is
+			// the active path. Skip silently (not even Debug level —
+			// this is the common case for new workspaces).
+			continue
+		}
+
+		token := loadShipHubTokenForWorkspace(ctx, queries, ws)
+		if token == "" {
+			// Same skip behavior as the reconciler: a workspace with
+			// the feature enabled but no token can't make any GitHub
+			// calls at all, so we don't even attempt the public-API
+			// fallback (rate limit is too low for periodic polling).
+			slog.Debug("ship hub deploy poller: skipping workspace without token",
+				"workspace_id", ws.ID)
+			continue
+		}
+		client := gh.NewClient(token)
+		pollWorkspaceDeployWorkflows(ctx, queries, bus, ws, client, stagingWf, prodWf)
+	}
+}
+
+// loadShipHubTokenForWorkspace mirrors the reconciler's token-load
+// path: prefer the encrypted workspace_secret row, fall back to the
+// legacy settings JSON. Defensive: any decryption failure surfaces as
+// "no token" so the poller skips rather than crashing.
+func loadShipHubTokenForWorkspace(ctx context.Context, queries *db.Queries, ws db.Workspace) string {
+	token := handler.ReadShipHubGitHubTokenForReconciler(ws.Settings)
+	if token != "" {
+		return token
+	}
+	row, err := queries.GetWorkspaceSecret(ctx, db.GetWorkspaceSecretParams{
+		WorkspaceID: ws.ID,
+		Name:        "github_token",
+	})
+	if err == nil {
+		return handler.ReadShipHubGitHubTokenFromEncrypted(row.ValueEncrypted)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("ship hub deploy poller: load encrypted token failed",
+			"workspace_id", ws.ID, "error", err)
+	}
+	return ""
+}
+
+// pollWorkspaceDeployWorkflows iterates every project in the
+// workspace that has a github_repo resource attached and polls the
+// configured workflow(s) on it. We list every project (ListProjects
+// excludes archived by default) and read its github_repo URL — the
+// same pattern repoURLForRelease uses on the request path.
+func pollWorkspaceDeployWorkflows(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	ws db.Workspace,
+	client *gh.Client,
+	stagingWf, prodWf string,
+) {
+	projects, err := queries.ListProjects(ctx, db.ListProjectsParams{
+		WorkspaceID: ws.ID,
+	})
+	if err != nil {
+		slog.Warn("ship hub deploy poller: list projects failed",
+			"workspace_id", ws.ID, "error", err)
+		return
+	}
+	for _, p := range projects {
+		repoURL, ok := firstGitHubRepoURL(ctx, queries, p.ID)
+		if !ok {
+			// Project has no github_repo — nothing to poll. Common
+			// for a "Documentation" or "Customer support" project
+			// in a multi-project workspace.
+			continue
+		}
+		owner, repo, err := gh.ParseRepoURL(repoURL)
+		if err != nil {
+			slog.Debug("ship hub deploy poller: invalid repo url",
+				"project_id", p.ID, "url", repoURL, "error", err)
+			continue
+		}
+		if stagingWf != "" {
+			pollEnvironmentForRelease(ctx, queries, bus, ws, p, client, owner, repo, stagingWf, db.DeployEnvironmentKindStaging)
+		}
+		if prodWf != "" {
+			pollEnvironmentForRelease(ctx, queries, bus, ws, p, client, owner, repo, prodWf, db.DeployEnvironmentKindProduction)
+		}
+	}
+}
+
+// firstGitHubRepoURL — the project's first github_repo resource_ref
+// URL, if any. Mirrors the same JSON shape the request handler uses;
+// duplicating the logic here (instead of importing handler.repoURL...)
+// keeps the cmd/server package free of a handler-internals dependency.
+func firstGitHubRepoURL(ctx context.Context, queries *db.Queries, projectID pgtype.UUID) (string, bool) {
+	resources, err := queries.ListProjectResources(ctx, projectID)
+	if err != nil {
+		return "", false
+	}
+	for _, res := range resources {
+		if res.ResourceType != "github_repo" {
+			continue
+		}
+		var payload struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(res.ResourceRef, &payload); err != nil {
+			continue
+		}
+		if payload.URL != "" {
+			return payload.URL, true
+		}
+	}
+	return "", false
+}
+
+// pollEnvironmentForRelease — poll one (workspace, project, env_kind)
+// triple. Lists the last N completed workflow runs on main; for each
+// success run, look up a release matching the head_sha + the
+// environment-appropriate stage filter, and on hit synthesize a
+// deploy + run the linkage.
+func pollEnvironmentForRelease(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	ws db.Workspace,
+	project db.Project,
+	client *gh.Client,
+	owner, repo, workflowFile string,
+	envKind db.DeployEnvironmentKind,
+) {
+	runs, err := client.ListWorkflowRuns(ctx, owner, repo, workflowFile, gh.ListWorkflowRunsOptions{
+		Branch:  "main",
+		Status:  "completed",
+		PerPage: shipHubDeployWorkflowRunsPerPoll,
+	})
+	if err != nil {
+		slog.Warn("ship hub deploy poller: list workflow runs failed",
+			"workspace_id", ws.ID,
+			"project_id", project.ID,
+			"workflow", workflowFile,
+			"env_kind", envKind,
+			"error", err)
+		return
+	}
+	for _, run := range runs {
+		if run.Conclusion != "success" {
+			continue
+		}
+		if run.HeadSHA == "" {
+			continue
+		}
+		linkRunIfMatchingRelease(ctx, queries, bus, ws, project, client, run, envKind)
+	}
+}
+
+// linkRunIfMatchingRelease — the per-run match logic. Returns nothing
+// because the entire path is best-effort; every miss is silent and
+// every error is logged + swallowed.
+//
+// Match criteria:
+//   - staging → release whose merged_main_sha == run.head_sha AND
+//     stage is in the staging-eligible set (FindReleaseByMergedMainSHA
+//     handles the stage filter)
+//   - production → release whose production_main_sha == run.head_sha
+//     OR (production_main_sha empty AND merged_main_sha == run.head_sha)
+//     AND stage is verifying / promoting / in_production
+//     (FindReleaseByProductionMainSHA handles the OR + stage filter)
+//
+// Already-linked releases are skipped (the existing deploy_id check).
+// This keeps the poller idempotent across restarts and across
+// multiple workspaces sharing a sha (rare but possible).
+func linkRunIfMatchingRelease(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	ws db.Workspace,
+	project db.Project,
+	client *gh.Client,
+	run gh.WorkflowRun,
+	envKind db.DeployEnvironmentKind,
+) {
+	var release db.ShipRelease
+	var lookupErr error
+	switch envKind {
+	case db.DeployEnvironmentKindStaging:
+		release, lookupErr = queries.FindReleaseByMergedMainSHA(ctx, db.FindReleaseByMergedMainSHAParams{
+			WorkspaceID:   ws.ID,
+			MergedMainSha: pgtype.Text{String: run.HeadSHA, Valid: true},
+		})
+	case db.DeployEnvironmentKindProduction:
+		release, lookupErr = queries.FindReleaseByProductionMainSHA(ctx, db.FindReleaseByProductionMainSHAParams{
+			WorkspaceID:       ws.ID,
+			ProductionMainSha: pgtype.Text{String: run.HeadSHA, Valid: true},
+		})
+	default:
+		return
+	}
+	if lookupErr != nil {
+		// pgx.ErrNoRows is the common case — most workflow runs aren't
+		// from a tracked release (a hotfix, a docs change, etc).
+		if !errors.Is(lookupErr, pgx.ErrNoRows) {
+			slog.Warn("ship hub deploy poller: find release by sha failed",
+				"workspace_id", ws.ID,
+				"sha", run.HeadSHA,
+				"env", envKind,
+				"error", lookupErr)
+		}
+		return
+	}
+	// Cross-project guard: a release is project-scoped, but
+	// workspace-level workflow polling will pick up runs from every
+	// repo in the workspace. Skip if the matched release belongs to a
+	// different project than the one we're scanning, otherwise we'd
+	// link a deploy from repo-A's CI to repo-B's release.
+	if release.ProjectID != project.ID {
+		return
+	}
+	// Skip if already linked. This is the cheap idempotency guard
+	// that lets the poller re-run after a restart without
+	// re-creating deploy rows.
+	switch envKind {
+	case db.DeployEnvironmentKindStaging:
+		if release.StagingDeployID.Valid {
+			return
+		}
+	case db.DeployEnvironmentKindProduction:
+		if release.ProductionDeployID.Valid {
+			return
+		}
+	}
+
+	deploy, ok := upsertSyntheticDeploy(ctx, queries, ws.ID, project.ID, envKind, run)
+	if !ok {
+		return
+	}
+
+	deps := buildPollerStagingDeps(ctx, bus)
+	switch envKind {
+	case db.DeployEnvironmentKindStaging:
+		smokeWorkflow := ""
+		if ws.ShipHubSmokeWorkflow.Valid {
+			smokeWorkflow = ws.ShipHubSmokeWorkflow.String
+		}
+		repoURL, _ := firstGitHubRepoURL(ctx, queries, project.ID)
+		svc := &ship.Service{Q: queries, Github: client}
+		if _, err := svc.LinkStagingDeploy(ctx, release.ID, deploy.ID, run.HeadSHA, smokeWorkflow, repoURL, deps); err != nil {
+			slog.Warn("ship hub deploy poller: link staging deploy failed",
+				"release_id", release.ID, "error", err)
+			return
+		}
+		slog.Info("ship hub deploy poller: linked staging deploy",
+			"workspace_id", ws.ID,
+			"release_id", release.ID,
+			"deploy_id", deploy.ID,
+			"sha", run.HeadSHA,
+			"run_url", run.HTMLURL)
+	case db.DeployEnvironmentKindProduction:
+		svc := &ship.Service{Q: queries, Github: client}
+		if _, err := svc.LinkProductionDeploy(ctx, release.ID, deploy.ID, run.HeadSHA, deps); err != nil {
+			slog.Warn("ship hub deploy poller: link production deploy failed",
+				"release_id", release.ID, "error", err)
+			return
+		}
+		slog.Info("ship hub deploy poller: linked production deploy",
+			"workspace_id", ws.ID,
+			"release_id", release.ID,
+			"deploy_id", deploy.ID,
+			"sha", run.HeadSHA,
+			"run_url", run.HTMLURL)
+	}
+
+	// Generic stage-update fan-out so any rail listeners pick up the
+	// stage flip from the LinkStagingDeploy / LinkProductionDeploy
+	// path. The service-layer linkage already publishes the
+	// release-specific event; this is the workspace-level rail signal.
+	if bus != nil {
+		bus.Publish(events.Event{
+			Type:        protocol.EventReleaseUpdated,
+			WorkspaceID: uuidStringFromPg(ws.ID),
+			ActorType:   "system",
+			Payload: map[string]any{
+				"release_id": uuidStringFromPg(release.ID),
+			},
+		})
+	}
+}
+
+// buildPollerStagingDeps — the StagingDeps the service-layer linkage
+// expects. We supply a publisher (so WS events fire) but no
+// PostToReleaseChannel — the channel post is best-effort and the
+// poller has no per-request channel context. The webhook path
+// supplies the channel poster; from the poller, an audit-row +
+// WS event is the durable record (the channel post is a nice-to-have).
+func buildPollerStagingDeps(parentCtx context.Context, bus *events.Bus) *ship.StagingDeps {
+	return &ship.StagingDeps{
+		ParentCtx: parentCtx,
+		Publisher: &pollerBusAdapter{bus: bus},
+	}
+}
+
+// upsertSyntheticDeploy — find or create the env, then insert a
+// successful deploy row keyed to the workflow run. ok=false on any
+// DB failure with the error already logged. Mirrors the
+// MarkReleaseStagingDeployed handler's synthesizing path so the
+// auto-detected and manually-clicked rows look identical
+// downstream (same env, same triggered_by=NULL, same status).
+func upsertSyntheticDeploy(
+	ctx context.Context,
+	queries *db.Queries,
+	workspaceID, projectID pgtype.UUID,
+	envKind db.DeployEnvironmentKind,
+	run gh.WorkflowRun,
+) (db.Deploy, bool) {
+	envs, err := queries.ListDeployEnvironmentsByProject(ctx, projectID)
+	if err != nil {
+		slog.Warn("ship hub deploy poller: list deploy envs failed",
+			"project_id", projectID, "error", err)
+		return db.Deploy{}, false
+	}
+	var env *db.DeployEnvironment
+	for i := range envs {
+		if envs[i].Kind == envKind {
+			env = &envs[i]
+			break
+		}
+	}
+	if env == nil {
+		// First-deploy case — create a minimal env so the deploy row
+		// has a parent. Same shape as the MarkReleaseStagingDeployed
+		// handler's create path.
+		name := "Staging"
+		if envKind == db.DeployEnvironmentKindProduction {
+			name = "Production"
+		}
+		created, err := queries.UpsertDeployEnvironment(ctx, db.UpsertDeployEnvironmentParams{
+			WorkspaceID:  workspaceID,
+			ProjectID:    projectID,
+			Kind:         envKind,
+			Name:         name,
+			TargetBranch: "main",
+		})
+		if err != nil {
+			slog.Warn("ship hub deploy poller: create deploy env failed",
+				"project_id", projectID, "kind", envKind, "error", err)
+			return db.Deploy{}, false
+		}
+		env = &created
+	}
+
+	now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
+	deploy, err := queries.InsertDeploy(ctx, db.InsertDeployParams{
+		WorkspaceID:   workspaceID,
+		EnvironmentID: env.ID,
+		Ref:           env.TargetBranch,
+		Sha:           run.HeadSHA,
+		Status:        db.DeployStatusSucceeded,
+		TriggeredBy:   pgtype.UUID{}, // automated — no user actor
+		StartedAt:     now,
+		CompletedAt:   now,
+		LogUrl:        pgtype.Text{String: run.HTMLURL, Valid: run.HTMLURL != ""},
+	})
+	if err != nil {
+		slog.Warn("ship hub deploy poller: insert deploy failed",
+			"project_id", projectID, "kind", envKind, "error", err)
+		return db.Deploy{}, false
+	}
+	// Best-effort env current_sha bump — same as the manual path.
+	_, _ = queries.UpdateDeployEnvironmentCurrent(ctx, db.UpdateDeployEnvironmentCurrentParams{
+		ID:                env.ID,
+		CurrentSha:        pgtype.Text{String: deploy.Sha, Valid: true},
+		CurrentDeployedAt: deploy.TriggeredAt,
+	})
+	return deploy, true
+}
+
+// uuidStringFromPg is a local copy of the handler-package helper. We
+// can't import handler.uuidToString because it's lowercase, and a
+// public alias would clutter the API surface for one cmd/server use
+// case.
+func uuidStringFromPg(u pgtype.UUID) string {
+	if !u.Valid {
+		return ""
+	}
+	b := u.Bytes
+	const hex = "0123456789abcdef"
+	out := make([]byte, 36)
+	for i, j := 0, 0; i < 16; i++ {
+		switch i {
+		case 4, 6, 8, 10:
+			out[j] = '-'
+			j++
+		}
+		out[j] = hex[b[i]>>4]
+		out[j+1] = hex[b[i]&0x0f]
+		j += 2
+	}
+	return string(out)
+}

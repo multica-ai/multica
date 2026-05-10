@@ -461,6 +461,7 @@
     },
     "staging": {
       "awaiting_deploy": "Awaiting staging deploy",
+      "awaiting_deploy_with_poller": "Awaiting staging deploy. Auto-detect is polling every 2min.",
       "deploy_panel_title": "Linked staging deploy",
       "deploy_at": "Deployed",
       "smoke_panel_title": "Smoke tests",
@@ -520,6 +521,8 @@
     "next_step": {
       "no_merged_sha": "No merged commit recorded for this release — the staging deploy can't auto-link. Mark verified manually to advance.",
       "awaiting_deploy": "Waiting for the staging deploy of {{sha}} to land. The deploy webhook will link automatically; or mark verified manually.",
+      "awaiting_deploy_with_poller": "Waiting for the staging deploy of {{sha}}. Multica is polling GitHub Actions every 2 minutes — the link should land within 4 minutes of the workflow completing.",
+      "awaiting_production_deploy_with_poller": "Waiting for the production deploy of {{sha}}. Multica is polling GitHub Actions every 2 minutes — the link should land within 4 minutes of the workflow completing.",
       "smoke_running": "Smoke tests running. The release will advance to verifying when they pass.",
       "smoke_failed": "Smoke tests failed. Review the run, re-run, mark a manual pass, or mark verified to override.",
       "ready_to_verify": "Ready to verify. Click Mark verified to advance to the production gate.",
@@ -551,6 +554,7 @@
       "deploy_panel_title": "Production deploy",
       "deploy_at": "Deployed",
       "awaiting_deploy": "Awaiting production deploy. Use Mark production deployed if your CI doesn't fire webhooks.",
+      "awaiting_deploy_with_poller": "Awaiting production deploy. Multica is polling GitHub Actions every 2 minutes — the link should land within 4 minutes of the workflow completing.",
       "promoting_progress": "Promoting…",
       "mark_deployed_button": "Mark production deployed",
       "mark_deployed_toast": "Production deploy linked.",

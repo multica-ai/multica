@@ -549,6 +549,78 @@ type dispatchWorkflowRequest struct {
 	Inputs map[string]string `json:"inputs,omitempty"`
 }
 
+// WorkflowRun mirrors the GitHub Actions
+// /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs response
+// shape. We only project the fields the Ship Hub deploy poller needs
+// (head_sha to match against release.merged_main_sha, conclusion to
+// gate "successful run", html_url for the channel announcement). The
+// rest of the wire shape (head_commit, repository, actor, etc.) is
+// ignored.
+type WorkflowRun struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	HeadSHA      string `json:"head_sha"`
+	HeadBranch   string `json:"head_branch"`
+	Status       string `json:"status"`     // "queued" | "in_progress" | "completed"
+	Conclusion   string `json:"conclusion"` // "success" | "failure" | "cancelled" | "skipped" | "timed_out" | ...
+	HTMLURL      string `json:"html_url"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+	RunStartedAt string `json:"run_started_at"`
+}
+
+// ListWorkflowRunsOptions controls /actions/workflows/{file}/runs paging
+// + filters. Defaults: branch="" (no filter), status="" (no filter),
+// per_page=10. The deploy poller passes branch="main", status="completed",
+// per_page=10 — enough to catch every CI completion in a 2-minute window
+// for any sane release cadence.
+type ListWorkflowRunsOptions struct {
+	Branch  string
+	Status  string
+	PerPage int
+}
+
+// ListWorkflowRuns fetches recent runs for a workflow file. The
+// workflow_id parameter accepts both the numeric id and the file name
+// (e.g. "production.yml") — GitHub treats both as valid path params.
+//
+// Used by the Ship Hub deploy workflow poller to discover successful
+// runs on main and auto-link the matching release without requiring
+// the user to set up GitHub `deployment_status` webhooks (which Vercel,
+// Netlify, Cloudflare, and most custom CI providers do not fire).
+func (c *Client) ListWorkflowRuns(ctx context.Context, owner, repo, workflowFile string, opts ListWorkflowRunsOptions) ([]WorkflowRun, error) {
+	if strings.TrimSpace(workflowFile) == "" {
+		return nil, errors.New("github: workflow file is required")
+	}
+	perPage := opts.PerPage
+	if perPage <= 0 {
+		perPage = 10
+	}
+	if perPage > 100 {
+		perPage = 100
+	}
+	q := url.Values{}
+	if opts.Branch != "" {
+		q.Set("branch", opts.Branch)
+	}
+	if opts.Status != "" {
+		q.Set("status", opts.Status)
+	}
+	q.Set("per_page", strconv.Itoa(perPage))
+
+	path := fmt.Sprintf("/repos/%s/%s/actions/workflows/%s/runs?%s",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(workflowFile), q.Encode())
+
+	// GitHub wraps the array in `{ "total_count": N, "workflow_runs": [...] }`.
+	var wrapper struct {
+		WorkflowRuns []WorkflowRun `json:"workflow_runs"`
+	}
+	if err := c.do(ctx, "GET", path, &wrapper); err != nil {
+		return nil, err
+	}
+	return wrapper.WorkflowRuns, nil
+}
+
 // DispatchWorkflow triggers a workflow_dispatch event on the named
 // workflow file. ref is the branch or tag name (NOT a SHA — GitHub
 // requires a ref label here). Returns nil on the standard 204 No Content

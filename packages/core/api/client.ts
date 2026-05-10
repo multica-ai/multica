@@ -1031,6 +1031,14 @@ export class ApiClient {
       ship_hub_approval_critical_set?: boolean;
       ship_hub_approver_can_be_author?: boolean | null;
       ship_hub_approver_can_be_author_set?: boolean;
+      // Phase 7d follow-up — auto-detect deploys via GitHub Actions
+      // polling. Pair with the *_set flag to actually mutate; pass
+      // `null` (or `""`) with set=true to clear and turn auto-detect
+      // off (manual Mark-deployed becomes the active path).
+      ship_hub_deploy_workflow_staging?: string | null;
+      ship_hub_deploy_workflow_staging_set?: boolean;
+      ship_hub_deploy_workflow_production?: string | null;
+      ship_hub_deploy_workflow_production_set?: boolean;
     },
   ): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
