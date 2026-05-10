@@ -75,8 +75,8 @@ function CommentInput({ issueId, onSubmit, autoFocus = false }: CommentInputProp
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
         <ContentEditor
           // CEREBRO-PATCH(input-autofocus): JEH-756 — remount on
-          // channel/DM switch so Tiptap re-evaluates `autoFocus` for
-          // the new context (autofocus is read once at create time).
+          // channel/DM switch so ContentEditor re-evaluates `autoFocus`
+          // for the new context (autofocus is read once at create time).
           key={issueId}
           ref={editorRef}
           placeholder={t(($) => $.comment.leave_comment_placeholder)}
@@ -86,9 +86,8 @@ function CommentInput({ issueId, onSubmit, autoFocus = false }: CommentInputProp
           debounceMs={100}
           currentIssueId={issueId}
           submitOnEnter={submitOnEnter}
-          // CEREBRO-PATCH(input-autofocus): JEH-756 — Tiptap-native
-          // autofocus. Issue pages stay opt-out (read-first); channel
-          // and DM views opt in.
+          // CEREBRO-PATCH(input-autofocus): JEH-756 — issue pages stay
+          // opt-out (read-first); channel and DM views opt in.
           autoFocus={autoFocus}
         />
       </div>

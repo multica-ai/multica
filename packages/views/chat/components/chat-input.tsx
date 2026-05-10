@@ -44,7 +44,7 @@ interface ChatInputProps {
   topSlot?: ReactNode;
   // CEREBRO-PATCH(input-autofocus): JEH-756 — when true, focus the editor on
   // mount and on session/agent switch so the user can start typing without
-  // an extra click. Skipped if a dialog is in front.
+  // an extra click. Skipped if a dialog still owns focus.
   autoFocus?: boolean;
   // CEREBRO-PATCH(chat-session-scoped-draft): JEH-806 — embedded panels can pass
   // the owning session id so drafts do not read the global active session.
@@ -167,7 +167,7 @@ export function ChatInput({
             // Remount the editor when the active session changes so its
             // uncontrolled defaultValue picks up the new session's draft.
             // Also re-evaluates `autoFocus` for the new session/agent —
-            // Tiptap reads autofocus once at create time.
+            // ContentEditor snapshots autofocus once at create time.
             key={draftKey}
             ref={editorRef}
             defaultValue={inputDraft}
@@ -186,9 +186,9 @@ export function ChatInput({
             //   true  → Enter sends, Shift+Enter inserts newline
             //   false → Cmd/Ctrl+Enter sends, Enter inserts newline
             submitOnEnter={submitOnEnter}
-            // CEREBRO-PATCH(input-autofocus): JEH-756 — Tiptap-native
-            // autofocus. Gated here so archived sessions and no-agent
-            // surfaces don't pull focus into a non-functional editor.
+            // CEREBRO-PATCH(input-autofocus): JEH-756 — gated here so
+            // archived sessions and no-agent surfaces don't pull focus into
+            // a non-functional editor.
             autoFocus={autoFocus && !disabled && !noAgent}
           />
         </div>

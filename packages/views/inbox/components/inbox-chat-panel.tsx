@@ -214,11 +214,10 @@ export function InboxChatPanel({
         disabled={isSessionArchived}
         noAgent={!activeAgent}
         agentName={activeAgent?.name}
-        // CEREBRO-PATCH(input-autofocus-tiptap): JEH-756 — the panel only mounts
+        // CEREBRO-PATCH(input-autofocus): JEH-756 — the panel only mounts
         // when the user enters a chat or starts a new one, so always claim
-        // focus; ChatInput passes the prop to ContentEditor which routes
-        // it through Tiptap's `autofocus` option (handles the dialog yield
-        // + the deferred-create timing internally).
+        // focus; ChatInput passes the prop to ContentEditor, which focuses
+        // after the editor exists and after closing dialogs restore focus.
         autoFocus
         draftSessionId={sessionId}
         leftAdornment={

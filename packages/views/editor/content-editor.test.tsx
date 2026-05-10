@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 
 const mockFocus = vi.hoisted(() => vi.fn());
 const lastUseEditorOptions = vi.hoisted(
@@ -56,6 +56,25 @@ vi.mock("@tiptap/react", () => ({
 
 import { ContentEditor } from "./content-editor";
 
+function createFocusedDialog() {
+  const dialog = document.createElement("div");
+  dialog.setAttribute("role", "dialog");
+  const dialogInput = document.createElement("input");
+  dialog.appendChild(dialogInput);
+  document.body.appendChild(dialog);
+  dialogInput.focus();
+  return { dialog, dialogInput };
+}
+
+async function flushAutofocusFrames() {
+  await act(async () => {
+    vi.runOnlyPendingTimers();
+  });
+  await act(async () => {
+    vi.runOnlyPendingTimers();
+  });
+}
+
 describe("ContentEditor", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -83,47 +102,63 @@ describe("ContentEditor", () => {
 });
 
 describe("ContentEditor — JEH-756 autofocus", () => {
-  // The previous fix used a post-mount RAF effect that called
-  // `editor.commands.focus()`. With `immediatelyRender: false` the editor
-  // is null on first render, so the effect ran before the editor existed
-  // and silently no-op'd. The fix is to delegate timing to Tiptap's own
-  // `autofocus` option — these tests pin the option's value through the
-  // useEditor boundary.
-
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) =>
+      window.setTimeout(() => callback(performance.now()), 0),
+    );
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) =>
+      window.clearTimeout(id),
+    );
     vi.clearAllMocks();
     lastUseEditorOptions.value = undefined;
   });
 
-  it("passes `autofocus: \"end\"` to useEditor when autoFocus is true", () => {
-    render(<ContentEditor autoFocus placeholder="…" />);
-    expect(lastUseEditorOptions.value?.autofocus).toBe("end");
+  afterEach(() => {
+    document.querySelectorAll('[role="dialog"], [role="alertdialog"]').forEach((node) => {
+      node.remove();
+    });
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
-  it("passes `autofocus: false` when autoFocus is omitted", () => {
+  it("focuses after the editor instance exists when autoFocus is true", async () => {
+    render(<ContentEditor autoFocus placeholder="…" />);
+    expect(lastUseEditorOptions.value?.autofocus).toBe(false);
+
+    await flushAutofocusFrames();
+
+    expect(mockFocus).toHaveBeenCalledWith("end");
+  });
+
+  it("does not focus when autoFocus is omitted", async () => {
     render(<ContentEditor placeholder="…" />);
     expect(lastUseEditorOptions.value?.autofocus).toBe(false);
+
+    await flushAutofocusFrames();
+
+    expect(mockFocus).not.toHaveBeenCalled();
   });
 
-  it("yields focus to a focus-trapping dialog at mount", () => {
-    // A dialog with focus inside it: the editor must NOT ask Tiptap to
-    // autofocus, otherwise the dialog's focus trap fights the editor.
-    const dialog = document.createElement("div");
-    dialog.setAttribute("role", "dialog");
-    const dialogInput = document.createElement("input");
-    dialog.appendChild(dialogInput);
-    document.body.appendChild(dialog);
-    dialogInput.focus();
+  it("yields focus while a focus-trapping dialog still owns focus", async () => {
+    const { dialogInput } = createFocusedDialog();
 
     render(<ContentEditor autoFocus placeholder="…" />);
-    expect(lastUseEditorOptions.value?.autofocus).toBe(false);
 
-    document.body.removeChild(dialog);
+    await flushAutofocusFrames();
+
+    expect(mockFocus).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(dialogInput);
   });
 
-  it("autofocuses normally when the dialog has been dismissed", () => {
-    // Dialog removed before mount → activeElement is body → autofocus on.
+  it("focuses when a dismissing dialog has closed before deferred focus", async () => {
+    const { dialog } = createFocusedDialog();
+
     render(<ContentEditor autoFocus placeholder="…" />);
-    expect(lastUseEditorOptions.value?.autofocus).toBe("end");
+    dialog.remove();
+
+    await flushAutofocusFrames();
+
+    expect(mockFocus).toHaveBeenCalledWith("end");
   });
 });

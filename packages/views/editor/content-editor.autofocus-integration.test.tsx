@@ -5,8 +5,8 @@ import { render, waitFor } from "@testing-library/react";
 // because every chat-/comment-input test mocked `@tiptap/react` with a stub
 // that exposed `focus()` synchronously. The real `useEditor({
 // immediatelyRender: false })` is async — it returns `null` on first render
-// and creates the editor in a deferred frame — so post-mount RAF effects
-// calling `editor.commands.focus()` no-op'd silently in production.
+// and creates the editor in a deferred frame — so autofocus must run from
+// ContentEditor after the real editor instance exists.
 //
 // This test does NOT mock `@tiptap/react`. It mounts ContentEditor with the
 // real Tiptap stack and asserts `document.activeElement` lands inside the
@@ -47,6 +47,16 @@ vi.mock("./bubble-menu", () => ({
 
 import { ContentEditor } from "./content-editor";
 
+function createFocusedDialog() {
+  const dialog = document.createElement("div");
+  dialog.setAttribute("role", "dialog");
+  const dialogInput = document.createElement("input");
+  dialog.appendChild(dialogInput);
+  document.body.appendChild(dialog);
+  dialogInput.focus();
+  return { dialog, dialogInput };
+}
+
 describe("ContentEditor — JEH-756 autofocus integration", () => {
   it("focus lands on the ProseMirror node when autoFocus is set", async () => {
     const { container } = render(<ContentEditor autoFocus placeholder="…" />);
@@ -76,9 +86,44 @@ describe("ContentEditor — JEH-756 autofocus integration", () => {
       return node as HTMLElement;
     });
 
-    // Give Tiptap room to autofocus if it were going to.
+    // Give the deferred autofocus effect room to run if it were enabled.
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(proseMirror.contains(document.activeElement)).toBe(false);
+  });
+
+  it("focuses after a dismissing dialog closes before deferred focus", async () => {
+    const { dialog } = createFocusedDialog();
+    const { container } = render(<ContentEditor autoFocus placeholder="…" />);
+
+    const proseMirror = await waitFor(() => {
+      const node = container.querySelector(".ProseMirror");
+      if (!node) throw new Error("ProseMirror not yet mounted");
+      return node as HTMLElement;
+    });
+
+    dialog.remove();
+
+    await waitFor(() => {
+      expect(proseMirror.contains(document.activeElement)).toBe(true);
+    });
+  });
+
+  it("does not focus while an open dialog still owns focus", async () => {
+    const { dialog, dialogInput } = createFocusedDialog();
+    const { container } = render(<ContentEditor autoFocus placeholder="…" />);
+
+    const proseMirror = await waitFor(() => {
+      const node = container.querySelector(".ProseMirror");
+      if (!node) throw new Error("ProseMirror not yet mounted");
+      return node as HTMLElement;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(proseMirror.contains(document.activeElement)).toBe(false);
+    expect(document.activeElement).toBe(dialogInput);
+
+    dialog.remove();
   });
 });

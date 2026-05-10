@@ -64,6 +64,13 @@ function stripBlobUrls(md: string): string {
   return md.replace(BLOB_IMAGE_RE, "");
 }
 
+function activeElementIsOwnedByDialog(): boolean {
+  if (typeof document === "undefined") return false;
+  const active = document.activeElement;
+  if (!active || active === document.body) return false;
+  return Boolean(active.closest('[role="dialog"], [role="alertdialog"]'));
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -95,18 +102,17 @@ interface ContentEditorProps {
   disableMentions?: boolean;
   /**
    * CEREBRO-PATCH(input-autofocus): JEH-756 — when true, focus the editor
-   * once it finishes initialising. Routed through Tiptap's `autofocus`
-   * option (not a post-mount RAF) because `immediatelyRender: false` defers
-   * editor creation; an effect that calls `editor.commands.focus()` runs
-   * before the editor exists and silently no-ops. Tiptap fires its own
-   * focus call after `onCreate`, so the timing is guaranteed.
+   * once it finishes initialising. The focus call is owned by ContentEditor
+   * so it runs only after `useEditor({ immediatelyRender: false })` has
+   * produced a real editor instance, then yields a couple frames for closing
+   * menus/dialogs to finish their focus restoration.
    *
    * Static at create time — re-keying the parent (e.g. `key={draftKey}`)
    * remounts the editor and re-applies the prop on session/agent switch.
    *
    * If a focus-trapping dialog (`[role="dialog"]` / `[role="alertdialog"]`)
-   * owns focus when the editor is created, the editor yields and blurs
-   * itself so the dialog keeps focus.
+   * still owns focus at the deferred focus time, the editor yields so the
+   * dialog keeps focus.
    */
   autoFocus?: boolean;
 }
@@ -171,35 +177,17 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
 
     const queryClient = useQueryClient();
 
-    // CEREBRO-PATCH(input-autofocus): JEH-756 — decide once, at mount, whether
-    // Tiptap should autofocus. If a focus-trapping dialog already owns focus
-    // we yield silently. Lazy `useState` init runs once per editor instance;
-    // remounting the parent (e.g. via `key={draftKey}`) re-evaluates the
-    // check for the new mount.
-    const [autoFocusAtMount] = useState(() => {
-      if (!autoFocus) return false;
-      if (typeof document === "undefined") return false;
-      const active = document.activeElement;
-      if (
-        active &&
-        active !== document.body &&
-        active.closest('[role="dialog"], [role="alertdialog"]')
-      ) {
-        return false;
-      }
-      return true;
-    });
+    // CEREBRO-PATCH(input-autofocus): JEH-756 — snapshot once per editor
+    // instance. Parent re-keying (e.g. `key={draftKey}`) remounts the editor
+    // and re-applies the request for session/agent/channel switches.
+    const [autoFocusAtMount] = useState(() => autoFocus);
 
     const editor = useEditor({
       immediatelyRender: false,
       // Note: in v3.22.1 the default is already false/undefined (same behavior).
       // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
       shouldRerenderOnTransaction: false,
-      // CEREBRO-PATCH(input-autofocus): JEH-756 — route autofocus through
-      // Tiptap so the focus call fires after the editor is created. A
-      // post-mount RAF effect calling `editor.commands.focus()` no-ops when
-      // `immediatelyRender: false` defers editor creation past the effect.
-      autofocus: autoFocusAtMount ? "end" : false,
+      autofocus: false,
       onCreate: ({ editor: ed }) => {
         lastEmittedRef.current = stripBlobUrls(ed.getMarkdown()).trimEnd();
       },
@@ -256,6 +244,43 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         if (debounceRef.current) clearTimeout(debounceRef.current);
       };
     }, []);
+
+    // CEREBRO-PATCH(input-autofocus): JEH-756 — focus after the editor exists,
+    // then defer past dropdown/dialog close focus-restore. The dialog guard is
+    // checked at execution time, not mount time: the New Message dialog is
+    // still focused while its selection mounts InboxChatPanel, but it is gone
+    // by the time focus should land in the input.
+    useEffect(() => {
+      if (!editor || !autoFocusAtMount) return;
+      if (typeof window === "undefined") return;
+
+      let didFocus = false;
+      const focusEditor = () => {
+        if (didFocus) return;
+        if (editor.isDestroyed) return;
+        if (activeElementIsOwnedByDialog()) return;
+        didFocus = true;
+        editor.commands.focus("end");
+      };
+
+      if (typeof window.requestAnimationFrame !== "function") {
+        const timeoutId = window.setTimeout(focusEditor, 0);
+        return () => window.clearTimeout(timeoutId);
+      }
+
+      let frameOne = 0;
+      let frameTwo = 0;
+      frameOne = window.requestAnimationFrame(() => {
+        frameTwo = window.requestAnimationFrame(focusEditor);
+      });
+      const timeoutId = window.setTimeout(focusEditor, 50);
+
+      return () => {
+        window.cancelAnimationFrame(frameOne);
+        window.cancelAnimationFrame(frameTwo);
+        window.clearTimeout(timeoutId);
+      };
+    }, [editor, autoFocusAtMount]);
 
     useImperativeHandle(ref, () => ({
       getMarkdown: () => stripBlobUrls(editor?.getMarkdown() ?? ""),
