@@ -25,6 +25,14 @@ const isErrorRef = vi.hoisted(() => ({ current: false }));
 const openIdRef = vi.hoisted(() => ({ current: null as string | null }));
 const closeSpy = vi.hoisted(() => vi.fn());
 
+// Selection state lives in a ref so individual tests can exercise the
+// "select for release" checkbox without rebuilding the whole module
+// graph. The store contract: `selected` is a Set<string>; `toggle` is
+// the only mutator the drawer cares about.
+const selectionStateRef = vi.hoisted(() => ({
+  current: { selected: new Set<string>(), toggle: vi.fn() },
+}));
+
 vi.mock("@multica/core/ship", () => ({
   usePullRequestDetails: () => ({
     data: detailsRef.current,
@@ -37,6 +45,9 @@ vi.mock("@multica/core/ship", () => ({
       selector({ close: closeSpy }),
     {},
   ),
+  useShipSelection: <T,>(
+    selector: (state: { selected: Set<string>; toggle: (id: string) => void }) => T,
+  ): T => selector(selectionStateRef.current),
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -120,6 +131,10 @@ beforeEach(() => {
   isErrorRef.current = false;
   openIdRef.current = null;
   closeSpy.mockReset();
+  selectionStateRef.current = {
+    selected: new Set<string>(),
+    toggle: vi.fn(),
+  };
 });
 
 describe("ShipPrDetailDrawer", () => {
@@ -234,5 +249,38 @@ describe("ShipPrDetailDrawer", () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     });
     expect(closeSpy).toHaveBeenCalled();
+  });
+
+  // Bug fix regression — the drawer needed its own "select for release"
+  // affordance so users could multi-select PRs without closing the
+  // drawer to reach the card's checkbox. Asserts both the unchecked
+  // path (label says "Add to release") AND that toggling fires the
+  // shared selection store's `toggle(prId)` mutator.
+  it("renders a select-for-release checkbox that toggles the shared selection store", async () => {
+    openIdRef.current = "pr-1";
+    detailsRef.current = makeDetails();
+    render(<ShipPrDetailDrawer />, { wrapper: Wrapper });
+    const select = screen.getByTestId("ship-pr-detail-select-for-release");
+    expect(select).toBeInTheDocument();
+    expect(select.textContent).toContain("Add to release");
+    // Click the wrapping label — the checkbox inside fires
+    // onCheckedChange. We don't probe the Base UI internals; a label
+    // click is what a real user does.
+    await act(async () => {
+      (select as HTMLElement).click();
+    });
+    expect(selectionStateRef.current.toggle).toHaveBeenCalledWith("pr-1");
+  });
+
+  it("shows the deselect label when the PR is already in the selection", () => {
+    openIdRef.current = "pr-1";
+    detailsRef.current = makeDetails();
+    selectionStateRef.current = {
+      selected: new Set<string>(["pr-1"]),
+      toggle: vi.fn(),
+    };
+    render(<ShipPrDetailDrawer />, { wrapper: Wrapper });
+    const select = screen.getByTestId("ship-pr-detail-select-for-release");
+    expect(select.textContent).toContain("Selected");
   });
 });

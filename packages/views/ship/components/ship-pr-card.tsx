@@ -236,8 +236,15 @@ export function ShipPRCard({
     >
       {/* Phase 7a — multi-select checkbox. Always rendered to keep
           DOM stable; visually hidden until hover or until something
-          else is selected. Click handling stops propagation so we
-          don't navigate to GitHub when toggling. */}
+          else is selected.
+          Click handling stops propagation on BOTH the wrapper div
+          AND the Checkbox itself: Base UI Checkbox dispatches its
+          internal pointer handlers before the React click listener,
+          and the click event still bubbles up the DOM tree. Without
+          the wrapper-level stop, ticking the checkbox would also
+          trigger the card's role="button" handler and open the
+          detail drawer — surfaced as "checkbox click also opens the
+          sidebar". */}
       <div
         className={cn(
           "absolute left-2 top-2 transition-opacity",
@@ -245,6 +252,8 @@ export function ShipPRCard({
             ? "opacity-100"
             : "opacity-0 group-hover/card:opacity-100",
         )}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
         <Checkbox
           checked={isSelected}

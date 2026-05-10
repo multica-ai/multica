@@ -44,7 +44,9 @@ import {
   usePullRequestDetails,
   useShipPrDetailOpenId,
   useShipPrDetailStore,
+  useShipSelection,
 } from "@multica/core/ship";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import type {
   DrawerCheck,
@@ -222,6 +224,14 @@ function DrawerHeader({ pr, locale }: DrawerHeaderProps) {
     descKey = "drawer_description_closed";
     when = pr.pr_closed_at;
   }
+  // Mirror the Kanban card's selection contract so a user can multi-
+  // select PRs from inside the drawer too. Without this, opening the
+  // drawer to confirm a PR's details forced the user to close it,
+  // hover the card, find the checkbox, then re-open the drawer for
+  // the next candidate. Now the same checkbox is available alongside
+  // the close button — same store, same behavior.
+  const isSelected = useShipSelection((s) => s.selected.has(pr.id));
+  const toggleSelection = useShipSelection((s) => s.toggle);
   return (
     <SheetHeader className="border-b px-4 py-3">
       <div className="flex items-start gap-3">
@@ -247,6 +257,29 @@ function DrawerHeader({ pr, locale }: DrawerHeaderProps) {
             })}
           </SheetDescription>
           <div className="mt-2 flex flex-wrap items-center gap-2">
+            <label
+              className={cn(
+                "inline-flex cursor-pointer items-center gap-1.5 rounded border px-2 py-1 text-[11px]",
+                isSelected
+                  ? "border-primary/50 bg-primary/10 text-primary"
+                  : "hover:bg-accent",
+              )}
+              data-testid="ship-pr-detail-select-for-release"
+            >
+              <Checkbox
+                checked={isSelected}
+                onCheckedChange={() => toggleSelection(pr.id)}
+                aria-label={t(($) => $.pr_detail.select_for_release_aria, {
+                  number: pr.number,
+                })}
+                className="size-3.5"
+              />
+              {t(($) =>
+                isSelected
+                  ? $.pr_detail.deselect_for_release
+                  : $.pr_detail.select_for_release,
+              )}
+            </label>
             <a
               href={pr.html_url}
               target="_blank"
@@ -476,7 +509,7 @@ function DrawerSections({ data, pr, slug, locale }: DrawerSectionsProps) {
   const hasStackSection = !!data.stack_parent || data.stack_children.length > 0;
 
   return (
-    <ScrollArea className="flex-1">
+    <ScrollArea className="min-h-0 flex-1">
       <div className="space-y-1 px-4 py-3">
         {/* Source — repo, branches, head SHA. Always rendered because
             every PR has a repo and head sha. */}
@@ -663,7 +696,14 @@ export function ShipPrDetailDrawer() {
     >
       <SheetContent
         side="right"
-        className="flex h-full w-full flex-col gap-0 sm:max-w-xl"
+        // `overflow-hidden` clips at the Sheet level and `min-h-0` on
+        // the inner ScrollArea below lets the flex-1 child actually
+        // constrain — without these, a long PR description (or large
+        // checks/reviews list) made the drawer body grow past the
+        // viewport and the user couldn't reach lower sections. With
+        // them, the inner ScrollArea handles overflow with a styled
+        // scrollbar.
+        className="flex h-full w-full flex-col gap-0 overflow-hidden sm:max-w-xl"
         data-testid="ship-pr-detail-drawer"
       >
         {openPrId ? <DrawerBody prId={openPrId} /> : null}
