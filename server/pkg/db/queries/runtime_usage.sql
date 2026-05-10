@@ -1,8 +1,9 @@
 -- name: ListRuntimeUsage :many
--- Bucket by tu.created_at (usage report time, ~= task completion time), not
--- atq.created_at (task enqueue time), so tasks that queue one day and execute
--- the next are attributed to the day tokens were actually produced. The since
--- cutoff is truncated to start-of-day so `days=N` yields full calendar days.
+-- Reads from raw `task_usage`, bucketed by DATE(tu.created_at) — usage
+-- report time, ~= task completion time. Since cutoff is truncated to
+-- start-of-day so `days=N` yields full calendar days. This is the
+-- always-correct fallback path; used when USAGE_DAILY_ROLLUP_ENABLED
+-- is false (or the rollup hasn't been deployed yet).
 SELECT
     DATE(tu.created_at) AS date,
     tu.provider,
@@ -17,6 +18,35 @@ WHERE atq.runtime_id = $1
   AND tu.created_at >= DATE_TRUNC('day', @since::timestamptz)
 GROUP BY DATE(tu.created_at), tu.provider, tu.model
 ORDER BY DATE(tu.created_at) DESC, tu.provider, tu.model;
+
+-- name: ListRuntimeUsageDaily :many
+-- Reads from the `task_usage_daily` rollup table maintained by
+-- rollup_task_usage_daily() (scheduled every 5 min via pg_cron, or any
+-- equivalent external scheduler that calls the function). Same shape as
+-- ListRuntimeUsage above. Today's bucket may lag the raw table by up to
+-- ~10 min (5 min cron period + 5 min rollup safety lag); intentional.
+--
+-- Only used when USAGE_DAILY_ROLLUP_ENABLED is true AND deploy has
+-- verified that the rollup is fresh (see task_usage_rollup_lag_seconds
+-- helper from migration 076).
+--
+-- The PK on task_usage_daily already collapses to one row per
+-- (bucket_date, runtime_id, provider, model), but SUM/GROUP BY is kept
+-- so future schema changes (extra dimensions promoted into the table)
+-- don't silently change query semantics.
+SELECT
+    bucket_date AS date,
+    provider,
+    model,
+    SUM(input_tokens)::bigint AS input_tokens,
+    SUM(output_tokens)::bigint AS output_tokens,
+    SUM(cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(cache_write_tokens)::bigint AS cache_write_tokens
+FROM task_usage_daily
+WHERE runtime_id = $1
+  AND bucket_date >= DATE(DATE_TRUNC('day', @since::timestamptz))
+GROUP BY bucket_date, provider, model
+ORDER BY bucket_date DESC, provider, model;
 
 -- name: GetRuntimeTaskHourlyActivity :many
 SELECT EXTRACT(HOUR FROM started_at)::int AS hour, COUNT(*)::int AS count

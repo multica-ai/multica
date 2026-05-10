@@ -12,6 +12,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { isImeComposing } from "@multica/core/utils";
 import { useT } from "../../../i18n";
 
 const HIGHLIGHT_CLASS = "bg-accent";
@@ -107,6 +108,9 @@ export function PropertyPicker({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // IME is composing — Enter/Arrow belong to the IME (Enter commits
+      // composition; Arrow rotates candidates). Don't hijack them.
+      if (isImeComposing(e)) return;
       const items = getItems();
       if (items.length === 0) return;
 

@@ -13,6 +13,8 @@ const (
 	EventCommentCreated       = "comment:created"
 	EventCommentUpdated       = "comment:updated"
 	EventCommentDeleted       = "comment:deleted"
+	EventCommentResolved      = "comment:resolved"
+	EventCommentUnresolved    = "comment:unresolved"
 	EventReactionAdded        = "reaction:added"
 	EventReactionRemoved      = "reaction:removed"
 	EventIssueReactionAdded   = "issue_reaction:added"

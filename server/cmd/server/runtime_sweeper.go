@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -19,13 +20,14 @@ const (
 	sweepInterval = 30 * time.Second
 	// staleThresholdSeconds marks runtimes offline if no heartbeat for this
 	// long. Must be strictly greater than runtimeHeartbeatDBFlushInterval
-	// (60s in handler/daemon.go) plus one daemon heartbeat cycle (~15s) so
-	// the DB stale window never trips on an alive-but-DB-lagging runtime
-	// when the sweeper's Redis check errors and we fall back to the DB.
-	// 90s leaves a 15s buffer above the 75s worst-case DB age and still
-	// keeps detection latency for a genuinely-dead runtime under
-	// staleThreshold + sweepInterval = 120s.
-	staleThresholdSeconds = 90.0
+	// (60s in handler/daemon.go) plus one daemon heartbeat cycle (~15s)
+	// plus the BatchedHeartbeatScheduler tick interval (~30s) so the DB
+	// stale window never trips on an alive-but-DB-lagging runtime when the
+	// sweeper's Redis check errors and we fall back to the DB.
+	// 150s leaves a 45s buffer above the 105s worst-case DB age, and keeps
+	// detection latency for a genuinely-dead runtime under staleThreshold +
+	// sweepInterval = 180s (~3 minutes).
+	staleThresholdSeconds = 150.0
 	// offlineRuntimeTTLSeconds deletes offline runtimes with no active agents
 	// after this duration. 7 days gives users plenty of time to restart daemons.
 	offlineRuntimeTTLSeconds = 7 * 24 * 3600.0
@@ -36,6 +38,24 @@ const (
 	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this.
 	// The default agent timeout is 2h, so 2.5h gives a generous buffer.
 	runningTimeoutSeconds = 9000.0
+	// queuedTTLSeconds expires tasks that have been sitting in 'queued'
+	// for longer than this without ever being claimed. This is the cleanup
+	// arm of the MUL-1899 backlog fix: even with the dispatch-time
+	// admission gate that blocks new enqueues against offline runtimes,
+	// tasks already on the queue when a runtime drops off (or that lost
+	// the race against a runtime that went offline mid-tick) need a
+	// time-bounded exit. 2 hours is conservatively above any reasonable
+	// "queued behind a long-running task" window for an online runtime
+	// (default agent timeout is 2h, sweeper interval is 30s) so we don't
+	// expire legitimately-pending work, while still draining the historical
+	// 87k autopilot backlog within ~24h once enabled.
+	queuedTTLSeconds = 2 * 3600.0
+	// queuedExpireBatchSize caps how many queued rows a single sweeper tick
+	// transitions to failed. Keeps the sweep transaction short even when
+	// the historical backlog is large (~89k at MUL-1899 baseline). At 30s
+	// ticks and 500 rows/tick we drain 60k rows/hour worst case — plenty
+	// of headroom for the documented backlog without monopolising DB CPU.
+	queuedExpireBatchSize = 500
 )
 
 // runRuntimeSweeper periodically marks runtimes as offline if their
@@ -60,6 +80,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 		case <-ticker.C:
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
+			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
 			gcRuntimes(ctx, queries, bus)
 		}
 	}
@@ -94,6 +115,17 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, liveness handl
 		// All filtered candidates raced into a non-online state between the
 		// SELECT and the UPDATE. Nothing to broadcast.
 		return
+	}
+	if taskSvc != nil && taskSvc.Analytics != nil {
+		for _, row := range staleRows {
+			taskSvc.Analytics.Capture(analytics.RuntimeOffline(
+				util.UUIDToString(row.OwnerID),
+				util.UUIDToString(row.WorkspaceID),
+				util.UUIDToString(row.ID),
+				row.DaemonID.String,
+				row.Provider,
+			))
+		}
 	}
 
 	// Collect unique workspace IDs to notify.
@@ -221,6 +253,29 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 	}
 
 	slog.Info("task sweeper: failed stale tasks", "count", len(failedTasks))
+	taskSvc.HandleFailedTasks(ctx, failedTasks)
+}
+
+// sweepExpiredQueuedTasks fails tasks that have been sitting in 'queued' for
+// longer than the TTL. Companion to the dispatch-time admission gate added
+// in MUL-1899: that gate prevents new doomed enqueues; this gate drains the
+// historical backlog and catches the race where a runtime goes offline AFTER
+// a task is already queued. Capped to queuedExpireBatchSize per tick so a
+// big backlog can't monopolise the DB.
+func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService) {
+	failedTasks, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+		TtlSecs:    queuedTTLSeconds,
+		MaxPerTick: queuedExpireBatchSize,
+	})
+	if err != nil {
+		slog.Warn("task sweeper: failed to expire stale queued tasks", "error", err)
+		return
+	}
+	if len(failedTasks) == 0 {
+		return
+	}
+
+	slog.Info("task sweeper: expired stale queued tasks", "count", len(failedTasks))
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
 }
 

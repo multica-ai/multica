@@ -24,9 +24,6 @@
     "copy_failed_toast": "复制失败"
   },
   "session_history": {
-    "back_tooltip": "返回",
-    "header": "对话历史",
-    "empty": "还没有对话记录",
     "untitled": "无标题",
     "time": {
       "just_now": "刚刚",
@@ -35,7 +32,6 @@
       "days": "{{count}} 天前"
     },
     "row_delete_aria": "删除对话",
-    "row_delete_tooltip": "删除",
     "delete_dialog": {
       "title": "删除对话",
       "description_with_title": "\"{{title}}\" 及其消息会被永久删除，无法撤销。",
@@ -59,8 +55,8 @@
     "my_agents": "我的智能体",
     "others": "其他",
     "no_agents": "暂无智能体",
-    "history_show_tooltip": "对话历史",
-    "history_back_tooltip": "返回对话"
+    "active_group": "进行中",
+    "archived_group_other": "{{count}} 条已归档"
   },
   "empty_state": {
     "first_time_title": "和你的智能体对话",

@@ -31,6 +31,7 @@ import { channelListOptions } from "@multica/core/channels";
 import { useChatStore } from "@multica/core/chat";
 import { ChannelDetail, NewMessageModal } from "../../channels";
 import { IssueDetail } from "../../issues/components";
+import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { useNavigation } from "../../navigation";
 import { SidebarTrigger } from "@multica/ui/components/ui/sidebar";
 import { toast } from "sonner";
@@ -358,8 +359,17 @@ export function InboxPage() {
   };
 
   const handleArchive = (id: string) => {
-    const archived = items.find((i) => i.id === id);
-    if (archived && (archived.issue_id ?? archived.id) === selectedKey) setSelectedKey(null, "");
+    const idx = items.findIndex((i) => i.id === id);
+    const archived = idx >= 0 ? items[idx] : null;
+    const wasSelected =
+      !!archived && (archived.issue_id ?? archived.id) === selectedKey;
+    if (wasSelected) {
+      // List is sorted newest-first; prefer the next (older) item, fall back
+      // to the previous (newer) one when archiving at the bottom, and only
+      // clear the selection when nothing else is left.
+      const next = items[idx + 1] ?? items[idx - 1] ?? null;
+      setSelectedKey(next ? "issue" : null, next ? (next.issue_id ?? next.id) : "");
+    }
     archiveMutation.mutate(id, {
       onError: () => toast.error(t(($) => $.errors.archive_failed)),
     });
@@ -931,27 +941,26 @@ export function InboxPage() {
       }}
     />
   ) : selected?.issue_id ? (
-    <IssueDetail
-      key={selected.issue_id}
-      issueId={selected.issue_id}
-      defaultSidebarOpen={false}
-      layoutId="multica_inbox_issue_detail_layout"
-      highlightCommentId={selected.details?.comment_id ?? undefined}
-      linkSelfInBreadcrumb
-      onDelete={() => {
-        // Issue deletion CASCADE-deletes the inbox item server-side, and the
-        // issue:deleted WS event prunes it from the inbox cache. Just clear
-        // the selection — calling archive here would 404 on a row that no
-        // longer exists.
-        setSelectedKey(null, "");
-      }}
-      onDone={() => {
-        setSelectedKey(null, "");
-        archiveMutation.mutate(selected.id, {
-          onError: () => toast.error(t(($) => $.errors.archive_failed)),
-        });
-      }}
-    />
+    <ErrorBoundary resetKeys={[selected.issue_id]}>
+      <IssueDetail
+        key={selected.issue_id}
+        issueId={selected.issue_id}
+        defaultSidebarOpen={false}
+        layoutId="multica_inbox_issue_detail_layout"
+        highlightCommentId={selected.details?.comment_id ?? undefined}
+        linkSelfInBreadcrumb
+        onDelete={() => {
+          // Issue deletion CASCADE-deletes the inbox item server-side, and the
+          // issue:deleted WS event prunes it from the inbox cache. Just clear
+          // the selection — calling archive here would 404 on a row that no
+          // longer exists.
+          setSelectedKey(null, "");
+        }}
+        onDone={() => {
+          handleArchive(selected.id);
+        }}
+      />
+    </ErrorBoundary>
   ) : selected ? (
     <div className="p-3 sm:p-6">
       <h2 className="text-lg font-semibold">{getInboxDisplayTitle(selected)}</h2>

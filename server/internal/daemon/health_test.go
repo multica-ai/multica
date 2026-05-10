@@ -6,8 +6,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 )
 
 func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
@@ -128,6 +131,104 @@ func TestShutdownHandlerRejectsNonPost(t *testing.T) {
 	if cancelled {
 		t.Fatal("GET request should not trigger cancellation")
 	}
+}
+
+func TestHealthHandlerRespondsWhileTaskRepoLookupWaits(t *testing.T) {
+	const workspaceID = "ws-health"
+	const repoURL = "https://github.com/org/repo.git"
+	cache := newBlockingLookupRepoCache("/cache/org/repo.git")
+	d := &Daemon{
+		cfg: Config{CLIVersion: "v1.0.0"},
+		workspaces: map[string]*workspaceState{
+			workspaceID: {
+				workspaceID:     workspaceID,
+				runtimeIDs:      []string{"rt-1"},
+				allowedRepoURLs: map[string]struct{}{repoURL: {}},
+				taskRepoURLs:    map[string]struct{}{},
+			},
+		},
+		repoCache: cache,
+		logger:    slog.Default(),
+	}
+	defer cache.release()
+
+	registerDone := make(chan struct{})
+	go func() {
+		d.registerTaskRepos(workspaceID, []RepoData{{URL: repoURL}})
+		close(registerDone)
+	}()
+	cache.waitForLookup(t)
+
+	rec := httptest.NewRecorder()
+	healthDone := make(chan struct{})
+	go func() {
+		d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+		close(healthDone)
+	}()
+
+	select {
+	case <-healthDone:
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rec.Code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("/health blocked behind task repo cache lookup")
+	}
+
+	cache.release()
+	select {
+	case <-registerDone:
+	case <-time.After(time.Second):
+		t.Fatal("registerTaskRepos did not unblock after repo lookup finished")
+	}
+}
+
+type blockingLookupRepoCache struct {
+	path          string
+	lookupSeen    chan struct{}
+	releaseLookup chan struct{}
+	releaseOnce   sync.Once
+}
+
+func newBlockingLookupRepoCache(path string) *blockingLookupRepoCache {
+	return &blockingLookupRepoCache{
+		path:          path,
+		lookupSeen:    make(chan struct{}),
+		releaseLookup: make(chan struct{}),
+	}
+}
+
+func (c *blockingLookupRepoCache) Lookup(_, _ string) string {
+	select {
+	case <-c.lookupSeen:
+	default:
+		close(c.lookupSeen)
+	}
+	<-c.releaseLookup
+	return c.path
+}
+
+func (c *blockingLookupRepoCache) Sync(string, []repocache.RepoInfo) error {
+	return nil
+}
+
+func (c *blockingLookupRepoCache) CreateWorktree(repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	return nil, nil
+}
+
+func (c *blockingLookupRepoCache) waitForLookup(t *testing.T) {
+	t.Helper()
+	select {
+	case <-c.lookupSeen:
+	case <-time.After(time.Second):
+		t.Fatal("registerTaskRepos did not call repo lookup")
+	}
+}
+
+func (c *blockingLookupRepoCache) release() {
+	c.releaseOnce.Do(func() {
+		close(c.releaseLookup)
+	})
 }
 
 func assertActiveTaskCount(t *testing.T, h http.HandlerFunc, want int64) {

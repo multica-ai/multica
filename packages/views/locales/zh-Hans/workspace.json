@@ -9,6 +9,7 @@
     "errors": {
       "slug_format": "只能包含小写字母、数字和连字符",
       "slug_taken": "该工作区 URL 已被占用。",
+      "slug_reserved": "该工作区 URL 是系统保留的，无法使用。",
       "slug_conflict_toast": "请换一个工作区 URL",
       "create_failed": "创建工作区失败"
     }

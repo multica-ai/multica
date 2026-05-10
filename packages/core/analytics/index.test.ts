@@ -45,20 +45,33 @@ describe("initAnalytics super-properties", () => {
     expect(posthog.register).toHaveBeenCalledWith({
       client_type: "web",
       app_version: "1.2.3",
+      environment: "dev",
+      event_schema_version: 2,
+      is_demo: false,
     });
   });
 
   it("omits app_version when not provided", async () => {
     const { analytics, posthog } = await loadModule();
     analytics.initAnalytics({ key: "k", host: "" });
-    expect(posthog.register).toHaveBeenCalledWith({ client_type: "web" });
+    expect(posthog.register).toHaveBeenCalledWith({
+      client_type: "web",
+      environment: "dev",
+      event_schema_version: 2,
+      is_demo: false,
+    });
   });
 
   it("detects desktop when window.electron is present", async () => {
     vi.stubGlobal("window", { electron: {} });
     const { analytics, posthog } = await loadModule();
     analytics.initAnalytics({ key: "k", host: "" });
-    expect(posthog.register).toHaveBeenCalledWith({ client_type: "desktop" });
+    expect(posthog.register).toHaveBeenCalledWith({
+      client_type: "desktop",
+      environment: "dev",
+      event_schema_version: 2,
+      is_demo: false,
+    });
   });
 });
 
@@ -76,6 +89,9 @@ describe("resetAnalytics", () => {
     expect(posthog.register).toHaveBeenCalledWith({
       client_type: "web",
       app_version: "1.2.3",
+      environment: "dev",
+      event_schema_version: 2,
+      is_demo: false,
     });
   });
 

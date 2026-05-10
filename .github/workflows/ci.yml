@@ -29,6 +29,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Verify reserved-slugs.ts is up to date
+        # Re-runs the generator and fails on any drift from the
+        # checked-in TypeScript output. The Go side embeds the JSON
+        # source directly, so a passing diff here proves both sides
+        # share one source of truth.
+        run: |
+          pnpm generate:reserved-slugs
+          git diff --exit-code -- packages/core/paths/reserved-slugs.ts
+
       - name: Build, type check, and test
         # Match main's CI: lint is not enforced in CI (the codebase has
         # ~73 i18next/no-literal-string violations on main that would

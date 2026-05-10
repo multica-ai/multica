@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,8 +21,9 @@ const (
 
 // PostHogConfig configures the live PostHog client.
 type PostHogConfig struct {
-	APIKey string
-	Host   string
+	APIKey      string
+	Host        string
+	Environment string
 
 	// Optional overrides. Zero values fall back to sensible defaults.
 	QueueSize  int
@@ -58,6 +60,9 @@ func NewPostHogClient(cfg PostHogConfig) *PostHogClient {
 	}
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{Timeout: defaultFlushTimeout}
+	}
+	if cfg.Environment == "" {
+		cfg.Environment = EnvironmentFromEnv()
 	}
 	c := &PostHogClient{
 		cfg:  cfg,
@@ -162,6 +167,14 @@ func (c *PostHogClient) send(batch []Event) {
 		}
 		if e.WorkspaceID != "" {
 			props["workspace_id"] = e.WorkspaceID
+		}
+		props["event_schema_version"] = EventSchemaVersion
+		props["environment"] = c.cfg.Environment
+		if _, ok := props["is_demo"]; !ok {
+			props["is_demo"] = false
+		}
+		if _, ok := props["user_id"]; !ok && e.DistinctID != "" && !strings.Contains(e.DistinctID, ":") {
+			props["user_id"] = e.DistinctID
 		}
 		if len(e.SetOnce) > 0 {
 			props["$set_once"] = e.SetOnce

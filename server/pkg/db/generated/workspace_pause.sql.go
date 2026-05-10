@@ -24,7 +24,7 @@ WHERE status IN ('queued', 'dispatched', 'running')
       WHERE ap.workspace_id = $1
     )
   )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, last_heartbeat_at, trigger_summary, force_fresh_session, title
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, title
 `
 
 // Cancels every queued/dispatched/running task whose workspace resolves to @workspace_id.
@@ -66,7 +66,6 @@ func (q *Queries) CancelAllActiveTasksByWorkspace(ctx context.Context, workspace
 			&i.MaxAttempts,
 			&i.ParentTaskID,
 			&i.FailureReason,
-			&i.LastHeartbeatAt,
 			&i.TriggerSummary,
 			&i.ForceFreshSession,
 			&i.Title,

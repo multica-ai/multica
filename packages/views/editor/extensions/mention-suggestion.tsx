@@ -18,6 +18,7 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { api } from "@multica/core/api";
+import { isImeComposing } from "@multica/core/utils";
 import type {
   Issue,
   ListIssuesCache,
@@ -204,6 +205,9 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
 
     useImperativeHandle(ref, () => ({
       onKeyDown: ({ event }) => {
+        // IME is composing — don't intercept Enter/Arrow as picker actions;
+        // those keys belong to the IME (Enter commits composition, etc).
+        if (isImeComposing(event)) return false;
         if (event.key === "ArrowUp") {
           if (displayItems.length === 0) return true;
           setSelectedIndex(

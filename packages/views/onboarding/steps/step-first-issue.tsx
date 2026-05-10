@@ -30,6 +30,7 @@ import { useT } from "../../i18n";
 export function StepFirstIssue({
   onFinished,
   completionPath,
+  workspaceId,
 }: {
   /** Called after `onboarded_at` is set server-side. Parent handles
    *  navigation to the workspace landing page. */
@@ -38,6 +39,7 @@ export function StepFirstIssue({
    *  Computed in the parent shell where runtime + waitlist state are
    *  both in scope. */
   completionPath: OnboardingCompletionPath;
+  workspaceId?: string;
 }) {
   const { t } = useT("onboarding");
   const [error, setError] = useState<string | null>(null);
@@ -47,13 +49,18 @@ export function StepFirstIssue({
   onFinishedRef.current = onFinished;
   const completionPathRef = useRef(completionPath);
   completionPathRef.current = completionPath;
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
 
   useEffect(() => {
     if (started.current) return;
     started.current = true;
     (async () => {
       try {
-        await completeOnboarding(completionPathRef.current);
+        await completeOnboarding(
+          completionPathRef.current,
+          workspaceIdRef.current,
+        );
         onFinishedRef.current();
       } catch (err) {
         setError(
@@ -68,10 +75,14 @@ export function StepFirstIssue({
     setRetrying(true);
     setError(null);
     try {
-      await completeOnboarding(completionPathRef.current);
+      await completeOnboarding(
+        completionPathRef.current,
+        workspaceIdRef.current,
+      );
       onFinishedRef.current();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : t(($) => $.first_issue.retry_failed);
+      const msg =
+        err instanceof Error ? err.message : t(($) => $.first_issue.retry_failed);
       setError(msg);
       toast.error(msg);
     } finally {

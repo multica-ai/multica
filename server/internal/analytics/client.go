@@ -15,6 +15,7 @@ package analytics
 import (
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -66,6 +67,7 @@ type Client interface {
 //
 //   - POSTHOG_API_KEY: project API key. Empty → no-op client.
 //   - POSTHOG_HOST:    API host (default https://us.i.posthog.com).
+//   - ANALYTICS_ENVIRONMENT: production/staging/dev. Defaults from APP_ENV.
 //   - ANALYTICS_DISABLED: set to "true"/"1" to force a no-op client even
 //     when POSTHOG_API_KEY is set (useful for CI and self-hosted opt-out).
 func NewFromEnv() Client {
@@ -83,12 +85,39 @@ func NewFromEnv() Client {
 		host = "https://us.i.posthog.com"
 	}
 	slog.Info("analytics: posthog client enabled", "host", host)
-	return NewPostHogClient(PostHogConfig{APIKey: key, Host: host})
+	return NewPostHogClient(PostHogConfig{
+		APIKey:      key,
+		Host:        host,
+		Environment: EnvironmentFromEnv(),
+	})
 }
 
 func isDisabled() bool {
 	v := os.Getenv("ANALYTICS_DISABLED")
 	return v == "true" || v == "1"
+}
+
+func EnvironmentFromEnv() string {
+	if v := normalizeEnvironment(os.Getenv("ANALYTICS_ENVIRONMENT")); v != "" {
+		return v
+	}
+	if v := normalizeEnvironment(os.Getenv("APP_ENV")); v != "" {
+		return v
+	}
+	return "dev"
+}
+
+func normalizeEnvironment(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "production", "prod":
+		return "production"
+	case "staging", "stage":
+		return "staging"
+	case "development", "dev", "test", "local":
+		return "dev"
+	default:
+		return ""
+	}
 }
 
 // NoopClient silently drops all events. Used in tests, in local dev when

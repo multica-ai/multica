@@ -85,6 +85,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const issueId = issue?.id ?? null;
   const issueStatus = issue?.status ?? null;
   const issueIdentifier = issue?.identifier ?? null;
+  const issueProjectId = issue?.project_id ?? null;
 
   const updateField = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
@@ -119,12 +120,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
 
   const copyLink = useCallback(async () => {
     if (!issueId) return;
-    const path = paths.issueDetail(issueId);
-    const url = navigation.getShareableUrl
-      ? navigation.getShareableUrl(path)
-      : typeof window !== "undefined"
-        ? window.location.origin + path
-        : path;
+    const url = navigation.getShareableUrl(paths.issueDetail(issueId));
     try {
       await navigator.clipboard.writeText(url);
       toast.success(t(($) => $.detail.link_copied));
@@ -138,8 +134,9 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     openModal("create-issue", {
       parent_issue_id: issueId,
       parent_issue_identifier: issueIdentifier,
+      ...(issueProjectId ? { project_id: issueProjectId } : {}),
     });
-  }, [openModal, issueId, issueIdentifier]);
+  }, [openModal, issueId, issueIdentifier, issueProjectId]);
 
   const openSetParent = useCallback(() => {
     if (!issueId) return;

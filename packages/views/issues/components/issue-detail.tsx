@@ -72,9 +72,10 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
-import type { IssueStatus, IssuePriority, TimelineEntry, IssueSubscriber } from "@multica/core/types";
+import type { Issue, IssueStatus, IssuePriority, TimelineEntry, IssueSubscriber, UpdateIssueRequest } from "@multica/core/types";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, LabelPicker, canAssignAgent } from ".";
+import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { PrivacyToggle } from "@multica/cerebro-access/views";
@@ -84,6 +85,8 @@ import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory, WorkSessionHistory } from "./agent-live-card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { BacklogAgentHintDialog } from "./backlog-agent-hint-dialog";
+import { ResolvedThreadBar } from "./resolved-thread-bar";
+import { collectThreadReplies } from "./thread-utils";
 import { ExecutionLogSection } from "./execution-log-section";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -95,13 +98,14 @@ import { useDeleteIssue } from "@multica/core/issues/mutations";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
+import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
-import { useModalStore } from "@multica/core/modals";
 import { timeAgo } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -193,6 +197,23 @@ function formatTokenCount(n: number): string {
   return String(n);
 }
 
+// Stable reference for threads with no replies. Inline `[]` would create a
+// new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
+const EMPTY_REPLIES: TimelineEntry[] = [];
+
+// Shallow array equality by element identity. Used to reuse the previous
+// render's per-thread reply slice when nothing in *this* thread changed,
+// even if the surrounding `timeline` array was rebuilt by a WS event in
+// some unrelated thread.
+function shallowEqualEntries(a: TimelineEntry[], b: TimelineEntry[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 function TimelineSkeleton() {
   return (
     <div className="mt-4 flex flex-col gap-3">
@@ -262,6 +283,108 @@ function ParticipantGroup({
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SubIssueRow — sub-issue list item with inline status & assignee editing
+// ---------------------------------------------------------------------------
+
+function SubIssueRow({ child }: { child: Issue }) {
+  const { t } = useT("issues");
+  const paths = useWorkspacePaths();
+  const updateIssue = useUpdateIssue();
+  const selected = useIssueSelectionStore((s) => s.selectedIds.has(child.id));
+  const toggleSelected = useIssueSelectionStore((s) => s.toggle);
+  const isDone = child.status === "done" || child.status === "cancelled";
+
+  const handleUpdate = useCallback(
+    (updates: Partial<UpdateIssueRequest>) => {
+      updateIssue.mutate(
+        { id: child.id, ...updates },
+        { onError: () => toast.error(t(($) => $.detail.update_failed)) },
+      );
+    },
+    [child.id, updateIssue, t],
+  );
+
+  // AppLink wraps only the title/identifier area. Pickers and checkbox are
+  // siblings, so their clicks never navigate — no stopPropagation acrobatics
+  // and no risk of the native checkbox / picker triggers being blocked.
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
+        selected && "bg-accent/30",
+      )}
+    >
+      <div
+        className={cn(
+          "flex h-4 w-4 shrink-0 items-center justify-center transition-opacity",
+          selected
+            ? "opacity-100"
+            : "opacity-0 group-hover/row:opacity-100 focus-within:opacity-100",
+        )}
+      >
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => toggleSelected(child.id)}
+          aria-label={`Select ${child.identifier}`}
+          className="cursor-pointer accent-primary"
+        />
+      </div>
+      <StatusPicker
+        status={child.status}
+        onUpdate={handleUpdate}
+        align="start"
+        trigger={
+          <StatusIcon
+            status={child.status}
+            className="h-[15px] w-[15px] shrink-0"
+          />
+        }
+      />
+      <AppLink
+        href={paths.issueDetail(child.id)}
+        className="flex min-w-0 flex-1 items-center gap-2.5"
+      >
+        <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
+          {child.identifier}
+        </span>
+        <span
+          className={cn(
+            "text-sm truncate flex-1",
+            isDone
+              ? "text-muted-foreground"
+              : "group-hover/row:text-foreground",
+          )}
+        >
+          {child.title}
+        </span>
+      </AppLink>
+      <AssigneePicker
+        assigneeType={child.assignee_type}
+        assigneeId={child.assignee_id}
+        onUpdate={handleUpdate}
+        align="end"
+        trigger={
+          child.assignee_type && child.assignee_id ? (
+            <ActorAvatar
+              actorType={child.assignee_type}
+              actorId={child.assignee_id}
+              size={20}
+              className="shrink-0"
+            />
+          ) : (
+            <span
+              aria-hidden
+              className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 shrink-0"
+            />
+          )
+        }
+      />
     </div>
   );
 }
@@ -342,6 +465,26 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     initialScroll: false,
   });
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+
+  // Per-session: which resolved threads the user has temporarily expanded.
+  // Not persisted (matches Linear) — reload collapses everything back to bars.
+  const [expandedResolved, setExpandedResolved] = useState<Set<string>>(() => new Set());
+  const toggleResolvedExpand = useCallback((commentId: string, expand: boolean) => {
+    setExpandedResolved((prev) => {
+      const next = new Set(prev);
+      if (expand) next.add(commentId);
+      else next.delete(commentId);
+      return next;
+    });
+  }, []);
+  const clearResolvedExpand = useCallback((commentId: string) => {
+    setExpandedResolved((prev) => {
+      if (!prev.has(commentId)) return prev;
+      const next = new Set(prev);
+      next.delete(commentId);
+      return next;
+    });
+  }, []);
   const didHighlightRef = useRef<string | null>(null);
 
   // Issue data from TQ — uses detail query, seeded from list cache if available.
@@ -391,19 +534,40 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const {
     timeline, loading: timelineLoading,
     submitComment, submitReply,
-    editComment, deleteComment, toggleReaction: handleToggleReaction,
-    hasMoreOlder, hasMoreNewer,
-    isFetchingOlder, isFetchingNewer,
-    fetchOlder, fetchNewer, jumpToLatest,
-    isAtLatest, newEntriesBelowCount,
-  } = useIssueTimeline(id, user?.id, { around: highlightCommentId ?? null });
+    editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
+  } = useIssueTimeline(id, user?.id);
 
-  // Memoized timeline grouping. The same Map / groups references are reused
-  // across re-renders that don't change `timeline`, so React.memo on
-  // CommentCard can skip re-rendering when the only thing that moved was
-  // unrelated parent state (e.g. composer draft, sidebar toggle).
+  // Resolve / unresolve must always clear the per-session expand entry so
+  // re-resolving an already-expanded thread folds it back to the bar (the
+  // expand Set is keyed only on commentId, not on resolution state). Without
+  // this wrapper, an expand → unresolve → resolve sequence keeps the thread
+  // visually expanded after the second resolve.
+  const handleResolveToggle = useCallback(
+    (commentId: string, resolved: boolean) => {
+      clearResolvedExpand(commentId);
+      toggleResolveComment(commentId, resolved);
+    },
+    [clearResolvedExpand, toggleResolveComment],
+  );
+
+  // Memoized timeline grouping. Each render rebuilds the per-parent map from
+  // the latest timeline, then pre-flattens each thread's reply subtree into a
+  // dedicated `threadReplies` slice per root. Slices are stabilized against
+  // the previous render via `prevThreadRepliesRef`: if a thread's flat list
+  // is shallow-equal to the previous one, we reuse the previous array so
+  // React.memo on CommentCard / ResolvedThreadBar can short-circuit. Without
+  // this, every WS event (including reactions, edits, AI streaming on an
+  // unrelated thread) hands every card a brand-new prop reference and forces
+  // every thread subtree to re-render in lockstep.
+  const prevThreadRepliesRef = useRef<Map<string, TimelineEntry[]>>(new Map());
   const timelineView = useMemo(() => {
-    const topLevel = timeline.filter((e) => e.type === "activity" || !e.parent_id);
+    // Group entries: top-level = activities + root comments; replies are
+    // bucketed under their parent's id and rendered nested inside CommentCard.
+    // No orphan rescue needed: the timeline is fetched in full, so every
+    // reply's parent is always in the same array.
+    const topLevel = timeline.filter(
+      (e) => e.type === "activity" || !e.parent_id,
+    );
     const repliesByParent = new Map<string, TimelineEntry[]>();
     for (const e of timeline) {
       if (e.type === "comment" && e.parent_id) {
@@ -412,6 +576,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         repliesByParent.set(e.parent_id, list);
       }
     }
+
+    // Pre-flatten each top-level comment's thread subtree (parent + every
+    // descendant in render order). Reuse the previous array reference when
+    // the thread is unchanged so unrelated CommentCards keep their memo.
+    const prevThreadReplies = prevThreadRepliesRef.current;
+    const threadReplies = new Map<string, TimelineEntry[]>();
+    for (const root of topLevel) {
+      if (root.type !== "comment") continue;
+      const fresh = collectThreadReplies(root.id, repliesByParent);
+      const previous = prevThreadReplies.get(root.id);
+      threadReplies.set(
+        root.id,
+        previous && shallowEqualEntries(previous, fresh) ? previous : fresh,
+      );
+    }
+    prevThreadRepliesRef.current = threadReplies;
 
     // Coalesce consecutive activities from the same actor + action.
     // - task_completed / task_failed: no time limit (these repeat across runs)
@@ -452,7 +632,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
     }
 
-    return { repliesByParent, groups };
+    return { threadReplies, groups };
   }, [timeline]);
 
   const {
@@ -496,6 +676,30 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     enabled: !!parentIssueId,
   });
   const [subIssuesCollapsed, setSubIssuesCollapsed] = useState(false);
+
+  // Selection store is global (workspace-scoped); clear it whenever this
+  // issue detail is mounted or switched, so leftover selections from the
+  // main list view (or another sub-issue list) don't leak into this one.
+  const clearSelection = useIssueSelectionStore((s) => s.clear);
+  const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
+  const selectIds = useIssueSelectionStore((s) => s.select);
+  const deselectIds = useIssueSelectionStore((s) => s.deselect);
+  useEffect(() => {
+    clearSelection();
+    return clearSelection;
+  }, [id, clearSelection]);
+
+  const childIssueIds = useMemo(() => childIssues.map((c) => c.id), [childIssues]);
+  const childSelectedCount = childIssueIds.filter((cid) =>
+    selectedIds.has(cid),
+  ).length;
+  const allChildrenSelected =
+    childIssueIds.length > 0 && childSelectedCount === childIssueIds.length;
+  const someChildrenSelected = childSelectedCount > 0;
+  const handleToggleSelectAllChildren = useCallback(() => {
+    if (allChildrenSelected) deselectIds(childIssueIds);
+    else selectIds(childIssueIds);
+  }, [allChildrenSelected, childIssueIds, deselectIds, selectIds]);
 
   const loading = issueLoading;
 
@@ -1411,12 +1615,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <button
                 type="button"
                 className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                onClick={() =>
-                  useModalStore.getState().open("create-issue", {
-                    parent_issue_id: issue.id,
-                    parent_issue_identifier: issue.identifier,
-                  })
-                }
+                onClick={() => actions.openCreateSubIssue()}
               >
                 <Plus className="h-3.5 w-3.5" />
                 <span>{t(($) => $.detail.add_sub_issues)}</span>
@@ -1426,7 +1625,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {!isChat && childIssues.length > 0 && (() => {
             const doneCount = childIssues.filter((c) => c.status === "done").length;
             return (
-              <div className="mt-10">
+              <div className="mt-10 group/sub-issues">
                 {/* Header */}
                 <div className="flex items-center gap-2 mb-2">
                   <button
@@ -1448,18 +1647,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       {doneCount}/{childIssues.length}
                     </span>
                   </div>
+                  <input
+                    type="checkbox"
+                    checked={allChildrenSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = someChildrenSelected && !allChildrenSelected;
+                    }}
+                    onChange={handleToggleSelectAllChildren}
+                    aria-label="Select all sub-issues"
+                    className={cn(
+                      "ml-1 cursor-pointer accent-primary transition-opacity",
+                      someChildrenSelected
+                        ? "opacity-100"
+                        : "opacity-0 group-hover/sub-issues:opacity-100 focus-visible:opacity-100",
+                    )}
+                  />
                   <Tooltip>
                     <TooltipTrigger
                       render={
                         <button
                           type="button"
                           className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                          onClick={() =>
-                            useModalStore.getState().open("create-issue", {
-                              parent_issue_id: issue.id,
-                              parent_issue_identifier: issue.identifier,
-                            })
-                          }
+                          onClick={() => actions.openCreateSubIssue()}
                           aria-label={t(($) => $.detail.add_sub_issue_aria)}
                         >
                           <Plus className="h-4 w-4" />
@@ -1470,52 +1679,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   </Tooltip>
                 </div>
 
+                {/* Inline batch toolbar — appears next to the rows when
+                    selections exist, instead of as a far-away fixed bar. */}
+                <BatchActionToolbar placement="inline" />
+
                 {/* List */}
                 {!subIssuesCollapsed && (
                   <div className="overflow-hidden rounded-lg border bg-card/30 divide-y divide-border/60">
-                    {childIssues.map((child) => {
-                      const isDone =
-                        child.status === "done" || child.status === "cancelled";
-                      return (
-                        <AppLink
-                          key={child.id}
-                          href={paths.issueDetail(child.id)}
-                          className="flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row"
-                        >
-                          <StatusIcon
-                            status={child.status}
-                            className="h-[15px] w-[15px] shrink-0"
-                          />
-                          <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
-                            {child.identifier}
-                          </span>
-                          <span
-                            className={cn(
-                              "text-sm truncate flex-1",
-                              isDone
-                                ? "text-muted-foreground"
-                                : "group-hover/row:text-foreground",
-                            )}
-                          >
-                            {child.title}
-                          </span>
-                          {child.assignee_type && child.assignee_id ? (
-                            <ActorAvatar
-                              actorType={child.assignee_type}
-                              actorId={child.assignee_id}
-                              size={20}
-                              className="shrink-0"
-                              enableHoverCard
-                            />
-                          ) : (
-                            <span
-                              aria-hidden
-                              className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 shrink-0"
-                            />
-                          )}
-                        </AppLink>
-                      );
-                    })}
+                    {childIssues.map((child) => (
+                      <SubIssueRow key={child.id} child={child} />
+                    ))}
                   </div>
                 )}
               </div>
@@ -1581,37 +1754,37 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <TimelineSkeleton />
             ) : (
             <>
-            {hasMoreOlder && (
-              <div className="my-4 flex items-center gap-3">
-                <div className="h-px flex-1 bg-border" />
-                <button
-                  onClick={fetchOlder}
-                  disabled={isFetchingOlder}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                >
-                  {isFetchingOlder
-                    ? t(($) => $.timeline.loading)
-                    : t(($) => $.timeline.show_older)}
-                </button>
-                <div className="h-px flex-1 bg-border" />
-              </div>
-            )}
             <div className="mt-4 flex flex-col gap-3">
               {timelineView.groups.map((group) => {
                 if (group.type === "comment") {
                   const entry = group.entries[0]!;
+                  const isResolved = !!entry.resolved_at;
+                  const isExpanded = expandedResolved.has(entry.id);
+                  if (isResolved && !isExpanded) {
+                    return (
+                      <div key={entry.id} id={`comment-${entry.id}`}>
+                        <ResolvedThreadBar
+                          entry={entry}
+                          replies={timelineView.threadReplies.get(entry.id) ?? EMPTY_REPLIES}
+                          onExpand={() => toggleResolvedExpand(entry.id, true)}
+                        />
+                      </div>
+                    );
+                  }
                   return (
                     <div key={entry.id} id={`comment-${entry.id}`}>
                       <CommentCard
                         issueId={id}
                         entry={entry}
-                        allReplies={timelineView.repliesByParent}
+                        replies={timelineView.threadReplies.get(entry.id) ?? EMPTY_REPLIES}
                         currentUserId={user?.id}
                         canModerate={canModerateComments}
                         onReply={submitReply}
                         onEdit={editComment}
                         onDelete={deleteComment}
                         onToggleReaction={handleToggleReaction}
+                        onResolveToggle={handleResolveToggle}
+                        onCollapseResolved={isResolved ? () => toggleResolvedExpand(entry.id, false) : undefined}
                         highlightedCommentId={highlightedId}
                       />
                     </div>
@@ -1645,6 +1818,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                           <div className="flex min-w-0 flex-1 items-center gap-1">
                             <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
                             <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+                            {/* Coalesce badge for non-task actions: task_completed / task_failed already
+                                bake the count into their translation, so suppress the badge there to
+                                avoid showing "×N" twice. */}
+                            {(entry.coalesced_count ?? 1) > 1 &&
+                              entry.action !== "task_completed" &&
+                              entry.action !== "task_failed" && (
+                                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                                  {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
+                                </span>
+                              )}
                             <Tooltip>
                               <TooltipTrigger
                                 render={
@@ -1665,33 +1848,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 );
               })}
             </div>
-            {(hasMoreNewer || !isAtLatest) && (
-              <div className="mt-4 flex items-center justify-center gap-4">
-                {hasMoreNewer && (
-                  <button
-                    onClick={fetchNewer}
-                    disabled={isFetchingNewer}
-                    className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                  >
-                    {isFetchingNewer
-                      ? t(($) => $.timeline.loading)
-                      : t(($) => $.timeline.show_newer)}
-                  </button>
-                )}
-                {!isAtLatest && (
-                  <button
-                    onClick={jumpToLatest}
-                    className="text-xs font-medium text-foreground hover:text-foreground/80 transition-colors"
-                  >
-                    {newEntriesBelowCount > 0
-                      ? t(($) => $.timeline.jump_to_latest_with_count, {
-                          count: newEntriesBelowCount,
-                        })
-                      : t(($) => $.timeline.jump_to_latest)}
-                  </button>
-                )}
-              </div>
-            )}
             </>
             )}
 

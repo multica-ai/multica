@@ -58,6 +58,7 @@ export function StepRuntimeConnect({
 
   return (
     <FancyView
+      wsId={wsId}
       runtimes={runtimes}
       selected={selected}
       selectedId={selectedId}
@@ -79,6 +80,7 @@ type Phase = "scanning" | "found" | "empty";
 const EMPTY_TIMEOUT_MS = 5000;
 
 function FancyView({
+  wsId,
   runtimes,
   selected,
   selectedId,
@@ -87,6 +89,7 @@ function FancyView({
   onBack,
   onWaitlistSubmitted,
 }: {
+  wsId: string;
   runtimes: AgentRuntime[];
   selected: AgentRuntime | null;
   selectedId: string | null;
@@ -142,7 +145,9 @@ function FancyView({
     const detectMs = Math.round(now - (detectStartRef.current ?? now));
 
     captureEvent("onboarding_runtime_detected", {
-      source: "step3_desktop",
+      source: "onboarding",
+      surface: "step3_desktop",
+      workspace_id: wsId,
       outcome: phase,
       runtime_count: runtimes.length,
       online_count: onlineCount,
@@ -597,4 +602,3 @@ function RadioMark({ selected }: { selected: boolean }) {
     </span>
   );
 }
-
