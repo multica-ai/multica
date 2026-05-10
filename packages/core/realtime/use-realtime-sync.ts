@@ -675,12 +675,25 @@ export function useRealtimeSync(
       }
     });
     const unsubChannelMessageDeleted = ws.on("channel:message_deleted", (p) => {
-      const payload = p as { channel_id?: string; message_id?: string };
+      const payload = p as {
+        channel_id?: string;
+        message_id?: string;
+        parent_message_id?: string | null;
+      };
       if (payload?.channel_id) {
         qc.invalidateQueries({ queryKey: channelKeys.messages(payload.channel_id) });
       }
+      // Invalidate the deleted message's OWN thread (in case a parent was
+      // deleted while its panel was open) AND its parent's thread (so a
+      // reply being deleted disappears from the side panel without
+      // a refresh). Both are no-ops if the cache isn't populated.
       if (payload?.message_id) {
         qc.invalidateQueries({ queryKey: channelKeys.thread(payload.message_id) });
+      }
+      if (payload?.parent_message_id) {
+        qc.invalidateQueries({
+          queryKey: channelKeys.thread(payload.parent_message_id),
+        });
       }
     });
 

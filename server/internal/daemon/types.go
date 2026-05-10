@@ -104,6 +104,19 @@ type Task struct {
 	// (configurable via CHANNEL_AGENT_CONTEXT_MESSAGES). renderChannelMentionContext
 	// embeds these into issue_context.md so the agent has a transcript.
 	ChannelHistory []ChannelHistoryMessage `json:"channel_history,omitempty"`
+	// Channels thread → issue dispatch. Populated when the task was
+	// created from "Convert thread → issue" in the ThreadPanel. The
+	// dispatcher routes via TaskKind == "thread_issue"; the prompt
+	// builder embeds the thread (parent + replies in ChannelHistory)
+	// and tells the agent to call `multica issue create` one or more
+	// times to distill the conversation. Optional fields stay empty
+	// when the user didn't pick a project / parent issue / instruction.
+	TaskKind                  string `json:"task_kind,omitempty"`
+	ThreadIssueInstruction    string `json:"thread_issue_instruction,omitempty"`
+	ThreadIssueProjectID      string `json:"thread_issue_project_id,omitempty"`
+	ThreadIssueProjectTitle   string `json:"thread_issue_project_title,omitempty"`
+	ThreadIssueParentIssueID  string `json:"thread_issue_parent_issue_id,omitempty"`
+	ThreadIssueParentIssueKey string `json:"thread_issue_parent_issue_key,omitempty"`
 }
 
 // ChannelHistoryMessage mirrors handler.ChannelHistoryMessage on the wire.

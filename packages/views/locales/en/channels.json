@@ -155,7 +155,27 @@
     "reply_count_other": "{{count}} replies",
     "reply_placeholder": "Reply in thread…",
     "sending": "Sending…",
-    "reply": "Reply"
+    "reply": "Reply",
+    "convert_to_issue_aria": "Convert thread to issue task",
+    "convert_to_issue_button": "Issue task"
+  },
+  "thread_to_issue_dialog": {
+    "title": "Convert thread to issue task",
+    "description": "Dispatch an agent to create issue(s) from this thread. The agent runs in issue-task mode and may call multica issue create / update / comment.",
+    "agent_label": "Assignee",
+    "agent_placeholder": "Pick an agent",
+    "no_agents": "No agents available in this workspace.",
+    "project_label": "Project (optional)",
+    "project_none": "No preference",
+    "parent_issue_label": "Parent issue (optional)",
+    "parent_issue_placeholder": "MUL-123 or issue UUID",
+    "instruction_label": "Instruction (optional)",
+    "instruction_placeholder": "What should the agent capture? Defaults to the agent's judgment.",
+    "submit": "Dispatch",
+    "submitting": "Dispatching…",
+    "cancel": "Cancel",
+    "dispatched_toast": "Dispatched issue task to {{agent}}.",
+    "dispatch_failed": "Could not dispatch task: {{message}}"
   },
   "attachments": {
     "download_aria": "Download {{filename}}",

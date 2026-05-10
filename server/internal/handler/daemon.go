@@ -183,6 +183,90 @@ func (h *Handler) loadChannelHistoryForTask(ctx context.Context, cm service.Chan
 	return out
 }
 
+// loadThreadHistoryForTask fetches the parent message + all its non-deleted
+// replies (oldest-first) for a thread-issue task, resolving author display
+// names like loadChannelHistoryForTask does. Returns the parent first, then
+// replies in chronological order so the rendered prompt reads naturally.
+//
+// Best-effort: any DB error returns an empty slice and the agent simply
+// gets less context, rather than failing the claim. Distinct from
+// loadChannelHistoryForTask because that one fetches "last N messages in
+// the channel" — for thread-issue dispatch we want ONLY the thread the
+// user clicked on, never sibling threads or unrelated chatter.
+func (h *Handler) loadThreadHistoryForTask(ctx context.Context, channelID pgtype.UUID, parentMessageID pgtype.UUID) []ChannelHistoryMessage {
+	parent, err := h.Queries.GetChannelMessage(ctx, parentMessageID)
+	if err != nil {
+		return nil
+	}
+	// Defense-in-depth: never leak messages from a different channel even
+	// if the caller somehow passed a mismatched pair (the handler already
+	// guards this, but the hydrator runs from the daemon-claim path where
+	// inputs are sourced from the task's stored context JSON).
+	if parent.ChannelID.Bytes != channelID.Bytes {
+		return nil
+	}
+
+	replies, err := h.Queries.ListThreadReplies(ctx, parentMessageID)
+	if err != nil {
+		// Parent alone is still useful context; carry on with replies=nil.
+		replies = nil
+	}
+
+	// Combine parent + replies, then batch-resolve author names so a long
+	// thread costs at most one query per unique author.
+	all := make([]db.ChannelMessage, 0, len(replies)+1)
+	all = append(all, parent)
+	all = append(all, replies...)
+
+	memberNames := map[string]string{}
+	agentNames := map[string]string{}
+	for _, m := range all {
+		switch m.AuthorType {
+		case "member":
+			memberNames[uuidToString(m.AuthorID)] = ""
+		case "agent":
+			agentNames[uuidToString(m.AuthorID)] = ""
+		}
+	}
+	for id := range memberNames {
+		if uid, err := util.ParseUUID(id); err == nil {
+			if u, err := h.Queries.GetUser(ctx, uid); err == nil {
+				memberNames[id] = u.Name
+			}
+		}
+	}
+	for id := range agentNames {
+		if aid, err := util.ParseUUID(id); err == nil {
+			if a, err := h.Queries.GetAgent(ctx, aid); err == nil {
+				agentNames[id] = a.Name
+			}
+		}
+	}
+
+	out := make([]ChannelHistoryMessage, 0, len(all))
+	for _, m := range all {
+		authorID := uuidToString(m.AuthorID)
+		var name string
+		switch m.AuthorType {
+		case "member":
+			name = memberNames[authorID]
+		case "agent":
+			name = agentNames[authorID]
+		}
+		if name == "" {
+			name = m.AuthorType
+		}
+		out = append(out, ChannelHistoryMessage{
+			ID:         uuidToString(m.ID),
+			CreatedAt:  timestampToString(m.CreatedAt),
+			AuthorType: m.AuthorType,
+			AuthorName: name,
+			Content:    m.Content,
+		})
+	}
+	return out
+}
+
 // requireDaemonTaskAccess looks up a task and verifies the caller owns its workspace.
 func (h *Handler) requireDaemonTaskAccess(w http.ResponseWriter, r *http.Request, taskID string) (db.AgentTaskQueue, bool) {
 	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task_id")
@@ -1336,11 +1420,12 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// there so the isolation check below has something to compare.
 	hasQuickCreate := false
 	hasChannelMention := false
+	hasThreadIssue := false
 	if task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
 		// Lightweight type sniff before committing to a full unmarshal —
-		// we have two no-issue/no-chat task shapes today (quick-create and
-		// channel-mention) and a malformed payload shouldn't pollute either
-		// branch.
+		// we have three no-issue/no-chat task shapes today (quick-create,
+		// channel-mention, thread-issue) and a malformed payload shouldn't
+		// pollute any of them.
 		var probe struct {
 			Type string `json:"type"`
 		}
@@ -1429,6 +1514,90 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					maxArtifactsPerAnchor,
 				)
 			}
+		case service.ThreadIssueTaskContextType:
+			// "Convert thread → issue" dispatch. The agent runs in full
+			// issue-task mode (free to call multica issue create/update/
+			// comment); the prompt builder routes via TaskKind ==
+			// "thread_issue". ChannelID is populated so the agent can use
+			// `multica channel history` if it needs more transcript than
+			// the embedded thread, but the prompt deliberately tells it
+			// not to post a channel_message reply.
+			var ti service.ThreadIssueTaskContext
+			if json.Unmarshal(task.Context, &ti) == nil {
+				hasThreadIssue = true
+				resp.TaskKind = "thread_issue"
+				resp.WorkspaceID = ti.WorkspaceID
+				resp.ChannelID = ti.ChannelID
+				resp.ChannelName = ti.ChannelName
+				resp.ChannelKind = ti.ChannelKind
+				resp.ChannelMessageID = ti.ParentMessageID
+				resp.ThreadIssueInstruction = ti.Instruction
+				resp.ThreadIssueProjectID = ti.ProjectID
+				resp.ThreadIssueProjectTitle = ti.ProjectTitle
+				resp.ThreadIssueParentIssueID = ti.ParentIssueID
+				resp.ThreadIssueParentIssueKey = ti.ParentIssueKey
+
+				// Resolve workspace repos for execenv injection (kept
+				// best-effort like the other branches).
+				if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(ti.WorkspaceID)); err == nil && ws.Repos != nil {
+					var repos []RepoData
+					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+						resp.Repos = repos
+					}
+				}
+
+				// Re-resolve project title / parent issue key in case the
+				// handler stored stale values or the rows changed between
+				// enqueue and claim. Best-effort: a fetch failure simply
+				// keeps whatever the handler stored.
+				if ti.ProjectID != "" {
+					if pid, err := util.ParseUUID(ti.ProjectID); err == nil {
+						if p, err := h.Queries.GetProject(r.Context(), pid); err == nil {
+							resp.ThreadIssueProjectTitle = p.Title
+							resp.ProjectID = uuidToString(p.ID)
+							resp.ProjectTitle = p.Title
+						}
+					}
+				}
+				if ti.ParentIssueID != "" {
+					if iid, err := util.ParseUUID(ti.ParentIssueID); err == nil {
+						if issue, err := h.Queries.GetIssue(r.Context(), iid); err == nil {
+							if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil {
+								resp.ThreadIssueParentIssueKey = fmt.Sprintf("%s-%d", ws.IssuePrefix, issue.Number)
+							}
+						}
+					}
+				}
+
+				// Embed the thread itself (parent + replies, oldest first)
+				// in ChannelHistory. Different fetch than the channel-
+				// mention branch: we want EXACTLY this thread, not the
+				// last N messages in the channel.
+				resp.ChannelHistory = h.loadThreadHistoryForTask(
+					r.Context(),
+					parseUUID(ti.ChannelID),
+					parseUUID(ti.ParentMessageID),
+				)
+
+				// Memory artifact injection. Anchor on channel (the
+				// conversation surface) + agent (long-lived persona);
+				// when a project was picked, anchor on it too so any
+				// project-scoped runbooks / decisions surface.
+				const maxArtifactsPerAnchor = 10
+				anchors := []taskAnchor{
+					{Type: "channel", ID: parseUUID(ti.ChannelID)},
+					{Type: "agent", ID: task.AgentID},
+				}
+				if ti.ProjectID != "" {
+					anchors = append(anchors, taskAnchor{Type: "project", ID: parseUUID(ti.ProjectID)})
+				}
+				resp.MemoryArtifacts = h.fetchMemoryArtifactsForTask(
+					r.Context(),
+					parseUUID(ti.WorkspaceID),
+					anchors,
+					maxArtifactsPerAnchor,
+				)
+			}
 		}
 	}
 
@@ -1452,6 +1621,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			"has_autopilot_run", task.AutopilotRunID.Valid,
 			"has_quick_create", hasQuickCreate,
 			"has_channel_mention", hasChannelMention,
+			"has_thread_issue", hasThreadIssue,
 		)
 		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
 			slog.Error("task claim: cancel after workspace check failed",

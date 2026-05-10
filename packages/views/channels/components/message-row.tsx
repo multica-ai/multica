@@ -175,12 +175,21 @@ function MessageRowBody({
   };
 
   const handleConfirmDelete = () => {
-    deleteMut.mutate(message.id, {
-      onSuccess: () => setConfirmDelete(false),
-      onError: (err) => {
-        toast.error(err instanceof Error ? err.message : t(($) => $.messages.delete_failed));
+    // Pass parent_message_id when deleting a thread reply so the
+    // mutation can invalidate the parent's thread cache. Without this
+    // the side panel kept showing the now-deleted reply until the
+    // user manually refreshed.
+    deleteMut.mutate(
+      message.parent_message_id
+        ? { messageId: message.id, parentMessageId: message.parent_message_id }
+        : message.id,
+      {
+        onSuccess: () => setConfirmDelete(false),
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : t(($) => $.messages.delete_failed));
+        },
       },
-    });
+    );
   };
 
   // Slack-style density. First-in-group ("standalone") gets the full
@@ -326,8 +335,10 @@ function MessageRowBody({
             <button
               type="button"
               onClick={() => onOpenThread(message.id)}
-              className="mt-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+              className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-500/20 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200"
+              data-testid="thread-reply-count"
             >
+              <span className="size-1.5 rounded-full bg-amber-500" aria-hidden />
               <MessageSquareReply className="h-3 w-3" />
               {t(($) => $.messages.reply_count, { count: message.thread_reply_count })}
             </button>

@@ -12,11 +12,12 @@ import {
   useSendChannelMessage,
 } from "@multica/core/channels";
 import { Button } from "@multica/ui/components/ui/button";
-import { X } from "lucide-react";
+import { FilePlus2, X } from "lucide-react";
 import { ContentEditor, type ContentEditorRef } from "../../editor";
 import { MessageRow } from "./message-row";
 import { useRef } from "react";
 import { useT } from "../../i18n";
+import { ThreadToIssueDialog } from "./thread-to-issue-dialog";
 
 interface ThreadPanelProps {
   channelId: string;
@@ -49,6 +50,7 @@ export function ThreadPanel({ channelId, parentMessageId, onClose, enabled }: Th
   const sendMut = useSendChannelMessage(channelId);
   const editorRef = useRef<ContentEditorRef>(null);
   const [isEmpty, setIsEmpty] = useState(true);
+  const [convertOpen, setConvertOpen] = useState(false);
 
   const handleSend = () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
@@ -60,18 +62,37 @@ export function ThreadPanel({ channelId, parentMessageId, onClose, enabled }: Th
 
   return (
     <aside className="flex h-full min-w-0 flex-col border-l border-border bg-background">
-      <header className="flex items-center justify-between border-b border-border px-4 py-3">
+      <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
         <span className="text-sm font-semibold text-foreground">{t(($) => $.thread.title)}</span>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onClose}
-          aria-label={t(($) => $.thread.close_aria)}
-          className="h-6 w-6 p-0"
-        >
-          <X className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setConvertOpen(true)}
+            aria-label={t(($) => $.thread.convert_to_issue_aria)}
+            className="h-6 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+            data-testid="thread-convert-to-issue"
+          >
+            <FilePlus2 className="h-3.5 w-3.5" />
+            <span>{t(($) => $.thread.convert_to_issue_button)}</span>
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onClose}
+            aria-label={t(($) => $.thread.close_aria)}
+            className="h-6 w-6 p-0"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
       </header>
+      <ThreadToIssueDialog
+        open={convertOpen}
+        onOpenChange={setConvertOpen}
+        channelId={channelId}
+        parentMessageId={parentMessageId}
+      />
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
           <div className="px-4 py-6 text-sm text-muted-foreground">{t(($) => $.thread.loading)}</div>

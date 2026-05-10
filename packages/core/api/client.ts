@@ -1364,6 +1364,25 @@ export class ApiClient {
     return this.fetch(`/api/channels/${channelId}/messages/${messageId}/thread`);
   }
 
+  async dispatchThreadIssueTask(
+    channelId: string,
+    messageId: string,
+    data: {
+      agent_id: string;
+      project_id?: string;
+      parent_issue_id?: string;
+      instruction?: string;
+    },
+  ): Promise<{ task_id: string }> {
+    return this.fetch(
+      `/api/channels/${channelId}/messages/${messageId}/dispatch-issue-task`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
   async addChannelReaction(channelId: string, messageId: string, emoji: string): Promise<ChannelReaction> {
     return this.fetch(`/api/channels/${channelId}/messages/${messageId}/reactions`, {
       method: "POST",
