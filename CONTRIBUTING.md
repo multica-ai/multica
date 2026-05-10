@@ -862,3 +862,25 @@ To send a real test card to the group, add `FEISHU_WEBHOOK_URL=...` and drop `--
 The notification depends on one masked CI variable in GitLab project settings:
 
 - `FEISHU_WEBHOOK_URL` — the Feishu group's incoming-webhook URL. Mark **Masked** and **Protected**, and make sure the tag pattern is in **Protected tags** (Settings → Repository) so the variable is exposed during the tag pipeline.
+
+### Runner Host Requirements
+
+The current GitLab runner uses a **shell executor** on a Linux VM (set up out of band, not part of this repo). The runner host needs these tools available to the `gitlab-runner` user — the pipeline pre-flight check fails fast if any are missing:
+
+- `bash` (>= 4)
+- `git`
+- `curl`
+- `jq`
+
+Install via the host's package manager once:
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install -y bash git curl jq
+# RHEL / CentOS
+sudo yum install -y bash git curl jq
+# Alpine
+sudo apk add --no-cache bash git curl jq
+```
+
+If we move the runner to a docker executor later, switch the `.gitlab-ci.yml` job back to `image: alpine:3.21` + `before_script: apk add --no-cache bash git curl jq` (the script itself is executor-agnostic).

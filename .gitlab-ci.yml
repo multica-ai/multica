@@ -4,8 +4,18 @@
 # group when a semver tag (NN.NN.NN) lands on main. Day-to-day testing /
 # build / lint runs in GitHub Actions (.github/workflows/ci.yml) — not here.
 #
-# Add new jobs at your own discretion, but keep the workflow rule below
-# strict so a casual `git push` doesn't accidentally light up the runner.
+# Runner requirement: the CI is wired for a SHELL executor on a Linux VM.
+# The runner host must have these tools on $PATH for the runner user
+# (`gitlab-runner` by default):
+#   - bash >= 4
+#   - git
+#   - curl
+#   - jq
+# (apt: `apt-get install -y curl jq git`; yum/dnf: same; apk: same.)
+#
+# To switch to a docker executor later, add `image: alpine:3.21` to the
+# job below and put `apk add --no-cache bash curl jq git` back in
+# before_script — both are valid configs.
 
 workflow:
   rules:
@@ -17,18 +27,21 @@ stages:
 
 notify-release:
   stage: notify
-  image: alpine:3.21
   rules:
     # Only semver release tags trigger the notification (NN.NN.NN). The
     # script also re-checks "tag must be reachable from main" and "tag must
     # be annotated" so noise from non-release tags is double-guarded.
     - if: '$CI_COMMIT_TAG =~ /^[0-9]+\.[0-9]+\.[0-9]+$/'
   variables:
-    # Without GIT_DEPTH=0 the runner shallow-clones and `git log <prev>..<tag>`
-    # cannot see the previous tag, leaving the commit list empty.
+    # Without GIT_DEPTH=0 the runner shallow-clones and the merge-base check
+    # against main fails (or the previous-tag commit-range lookup, if we
+    # ever re-add the commit list section to the card).
     GIT_DEPTH: "0"
     GIT_STRATEGY: "clone"
   before_script:
-    - apk add --no-cache bash curl jq git
+    # Fail fast with a readable message if the host is missing one of the
+    # tools the script depends on. This is far less confusing than the
+    # generic "command not found" the script would emit later.
+    - for tool in bash git curl jq; do command -v "$tool" >/dev/null || { echo "❌ Runner host is missing '$tool' — install it (apt/yum/apk) and retry."; exit 1; }; done
   script:
     - bash scripts/notify-feishu-release.sh
