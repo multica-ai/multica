@@ -26,6 +26,11 @@ server/**
 !packages/cerebro-*/**
 !server/internal/cerebro/**
 !server/migrations/cerebro/**
+# Cerebro docs namespace — own folder under Fumadocs auto-discovery, never
+# touched by upstream. Listed even though apps/web/** is outside the include
+# zone today, so the carve-out is already in place if upstream/web docs is
+# ever added to the upstream zone.
+!apps/web/content/docs/cerebro/**
 # Cerebro 9NNN migrations are net-new files in the cerebro namespace,
 # not modifications of upstream files. The 9000+ prefix is the namespace marker.
 !server/migrations/9*.sql

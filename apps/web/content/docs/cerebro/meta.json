@@ -1,0 +1,5 @@
+{
+  "title": "Cerebro",
+  "icon": "Sparkles",
+  "pages": ["index", "release-notes", "...", "---Guides---"]
+}
