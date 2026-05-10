@@ -7,11 +7,16 @@
 #   /api/*, /auth/*, /ws, /uploads/*   → multica-server:8080
 #   /                                  → multica-web:3000  (catch-all)
 #
-# Hosts: ship.lilithgames.com (canonical) + multica.lilithgames.com (transition
-# alias — both serve the same content during the rename). Path rules are
-# defined once via the &paths YAML anchor and reused in both rule entries so
-# they stay in sync. TLS uses the wildcard *.lilithgames.com cert in the
-# multica-tls Secret, which already covers both names.
+# Hosts:
+#   - multica.lilithgames.com  → canonical, serves the app
+#   - ship.lilithgames.com     → 301 → https://multica.lilithgames.com${path}?${query}
+#                                via the ALB Redirect action annotation below.
+#                                The "ship-to-multica-redirect" service name is
+#                                a placeholder — the controller intercepts it
+#                                because port.name == "use-annotation" and uses
+#                                the matching actions.<name> annotation instead
+#                                of routing to a real backend.
+# TLS uses the wildcard *.lilithgames.com cert in multica-tls (covers both).
 #
 # WebSocket note: ACK ALB supports WS natively; no extra annotation needed.
 apiVersion: networking.k8s.io/v1
@@ -20,7 +25,7 @@ metadata:
   name: multica
   annotations:
     # HTTP 80 → HTTPS 443 with 301. Applies to every rule on the HTTP listener
-    # so a user hitting http://ship.lilithgames.com lands on https:// cleanly
+    # so a user hitting http://multica.lilithgames.com lands on https:// cleanly
     # instead of the controller's default fake-svc (which 503s).
     alb.ingress.kubernetes.io/force-override-https: "true"
     # IP whitelist. The ACL was pre-created via Aliyun CLI + Python SDK
@@ -28,16 +33,23 @@ metadata:
     # associates it with both listeners on apply.
     alb.ingress.kubernetes.io/acl-id: "acl-ry04o6lyky6tmscnfu"
     alb.ingress.kubernetes.io/acl-type: "White"
+    # Redirect every ship.lilithgames.com request → multica.lilithgames.com
+    # with the same path + query, as a 301. ${path} / ${query} / ${host} are
+    # ALB placeholders the controller substitutes at request time. ACL above
+    # still gates the redirect itself, matching ship's pre-cutover access
+    # control so scanners can't enumerate via the redirect either.
+    alb.ingress.kubernetes.io/actions.ship-to-multica-redirect: |
+      [{"type":"Redirect","RedirectConfig":{"host":"multica.lilithgames.com","path":"${path}","port":"443","protocol":"https","query":"${query}","httpCode":"301"}}]
 spec:
   ingressClassName: multica-alb
   tls:
     - hosts:
-        - ship.lilithgames.com
         - multica.lilithgames.com
+        - ship.lilithgames.com
       secretName: multica-tls
   rules:
-    - host: ship.lilithgames.com
-      http: &paths
+    - host: multica.lilithgames.com
+      http:
         paths:
           # OAuth callback pages are Next.js routes in apps/web — match them
           # first so they reach the web Deployment, not the backend (which
@@ -100,9 +112,16 @@ spec:
                 name: multica-web
                 port:
                   number: 3000
-    # multica.lilithgames.com — transition alias serving the same paths as
-    # ship.lilithgames.com via the &paths anchor above. When the cutover
-    # flips canonical to multica (PR 2), ship will instead get a 301 to
-    # multica via a separate Ingress that points at a redirect-only backend.
-    - host: multica.lilithgames.com
-      http: *paths
+    # ship.lilithgames.com — every path 301-redirected to the multica equivalent
+    # via the ALB Redirect action annotation declared above. Old bookmarks /
+    # in-flight OAuth callbacks / archived emails keep working.
+    - host: ship.lilithgames.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ship-to-multica-redirect
+                port:
+                  name: use-annotation
