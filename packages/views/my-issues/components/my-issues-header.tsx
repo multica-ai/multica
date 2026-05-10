@@ -107,6 +107,7 @@ function useIssueCounts(allIssues: Issue[]) {
 export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
   const { t } = useT("my-issues");
   const SCOPES: { value: MyIssuesScope; label: string; description: string }[] = [
+    { value: "my", label: t(($) => $.header.scope.my_label), description: t(($) => $.header.scope.my_description) },
     { value: "assigned", label: t(($) => $.header.scope.assigned_label), description: t(($) => $.header.scope.assigned_description) },
     { value: "created", label: t(($) => $.header.scope.created_label), description: t(($) => $.header.scope.created_description) },
     { value: "agents", label: t(($) => $.header.scope.agents_label), description: t(($) => $.header.scope.agents_description) },

@@ -83,6 +83,42 @@ async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesC
 }
 
 /**
+ * Merge two ListIssuesCache results, deduplicating issues by id.
+ * Used by the "my" scope to combine assigned + created issues.
+ */
+function mergeIssueBuckets(a: ListIssuesCache, b: ListIssuesCache): ListIssuesCache {
+  const byStatus: ListIssuesCache["byStatus"] = {};
+  for (const status of PAGINATED_STATUSES) {
+    const issuesA = a.byStatus[status]?.issues ?? [];
+    const issuesB = b.byStatus[status]?.issues ?? [];
+    const seen = new Set<string>();
+    const merged = [];
+    for (const issue of [...issuesA, ...issuesB]) {
+      if (!seen.has(issue.id)) {
+        seen.add(issue.id);
+        merged.push(issue);
+      }
+    }
+    if (merged.length > 0 || a.byStatus[status] || b.byStatus[status]) {
+      byStatus[status] = { issues: merged, total: merged.length };
+    }
+  }
+  return { byStatus };
+}
+
+/**
+ * Fetch issues where the user is either the assignee or the creator.
+ * Makes two parallel fetches and merges + deduplicates the results.
+ */
+async function fetchMyIssues(userId: string): Promise<ListIssuesCache> {
+  const [assigned, created] = await Promise.all([
+    fetchFirstPages({ assignee_id: userId }),
+    fetchFirstPages({ creator_id: userId }),
+  ]);
+  return mergeIssueBuckets(assigned, created);
+}
+
+/**
  * CACHE SHAPE NOTE: The raw cache stores {@link ListIssuesCache} (buckets keyed
  * by status, each with `{ issues, total }`), and `select` flattens it to
  * `Issue[]` for consumers. Mutations and ws-updaters must use
@@ -111,6 +147,19 @@ export function myIssueListOptions(
   return queryOptions({
     queryKey: issueKeys.myList(wsId, scope, filter),
     queryFn: () => fetchFirstPages(filter),
+    select: flattenIssueBuckets,
+  });
+}
+
+/**
+ * Combined "my issues" query: fetches issues where the user is either the
+ * assignee or the creator, then merges and deduplicates the two result sets.
+ * Used for the default "my" scope which shows all issues relevant to the user.
+ */
+export function myAllIssuesListOptions(wsId: string, userId: string) {
+  return queryOptions({
+    queryKey: [...issueKeys.myAll(wsId), "my", userId],
+    queryFn: () => fetchMyIssues(userId),
     select: flattenIssueBuckets,
   });
 }

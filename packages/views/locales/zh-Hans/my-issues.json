@@ -2,11 +2,13 @@
   "page": {
     "breadcrumb": "我的 issue",
     "workspace_fallback": "工作区",
-    "empty_title": "没有分配给你的 issue",
-    "empty_description": "你创建或被分配到的 issue 会显示在这里。"
+    "empty_title": "暂无相关 issue",
+    "empty_description": "分配给你或由你创建的 issue 会显示在这里。"
   },
   "header": {
     "scope": {
+      "my_label": "我的",
+      "my_description": "分配给我或由我创建的 issue",
       "assigned_label": "已分配",
       "assigned_description": "分配给我的 issue",
       "created_label": "我创建的",

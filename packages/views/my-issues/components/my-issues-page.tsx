@@ -20,7 +20,7 @@ import { ListView } from "../../issues/components/list-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { myIssueListOptions, childIssueProgressOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
+import { myIssueListOptions, myAllIssuesListOptions, childIssueProgressOptions, type MyIssuesFilter } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { myIssuesViewStore } from "@multica/core/issues/stores/my-issues-view-store";
 import { PageHeader } from "../../layout/page-header";
@@ -65,13 +65,22 @@ export function MyIssuesPage() {
       case "agents":
         return { assignee_ids: myAgentIds };
       default:
-        return { assignee_id: user.id };
+        return {};
     }
   }, [scope, user, myAgentIds]);
 
-  const { data: myIssues = [], isLoading: loading } = useQuery(
-    myIssueListOptions(wsId, scope, filter),
-  );
+  // For the "my" scope, use the combined query that fetches both assigned and
+  // created issues. For all other scopes, use the single-filter query.
+  const { data: myIssuesScoped = [], isLoading: loadingScoped } = useQuery({
+    ...myIssueListOptions(wsId, scope, filter),
+    enabled: scope !== "my",
+  });
+  const { data: myIssuesMy = [], isLoading: loadingMy } = useQuery({
+    ...myAllIssuesListOptions(wsId, user?.id ?? ""),
+    enabled: scope === "my" && !!user,
+  });
+  const myIssues = scope === "my" ? myIssuesMy : myIssuesScoped;
+  const loading = scope === "my" ? loadingMy : loadingScoped;
 
   // Apply status/priority filters from view store
   const issues = useMemo(
