@@ -165,6 +165,59 @@ function KiroLogo({ className }: { className: string }) {
   );
 }
 
+// CodeBuddy (Tencent Cloud) — official logo from codebuddy.cn
+function CodeBuddyLogo({ className }: { className: string }) {
+  const id = useId().replace(/:/g, "");
+  const clipId = `cb-clip-${id}`;
+  const f0 = `cb-f0-${id}`;
+  const f1 = `cb-f1-${id}`;
+  const g0 = `cb-g0-${id}`;
+  const g1 = `cb-g1-${id}`;
+
+  return (
+    <svg viewBox="0 0 40 40" fill="none" className={className}>
+      <g clipPath={`url(#${clipId})`}>
+        <rect width="40" height="40" rx="20" fill={`url(#${g0})`} />
+        <g filter={`url(#${f0})`}>
+          <circle cx="12.607" cy="34.979" r="14.081" fill="#32E6B9" fillOpacity="0.4" />
+        </g>
+        <g filter={`url(#${f1})`}>
+          <circle cx="33.34" cy="43.619" r="12.87" fill="#32E6B9" />
+        </g>
+        <path
+          d="M27.6897 3.3426C28.057 3.01322 28.0795 2.99983 28.3485 2.98366C28.7851 2.95177 29.1858 3.16107 29.8664 3.78072C31.4566 5.22574 33.6703 8.19724 35.047 10.7343L35.5796 11.7191L36.3309 12.0927C37.0562 12.4593 38.2459 13.2111 38.7428 13.614C38.9673 13.7997 38.9992 13.8032 39.2326 13.7124C40.2872 13.3017 41.7982 13.846 43.1307 15.1244C44.3302 16.274 45.479 18.2384 45.9191 19.8778C45.9833 20.1417 46.0683 20.709 46.0994 21.1314C46.1997 22.6144 45.7243 23.7986 44.8085 24.3349C44.6213 24.443 44.6085 24.4725 44.6137 24.939C44.6559 27.1604 44.0571 29.3777 42.8543 31.54C41.4965 33.9678 39.0794 36.4798 35.8073 38.846C34.0502 40.1247 29.8918 42.5469 28.0122 43.3973C23.5096 45.4244 19.8999 46.2022 16.7645 45.8181C14.8943 45.5915 12.7771 44.8611 11.5246 44.0137C11.1951 43.786 11.1428 43.7719 10.8909 43.8439C9.55017 44.2289 7.79442 43.4374 6.30272 41.7817C5.70771 41.1197 4.74709 39.4939 4.43575 38.6241C3.71569 36.5887 3.85859 34.752 4.81783 33.6551C5.0657 33.3725 5.07387 33.3607 5.01972 32.8856C4.93033 32.1079 4.88982 30.9566 4.93066 30.2138L4.96343 29.5205L3.92091 27.6777C2.3078 24.8074 1.28326 22.3968 0.887982 20.5554C0.679402 19.546 0.692781 19.0981 0.949061 18.7667C1.10529 18.5666 1.61622 18.3594 2.23252 18.2455C3.78518 17.9729 7.17203 18.2198 10.9394 18.885L11.3303 18.9525L12.1903 18.1921C13.6179 16.9275 14.5665 16.2176 16.315 15.1274C18.1373 13.9872 20.1943 13.0498 22.5103 12.3071L23.2533 12.0687L23.6615 10.9964C25.1239 7.13587 26.6218 4.28969 27.6897 3.3426ZM15.4393 23.1261C13.7864 24.0804 12.9602 24.5582 12.3529 25.093C9.89364 27.2585 8.9738 30.6888 10.0208 33.7938C10.2794 34.5606 10.7568 35.387 11.7111 37.0398C12.6653 38.6926 13.1424 39.5194 13.6771 40.1267C15.8426 42.5859 19.2732 43.5045 22.3783 42.4574C23.145 42.1989 23.972 41.7223 25.6248 40.768L35.1333 35.2783C36.7862 34.324 37.6124 33.8462 38.2196 33.3114C40.6789 31.1459 41.5988 27.7156 40.5518 24.6105C40.2932 23.8438 39.8157 23.0174 38.8615 21.3646C37.9072 19.7117 37.4302 18.885 36.8955 18.2777C34.7299 15.8185 31.2993 14.8999 28.1943 15.947C27.4275 16.2055 26.6006 16.6821 24.9478 17.6364L15.4393 23.1261Z"
+          fill={`url(#${g1})`}
+        />
+        <rect x="15.882" y="30.027" width="4.009" height="8.326" rx="2.005" transform="rotate(-30 15.882 30.027)" fill="white" />
+        <rect x="26.698" y="23.781" width="4.009" height="8.326" rx="2.005" transform="rotate(-30 26.698 23.781)" fill="white" />
+      </g>
+      <defs>
+        <filter id={f0} x="-14.916" y="7.456" width="55.047" height="55.047" filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
+          <feFlood floodOpacity="0" result="BackgroundImageFix" />
+          <feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape" />
+          <feGaussianBlur stdDeviation="6.721" result="effect1_foregroundBlur" />
+        </filter>
+        <filter id={f1} x="9.47" y="19.748" width="47.742" height="47.741" filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
+          <feFlood floodOpacity="0" result="BackgroundImageFix" />
+          <feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape" />
+          <feGaussianBlur stdDeviation="5.5" result="effect1_foregroundBlur" />
+        </filter>
+        <linearGradient id={g0} x1="20" y1="0" x2="20" y2="40" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#6C4DFF" />
+          <stop offset="1" stopColor="#583ED3" />
+        </linearGradient>
+        <linearGradient id={g1} x1="14.639" y1="10.792" x2="32.171" y2="41.159" gradientUnits="userSpaceOnUse">
+          <stop stopColor="white" stopOpacity="0.8" />
+          <stop offset="0.438" stopColor="white" />
+        </linearGradient>
+        <clipPath id={clipId}>
+          <rect width="40" height="40" rx="20" fill="white" />
+        </clipPath>
+      </defs>
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -193,6 +246,8 @@ export function ProviderLogo({
       return <KimiLogo className={className} />;
     case "kiro":
       return <KiroLogo className={className} />;
+    case "codebuddy":
+      return <CodeBuddyLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

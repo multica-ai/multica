@@ -174,8 +174,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_KIRO_MODEL")),
 		}
 	}
+	codeBuddyPath := envOrDefault("MULTICA_CODEBUDDY_PATH", "codebuddy")
+	if _, err := exec.LookPath(codeBuddyPath); err == nil {
+		agents["codebuddy"] = AgentEntry{
+			Path:  codeBuddyPath,
+			Model: strings.TrimSpace(os.Getenv("MULTICA_CODEBUDDY_MODEL")),
+		}
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or codebuddy and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")

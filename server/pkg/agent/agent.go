@@ -124,8 +124,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &kimiBackend{cfg: cfg}, nil
 	case "kiro":
 		return &kiroBackend{cfg: cfg}, nil
+	case "codebuddy":
+		return &codeBuddyBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, codebuddy)", agentType)
 	}
 }
 
@@ -152,6 +154,7 @@ var launchHeaders = map[string]string{
 	"pi":       "pi (json mode)",
 	"kimi":     "kimi acp",
 	"kiro":     "kiro-cli acp",
+	"codebuddy": "codebuddy (stream-json)",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an
