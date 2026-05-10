@@ -6,7 +6,8 @@
 
 import pg from "pg";
 
-const API_BASE = process.env.VITE_API_URL ?? `http://localhost:${process.env.PORT ?? "8080"}`;
+const envApiBase = process.env.VITE_API_URL;
+const API_BASE = envApiBase && envApiBase.length > 0 ? envApiBase : `http://localhost:${process.env.PORT ?? "8080"}`;
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://multica:multica@localhost:5432/multica?sslmode=disable";
 
 interface TestWorkspace {
