@@ -24,3 +24,15 @@ export function useProjectQuery(projectId?: string) {
     enabled: Boolean(workspaceId && projectId),
   });
 }
+
+/** Fetches total time spent on a project (all time, all members). */
+export function useProjectTimeStatsQuery(projectId?: string) {
+  const workspaceId = useWorkspaceStore((state) => state.workspace?.id ?? "");
+
+  return useQuery<{ total_seconds: number }>({
+    queryKey: queryKeys.projects.timeStats(workspaceId, projectId ?? ""),
+    queryFn: () => api.getProjectTimeStats(projectId!),
+    enabled: Boolean(workspaceId && projectId),
+    staleTime: 60_000,
+  });
+}
