@@ -46,6 +46,15 @@ interface JsonNode {
   content?: JsonNode[];
 }
 
+function findAll(json: JsonNode, type: string): JsonNode[] {
+  const hits: JsonNode[] = [];
+  if (json.type === type) hits.push(json);
+  for (const child of json.content ?? []) {
+    hits.push(...findAll(child, type));
+  }
+  return hits;
+}
+
 function findFirst(json: JsonNode, type: string): JsonNode | undefined {
   if (json.type === type) return json;
   for (const child of json.content ?? []) {
@@ -139,6 +148,22 @@ describe("markdownPaste — code block context", () => {
     const types = (json.content ?? []).map((n) => n.type);
     // Markdown parsing produced a heading at the top.
     expect(types).toContain("heading");
+  });
+
+  it("keeps empty ordered list items editable after Markdown paste", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    editor.commands.setTextSelection(1);
+    paste(editor, "### Requirement\n\n1. \n2.");
+
+    const json = editor.getJSON() as JsonNode;
+    const items = findAll(json, "listItem");
+
+    expect(items).toHaveLength(2);
+    expect(items.every((item) => item.content?.[0]?.type === "paragraph")).toBe(true);
   });
 
   it("inserts JSON clipboard text without running the Markdown parser", () => {
