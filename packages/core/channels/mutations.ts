@@ -113,8 +113,14 @@ export function useSendChannelMessage(channelId: string) {
         qc.setQueryData(channelKeys.messages(channelId), ctx.prev);
       }
     },
-    onSettled: () => {
+    onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: channelKeys.messages(channelId) });
+      // If this was a thread reply, also bump the parent's thread cache
+      // so an open ThreadPanel for the parent immediately shows the new
+      // reply rather than waiting for a WS round-trip.
+      if (vars.parent_message_id) {
+        qc.invalidateQueries({ queryKey: channelKeys.thread(vars.parent_message_id) });
+      }
     },
   });
 }

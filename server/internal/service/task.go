@@ -1017,13 +1017,14 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 							"trigger_message_id":   cm.MessageID,
 							"trigger_author_type":  cm.AuthorType,
 						})
-						if _, err := s.Queries.CreateChannelMessage(ctx, db.CreateChannelMessageParams{
+						msg, err := s.Queries.CreateChannelMessage(ctx, db.CreateChannelMessageParams{
 							ChannelID:  channelUUID,
 							AuthorType: "agent",
 							AuthorID:   task.AgentID,
 							Content:    redact.Text(body),
 							Metadata:   metaJSON,
-						}); err != nil {
+						})
+						if err != nil {
 							slog.Error("channel-mention completion: failed to post reply",
 								"task_id", util.UUIDToString(task.ID),
 								"channel_id", cm.ChannelID,
@@ -1035,17 +1036,36 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 								"channel_id", cm.ChannelID,
 								"agent_id", util.UUIDToString(task.AgentID),
 							)
-							// Notify all channel subscribers — same event
-							// the user-facing CreateChannelMessage handler
-							// publishes.
+							// Notify all channel subscribers — same event the
+							// user-facing CreateChannelMessage handler publishes.
+							// Include the `message` payload so client-side WS
+							// handlers can extract fields like parent_message_id
+							// and invalidate the right thread cache. Without this,
+							// agent-authored replies left the thread side panel
+							// stuck on stale data while the timeline's reply-count
+							// badge correctly updated.
+							var parentRef *string
+							if msg.ParentMessageID.Valid {
+								p := util.UUIDToString(msg.ParentMessageID)
+								parentRef = &p
+							}
 							s.Bus.Publish(events.Event{
 								Type:        protocol.EventChannelMessage,
 								WorkspaceID: cm.WorkspaceID,
 								ActorType:   "agent",
 								ActorID:     util.UUIDToString(task.AgentID),
 								Payload: map[string]any{
-									"channel_id": cm.ChannelID,
+									"channel_id":                   cm.ChannelID,
 									"message_triggered_by_task_id": util.UUIDToString(task.ID),
+									"message": map[string]any{
+										"id":                util.UUIDToString(msg.ID),
+										"channel_id":        cm.ChannelID,
+										"author_type":       msg.AuthorType,
+										"author_id":         util.UUIDToString(msg.AuthorID),
+										"content":           msg.Content,
+										"parent_message_id": parentRef,
+										"created_at":        msg.CreatedAt.Time.Format("2006-01-02T15:04:05.999999Z07:00"),
+									},
 								},
 							})
 						}

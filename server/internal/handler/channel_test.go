@@ -1124,6 +1124,85 @@ func TestThreads_RepliesNestUnderParent(t *testing.T) {
 	}
 }
 
+// Regression test for the "1 reply" badge / "No replies yet." panel
+// mismatch. The client's WS handler keys off message.parent_message_id
+// to invalidate the right thread cache; if the server's payload doesn't
+// carry it, the panel stays stuck on the empty (first-fetch) state
+// while the timeline's reply-count badge correctly updates.
+//
+// This locks in the contract: a channel:message event for a reply
+// MUST include parent_message_id under the `message` key.
+func TestThreads_ReplyWSEventCarriesParentMessageID(t *testing.T) {
+	enableChannels(t)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "thread-ws-test", "display_name": "ThreadWSTest", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create channel: %d", w.Code)
+	}
+	ch := decodeChannel(t, w)
+
+	parent := postChannelMessage(t, ch.ID, "parent")
+
+	// Subscribe and capture the published reply event.
+	var capturedParent atomic.Value // string
+	var capturedReplyID atomic.Value // string
+	testHandler.Bus.Subscribe(protocol.EventChannelMessage, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		msg, ok := payload["message"].(ChannelMessageResponse)
+		if !ok {
+			return
+		}
+		// Only react to the reply, not the parent. The parent's event
+		// fired before this subscriber was registered, but be defensive
+		// in case a future change reorders things.
+		if msg.ParentMessageID == nil {
+			return
+		}
+		capturedParent.Store(*msg.ParentMessageID)
+		capturedReplyID.Store(msg.ID)
+	})
+
+	// Post the reply.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/channels/"+ch.ID+"/messages", map[string]any{
+		"content":           "child reply",
+		"parent_message_id": parent.ID,
+	})
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.CreateChannelMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("post reply: %d %s", w.Code, w.Body.String())
+	}
+	var reply ChannelMessageResponse
+	json.NewDecoder(w.Body).Decode(&reply)
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if capturedReplyID.Load() != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	gotParent := capturedParent.Load()
+	gotReply := capturedReplyID.Load()
+	if gotParent == nil || gotReply == nil {
+		t.Fatal("EventChannelMessage with parent_message_id never fired")
+	}
+	if gotParent.(string) != parent.ID {
+		t.Fatalf("WS payload parent_message_id = %q, want %q", gotParent, parent.ID)
+	}
+	if gotReply.(string) != reply.ID {
+		t.Fatalf("WS payload reply id = %q, want %q", gotReply, reply.ID)
+	}
+}
+
 func TestReactions_AddRemoveAndCount(t *testing.T) {
 	enableChannels(t)
 
