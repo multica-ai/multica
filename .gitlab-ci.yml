@@ -1,0 +1,34 @@
+# GitLab CI for the internal Lilith Multica fork.
+#
+# This config exists ONLY to fire release-notification cards into the Feishu
+# group when a semver tag (NN.NN.NN) lands on main. Day-to-day testing /
+# build / lint runs in GitHub Actions (.github/workflows/ci.yml) — not here.
+#
+# Add new jobs at your own discretion, but keep the workflow rule below
+# strict so a casual `git push` doesn't accidentally light up the runner.
+
+workflow:
+  rules:
+    # Only run pipelines for tag pushes — never for branch pushes or MRs.
+    - if: '$CI_COMMIT_TAG'
+
+stages:
+  - notify
+
+notify-release:
+  stage: notify
+  image: alpine:3.21
+  rules:
+    # Only semver release tags trigger the notification (NN.NN.NN). The
+    # script also re-checks "tag must be reachable from main" and "tag must
+    # be annotated" so noise from non-release tags is double-guarded.
+    - if: '$CI_COMMIT_TAG =~ /^[0-9]+\.[0-9]+\.[0-9]+$/'
+  variables:
+    # Without GIT_DEPTH=0 the runner shallow-clones and `git log <prev>..<tag>`
+    # cannot see the previous tag, leaving the commit list empty.
+    GIT_DEPTH: "0"
+    GIT_STRATEGY: "clone"
+  before_script:
+    - apk add --no-cache bash curl jq git
+  script:
+    - bash scripts/notify-feishu-release.sh
