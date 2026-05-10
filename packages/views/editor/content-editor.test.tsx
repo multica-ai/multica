@@ -66,12 +66,9 @@ function createFocusedDialog() {
   return { dialog, dialogInput };
 }
 
-async function flushAutofocusFrames() {
+async function advanceAutofocus(ms = 50) {
   await act(async () => {
-    vi.runOnlyPendingTimers();
-  });
-  await act(async () => {
-    vi.runOnlyPendingTimers();
+    vi.advanceTimersByTime(ms);
   });
 }
 
@@ -104,12 +101,6 @@ describe("ContentEditor", () => {
 describe("ContentEditor — JEH-756 autofocus", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) =>
-      window.setTimeout(() => callback(performance.now()), 0),
-    );
-    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) =>
-      window.clearTimeout(id),
-    );
     vi.clearAllMocks();
     lastUseEditorOptions.value = undefined;
   });
@@ -126,7 +117,7 @@ describe("ContentEditor — JEH-756 autofocus", () => {
     render(<ContentEditor autoFocus placeholder="…" />);
     expect(lastUseEditorOptions.value?.autofocus).toBe(false);
 
-    await flushAutofocusFrames();
+    await advanceAutofocus();
 
     expect(mockFocus).toHaveBeenCalledWith("end");
   });
@@ -135,7 +126,7 @@ describe("ContentEditor — JEH-756 autofocus", () => {
     render(<ContentEditor placeholder="…" />);
     expect(lastUseEditorOptions.value?.autofocus).toBe(false);
 
-    await flushAutofocusFrames();
+    await advanceAutofocus();
 
     expect(mockFocus).not.toHaveBeenCalled();
   });
@@ -145,7 +136,7 @@ describe("ContentEditor — JEH-756 autofocus", () => {
 
     render(<ContentEditor autoFocus placeholder="…" />);
 
-    await flushAutofocusFrames();
+    await advanceAutofocus(800);
 
     expect(mockFocus).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(dialogInput);
@@ -157,7 +148,22 @@ describe("ContentEditor — JEH-756 autofocus", () => {
     render(<ContentEditor autoFocus placeholder="…" />);
     dialog.remove();
 
-    await flushAutofocusFrames();
+    await advanceAutofocus();
+
+    expect(mockFocus).toHaveBeenCalledWith("end");
+  });
+
+  it("retries until a dismissing dialog releases focus", async () => {
+    const { dialog } = createFocusedDialog();
+
+    render(<ContentEditor autoFocus placeholder="…" />);
+
+    await advanceAutofocus(100);
+
+    expect(mockFocus).not.toHaveBeenCalled();
+
+    dialog.remove();
+    await advanceAutofocus(40);
 
     expect(mockFocus).toHaveBeenCalledWith("end");
   });

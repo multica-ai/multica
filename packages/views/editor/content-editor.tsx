@@ -59,6 +59,9 @@ import "./content-editor.css";
 /** Blob URLs (blob:http://…) are process-local and expire on reload. Strip them
  *  from serialised markdown so they never reach the database. */
 const BLOB_IMAGE_RE = /!\[[^\]]*\]\(blob:[^)]*\)\n?/g;
+// CEREBRO-PATCH(input-autofocus): JEH-756 — retry briefly while a closing dialog still owns focus.
+const AUTOFOCUS_DIALOG_RETRY_MS = 750;
+const AUTOFOCUS_DIALOG_RETRY_STEP_MS = 32;
 
 function stripBlobUrls(md: string): string {
   return md.replace(BLOB_IMAGE_RE, "");
@@ -246,39 +249,38 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     }, []);
 
     // CEREBRO-PATCH(input-autofocus): JEH-756 — focus after the editor exists,
-    // then defer past dropdown/dialog close focus-restore. The dialog guard is
-    // checked at execution time, not mount time: the New Message dialog is
-    // still focused while its selection mounts InboxChatPanel, but it is gone
-    // by the time focus should land in the input.
+    // then wait briefly for closing dialogs/dropdowns to finish focus-restore.
+    // The guard is checked at execution time, not mount time: the New Message
+    // dialog can still own focus while its selection mounts InboxChatPanel,
+    // then release focus a few frames later.
     useEffect(() => {
       if (!editor || !autoFocusAtMount) return;
       if (typeof window === "undefined") return;
 
       let didFocus = false;
-      const focusEditor = () => {
+      let timeoutId: number | undefined;
+      const startedAt = window.performance?.now?.() ?? Date.now();
+
+      const attemptFocus = () => {
         if (didFocus) return;
         if (editor.isDestroyed) return;
-        if (activeElementIsOwnedByDialog()) return;
+
+        if (activeElementIsOwnedByDialog()) {
+          const now = window.performance?.now?.() ?? Date.now();
+          if (now - startedAt < AUTOFOCUS_DIALOG_RETRY_MS) {
+            timeoutId = window.setTimeout(attemptFocus, AUTOFOCUS_DIALOG_RETRY_STEP_MS);
+          }
+          return;
+        }
+
         didFocus = true;
         editor.commands.focus("end");
       };
 
-      if (typeof window.requestAnimationFrame !== "function") {
-        const timeoutId = window.setTimeout(focusEditor, 0);
-        return () => window.clearTimeout(timeoutId);
-      }
-
-      let frameOne = 0;
-      let frameTwo = 0;
-      frameOne = window.requestAnimationFrame(() => {
-        frameTwo = window.requestAnimationFrame(focusEditor);
-      });
-      const timeoutId = window.setTimeout(focusEditor, 50);
+      timeoutId = window.setTimeout(attemptFocus, 0);
 
       return () => {
-        window.cancelAnimationFrame(frameOne);
-        window.cancelAnimationFrame(frameTwo);
-        window.clearTimeout(timeoutId);
+        if (timeoutId) window.clearTimeout(timeoutId);
       };
     }, [editor, autoFocusAtMount]);
 

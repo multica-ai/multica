@@ -109,6 +109,23 @@ describe("ContentEditor — JEH-756 autofocus integration", () => {
     });
   });
 
+  it("focuses after a dismissing dialog closes during the retry window", async () => {
+    const { dialog } = createFocusedDialog();
+    const { container } = render(<ContentEditor autoFocus placeholder="…" />);
+
+    const proseMirror = await waitFor(() => {
+      const node = container.querySelector(".ProseMirror");
+      if (!node) throw new Error("ProseMirror not yet mounted");
+      return node as HTMLElement;
+    });
+
+    window.setTimeout(() => dialog.remove(), 100);
+
+    await waitFor(() => {
+      expect(proseMirror.contains(document.activeElement)).toBe(true);
+    });
+  });
+
   it("does not focus while an open dialog still owns focus", async () => {
     const { dialog, dialogInput } = createFocusedDialog();
     const { container } = render(<ContentEditor autoFocus placeholder="…" />);
@@ -119,7 +136,7 @@ describe("ContentEditor — JEH-756 autofocus integration", () => {
       return node as HTMLElement;
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 850));
 
     expect(proseMirror.contains(document.activeElement)).toBe(false);
     expect(document.activeElement).toBe(dialogInput);
