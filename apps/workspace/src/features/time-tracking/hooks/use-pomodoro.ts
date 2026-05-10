@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { PomodoroSession } from "@/shared/types";
+import type { PomodoroSession, CompletePomodoroBody, CompletePomodoroResponse } from "@/shared/types";
 import { api } from "@/shared/api";
 import { queryKeys } from "@/shared/query";
 import { useWorkspaceStore } from "@/features/workspace";
@@ -91,15 +91,17 @@ export function usePausePomodoroMutation() {
 
 /**
  * Complete the current phase.
+ * Accepts an optional body (issue_id, note, long_break_after).
  * Optimistically flips the phase and resets elapsed.
  * Work-phase completion creates a pomodoro time_entry on the backend.
+ * Returns { session, next_phase } from the API.
  */
 export function useCompletePomodoroMutation() {
   const queryClient = useQueryClient();
   const workspaceId = useWorkspaceStore((s) => s.workspace?.id ?? "");
 
-  return useMutation({
-    mutationFn: () => api.completePomodoro(),
+  return useMutation<CompletePomodoroResponse, Error, CompletePomodoroBody | undefined>({
+    mutationFn: (body) => api.completePomodoro(body),
     onMutate: async () => {
       const key = queryKeys.pomodoro.current(workspaceId);
       await queryClient.cancelQueries({ queryKey: key });
@@ -121,10 +123,11 @@ export function useCompletePomodoroMutation() {
     },
     onError: (_err, _vars, context) => {
       const key = queryKeys.pomodoro.current(workspaceId);
-      if (context?.previous) queryClient.setQueryData(key, context.previous);
+      const ctx = context as { previous?: PomodoroSession } | undefined;
+      if (ctx?.previous) queryClient.setQueryData(key, ctx.previous);
     },
-    onSuccess: (session) => {
-      queryClient.setQueryData(queryKeys.pomodoro.current(workspaceId), session);
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.pomodoro.current(workspaceId), data.session);
       // Invalidate time entries so the newly created pomodoro entry appears in the list.
       queryClient.invalidateQueries({ queryKey: queryKeys.timeTracking.entries(workspaceId) });
     },

@@ -295,6 +295,7 @@ type PomodoroSession struct {
 	StartedAt            pgtype.Timestamptz `json:"started_at"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	PomodoroCount        int32              `json:"pomodoro_count"`
 }
 
 type Project struct {

@@ -377,6 +377,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Rout
 			// Pomodoro session persistence
 			ph := handler.NewPomodoroHandler(queries)
 			r.Get("/api/pomodoro/current", ph.GetCurrentPomodoro)
+			r.Get("/api/pomodoro/history", ph.GetPomodoroHistory)
 			r.Post("/api/pomodoro/start", ph.StartPomodoro)
 			r.Post("/api/pomodoro/pause", ph.PausePomodoro)
 			r.Post("/api/pomodoro/complete", ph.CompletePomodoro)

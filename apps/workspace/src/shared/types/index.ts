@@ -44,4 +44,4 @@ export type { NotificationPreference, UpdateNotificationPreferenceRequest, TestN
 export type { TimeEntry, CreateTimeEntryRequest, UpdateTimeEntryRequest, ListTimeEntriesResponse, TeamTimeUserStat, TeamTimeProjectStat, TeamTimeStats } from "./time-entry";
 export type { DailyReview, DailyPlan } from "./daily";
 export type { AutomationTemplate, StandupSummaryResult } from "./automation";
-export type { PomodoroPhase, PomodoroStatus, PomodoroSession } from "./pomodoro";
+export type { PomodoroPhase, PomodoroStatus, PomodoroSession, CompletePomodoroBody, CompletePomodoroResponse } from "./pomodoro";

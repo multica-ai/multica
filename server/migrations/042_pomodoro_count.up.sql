@@ -1,0 +1,1 @@
+ALTER TABLE pomodoro_sessions ADD COLUMN IF NOT EXISTS pomodoro_count INT NOT NULL DEFAULT 0;

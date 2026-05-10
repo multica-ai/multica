@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -204,9 +206,17 @@ func (h *PomodoroHandler) PausePomodoro(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, sessionToResponse(session))
 }
 
+// completePomodoroRequest is the optional JSON body for POST /api/pomodoro/complete.
+type completePomodoroRequest struct {
+	IssueID        *string `json:"issue_id,omitempty"`
+	Note           *string `json:"note,omitempty"`
+	LongBreakAfter int     `json:"long_break_after"` // how many pomodoros before a long break; default 4
+}
+
 // CompletePomodoro handles POST /api/pomodoro/complete.
-// If phase='work', creates a time_entry of type='pomodoro' for the work duration.
-// Then flips the phase (work→break 5min, break→work 25min), resets elapsed and started_at, sets status='idle'.
+// If phase='work', creates a time_entry of type='pomodoro' for the work duration,
+// increments the pomodoro count, and decides whether the next break is short or long.
+// Then transitions the session to the next phase with elapsed reset.
 func (h *PomodoroHandler) CompletePomodoro(w http.ResponseWriter, r *http.Request) {
 	userIDStr, ok := requireUserID(w, r)
 	if !ok {
@@ -220,6 +230,15 @@ func (h *PomodoroHandler) CompletePomodoro(w http.ResponseWriter, r *http.Reques
 	userID := parseUUID(userIDStr)
 	workspaceID := parseUUID(workspaceIDStr)
 	ctx := r.Context()
+
+	// Parse optional request body.
+	var req completePomodoroRequest
+	if r.ContentLength != 0 {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	if req.LongBreakAfter <= 0 {
+		req.LongBreakAfter = 4 // default: long break every 4 pomodoros
+	}
 
 	existing, err := h.queries.GetPomodoroSession(ctx, db.GetPomodoroSessionParams{
 		UserID:      userID,
@@ -235,14 +254,28 @@ func (h *PomodoroHandler) CompletePomodoro(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// If this was a work phase, record a time entry for the completed focus block.
+	// Determine the next phase (default for non-work phases).
+	nextPhase := "break"
+	nextDuration := int32(300) // 5-minute short break
+
 	if existing.Phase == "work" && existing.StartedAt.Valid {
+		// Build description from optional note.
 		desc := "Pomodoro 专注"
+		if req.Note != nil && *req.Note != "" {
+			desc = *req.Note
+		}
+
+		// Build issue_id: use provided value if present.
+		issueID := pgtype.UUID{}
+		if req.IssueID != nil && *req.IssueID != "" {
+			issueID = parseUUID(*req.IssueID)
+		}
+
 		stopTime := pgtype.Timestamptz{Time: time.Now(), Valid: true}
 		_, teErr := h.queries.CreateTimeEntry(ctx, db.CreateTimeEntryParams{
 			WorkspaceID:     workspaceID,
 			UserID:          userID,
-			IssueID:         pgtype.UUID{}, // not linked to an issue
+			IssueID:         issueID,
 			Description:     pgtype.Text{String: desc, Valid: true},
 			StartTime:       existing.StartedAt,
 			StopTime:        stopTime,
@@ -250,17 +283,26 @@ func (h *PomodoroHandler) CompletePomodoro(w http.ResponseWriter, r *http.Reques
 			Type:            "pomodoro",
 		})
 		if teErr != nil {
-			// Log but don't block the phase flip — the session state is more important.
+			// Non-fatal — log but continue with phase transition.
 			slog.Warn("pomodoro complete: failed to create time entry", append(logger.RequestAttrs(r), "error", teErr)...)
 		}
-	}
 
-	// Flip phase and reset timers.
-	nextPhase := "break"
-	nextDuration := int32(300) // 5-minute break
-	if existing.Phase == "break" {
+		// Increment the pomodoro count and decide next break length.
+		newCount, countErr := h.queries.IncrementPomodoroCount(ctx, db.IncrementPomodoroCountParams{
+			UserID:      userID,
+			WorkspaceID: workspaceID,
+		})
+		if countErr != nil {
+			slog.Warn("pomodoro complete: failed to increment count", append(logger.RequestAttrs(r), "error", countErr)...)
+		} else if int(newCount)%req.LongBreakAfter == 0 {
+			// Every Nth pomodoro triggers a long break (15 minutes).
+			nextPhase = "long_break"
+			nextDuration = 900
+		}
+	} else if existing.Phase == "break" || existing.Phase == "long_break" {
+		// After any break, return to work.
 		nextPhase = "work"
-		nextDuration = 1500 // 25-minute work
+		nextDuration = 1500
 	}
 
 	session, err := h.queries.UpdatePomodoroSession(ctx, db.UpdatePomodoroSessionParams{
@@ -270,7 +312,7 @@ func (h *PomodoroHandler) CompletePomodoro(w http.ResponseWriter, r *http.Reques
 		PhaseDurationSeconds: nextDuration,
 		Status:               "idle",
 		ElapsedSeconds:       0,
-		StartedAt:            pgtype.Timestamptz{Valid: false}, // NULL
+		StartedAt:            pgtype.Timestamptz{Valid: false}, // NULL — not running
 	})
 	if err != nil {
 		slog.Warn("update pomodoro session for complete failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -278,7 +320,79 @@ func (h *PomodoroHandler) CompletePomodoro(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusOK, sessionToResponse(session))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"session":    sessionToResponse(session),
+		"next_phase": nextPhase,
+	})
+}
+
+// GetPomodoroHistory handles GET /api/pomodoro/history.
+// Returns paginated pomodoro time entries and aggregate stats for the requesting user.
+func (h *PomodoroHandler) GetPomodoroHistory(w http.ResponseWriter, r *http.Request) {
+	userID, workspaceID, ok := resolvePomodoroPrincipal(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+
+	// Parse optional pagination query params.
+	limit := int32(50)
+	offset := int32(0)
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = int32(n)
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = int32(n)
+		}
+	}
+
+	// Compute time boundaries for stats aggregation.
+	now := time.Now().UTC()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	// ISO week: Monday is the first day.
+	weekday := int(now.Weekday())
+	if weekday == 0 {
+		weekday = 7 // Sunday → 7 so Monday=1
+	}
+	weekStart := todayStart.AddDate(0, 0, -(weekday - 1))
+
+	entries, err := h.queries.GetPomodoroHistory(ctx, db.GetPomodoroHistoryParams{
+		UserID:      userID,
+		WorkspaceID: workspaceID,
+		LimitCount:  limit,
+		OffsetCount: offset,
+	})
+	if err != nil {
+		slog.Warn("get pomodoro history failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to get pomodoro history")
+		return
+	}
+
+	stats, err := h.queries.GetPomodoroStats(ctx, db.GetPomodoroStatsParams{
+		UserID:      userID,
+		WorkspaceID: workspaceID,
+		TodayStart:  pgtype.Timestamptz{Time: todayStart, Valid: true},
+		WeekStart:   pgtype.Timestamptz{Time: weekStart, Valid: true},
+	})
+	if err != nil {
+		slog.Warn("get pomodoro stats failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to get pomodoro stats")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"entries": entries,
+		"stats": map[string]interface{}{
+			"today_count":   stats.TodayCount,
+			"week_count":    stats.WeekCount,
+			"total_seconds": stats.TotalSeconds,
+		},
+	})
 }
 
 // ResetPomodoro handles POST /api/pomodoro/reset.

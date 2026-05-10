@@ -11,6 +11,7 @@ import {
   Columns3,
   Clock,
   Users,
+  Timer,
 } from "lucide-react";
 
 export const primaryNav = [
@@ -23,6 +24,7 @@ export const primaryNav = [
   { href: "/my-work", label: "My Work", icon: CircleUser },
   { href: "/my-time", label: "My Time", icon: Clock },
   { href: "/team-time", label: "Team Time", icon: Users },
+  { href: "/pomodoro", label: "Pomodoro", icon: Timer },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/notifications", label: "Notifications", icon: Inbox },
 ];

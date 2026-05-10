@@ -57,12 +57,25 @@ import type {
   AutomationTemplate,
   StandupSummaryResult,
   PomodoroSession,
+  CompletePomodoroBody,
+  CompletePomodoroResponse,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
 export interface LoginResponse {
   token: string;
   user: User;
+}
+
+export interface PomodoroHistoryStats {
+  today_count: number;
+  week_count: number;
+  total_seconds: number;
+}
+
+export interface PomodoroHistoryResponse {
+  entries: TimeEntry[];
+  stats: PomodoroHistoryStats;
 }
 
 export class BulkCreateApiError extends Error {
@@ -989,13 +1002,30 @@ export class ApiClient {
   /**
    * Complete the current phase.
    * Work-phase completion auto-creates a time_entry with type='pomodoro'.
+   * Returns the updated session and the next phase that will run.
    */
-  async completePomodoro(): Promise<PomodoroSession> {
-    return this.fetch("/api/pomodoro/complete", { method: "POST" });
+  async completePomodoro(body?: CompletePomodoroBody): Promise<CompletePomodoroResponse> {
+    return this.fetch("/api/pomodoro/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
   }
 
   /** Reset the pomodoro session back to idle. */
   async resetPomodoro(): Promise<PomodoroSession> {
     return this.fetch("/api/pomodoro/reset", { method: "POST" });
+  }
+
+  /** Get pomodoro history (time entries of type "pomodoro") with aggregate stats. */
+  async getPomodoroHistory(params?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<PomodoroHistoryResponse> {
+    const query = new URLSearchParams();
+    if (params?.limit !== undefined) query.set("limit", String(params.limit));
+    if (params?.offset !== undefined) query.set("offset", String(params.offset));
+    const qs = query.toString();
+    return this.fetch(`/api/pomodoro/history${qs ? `?${qs}` : ""}`);
   }
 }
