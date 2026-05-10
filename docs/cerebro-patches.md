@@ -338,6 +338,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `runtime-setup-handler` | server/internal/handler/runtime_setup.go | 224 | Runtime-setup token + install script (cerebro feature) |
 | `runtime-setup-page` | packages/views/docs/runtime-setup-page.tsx | 182 | Runtime-setup token + install script (cerebro feature) |
 | `runtimes-utils-cerebro` | packages/views/runtimes/utils.ts | 4 | Runtime view cerebro additions |
+| `mobile-sidebar-burger-icon` | packages/ui/components/ui/sidebar.tsx | 3 | JEH-821 — show the standard hamburger menu icon for the mobile global navigation trigger while keeping the desktop panel icon |
 | `server-integration-test-cerebro` | server/cmd/server/integration_test.go | 157 | Server bootstrapping additions |
 | `server-listeners-cerebro` | server/cmd/server/listeners.go | 9 | Server bootstrapping additions |
 | `server-firtal-gateway-runtime` | server/cmd/server/main.go | 12 | Start the Cerebro server-side Firtal Gateway HTTPS runtime worker for daemonless chat tasks |
