@@ -450,15 +450,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // every thread subtree to re-render in lockstep.
   const prevThreadRepliesRef = useRef<Map<string, TimelineEntry[]>>(new Map());
   const timelineView = useMemo(() => {
+    // Defensive: guard against non-array timeline (e.g. null/undefined from a
+    // misbehaving selector). The API client normalises this too — both layers
+    // guard so a regression upstream can't white-screen the detail page
+    // (#BRY-53).
+    const safeTimeline = Array.isArray(timeline) ? timeline : [];
     // Group entries: top-level = activities + root comments; replies are
     // bucketed under their parent's id and rendered nested inside CommentCard.
     // No orphan rescue needed: the timeline is fetched in full, so every
     // reply's parent is always in the same array.
-    const topLevel = timeline.filter(
+    const topLevel = safeTimeline.filter(
       (e) => e.type === "activity" || !e.parent_id,
     );
     const repliesByParent = new Map<string, TimelineEntry[]>();
-    for (const e of timeline) {
+    for (const e of safeTimeline) {
       if (e.type === "comment" && e.parent_id) {
         const list = repliesByParent.get(e.parent_id) ?? [];
         list.push(e);
@@ -582,8 +587,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const loading = issueLoading;
 
   // Scroll to highlighted comment once timeline loads (fire only once per highlightCommentId)
+  // Guard timeline.length — non-array timeline (null/undefined) would throw
+  // when computing the dep array. Boundary normaliser already ensures array,
+  // this is the second layer (#BRY-53).
+  const timelineLength = Array.isArray(timeline) ? timeline.length : 0;
   useEffect(() => {
-    if (!highlightCommentId || timeline.length === 0) return;
+    if (!highlightCommentId || timelineLength === 0) return;
     if (didHighlightRef.current === highlightCommentId) return;
     const el = document.getElementById(`comment-${highlightCommentId}`);
     if (el) {
@@ -595,7 +604,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         return () => clearTimeout(timer);
       });
     }
-  }, [highlightCommentId, timeline.length]);
+  }, [highlightCommentId, timelineLength]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
