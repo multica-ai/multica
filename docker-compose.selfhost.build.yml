@@ -7,6 +7,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Stamp a real semver into the binary so the daemon's reported
+        # version satisfies backend feature gates (e.g. "create with agent"
+        # requires CLI >= 0.2.20). Override at build time via env, e.g.
+        #   MULTICA_VERSION=$(git describe --tags --always --dirty) \
+        #   MULTICA_COMMIT=$(git rev-parse --short HEAD) docker compose build
+        VERSION: ${MULTICA_VERSION:-v0.2.29}
+        COMMIT: ${MULTICA_COMMIT:-source}
 
   frontend:
     image: multica-web:dev
