@@ -86,7 +86,7 @@ ANNOTATION_BODY="${ANNOTATION_BODY%"${ANNOTATION_BODY##*[![:space:]]}"}"
 SHORT_SHA="${COMMIT_SHA:0:7}"
 TAG_URL="$PROJECT_URL/-/tags/$TAG"
 COMMIT_URL="$PROJECT_URL/-/commit/$COMMIT_SHA"
-SHIP_URL="https://ship.lilithgames.com"
+APP_URL="https://multica.lilithgames.com"
 
 PAYLOAD="$(jq -n \
     --arg tag "$TAG" \
@@ -95,14 +95,14 @@ PAYLOAD="$(jq -n \
     --arg short_sha "$SHORT_SHA" \
     --arg tag_url "$TAG_URL" \
     --arg commit_url "$COMMIT_URL" \
-    --arg ship_url "$SHIP_URL" \
+    --arg app_url "$APP_URL" \
 '{
     msg_type: "interactive",
     card: {
         config: {wide_screen_mode: true},
         header: {
             title: {tag: "plain_text", content: $subject},
-            subtitle: {tag: "plain_text", content: ("已上线 Ship  ·  Tag " + $tag)},
+            subtitle: {tag: "plain_text", content: ("已上线  ·  Tag " + $tag)},
             template: "blue"
         },
         elements: (
@@ -111,7 +111,7 @@ PAYLOAD="$(jq -n \
                 {
                     tag: "action",
                     actions: [
-                        {tag: "button", text: {tag: "plain_text", content: "🚀 打开 Ship"}, type: "primary", url: $ship_url}
+                        {tag: "button", text: {tag: "plain_text", content: "🚀 打开"}, type: "primary", url: $app_url}
                     ]
                 },
                 {

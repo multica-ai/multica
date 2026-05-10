@@ -63,10 +63,10 @@ func isSecureCookie() bool {
 }
 
 // sessionSameSite returns the SameSite policy for session cookies.
-// None is required so the cookie is sent when ship is embedded as an iframe
+// None is required so the cookie is sent when the app is embedded as an iframe
 // or called cross-site (e.g. Feishu Project plugin at projectplg.feishupkg.com
-// hitting ship.lilithgames.com). None requires Secure, so fall back to Lax on
-// plain-HTTP dev where Secure isn't set and browsers would reject None.
+// hitting multica.lilithgames.com). None requires Secure, so fall back to Lax
+// on plain-HTTP dev where Secure isn't set and browsers would reject None.
 func sessionSameSite(secure bool) http.SameSite {
 	if secure {
 		return http.SameSiteNoneMode

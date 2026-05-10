@@ -27,6 +27,12 @@ stages:
 
 notify-release:
   stage: notify
+  # Match the runner registered for this project. The runner has both
+  # "Run untagged jobs" enabled AND tag `multica`, but pinning the job
+  # explicitly here removes any ambiguity in the dispatch rules and
+  # survives admins flipping the runner's "untagged" flag later.
+  tags:
+    - multica
   rules:
     # Only semver release tags trigger the notification (NN.NN.NN). The
     # script also re-checks "tag must be reachable from main" and "tag must

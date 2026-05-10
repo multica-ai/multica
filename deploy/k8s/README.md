@@ -13,7 +13,7 @@ deploy/k8s/
 │   ├── migrate-job.yaml     ← runs ./migrate up once per rollout
 │   ├── server-deployment.yaml + service.yaml
 │   ├── web-deployment.yaml + service.yaml
-│   ├── ingress.yaml         ← ALB Ingress for ship.lilithgames.com
+│   ├── ingress.yaml         ← ALB Ingress for multica.lilithgames.com (+ ship 301 alias)
 │   └── kustomization.yaml
 └── overlays/
     └── prod/                ← production overlay (image tag, replicas)
@@ -24,14 +24,17 @@ deploy/k8s/
 
 1. **Install ALB Ingress Controller** in the ACK console (`Operations → Add-ons`).
    The controller reconciles the `AlbConfig` CRD and creates the ALB itself.
-2. **Upload the TLS cert** for `ship.lilithgames.com` to Aliyun SSL Certificate
-   Service and copy its id.
+2. **Upload the TLS cert** for `multica.lilithgames.com` (or a wildcard
+   `*.lilithgames.com` cert that covers it) to Aliyun SSL Certificate Service
+   and copy its id. The current cert is wildcard, so the same Secret also
+   serves the `ship.lilithgames.com` 301-redirect alias.
 3. **Edit `base/albconfig.yaml`**:
    - Paste two `vSwitchId` values in different AZs under `zoneMappings` —
      `tofu output -json vswitch_zones` lists id → zone for you.
    - Paste the SSL cert id under `listeners[].certificates[].CertificateId`.
 4. **DNS** — after `kubectl apply`, read the ALB address from the Ingress
-   status and CNAME `ship.lilithgames.com` at it:
+   status and CNAME `multica.lilithgames.com` (and `ship.lilithgames.com`
+   for the 301-redirect alias) at it:
    ```
    kubectl -n multica get ingress multica \
      -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'

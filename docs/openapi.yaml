@@ -3,7 +3,7 @@ info:
   title: Multica API
   version: "0.2.0"
   description: |
-    Multica HTTP API — as deployed at `https://ship.lilithgames.com`.
+    Multica HTTP API — as deployed at `https://multica.lilithgames.com`.
 
     Scope of this document: the subset an external integrator (e.g. a Feishu
     Project / Meego plugin) needs to create/update issues, post comments, and
@@ -29,7 +29,7 @@ info:
     Any non-2xx response is JSON `{ "error": "<reason>" }`.
 
 servers:
-  - url: https://ship.lilithgames.com
+  - url: https://multica.lilithgames.com
     description: Production (Lilith)
 
 security:
