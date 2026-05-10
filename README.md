@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| 平台入口 | https://ship.lilithgames.com |
+| 平台入口 | https://multica.lilithgames.com |
 | 产品文档 | [飞书 Ship 平台使用文档](https://lilithgames.feishu.cn/docx/K5NwdtGsYoaLhExh9JAcxE2PnTb) |
 | 上游仓库 | https://github.com/multica-ai/multica |
 
@@ -65,4 +65,4 @@ make dev    # 一键起 DB + 后端 + 前端，自动处理 worktree
 
 ## 反馈
 
-有问题、bug、改进建议：在 [Ship 平台](https://ship.lilithgames.com) 提一个 issue，或在内部飞书 Ship 群里讨论。
+有问题、bug、改进建议：在 [Ship 平台](https://multica.lilithgames.com) 提一个 issue，或在内部飞书 Ship 群里讨论。

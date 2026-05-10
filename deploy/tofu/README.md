@@ -63,7 +63,9 @@ tofu output -json vswitch_zones | jq   # pick two ids in different zones
 # Paste them into deploy/k8s/base/albconfig.yaml, alongside the SSL cert id.
 
 # DNS: after `kubectl apply`, the controller provisions the ALB; read its
-# address off the Ingress status and CNAME ship.lilithgames.com at it:
+# address off the Ingress status and CNAME multica.lilithgames.com at it
+# (ship.lilithgames.com is also CNAMEd to the same ALB and 301-redirects
+# to multica via an Ingress action):
 kubectl -n multica get ingress multica -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 ```
 
