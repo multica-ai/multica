@@ -58,9 +58,13 @@ services:
       APP_ENV: ${APP_ENV:-production}
       MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-}
       MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
-      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}                                     
-      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}                                     
-      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-} 
+      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
+      # Single-user self-host: when "true", the login flow is bypassed
+      # and every request is authenticated as an auto-created local user.
+      # Only safe on LAN / VPN-only deployments. See SELF_HOSTING.md.
+      MULTICA_SINGLE_USER: ${MULTICA_SINGLE_USER:-false}
     restart: unless-stopped
 
   frontend:

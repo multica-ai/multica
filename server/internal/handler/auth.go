@@ -251,6 +251,11 @@ func contains(slice []string, s string) bool {
 }
 
 func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
+	if auth.SingleUserMode() {
+		writeError(w, http.StatusForbidden, "login is disabled in single-user mode")
+		return
+	}
+
 	var req SendCodeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -333,6 +338,11 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
+	if auth.SingleUserMode() {
+		writeError(w, http.StatusForbidden, "login is disabled in single-user mode")
+		return
+	}
+
 	var req VerifyCodeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -444,6 +454,11 @@ type googleUserInfo struct {
 }
 
 func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
+	if auth.SingleUserMode() {
+		writeError(w, http.StatusForbidden, "login is disabled in single-user mode")
+		return
+	}
+
 	var req GoogleLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")

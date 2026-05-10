@@ -133,6 +133,16 @@ func main() {
 			slog.Warn("MULTICA_DEV_VERIFICATION_CODE is enabled. Use it only for local development or private test instances.")
 		}
 	}
+	// Single-user mode bypasses the entire login flow — every request is
+	// treated as the auto-created local user. Surface a loud warning at
+	// startup so operators are reminded the instance must not be exposed
+	// to the public internet without an external auth layer in front.
+	if v := strings.TrimSpace(os.Getenv("MULTICA_SINGLE_USER")); v != "" {
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "on":
+			slog.Warn("MULTICA_SINGLE_USER is enabled. The login flow is bypassed and every request is authenticated as the local user. Only run this on instances reachable from a trusted network (LAN / VPN).")
+		}
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {

@@ -849,6 +849,11 @@ export class ApiClient {
     cdn_domain: string;
     allow_signup: boolean;
     google_client_id?: string;
+    // single_user reflects the backend's MULTICA_SINGLE_USER env var. When
+    // true, the web app skips the login UI and treats every visitor as the
+    // auto-created local user. Optional on the wire so older backends that
+    // do not set the field are correctly interpreted as multi-user.
+    single_user?: boolean;
     posthog_key?: string;
     posthog_host?: string;
     analytics_environment?: string;

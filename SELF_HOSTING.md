@@ -69,6 +69,8 @@ Once ready:
 
 Open http://localhost:3000 in your browser. The Docker self-host stack defaults to `APP_ENV=production` (set in `docker-compose.selfhost.yml`), and there is no fixed verification code by default. Pick one of the following to log in:
 
+> **Solo self-host?** If you are the only human ever going to use this instance and it sits on a trusted LAN / VPN, set `MULTICA_SINGLE_USER=true` in `.env` to skip the login flow entirely. See [Single-user mode](#single-user-mode-bypass-login) below.
+
 - **Recommended (production):** configure `RESEND_API_KEY` in `.env`, then restart the backend. Real verification codes will be sent to the email address you enter. See [Advanced Configuration → Email](SELF_HOSTING_ADVANCED.md#email-required-for-authentication).
 - **Without email configured:** the verification code is generated server-side and printed to the backend container logs (look for `[DEV] Verification code for ...:`). Useful for one-off testing on a single machine.
 - **Deterministic local/private testing:** set `APP_ENV=development` and `MULTICA_DEV_VERIFICATION_CODE=888888` in `.env`, then restart the backend. This fixed code is ignored when `APP_ENV=production`.
@@ -134,6 +136,33 @@ multica daemon status
 2. Navigate to **Settings → Runtimes** — you should see your machine listed
 3. Go to **Settings → Agents** and create a new agent
 4. Create an issue and assign it to your agent — it will pick up the task automatically
+
+## Single-user mode (bypass login)
+
+A solo self-host typically has one human plus a few AI agents — there is never a second user. In that case the email-verification login flow is friction without payoff. Set `MULTICA_SINGLE_USER=true` in `.env` and visiting `http://localhost:3000/` lands directly on the dashboard, signed in as an auto-created `local@multica.local` user.
+
+```bash
+# .env
+MULTICA_SINGLE_USER=true
+```
+
+What changes when this is on:
+
+- The backend `Auth` middleware bypasses JWT/PAT validation and treats every request as the local user. The user is created on first request if it does not already exist.
+- The web app hides the marketing landing page, the Login form, and the "Download Desktop" CTA. `/` redirects straight to `/onboarding` (first run) or your last workspace.
+- `POST /auth/send-code`, `POST /auth/verify-code`, and `POST /auth/google` return 403 — there is nothing to log into.
+
+> **Security warning — required reading.** Single-user mode disables authentication. Anyone who can reach the frontend or backend ports has full access. **Only enable this on instances reachable from a trusted network** (LAN, VPN, Tailscale). If you must expose the instance publicly, put an external auth layer (Cloudflare Access, Tailscale Funnel + ACL, basic-auth proxy, …) in front of BOTH the frontend (`:3000`) and backend (`:8080`) — both are accessed by the browser.
+
+> **Build path.** The single-user codepath is not yet published to the upstream `ghcr.io/multica-ai/multica-{backend,web}:latest` images. To pick it up, run the build variant of the compose stack:
+>
+> ```bash
+> docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
+> ```
+>
+> or, equivalently, `make selfhost-build`. Toggling `MULTICA_SINGLE_USER` against the pulled `:latest` images is a no-op.
+
+To turn it off, unset the var (or set `MULTICA_SINGLE_USER=false`) and restart the backend. Existing data is unaffected — the `local@multica.local` user remains in the database but is not auto-attached to incoming requests anymore, so you must log in via email or Google as normal.
 
 ## Stopping Services
 

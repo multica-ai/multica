@@ -4,6 +4,7 @@ import Link from "next/link";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
+import { useConfigStore } from "@multica/core/config";
 import { useLocale } from "../i18n";
 import { GitHubMark, githubUrl, headerButtonClassName } from "./shared";
 
@@ -14,6 +15,9 @@ export function LandingHeader({
 }) {
   const { t } = useLocale();
   const user = useAuthStore((s) => s.user);
+  // Single-user self-host: no login UI to surface — every visitor IS the
+  // user. The CTA in the header would be a dead link, so hide it.
+  const singleUser = useConfigStore((s) => s.singleUser);
 
   return (
     <header
@@ -62,12 +66,14 @@ export function LandingHeader({
             <GitHubMark className="size-3.5" />
             {t.header.github}
           </Link>
-          <Link
-            href={user ? "/" : "/login"}
-            className={headerButtonClassName("solid", variant)}
-          >
-            {user ? t.header.dashboard : t.header.login}
-          </Link>
+          {!singleUser && (
+            <Link
+              href={user ? "/" : "/login"}
+              className={headerButtonClassName("solid", variant)}
+            >
+              {user ? t.header.dashboard : t.header.login}
+            </Link>
+          )}
         </div>
       </div>
     </header>

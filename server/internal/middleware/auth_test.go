@@ -60,6 +60,54 @@ func authMiddleware(next http.Handler) http.Handler {
 	return Auth(nil, nil)(next)
 }
 
+// TestAuth_SingleUserBypassEntered verifies the single-user fast path is
+// entered when MULTICA_SINGLE_USER=true: even with no Authorization header
+// the middleware does NOT return 401. With nil queries the auto-create path
+// fails with 500 — that is the right shape (500 instead of 401) and proves
+// the JWT branch was skipped. Full happy-path coverage of EnsureSingleUser
+// requires a Postgres-backed test which lives in handler/.
+func TestAuth_SingleUserBypassEntered(t *testing.T) {
+	t.Setenv("MULTICA_SINGLE_USER", "true")
+	auth.ResetSingleUserCacheForTesting()
+
+	handler := authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not be called when EnsureSingleUser fails")
+	}))
+
+	req := httptest.NewRequest("GET", "/api/me", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// 500 (not 401) proves we entered the single-user branch and tried to
+	// resolve the local user — the JWT/PAT branch would have returned 401.
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 (EnsureSingleUser failure with nil queries), got %d", w.Code)
+	}
+	if body := w.Body.String(); body != `{"error":"single-user setup failed"}`+"\n" {
+		t.Fatalf("unexpected body: %s", body)
+	}
+}
+
+// TestAuth_SingleUserDisabledKeepsJWTPath confirms that with MULTICA_SINGLE_USER
+// unset the legacy 401-on-missing-token behavior is preserved. This is the
+// regression check for the "default safe" requirement on the fork PR.
+func TestAuth_SingleUserDisabledKeepsJWTPath(t *testing.T) {
+	t.Setenv("MULTICA_SINGLE_USER", "")
+	auth.ResetSingleUserCacheForTesting()
+
+	handler := authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not be called without a valid token")
+	}))
+
+	req := httptest.NewRequest("GET", "/api/me", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 with single-user disabled, got %d", w.Code)
+	}
+}
+
 func TestAuth_MissingHeader(t *testing.T) {
 	handler := authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next handler should not be called")

@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/auth"
 )
 
 type AppConfig struct {
@@ -14,6 +15,10 @@ type AppConfig struct {
 	// toggle signup or wire Google OAuth.
 	AllowSignup    bool   `json:"allow_signup"`
 	GoogleClientID string `json:"google_client_id,omitempty"`
+	// SingleUser is true when MULTICA_SINGLE_USER is enabled. The web app
+	// uses this to skip the login UI and treat every visitor as the local
+	// user. See SELF_HOSTING.md for the security caveat.
+	SingleUser bool `json:"single_user"`
 
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
@@ -33,6 +38,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config := AppConfig{
 		AllowSignup:    os.Getenv("ALLOW_SIGNUP") != "false",
 		GoogleClientID: os.Getenv("GOOGLE_CLIENT_ID"),
+		SingleUser:     auth.SingleUserMode(),
 	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()

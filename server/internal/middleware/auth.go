@@ -30,6 +30,25 @@ func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 func Auth(queries *db.Queries, patCache *auth.PATCache) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Single-user mode: bypass JWT/PAT validation entirely and treat
+			// every request as authenticated as the auto-created local user.
+			// The user is created on first hit so a fresh self-host with
+			// MULTICA_SINGLE_USER=true works with zero setup. SECURITY: this
+			// MUST only be enabled on instances reachable from a trusted
+			// network (LAN / VPN). See SELF_HOSTING.md.
+			if auth.SingleUserMode() {
+				userID, err := auth.EnsureSingleUser(r.Context(), queries)
+				if err != nil {
+					slog.Error("single-user mode: failed to resolve local user", "path", r.URL.Path, "error", err)
+					http.Error(w, `{"error":"single-user setup failed"}`, http.StatusInternalServerError)
+					return
+				}
+				r.Header.Set("X-User-ID", userID)
+				r.Header.Set("X-User-Email", auth.SingleUserEmail)
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
 				slog.Debug("auth: no token found", "path", r.URL.Path)

@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Download } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
+import { useConfigStore } from "@multica/core/config";
 import { captureDownloadIntent } from "@multica/core/analytics";
 import { useLocale } from "../i18n";
 import {
@@ -18,6 +19,11 @@ import {
 export function LandingHero() {
   const { t } = useLocale();
   const user = useAuthStore((s) => s.user);
+  // In single-user self-host the desktop app is irrelevant (no separate
+  // login flow to plug into) and the marketing landing page is hidden by
+  // RedirectIfAuthenticated anyway. Drop the Download CTA so it never
+  // briefly flashes during the redirect.
+  const singleUser = useConfigStore((s) => s.singleUser);
 
   return (
     <div className="relative min-h-full overflow-hidden bg-[#05070b] text-white">
@@ -40,17 +46,22 @@ export function LandingHero() {
             </p>
 
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-              <Link href={user ? "/" : "/login"} className={heroButtonClassName("solid")}>
-                {user ? t.header.dashboard : t.hero.cta}
-              </Link>
               <Link
-                href="/download"
-                className={heroButtonClassName("ghost")}
-                onClick={() => captureDownloadIntent("landing_hero")}
+                href={user || singleUser ? "/" : "/login"}
+                className={heroButtonClassName("solid")}
               >
-                <Download className="size-4" aria-hidden />
-                {t.hero.downloadDesktop}
+                {user || singleUser ? t.header.dashboard : t.hero.cta}
               </Link>
+              {!singleUser && (
+                <Link
+                  href="/download"
+                  className={heroButtonClassName("ghost")}
+                  onClick={() => captureDownloadIntent("landing_hero")}
+                >
+                  <Download className="size-4" aria-hidden />
+                  {t.hero.downloadDesktop}
+                </Link>
+              )}
             </div>
           </div>
 

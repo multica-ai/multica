@@ -59,6 +59,10 @@ function LoginPageContent() {
   const qc = useQueryClient();
   const { t } = useT("auth");
   const googleClientId = useConfigStore((state) => state.googleClientId);
+  // In single-user self-host the login page is unreachable in the UI but a
+  // direct navigation (bookmark, deep link) should not show a dead form.
+  // Bounce to root so the landing page's redirect-if-authenticated fires.
+  const singleUser = useConfigStore((s) => s.singleUser);
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
@@ -77,6 +81,11 @@ function LoginPageContent() {
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
   const [desktopError, setDesktopError] = useState("");
   const hasOnboarded = useHasOnboarded();
+
+  // Single-user mode: hard-bounce to root before any state matters.
+  useEffect(() => {
+    if (singleUser) router.replace("/");
+  }, [singleUser, router]);
 
   // Already authenticated — honor ?next= or fall back to first workspace
   // (or /onboarding if the user has none). Skip this entire path when
