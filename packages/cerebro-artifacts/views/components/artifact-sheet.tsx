@@ -33,7 +33,7 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { ArtifactBody } from "./artifact-body";
+import { ArtifactContent } from "./artifact-content";
 import { KindIcon, KIND_LABELS } from "./kind-icon";
 import { MoveScopeMenu } from "./move-scope-menu";
 
@@ -110,7 +110,7 @@ export function ArtifactSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-2xl">
+      <SheetContent className="w-[96vw] sm:max-w-[96vw] lg:max-w-6xl xl:max-w-7xl">
         {isLoading || !artifact ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             Loading…
@@ -155,12 +155,11 @@ export function ArtifactSheet({
                   placeholder="Markdown body"
                   className="min-h-[400px] font-mono text-sm"
                 />
-              ) : artifact.body ? (
-                <div className="prose prose-sm max-w-none dark:prose-invert">
-                  <ArtifactBody body={artifact.body} />
-                </div>
               ) : (
-                <p className="text-sm text-muted-foreground">No body.</p>
+                <ArtifactContent
+                  artifact={artifact}
+                  frameClassName="h-[calc(100vh-14rem)] min-h-[520px]"
+                />
               )}
             </div>
 

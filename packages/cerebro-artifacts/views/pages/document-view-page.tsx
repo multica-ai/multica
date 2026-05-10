@@ -29,10 +29,9 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
-import { ArtifactBody } from "../components/artifact-body";
+import { ArtifactContent } from "../components/artifact-content";
 import { KindIcon, KIND_LABELS } from "../components/kind-icon";
 import { MoveScopeMenu } from "../components/move-scope-menu";
-import { sanitizeHtml } from "../utils/sanitize-html";
 
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
@@ -44,47 +43,6 @@ function formatDateTime(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function normalizeTitle(s: string): string {
-  return s.replace(/\s+/g, " ").trim().toLowerCase();
-}
-
-// Agents sometimes save HTML artifacts as a full <!DOCTYPE html> document
-// (with their own <style>), and inlining that via dangerouslySetInnerHTML
-// leaks the body styles into the host app — that's the "looks weird" we
-// see in JEH-285. Detect full-document bodies and isolate them in an iframe.
-function isFullHtmlDocument(body: string): boolean {
-  const head = body.slice(0, 256).toLowerCase();
-  return head.includes("<!doctype html") || /<html[\s>]/.test(head);
-}
-
-// Authors (humans and agents) often repeat the document title as a leading
-// H1 inside the body. Strip it so the page H1 isn't shown twice. Only
-// applies to inline-rendered bodies (markdown / HTML snippets); full HTML
-// documents render in an iframe so a duplicate H1 there is benign.
-function stripLeadingTitleHeading(body: string, title: string, format: string): string {
-  if (!body || !title) return body;
-  const want = normalizeTitle(title);
-  if (format === "html") {
-    const m = body.match(/^\s*<h1[^>]*>([\s\S]*?)<\/h1>\s*/i);
-    if (m && normalizeTitle((m[1] ?? "").replace(/<[^>]+>/g, "")) === want) {
-      return body.slice(m[0].length);
-    }
-    return body;
-  }
-  // markdown (and md-like default)
-  const m = body.match(/^\s*#\s+([^\n]+)\n+/);
-  if (m && normalizeTitle(m[1] ?? "") === want) {
-    return body.slice(m[0].length);
-  }
-  return body;
 }
 
 function slugifyForFilename(title: string): string {
@@ -273,12 +231,6 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
     setTitleDraft(artifact.title);
   };
 
-  const renderedBody = stripLeadingTitleHeading(
-    artifact.body ?? "",
-    artifact.title,
-    artifact.format,
-  );
-
   const handleDownload = () => {
     const slug = slugifyForFilename(artifact.title);
     if (artifact.format === "pdf") {
@@ -389,49 +341,7 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
       </p>
 
       <div className="mt-6">
-        {artifact.format === "pdf" && artifact.file_url ? (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between rounded border border-border bg-card/40 px-3 py-2 text-xs text-muted-foreground">
-              <span>
-                PDF
-                {artifact.file_size_bytes
-                  ? ` · ${formatBytes(artifact.file_size_bytes)}`
-                  : ""}
-              </span>
-            </div>
-            <iframe
-              src={artifact.file_url}
-              title={artifact.title}
-              className="h-[80vh] w-full rounded border border-border bg-white"
-            />
-          </div>
-        ) : artifact.format === "html" ? (
-          isFullHtmlDocument(renderedBody) ? (
-            // Sandboxed iframe isolates the document's CSS from the app shell
-            // and blocks scripts — agents can write HTML, so this is the
-            // trust boundary.
-            <iframe
-              srcDoc={renderedBody}
-              sandbox=""
-              title={artifact.title}
-              className="h-[80vh] w-full rounded border border-border bg-white"
-            />
-          ) : (
-            <div
-              className="prose prose-sm max-w-none dark:prose-invert"
-              // Agents can author HTML artifacts — sanitize before inline
-              // injection to strip scripts, on*-handlers, and javascript:/data:
-              // URIs. Full <!DOCTYPE> docs take the iframe path above.
-              dangerouslySetInnerHTML={{ __html: sanitizeHtml(renderedBody) }}
-            />
-          )
-        ) : renderedBody ? (
-          <div className="prose prose-sm max-w-none dark:prose-invert">
-            <ArtifactBody body={renderedBody} />
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">No content.</p>
-        )}
+        <ArtifactContent artifact={artifact} />
       </div>
 
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
