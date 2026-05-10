@@ -900,9 +900,13 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                       ) : (
                         <span className="font-medium text-foreground">{label}</span>
                       )}
-                      <span className="ml-auto tabular-nums">
-                        {formatRelativeShort(event.created_at)}
-                      </span>
+                      <time
+                        dateTime={event.created_at}
+                        title={`${new Date(event.created_at).toLocaleString()} (${formatRelativeShort(event.created_at)} ago)`}
+                        className="ml-auto whitespace-nowrap tabular-nums"
+                      >
+                        {formatAbsoluteShort(event.created_at)}
+                      </time>
                     </li>
                   );
                 })}
@@ -1921,6 +1925,30 @@ function formatRelativeShort(iso: string): string {
   if (hr < 24) return `${hr}h`;
   const day = Math.floor(hr / 24);
   return `${day}d`;
+}
+
+/** Compact absolute timestamp for the timeline. Drops the year when the
+ *  event is in the current year (the common case — release timelines
+ *  don't span years), and renders "May 9, 3:42 PM" style.
+ *
+ *  Used in the event timeline where users want to know "what time did
+ *  staging deploy land" without doing relative-to-absolute math from
+ *  "17h ago". The relative form is preserved as a hover tooltip via
+ *  the `title` attribute on the <time> element so both views are one
+ *  cursor-hover apart. */
+function formatAbsoluteShort(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return "";
+  const now = new Date();
+  const sameYear = d.getFullYear() === now.getFullYear();
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: sameYear ? undefined : "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 /** checkStartMergePreconditions returns a list of human-readable

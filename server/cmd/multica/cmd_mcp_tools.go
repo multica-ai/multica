@@ -39,6 +39,7 @@ func RegisterAllMCPTools(srv *server.MCPServer, c *cli.APIClient) {
 	registerLabelTools(srv, c)
 	registerAutopilotTools(srv, c)
 	registerWorkspaceTools(srv, c)
+	registerShipHubTools(srv, c)
 }
 
 // ---------------------------------------------------------------------------
@@ -1214,6 +1215,795 @@ func registerWorkspaceTools(srv *server.MCPServer, c *cli.APIClient) {
 			}
 			var out json.RawMessage
 			if err := c.GetJSON(ctx, "/api/workspaces/"+c.WorkspaceID+"/members", &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+}
+
+// ---------------------------------------------------------------------------
+// Ship Hub — release coordination, PR triage, deploy logging. The surface
+// mirrors the dashboard the user already drives in the browser, so an LLM
+// running in Claude Code can answer "what should I merge?" and "what's
+// blocking this release?" without copy-pasting into the chat.
+//
+// Read tools are safe for the model to call freely. Write tools mutate
+// real GitHub state (merges, comments) or kick off CI workflows; they're
+// gated behind the workspace token the user has already trusted to
+// `multica mcp-stdio`. The PR-action tools intentionally expose only the
+// subset that's actually useful for AI-assisted shipping — destructive
+// chip endpoints like dismiss_review or run_smoke_tests stay UI-only.
+// ---------------------------------------------------------------------------
+
+var prStateEnum = []string{"open", "closed", "merged", "all"}
+var releaseStatusEnum = []string{"active", "all"}
+var mergeMethodEnum = []string{"merge", "squash", "rebase"}
+var deployStatusEnum = []string{"succeeded", "failed", "in_progress", "pending", "rolled_back"}
+var reviewEventEnum = []string{"APPROVE", "REQUEST_CHANGES", "COMMENT"}
+
+func registerShipHubTools(srv *server.MCPServer, c *cli.APIClient) {
+	registerShipHubReadTools(srv, c)
+	registerShipHubReleaseWriteTools(srv, c)
+	registerShipHubDeployAndReviewTools(srv, c)
+	registerShipHubPRActionTools(srv, c)
+}
+
+// ----- read tools -----------------------------------------------------------
+
+func registerShipHubReadTools(srv *server.MCPServer, c *cli.APIClient) {
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_list_projects",
+			mcp.WithDescription("List Ship Hub projects in the active workspace — projects that have an attached github_repo resource. Returns id, title, icon, open_pr_count, env_count for each. Use this first to find the project_id you need for downstream calls."),
+		),
+		toolHandler(func(ctx context.Context, _ mcp.CallToolRequest) (any, error) {
+			var out json.RawMessage
+			if err := c.GetJSON(ctx, "/api/ship/projects", &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_list_pull_requests",
+			mcp.WithDescription("List cached pull requests for a project, decorated with active_release when the PR is in a release. Default state is 'open'. The cache is refreshed by multica_ship_sync_project; use that first if you suspect the data is stale."),
+			mcp.WithString("project_id", mcp.Required(), mcp.Description("Ship Hub project UUID — find via multica_ship_list_projects.")),
+			mcp.WithString("state", mcp.Description("Filter by PR state. Default 'open'."), mcp.Enum(prStateEnum...)),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			projectID, errResult := requireString(req, "project_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			path := "/api/projects/" + url.PathEscape(projectID) + "/pull_requests" + queryString(
+				[2]string{"state", argString(req, "state")},
+			)
+			var out json.RawMessage
+			if err := c.GetJSON(ctx, path, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_get_pull_request",
+			mcp.WithDescription("Fetch the full PR detail bundle: PR row + linked Multica issue + originating agent task + active release + reviews + checks + recent_actions + stack relations. This is the one-call answer to 'tell me everything about PR X' — prefer it over chaining list calls."),
+			mcp.WithString("pull_request_id", mcp.Required(), mcp.Description("Pull request UUID (Multica id, not the GitHub PR number).")),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			prID, errResult := requireString(req, "pull_request_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			var out json.RawMessage
+			if err := c.GetJSON(ctx, "/api/pull_requests/"+url.PathEscape(prID)+"/details", &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_list_releases",
+			mcp.WithDescription("List releases for a project. Default scope is 'active' (anything not yet done/cancelled). Pass status='all' to include historical releases — useful for postmortems."),
+			mcp.WithString("project_id", mcp.Required()),
+			mcp.WithString("status", mcp.Description("Default 'active'."), mcp.Enum(releaseStatusEnum...)),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			projectID, errResult := requireString(req, "project_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			path := "/api/projects/" + url.PathEscape(projectID) + "/releases" + queryString(
+				[2]string{"status", argString(req, "status")},
+			)
+			var out json.RawMessage
+			if err := c.GetJSON(ctx, path, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_list_active_releases",
+			mcp.WithDescription("List every active (in-flight) release across all projects in the active workspace — the 'release radar'. Use this to answer 'what is currently shipping?' without iterating per-project."),
+		),
+		toolHandler(func(ctx context.Context, _ mcp.CallToolRequest) (any, error) {
+			if c.WorkspaceID == "" {
+				return nil, fmt.Errorf("no active workspace — set MULTICA_WORKSPACE_ID or run `multica config set workspace_id <id>`")
+			}
+			var out json.RawMessage
+			if err := c.GetJSON(ctx, "/api/workspaces/"+c.WorkspaceID+"/releases/active", &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_get_release",
+			mcp.WithDescription("Fetch a single release by id: stage, signoffs, attached PRs, event timeline, linked deploys. Use after multica_ship_list_active_releases when the user asks 'what's the status of release X?'"),
+			mcp.WithString("release_id", mcp.Required()),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			id, errResult := requireString(req, "release_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			var out json.RawMessage
+			if err := c.GetJSON(ctx, "/api/releases/"+url.PathEscape(id), &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_get_release_health",
+			mcp.WithDescription("Return the post-promote health snapshot for a release: production deploy status, error rate, smoke test outcomes. Use to answer 'is the release healthy?' once it's in production."),
+			mcp.WithString("release_id", mcp.Required()),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			id, errResult := requireString(req, "release_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			var out json.RawMessage
+			if err := c.GetJSON(ctx, "/api/releases/"+url.PathEscape(id)+"/health", &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_get_release_merge_state",
+			mcp.WithDescription("Return the merge-train state for a release: per-PR merge_state (queued / merging / merged / failed / skipped), the train's current status, and any blocking conditions. Poll this after multica_ship_start_merge_train to watch progress."),
+			mcp.WithString("release_id", mcp.Required()),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			id, errResult := requireString(req, "release_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			var out json.RawMessage
+			if err := c.GetJSON(ctx, "/api/releases/"+url.PathEscape(id)+"/merge_state", &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_list_deploy_environments",
+			mcp.WithDescription("List the configured deploy environments (staging/production) for a project, with current_sha and current_deployed_at so you can answer 'what's running on production?' in one call."),
+			mcp.WithString("project_id", mcp.Required()),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			projectID, errResult := requireString(req, "project_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			var out json.RawMessage
+			if err := c.GetJSON(ctx, "/api/projects/"+url.PathEscape(projectID)+"/deploy_environments", &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_list_deploys",
+			mcp.WithDescription("Return the most recent deploys for a deploy environment, newest first. Default limit 20, max 200. Use to find a recent failed deploy before recommending a rollback."),
+			mcp.WithString("environment_id", mcp.Required()),
+			mcp.WithNumber("limit", mcp.Description("Default 20; cap 200.")),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			envID, errResult := requireString(req, "environment_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			limit, hasLim := argInt(req, "limit")
+			path := "/api/deploy_environments/" + url.PathEscape(envID) + "/deploys" + queryString(
+				[2]string{"limit", intStr(limit, hasLim)},
+			)
+			var out json.RawMessage
+			if err := c.GetJSON(ctx, path, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_workspace_summary",
+			mcp.WithDescription("Aggregate Ship Hub metrics for the active workspace: open PR count, active release count, environments-out-of-date count. Use this once at the start of a session to orient before drilling into a specific project."),
+		),
+		toolHandler(func(ctx context.Context, _ mcp.CallToolRequest) (any, error) {
+			var out json.RawMessage
+			if err := c.GetJSON(ctx, "/api/ship_hub/summary", &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_get_snapshot",
+			mcp.WithDescription("Time-machine snapshot of a project's ship state at a specific instant — the closest the data model has to 'replay this release'. Useful for postmortems: what was on production when X failed?"),
+			mcp.WithString("project_id", mcp.Required()),
+			mcp.WithString("at", mcp.Required(), mcp.Description("RFC3339 timestamp, e.g. 2026-01-15T14:30:00Z.")),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			projectID, errResult := requireString(req, "project_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			at, errResult := requireString(req, "at")
+			if errResult != nil {
+				return errResult, nil
+			}
+			path := "/api/projects/" + url.PathEscape(projectID) + "/ship_snapshot" + queryString(
+				[2]string{"at", at},
+			)
+			var out json.RawMessage
+			if err := c.GetJSON(ctx, path, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+}
+
+// ----- release write tools --------------------------------------------------
+
+func registerShipHubReleaseWriteTools(srv *server.MCPServer, c *cli.APIClient) {
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_sync_project",
+			mcp.WithDescription("Refresh the cached PR list for a project from GitHub. Returns the SyncResult diff (created/updated/closed counts). Run this before listing PRs if the workspace was idle for a while or if a webhook may have been missed."),
+			mcp.WithString("project_id", mcp.Required()),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			projectID, errResult := requireString(req, "project_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/projects/"+url.PathEscape(projectID)+"/pull_requests/sync", map[string]any{}, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_create_release",
+			mcp.WithDescription("Create a release: bundle multiple pull requests for coordinated rollout through staging → production. Use AFTER multica_ship_list_pull_requests has surfaced eligible PRs and you've reasoned about which ones should ship together. Returns the new release id + auto-created channel + tracking issue. The release lands in 'assembling' stage; call multica_ship_start_merge_train to begin merging."),
+			mcp.WithString("project_id", mcp.Required()),
+			mcp.WithString("title", mcp.Required(), mcp.Description("Human-readable release name, shown in the release radar.")),
+			mcp.WithString("description"),
+			mcp.WithArray("pull_request_ids", mcp.Required(), mcp.Description("Non-empty array of PR UUIDs to attach. Order is preserved as the merge order.")),
+			mcp.WithString("approver_id", mcp.Description("Optional member id who must sign off before promote.")),
+			mcp.WithString("second_approver_id", mcp.Description("Optional second sign-off (two-person rule).")),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			projectID, errResult := requireString(req, "project_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			title, errResult := requireString(req, "title")
+			if errResult != nil {
+				return errResult, nil
+			}
+			prIDs := argStringSlice(req, "pull_request_ids")
+			if len(prIDs) == 0 {
+				return mcp.NewToolResultError("pull_request_ids must be a non-empty array of PR UUIDs"), nil
+			}
+			body := map[string]any{
+				"title":            title,
+				"description":      argString(req, "description"),
+				"pull_request_ids": prIDs,
+			}
+			if v := argString(req, "approver_id"); v != "" {
+				body["approver_id"] = v
+			}
+			if v := argString(req, "second_approver_id"); v != "" {
+				body["second_approver_id"] = v
+			}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/projects/"+url.PathEscape(projectID)+"/releases", body, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_add_pr_to_release",
+			mcp.WithDescription("Attach a pull request to an in-flight release. Only allowed while the release is in 'assembling' stage; once the merge train starts, the membership is frozen."),
+			mcp.WithString("release_id", mcp.Required()),
+			mcp.WithString("pull_request_id", mcp.Required()),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			releaseID, errResult := requireString(req, "release_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			prID, errResult := requireString(req, "pull_request_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			body := map[string]any{"pull_request_id": prID}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/releases/"+url.PathEscape(releaseID)+"/pull_requests", body, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_remove_pr_from_release",
+			mcp.WithDescription("Detach a pull request from a release. Like add, only valid in 'assembling' stage."),
+			mcp.WithString("release_id", mcp.Required()),
+			mcp.WithString("pull_request_id", mcp.Required()),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			releaseID, errResult := requireString(req, "release_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			prID, errResult := requireString(req, "pull_request_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			path := "/api/releases/" + url.PathEscape(releaseID) + "/pull_requests/" + url.PathEscape(prID)
+			if err := c.DeleteJSON(ctx, path); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_cancel_release",
+			mcp.WithDescription("Cancel a release that hasn't started merging. Posts the reason to the release channel and closes the tracking issue. Once the merge train has begun, use multica_ship_abort_merge_train instead."),
+			mcp.WithString("release_id", mcp.Required()),
+			mcp.WithString("reason"),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			releaseID, errResult := requireString(req, "release_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			body := map[string]any{"reason": argString(req, "reason")}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/releases/"+url.PathEscape(releaseID)+"/cancel", body, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_start_merge_train",
+			mcp.WithDescription("Kick off the merge train for an assembled release. Each attached PR is merged in order; failures pause the train. Returns 202 Accepted; poll multica_ship_get_release_merge_state for progress."),
+			mcp.WithString("release_id", mcp.Required()),
+			mcp.WithString("merge_method", mcp.Description("Default 'merge'."), mcp.Enum(mergeMethodEnum...)),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			releaseID, errResult := requireString(req, "release_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			body := map[string]any{}
+			if v := argString(req, "merge_method"); v != "" {
+				body["merge_method"] = v
+			}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/releases/"+url.PathEscape(releaseID)+"/start_merge", body, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_resume_merge_train",
+			mcp.WithDescription("Resume a paused merge train (e.g. after fixing a failed PR or deciding to skip it). skip_pr_ids lists PR membership rows to mark 'skipped' before resuming — the train moves on without merging them."),
+			mcp.WithString("release_id", mcp.Required()),
+			mcp.WithArray("skip_pr_ids", mcp.Description("Optional array of PR UUIDs to drop from the train.")),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			releaseID, errResult := requireString(req, "release_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			body := map[string]any{"skip_pr_ids": argStringSlice(req, "skip_pr_ids")}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/releases/"+url.PathEscape(releaseID)+"/resume_merge", body, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_abort_merge_train",
+			mcp.WithDescription("Abort an in-flight merge train. Already-merged PRs stay merged; remaining ones are abandoned. Reason is posted to the release channel for the audit trail."),
+			mcp.WithString("release_id", mcp.Required()),
+			mcp.WithString("reason"),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			releaseID, errResult := requireString(req, "release_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			body := map[string]any{"reason": argString(req, "reason")}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/releases/"+url.PathEscape(releaseID)+"/abort_merge", body, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_mark_release_verified",
+			mcp.WithDescription("Manually mark a release as verified on staging — the human-in-the-loop gate before promote. Note is recorded on the release event timeline."),
+			mcp.WithString("release_id", mcp.Required()),
+			mcp.WithString("note"),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			releaseID, errResult := requireString(req, "release_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			body := map[string]any{"note": argString(req, "note")}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/releases/"+url.PathEscape(releaseID)+"/mark_verified", body, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_unverify_release",
+			mcp.WithDescription("Reverse a verified mark — used when a problem is found between verify and promote. Reason is required for the audit row."),
+			mcp.WithString("release_id", mcp.Required()),
+			mcp.WithString("reason", mcp.Required()),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			releaseID, errResult := requireString(req, "release_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			reason, errResult := requireString(req, "reason")
+			if errResult != nil {
+				return errResult, nil
+			}
+			body := map[string]any{"reason": reason}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/releases/"+url.PathEscape(releaseID)+"/unverify", body, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_promote_release",
+			mcp.WithDescription("Promote a verified release to production. The release flips to 'promoting' and the user's CI/CD takes over; multica_ship_mark_production_deployed is the manual escape hatch when no deployment_status webhook fires. rollback_plan is captured at click time for the audit trail."),
+			mcp.WithString("release_id", mcp.Required()),
+			mcp.WithString("rollback_plan", mcp.Description("Free-text rollback procedure recorded with the promote action.")),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			releaseID, errResult := requireString(req, "release_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			body := map[string]any{"rollback_plan": argString(req, "rollback_plan")}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/releases/"+url.PathEscape(releaseID)+"/promote", body, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_mark_production_deployed",
+			mcp.WithDescription("Manual escape hatch to advance a 'promoting' release into 'in_production'. Use only when the deployment_status webhook didn't fire (e.g. the user's CI provider doesn't support GitHub deployments)."),
+			mcp.WithString("release_id", mcp.Required()),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			releaseID, errResult := requireString(req, "release_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/releases/"+url.PathEscape(releaseID)+"/mark_production_deployed", map[string]any{}, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_rollback_release",
+			mcp.WithDescription("Mark a release as rolled back. Use after an incident — reason is REQUIRED and is echoed in the release channel + audit log. Does not itself revert any code; that's a separate manual operation."),
+			mcp.WithString("release_id", mcp.Required()),
+			mcp.WithString("reason", mcp.Required()),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			releaseID, errResult := requireString(req, "release_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			reason, errResult := requireString(req, "reason")
+			if errResult != nil {
+				return errResult, nil
+			}
+			body := map[string]any{"reason": reason}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/releases/"+url.PathEscape(releaseID)+"/rollback", body, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_mark_release_done",
+			mcp.WithDescription("Mark a healthy release as 'done' — closes the tracking issue and removes it from the active radar. Call this once production has soaked and you're satisfied."),
+			mcp.WithString("release_id", mcp.Required()),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			releaseID, errResult := requireString(req, "release_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/releases/"+url.PathEscape(releaseID)+"/mark_done", map[string]any{}, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+}
+
+// ----- deploy + review tools ------------------------------------------------
+
+func registerShipHubDeployAndReviewTools(srv *server.MCPServer, c *cli.APIClient) {
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_log_deploy",
+			mcp.WithDescription("Manually record a deploy event on an environment — use when the deploy happened outside Multica (Vercel CLI, GitHub Actions, k8s rollout) and the webhook didn't fire. A 'succeeded' status updates the environment's current_sha and triggers release-staging linkage when applicable."),
+			mcp.WithString("environment_id", mcp.Required()),
+			mcp.WithString("sha", mcp.Required(), mcp.Description("The git commit SHA that was deployed.")),
+			mcp.WithString("status", mcp.Required(), mcp.Enum(deployStatusEnum...)),
+			mcp.WithString("ref", mcp.Description("Optional git ref (branch/tag); defaults to the environment's target_branch.")),
+			mcp.WithString("log_url", mcp.Description("Optional URL pointing at the build/deploy log.")),
+			mcp.WithString("error_message", mcp.Description("Optional failure message; only meaningful when status is 'failed'.")),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			envID, errResult := requireString(req, "environment_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			sha, errResult := requireString(req, "sha")
+			if errResult != nil {
+				return errResult, nil
+			}
+			status, errResult := requireString(req, "status")
+			if errResult != nil {
+				return errResult, nil
+			}
+			body := map[string]any{
+				"sha":    sha,
+				"status": status,
+			}
+			if v := argString(req, "ref"); v != "" {
+				body["ref"] = v
+			}
+			if v := argString(req, "log_url"); v != "" {
+				body["log_url"] = v
+			}
+			if v := argString(req, "error_message"); v != "" {
+				body["error_message"] = v
+			}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/deploy_environments/"+url.PathEscape(envID)+"/deploys", body, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_submit_pr_review",
+			mcp.WithDescription("Submit a GitHub PR review (APPROVE / REQUEST_CHANGES / COMMENT) without leaving Multica. Body is optional for APPROVE but recommended for REQUEST_CHANGES. The review attribution is the workspace user behind the MCP token, not an agent."),
+			mcp.WithString("pull_request_id", mcp.Required()),
+			mcp.WithString("event", mcp.Required(), mcp.Enum(reviewEventEnum...)),
+			mcp.WithString("body", mcp.Description("Review comment text, markdown supported.")),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			prID, errResult := requireString(req, "pull_request_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			event, errResult := requireString(req, "event")
+			if errResult != nil {
+				return errResult, nil
+			}
+			body := map[string]any{
+				"event": event,
+				"body":  argString(req, "body"),
+			}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/pull_requests/"+url.PathEscape(prID)+"/review", body, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+}
+
+// ----- PR action tools ------------------------------------------------------
+
+func registerShipHubPRActionTools(srv *server.MCPServer, c *cli.APIClient) {
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_merge_pr",
+			mcp.WithDescription("Merge a pull request via GitHub's merge API. Destructive — requires owner/admin role. Default method is 'merge' (creates a merge commit); use 'squash' to flatten the branch history or 'rebase' for a linear history."),
+			mcp.WithString("pull_request_id", mcp.Required()),
+			mcp.WithString("method", mcp.Description("Default 'merge'."), mcp.Enum(mergeMethodEnum...)),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			prID, errResult := requireString(req, "pull_request_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			body := map[string]any{}
+			if v := argString(req, "method"); v != "" {
+				body["method"] = v
+			}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/pull_requests/"+url.PathEscape(prID)+"/merge", body, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_comment_on_pr",
+			mcp.WithDescription("Post an issue-style comment on a GitHub PR. Markdown is supported. Use to nudge authors, surface review feedback, or echo a Multica decision."),
+			mcp.WithString("pull_request_id", mcp.Required()),
+			mcp.WithString("body", mcp.Required()),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			prID, errResult := requireString(req, "pull_request_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			body, errResult := requireString(req, "body")
+			if errResult != nil {
+				return errResult, nil
+			}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/pull_requests/"+url.PathEscape(prID)+"/comment", map[string]any{"body": body}, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_close_pr_as_stale",
+			mcp.WithDescription("Close a stale or abandoned PR with a closing comment. Destructive — requires owner/admin role. Reason is posted as a comment before close so the author has the audit trail."),
+			mcp.WithString("pull_request_id", mcp.Required()),
+			mcp.WithString("reason"),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			prID, errResult := requireString(req, "pull_request_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			body := map[string]any{"reason": argString(req, "reason")}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/pull_requests/"+url.PathEscape(prID)+"/close_as_stale", body, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_diagnose_ci_failure",
+			mcp.WithDescription("Dispatch a diagnostic agent task against a PR with red CI. The agent reads the failing logs and posts an analysis back to the PR's conversation channel. Returns the agent_task_id so you can poll progress via multica_agent_tasks."),
+			mcp.WithString("pull_request_id", mcp.Required()),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			prID, errResult := requireString(req, "pull_request_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/pull_requests/"+url.PathEscape(prID)+"/diagnose_ci_failure", map[string]any{}, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_ship_summarize_review_feedback",
+			mcp.WithDescription("Dispatch an agent task to read all PR review comments and produce a consolidated summary in the PR's conversation channel. Use when a PR has accumulated many review threads and the author needs an actionable digest."),
+			mcp.WithString("pull_request_id", mcp.Required()),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			prID, errResult := requireString(req, "pull_request_id")
+			if errResult != nil {
+				return errResult, nil
+			}
+			var out json.RawMessage
+			if err := c.PostJSON(ctx, "/api/pull_requests/"+url.PathEscape(prID)+"/summarize_review_feedback", map[string]any{}, &out); err != nil {
 				return nil, err
 			}
 			return out, nil

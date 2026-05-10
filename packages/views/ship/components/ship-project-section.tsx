@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, AlertCircle } from "lucide-react";
+import { RefreshCw, AlertCircle, ChevronRight } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { cn } from "@multica/ui/lib/utils";
 import { useProjectPullRequests, useSyncProject } from "@multica/core/ship";
 import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -119,9 +120,58 @@ export function ShipProjectSection({ project }: ShipProjectSectionProps) {
 
   const banner = errorBanner ?? fetchErrorBanner;
 
+  // Phase 7e — collapsible per-project sections. With several projects on
+  // the Ship Hub page, the user often only cares about one or two; the
+  // others can be folded so the relevant Kanban + deploy lanes stay
+  // above the fold. State is intentionally local + ephemeral (CLAUDE.md
+  // "Don't persist ephemeral UI state" — collapse on a fresh page load
+  // is fine; the in-memory store survives sync refetches but not
+  // navigation).
+  const [collapsed, setCollapsed] = useState(false);
+
+  // Summary counts shown in the header (always visible, but most useful
+  // when collapsed — they tell the user "is there anything to act on
+  // here without expanding?"). Derived from the full PR list rather
+  // than `project.open_pr_count` so the categories stay consistent
+  // (open_pr_count is from the list endpoint and doesn't break out
+  // drafts vs blocked).
+  const summary = useMemo(() => {
+    const openOnly = prs.filter((pr) => pr.state === "open");
+    const draft = openOnly.filter((pr) => pr.is_draft).length;
+    const blocked = openOnly.filter(
+      (pr) => pr.ci_status === "failure" || pr.mergeable === "CONFLICTING",
+    ).length;
+    const readyToMerge = openOnly.filter(
+      (pr) =>
+        !pr.is_draft &&
+        pr.review_decision === "APPROVED" &&
+        pr.ci_status === "success" &&
+        pr.mergeable !== "CONFLICTING",
+    ).length;
+    return { open: openOnly.length, draft, blocked, readyToMerge };
+  }, [prs]);
+
+  const sectionId = `ship-project-${project.id}`;
+
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          className="flex size-6 shrink-0 items-center justify-center rounded hover:bg-muted"
+          aria-expanded={!collapsed}
+          aria-controls={sectionId}
+          aria-label={collapsed ? "Expand project" : "Collapse project"}
+          data-testid="ship-project-toggle"
+        >
+          <ChevronRight
+            className={cn(
+              "size-4 text-muted-foreground transition-transform",
+              !collapsed && "rotate-90",
+            )}
+          />
+        </button>
         <AppLink
           href={wsPaths.projectDetail(project.id)}
           className="flex min-w-0 items-center gap-2"
@@ -133,9 +183,41 @@ export function ShipProjectSection({ project }: ShipProjectSectionProps) {
           )}
           <h2 className="truncate text-base font-semibold">{project.title}</h2>
         </AppLink>
-        <span className="text-xs text-muted-foreground tabular-nums">
-          {project.open_pr_count}
+        {/* Summary chips — always visible. Acts as both "what's in here"
+            (when collapsed) and a quick-status header (when expanded).
+            The single `n` chip preserves Phase 1's open-count UI; the
+            extra chips surface only when non-zero so the header stays
+            quiet for projects with nothing notable. */}
+        <span
+          className="text-xs text-muted-foreground tabular-nums"
+          title={`${summary.open} open`}
+        >
+          {summary.open}
         </span>
+        {summary.readyToMerge > 0 && (
+          <span
+            className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 tabular-nums dark:text-emerald-300"
+            title={`${summary.readyToMerge} ready to merge`}
+          >
+            {summary.readyToMerge} ready
+          </span>
+        )}
+        {summary.blocked > 0 && (
+          <span
+            className="rounded border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive tabular-nums"
+            title={`${summary.blocked} blocked (failing CI or conflicts)`}
+          >
+            {summary.blocked} blocked
+          </span>
+        )}
+        {summary.draft > 0 && (
+          <span
+            className="rounded border border-muted-foreground/30 bg-muted/30 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground tabular-nums"
+            title={`${summary.draft} draft`}
+          >
+            {summary.draft} draft
+          </span>
+        )}
         <div className="ml-auto">
           <Button
             size="sm"
@@ -166,13 +248,17 @@ export function ShipProjectSection({ project }: ShipProjectSectionProps) {
         </div>
       )}
 
-      <ShipDeploySwimlanes projectId={project.id} />
+      {!collapsed && (
+        <div id={sectionId} className="space-y-3">
+          <ShipDeploySwimlanes projectId={project.id} />
 
-      <ShipKanban
-        pullRequests={prs}
-        isLoading={isLoading}
-        projectId={project.id}
-      />
+          <ShipKanban
+            pullRequests={prs}
+            isLoading={isLoading}
+            projectId={project.id}
+          />
+        </div>
+      )}
     </section>
   );
 }
