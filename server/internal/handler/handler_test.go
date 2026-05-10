@@ -157,6 +157,11 @@ func newRequest(method, path string, body any) *http.Request {
 
 func withURLParam(req *http.Request, key, value string) *http.Request {
 	rctx := chi.NewRouteContext()
+	if existing, ok := req.Context().Value(chi.RouteCtxKey).(*chi.Context); ok && existing != nil {
+		for i, existingKey := range existing.URLParams.Keys {
+			rctx.URLParams.Add(existingKey, existing.URLParams.Values[i])
+		}
+	}
 	rctx.URLParams.Add(key, value)
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 }
