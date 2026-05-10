@@ -25,9 +25,14 @@ RETURNING *;
 DELETE FROM member WHERE id = $1;
 
 -- name: ListMembersWithUser :many
-SELECT m.id, m.workspace_id, m.user_id, m.role, m.created_at,
+SELECT m.id, m.workspace_id, m.user_id, m.role, m.created_at, m.invited_by,
        u.name as user_name, u.email as user_email, u.avatar_url as user_avatar_url
 FROM member m
 JOIN "user" u ON u.id = m.user_id
 WHERE m.workspace_id = $1
 ORDER BY m.created_at ASC;
+
+-- name: CreateMemberWithInvitedBy :one
+INSERT INTO member (workspace_id, user_id, role, invited_by)
+VALUES ($1, $2, $3, $4)
+RETURNING *;
