@@ -188,21 +188,32 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
   // Phase 7d UX: the "Mark production deployed" escape hatch is
   // hidden for the first 30s after entering the promoting stage so
   // the user doesn't click before the deploy webhook has had a chance
-  // to land.
+  // to land. Anchored to release.promoted_at (server-side timestamp)
+  // rather than page-mount time — otherwise navigating away and back
+  // would restart the wait, even if the release entered promoting
+  // hours ago.
+  const promotedAt = data?.release.promoted_at ?? null;
   useEffect(() => {
-    if (isPromotingStage) {
-      const enteredAt = Date.now();
-      setPromotingSince(enteredAt);
+    if (!isPromotingStage) {
+      setPromotingSince(null);
       setShowProductionEscapeHatch(false);
-      const timer = window.setTimeout(() => {
-        setShowProductionEscapeHatch(true);
-      }, 30_000);
-      return () => window.clearTimeout(timer);
+      return undefined;
     }
-    setPromotingSince(null);
+    const promotedMs = promotedAt ? new Date(promotedAt).getTime() : Date.now();
+    setPromotingSince(promotedMs);
+    const elapsed = Date.now() - promotedMs;
+    const DEBOUNCE_MS = 30_000;
+    if (elapsed >= DEBOUNCE_MS) {
+      // Already past the wait — show immediately.
+      setShowProductionEscapeHatch(true);
+      return undefined;
+    }
     setShowProductionEscapeHatch(false);
-    return undefined;
-  }, [isPromotingStage]);
+    const timer = window.setTimeout(() => {
+      setShowProductionEscapeHatch(true);
+    }, DEBOUNCE_MS - elapsed);
+    return () => window.clearTimeout(timer);
+  }, [isPromotingStage, promotedAt]);
 
   if (isLoading) {
     return (

@@ -737,25 +737,42 @@ describe("ShipReleasePage", () => {
     expect(screen.getByTestId("release-verified-banner")).toBeInTheDocument();
   });
 
-  it("hides the Mark production deployed escape hatch for the first 30s of promoting", () => {
+  it("hides the Mark production deployed escape hatch when promoted_at is within 30s", () => {
+    // Anchored to release.promoted_at (server-side), not page mount.
+    // A "just now" timestamp keeps the button hidden during the test.
     detailFixture = {
       release: makeRelease({
         stage: "promoting",
-        promoted_at: "2026-05-09T03:00:00Z",
+        promoted_at: new Date(Date.now() - 1_000).toISOString(),
       }),
       pull_requests: [],
       events: [],
     };
     render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
-    // Right after entering the promoting stage, the escape hatch is
-    // hidden; the progress chip is visible. The button appears only
-    // after a 30s setTimeout fires, which we don't advance here.
     expect(screen.getByTestId("release-promoting-progress")).toBeInTheDocument();
     expect(
       screen.queryByTestId("release-mark-prod-deployed-button"),
     ).not.toBeInTheDocument();
-    // Rollback (always-on escape) is still shown so a stuck promotion
-    // can be aborted.
     expect(screen.getByTestId("release-rollback-button")).toBeInTheDocument();
+  });
+
+  it("shows the Mark production deployed escape hatch when promoted_at is older than 30s", () => {
+    // After 30s wall-clock from release.promoted_at, the manual
+    // escape hatch appears — even across page navigations / reloads.
+    // This is the bug fix from the user's "stuck at promoting"
+    // report: the prior implementation anchored to page-mount, so
+    // navigating away and back restarted the wait every time.
+    detailFixture = {
+      release: makeRelease({
+        stage: "promoting",
+        promoted_at: new Date(Date.now() - 60_000).toISOString(),
+      }),
+      pull_requests: [],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    expect(
+      screen.getByTestId("release-mark-prod-deployed-button"),
+    ).toBeInTheDocument();
   });
 });
