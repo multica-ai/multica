@@ -558,13 +558,7 @@ const mockDMIssue: Issue = {
 describe("IssueDetail (channel/DM)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockApiObj.listTimeline.mockResolvedValue({
-      entries: [],
-      next_cursor: null,
-      prev_cursor: null,
-      has_more_before: false,
-      has_more_after: false,
-    });
+    mockApiObj.listTimeline.mockResolvedValue([]);
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });

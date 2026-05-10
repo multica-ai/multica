@@ -117,6 +117,7 @@ vi.mock("@multica/core/chat/queries", () => ({
 
 vi.mock("@multica/core/chat/mutations", () => ({
   useCreateChatSession: () => ({ mutateAsync: vi.fn() }),
+  useDeleteChatSession: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   useMarkChatSessionRead: () => ({ mutate: vi.fn() }),
 }));
 

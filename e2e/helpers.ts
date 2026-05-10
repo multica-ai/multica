@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { TestApiClient } from "./fixtures";
 
 const DEFAULT_E2E_NAME = "E2E User";
@@ -19,14 +19,15 @@ export async function loginAsDefault(page: Page): Promise<string> {
     "E2E Workspace",
     DEFAULT_E2E_WORKSPACE,
   );
+  await api.dismissStarterContent();
 
   const token = api.getToken();
-  await page.goto("/login");
-  await page.evaluate((t) => {
+  await page.addInitScript((t) => {
     localStorage.setItem("multica_token", t);
   }, token);
   await page.goto(`/${workspace.slug}/issues`, { waitUntil: "domcontentloaded" });
   await page.waitForURL("**/issues", { timeout: 15000 });
+  await expect(page.getByRole("link", { name: "Inbox" })).toBeVisible({ timeout: 15000 });
   return workspace.slug;
 }
 
@@ -38,12 +39,13 @@ export async function createTestApi(): Promise<TestApiClient> {
   const api = new TestApiClient();
   await api.login(DEFAULT_E2E_EMAIL, DEFAULT_E2E_NAME);
   await api.ensureWorkspace("E2E Workspace", DEFAULT_E2E_WORKSPACE);
+  await api.dismissStarterContent();
   return api;
 }
 
 export async function openWorkspaceMenu(page: Page) {
   // Click the workspace switcher button (has ChevronDown icon)
-  await page.locator("aside button").first().click();
+  await page.locator('[data-sidebar="menu-button"]').first().click();
   // Wait for dropdown to appear
-  await page.locator('[class*="popover"]').waitFor({ state: "visible" });
+  await page.getByRole("menuitem", { name: "Log out" }).waitFor({ state: "visible" });
 }

@@ -30,23 +30,27 @@ test.afterEach(async () => {
   await api.cleanup();
 });
 
-async function seedThreeNotifications(api: TestApiClient, issueId: string) {
+async function seedThreeNotifications(api: TestApiClient) {
+  const commentIssue = await api.createIssue("Notification comment target");
+  const statusIssue = await api.createIssue("Notification status target");
+  const reactionIssue = await api.createIssue("Notification reaction target");
+
   await api.insertInboxItem({
     type: "new_comment",
     title: "First comment",
-    issueId,
+    issueId: commentIssue.id,
     details: { comment_id: "fake-comment" },
   });
   await api.insertInboxItem({
     type: "status_changed",
     title: "Status moved",
-    issueId,
+    issueId: statusIssue.id,
     details: { from: "todo", to: "in_progress" },
   });
   await api.insertInboxItem({
     type: "reaction_added",
     title: "Reaction on your work",
-    issueId,
+    issueId: reactionIssue.id,
     details: { emoji: "👍" },
   });
 }
@@ -62,8 +66,7 @@ async function gotoNotificationsPage(page: Page, slug: string) {
 test.describe("Sidebar — NOTIFICATIONS link", () => {
   test("shows count when items exist and navigates to the page on click", async ({ page }) => {
     const slug = await loginAsDefault(page);
-    const issue = await api.createIssue("Sidebar link target");
-    await seedThreeNotifications(api, issue.id);
+    await seedThreeNotifications(api);
 
     // Trigger a refetch to surface the count.
     await page.reload();
@@ -79,8 +82,7 @@ test.describe("Sidebar — NOTIFICATIONS link", () => {
 
   test("Clear button archives all without navigating", async ({ page }) => {
     const slug = await loginAsDefault(page);
-    const issue = await api.createIssue("Sidebar clear target");
-    await seedThreeNotifications(api, issue.id);
+    await seedThreeNotifications(api);
 
     await page.reload();
     await expect(page.getByTestId("sidebar-notifications-count")).toHaveText("3");
@@ -88,7 +90,11 @@ test.describe("Sidebar — NOTIFICATIONS link", () => {
     // The Clear button is hover-revealed — force-click since we don't need
     // visual hover for the action to fire.
     const clearBtn = page.getByTestId("sidebar-notifications-clear");
+    const archiveAllResponse = page.waitForResponse(
+      (res) => res.url().includes("/api/inbox/notifications/archive-all"),
+    );
     await clearBtn.click({ force: true });
+    expect((await archiveAllResponse).ok()).toBe(true);
 
     // After Clear: badge disappears (count goes to 0), and we're still on /issues.
     await expect(page.getByTestId("sidebar-notifications-count")).toBeHidden();
@@ -99,8 +105,7 @@ test.describe("Sidebar — NOTIFICATIONS link", () => {
 test.describe("Notifications page", () => {
   test("renders rows, marks read, and dismisses", async ({ page }) => {
     const slug = await loginAsDefault(page);
-    const issue = await api.createIssue("Notifications page target");
-    await seedThreeNotifications(api, issue.id);
+    await seedThreeNotifications(api);
 
     await gotoNotificationsPage(page, slug);
 
@@ -127,7 +132,14 @@ test.describe("Notifications page", () => {
     // dismiss control is opacity-0 until hover and Playwright's .hover() is
     // not 100% reliable for triggering the CSS :hover transition in time.
     const firstRow = rows.first();
-    await firstRow.getByTitle("Dismiss").click({ force: true });
+    await firstRow.hover();
+    const archiveResponse = page.waitForResponse(
+      (res) => res.url().includes("/api/inbox/") && res.url().endsWith("/archive"),
+    );
+    await firstRow
+      .getByRole("button", { name: "Dismiss" })
+      .evaluate((button: HTMLElement) => button.click());
+    expect((await archiveResponse).ok()).toBe(true);
 
     await expect(rows).toHaveCount(2);
   });
@@ -152,8 +164,7 @@ test.describe("Notifications page", () => {
 
   test("Clear archives every visible item and shows the empty state", async ({ page }) => {
     const slug = await loginAsDefault(page);
-    const issue = await api.createIssue("Clear target");
-    await seedThreeNotifications(api, issue.id);
+    await seedThreeNotifications(api);
 
     await gotoNotificationsPage(page, slug);
     await expect(page.getByTestId("notification-row")).toHaveCount(3);
@@ -326,27 +337,26 @@ test.describe("Settings — Notifications tab", () => {
     await page.goto(`/${slug}/settings`);
     await page.waitForURL("**/settings");
 
-    // Open the Notifications tab. Use text= for resilience — base-ui's tab
-    // role attribute can vary across versions.
-    await page.locator("button", { hasText: "Notifications" }).first().click();
+    await page.getByRole("tab", { name: "Notifications" }).click();
     await expect(
       page.getByRole("heading", { name: "Notifications", level: 2 }),
     ).toBeVisible();
 
-    // Find the "Reaction on your content" row and switch it from
-    // Notifications (default) to Off.
+    // Find the "Reaction on your content" row in the Notifications channel
+    // section and switch it off.
     const reactionRow = page
-      .locator("text=Reaction on your content")
-      .locator("xpath=ancestor::div[contains(@class,'flex')][1]");
-    await reactionRow.locator("button", { hasText: "Off" }).click();
+      .getByText("Reaction on your content")
+      .nth(1)
+      .locator("xpath=ancestor::div[.//*[@role='switch']][1]");
+    await reactionRow.locator('[role="switch"]').click();
 
     // Reload and confirm the choice survived.
     await page.reload();
-    await page.locator("button", { hasText: "Notifications" }).first().click();
+    await page.getByRole("tab", { name: "Notifications" }).click();
     const reloadedRow = page
-      .locator("text=Reaction on your content")
-      .locator("xpath=ancestor::div[contains(@class,'flex')][1]");
-    const offBtn = reloadedRow.locator("button", { hasText: "Off" });
-    await expect(offBtn).toHaveClass(/bg-background/);
+      .getByText("Reaction on your content")
+      .nth(1)
+      .locator("xpath=ancestor::div[.//*[@role='switch']][1]");
+    await expect(reloadedRow.locator('[role="switch"]')).not.toBeChecked();
   });
 });
