@@ -172,6 +172,10 @@ func runAutopilotList(cmd *cobra.Command, _ []string) error {
 	if status, _ := cmd.Flags().GetString("status"); status != "" {
 		path += "?" + url.Values{"status": {status}}.Encode()
 	}
+	// CEREBRO-PATCH(autopilot-scope-cli-list-query): append optional scope filter.
+	if path, err = cerebroAutopilotListScopePath(cmd, path); err != nil {
+		return err
+	}
 
 	var resp struct {
 		Autopilots []map[string]any `json:"autopilots"`
@@ -290,6 +294,10 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("issue-title-template"); v != "" {
 		body["issue_title_template"] = v
 	}
+	// CEREBRO-PATCH(autopilot-scope-cli-create-body): add scope fields to create body.
+	if err := cerebroAutopilotCreateScopeBody(ctx, client, cmd, body); err != nil {
+		return err
+	}
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/autopilots", body, &result); err != nil {
@@ -356,6 +364,10 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("issue-title-template") {
 		v, _ := cmd.Flags().GetString("issue-title-template")
 		body["issue_title_template"] = v
+	}
+	// CEREBRO-PATCH(autopilot-scope-cli-update-body): add scope fields to update body.
+	if err := cerebroAutopilotUpdateScopeBody(ctx, client, cmd, body); err != nil {
+		return err
 	}
 
 	if len(body) == 0 {

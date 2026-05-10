@@ -118,3 +118,8 @@ func TestUUIDRegexp(t *testing.T) {
 		}
 	}
 }
+
+// CEREBRO-PATCH(autopilot-scope-cli-test-snapshot): assert scope flags are exposed.
+func TestAutopilotCommandsExposeScopeFlags(t *testing.T) {
+	cerebroTestAutopilotCommandsExposeScopeFlags(t)
+}

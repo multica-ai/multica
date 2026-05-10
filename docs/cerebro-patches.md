@@ -8,8 +8,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 
 ## Summary
 
-- **Unique patch names:** 288 (273 baseline + 15 PR #118 markers)
-- **Files marked (including chunks 4-8 pre-existing markers):** 298
+- **Unique patch names:** 294 (273 baseline + 15 PR #118 markers + 6 JEH-725 markers)
+- **Files marked (including chunks 4-8 pre-existing markers):** 302
 - **Files newly marked in chunk 11:** 280 (chunk-11 scope)
 - **Total marker lines added in chunk 11:** ~280 (one comment line per file)
 - **Marker lines added in PR #118:** 16 (managed Firtal Gateway runtime scope)
@@ -77,6 +77,12 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `auth-jwt-test` | server/internal/auth/jwt_test.go | 65 | Auth additions (master-code, JWT) |
 | `auth-master-code-handler` | server/internal/handler/auth_master_code_test.go | 69 | Auth additions (master-code, JWT) |
 | `autopilot-cerebro` | server/internal/handler/autopilot_cerebro.go | 130 | Scope visibility helpers (workspace/personal/group) for the upstream autopilot handler — JEH-724 |
+| `autopilot-scope-cli` | server/cmd/multica/cerebro_autopilot_scope.go | ~330 | CLI flags, validation, and owner/group resolution for autopilot scopes — JEH-725 |
+| `autopilot-scope-cli-create-body` | server/cmd/multica/cmd_autopilot.go | 2 | Add scope/owner_user_id/group_id to autopilot create request bodies — JEH-725 |
+| `autopilot-scope-cli-list-query` | server/cmd/multica/cmd_autopilot.go | 2 | Add optional `scope` query parameter for autopilot list — JEH-725 |
+| `autopilot-scope-cli-test` | server/cmd/multica/cerebro_autopilot_scope_test.go | ~270 | Unit coverage for autopilot scope CLI helper behavior — JEH-725 |
+| `autopilot-scope-cli-test-snapshot` | server/cmd/multica/cmd_autopilot_test.go | 2 | Assert create/list/update expose the new scope flags — JEH-725 |
+| `autopilot-scope-cli-update-body` | server/cmd/multica/cmd_autopilot.go | 2 | Add scope/owner_user_id/group_id to autopilot update request bodies — JEH-725 |
 | `autopilot-scope-create` | server/internal/handler/autopilot.go | 6 | Apply scope/owner_user_id/group_id after CreateAutopilot — JEH-724 |
 | `autopilot-scope-create-req` | server/internal/handler/autopilot.go | 4 | Scope fields on CreateAutopilotRequest — JEH-724 |
 | `autopilot-scope-delete` | server/internal/handler/autopilot.go | 4 | Edit-permission check on Delete — JEH-724 |
