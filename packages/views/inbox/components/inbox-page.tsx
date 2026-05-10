@@ -202,7 +202,8 @@ export function InboxPage() {
   // any inbox row with the same issue_id is folded into the channel row.
   // CEREBRO-PATCH(channels-flag-gate): channelsEnabledHere skips the fetch when feature is disabled
   const channelsEnabledForFetch = useFeatureFlag("cerebro_channels");
-  const { data: channels = [] } = useQuery({
+  // CEREBRO-PATCH(inbox-page-channel-fallback): expose isLoading so the redirect effect can wait for channels
+  const { data: channels = [], isLoading: channelsLoading } = useQuery({
     ...channelListOptions(wsId),
     enabled: channelsEnabledForFetch && !isArchivedView,
   });
@@ -305,8 +306,10 @@ export function InboxPage() {
   // too — clear the selection and stay on /inbox instead.
   useEffect(() => {
     if (loading) return;
+    if (channelsLoading) return; // CEREBRO-PATCH(inbox-page-channel-fallback): wait for channels query before deciding to redirect
     if (!selectedKey) return;
     if (selected) return;
+    if (channelMap.has(selectedKey)) return; // CEREBRO-PATCH(inbox-page-channel-fallback): channel/DM URLs render via ChannelDetail in-place
     // CEREBRO-PATCH(inbox-page-chat-fallback): don't redirect chat URLs to issue page
     if (selectedChatSession || selectedKey === "new-chat") return;
     if (pendingChatIdRef.current === selectedKey) return;
@@ -316,7 +319,7 @@ export function InboxPage() {
       return;
     }
     replace(wsPaths.issueDetail(selectedKey));
-  }, [loading, selectedKey, selected, selectedChatSession, replace, wsPaths, setSelectedKey, urlChat, urlIssue]);
+  }, [loading, channelsLoading, selectedKey, selected, channelMap, selectedChatSession, replace, wsPaths, setSelectedKey, urlChat, urlIssue]);
 
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_inbox_layout",
