@@ -1,199 +1,67 @@
-<p align="center">
-  <img src="docs/assets/banner.jpg" alt="Multica — humans and agents, side by side" width="100%">
-</p>
+# Multica — `Josephkready/multica`
 
-<div align="center">
+Personal fork of [`multica-ai/multica`](https://github.com/multica-ai/multica), pinned to whatever the trial is running on dante. Upstream is the source of truth for product docs, install scripts, and the CLI; this README is just the dante-specific operator's note.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo-light.svg">
-  <img alt="Multica" src="docs/assets/logo-light.svg" width="50">
-</picture>
+## Why this fork exists
 
-# Multica
+I'm trialling Multica as the kanban surface for the existing `claude-remote-*` + `nightshift` + `/start-work` agent workflow on dante. Full design + alternatives weighed in [Multi-Agent Task Board](https://dante.local/docs/projects/multi-agent-task-board.html) (`/home/jkready/docs/src/projects/multi-agent-task-board.md`). TL;DR from that doc:
 
-**Your next 10 hires won't be human.**
+- Two-week trial starting 2026-05-10. Decommission Taskwarrior `/todo` only if Multica sticks.
+- Picked over Paperclip / Maestro / Symphony / Vibe Kanban because it's the only off-the-shelf option that ships a kanban board, multi-CLI agent auto-detection, and self-host-on-Linux without forcing me to re-author `~/.claude/skills/`.
+- The fork is so I can carry local patches if needed during the trial. Default branch tracks `upstream/main`; sync with `git fetch upstream && git merge upstream/main` (or rebase, depending on what's diverged).
 
-The open-source managed agents platform.<br/>
-Turn coding agents into real teammates — assign tasks, track progress, compound skills.
+Upstream README — features, screenshots, the full CLI reference — is at [`multica-ai/multica#readme`](https://github.com/multica-ai/multica/blob/main/README.md). Don't duplicate it here.
 
-[![CI](https://github.com/multica-ai/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/multica-ai/multica/actions/workflows/ci.yml)
-[![GitHub stars](https://img.shields.io/github/stars/multica-ai/multica?style=flat)](https://github.com/multica-ai/multica/stargazers)
+## Where it runs
 
-[Website](https://multica.ai) · [Cloud](https://multica.ai/app) · [X](https://x.com/MulticaAI) · [Self-Hosting](SELF_HOSTING.md) · [Contributing](CONTRIBUTING.md)
+| Concern | dante answer |
+|---|---|
+| Host | dante (LAN box), Tailscale-accessible |
+| Install | `multica setup self-host` via the upstream Docker compose |
+| URL | `https://dante.local/multica/` (nginx reverse proxy, same pattern as `/docs/`, `/health/`) |
+| Postgres state | `/var/lib/multica/` — **never** `/root/prod/multica/` (ansible-pull would clobber it) |
+| Secrets | `/etc/multica.env` |
+| Backups | Postgres volume + `pg_dump` daily; add to `~/.config/dante-sync/backup.yaml` before trial ends |
+| Public access | None. LAN + Tailscale only. Not on `dante-live`. |
 
-**English | [简体中文](README.zh-CN.md)**
+State / secrets / code split follows the dante convention documented in the global `CLAUDE.md`. If you're touching the deploy, read that first.
 
-</div>
+## How it fits the existing workflow
 
-## What is Multica?
+- **Code changes still go through `/start-work` → `/make-pr`.** Multica's daemon shells out to `claude` in the worktree path; the agent inherits `~/.claude/skills/`, so `/start-work`, `/make-pr`, `/todo`, etc. all keep working unchanged. (Verifying this end-to-end is open question #1 of the trial.)
+- **Taskwarrior `/todo` runs in parallel for the full two weeks.** Don't migrate yet. End-of-trial decision: keep one, archive the other.
+- **GitHub Issues → board sync is a ~50-line glue script**, not a Multica feature. Lives at `/usr/local/bin/gh-to-multica.sh` driven by `gh-to-multica.timer` (15-min cadence). One-way for now (GitHub → board); revisit bidirectional after a week of production. Sketch is in the design doc.
+- **Codex / Gemini CLI cueing** lives in `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md` — small "when you surface a follow-up, create a Multica issue" block, mirroring how Claude's skill description cues `/todo` today.
+- **Plan-mode span review is explicitly out of scope** for this tool. Pair with Outline per [Plan Mode Artifacts](https://dante.local/docs/projects/plan-mode-artifacts.html) when the pain crosses the threshold.
 
-Multica turns coding agents into real teammates. Assign issues to an agent like you'd assign to a colleague — they'll pick up the work, write code, report blockers, and update statuses autonomously.
+## Local development on this fork
 
-No more copy-pasting prompts. No more babysitting runs. Your agents show up on the board, participate in conversations, and compound reusable skills over time. Think of it as open-source infrastructure for managed agents — vendor-neutral, self-hosted, and designed for human + AI teams. Works with **Claude Code**, **Codex**, **GitHub Copilot CLI**, **OpenClaw**, **OpenCode**, **Hermes**, **Gemini**, **Pi**, **Cursor Agent**, **Kimi**, and **Kiro CLI**.
-
-<p align="center">
-  <img src="docs/assets/hero-screenshot.png" alt="Multica board view" width="800">
-</p>
-
-## Why "Multica"?
-
-Multica — **Mul**tiplexed **I**nformation and **C**omputing **A**gent.
-
-The name is a nod to Multics, the pioneering operating system of the 1960s that introduced time-sharing — letting multiple users share a single machine as if each had it to themselves. Unix was born as a deliberate simplification of Multics: one user, one task, one elegant philosophy.
-
-We think the same inflection is happening again. For decades, software teams have been single-threaded — one engineer, one task, one context switch at a time. AI agents change that equation. Multica brings time-sharing back, but for an era where the "users" multiplexing the system are both humans and autonomous agents.
-
-In Multica, agents are first-class teammates. They get assigned issues, report progress, raise blockers, and ship code — just like their human colleagues. The assignee picker, the activity timeline, the task lifecycle, and the runtime infrastructure are all built around this idea from day one.
-
-Like Multics before it, the bet is on multiplexing: a small team shouldn't feel small. With the right system, two engineers and a fleet of agents can move like twenty.
-
-## Features
-
-Multica manages the full agent lifecycle: from task assignment to execution monitoring to skill reuse.
-
-- **Agents as Teammates** — assign to an agent like you'd assign to a colleague. They have profiles, show up on the board, post comments, create issues, and report blockers proactively.
-- **Autonomous Execution** — set it and forget it. Full task lifecycle management (enqueue, claim, start, complete/fail) with real-time progress streaming via WebSocket.
-- **Reusable Skills** — every solution becomes a reusable skill for the whole team. Deployments, migrations, code reviews — skills compound your team's capabilities over time.
-- **Unified Runtimes** — one dashboard for all your compute. Local daemons and cloud runtimes, auto-detection of available CLIs, real-time monitoring.
-- **Multi-Workspace** — organize work across teams with workspace-level isolation. Each workspace has its own agents, issues, and settings.
-
----
-
-## Quick Install
-
-### macOS / Linux (Homebrew - recommended)
+If you're hacking on Multica itself (not just running it), upstream's [`CONTRIBUTING.md`](CONTRIBUTING.md) is canonical. Quick reminders for this fork:
 
 ```bash
-brew install multica-ai/tap/multica
+# Sync with upstream
+git fetch upstream
+git merge upstream/main         # or rebase, depending on divergence
+
+# Code changes — always via /start-work, never directly on main
+# (the dante-global pre-commit hook blocks direct commits to main/master)
+
+make dev                        # upstream dev script — Node 20+, pnpm 10.28+, Go 1.26+, Docker
 ```
 
-Use `brew upgrade multica-ai/tap/multica` to keep the CLI current.
+Branch convention is the dante-global one: `<task>-<session-suffix>` worktrees at `/tmp/multica-<task>-<session>`, opened with `/start-work`, landed with `/make-pr`.
 
-### macOS / Linux (install script)
+## Trial exit criteria (2026-05-10 → 2026-05-24)
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
-```
+Keep Multica if, by end of trial:
 
-Use this if Homebrew is not available. The script installs the Multica CLI on macOS and Linux by using Homebrew when it is on `PATH`, otherwise it downloads the binary directly.
+1. Claude / Codex / Gemini agents launched through the daemon find their existing skills/configs without modification.
+2. The GitHub Issues sync glue is running idempotently against ≥3 repos.
+3. The board is genuinely the place I look first to see "what's in flight" — and I haven't been re-falling back to `task list` more than once or twice.
+4. Postgres backup is wired into the dante backup system.
 
-### Windows (PowerShell)
+If any of those are still red on day 14, drop Multica, stay on Taskwarrior + `/todo`, and revisit when a contender lands a built-in GitHub Issues importer.
 
-```powershell
-irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
-```
+## License
 
-Then configure, authenticate, and start the daemon in one command:
-
-```bash
-multica setup          # Connect to Multica Cloud, log in, start daemon
-```
-
-> **Self-hosting?** Add `--with-server` to deploy a full Multica server on your machine:
->
-> ```bash
-> curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
-> multica setup self-host
-> ```
->
-> This pulls the official Multica images from GHCR (latest stable by default). Requires Docker. See the [Self-Hosting Guide](SELF_HOSTING.md) for details.
-> If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` from a checkout.
-
----
-
-## Getting Started
-
-### 1. Set up and start the daemon
-
-```bash
-multica setup           # Configure, authenticate, and start the daemon
-```
-
-The daemon runs in the background and auto-detects agent CLIs (`claude`, `codex`, `copilot`, `openclaw`, `opencode`, `hermes`, `gemini`, `pi`, `cursor-agent`, `kimi`, `kiro-cli`) on your PATH.
-
-### 2. Verify your runtime
-
-Open your workspace in the Multica web app. Navigate to **Settings → Runtimes** — you should see your machine listed as an active **Runtime**.
-
-> **What is a Runtime?** A Runtime is a compute environment that can execute agent tasks. It can be your local machine (via the daemon) or a cloud instance. Each runtime reports which agent CLIs are available, so Multica knows where to route work.
-
-### 3. Create an agent
-
-Go to **Settings → Agents** and click **New Agent**. Pick the runtime you just connected and choose a provider (Claude Code, Codex, GitHub Copilot CLI, OpenClaw, OpenCode, Hermes, Gemini, Pi, Cursor Agent, Kimi, or Kiro CLI). Give your agent a name — this is how it will appear on the board, in comments, and in assignments.
-
-### 4. Assign your first task
-
-Create an issue from the board (or via `multica issue create`), then assign it to your new agent. The agent will automatically pick up the task, execute it on your runtime, and report progress — just like a human teammate.
-
----
-
-## Multica vs Paperclip
-
-| | Multica | Paperclip |
-|---|---------|-----------|
-| **Focus** | Team AI agent collaboration platform | Solo AI agent company simulator |
-| **User model** | Multi-user teams with roles & permissions | Single board operator |
-| **Agent interaction** | Issues + Chat conversations | Issues + Heartbeat |
-| **Deployment** | Cloud-first | Local-first |
-| **Management depth** | Lightweight (Issues / Projects / Labels) | Heavy governance (Org chart / Approvals / Budgets) |
-| **Extensibility** | Skills system | Skills + Plugin system |
-
-**TL;DR — Multica is built for teams that want to collaborate with AI agents on real projects together.**
-
----
-
-## CLI
-
-The `multica` CLI connects your local machine to Multica — authenticate, manage workspaces, and run the agent daemon.
-
-| Command | Description |
-|---------|-------------|
-| `multica login` | Authenticate (opens browser) |
-| `multica daemon start` | Start the local agent runtime |
-| `multica daemon status` | Check daemon status |
-| `multica setup` | One-command setup for Multica Cloud (configure + login + start daemon) |
-| `multica setup self-host` | Same, but for self-hosted deployments |
-| `multica issue list` | List issues in your workspace |
-| `multica issue create` | Create a new issue |
-| `multica update` | Update to the latest version |
-
-See the [CLI and Daemon Guide](CLI_AND_DAEMON.md) for the full command reference.
-
----
-
-## Architecture
-
-```
-┌──────────────┐     ┌──────────────┐     ┌──────────────────┐
-│   Next.js    │────>│  Go Backend  │────>│   PostgreSQL     │
-│   Frontend   │<────│  (Chi + WS)  │<────│   (pgvector)     │
-└──────────────┘     └──────┬───────┘     └──────────────────┘
-                            │
-                     ┌──────┴───────┐
-                     │ Agent Daemon │  runs on your machine
-                     └──────────────┘  (Claude Code, Codex, GitHub Copilot CLI,
-                                        OpenCode, OpenClaw, Hermes, Gemini,
-                                        Pi, Cursor Agent, Kimi, Kiro CLI)
-```
-
-| Layer | Stack |
-|-------|-------|
-| Frontend | Next.js 16 (App Router) |
-| Backend | Go (Chi router, sqlc, gorilla/websocket) |
-| Database | PostgreSQL 17 with pgvector |
-| Agent Runtime | Local daemon executing Claude Code, Codex, GitHub Copilot CLI, OpenClaw, OpenCode, Hermes, Gemini, Pi, Cursor Agent, Kimi, or Kiro CLI |
-
-## Development
-
-For contributors working on the Multica codebase, see the [Contributing Guide](CONTRIBUTING.md).
-
-**Prerequisites:** [Node.js](https://nodejs.org/) v20+, [pnpm](https://pnpm.io/) v10.28+, [Go](https://go.dev/) v1.26+, [Docker](https://www.docker.com/)
-
-```bash
-make dev
-```
-
-`make dev` auto-detects your environment (main checkout or worktree), creates the env file, installs dependencies, sets up the database, runs migrations, and starts all services.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow, worktree support, testing, and troubleshooting.
+Inherits MIT from upstream. See [`LICENSE`](LICENSE).
