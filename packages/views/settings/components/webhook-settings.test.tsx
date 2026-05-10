@@ -140,6 +140,7 @@ function makeWorkspace(
     github_token_set: true,
     ship_hub_webhook_url: "https://api.example.com/api/integrations/github/webhook",
     ship_hub_webhook_secret_set: false,
+    ship_hub_smoke_workflow_set: false,
     ...overrides,
   };
 }

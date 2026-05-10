@@ -465,6 +465,7 @@
       "smoke_status_completed_failure": "失败",
       "smoke_status_skipped": "已跳过(未配置)",
       "smoke_status_manual_pass": "手动通过",
+      "smoke_not_configured": "本工作区未配置冒烟测试。可使用「人工通过」继续推进,或在工作区设置中配置 ship_hub_smoke_workflow。",
       "run_smoke_button": "运行冒烟测试",
       "rerun_smoke_button": "重新运行冒烟测试",
       "view_run_link": "在 GitHub 查看运行",

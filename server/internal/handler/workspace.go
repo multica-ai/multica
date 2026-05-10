@@ -75,6 +75,14 @@ type WorkspaceResponse struct {
 	// webhook secret has been configured. The plaintext value is only
 	// ever returned by POST .../regenerate_webhook_secret.
 	ShipHubWebhookSecretSet bool `json:"ship_hub_webhook_secret_set"`
+	// ShipHubSmokeWorkflowSet — true when a smoke-test GitHub Actions
+	// workflow filename has been configured for the workspace. Drives
+	// the Ship Hub release page's "Run smoke tests" button: when false,
+	// the affordance hides (it would 400 anyway), and the smoke status
+	// pill renders "Not configured" instead of an empty dash. Phase 7c
+	// polish — adding this stops users clicking a button that's
+	// guaranteed to error.
+	ShipHubSmokeWorkflowSet bool `json:"ship_hub_smoke_workflow_set"`
 }
 
 // shipHubSettingsKey is the JSON object inside workspace.settings that holds
@@ -216,6 +224,7 @@ func workspaceToResponseWithSecretFlags(w db.Workspace, flags secretFlags) Works
 		GitHubTokenSet:          tokenSet,
 		ShipHubWebhookURL:       flags.WebhookURL, // pass-through; built upstream when a request is in scope
 		ShipHubWebhookSecretSet: webhookSet,
+		ShipHubSmokeWorkflowSet: w.ShipHubSmokeWorkflow.Valid && w.ShipHubSmokeWorkflow.String != "",
 	}
 }
 

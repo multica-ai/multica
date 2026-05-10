@@ -38,6 +38,7 @@ export const mockWorkspace: Workspace = {
   github_token_set: false,
   ship_hub_webhook_url: "",
   ship_hub_webhook_secret_set: false,
+    ship_hub_smoke_workflow_set: false,
 };
 
 // Mock members

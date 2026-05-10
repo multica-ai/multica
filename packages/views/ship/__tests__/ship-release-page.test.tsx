@@ -91,7 +91,15 @@ vi.mock("@multica/core/ship", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({
-  useCurrentWorkspace: () => ({ slug: "acme" }),
+  // Phase 7c polish — the staging UI gates the "Run smoke" button
+  // on workspace.ship_hub_smoke_workflow_set. The mock sets it true
+  // so existing tests keep covering the configured path; tests that
+  // need the unconfigured path can override the workspace ref before
+  // mounting (none currently exercise that path).
+  useCurrentWorkspace: () => ({
+    slug: "acme",
+    ship_hub_smoke_workflow_set: true,
+  }),
 }));
 
 vi.mock("../../navigation", () => ({

@@ -47,6 +47,11 @@ export interface Workspace {
    * configured. The plaintext value is only ever returned by
    * POST /workspaces/{id}/ship_hub/regenerate_webhook_secret. */
   ship_hub_webhook_secret_set: boolean;
+  /** True when a smoke-test GitHub Actions workflow filename has been
+   * configured for the workspace. Drives the release page's "Run smoke
+   * tests" button — when false, the button hides (it would 400 anyway)
+   * and the smoke pill renders "Not configured" instead of empty. */
+  ship_hub_smoke_workflow_set: boolean;
 }
 
 export interface Member {

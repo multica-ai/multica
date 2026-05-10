@@ -322,6 +322,9 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
               {isStagingOrVerifying && (
                 <StagingActionButtons
                   release={release}
+                  smokeWorkflowConfigured={
+                    workspace?.ship_hub_smoke_workflow_set === true
+                  }
                   onRunSmoke={() => {
                     runSmoke
                       .mutateAsync(undefined)
@@ -426,7 +429,14 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
           {/* Phase 7c — staging-stage panels. Each is conditional on
               the relevant signal being present, so a release in
               earlier stages doesn't render any of them. */}
-          {isStagingOrVerifying && <StagingPanels release={release} />}
+          {isStagingOrVerifying && (
+            <StagingPanels
+              release={release}
+              smokeWorkflowConfigured={
+                workspace?.ship_hub_smoke_workflow_set === true
+              }
+            />
+          )}
 
           {/* Verified banner — only when the release reached
               verifying via mark_verified. */}
@@ -1312,6 +1322,7 @@ function NextStepBanner({
  *  affordances colocated makes the gating logic easier to follow. */
 function StagingActionButtons({
   release,
+  smokeWorkflowConfigured,
   onRunSmoke,
   runSmokePending,
   onMarkSmokePass,
@@ -1319,6 +1330,11 @@ function StagingActionButtons({
   onUnverify,
 }: {
   release: import("@multica/core/types").Release;
+  /** True when the workspace has a smoke-test workflow configured.
+   *  When false, the "Run smoke tests" button is hidden entirely
+   *  (clicking it would 400 anyway) and "Manual pass" is the only
+   *  way to advance the smoke gate. */
+  smokeWorkflowConfigured: boolean;
   onRunSmoke: () => void;
   runSmokePending: boolean;
   onMarkSmokePass: () => void;
@@ -1350,19 +1366,26 @@ function StagingActionButtons({
   return (
     <>
       {/* Run smoke is the primary affordance whenever it's not
-          mid-flight; the "Re-run" copy applies after a completed run. */}
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={onRunSmoke}
-        disabled={!canRunSmoke || runSmokePending}
-        data-testid="release-run-smoke-button"
-      >
-        <FlaskConical className="size-3.5" />
-        {smoke === "completed_failure" || smoke === "completed_success"
-          ? t(($) => $.releases.staging.rerun_smoke_button)
-          : t(($) => $.releases.staging.run_smoke_button)}
-      </Button>
+          mid-flight; the "Re-run" copy applies after a completed run.
+          Phase 7c polish — hidden entirely when the workspace hasn't
+          configured a smoke workflow. Pressing it would return 400
+          ("smoke workflow not configured for this workspace") so the
+          button being live was a UX trap. With the affordance gone,
+          Manual pass becomes the explicit path. */}
+      {smokeWorkflowConfigured && (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onRunSmoke}
+          disabled={!canRunSmoke || runSmokePending}
+          data-testid="release-run-smoke-button"
+        >
+          <FlaskConical className="size-3.5" />
+          {smoke === "completed_failure" || smoke === "completed_success"
+            ? t(($) => $.releases.staging.rerun_smoke_button)
+            : t(($) => $.releases.staging.run_smoke_button)}
+        </Button>
+      )}
       {canManualPass && (
         <Button
           size="sm"
@@ -1392,8 +1415,10 @@ function StagingActionButtons({
  *  data isn't populated yet. */
 function StagingPanels({
   release,
+  smokeWorkflowConfigured,
 }: {
   release: import("@multica/core/types").Release;
+  smokeWorkflowConfigured: boolean;
 }) {
   const { t } = useT("ship");
   const smoke = release.smoke_status ?? "";
@@ -1426,7 +1451,11 @@ function StagingPanels({
         )}
       </div>
 
-      {/* Smoke panel. */}
+      {/* Smoke panel. Phase 7c polish — when the workspace hasn't
+          configured a smoke workflow, render an explicit "Not
+          configured" state with a settings link instead of an empty
+          dash, so the user understands smoke is optional rather than
+          broken. */}
       <div
         className="rounded border bg-card p-3 text-sm"
         data-testid="release-smoke-panel"
@@ -1436,7 +1465,13 @@ function StagingPanels({
           <FlaskConical className="size-3.5" />
           {t(($) => $.releases.staging.smoke_panel_title)}
         </div>
-        <SmokeStatusPill status={smoke} />
+        {!smokeWorkflowConfigured && smoke === "" ? (
+          <p className="text-xs text-muted-foreground">
+            {t(($) => $.releases.staging.smoke_not_configured)}
+          </p>
+        ) : (
+          <SmokeStatusPill status={smoke} />
+        )}
         {release.smoke_run_url && (
           <a
             href={release.smoke_run_url}
