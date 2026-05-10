@@ -22,6 +22,8 @@ export class TestApiClient {
   private createdProjectIds: string[] = [];
   private createdTimeEntryIds: string[] = [];
   private user: Record<string, unknown> | null = null;
+  /** Whether a pomodoro session was started during this test (needs reset in cleanup). */
+  private pomodoroSessionActive = false;
 
   async login(email: string, name: string) {
     const client = new pg.Client(DATABASE_URL);
@@ -295,6 +297,63 @@ export class TestApiClient {
     this.createdTimeEntryIds = this.createdTimeEntryIds.filter((tid) => tid !== id);
   }
 
+  // ── Pomodoro session helpers ───────────────────────────────────────────────
+
+  /** Start (or resume) the user's pomodoro session. */
+  async startPomodoroSession(): Promise<Record<string, unknown>> {
+    const res = await this.authedFetch("/api/pomodoro/start", { method: "POST" });
+    this.pomodoroSessionActive = true;
+    return res.json();
+  }
+
+  /** Pause the running pomodoro session. */
+  async pausePomodoroSession(): Promise<Record<string, unknown>> {
+    const res = await this.authedFetch("/api/pomodoro/pause", { method: "POST" });
+    return res.json();
+  }
+
+  /**
+   * Complete the current work phase — creates a time_entry with type='pomodoro'.
+   * @param opts Optional issue_id and note to attach.
+   */
+  async completePomodoroSession(opts?: {
+    issue_id?: string;
+    note?: string;
+    long_break_after?: number;
+  }): Promise<Record<string, unknown>> {
+    const res = await this.authedFetch("/api/pomodoro/complete", {
+      method: "POST",
+      body: JSON.stringify(opts ?? {}),
+    });
+    return res.json();
+  }
+
+  /** Reset the pomodoro session back to idle. */
+  async resetPomodoroSession(): Promise<void> {
+    await this.authedFetch("/api/pomodoro/reset", { method: "POST" });
+    this.pomodoroSessionActive = false;
+  }
+
+  /** Fetch the current pomodoro session (GET /api/pomodoro/current). */
+  async getCurrentPomodoroSession(): Promise<Record<string, unknown> | null> {
+    const res = await this.authedFetch("/api/pomodoro/current");
+    if (res.status === 404) return null;
+    return res.json();
+  }
+
+  /** Fetch pomodoro history and stats. */
+  async getPomodoroHistory(params?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams();
+    if (params?.limit !== undefined) query.set("limit", String(params.limit));
+    if (params?.offset !== undefined) query.set("offset", String(params.offset));
+    const qs = query.toString();
+    const res = await this.authedFetch(`/api/pomodoro/history${qs ? `?${qs}` : ""}`);
+    return res.json();
+  }
+
   /** Clean up all issues created during this test. */
   async cleanup() {
     for (const id of this.createdIssueIds) {
@@ -323,6 +382,14 @@ export class TestApiClient {
       }
     }
     this.createdTimeEntryIds = [];
+
+    if (this.pomodoroSessionActive) {
+      try {
+        await this.resetPomodoroSession();
+      } catch {
+        /* ignore — session may already be idle */
+      }
+    }
   }
 
   getToken() {
