@@ -75,6 +75,15 @@
   margin-top: 0.625rem;
   margin-bottom: 0.625rem;
   line-height: 1.625;
+  overflow-wrap: break-word;
+}
+
+/* Long words / JSON / URLs in list and table content must also wrap */
+.rich-text-editor li,
+.rich-text-editor td,
+.rich-text-editor th,
+.rich-text-editor blockquote {
+  overflow-wrap: break-word;
 }
 
 /* First child should not have top margin */
