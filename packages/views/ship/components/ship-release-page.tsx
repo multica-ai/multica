@@ -275,7 +275,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
   const mergedCount = data.pull_requests.filter((pr) => pr.merge_state === "merged").length;
   const inFlight = data.pull_requests.find((pr) => pr.merge_state === "merging");
 
-  const startMergePreconditions = checkStartMergePreconditions(data);
+  const startMergePreconditions = checkStartMergePreconditions(data, workspace);
   const canStartMerge = isAssembling && startMergePreconditions.length === 0;
 
   return (
@@ -2036,13 +2036,60 @@ function formatAbsoluteShort(iso: string): string {
   });
 }
 
+/** Resolve the effective approval rule for a release's risk tier.
+ *  Reads `workspace.ship_hub_approval_<tier>` and falls back to the
+ *  legacy defaults (low/medium → member, high → approver, critical →
+ *  two) when the workspace setting is empty.
+ *
+ *  Kept in sync with the server-side `resolveApprovalRule` in
+ *  `service/ship/release_staging.go`. If you change the defaults here,
+ *  change them there. */
+function approvalRuleForRisk(
+  workspace: ReturnType<typeof useCurrentWorkspace>,
+  risk: string,
+): "member" | "admin" | "approver" | "two" {
+  const norm = (
+    v: string | undefined,
+    fallback: "member" | "admin" | "approver" | "two",
+  ): "member" | "admin" | "approver" | "two" => {
+    switch (v) {
+      case "member":
+      case "admin":
+      case "approver":
+      case "two":
+        return v;
+    }
+    return fallback;
+  };
+  if (!workspace) return "member";
+  switch (risk) {
+    case "low":
+      return norm(workspace.ship_hub_approval_low, "member");
+    case "medium":
+      return norm(workspace.ship_hub_approval_medium, "member");
+    case "high":
+      return norm(workspace.ship_hub_approval_high, "approver");
+    case "critical":
+      return norm(workspace.ship_hub_approval_critical, "two");
+    default:
+      return "member";
+  }
+}
+
 /** checkStartMergePreconditions returns a list of human-readable
  *  reasons the start_merge button should be disabled, or [] when
  *  it's safe to start. We intentionally surface these on the UI
  *  side too (the server enforces them at start_merge time) so the
- *  user sees why the button is greyed out before clicking. */
+ *  user sees why the button is greyed out before clicking.
+ *
+ *  Approver gate respects the workspace's per-risk-tier approval rule
+ *  (`ship_hub_approval_<tier>`). With the default for medium = "member",
+ *  no approver is required. Setting medium = "approver" restores the
+ *  old behavior. Critical defaults to "two" so the two-approver
+ *  requirement still bites unless the workspace explicitly opts out. */
 function checkStartMergePreconditions(
   data: NonNullable<ReturnType<typeof useReleaseDetail>["data"]>,
+  workspace: ReturnType<typeof useCurrentWorkspace>,
 ): string[] {
   const reasons: string[] = [];
   if (data.pull_requests.length === 0) {
@@ -2061,14 +2108,17 @@ function checkStartMergePreconditions(
       reasons.push(`PR #${pr.number} review: ${pr.review_decision}`);
     }
   }
-  const risk = data.release.risk_level;
-  if ((risk === "medium" || risk === "high") && !data.release.approver_id) {
-    reasons.push(`Risk ${risk} requires an approver`);
+  const rule = approvalRuleForRisk(workspace, data.release.risk_level);
+  if (rule === "approver" && !data.release.approver_id) {
+    reasons.push(`Risk ${data.release.risk_level} requires an approver`);
   }
-  if (risk === "critical") {
-    if (!data.release.approver_id) reasons.push("Critical risk requires an approver");
-    if (!data.release.second_approver_id)
-      reasons.push("Critical risk requires a second approver");
+  if (rule === "two") {
+    if (!data.release.approver_id) {
+      reasons.push(`Risk ${data.release.risk_level} requires an approver`);
+    }
+    if (!data.release.second_approver_id) {
+      reasons.push(`Risk ${data.release.risk_level} requires a second approver`);
+    }
   }
   return reasons;
 }

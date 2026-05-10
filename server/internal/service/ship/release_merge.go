@@ -182,6 +182,7 @@ func (s *Service) StartMerge(
 	ctx context.Context,
 	releaseID, requestedBy pgtype.UUID,
 	mergeMethod string,
+	approvalRule string,
 	deps *MergeTrainDeps,
 ) error {
 	if s.Github == nil {
@@ -220,19 +221,31 @@ func (s *Service) StartMerge(
 			reasons = append(reasons, fmt.Sprintf("PR #%d %s", pr.PrNumber, reason))
 		}
 	}
-	// Approver gates (mirror riskWarnings hard-side). Phase 7b's
-	// CanStartMerge spec lists these as blocking for medium+ risk.
-	switch release.RiskLevel {
-	case db.RiskLevelMedium, db.RiskLevelHigh:
+	// Approver gate. The workspace's per-risk-tier approval rule
+	// decides whether an approver_id (and second_approver_id) must be
+	// set before start_merge. Previously this was hardcoded to require
+	// approvers for every medium+ release regardless of the workspace's
+	// configured rule — which contradicted the verify-path code that
+	// DID respect the rule, and made `ship_hub_approval_medium=member`
+	// useless. The user could not start a merge train even with the
+	// rule set to "any member can verify."
+	//
+	// Now the gate mirrors the verify-time logic: only `approver` and
+	// `two` rules require approver_id; `member` / `admin` / empty rules
+	// don't block start_merge on approver presence. `resolveApprovalRule`
+	// supplies the legacy defaults when `approvalRule` is "".
+	rule := resolveApprovalRule(approvalRule, release.RiskLevel)
+	switch rule {
+	case ApprovalRuleApprover:
 		if !release.ApproverID.Valid {
 			reasons = append(reasons, "approver required for risk level "+string(release.RiskLevel))
 		}
-	case db.RiskLevelCritical:
+	case ApprovalRuleTwo:
 		if !release.ApproverID.Valid {
-			reasons = append(reasons, "approver required for critical risk")
+			reasons = append(reasons, "approver required for risk level "+string(release.RiskLevel))
 		}
 		if !release.SecondApproverID.Valid {
-			reasons = append(reasons, "second approver required for critical risk")
+			reasons = append(reasons, "second approver required for risk level "+string(release.RiskLevel))
 		}
 	}
 	if len(reasons) > 0 {
