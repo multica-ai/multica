@@ -673,6 +673,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// listen-mode toggle.
 				r.Get("/{id}/agent-settings", channelListenSvc.ListSettings)
 				r.Put("/{id}/agents/{agentId}/listen-mode", channelListenSvc.SetListenModeHandler)
+				// CEREBRO-PATCH(channel-archive-routes): per-(channel, user)
+				// archive flag (JEH-855/912).
+				r.Post("/{id}/archive", channelListenSvc.ArchiveChannelHandler)
+				r.Delete("/{id}/archive", channelListenSvc.UnarchiveChannelHandler)
 			})
 
 			// Workspace-wide agent task snapshot for presence derivation:

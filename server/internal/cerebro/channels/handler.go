@@ -135,6 +135,93 @@ func (s *Service) SetListenModeHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// archiveChannelResponse is the body returned by POST /api/channels/{id}/archive.
+type archiveChannelResponse struct {
+	ArchivedAt string `json:"archived_at"`
+}
+
+// ArchiveChannelHandler handles POST /api/channels/{id}/archive. Idempotent:
+// posting against an already-archived channel returns 200 with archived_at
+// refreshed to NOW.
+func (s *Service) ArchiveChannelHandler(w http.ResponseWriter, r *http.Request) {
+	channelID, ok := s.requireChannelMember(w, r)
+	if !ok {
+		return
+	}
+	userID := r.Header.Get("X-User-ID")
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "user not authenticated")
+		return
+	}
+
+	if err := s.ArchiveChannel(r.Context(), channelID, userUUID); err != nil {
+		slog.Error("channel archive failed", "channel_id", util.UUIDToString(channelID), "user_id", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to archive channel")
+		return
+	}
+
+	ts, _, err := s.GetChannelArchivedAt(r.Context(), channelID, userUUID)
+	if err != nil {
+		slog.Error("channel archive lookup failed", "channel_id", util.UUIDToString(channelID), "user_id", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to archive channel")
+		return
+	}
+	archivedAtStr := ts.Time.UTC().Format("2006-01-02T15:04:05.999999Z07:00")
+
+	// Per-user state — broadcast restricted to the acting user's own sessions
+	// so other channel members aren't notified about someone else's inbox flip.
+	s.Bus.Publish(events.Event{
+		Type:        EventChannelArchived,
+		WorkspaceID: middleware.WorkspaceIDFromContext(r.Context()),
+		ActorType:   "member",
+		ActorID:     userID,
+		Payload: map[string]any{
+			"channel_id":  util.UUIDToString(channelID),
+			"user_id":     userID,
+			"archived_at": archivedAtStr,
+		},
+		AudienceUserIDs: []string{userID},
+	})
+
+	writeJSON(w, http.StatusOK, archiveChannelResponse{ArchivedAt: archivedAtStr})
+}
+
+// UnarchiveChannelHandler handles DELETE /api/channels/{id}/archive.
+// Idempotent: deleting a missing archive row also returns 204.
+func (s *Service) UnarchiveChannelHandler(w http.ResponseWriter, r *http.Request) {
+	channelID, ok := s.requireChannelMember(w, r)
+	if !ok {
+		return
+	}
+	userID := r.Header.Get("X-User-ID")
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "user not authenticated")
+		return
+	}
+
+	if err := s.UnarchiveChannel(r.Context(), channelID, userUUID); err != nil {
+		slog.Error("channel unarchive failed", "channel_id", util.UUIDToString(channelID), "user_id", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to unarchive channel")
+		return
+	}
+
+	s.Bus.Publish(events.Event{
+		Type:        EventChannelUnarchived,
+		WorkspaceID: middleware.WorkspaceIDFromContext(r.Context()),
+		ActorType:   "member",
+		ActorID:     userID,
+		Payload: map[string]any{
+			"channel_id": util.UUIDToString(channelID),
+			"user_id":    userID,
+		},
+		AudienceUserIDs: []string{userID},
+	})
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // requireChannelMember resolves the {id} path param to a channel/dm issue and
 // confirms the calling member is subscribed to it. Returns the channel UUID
 // for downstream queries.

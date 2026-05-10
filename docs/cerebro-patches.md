@@ -106,6 +106,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `cerebro-listeners` | server/cmd/server/notification_listeners.go<br>server/cmd/server/notification_routing.go | 0 | Cerebro modification (see file for details) |
 | `channel-listen-mode` | server/internal/handler/comment.go | 4 | JEH-699 — invoke cerebro channel listen-mode service so non-mentioned, non-assignee agents subscribed to a channel are triggered when their listen_mode is 'always' |
 | `channel-listen-routes` | server/cmd/server/router.go | 3 | JEH-699 — channel listen-mode list/upsert HTTP routes |
+| `channel-archive-routes` | server/cmd/server/router.go | 4 | JEH-855/912 — per-(channel, user) archive HTTP routes (POST/DELETE /api/channels/{id}/archive) |
 | `router-channel-listen` | server/cmd/server/router.go | 5 | JEH-699 — wire cerebro channel-listen service into the upstream Handler so the comment trigger path can dispatch always-listening agents |
 | `handler-channel-listen` | server/internal/handler/handler.go | 1 | JEH-699 — ChannelListen field on Handler struct |
 | `handler-channel-listen-iface` | server/internal/handler/handler.go | 4 | JEH-699 — ChannelListenInvoker interface seam (avoids handler→cerebro import cycle) |

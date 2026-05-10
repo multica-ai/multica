@@ -32,6 +32,15 @@ const ListenModeMentionOnly = "mention_only"
 // Restricted to channel participants (audience set by caller in the HTTP path).
 const EventChannelListenModeChanged = "channel:listen_mode_changed"
 
+// EventChannelArchived is the WS event published when a member archives a
+// channel. Per-user state, so the audience is restricted to the acting user's
+// own sessions — other channel members do not need to see it.
+const EventChannelArchived = "cerebro_channel_archived"
+
+// EventChannelUnarchived is the WS event published when a member unarchives
+// a channel. Same audience contract as EventChannelArchived.
+const EventChannelUnarchived = "cerebro_channel_unarchived"
+
 // Service ties together the cerebro listen-mode store, the upstream issue/
 // agent/subscriber queries, and the task-enqueue service so the comment
 // handler can dispatch listen-always agents in one call.
@@ -183,4 +192,38 @@ func (s *Service) SetListenMode(ctx context.Context, channelID, agentID pgtype.U
 // frontend applies that default when a row is missing.
 func (s *Service) ListListenModes(ctx context.Context, channelID pgtype.UUID) ([]cerebrodb.ListChannelAgentListenModesRow, error) {
 	return s.CerebroQueries.ListChannelAgentListenModes(ctx, channelID)
+}
+
+// ArchiveChannel marks (channelID, userID) as archived. Idempotent — calling
+// it on an already-archived channel just refreshes archived_at.
+func (s *Service) ArchiveChannel(ctx context.Context, channelID, userID pgtype.UUID) error {
+	return s.CerebroQueries.ArchiveChannelForUser(ctx, cerebrodb.ArchiveChannelForUserParams{
+		ChannelID: channelID,
+		UserID:    userID,
+	})
+}
+
+// UnarchiveChannel removes the archive flag for (channelID, userID).
+// Idempotent — deleting a missing row is not an error.
+func (s *Service) UnarchiveChannel(ctx context.Context, channelID, userID pgtype.UUID) error {
+	return s.CerebroQueries.UnarchiveChannelForUser(ctx, cerebrodb.UnarchiveChannelForUserParams{
+		ChannelID: channelID,
+		UserID:    userID,
+	})
+}
+
+// GetChannelArchivedAt returns the archived_at timestamp for (channelID, userID).
+// Returns ok=false (no error) when the channel is not archived for the user.
+func (s *Service) GetChannelArchivedAt(ctx context.Context, channelID, userID pgtype.UUID) (pgtype.Timestamptz, bool, error) {
+	ts, err := s.CerebroQueries.GetChannelArchivedAtForUser(ctx, cerebrodb.GetChannelArchivedAtForUserParams{
+		ChannelID: channelID,
+		UserID:    userID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return pgtype.Timestamptz{}, false, nil
+		}
+		return pgtype.Timestamptz{}, false, err
+	}
+	return ts, true, nil
 }
