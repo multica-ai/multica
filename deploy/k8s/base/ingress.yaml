@@ -105,6 +105,17 @@ spec:
                 name: multica-feishu-bridge
                 port:
                   number: 8080
+          # Bridge also serves /doc/install.md (the agent-facing install
+          # guide bake'd into the bridge image). The bridge serves it on
+          # localhost:8080 already; this route just exposes it through ALB
+          # so AI agents can `read https://multica.lilithgames.com/doc/install.md`.
+          - path: /doc
+            pathType: Prefix
+            backend:
+              service:
+                name: multica-feishu-bridge
+                port:
+                  number: 8080
           - path: /
             pathType: Prefix
             backend:

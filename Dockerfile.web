@@ -40,12 +40,41 @@ ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID
 ARG NEXT_PUBLIC_FEISHU_APP_ID
 ARG NEXT_PUBLIC_WS_URL
 ARG NEXT_PUBLIC_APP_VERSION=dev
+# Skip the build-arg presence check; for upstream OSS builds where Feishu
+# integration isn't wired up, set this to any non-empty value.
+ARG SKIP_FEISHU_APP_ID_CHECK=
 ENV REMOTE_API_URL=$REMOTE_API_URL
 ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=$NEXT_PUBLIC_GOOGLE_CLIENT_ID
 ENV NEXT_PUBLIC_FEISHU_APP_ID=$NEXT_PUBLIC_FEISHU_APP_ID
 ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
 ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 ENV STANDALONE=true
+
+# Fail-fast guard for build-time-baked OAuth client ids. NEXT_PUBLIC_* env
+# vars are sealed into the client bundle by `next build`; if you forget the
+# `--build-arg`, the bundle silently embeds an empty string and the OAuth
+# button disappears at runtime even though the runtime configmap looks fine.
+# This check exists because that exact regression bit us once already
+# (web 0.0.1 was built without --build-arg NEXT_PUBLIC_FEISHU_APP_ID and
+# the Feishu login button vanished after a routine restart). Pass
+# --build-arg SKIP_FEISHU_APP_ID_CHECK=1 to opt out for upstream builds.
+RUN if [ -z "$SKIP_FEISHU_APP_ID_CHECK" ] && [ -z "$NEXT_PUBLIC_FEISHU_APP_ID" ]; then \
+        echo ""; \
+        echo "❌ NEXT_PUBLIC_FEISHU_APP_ID is empty at build time."; \
+        echo ""; \
+        echo "   Next.js bakes NEXT_PUBLIC_* into the client bundle at build,"; \
+        echo "   not at runtime. Empty here means the Feishu login button"; \
+        echo "   will be gone in the deployed image, regardless of what the"; \
+        echo "   k8s ConfigMap says."; \
+        echo ""; \
+        echo "   Add to your build command:"; \
+        echo "     --build-arg NEXT_PUBLIC_FEISHU_APP_ID=cli_..."; \
+        echo ""; \
+        echo "   Or for upstream / non-Feishu builds:"; \
+        echo "     --build-arg SKIP_FEISHU_APP_ID_CHECK=1"; \
+        echo ""; \
+        exit 1; \
+    fi
 
 # Build the web app (standalone output for minimal runtime)
 RUN pnpm --filter @multica/web build
