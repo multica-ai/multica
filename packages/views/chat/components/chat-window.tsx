@@ -111,11 +111,16 @@ export function ChatWindow() {
     (a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole),
   );
 
-  // Resolve selected agent: stored preference → first available
-  const activeAgent =
-    availableAgents.find((a) => a.id === selectedAgentId) ??
-    availableAgents[0] ??
-    null;
+  // CEREBRO-PATCH(chat-session-scoped-agent): JEH-806 — existing sessions own
+  // their agent; the stored selected agent is only the new-chat preference.
+  const activeAgent = currentSession
+    ? agents.find((a) => a.id === currentSession?.agent_id) ?? null
+    : availableAgents.find((a) => a.id === selectedAgentId) ?? availableAgents[0] ?? null;
+
+  useEffect(() => {
+    if (!currentSession || selectedAgentId === currentSession.agent_id) return;
+    setSelectedAgentId(currentSession.agent_id);
+  }, [currentSession, selectedAgentId, setSelectedAgentId]);
 
   // Three-state availability — "loading" stays neutral (no banner, no
   // disable) so the input doesn't flash a fake "no agent" state in the

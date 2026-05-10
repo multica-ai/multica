@@ -64,10 +64,22 @@ export function InboxChatPanel({
   const availableAgents = agents.filter(
     (a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole),
   );
-  const activeAgent =
-    availableAgents.find((a) => a.id === selectedAgentId) ??
-    availableAgents[0] ??
-    null;
+
+  const currentSession = sessionId
+    ? allSessions.find((s) => s.id === sessionId)
+    : null;
+  const isSessionArchived = currentSession?.status === "archived";
+
+  // CEREBRO-PATCH(chat-session-scoped-agent): JEH-806 — inbox sessions display
+  // their own agent instead of the workspace-global selected agent.
+  const activeAgent = currentSession
+    ? agents.find((a) => a.id === currentSession?.agent_id) ?? null
+    : availableAgents.find((a) => a.id === selectedAgentId) ?? availableAgents[0] ?? null;
+
+  useEffect(() => {
+    if (!currentSession || selectedAgentId === currentSession.agent_id) return;
+    setSelectedAgentId(currentSession.agent_id);
+  }, [currentSession, selectedAgentId, setSelectedAgentId]);
 
   // Messages & pending task for the active session
   const { data: rawMessages, isLoading: messagesLoading } = useQuery(
@@ -80,11 +92,6 @@ export function InboxChatPanel({
     pendingChatTaskOptions(sessionId ?? ""),
   );
   const pendingTaskId = pendingTask?.task_id ?? null;
-
-  const currentSession = sessionId
-    ? allSessions.find((s) => s.id === sessionId)
-    : null;
-  const isSessionArchived = currentSession?.status === "archived";
 
   // Auto mark-as-read
   const currentHasUnread =
@@ -211,6 +218,7 @@ export function InboxChatPanel({
         // when the user enters a chat or starts a new one, so always claim
         // focus; ChatInput's own RAF + dialog-aware guard handles the rest.
         autoFocus
+        draftSessionId={sessionId}
         leftAdornment={
           <AgentPicker
             agents={availableAgents}

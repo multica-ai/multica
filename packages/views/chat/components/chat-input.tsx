@@ -46,6 +46,9 @@ interface ChatInputProps {
   // mount and on session/agent switch so the user can start typing without
   // an extra click. Skipped if a dialog is in front.
   autoFocus?: boolean;
+  // CEREBRO-PATCH(chat-session-scoped-draft): JEH-806 — embedded panels can pass
+  // the owning session id so drafts do not read the global active session.
+  draftSessionId?: string | null;
 }
 
 export function ChatInput({
@@ -59,6 +62,7 @@ export function ChatInput({
   rightAdornment,
   topSlot,
   autoFocus = false,
+  draftSessionId,
 }: ChatInputProps) {
   const { t } = useT("chat");
   const editorRef = useRef<ContentEditorRef>(null);
@@ -71,8 +75,10 @@ export function ChatInput({
   //   2. Tiptap's Placeholder extension is only applied at mount; this
   //      key changes on agent switch so the editor remounts and the
   //      `Tell {agent} what to do…` placeholder refreshes.
+  const scopedSessionId =
+    draftSessionId === undefined ? activeSessionId : draftSessionId;
   const draftKey =
-    activeSessionId ?? `${DRAFT_NEW_SESSION}:${selectedAgentId ?? ""}`;
+    scopedSessionId ?? `${DRAFT_NEW_SESSION}:${selectedAgentId ?? ""}`;
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
   const setInputDraft = useChatStore((s) => s.setInputDraft);
