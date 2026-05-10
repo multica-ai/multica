@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // gcLoop periodically scans local workspace directories and removes those
@@ -550,6 +551,7 @@ func (d *Daemon) pruneWorktree(barePath string) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitCmdTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "-C", barePath, "worktree", "prune")
+	util.HideConsoleWindow(cmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		d.logger.Warn("gc: worktree prune failed",
 			"repo", barePath,

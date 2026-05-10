@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // gitEnv returns an environment for git subprocesses that contact remotes.
@@ -243,6 +245,7 @@ const modernFetchRefspec = "+refs/heads/*:refs/remotes/origin/*"
 func gitCloneBare(url, dest string) error {
 	cmd := exec.Command("git", "clone", "--bare", url, dest)
 	cmd.Env = gitEnv()
+	util.HideConsoleWindow(cmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		// Clean up partial clone.
 		os.RemoveAll(dest)
@@ -283,6 +286,7 @@ func gitFetch(barePath string) error {
 	// on this call.
 	cmd := exec.Command("git", "-C", barePath, "remote", "set-head", "origin", "--auto")
 	cmd.Env = gitEnv()
+	util.HideConsoleWindow(cmd)
 	_ = cmd.Run()
 	return nil
 }
@@ -292,6 +296,7 @@ func gitFetch(barePath string) error {
 func runGitFetch(barePath string) error {
 	cmd := exec.Command("git", "-C", barePath, "fetch", "origin")
 	cmd.Env = gitEnv()
+	util.HideConsoleWindow(cmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git fetch: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -326,6 +331,7 @@ func ensureRemoteTrackingLayout(barePath string) error {
 	// Non-fatal: if this fails we fall back to origin/main, origin/master.
 	cmd := exec.Command("git", "-C", barePath, "remote", "set-head", "origin", "--auto")
 	cmd.Env = gitEnv()
+	util.HideConsoleWindow(cmd)
 	_ = cmd.Run()
 	return nil
 }
@@ -334,7 +340,9 @@ func ensureRemoteTrackingLayout(barePath string) error {
 // the empty string if it's not set. Distinguishes "missing" (exit 1) from
 // real git errors.
 func readFetchRefspec(barePath string) (string, error) {
-	out, err := exec.Command("git", "-C", barePath, "config", "--get", "remote.origin.fetch").Output()
+	cmd := exec.Command("git", "-C", barePath, "config", "--get", "remote.origin.fetch")
+	util.HideConsoleWindow(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
 			return "", nil // key missing, not an error
@@ -345,7 +353,9 @@ func readFetchRefspec(barePath string) (string, error) {
 }
 
 func setFetchRefspec(barePath, refspec string) error {
-	out, err := exec.Command("git", "-C", barePath, "config", "remote.origin.fetch", refspec).CombinedOutput()
+	cmd := exec.Command("git", "-C", barePath, "config", "remote.origin.fetch", refspec)
+	util.HideConsoleWindow(cmd)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("set remote.origin.fetch: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -530,6 +540,7 @@ func resolveBaseRef(barePath, requestedRef string) (string, error) {
 
 func gitRefExists(repoPath, ref string) bool {
 	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", ref)
+	util.HideConsoleWindow(cmd)
 	return cmd.Run() == nil
 }
 
@@ -560,6 +571,7 @@ func createWorktree(gitRoot, worktreePath, branchName, baseRef string) (string, 
 
 func runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef string) error {
 	cmd := exec.Command("git", "-C", gitRoot, "worktree", "add", "-b", branchName, worktreePath, baseRef)
+	util.HideConsoleWindow(cmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -594,12 +606,14 @@ func isGitWorktree(path string) bool {
 func updateExistingWorktree(worktreePath, branchName, baseRef string) (string, error) {
 	// Discard any leftover uncommitted changes from the previous task.
 	resetCmd := exec.Command("git", "-C", worktreePath, "reset", "--hard")
+	util.HideConsoleWindow(resetCmd)
 	if out, err := resetCmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git reset --hard: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
 	// Clean untracked files (e.g. build artifacts from previous task).
 	cleanCmd := exec.Command("git", "-C", worktreePath, "clean", "-fd")
+	util.HideConsoleWindow(cleanCmd)
 	if out, err := cleanCmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git clean -fd: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -610,6 +624,7 @@ func updateExistingWorktree(worktreePath, branchName, baseRef string) (string, e
 	// legacy/migration-pending cache. Either form is valid as a checkout
 	// startpoint.
 	checkoutCmd := exec.Command("git", "-C", worktreePath, "checkout", "-b", branchName, baseRef)
+	util.HideConsoleWindow(checkoutCmd)
 	out, err := checkoutCmd.CombinedOutput()
 	if err == nil {
 		return branchName, nil
@@ -621,6 +636,7 @@ func updateExistingWorktree(worktreePath, branchName, baseRef string) (string, e
 	// Branch name collision: append timestamp and retry once.
 	branchName = fmt.Sprintf("%s-%d", branchName, time.Now().Unix())
 	checkoutCmd = exec.Command("git", "-C", worktreePath, "checkout", "-b", branchName, baseRef)
+	util.HideConsoleWindow(checkoutCmd)
 	if out2, err2 := checkoutCmd.CombinedOutput(); err2 != nil {
 		return "", fmt.Errorf("git checkout -b (retry): %s: %w", strings.TrimSpace(string(out2)), err2)
 	}
@@ -659,17 +675,23 @@ func getRemoteDefaultBranch(barePath string) string {
 	//    repo can leave a symref pointing at a deleted ref, and returning
 	//    it here would later fail in `git worktree add` with a confusing
 	//    "invalid reference" error.
-	if out, err := exec.Command("git", "-C", barePath, "symbolic-ref", "refs/remotes/origin/HEAD").Output(); err == nil {
+	symrefCmd := exec.Command("git", "-C", barePath, "symbolic-ref", "refs/remotes/origin/HEAD")
+	util.HideConsoleWindow(symrefCmd)
+	if out, err := symrefCmd.Output(); err == nil {
 		ref := strings.TrimSpace(string(out))
 		if ref != "" {
-			if err := exec.Command("git", "-C", barePath, "rev-parse", "--verify", ref).Run(); err == nil {
+			verifyCmd := exec.Command("git", "-C", barePath, "rev-parse", "--verify", ref)
+			util.HideConsoleWindow(verifyCmd)
+			if err := verifyCmd.Run(); err == nil {
 				return ref
 			}
 		}
 	}
 	// 2) Common default branch names under the origin namespace.
 	for _, candidate := range []string{"refs/remotes/origin/main", "refs/remotes/origin/master"} {
-		if err := exec.Command("git", "-C", barePath, "rev-parse", "--verify", candidate).Run(); err == nil {
+		cmd := exec.Command("git", "-C", barePath, "rev-parse", "--verify", candidate)
+		util.HideConsoleWindow(cmd)
+		if err := cmd.Run(); err == nil {
 			return candidate
 		}
 	}
@@ -682,7 +704,9 @@ func getRemoteDefaultBranch(barePath string) string {
 	bareRef := bareHeadBranch(barePath)
 	if bareRef != "" {
 		originRef := "refs/remotes/origin/" + strings.TrimPrefix(bareRef, "refs/heads/")
-		if err := exec.Command("git", "-C", barePath, "rev-parse", "--verify", originRef).Run(); err == nil {
+		cmd := exec.Command("git", "-C", barePath, "rev-parse", "--verify", originRef)
+		util.HideConsoleWindow(cmd)
+		if err := cmd.Run(); err == nil {
 			return originRef
 		}
 	}
@@ -694,7 +718,9 @@ func getRemoteDefaultBranch(barePath string) string {
 	//    "legacy empty" apart from "ambiguous".
 	originCount := 0
 	var singleton string
-	if out, err := exec.Command("git", "-C", barePath, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/").Output(); err == nil {
+	foreachCmd := exec.Command("git", "-C", barePath, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/")
+	util.HideConsoleWindow(foreachCmd)
+	if out, err := foreachCmd.Output(); err == nil {
 		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || line == "refs/remotes/origin/HEAD" {
@@ -730,7 +756,9 @@ func getRemoteDefaultBranch(barePath string) string {
 // modern caches should never reach this path because origin/* resolution
 // succeeds first.
 func bareHeadBranch(barePath string) string {
-	out, err := exec.Command("git", "-C", barePath, "symbolic-ref", "HEAD").Output()
+	cmd := exec.Command("git", "-C", barePath, "symbolic-ref", "HEAD")
+	util.HideConsoleWindow(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
@@ -738,7 +766,9 @@ func bareHeadBranch(barePath string) string {
 	if ref == "" {
 		return ""
 	}
-	if err := exec.Command("git", "-C", barePath, "rev-parse", "--verify", ref).Run(); err != nil {
+	verifyCmd := exec.Command("git", "-C", barePath, "rev-parse", "--verify", ref)
+	util.HideConsoleWindow(verifyCmd)
+	if err := verifyCmd.Run(); err != nil {
 		return ""
 	}
 	return ref
@@ -795,6 +825,7 @@ git interpret-trailers --in-place --trailer "$TRAILER" "$COMMIT_MSG_FILE"
 // worktrees created from this cache.
 func installCoAuthoredByHook(worktreePath string) error {
 	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-common-dir")
+	util.HideConsoleWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("resolve git common dir: %w", err)
@@ -838,6 +869,7 @@ func isDaemonInstalledHook(contents []byte) bool {
 // the path.
 func removeCoAuthoredByHook(worktreePath string) error {
 	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-common-dir")
+	util.HideConsoleWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("resolve git common dir: %w", err)
@@ -868,6 +900,7 @@ func removeCoAuthoredByHook(worktreePath string) error {
 // excludeFromGit adds a pattern to the worktree's .git/info/exclude file.
 func excludeFromGit(worktreePath, pattern string) error {
 	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-dir")
+	util.HideConsoleWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("resolve git dir: %w", err)
