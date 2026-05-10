@@ -4,6 +4,7 @@
     "tagline": "Shared knowledge base for your workspace.",
     "new_document": "New document",
     "search_placeholder": "Search documents…",
+    "select_prompt": "Select a document to view or edit",
     "empty": {
       "title": "No documents yet",
       "description": "Create your first document to start building a shared knowledge base for your workspace."
@@ -28,7 +29,8 @@
     "placeholder": "Write markdown content…",
     "saving": "Saving…",
     "saved": "Saved",
-    "unsaved": "Unsaved changes"
+    "unsaved": "Unsaved changes",
+    "save_now": "Save now"
   },
   "header": {
     "pin": "Pin",

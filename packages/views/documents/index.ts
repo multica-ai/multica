@@ -1,1 +1,5 @@
-export { DocumentsPage, DocumentDetailPage } from "./components";
+export {
+  DocumentsPage,
+  DocumentDetailPage,
+  DocumentsShell,
+} from "./components";
