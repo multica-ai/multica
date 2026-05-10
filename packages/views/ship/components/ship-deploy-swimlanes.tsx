@@ -187,9 +187,17 @@ function DeployPill({ deploy, repoUrl, adapterKind }: DeployPillProps) {
                 href={commitUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-mono hover:underline"
+                className="inline-flex items-center gap-1 font-mono hover:underline"
+                data-testid="swimlane-popover-commit-link"
               >
                 {sha || "—"}
+                {/* Explicit external-link icon — without it the SHA reads
+                    as a static label and users miss that they can click
+                    through to the GitHub commit. The popover already
+                    surfaces "View workflow run" with this icon when a
+                    log_url exists; mirroring it here makes both
+                    affordances feel like the same kind of action. */}
+                <ExternalLink className="size-3 opacity-60" aria-hidden />
               </a>
             ) : (
               <span className="font-mono">{sha || "—"}</span>
