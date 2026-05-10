@@ -832,6 +832,7 @@ The annotation IS the release card. Write it for the audience in the Feishu grou
 - **Line 1** — short, value-focused headline. Becomes the card's title bar (blue background). Avoid commit-message style (`feat(scope): ...`).
 - **Body** — supports full Feishu markdown: `**bold**`, `` `code` ``, bullet lists, `---` for visual section breaks, `<font color='grey'>...</font>` for muted notes. Recommended structure: 🐛 问题 → ✅ 改动 → 👀 你会看到的变化, with `---` between sections so the card visually breaks them up.
 - **Don't include** the tag number, "已上线 Ship", or the commit/tag URL — the script adds those automatically (subtitle and footer).
+- **Don't escape backticks** as `` \` `` — the single-quoted heredoc (`<<'EOF'`) already disables shell expansion, so plain `` `code` `` is what gets stored. Escaped backticks render literally as `\`` in the card, which looks broken.
 
 ### Skip Behavior (No Notification)
 
