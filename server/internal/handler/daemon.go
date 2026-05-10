@@ -135,11 +135,18 @@ type DaemonRegisterRequest struct {
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
 	Runtimes        []struct {
-		Name    string `json:"name"`
-		Type    string `json:"type"`
-		Version string `json:"version"` // agent CLI version (claude/codex)
-		Status  string `json:"status"`
+		Name       string          `json:"name"`
+		Type       string          `json:"type"`
+		Version    string          `json:"version"` // agent CLI version (claude/codex)
+		Status     string          `json:"status"`
+		LocalRepos []LocalRepoData `json:"local_repos,omitempty"`
 	} `json:"runtimes"`
+}
+
+type LocalRepoData struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Root string `json:"root,omitempty"`
 }
 
 type daemonWorkspaceReposResponse struct {
@@ -192,6 +199,34 @@ func parseWorkspaceRepos(raw []byte) []RepoData {
 		return []RepoData{}
 	}
 	return normalizeWorkspaceRepos(repos)
+}
+
+func normalizeLocalRepos(repos []LocalRepoData) []LocalRepoData {
+	if len(repos) == 0 {
+		return []LocalRepoData{}
+	}
+	out := make([]LocalRepoData, 0, len(repos))
+	seen := make(map[string]struct{}, len(repos))
+	for _, repo := range repos {
+		path := strings.TrimSpace(repo.Path)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		name := strings.TrimSpace(repo.Name)
+		if name == "" {
+			name = path
+		}
+		out = append(out, LocalRepoData{
+			Name: name,
+			Path: path,
+			Root: strings.TrimSpace(repo.Root),
+		})
+	}
+	return out
 }
 
 func workspaceReposResponse(workspaceID string, raw []byte) daemonWorkspaceReposResponse {
@@ -280,11 +315,15 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		if runtime.Status == "offline" {
 			status = "offline"
 		}
-		metadata, _ := json.Marshal(map[string]any{
+		metadataPayload := map[string]any{
 			"version":     runtime.Version,
 			"cli_version": req.CLIVersion,
 			"launched_by": req.LaunchedBy,
-		})
+		}
+		if len(runtime.LocalRepos) > 0 {
+			metadataPayload["local_repos"] = normalizeLocalRepos(runtime.LocalRepos)
+		}
+		metadata, _ := json.Marshal(metadataPayload)
 
 		row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
 			WorkspaceID: wsUUID,

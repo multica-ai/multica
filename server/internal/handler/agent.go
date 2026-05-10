@@ -151,6 +151,7 @@ type AgentTaskResponse struct {
 	MaxAttempts             int32                 `json:"max_attempts"`
 	ParentTaskID            *string               `json:"parent_task_id,omitempty"`
 	Agent                   *TaskAgentData        `json:"agent,omitempty"`
+	Context                 json.RawMessage       `json:"context,omitempty"`
 	Repos                   []RepoData            `json:"repos,omitempty"`
 	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
 	ProjectTitle            string                `json:"project_title,omitempty"`     // for surfacing in agent context
@@ -222,6 +223,7 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 		TriggerSummary:   textToPtr(t.TriggerSummary),
 		WorkDir:          workDir,
+		Context:          json.RawMessage(t.Context),
 		// Surface task source so the UI can distinguish issue-linked tasks
 		// from chat-spawned or autopilot-spawned ones; all three may arrive
 		// with issue_id = "" once a task has no linked issue.

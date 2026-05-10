@@ -2,11 +2,15 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -109,7 +113,19 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, pgtype.UUID{})
+	var req struct {
+		CodexRepoPath string `json:"codex_repo_path"`
+	}
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+
+	task, err := h.TaskService.RerunIssueWithOptions(r.Context(), issue.ID, pgtype.UUID{}, service.RerunIssueOptions{
+		CodexRepoPath: strings.TrimSpace(req.CodexRepoPath),
+	})
 	if err != nil {
 		slog.Warn("issue rerun failed", "issue_id", id, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())

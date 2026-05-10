@@ -11,11 +11,13 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  Loader2,
   MoreHorizontal,
   PanelRight,
   Pin,
   PinOff,
   Plus,
+  Play,
   Users,
 } from "lucide-react";
 import { PageHeader } from "../../layout/page-header";
@@ -32,6 +34,13 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
@@ -56,6 +65,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
+import { runtimeListOptions } from "@multica/core/runtimes";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -155,6 +165,28 @@ function formatTokenCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
+}
+
+type LocalRepoOption = {
+  name: string;
+  path: string;
+};
+
+function localRepoOptions(metadata: Record<string, unknown> | undefined): LocalRepoOption[] {
+  const raw = metadata?.local_repos;
+  if (!Array.isArray(raw)) return [];
+  const repos: LocalRepoOption[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    const path = typeof rec.path === "string" ? rec.path.trim() : "";
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    const name = typeof rec.name === "string" && rec.name.trim() ? rec.name.trim() : path;
+    repos.push({ name, path });
+  }
+  return repos;
 }
 
 // Stable reference for threads with no replies. Inline `[]` would create a
@@ -324,6 +356,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   // Workspace owners and admins moderate any comment authored by anyone
   // (mirrors backend `comment.go:507-512`). Computed here so per-comment
   // rendering doesn't have to re-derive it for every row.
@@ -352,6 +385,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
+  const [selectedCodexRepoPath, setSelectedCodexRepoPath] = useState("");
+  const [repoRunPending, setRepoRunPending] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
@@ -386,6 +421,31 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       return cached?.description != null ? cached : undefined;
     },
   });
+
+  const assignedAgent = useMemo(() => {
+    if (!issue?.assignee_id || issue.assignee_type !== "agent") return null;
+    return agents.find((a) => a.id === issue.assignee_id) ?? null;
+  }, [agents, issue?.assignee_id, issue?.assignee_type]);
+
+  const assignedRuntime = useMemo(() => {
+    if (!assignedAgent?.runtime_id) return null;
+    return runtimes.find((rt) => rt.id === assignedAgent.runtime_id) ?? null;
+  }, [assignedAgent?.runtime_id, runtimes]);
+
+  const codexRepoOptions = useMemo(() => {
+    if (assignedRuntime?.provider !== "codex") return [];
+    return localRepoOptions(assignedRuntime.metadata);
+  }, [assignedRuntime]);
+
+  useEffect(() => {
+    if (codexRepoOptions.length === 0) {
+      if (selectedCodexRepoPath) setSelectedCodexRepoPath("");
+      return;
+    }
+    if (!codexRepoOptions.some((repo) => repo.path === selectedCodexRepoPath)) {
+      setSelectedCodexRepoPath(codexRepoOptions[0]?.path ?? "");
+    }
+  }, [codexRepoOptions, selectedCodexRepoPath]);
 
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
@@ -613,6 +673,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
 
+  const handleRunCodexInRepo = useCallback(async () => {
+    if (!issue || !selectedCodexRepoPath || repoRunPending) return;
+    setRepoRunPending(true);
+    try {
+      await api.rerunIssue(issue.id, { codex_repo_path: selectedCodexRepoPath });
+      toast.success(t(($) => $.detail.codex_run_queued));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.detail.codex_run_failed));
+    } finally {
+      setRepoRunPending(false);
+    }
+  }, [issue, repoRunPending, selectedCodexRepoPath, t]);
+
   const handleToggleSidebar = useCallback(() => {
     if (isMobile) {
       setMobileSidebarOpen((open) => !open);
@@ -716,6 +789,54 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <PropRow label={t(($) => $.detail.prop_project)}>
             <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
           </PropRow>
+          {codexRepoOptions.length > 0 && (
+            <PropRow label={t(($) => $.detail.prop_codex_repo)}>
+              <div className="flex min-w-0 items-center gap-1.5">
+                <Select
+                  value={selectedCodexRepoPath}
+                  onValueChange={(v) => v && setSelectedCodexRepoPath(v)}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    className="min-w-0 max-w-44 rounded-md border-transparent px-1.5"
+                    title={selectedCodexRepoPath}
+                  >
+                    <SelectValue placeholder={t(($) => $.detail.prop_codex_repo)}>
+                      {codexRepoOptions.find((repo) => repo.path === selectedCodexRepoPath)?.name ?? null}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent align="start" className="min-w-72">
+                    {codexRepoOptions.map((repo) => (
+                      <SelectItem key={repo.path} value={repo.path}>
+                        <span className="flex min-w-0 flex-col">
+                          <span className="truncate">{repo.name}</span>
+                          <span className="truncate text-xs text-muted-foreground">{repo.path}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground"
+                        disabled={!selectedCodexRepoPath || repoRunPending}
+                        onClick={handleRunCodexInRepo}
+                        aria-label={t(($) => $.detail.run_codex_in_repo)}
+                      >
+                        {repoRunPending ? <Loader2 className="animate-spin" /> : <Play />}
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>{t(($) => $.detail.run_codex_in_repo)}</TooltipContent>
+                </Tooltip>
+              </div>
+            </PropRow>
+          )}
           <PropRow label={t(($) => $.detail.prop_labels)}>
             <LabelPicker issueId={issue.id} align="start" />
           </PropRow>

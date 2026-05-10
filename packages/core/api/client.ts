@@ -793,9 +793,10 @@ export class ApiClient {
     });
   }
 
-  async rerunIssue(issueId: string): Promise<AgentTask> {
+  async rerunIssue(issueId: string, data?: { codex_repo_path?: string }): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/rerun`, {
       method: "POST",
+      ...(data ? { body: JSON.stringify(data) } : {}),
     });
   }
 

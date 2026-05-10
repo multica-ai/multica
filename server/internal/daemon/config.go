@@ -57,6 +57,7 @@ type Config struct {
 	GCOrphanTTL                    time.Duration         // clean orphan dirs with no meta, or dirs whose issue gc-check returns 404, once they exceed this age (default: 72h). The 404 path uses the same TTL — a scoped-down token can't instantly wipe live workspaces.
 	GCArtifactTTL                  time.Duration         // when a task has been completed for at least this long but its issue is still open, drop regenerable artifacts (default: 12h, set 0 to disable)
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
+	LocalRepoRoots                 []string              // host directories scanned for repo-native Codex runs (default: ~/projects)
 	PollInterval                   time.Duration
 	HeartbeatInterval              time.Duration
 	AgentTimeout                   time.Duration
@@ -186,6 +187,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	localRepoRoots := localRepoRootsFromEnv()
 
 	// Host info
 	host, err := os.Hostname()
@@ -336,6 +338,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		GCOrphanTTL:                    gcOrphanTTL,
 		GCArtifactTTL:                  gcArtifactTTL,
 		GCArtifactPatterns:             gcArtifactPatterns,
+		LocalRepoRoots:                 localRepoRoots,
 		HealthPort:                     healthPort,
 		MaxConcurrentTasks:             maxConcurrentTasks,
 		PollInterval:                   pollInterval,
@@ -406,6 +409,30 @@ func ResolveWorkspacesRoot(profile, override string) (string, error) {
 // matches what the GC would actually reclaim.
 func ArtifactPatternsFromEnv() []string {
 	return patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", DefaultGCArtifactPatterns)
+}
+
+func localRepoRootsFromEnv() []string {
+	raw := strings.TrimSpace(os.Getenv("MULTICA_LOCAL_REPO_ROOTS"))
+	if raw == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil
+		}
+		return []string{filepath.Join(home, "projects")}
+	}
+	roots := make([]string, 0)
+	for _, part := range filepath.SplitList(raw) {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		abs, err := filepath.Abs(part)
+		if err != nil {
+			continue
+		}
+		roots = append(roots, abs)
+	}
+	return roots
 }
 
 // patternsFromEnv reads a comma-separated list from env. Patterns containing

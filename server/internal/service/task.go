@@ -51,6 +51,17 @@ type TaskWakeupNotifier interface {
 // recognisable preview of a one-paragraph comment.
 const triggerSummaryMaxLen = 200
 
+const IssueTaskContextType = "issue_task"
+
+type IssueTaskContext struct {
+	Type          string `json:"type"`
+	CodexRepoPath string `json:"codex_repo_path,omitempty"`
+}
+
+type RerunIssueOptions struct {
+	CodexRepoPath string
+}
+
 // truncateForSummary returns s shortened to maxRunes, with a trailing
 // `…` when truncated. Operates on runes (not bytes) so multibyte characters
 // — Chinese / emoji — count as one each. Strips surrounding whitespace
@@ -358,7 +369,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	if len(triggerCommentID) > 0 {
 		commentID = triggerCommentID[0]
 	}
-	return s.enqueueIssueTask(ctx, issue, commentID, false)
+	return s.enqueueIssueTaskWithContext(ctx, issue, commentID, false, nil)
 }
 
 // enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
@@ -367,6 +378,10 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 // user already judged the prior output bad, a fresh agent session is the
 // expected behavior.
 func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
+	return s.enqueueIssueTaskWithContext(ctx, issue, triggerCommentID, forceFreshSession, nil)
+}
+
+func (s *TaskService) enqueueIssueTaskWithContext(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, contextJSON []byte) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -394,6 +409,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		TriggerCommentID:  triggerCommentID,
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
+		Context:           contextJSON,
 	})
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -1245,6 +1261,10 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 // @-mention agent) are left alone — rerun must not collateral-cancel
 // them.
 func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, triggerCommentID pgtype.UUID) (*db.AgentTaskQueue, error) {
+	return s.RerunIssueWithOptions(ctx, issueID, triggerCommentID, RerunIssueOptions{})
+}
+
+func (s *TaskService) RerunIssueWithOptions(ctx context.Context, issueID pgtype.UUID, triggerCommentID pgtype.UUID, opts RerunIssueOptions) (*db.AgentTaskQueue, error) {
 	issue, err := s.Queries.GetIssue(ctx, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("load issue: %w", err)
@@ -1272,7 +1292,17 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 
-	task, err := s.enqueueIssueTask(ctx, issue, triggerCommentID, true)
+	var contextJSON []byte
+	if strings.TrimSpace(opts.CodexRepoPath) != "" {
+		contextJSON, err = json.Marshal(IssueTaskContext{
+			Type:          IssueTaskContextType,
+			CodexRepoPath: strings.TrimSpace(opts.CodexRepoPath),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("marshal task context: %w", err)
+		}
+	}
+	task, err := s.enqueueIssueTaskWithContext(ctx, issue, triggerCommentID, true, contextJSON)
 	if err != nil {
 		return nil, err
 	}

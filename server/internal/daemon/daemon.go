@@ -336,7 +336,8 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 }
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
-	var runtimes []map[string]string
+	var runtimes []map[string]any
+	localRepos := discoverLocalRepos(d.cfg.LocalRepoRoots)
 	for name, entry := range d.cfg.Agents {
 		version, err := agent.DetectVersion(ctx, entry.Path)
 		if err != nil {
@@ -352,12 +353,16 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
-		runtimes = append(runtimes, map[string]string{
+		runtimeInfo := map[string]any{
 			"name":    displayName,
 			"type":    name,
 			"version": version,
 			"status":  "online",
-		})
+		}
+		if name == "codex" && len(localRepos) > 0 {
+			runtimeInfo["local_repos"] = localRepos
+		}
+		runtimes = append(runtimes, runtimeInfo)
 	}
 	if len(runtimes) == 0 {
 		return nil, fmt.Errorf("no agent runtimes could be registered")
@@ -1664,53 +1669,70 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		QuickCreatePrompt:       task.QuickCreatePrompt,
 	}
 
-	// Mark candidate env roots as active before any env work so the GC loop
-	// can't reclaim artifacts inside them mid-execution. We mark both the
-	// predicted root for a fresh Prepare and the prior root for Reuse — they
-	// usually differ (Reuse keeps the original task's directory).
-	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
-	d.markActiveEnvRoot(predictedRoot)
-	defer d.unmarkActiveEnvRoot(predictedRoot)
-	if task.PriorWorkDir != "" {
-		priorRoot := filepath.Dir(task.PriorWorkDir)
-		if priorRoot != predictedRoot {
-			d.markActiveEnvRoot(priorRoot)
-			defer d.unmarkActiveEnvRoot(priorRoot)
-		}
+	repoNativeWorkDir := repoNativeCodexPath(task, provider)
+	if repoNativeWorkDir != "" && !localRepoAllowed(d.cfg.LocalRepoRoots, repoNativeWorkDir) {
+		return TaskResult{}, fmt.Errorf("selected repo is not in the daemon local repo roots: %s", repoNativeWorkDir)
 	}
 
-	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
 	var env *execenv.Environment
-	codexVersion := d.agentVersion("codex")
-	if task.PriorWorkDir != "" {
-		env = execenv.Reuse(task.PriorWorkDir, provider, codexVersion, taskCtx, d.logger)
-	}
-	if env == nil {
-		var err error
-		env, err = execenv.Prepare(execenv.PrepareParams{
-			WorkspacesRoot: d.cfg.WorkspacesRoot,
-			WorkspaceID:    task.WorkspaceID,
-			TaskID:         task.ID,
-			AgentName:      agentName,
-			Provider:       provider,
-			CodexVersion:   codexVersion,
-			Task:           taskCtx,
-		}, d.logger)
-		if err != nil {
-			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
-		}
-	}
-	// Belt-and-suspenders: also mark whatever root we ended up with, in case
-	// future changes diverge from PredictRootDir.
-	if env.RootDir != predictedRoot && env.RootDir != "" {
-		d.markActiveEnvRoot(env.RootDir)
-		defer d.unmarkActiveEnvRoot(env.RootDir)
-	}
+	execWorkDir := repoNativeWorkDir
+	envRoot := ""
+	codexHome := ""
+	runtimeBrief := ""
+	reused := false
 
-	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
-	if err != nil {
-		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
+	if repoNativeWorkDir == "" {
+		// Mark candidate env roots as active before any env work so the GC loop
+		// can't reclaim artifacts inside them mid-execution. We mark both the
+		// predicted root for a fresh Prepare and the prior root for Reuse — they
+		// usually differ (Reuse keeps the original task's directory).
+		predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+		d.markActiveEnvRoot(predictedRoot)
+		defer d.unmarkActiveEnvRoot(predictedRoot)
+		if task.PriorWorkDir != "" {
+			priorRoot := filepath.Dir(task.PriorWorkDir)
+			if priorRoot != predictedRoot {
+				d.markActiveEnvRoot(priorRoot)
+				defer d.unmarkActiveEnvRoot(priorRoot)
+			}
+		}
+
+		// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
+		codexVersion := d.agentVersion("codex")
+		if task.PriorWorkDir != "" {
+			env = execenv.Reuse(task.PriorWorkDir, provider, codexVersion, taskCtx, d.logger)
+		}
+		if env == nil {
+			var err error
+			env, err = execenv.Prepare(execenv.PrepareParams{
+				WorkspacesRoot: d.cfg.WorkspacesRoot,
+				WorkspaceID:    task.WorkspaceID,
+				TaskID:         task.ID,
+				AgentName:      agentName,
+				Provider:       provider,
+				CodexVersion:   codexVersion,
+				Task:           taskCtx,
+			}, d.logger)
+			if err != nil {
+				return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
+			}
+		}
+		// Belt-and-suspenders: also mark whatever root we ended up with, in case
+		// future changes diverge from PredictRootDir.
+		if env.RootDir != predictedRoot && env.RootDir != "" {
+			d.markActiveEnvRoot(env.RootDir)
+			defer d.unmarkActiveEnvRoot(env.RootDir)
+		}
+
+		var err error
+		runtimeBrief, err = execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+		if err != nil {
+			d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
+		}
+		execWorkDir = env.WorkDir
+		envRoot = env.RootDir
+		codexHome = env.CodexHome
+		reused = task.PriorWorkDir != "" && env.WorkDir == task.PriorWorkDir
 	}
 	// NOTE: No cleanup — workdir is preserved for reuse by future tasks on
 	// the same (agent, issue) pair. The work_dir path is stored in DB on
@@ -1756,8 +1778,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
 	// without polluting the system ~/.codex/skills/.
-	if env.CodexHome != "" {
-		agentEnv["CODEX_HOME"] = env.CodexHome
+	if codexHome != "" {
+		agentEnv["CODEX_HOME"] = codexHome
 	}
 	// Inject user-configured custom environment variables (e.g. ANTHROPIC_API_KEY,
 	// ANTHROPIC_BASE_URL for router/proxy mode, or CLAUDE_CODE_USE_BEDROCK for
@@ -1782,11 +1804,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
 
-	reused := task.PriorWorkDir != "" && env.WorkDir == task.PriorWorkDir
 	taskLog.Info("starting agent",
 		"provider", provider,
-		"workdir", env.WorkDir,
+		"workdir", execWorkDir,
 		"model", entry.Model,
+		"repo_native", repoNativeWorkDir != "",
 		"reused", reused,
 	)
 	if task.PriorSessionID != "" {
@@ -1819,7 +1841,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		model = entry.Model
 	}
 	execOpts := agent.ExecOptions{
-		Cwd:                       env.WorkDir,
+		Cwd:                       execWorkDir,
 		Model:                     model,
 		Timeout:                   d.cfg.AgentTimeout,
 		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
@@ -1902,8 +1924,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				Status:    "blocked",
 				Comment:   fmt.Sprintf("%s returned empty output", provider),
 				SessionID: result.SessionID,
-				WorkDir:   env.WorkDir,
-				EnvRoot:   env.RootDir,
+				WorkDir:   execWorkDir,
+				EnvRoot:   envRoot,
 				Usage:     usageEntries,
 			}, nil
 		}
@@ -1922,8 +1944,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				Status:        "blocked",
 				Comment:       result.Output,
 				SessionID:     result.SessionID,
-				WorkDir:       env.WorkDir,
-				EnvRoot:       env.RootDir,
+				WorkDir:       execWorkDir,
+				EnvRoot:       envRoot,
 				Usage:         usageEntries,
 				FailureReason: reason,
 			}, nil
@@ -1932,8 +1954,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Status:    "completed",
 			Comment:   result.Output,
 			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
-			EnvRoot:   env.RootDir,
+			WorkDir:   execWorkDir,
+			EnvRoot:   envRoot,
 			Usage:     usageEntries,
 		}, nil
 	case "timeout":
@@ -1949,8 +1971,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Status:        "blocked",
 			Comment:       comment,
 			SessionID:     result.SessionID,
-			WorkDir:       env.WorkDir,
-			EnvRoot:       env.RootDir,
+			WorkDir:       execWorkDir,
+			EnvRoot:       envRoot,
 			FailureReason: "timeout",
 			Usage:         usageEntries,
 		}, nil
@@ -1964,8 +1986,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Status:    "cancelled",
 			Comment:   "task cancelled by server",
 			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
-			EnvRoot:   env.RootDir,
+			WorkDir:   execWorkDir,
+			EnvRoot:   envRoot,
 			Usage:     usageEntries,
 		}, nil
 	default:
@@ -1995,8 +2017,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Status:        "blocked",
 			Comment:       errMsg,
 			SessionID:     result.SessionID,
-			WorkDir:       env.WorkDir,
-			EnvRoot:       env.RootDir,
+			WorkDir:       execWorkDir,
+			EnvRoot:       envRoot,
 			Usage:         usageEntries,
 			FailureReason: failureReason,
 		}, nil
