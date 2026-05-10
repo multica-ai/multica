@@ -34,6 +34,7 @@
 @source "../../../../../packages/ui/**/*.tsx";
 @source "../../../../../packages/core/**/*.{ts,tsx}";
 @source "../../../../../packages/views/**/*.{ts,tsx}";
+@source "../../../../../packages/cerebro-*/**/*.{ts,tsx}";
 @source "./**/*.tsx";
 
 /* Desktop-specific: override sidebar container padding for traffic light layout */

@@ -10,3 +10,4 @@
 @source "../../../packages/ui/**/*.{ts,tsx}";
 @source "../../../packages/core/**/*.{ts,tsx}";
 @source "../../../packages/views/**/*.{ts,tsx}";
+@source "../../../packages/cerebro-*/**/*.{ts,tsx}";
