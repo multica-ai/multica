@@ -632,10 +632,24 @@ export function useRealtimeSync(
     // need workspace context here. Also refresh the workspace channels list
     // so the sidebar's unread count and "last_read_message_id" cursor
     // recompute against the new latest-message timestamp.
+    //
+    // Bug fix — when the new message is a thread reply (parent_message_id
+    // present), we ALSO invalidate the parent's thread cache. The thread
+    // panel uses `staleTime: Infinity` so without explicit invalidation
+    // the panel keeps showing the cached (empty / stale) reply list while
+    // the timeline's "N replies" badge correctly reflects the new count.
+    // Symptom: badge says "1 reply" but the panel shows "No replies yet."
     const unsubChannelMessage = ws.on("channel:message", (p) => {
-      const payload = p as { channel_id: string };
+      const payload = p as {
+        channel_id?: string;
+        message?: { id?: string; parent_message_id?: string | null };
+      };
       if (payload?.channel_id) {
         qc.invalidateQueries({ queryKey: channelKeys.messages(payload.channel_id) });
+      }
+      const parentId = payload?.message?.parent_message_id;
+      if (parentId) {
+        qc.invalidateQueries({ queryKey: channelKeys.thread(parentId) });
       }
       const wsId = getCurrentWsId();
       if (wsId) qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });

@@ -52,7 +52,13 @@ export function channelMessageThreadOptions(channelId: string, messageId: string
   return queryOptions({
     queryKey: channelKeys.thread(messageId),
     queryFn: () => api.getChannelMessageThread(channelId, messageId),
-    staleTime: Infinity,
+    // Belt-and-suspenders against missed WS invalidations: opening the
+    // panel for an existing thread should always refetch. Reply-bearing
+    // events that don't carry parent_message_id (e.g. older agent
+    // publishers, or any new event we add later) would otherwise leave
+    // the panel stuck at its first-fetch state — the bug surfaced as
+    // "1 reply" badge with "No replies yet." in the panel.
+    staleTime: 0,
     enabled: enabled && !!channelId && !!messageId,
   });
 }
