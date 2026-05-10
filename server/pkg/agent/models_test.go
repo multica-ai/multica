@@ -197,6 +197,35 @@ bareword
 	}
 }
 
+func TestParsePiModelsTableFormat(t *testing.T) {
+	input := `provider             model                   context  max-out  thinking  images
+bailian-coding-plan  glm-4.7                 202.8K   16.4K    no        no
+bailian-coding-plan  qwen3.6-plus            1M       65.5K    no        yes
+opencode             claude-sonnet-4-6       1M       64K      yes       yes
+opencode             claude-sonnet-4-6:exp   1M       64K      yes       yes
+opencode             claude-sonnet-4-6       1M       64K      yes       yes
+bareword-only-line
+`
+	models := parsePiModels(input)
+	if len(models) != 4 {
+		t.Fatalf("expected 4 models (header skipped, duplicate deduped, bareword skipped), got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "bailian-coding-plan/glm-4.7" || models[0].Provider != "bailian-coding-plan" {
+		t.Errorf("unexpected first model: %+v", models[0])
+	}
+	if models[1].ID != "bailian-coding-plan/qwen3.6-plus" || models[1].Provider != "bailian-coding-plan" {
+		t.Errorf("unexpected second model: %+v", models[1])
+	}
+	if models[2].ID != "opencode/claude-sonnet-4-6" || models[2].Provider != "opencode" {
+		t.Errorf("unexpected third model: %+v", models[2])
+	}
+	// Colon inside a model name in column 1 must be preserved — only
+	// the legacy `provider:model` form gets colon→slash normalization.
+	if models[3].ID != "opencode/claude-sonnet-4-6:exp" || models[3].Provider != "opencode" {
+		t.Errorf("expected ':' inside table-format model name to be preserved: %+v", models[3])
+	}
+}
+
 func TestParseOpenclawAgents(t *testing.T) {
 	input := `deepseek-v4   deepseek-v4
 claude-sonnet claude-sonnet-4-6

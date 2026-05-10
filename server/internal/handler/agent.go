@@ -142,39 +142,39 @@ type ChatHistoryMessage struct {
 }
 
 type AgentTaskResponse struct {
-	ID                    string                `json:"id"`
-	AgentID               string                `json:"agent_id"`
-	RuntimeID             string                `json:"runtime_id"`
-	IssueID               string                `json:"issue_id"`
-	WorkspaceID           string                `json:"workspace_id"`
-	Status                string                `json:"status"`
-	Priority              int32                 `json:"priority"`
-	DispatchedAt          *string               `json:"dispatched_at"`
-	StartedAt             *string               `json:"started_at"`
-	CompletedAt           *string               `json:"completed_at"`
-	Result                any                   `json:"result"`
-	Error                 *string               `json:"error"`
-	FailureReason         string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
-	Attempt               int32                 `json:"attempt"`
-	MaxAttempts           int32                 `json:"max_attempts"`
-	ParentTaskID          *string               `json:"parent_task_id,omitempty"`
-	Agent                 *TaskAgentData        `json:"agent,omitempty"`
-	Repos                 []RepoData            `json:"repos,omitempty"`
-	ProjectID             string                `json:"project_id,omitempty"`        // issue's project, when present
-	ProjectTitle          string                `json:"project_title,omitempty"`     // for surfacing in agent context
-	ProjectResources      []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
-	CreatedAt             string                `json:"created_at"`
-	PriorSessionID        string                `json:"prior_session_id,omitempty"`        // session ID from a previous task on same issue
-	PriorWorkDir          string                `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on same issue
-	TriggerCommentID      *string               `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
-	TriggerCommentContent string                `json:"trigger_comment_content,omitempty"` // content of the triggering comment
-	TriggerSummary        *string               `json:"trigger_summary,omitempty"`         // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
-	// CEREBRO-PATCH(task-title-builder): short generated headline for inline channel row, inbox, AgentLiveCard, Tasks list. Distinct from TriggerSummary (verbatim snapshot).
-	Title                 *string               `json:"title,omitempty"`
-	TriggerAuthorType     string                `json:"trigger_author_type,omitempty"` // "agent" or "member" — author kind of the triggering comment
-	TriggerAuthorName     string                `json:"trigger_author_name,omitempty"` // display name of the triggering comment author
-	ChatSessionID         string                `json:"chat_session_id,omitempty"`     // non-empty for chat tasks
-	ChatMessage           string                `json:"chat_message,omitempty"`        // user message for chat tasks (also: legacy single-message field for daemons pre-JEH-330)
+	ID                      string                `json:"id"`
+	AgentID                 string                `json:"agent_id"`
+	RuntimeID               string                `json:"runtime_id"`
+	IssueID                 string                `json:"issue_id"`
+	WorkspaceID             string                `json:"workspace_id"`
+	Status                  string                `json:"status"`
+	Priority                int32                 `json:"priority"`
+	DispatchedAt            *string               `json:"dispatched_at"`
+	StartedAt               *string               `json:"started_at"`
+	CompletedAt             *string               `json:"completed_at"`
+	Result                  any                   `json:"result"`
+	Error                   *string               `json:"error"`
+	FailureReason           string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt                 int32                 `json:"attempt"`
+	MaxAttempts             int32                 `json:"max_attempts"`
+	ParentTaskID            *string               `json:"parent_task_id,omitempty"`
+	Agent                   *TaskAgentData        `json:"agent,omitempty"`
+	Repos                   []RepoData            `json:"repos,omitempty"`
+	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
+	ProjectTitle            string                `json:"project_title,omitempty"`     // for surfacing in agent context
+	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
+	CreatedAt               string                `json:"created_at"`
+	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
+	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
+	WorkDir                 string                `json:"work_dir,omitempty"`                  // local working directory pinned for this task; populated once the daemon reports it
+	TriggerCommentID        *string               `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
+	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
+	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
+	Title                   *string               `json:"title,omitempty"`                     // CEREBRO-PATCH(task-title-builder): short generated headline.
+	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
+	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
+	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
+	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks (also: legacy single-message field for daemons pre-JEH-330)
 	// CEREBRO-PATCH(agent-task-cerebro-fields): cerebro-only daemon fields.
 	ChatHistory       []ChatHistoryMessage `json:"chat_history,omitempty"`        // capped chat transcript for stateless managed HTTP runtimes
 	ChatMessages      []string             `json:"chat_messages,omitempty"`       // user messages newer than the last assistant reply (oldest first)
@@ -220,6 +220,10 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 	if t.FailureReason.Valid {
 		failureReason = t.FailureReason.String
 	}
+	workDir := ""
+	if t.WorkDir.Valid {
+		workDir = t.WorkDir.String
+	}
 	return AgentTaskResponse{
 		ID:               uuidToString(t.ID),
 		AgentID:          uuidToString(t.AgentID),
@@ -240,7 +244,8 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 		TriggerSummary:   textToPtr(t.TriggerSummary),
 		// CEREBRO-PATCH(task-title-builder): surface generated title to clients.
-		Title: textToPtr(t.Title),
+		Title:            textToPtr(t.Title),
+		WorkDir:          workDir,
 		// Surface task source so the UI can distinguish issue-linked tasks
 		// from chat-spawned or autopilot-spawned ones; all three may arrive
 		// with issue_id = "" once a task has no linked issue.
@@ -534,6 +539,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		workspaceID,
 		uuidToString(agent.ID),
 		runtime.Provider,
+		runtime.RuntimeMode,
 		req.Template,
 		isFirstAgent,
 	))
@@ -744,8 +750,10 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	// rows here — the agent:archived event below already triggers a full
 	// active-tasks invalidation on every connected client, so per-task
 	// task:cancelled events would be redundant noise.
-	if _, err := h.Queries.CancelAgentTasksByAgent(r.Context(), agent.ID); err != nil {
+	if cancelled, err := h.Queries.CancelAgentTasksByAgent(r.Context(), agent.ID); err != nil {
 		slog.Warn("cancel agent tasks on archive failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+	} else {
+		h.TaskService.CaptureCancelledTasks(r.Context(), cancelled)
 	}
 
 	wsID := uuidToString(archived.WorkspaceID)

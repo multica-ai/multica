@@ -102,8 +102,6 @@ SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, create
 WHERE id = $1
 `
 
-// Used by the around-id mode of ListTimeline to resolve an entry to its
-// (created_at, id) cursor when the entry is an activity.
 func (q *Queries) GetActivity(ctx context.Context, id pgtype.UUID) (ActivityLog, error) {
 	row := q.db.QueryRow(ctx, getActivity, id)
 	var i ActivityLog
@@ -120,120 +118,22 @@ func (q *Queries) GetActivity(ctx context.Context, id pgtype.UUID) (ActivityLog,
 	return i, err
 }
 
-const listActivitiesAfter = `-- name: ListActivitiesAfter :many
+const listActivitiesForIssue = `-- name: ListActivitiesForIssue :many
 SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM activity_log
 WHERE issue_id = $1
-  AND (created_at, id) > ($2::timestamptz, $3::uuid)
 ORDER BY created_at ASC, id ASC
-LIMIT $4
-`
-
-type ListActivitiesAfterParams struct {
-	IssueID pgtype.UUID        `json:"issue_id"`
-	Column2 pgtype.Timestamptz `json:"column_2"`
-	Column3 pgtype.UUID        `json:"column_3"`
-	Limit   int32              `json:"limit"`
-}
-
-func (q *Queries) ListActivitiesAfter(ctx context.Context, arg ListActivitiesAfterParams) ([]ActivityLog, error) {
-	rows, err := q.db.Query(ctx, listActivitiesAfter,
-		arg.IssueID,
-		arg.Column2,
-		arg.Column3,
-		arg.Limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ActivityLog{}
-	for rows.Next() {
-		var i ActivityLog
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.IssueID,
-			&i.ActorType,
-			&i.ActorID,
-			&i.Action,
-			&i.Details,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listActivitiesBefore = `-- name: ListActivitiesBefore :many
-SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM activity_log
-WHERE issue_id = $1
-  AND (created_at, id) < ($2::timestamptz, $3::uuid)
-ORDER BY created_at DESC, id DESC
-LIMIT $4
-`
-
-type ListActivitiesBeforeParams struct {
-	IssueID pgtype.UUID        `json:"issue_id"`
-	Column2 pgtype.Timestamptz `json:"column_2"`
-	Column3 pgtype.UUID        `json:"column_3"`
-	Limit   int32              `json:"limit"`
-}
-
-func (q *Queries) ListActivitiesBefore(ctx context.Context, arg ListActivitiesBeforeParams) ([]ActivityLog, error) {
-	rows, err := q.db.Query(ctx, listActivitiesBefore,
-		arg.IssueID,
-		arg.Column2,
-		arg.Column3,
-		arg.Limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ActivityLog{}
-	for rows.Next() {
-		var i ActivityLog
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.IssueID,
-			&i.ActorType,
-			&i.ActorID,
-			&i.Action,
-			&i.Details,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listActivitiesLatest = `-- name: ListActivitiesLatest :many
-SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM activity_log
-WHERE issue_id = $1
-ORDER BY created_at DESC, id DESC
 LIMIT $2
 `
 
-type ListActivitiesLatestParams struct {
+type ListActivitiesForIssueParams struct {
 	IssueID pgtype.UUID `json:"issue_id"`
 	Limit   int32       `json:"limit"`
 }
 
-// Top N activities for an issue, newest first. Used by the cursor-paginated
-// timeline endpoint to assemble the latest page.
-func (q *Queries) ListActivitiesLatest(ctx context.Context, arg ListActivitiesLatestParams) ([]ActivityLog, error) {
-	rows, err := q.db.Query(ctx, listActivitiesLatest, arg.IssueID, arg.Limit)
+// All activities for an issue in chronological order, capped at $2 (DB safety
+// net to bound the response).
+func (q *Queries) ListActivitiesForIssue(ctx context.Context, arg ListActivitiesForIssueParams) ([]ActivityLog, error) {
+	rows, err := q.db.Query(ctx, listActivitiesForIssue, arg.IssueID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

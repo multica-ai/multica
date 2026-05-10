@@ -11,6 +11,7 @@ import { api } from "../api";
 
 export const chatKeys = {
   all: (wsId: string) => ["chat", wsId] as const,
+  /** Full sessions list (active + archived); the dropdown splits locally. */
   sessions: (wsId: string) => [...chatKeys.all(wsId), "sessions"] as const,
   allSessions: (wsId: string) => [...chatKeys.all(wsId), "sessions", "all"] as const,
   archivedSessions: (wsId: string) =>
@@ -27,18 +28,14 @@ export const chatKeys = {
 export function chatSessionsOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.sessions(wsId),
-    queryFn: () => api.listChatSessions(),
-    staleTime: Infinity,
-  });
-}
-
-export function allChatSessionsOptions(wsId: string) {
-  return queryOptions({
-    queryKey: chatKeys.allSessions(wsId),
     queryFn: () => api.listChatSessions({ status: "all" }),
     staleTime: Infinity,
   });
 }
+
+// CEREBRO-PATCH(core-chat-queries): compatibility alias for inbox chat panel
+// consumers created before upstream collapsed active+archived into one query.
+export const allChatSessionsOptions = chatSessionsOptions;
 
 export function archivedChatSessionsOptions(wsId: string) {
   return queryOptions({

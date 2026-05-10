@@ -35,6 +35,7 @@ func TestQuickCreateCompletion_SubscribesRequester(t *testing.T) {
 		parseUUID(testUserID),
 		parseUUID(agentID),
 		"please file a bug",
+		pgtype.UUID{},
 	)
 	if err != nil {
 		t.Fatalf("EnqueueQuickCreateTask: %v", err)
@@ -106,6 +107,7 @@ func TestQuickCreateFailure_DoesNotSubscribeRequester(t *testing.T) {
 		parseUUID(testUserID),
 		parseUUID(agentID),
 		"another bug",
+		pgtype.UUID{},
 	)
 	if err != nil {
 		t.Fatalf("EnqueueQuickCreateTask: %v", err)

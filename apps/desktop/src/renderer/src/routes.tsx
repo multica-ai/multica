@@ -32,6 +32,7 @@ import { InboxPage } from "@multica/views/inbox";
 import { NotificationsPage } from "@multica/cerebro-notifications/views";
 import { SettingsPage } from "@multica/views/settings";
 import { MemberDetailPage } from "@multica/cerebro-users/views";
+import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { Download, Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
@@ -95,7 +96,15 @@ export const appRoutes: RouteObject[] = [
         element: <WorkspaceRouteLayout />,
         children: [
           { index: true, element: <Navigate to="issues" replace /> },
-          { path: "issues", element: <IssuesPage />, handle: { title: "Issues" } },
+          {
+            path: "issues",
+            element: (
+              <ErrorBoundary>
+                <IssuesPage />
+              </ErrorBoundary>
+            ),
+            handle: { title: "Issues" },
+          },
           {
             path: "issues/:id",
             element: <IssueDetailPage />,

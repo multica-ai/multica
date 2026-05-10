@@ -13,17 +13,15 @@ import (
 )
 
 // listActivitiesForIssue is a test helper that fetches up to 100 activity_log
-// records for an issue using the keyset query that backs the cursor-paginated
-// timeline endpoint. The unbounded ListActivities was removed when the
-// timeline switched to cursor pagination (#1968 root fix).
+// records for an issue. Uses the same query that backs the timeline endpoint.
 func listActivitiesForIssue(t *testing.T, queries *db.Queries, issueID string) []db.ActivityLog {
 	t.Helper()
-	activities, err := queries.ListActivitiesLatest(context.Background(), db.ListActivitiesLatestParams{
+	activities, err := queries.ListActivitiesForIssue(context.Background(), db.ListActivitiesForIssueParams{
 		IssueID: util.MustParseUUID(issueID),
 		Limit:   100,
 	})
 	if err != nil {
-		t.Fatalf("ListActivitiesLatest: %v", err)
+		t.Fatalf("ListActivitiesForIssue: %v", err)
 	}
 	return activities
 }
@@ -158,7 +156,7 @@ func TestActivityIssueUpdated_AssigneeChanged(t *testing.T) {
 				AssigneeType: &assigneeType,
 				AssigneeID:   &assigneeID,
 			},
-			"assignee_changed":  true,
+			"assignee_changed":   true,
 			"prev_assignee_type": (*string)(nil),
 			"prev_assignee_id":   (*string)(nil),
 		},

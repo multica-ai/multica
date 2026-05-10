@@ -32,6 +32,8 @@ export class TestApiClient {
     const client = new pg.Client(DATABASE_URL);
     await client.connect();
     try {
+      await client.query("SELECT pg_advisory_lock(hashtext($1))", [`e2e-login:${email}`]);
+
       // Keep each E2E login isolated so previous test runs do not trip the
       // per-email send-code rate limit.
       await client.query("DELETE FROM verification_code WHERE email = $1", [email]);
@@ -81,6 +83,7 @@ export class TestApiClient {
 
       return data;
     } finally {
+      await client.query("SELECT pg_advisory_unlock(hashtext($1))", [`e2e-login:${email}`]).catch(() => {});
       await client.end();
     }
   }
@@ -114,6 +117,7 @@ export class TestApiClient {
     if (res.ok) {
       const created = (await res.json()) as TestWorkspace;
       this.workspaceId = created.id;
+      this.workspaceSlug = created.slug;
       return created;
     }
 
@@ -121,6 +125,7 @@ export class TestApiClient {
     const created = refreshed.find((item) => item.slug === slug) ?? refreshed[0];
     if (created) {
       this.workspaceId = created.id;
+      this.workspaceSlug = created.slug;
       return created;
     }
 
@@ -161,6 +166,20 @@ export class TestApiClient {
 
   async deleteProject(id: string) {
     await this.authedFetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  async dismissStarterContent() {
+    if (!this.workspaceId) {
+      throw new Error("ensureWorkspace must run before dismissStarterContent");
+    }
+
+    const res = await this.authedFetch("/api/me/starter-content/dismiss", {
+      method: "POST",
+      body: JSON.stringify({ workspace_id: this.workspaceId }),
+    });
+    if (!res.ok && res.status !== 409) {
+      throw new Error(`dismissStarterContent failed: ${res.status} ${await res.text()}`);
+    }
   }
 
   async updateProjectAccess(id: string, access: "workspace" | "restricted") {
@@ -256,6 +275,7 @@ export class TestApiClient {
     let secondaryToken = "";
     let secondaryUserId = "";
     try {
+      await client.query("SELECT pg_advisory_lock(hashtext($1))", [`e2e-login:${email}`]);
       await client.query("DELETE FROM verification_code WHERE email = $1", [email]);
 
       const sendRes = await fetch(`${API_BASE}/auth/send-code`, {
@@ -302,6 +322,7 @@ export class TestApiClient {
 
       await client.query("DELETE FROM verification_code WHERE email = $1", [email]);
     } finally {
+      await client.query("SELECT pg_advisory_unlock(hashtext($1))", [`e2e-login:${email}`]).catch(() => {});
       await client.end();
     }
 

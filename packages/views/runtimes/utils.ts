@@ -114,21 +114,29 @@ export function formatTokens(n: number): string {
 // Cost estimation
 // ---------------------------------------------------------------------------
 
-// Pricing per million tokens (USD). Sourced from
-// https://platform.claude.com/docs/en/about-claude/pricing — keep in sync
-// when Anthropic releases new models or adjusts prices. cacheWrite reflects
-// the 5-minute cache TTL (1.25× input); the daemon reports
-// cache_creation_input_tokens without TTL metadata, so 5m is the safest /
-// cheapest assumption (matches the API default).
+// Pricing per million tokens (USD). Anthropic figures sourced from
+// https://platform.claude.com/docs/en/about-claude/pricing; OpenAI figures
+// from https://openai.com/api/pricing — keep in sync when providers release
+// new models or adjust prices.
 //
-// Iteration order matters: the resolver's startsWith() fallback walks this
-// object in insertion order, so MORE SPECIFIC keys (e.g. claude-sonnet-4-5)
-// must precede SHORTER prefixes (e.g. claude-sonnet-4) of the same family.
+// Anthropic's cacheWrite reflects the 5-minute cache TTL (1.25× input); the
+// daemon reports cache_creation_input_tokens without TTL metadata, so 5m is
+// the safest / cheapest assumption (matches the API default). OpenAI does
+// not bill cache writes separately (cached input is just discounted on
+// subsequent reads), so cacheWrite mirrors input there.
+//
+// The resolver matches exact keys after stripping a trailing date snapshot
+// (see `resolvePricing` below). It deliberately does NOT do startsWith
+// fallbacks: every catalog SKU needs its own row. That keeps unfamiliar
+// variants (`gpt-5.5-mini`, hypothetical `gpt-5.4-foo`) from silently
+// inheriting the price of a near-named relative; they surface in the
+// unmapped diagnostic instead. Mirror new entries in
+// `server/pkg/agent/models.go` so the catalog and pricing stay in sync.
 const MODEL_PRICING: Record<
   string,
   { input: number; output: number; cacheRead: number; cacheWrite: number }
 > = {
-  // -- Current generation (4.5+ — Opus dropped from 15/75 to 5/25 here) --
+  // -- Anthropic: current generation (4.5+ — Opus dropped from 15/75 to 5/25 here) --
   "claude-haiku-4-5":   { input: 1,    output: 5,    cacheRead: 0.10, cacheWrite: 1.25 },
   "claude-sonnet-4-5":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
   "claude-sonnet-4-6":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
@@ -136,36 +144,55 @@ const MODEL_PRICING: Record<
   "claude-opus-4-6":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
   "claude-opus-4-7":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
 
-  // -- Pre-4.5 Opus (legacy, still served at original price tier) --
+  // -- Anthropic: pre-4.5 Opus (legacy, still served at original price tier) --
   "claude-opus-4-1":    { input: 15,   output: 75,   cacheRead: 1.50, cacheWrite: 18.75 },
   "claude-opus-4":      { input: 15,   output: 75,   cacheRead: 1.50, cacheWrite: 18.75 },
 
-  // -- Sonnet 4.0 (deprecated; same price as the 4.x family) --
+  // -- Anthropic: Sonnet 4.0 (deprecated; same price as the 4.x family) --
   "claude-sonnet-4":    { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
 
-  // -- Older Haiku tier (defensive entry for the rare runtime still on it) --
+  // -- Anthropic: older Haiku tier (defensive entry for the rare runtime still on it) --
   "claude-haiku-3-5":   { input: 0.80, output: 4,    cacheRead: 0.08, cacheWrite: 1.00 },
+
+  // -- OpenAI: dotted-minor Codex catalog SKUs. Each generation is priced
+  //    independently — no fallback to `gpt-5`. Entries track
+  //    `server/pkg/agent/models.go` (Codex provider list).
+  "gpt-5.5":            { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 5 },
+  "gpt-5.4-mini":       { input: 0.75, output: 4.50, cacheRead: 0.075, cacheWrite: 0.75 },
+  "gpt-5.4":            { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 2.50 },
+  "gpt-5.3-codex":      { input: 1.75, output: 14,   cacheRead: 0.175, cacheWrite: 1.75 },
+
+  // -- OpenAI: GPT-5 family (Codex CLI's default is gpt-5-codex; -codex/-mini/-nano variants priced per OpenAI tiers) --
+  "gpt-5-codex":        { input: 1.25, output: 10,   cacheRead: 0.125, cacheWrite: 1.25 },
+  "gpt-5-mini":         { input: 0.25, output: 2,    cacheRead: 0.025, cacheWrite: 0.25 },
+  "gpt-5-nano":         { input: 0.05, output: 0.40, cacheRead: 0.005, cacheWrite: 0.05 },
+  "gpt-5":              { input: 1.25, output: 10,   cacheRead: 0.125, cacheWrite: 1.25 },
+
+  // -- OpenAI: o-series reasoning models --
+  "o3-mini":            { input: 1.10, output: 4.40, cacheRead: 0.55,  cacheWrite: 1.10 },
+  "o3":                 { input: 2,    output: 8,    cacheRead: 0.50,  cacheWrite: 2 },
+  "o4-mini":            { input: 1.10, output: 4.40, cacheRead: 0.275, cacheWrite: 1.10 },
+
+  // -- OpenAI: GPT-4o family (legacy, kept for runtimes still configured against it) --
+  "gpt-4o-mini":        { input: 0.15, output: 0.60, cacheRead: 0.075, cacheWrite: 0.15 },
+  "gpt-4o":             { input: 2.50, output: 10,   cacheRead: 1.25,  cacheWrite: 2.50 },
 };
 
-// Resolve a model string to its pricing tier. Two layers of fallback so the
-// daemon-reported model name doesn't have to match the keys exactly:
-//   1. Exact match.
-//   2. Strip a trailing date / "latest" tag (Claude Code typically reports
-//      `claude-sonnet-4-5-20250929` — the date is volatile, the family is
-//      what we price). Try exact match again on the stripped name.
-//   3. startsWith on either the raw or stripped name.
-// Anything that misses all three is genuinely unknown; we return undefined
-// so callers can distinguish "$0 spend" from "spent but model not priced".
+// Resolve a model string to its pricing tier. Exact match, with one
+// tolerance: providers ship dated snapshots (`claude-sonnet-4-5-20250929`,
+// `gpt-5-2025-08-07`) where the family is what we price and the date is
+// volatile, so we strip a trailing date / "latest" tag and try again.
+// Anything still unmapped after that is genuinely unknown; return
+// undefined so callers can distinguish "$0 spend" from "spent but model
+// not priced". No startsWith fallback: variants like `gpt-5.5-mini` must
+// have their own row to be priced (otherwise they'd inherit `gpt-5.5`).
 function resolvePricing(model: string) {
   if (!model) return undefined;
   if (MODEL_PRICING[model]) return MODEL_PRICING[model];
 
-  const stripped = model.replace(/-(20\d{6}|latest)$/, "");
+  const stripped = model.replace(/-(20\d{2}-\d{2}-\d{2}|20\d{6}|latest)$/, "");
   if (stripped !== model && MODEL_PRICING[stripped]) return MODEL_PRICING[stripped];
 
-  for (const [key, p] of Object.entries(MODEL_PRICING)) {
-    if (model.startsWith(key) || stripped.startsWith(key)) return p;
-  }
   return undefined;
 }
 

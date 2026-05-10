@@ -205,6 +205,9 @@ function SourceCell({
   } else if (origin.type === "skills_sh") {
     icon = <Download className="h-3 w-3 shrink-0" />;
     label = t(($) => $.table.source_skills_sh);
+  } else if (origin.type === "github") {
+    icon = <Download className="h-3 w-3 shrink-0" />;
+    label = t(($) => $.table.source_github);
   }
 
   return (

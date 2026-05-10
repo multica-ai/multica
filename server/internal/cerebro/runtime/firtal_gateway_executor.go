@@ -537,7 +537,6 @@ func toDBAgentTaskQueue(t cerebrodb.AgentTaskQueue) db.AgentTaskQueue {
 		MaxAttempts:       t.MaxAttempts,
 		ParentTaskID:      t.ParentTaskID,
 		FailureReason:     t.FailureReason,
-		LastHeartbeatAt:   t.LastHeartbeatAt,
 		TriggerSummary:    t.TriggerSummary,
 		ForceFreshSession: t.ForceFreshSession,
 		Title:             t.Title,

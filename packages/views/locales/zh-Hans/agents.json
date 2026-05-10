@@ -255,7 +255,9 @@
       "remove_failed_toast": "移除 skill 失败",
       "add_dialog_title": "添加 skill",
       "add_dialog_description": "选择一个工作区 skill 分配给该智能体。",
+      "add_dialog_search_placeholder": "搜索 skill",
       "add_dialog_empty": "全部工作区 skill 都已分配。",
+      "add_dialog_no_match": "没有匹配的 skill。",
       "add_dialog_cancel": "取消",
       "add_failed_toast": "添加 skill 失败"
     },

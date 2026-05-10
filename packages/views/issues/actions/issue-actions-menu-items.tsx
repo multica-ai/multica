@@ -1,9 +1,13 @@
 "use client";
 
+import { useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   ArrowDown,
   ArrowUp,
   Calendar,
+  FolderOpen,
   Link2,
   MoreHorizontal,
   Pin,
@@ -12,12 +16,14 @@ import {
   Trash2,
   UserMinus,
 } from "lucide-react";
-import type { Issue } from "@multica/core/types";
+import type { AgentTask, Issue } from "@multica/core/types";
+import { api } from "@multica/core/api";
 import {
   ALL_STATUSES,
   PRIORITY_ORDER,
   PRIORITY_CONFIG,
 } from "@multica/core/issues/config";
+import { issueKeys } from "@multica/core/issues/queries";
 import { StatusIcon } from "../components/status-icon";
 import { PriorityIcon } from "../components/priority-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -102,6 +108,37 @@ export function IssueActionsMenuItems({
     d.setDate(d.getDate() + days);
     return d.toISOString();
   };
+
+  // Subscribe to the issue's task list so the cache is warm by the time the
+  // user clicks "Copy local workdir path". The query only fires while the
+  // menu is open (Base UI portals the menu content lazily) — list views
+  // that wrap every row in IssueActionsContextMenu pay nothing until the
+  // menu actually opens.
+  //
+  // The query shares its key with ExecutionLogSection, so navigating from
+  // the issue detail page is a free cache hit.
+  const { data: tasks } = useQuery({
+    queryKey: issueKeys.tasks(issue.id),
+    queryFn: () => api.listTasksByIssue(issue.id),
+    staleTime: 30_000,
+  });
+
+  // Synchronous click handler — the awaited fetch in the previous version
+  // dropped the browser's transient user activation, which made
+  // navigator.clipboard.writeText() reject from the menu when the cache
+  // was cold. We now read straight from the cached query result and write
+  // to the clipboard inside the same task as the click.
+  const handleCopyWorkdirPath = useCallback(() => {
+    const latestWorkDir = pickLatestWorkDir(tasks);
+    if (!latestWorkDir) {
+      toast.error(t(($) => $.detail.workdir_path_unavailable));
+      return;
+    }
+    navigator.clipboard.writeText(latestWorkDir).then(
+      () => toast.success(t(($) => $.detail.workdir_path_copied)),
+      () => toast.error(t(($) => $.detail.workdir_path_copy_failed)),
+    );
+  }, [tasks, t]);
 
   return (
     <>
@@ -238,6 +275,10 @@ export function IssueActionsMenuItems({
         <Link2 className="h-3.5 w-3.5" />
         {t(($) => $.actions.copy_link)}
       </P.Item>
+      <P.Item onClick={handleCopyWorkdirPath}>
+        <FolderOpen className="h-3.5 w-3.5" />
+        {t(($) => $.actions.copy_workdir_path)}
+      </P.Item>
 
       <P.Separator />
 
@@ -275,4 +316,16 @@ export function IssueActionsMenuItems({
       </P.Item>
     </>
   );
+}
+
+function pickLatestWorkDir(tasks: AgentTask[] | undefined): string | undefined {
+  if (!tasks?.length) return undefined;
+  let latest: AgentTask | undefined;
+  for (const task of tasks) {
+    if (!task.work_dir) continue;
+    if (!latest || task.created_at > latest.created_at) {
+      latest = task;
+    }
+  }
+  return latest?.work_dir;
 }

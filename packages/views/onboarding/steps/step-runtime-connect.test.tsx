@@ -98,7 +98,9 @@ describe("StepRuntimeConnect — onboarding_runtime_detected", () => {
     const [name, props] = mocks.captureEvent.mock.calls[0]!;
     expect(name).toBe("onboarding_runtime_detected");
     expect(props).toMatchObject({
-      source: "step3_desktop",
+      source: "onboarding",
+      surface: "step3_desktop",
+      workspace_id: "ws_test",
       outcome: "found",
       runtime_count: 1,
       online_count: 1,
@@ -154,7 +156,9 @@ describe("StepRuntimeConnect — onboarding_runtime_detected", () => {
     expect(mocks.captureEvent).toHaveBeenCalledTimes(1);
     const props = mocks.captureEvent.mock.calls[0]![1] as Record<string, unknown>;
     expect(props).toMatchObject({
-      source: "step3_desktop",
+      source: "onboarding",
+      surface: "step3_desktop",
+      workspace_id: "ws_test",
       outcome: "empty",
       runtime_count: 0,
       online_count: 0,

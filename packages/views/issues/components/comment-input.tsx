@@ -86,6 +86,7 @@ function CommentInput({ issueId, onSubmit, autoFocus = false }: CommentInputProp
   return (
     <div
       {...dropZoneProps}
+      data-testid="comment-input"
       className={cn(
         "relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border",
         isExpanded ? "h-[70vh]" : "max-h-56",
@@ -133,6 +134,7 @@ function CommentInput({ issueId, onSubmit, autoFocus = false }: CommentInputProp
         </Tooltip>
         <Button
           size="icon-sm"
+          aria-label="Submit comment"
           disabled={isEmpty || submitting}
           onClick={handleSubmit}
         >

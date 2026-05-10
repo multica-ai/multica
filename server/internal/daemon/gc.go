@@ -161,6 +161,8 @@ const (
 )
 
 // shouldCleanTaskDir decides whether a task directory should be removed.
+// Dispatches on meta.Kind so chat / autopilot / quick-create tasks each
+// follow the parent record that actually governs their lifecycle.
 func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcAction {
 	// A task currently running on this env root must never be reclaimed —
 	// not even on the done/cancelled or orphan-404 paths. A new comment on
@@ -173,37 +175,59 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 
 	meta, err := execenv.ReadGCMeta(taskDir)
 	if err != nil {
-		// No .gc_meta.json — check mtime for orphan cleanup.
-		info, statErr := os.Stat(taskDir)
-		if statErr != nil {
-			return gcActionSkip
-		}
-		if time.Since(info.ModTime()) > d.cfg.GCOrphanTTL {
-			d.logger.Info("gc: orphan directory (no meta)", "dir", taskDir, "age", time.Since(info.ModTime()).Round(time.Hour))
-			return gcActionOrphan
-		}
-		return gcActionSkip
+		return d.orphanByMTime(taskDir, "no meta")
 	}
 
+	switch meta.Kind {
+	case execenv.GCKindIssue:
+		return d.gcDecisionIssue(ctx, taskDir, meta)
+	case execenv.GCKindChat:
+		return d.gcDecisionChat(ctx, taskDir, meta)
+	case execenv.GCKindAutopilotRun:
+		return d.gcDecisionAutopilotRun(ctx, taskDir, meta)
+	case execenv.GCKindQuickCreate:
+		return d.gcDecisionQuickCreate(ctx, taskDir, meta)
+	default:
+		// Unknown kind: fall back to mtime-based orphan cleanup so a future
+		// daemon writing a kind we don't recognize doesn't get insta-wiped.
+		return d.orphanByMTime(taskDir, "unknown kind")
+	}
+}
+
+// orphanByMTime returns gcActionOrphan if the directory is older than
+// GCOrphanTTL, gcActionSkip otherwise. Centralizes the "we have no parent
+// record signal so just look at the disk" fallback used by every kind.
+func (d *Daemon) orphanByMTime(taskDir, reason string) gcAction {
+	info, err := os.Stat(taskDir)
+	if err != nil {
+		return gcActionSkip
+	}
+	if time.Since(info.ModTime()) > d.cfg.GCOrphanTTL {
+		d.logger.Info("gc: orphan directory", "dir", taskDir, "reason", reason, "age", time.Since(info.ModTime()).Round(time.Hour))
+		return gcActionOrphan
+	}
+	return gcActionSkip
+}
+
+// isAccessNotFound detects the 404 returned by gc-check endpoints. The same
+// status covers "row deleted" and "daemon token can't see this workspace"
+// (the requireDaemonWorkspaceAccess anti-enumeration shape), so callers
+// can't tell the two apart from the response alone.
+func isAccessNotFound(err error) bool {
+	var reqErr *requestError
+	return errors.As(err, &reqErr) && reqErr.StatusCode == http.StatusNotFound
+}
+
+func (d *Daemon) gcDecisionIssue(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
 	status, err := d.client.GetIssueGCCheck(ctx, meta.IssueID)
 	if err != nil {
-		var reqErr *requestError
-		if errors.As(err, &reqErr) && reqErr.StatusCode == http.StatusNotFound {
-			// 404 is ambiguous: the server returns it for both "issue deleted"
-			// and "daemon token has no access to the workspace" (anti-enumeration,
-			// see requireDaemonWorkspaceAccess). Fall back to the mtime-gated
-			// orphan cleanup so a scoped-down token can't instantly wipe dirs
-			// whose issues are still live.
-			info, statErr := os.Stat(taskDir)
-			if statErr != nil {
-				return gcActionSkip
-			}
-			if time.Since(info.ModTime()) > d.cfg.GCOrphanTTL {
-				d.logger.Info("gc: orphan directory (issue not accessible)", "dir", taskDir, "issue", meta.IssueID)
-				return gcActionOrphan
-			}
+		if isAccessNotFound(err) {
+			// 404 is ambiguous: server returns it for both "issue deleted"
+			// and "daemon token has no access to the workspace". Fall back
+			// to the mtime-gated orphan cleanup so a scoped-down token
+			// can't instantly wipe dirs whose issues are still live.
+			return d.orphanByMTime(taskDir, "issue not accessible")
 		}
-		// API error (network, auth, etc.) — skip and retry next cycle.
 		return gcActionSkip
 	}
 
@@ -211,6 +235,7 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 		time.Since(status.UpdatedAt) > d.cfg.GCTTL {
 		d.logger.Info("gc: eligible for cleanup",
 			"dir", filepath.Base(taskDir),
+			"kind", "issue",
 			"issue", meta.IssueID,
 			"status", status.Status,
 			"updated_at", status.UpdatedAt.Format(time.RFC3339),
@@ -218,15 +243,11 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 		return gcActionClean
 	}
 
-	// Artifact-only cleanup: issue is still open but the task itself completed
-	// long enough ago that its build artifacts are unlikely to be reused.
-	// Active-root protection is handled by the early return above; skip here
-	// only when artifact GC is disabled or the meta has no completed_at
-	// (defensive — that means the task crashed before WriteGCMeta).
 	if d.cfg.GCArtifactTTL > 0 && len(d.cfg.GCArtifactPatterns) > 0 &&
 		!meta.CompletedAt.IsZero() && time.Since(meta.CompletedAt) > d.cfg.GCArtifactTTL {
 		d.logger.Info("gc: eligible for artifact cleanup",
 			"dir", filepath.Base(taskDir),
+			"kind", "issue",
 			"issue", meta.IssueID,
 			"status", status.Status,
 			"completed_at", meta.CompletedAt.Format(time.RFC3339),
@@ -235,6 +256,145 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 	}
 
 	return gcActionSkip
+}
+
+func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
+	status, err := d.client.GetChatSessionGCCheck(ctx, meta.ChatSessionID)
+	if err != nil {
+		if isAccessNotFound(err) {
+			// 404 means the chat_session row is gone — DeleteChatSession is
+			// a real DELETE, so a hard delete propagates here as soon as
+			// the user clicks the button. This is the strongest reclaim
+			// signal we get and it's exactly acceptance criterion #3:
+			// reclaim within one GC cycle (≤ GCInterval), not 72h.
+			//
+			// We don't gate on mtime: every chat_session_id in a meta file
+			// was written by this daemon under its current token, so there
+			// is no cross-workspace probe to defend against.
+			d.logger.Info("gc: eligible for cleanup",
+				"dir", filepath.Base(taskDir),
+				"kind", "chat",
+				"chat_session", meta.ChatSessionID,
+				"reason", "session not accessible (hard-deleted)",
+			)
+			return gcActionClean
+		}
+		return gcActionSkip
+	}
+
+	switch status.Status {
+	case "active":
+		// An active chat session must never be reclaimed by mtime — that
+		// would silently kill a user's idle session and break "PriorWorkDir"
+		// resume on their next message. This is the explicit short-circuit
+		// the issue body called out as verifyable behavior #2.
+		return gcActionSkip
+	case "archived":
+		if time.Since(status.UpdatedAt) > d.cfg.GCTTL {
+			d.logger.Info("gc: eligible for cleanup",
+				"dir", filepath.Base(taskDir),
+				"kind", "chat",
+				"chat_session", meta.ChatSessionID,
+				"status", status.Status,
+				"updated_at", status.UpdatedAt.Format(time.RFC3339),
+			)
+			return gcActionClean
+		}
+	}
+	return gcActionSkip
+}
+
+func (d *Daemon) gcDecisionAutopilotRun(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
+	status, err := d.client.GetAutopilotRunGCCheck(ctx, meta.AutopilotRunID)
+	if err != nil {
+		if isAccessNotFound(err) {
+			return d.orphanByMTime(taskDir, "autopilot run not accessible")
+		}
+		return gcActionSkip
+	}
+
+	// Terminal states per the autopilot_run CHECK constraint:
+	//   completed, failed, skipped — the run finished its own work.
+	//   issue_created            — the run produced an issue task that owns
+	//                              its own workdir; this run's workdir is
+	//                              dead weight from here on.
+	// Non-terminal: pending, running. Skip until they reach a terminal state
+	// rather than trying to bound them by mtime — long autopilots are real.
+	if isAutopilotRunTerminal(status.Status) {
+		anchor := status.CompletedAt
+		if anchor.IsZero() {
+			// Defensive: terminal status without completed_at means the
+			// run finished but the column wasn't stamped (older code path).
+			// Fall back to the meta's CompletedAt so we still GC eventually.
+			anchor = meta.CompletedAt
+		}
+		if !anchor.IsZero() && time.Since(anchor) > d.cfg.GCTTL {
+			d.logger.Info("gc: eligible for cleanup",
+				"dir", filepath.Base(taskDir),
+				"kind", "autopilot_run",
+				"autopilot_run", meta.AutopilotRunID,
+				"status", status.Status,
+				"completed_at", anchor.Format(time.RFC3339),
+			)
+			return gcActionClean
+		}
+	}
+	return gcActionSkip
+}
+
+// isAutopilotRunTerminal mirrors the run.status CHECK in
+// migrations/042_autopilot.up.sql. Non-terminal states are pending/running;
+// every other value the schema allows is a final resting state from the
+// daemon's POV (the run is no longer producing work in this workdir).
+func isAutopilotRunTerminal(status string) bool {
+	switch status {
+	case "completed", "failed", "skipped", "issue_created":
+		return true
+	default:
+		return false
+	}
+}
+
+func (d *Daemon) gcDecisionQuickCreate(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
+	status, err := d.client.GetTaskGCCheck(ctx, meta.TaskID)
+	if err != nil {
+		if isAccessNotFound(err) {
+			// Task row was hard-deleted, or token can't see it. Either way,
+			// fall back to mtime-gated orphan to stay safe across scoped
+			// tokens — same reasoning as the issue path.
+			return d.orphanByMTime(taskDir, "task not accessible")
+		}
+		return gcActionSkip
+	}
+
+	// Quick-create workdirs are not reused by the issue task that
+	// LinkTaskToIssue eventually attaches — that issue gets its own
+	// envRoot. So as soon as the quick-create task itself reaches a
+	// terminal state we can reclaim the directory immediately, without
+	// waiting for GCTTL. If the user wants to revisit, the linked issue
+	// has the agent's output already.
+	if isAgentTaskTerminal(status.Status) {
+		d.logger.Info("gc: eligible for cleanup",
+			"dir", filepath.Base(taskDir),
+			"kind", "quick_create",
+			"task", meta.TaskID,
+			"status", status.Status,
+		)
+		return gcActionClean
+	}
+	return gcActionSkip
+}
+
+// isAgentTaskTerminal reports whether a value of agent_task_queue.status
+// represents a final state. Mirrors the status enum used across the
+// task service — see service/task.go for the canonical list.
+func isAgentTaskTerminal(status string) bool {
+	switch status {
+	case "completed", "failed", "cancelled":
+		return true
+	default:
+		return false
+	}
 }
 
 // cleanTaskDir removes a task directory and logs the result.

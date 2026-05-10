@@ -19,6 +19,7 @@ import type { Channel, ChannelMember, InboxItem, TimelineEntry } from "@multica/
 import { useIssueTimeline } from "../../issues/hooks/use-issue-timeline";
 import { CommentCard } from "../../issues/components/comment-card";
 import { CommentInput } from "../../issues/components/comment-input";
+import { collectThreadReplies } from "../../issues/components/thread-utils";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -211,7 +212,7 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
             <CommentCard
               issueId={channelId}
               entry={entry.entry}
-              allReplies={entry.replies}
+              replies={entry.replies}
               currentUserId={userId}
               onReply={submitReply}
               onEdit={editComment}
@@ -410,7 +411,7 @@ function participantsLabel(channel: Channel): string {
 interface GroupedComment {
   id: string;
   entry: TimelineEntry;
-  replies: Map<string, TimelineEntry[]>;
+  replies: TimelineEntry[];
 }
 
 /**
@@ -434,6 +435,6 @@ function groupTimeline(timeline: TimelineEntry[]): GroupedComment[] {
   return topLevel.map((entry) => ({
     id: entry.id,
     entry,
-    replies: repliesByParent,
+    replies: collectThreadReplies(entry.id, repliesByParent),
   }));
 }

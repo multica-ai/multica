@@ -653,3 +653,319 @@ func TestIsBareRepo(t *testing.T) {
 		}
 	})
 }
+
+// TestShouldCleanTaskDir_KindDispatch covers the four GCMeta kinds across
+// active / terminal / 404 / non-terminal axes. Each entry stands up a mock
+// server returning the expected payload (or 404) and asserts the action.
+func TestShouldCleanTaskDir_KindDispatch(t *testing.T) {
+	t.Parallel()
+
+	const (
+		issueID    = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa01"
+		chatID     = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb01"
+		runID      = "cccccccc-cccc-cccc-cccc-cccccccccc01"
+		quickTask  = "dddddddd-dddd-dddd-dddd-dddddddddd01"
+		legacyMeta = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeee01"
+	)
+
+	now := time.Now()
+	overTTL := now.Add(-10 * 24 * time.Hour)
+	withinTTL := now.Add(-1 * time.Hour)
+
+	type serverResp struct {
+		// Path to register on the mux. Empty entries are skipped (used for
+		// 404 cases where the mux returns the default not-found handler).
+		path   string
+		status int
+		body   map[string]any
+	}
+
+	cases := []struct {
+		name    string
+		meta    *execenv.GCMeta
+		servers []serverResp
+		want    gcAction
+	}{
+		// ---- chat ---------------------------------------------------------
+		{
+			name: "chat active session — never reclaimed",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindChat, ChatSessionID: chatID, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/chat-sessions/" + chatID + "/gc-check",
+				body: map[string]any{"status": "active", "updated_at": overTTL},
+			}},
+			want: gcActionSkip,
+		},
+		{
+			name: "chat archived over TTL — clean",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindChat, ChatSessionID: chatID, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/chat-sessions/" + chatID + "/gc-check",
+				body: map[string]any{"status": "archived", "updated_at": overTTL},
+			}},
+			want: gcActionClean,
+		},
+		{
+			name: "chat archived within TTL — skip",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindChat, ChatSessionID: chatID, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/chat-sessions/" + chatID + "/gc-check",
+				body: map[string]any{"status": "archived", "updated_at": withinTTL},
+			}},
+			want: gcActionSkip,
+		},
+		{
+			name: "chat 404 — hard-deleted, clean immediately (no mtime gate)",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindChat, ChatSessionID: chatID, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path:   "/api/daemon/chat-sessions/" + chatID + "/gc-check",
+				status: http.StatusNotFound,
+			}},
+			want: gcActionClean,
+		},
+
+		// ---- autopilot run -----------------------------------------------
+		{
+			name: "autopilot completed over TTL — clean",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
+				body: map[string]any{"status": "completed", "completed_at": overTTL},
+			}},
+			want: gcActionClean,
+		},
+		{
+			name: "autopilot issue_created counts as terminal",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
+				body: map[string]any{"status": "issue_created", "completed_at": overTTL},
+			}},
+			want: gcActionClean,
+		},
+		{
+			name: "autopilot running — skip",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
+				body: map[string]any{"status": "running"},
+			}},
+			want: gcActionSkip,
+		},
+		{
+			name: "autopilot completed within TTL — skip",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
+				body: map[string]any{"status": "completed", "completed_at": withinTTL},
+			}},
+			want: gcActionSkip,
+		},
+
+		// ---- quick-create -------------------------------------------------
+		{
+			name: "quick_create completed task — clean immediately",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindQuickCreate, TaskID: quickTask, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/tasks/" + quickTask + "/gc-check",
+				body: map[string]any{"status": "completed", "completed_at": withinTTL},
+			}},
+			want: gcActionClean,
+		},
+		{
+			name: "quick_create cancelled — clean",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindQuickCreate, TaskID: quickTask, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/tasks/" + quickTask + "/gc-check",
+				body: map[string]any{"status": "cancelled"},
+			}},
+			want: gcActionClean,
+		},
+		{
+			name: "quick_create still running — skip",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindQuickCreate, TaskID: quickTask, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/tasks/" + quickTask + "/gc-check",
+				body: map[string]any{"status": "running"},
+			}},
+			want: gcActionSkip,
+		},
+
+		// ---- legacy meta (no kind) → issue path ---------------------------
+		{
+			name: "legacy meta with no kind defaults to issue path — done over TTL = clean",
+			meta: &execenv.GCMeta{IssueID: legacyMeta, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/issues/" + legacyMeta + "/gc-check",
+				body: map[string]any{"status": "done", "updated_at": overTTL},
+			}},
+			want: gcActionClean,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			mux := http.NewServeMux()
+			for _, s := range tc.servers {
+				if s.path == "" {
+					continue
+				}
+				resp := s
+				mux.HandleFunc(resp.path, func(w http.ResponseWriter, r *http.Request) {
+					if resp.status != 0 {
+						w.WriteHeader(resp.status)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(resp.body)
+				})
+			}
+			d := newGCTestDaemon(t, mux)
+			taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", tc.name, tc.meta)
+			got := d.shouldCleanTaskDir(context.Background(), taskDir)
+			if got != tc.want {
+				t.Fatalf("kind dispatch %q: want %d, got %d", tc.name, tc.want, got)
+			}
+		})
+	}
+}
+
+// TestShouldCleanTaskDir_ChatHardDeletedFreshMtime locks acceptance #3:
+// when a user hard-deletes a chat session, the workdir must be reclaimed
+// on the next GC cycle (≤ GCInterval), not deferred to GCOrphanTTL. A
+// directory that was just created (mtime well within GCOrphanTTL) but
+// whose chat session now 404s must therefore return gcActionClean.
+func TestShouldCleanTaskDir_ChatHardDeletedFreshMtime(t *testing.T) {
+	t.Parallel()
+	chatID := "ffffffff-ffff-ffff-ffff-ffffffffff02"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/chat-sessions/%s/gc-check", chatID), func(w http.ResponseWriter, r *http.Request) {
+		// Simulate hard-deleted session (DeleteChatSession ran).
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	d := newGCTestDaemon(t, mux)
+	// Crank GCOrphanTTL up so the mtime path is unmistakably not in play —
+	// the only way the directory gets reclaimed is the chat-404 fast path.
+	d.cfg.GCOrphanTTL = 365 * 24 * time.Hour
+	meta := &execenv.GCMeta{
+		Kind:          execenv.GCKindChat,
+		ChatSessionID: chatID,
+		WorkspaceID:   "ws",
+		CompletedAt:   time.Now(),
+	}
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "hard-deleted-chat", meta)
+	// taskDir mtime is now-ish — well within any sane GCOrphanTTL.
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionClean {
+		t.Fatalf("hard-deleted chat with fresh mtime must clean immediately, got %d", got)
+	}
+}
+
+// TestShouldCleanTaskDir_ChatActiveResistsOldMtime is the explicit acceptance
+// criterion #2: an active chat session whose workdir is older than
+// GCOrphanTTL must NOT be reclaimed. The only path to clean an active
+// session's workdir is for the user to archive or hard-delete the session.
+func TestShouldCleanTaskDir_ChatActiveResistsOldMtime(t *testing.T) {
+	t.Parallel()
+	chatID := "ffffffff-ffff-ffff-ffff-ffffffffff01"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/chat-sessions/%s/gc-check", chatID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":     "active",
+			"updated_at": time.Now().Add(-100 * 24 * time.Hour),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCOrphanTTL = 0 // every directory is "older than orphan TTL"
+	meta := &execenv.GCMeta{
+		Kind:          execenv.GCKindChat,
+		ChatSessionID: chatID,
+		WorkspaceID:   "ws",
+		CompletedAt:   time.Now().Add(-200 * 24 * time.Hour),
+	}
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "active-chat", meta)
+	if err := os.Chtimes(taskDir, time.Now().Add(-200*24*time.Hour), time.Now().Add(-200*24*time.Hour)); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
+		t.Fatalf("active chat session must not be reclaimed even with stale mtime, got %d", got)
+	}
+}
+
+// TestGCMetaForTask covers the discriminator priority used by the daemon
+// when selecting which GCMetaKind to write at task completion.
+func TestGCMetaForTask(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		task Task
+		want execenv.GCMetaKind
+		idOK func(m execenv.GCMeta) bool
+	}{
+		{
+			name: "chat task",
+			task: Task{ID: "t1", WorkspaceID: "ws", ChatSessionID: "c1"},
+			want: execenv.GCKindChat,
+			idOK: func(m execenv.GCMeta) bool { return m.ChatSessionID == "c1" },
+		},
+		{
+			name: "autopilot run task",
+			task: Task{ID: "t2", WorkspaceID: "ws", AutopilotRunID: "r1"},
+			want: execenv.GCKindAutopilotRun,
+			idOK: func(m execenv.GCMeta) bool { return m.AutopilotRunID == "r1" },
+		},
+		{
+			name: "issue task",
+			task: Task{ID: "t3", WorkspaceID: "ws", IssueID: "i1"},
+			want: execenv.GCKindIssue,
+			idOK: func(m execenv.GCMeta) bool { return m.IssueID == "i1" },
+		},
+		{
+			name: "quick-create task — issue_id always empty at WriteGCMeta time",
+			task: Task{ID: "t4", WorkspaceID: "ws", QuickCreatePrompt: "do the thing"},
+			want: execenv.GCKindQuickCreate,
+			idOK: func(m execenv.GCMeta) bool { return m.TaskID == "t4" },
+		},
+		{
+			name: "chat wins over issue when both set (defensive ordering)",
+			task: Task{ID: "t5", WorkspaceID: "ws", IssueID: "i1", ChatSessionID: "c1"},
+			want: execenv.GCKindChat,
+			idOK: func(m execenv.GCMeta) bool { return m.ChatSessionID == "c1" && m.IssueID == "" },
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			meta, ok := gcMetaForTask(tc.task)
+			if !ok {
+				t.Fatalf("expected gcMetaForTask to recognize task, got ok=false")
+			}
+			if meta.Kind != tc.want {
+				t.Fatalf("kind: want %q, got %q", tc.want, meta.Kind)
+			}
+			if !tc.idOK(meta) {
+				t.Fatalf("ID field mismatch: %+v", meta)
+			}
+			if meta.WorkspaceID != "ws" {
+				t.Fatalf("workspace_id: want %q, got %q", "ws", meta.WorkspaceID)
+			}
+		})
+	}
+
+	t.Run("unrecognized task — ok=false", func(t *testing.T) {
+		t.Parallel()
+		_, ok := gcMetaForTask(Task{ID: "tX", WorkspaceID: "ws"})
+		if ok {
+			t.Fatal("expected gcMetaForTask to return ok=false for task with no IDs")
+		}
+	})
+}

@@ -28,6 +28,12 @@ import (
 // server refresh.
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
 
+var (
+	isBrewInstall        = cli.IsBrewInstall
+	getBrewPrefix        = cli.GetBrewPrefix
+	matchKnownBrewPrefix = cli.MatchKnownBrewPrefix
+)
+
 // workspaceState tracks registered runtimes for a single workspace.
 //
 // allowedRepoURLs covers the workspace-level repo bindings; it gets rebuilt on
@@ -46,11 +52,17 @@ type workspaceState struct {
 	repoRefreshMu   sync.Mutex
 }
 
+type repoCacheBackend interface {
+	Lookup(workspaceID, url string) string
+	Sync(workspaceID string, repos []repocache.RepoInfo) error
+	CreateWorktree(params repocache.WorktreeParams) (*repocache.WorktreeResult, error)
+}
+
 // Daemon is the local agent runtime that polls for and executes tasks.
 type Daemon struct {
 	cfg       Config
 	client    *Client
-	repoCache *repocache.Cache
+	repoCache repoCacheBackend
 	logger    *slog.Logger
 
 	mu           sync.Mutex
@@ -460,6 +472,11 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 		return
 	}
 
+	type repoCandidate struct {
+		url     string
+		tracked bool
+	}
+
 	d.mu.Lock()
 	ws, ok := d.workspaces[workspaceID]
 	if !ok {
@@ -469,7 +486,7 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 	if ws.taskRepoURLs == nil {
 		ws.taskRepoURLs = make(map[string]struct{}, len(repos))
 	}
-	toSync := make([]RepoData, 0, len(repos))
+	candidates := make([]repoCandidate, 0, len(repos))
 	for _, repo := range repos {
 		url := strings.TrimSpace(repo.URL)
 		if url == "" {
@@ -479,14 +496,21 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 		// AND the cache already has it.
 		_, inWorkspace := ws.allowedRepoURLs[url]
 		_, inTask := ws.taskRepoURLs[url]
-		if (inWorkspace || inTask) && d.repoCache != nil && d.repoCache.Lookup(workspaceID, url) != "" {
-			ws.taskRepoURLs[url] = struct{}{}
-			continue
-		}
 		ws.taskRepoURLs[url] = struct{}{}
-		toSync = append(toSync, RepoData{URL: url})
+		candidates = append(candidates, repoCandidate{
+			url:     url,
+			tracked: inWorkspace || inTask,
+		})
 	}
 	d.mu.Unlock()
+
+	toSync := make([]RepoData, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.tracked && d.repoCache != nil && d.repoCache.Lookup(workspaceID, candidate.url) != "" {
+			continue
+		}
+		toSync = append(toSync, RepoData{URL: candidate.url})
+	}
 
 	if d.repoCache != nil && len(toSync) > 0 {
 		// Sync in the background — same shape used at workspace registration.
@@ -1244,9 +1268,19 @@ func (d *Daemon) triggerRestart() {
 		d.logger.Error("could not resolve executable path for restart", "error", err)
 		return
 	}
-	// Only resolve symlinks for non-brew installs. Brew uses a symlink that
-	// points to the latest Cellar version, so we must preserve it.
-	if !cli.IsBrewInstall() {
+	// On Linux, os.Executable() reads /proc/self/exe, which the kernel resolves
+	// to the Cellar path. brew cleanup deletes that path after upgrade, so we
+	// must use the stable <brew-prefix>/bin/multica symlink instead.
+	if isBrewInstall() {
+		if brewPrefix := getBrewPrefix(); brewPrefix != "" {
+			newBin = filepath.Join(brewPrefix, "bin", "multica")
+		} else if prefix := matchKnownBrewPrefix(newBin); prefix != "" {
+			newBin = filepath.Join(prefix, "bin", "multica")
+		} else {
+			d.logger.Warn("brew install detected but prefix could not be resolved; restart may fail",
+				"executable", newBin)
+		}
+	} else {
 		if resolved, err := filepath.EvalSymlinks(newBin); err == nil {
 			newBin = resolved
 		}
@@ -1580,36 +1614,96 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		}
 	}
 
-	switch result.Status {
-	case "blocked":
-		// Forward SessionID/WorkDir even on the blocked path: the agent may
-		// have built a real session before getting stuck (rate-limit, tool
-		// error, etc.) and we want the next chat turn to resume there
-		// rather than start over and "forget" the conversation.
-		failureReason := result.FailureReason
-		if failureReason == "" {
-			failureReason = "agent_error"
-		}
-		if err := d.client.FailTask(ctx, task.ID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
-			taskLog.Error("report blocked task failed", "error", err)
-		}
-	default:
-		taskLog.Info("task completed", "status", result.Status)
-		if err := d.client.CompleteTask(ctx, task.ID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
-			taskLog.Error("complete task failed, falling back to fail", "error", err)
-			if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error"); failErr != nil {
-				taskLog.Error("fail task fallback also failed", "error", failErr)
+	d.reportTaskResult(ctx, task.ID, result, taskLog)
+
+	// Write GC metadata after the task finishes so the periodic GC loop
+	// can look up the parent record (issue / chat session / autopilot run /
+	// task itself for quick-create) later. Written last so that a mid-task
+	// crash leaves the directory as an orphan (cleaned up by GCOrphanTTL).
+	if result.EnvRoot != "" {
+		if meta, ok := gcMetaForTask(task); ok {
+			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
+				taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
 			}
 		}
 	}
+}
 
-	// Write GC metadata after the task finishes so the periodic GC loop
-	// can look up the issue later. Written last so that a mid-task crash
-	// leaves the directory as an orphan (cleaned up by GCOrphanTTL).
-	if result.EnvRoot != "" {
-		if err := execenv.WriteGCMeta(result.EnvRoot, task.IssueID, task.WorkspaceID, taskLog); err != nil {
-			taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
+// reportTaskResult writes the final task disposition back to the server.
+//
+// Fail closed: only an explicit "completed" status is reported as success.
+// Anything else — "blocked", "cancelled", or any future status we forget to
+// enumerate — must go through FailTask, so a run that never produced a real
+// result can never be displayed as "Completed" in the UI (e.g. provider 429 /
+// out-of-credit / runtime crash). Forward SessionID/WorkDir on every path:
+// the agent may have built a real session before getting stuck, and we want
+// the next chat turn to resume there rather than start over and "forget"
+// the conversation.
+func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) {
+	switch result.Status {
+	case "completed":
+		taskLog.Info("task completed", "status", result.Status)
+		if err := d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
+			taskLog.Error("complete task failed, falling back to fail", "error", err)
+			if failErr := d.client.FailTask(ctx, taskID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error"); failErr != nil {
+				taskLog.Error("fail task fallback also failed", "error", failErr)
+			}
 		}
+	default:
+		failureReason := result.FailureReason
+		if failureReason == "" {
+			if result.Status == "cancelled" {
+				failureReason = "cancelled"
+			} else {
+				failureReason = "agent_error"
+			}
+		}
+		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
+		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
+			taskLog.Error("report failed task failed", "error", err)
+		}
+	}
+}
+
+// gcMetaForTask classifies a finished task and produces a GCMeta of the right
+// kind. The discriminator order matters: a task carrying both an issue_id
+// and a chat_session_id (theoretical, not produced today) should be treated
+// as a chat task because the chat session is the longer-lived parent record.
+//
+// Returns ok=false when the task has no recognizable parent (e.g. an
+// internal task with no IDs at all). The caller skips writing a meta file
+// in that case so the directory falls back to mtime-based orphan cleanup.
+func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
+	meta := execenv.GCMeta{WorkspaceID: task.WorkspaceID}
+	switch {
+	case task.ChatSessionID != "":
+		meta.Kind = execenv.GCKindChat
+		meta.ChatSessionID = task.ChatSessionID
+	case task.AutopilotRunID != "":
+		meta.Kind = execenv.GCKindAutopilotRun
+		meta.AutopilotRunID = task.AutopilotRunID
+	case task.IssueID != "":
+		meta.Kind = execenv.GCKindIssue
+		meta.IssueID = task.IssueID
+	case task.QuickCreatePrompt != "":
+		// Quick-create tasks reach WriteGCMeta before the server runs
+		// LinkTaskToIssue, so IssueID is always empty here. Persist the
+		// task ID instead and let the GC loop ask the server for terminal
+		// state via the task gc-check endpoint.
+		meta.Kind = execenv.GCKindQuickCreate
+		meta.TaskID = task.ID
+	default:
+		return execenv.GCMeta{}, false
+	}
+	return meta, true
+}
+
+func providerNeedsInlineSystemPrompt(provider string) bool {
+	switch provider {
+	case "openclaw", "hermes", "kiro", "kimi", "firtal-gateway":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1718,7 +1812,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-	if err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); err != nil {
+	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
 	// NOTE: No cleanup — workdir is preserved for reuse by future tasks on
@@ -1851,13 +1946,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
 	}
-	// openclaw loads its bootstrap files (AGENTS.md, SOUL.md, ...) from its own
-	// workspace dir rather than the task workdir, so the AGENTS.md written by
-	// execenv.InjectRuntimeConfig is never read. firtal-gateway is an HTTP
-	// backend with no local runtime config reader. Pass agent instructions inline
-	// for both.
-	if provider == "openclaw" || provider == "firtal-gateway" {
-		execOpts.SystemPrompt = instructions
+	// Some providers do not reliably load the per-task runtime config files we
+	// write into the task workdir:
+	//   - openclaw loads bootstrap files (AGENTS.md, SOUL.md, ...) from its own
+	//     workspace dir rather than the task workdir.
+	//   - hermes is driven through ACP and starts from a long-lived Hermes home;
+	//     deployments that cross a wrapper/container boundary can miss the
+	//     task-workdir AGENTS.md even when the prompt itself is delivered.
+	//   - kiro and kimi are wrapped through their own CLIs whose cwd handling
+	//     is opaque enough that we can't trust the file-based path either.
+	// Pass the full runtime brief inline (CLI catalog + workflow steps + agent
+	// identity/persona + skills + project context) so the backend prepends the
+	// same payload that file-based runtimes pick up from disk. Without this,
+	// these providers silently miss the workflow section and never call
+	// `multica issue status` / `multica issue comment add`, leaving issues
+	// stuck in `todo`.
+	if providerNeedsInlineSystemPrompt(provider) {
+		execOpts.SystemPrompt = runtimeBrief
 	}
 
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
@@ -2003,13 +2108,27 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// model reject, …). Without this the chat_session resume pointer
 		// would either be left stale or overwritten with NULL on the
 		// server, causing the next chat turn to lose context.
+		//
+		// Classify upstream API 400 invalid_request_error failures with a
+		// dedicated failure_reason so GetLastTaskSession excludes the
+		// task from the (agent_id, issue_id) resume lookup. Without this
+		// classifier a corrupt image or oversized payload baked into the
+		// conversation permanently blocks the issue: every follow-up
+		// task resumes the same poisoned session and hits the same 400.
+		failureReason, _ := classifyPoisonedError(errMsg)
+		if failureReason != "" {
+			taskLog.Warn("agent failed with poisoned API error, classifying as blocked",
+				"failure_reason", failureReason,
+			)
+		}
 		return TaskResult{
-			Status:    "blocked",
-			Comment:   errMsg,
-			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
-			EnvRoot:   env.RootDir,
-			Usage:     usageEntries,
+			Status:        "blocked",
+			Comment:       errMsg,
+			SessionID:     result.SessionID,
+			WorkDir:       env.WorkDir,
+			EnvRoot:       env.RootDir,
+			Usage:         usageEntries,
+			FailureReason: failureReason,
 		}, nil
 	}
 }

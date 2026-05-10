@@ -6,28 +6,24 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 )
 
-// fetchTimeline issues a GET /timeline request with the given query string and
-// returns the decoded TimelineResponse + HTTP status.
-func fetchTimeline(t *testing.T, issueID, query string) (TimelineResponse, int) {
+// fetchTimeline issues a GET /timeline request and returns the decoded entries
+// + HTTP status. The endpoint returns a flat array of TimelineEntry sorted by
+// (created_at, id) ascending (oldest first); see ListTimeline / #1929.
+func fetchTimeline(t *testing.T, issueID string) ([]TimelineEntry, int) {
 	t.Helper()
-	url := "/api/issues/" + issueID + "/timeline"
-	if query != "" {
-		url += "?" + query
-	}
 	w := httptest.NewRecorder()
-	req := newRequest("GET", url, nil)
+	req := newRequest("GET", "/api/issues/"+issueID+"/timeline", nil)
 	req = withURLParam(req, "id", issueID)
 	testHandler.ListTimeline(w, req)
-	var resp TimelineResponse
+	var entries []TimelineEntry
 	if w.Code == http.StatusOK {
-		json.NewDecoder(w.Body).Decode(&resp)
+		json.NewDecoder(w.Body).Decode(&entries)
 	}
-	return resp, w.Code
+	return entries, w.Code
 }
 
 // createIssueForTimeline returns a freshly-created issue id and registers a
@@ -55,9 +51,8 @@ func createIssueForTimeline(t *testing.T, title string) string {
 }
 
 // seedTimelineEntries inserts <commentN> comments + <activityN> activities for
-// the given issue with descending timestamps (oldest first → newest last) so
-// callers can reason about ordering. Returns the inserted comment + activity
-// IDs in the order they were inserted (chronologically ascending).
+// the given issue with ascending timestamps. Returns the inserted ids in the
+// order they were inserted (chronologically ascending).
 func seedTimelineEntries(t *testing.T, issueID string, commentN, activityN int) (commentIDs, activityIDs []string) {
 	t.Helper()
 	ctx := context.Background()
@@ -90,243 +85,137 @@ func seedTimelineEntries(t *testing.T, issueID string, commentN, activityN int) 
 	return
 }
 
-func TestListTimeline_DefaultLatestPage(t *testing.T) {
-	issueID := createIssueForTimeline(t, "Latest page test")
-	seedTimelineEntries(t, issueID, 60, 60) // 120 total; default limit is 50
+func TestListTimeline_ReturnsAllEntriesAscending(t *testing.T) {
+	issueID := createIssueForTimeline(t, "All entries test")
+	commentIDs, _ := seedTimelineEntries(t, issueID, 5, 0)
 
-	// Empty query string is now reserved for the legacy compat path; new
-	// client always sends ?limit=... so emulate that here.
-	resp, code := fetchTimeline(t, issueID, "limit=50")
-	if code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", code)
+	entries, status := fetchTimeline(t, issueID)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
 	}
-	if len(resp.Entries) != 50 {
-		t.Fatalf("expected 50 entries on default page, got %d", len(resp.Entries))
-	}
-	if !resp.HasMoreBefore {
-		t.Fatalf("expected has_more_before=true with 120 total entries")
-	}
-	if resp.HasMoreAfter {
-		t.Fatalf("latest page must report has_more_after=false")
-	}
-	if resp.NextCursor == nil {
-		t.Fatalf("expected next_cursor on full page")
-	}
-	// DESC order: first entry's timestamp must be >= last entry's.
-	if resp.Entries[0].CreatedAt < resp.Entries[len(resp.Entries)-1].CreatedAt {
-		t.Fatalf("expected DESC order, first=%s last=%s",
-			resp.Entries[0].CreatedAt, resp.Entries[len(resp.Entries)-1].CreatedAt)
-	}
-}
-
-func TestListTimeline_BeforeCursorWalksOlder(t *testing.T) {
-	issueID := createIssueForTimeline(t, "Before cursor test")
-	seedTimelineEntries(t, issueID, 30, 30) // 60 total
-
-	first, _ := fetchTimeline(t, issueID, "limit=20")
-	if len(first.Entries) != 20 {
-		t.Fatalf("first page: expected 20, got %d", len(first.Entries))
-	}
-	if first.NextCursor == nil {
-		t.Fatalf("first page should have next_cursor")
-	}
-
-	second, code := fetchTimeline(t, issueID, "limit=20&before="+*first.NextCursor)
-	if code != http.StatusOK {
-		t.Fatalf("second page: expected 200, got %d", code)
-	}
-	if len(second.Entries) != 20 {
-		t.Fatalf("second page: expected 20, got %d", len(second.Entries))
-	}
-	if !second.HasMoreAfter {
-		t.Fatalf("second page must report has_more_after=true (we paged backward)")
-	}
-	// No overlap: oldest of first page must be strictly newer than newest of second.
-	firstTail := first.Entries[len(first.Entries)-1]
-	secondHead := second.Entries[0]
-	if firstTail.CreatedAt < secondHead.CreatedAt {
-		t.Fatalf("pages overlap: firstTail=%s secondHead=%s",
-			firstTail.CreatedAt, secondHead.CreatedAt)
-	}
-}
-
-func TestListTimeline_AfterCursorWalksNewer(t *testing.T) {
-	issueID := createIssueForTimeline(t, "After cursor test")
-	seedTimelineEntries(t, issueID, 30, 30)
-
-	first, _ := fetchTimeline(t, issueID, "limit=20")
-	if first.NextCursor == nil {
-		t.Fatalf("first page should have next_cursor")
-	}
-	older, _ := fetchTimeline(t, issueID, "limit=20&before="+*first.NextCursor)
-	if older.PrevCursor == nil {
-		t.Fatalf("older page should have prev_cursor")
-	}
-
-	// Walk back forward: ?after=older.prev_cursor should land on entries
-	// newer than the older page's newest, i.e. overlap with first page.
-	newer, code := fetchTimeline(t, issueID, "limit=20&after="+*older.PrevCursor)
-	if code != http.StatusOK {
-		t.Fatalf("after page: expected 200, got %d", code)
-	}
-	if len(newer.Entries) == 0 {
-		t.Fatalf("after page should not be empty")
-	}
-	if !newer.HasMoreBefore {
-		t.Fatalf("after page must report has_more_before=true")
-	}
-}
-
-func TestListTimeline_AroundAnchorsOnTarget(t *testing.T) {
-	issueID := createIssueForTimeline(t, "Around test")
-	commentIDs, _ := seedTimelineEntries(t, issueID, 50, 0)
-	// commentIDs[0] is the OLDEST. Pick the 2nd-oldest as the anchor — far
-	// from the latest page so we can verify around mode actually works.
-	target := commentIDs[1]
-
-	resp, code := fetchTimeline(t, issueID, "around="+target+"&limit=20")
-	if code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", code)
-	}
-	if resp.TargetIndex == nil {
-		t.Fatalf("expected target_index in around mode")
-	}
-	if len(resp.Entries) == 0 || resp.Entries[*resp.TargetIndex].ID != target {
-		t.Fatalf("target_index does not point at target id; got %s",
-			resp.Entries[*resp.TargetIndex].ID)
-	}
-	// Should have entries on both sides of the anchor (the 2nd-oldest has
-	// 1 older + many newer).
-	if !resp.HasMoreAfter {
-		t.Fatalf("around 2nd-oldest should report has_more_after=true")
-	}
-}
-
-func TestListTimeline_AroundUnknownTarget(t *testing.T) {
-	issueID := createIssueForTimeline(t, "Around 404 test")
-	seedTimelineEntries(t, issueID, 5, 0)
-
-	bogus := "00000000-0000-0000-0000-000000000001"
-	_, code := fetchTimeline(t, issueID, "around="+bogus)
-	if code != http.StatusNotFound {
-		t.Fatalf("expected 404 for unknown anchor, got %d", code)
-	}
-}
-
-func TestListTimeline_LimitOverMaxRejected(t *testing.T) {
-	issueID := createIssueForTimeline(t, "Limit cap test")
-	seedTimelineEntries(t, issueID, 1, 0)
-
-	_, code := fetchTimeline(t, issueID, "limit=500")
-	if code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for limit=500, got %d", code)
-	}
-}
-
-func TestListTimeline_MutuallyExclusiveCursorParams(t *testing.T) {
-	issueID := createIssueForTimeline(t, "Mutex test")
-	seedTimelineEntries(t, issueID, 1, 0)
-
-	_, code := fetchTimeline(t, issueID, "before=abc&after=def")
-	if code != http.StatusBadRequest {
-		t.Fatalf("before+after should 400, got %d", code)
-	}
-}
-
-func TestListTimeline_InvalidCursorRejected(t *testing.T) {
-	issueID := createIssueForTimeline(t, "Bad cursor test")
-	seedTimelineEntries(t, issueID, 1, 0)
-
-	_, code := fetchTimeline(t, issueID, "before=not-base64-json")
-	if code != http.StatusBadRequest {
-		t.Fatalf("invalid cursor should 400, got %d", code)
-	}
-}
-
-func TestListTimeline_MergedCommentAndActivity(t *testing.T) {
-	issueID := createIssueForTimeline(t, "Merge test")
-	ctx := context.Background()
-
-	// Use explicit, well-separated timestamps so the DESC ordering assertion
-	// is deterministic regardless of clock granularity.
-	older := time.Now().UTC().Add(-2 * time.Hour)
-	newer := older.Add(1 * time.Hour)
-
-	// Older row: activity.
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO activity_log (workspace_id, issue_id, actor_type, actor_id, action, details, created_at)
-		VALUES ($1, $2, 'member', $3, 'created', '{}'::jsonb, $4)
-	`, testWorkspaceID, issueID, testUserID, older); err != nil {
-		t.Fatalf("seed activity: %v", err)
-	}
-	// Newer row: comment.
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at, updated_at)
-		VALUES ($1, $2, 'member', $3, 'merge test comment', 'comment', $4, $4)
-	`, issueID, testWorkspaceID, testUserID, newer); err != nil {
-		t.Fatalf("seed comment: %v", err)
-	}
-
-	resp, code := fetchTimeline(t, issueID, "limit=50")
-	if code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", code)
-	}
-	if len(resp.Entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(resp.Entries))
-	}
-	// DESC: comment (newer) at index 0, activity (older) at index 1.
-	if resp.Entries[0].Type != "comment" || resp.Entries[1].Type != "activity" {
-		t.Fatalf("merge order wrong: got %s/%s, want comment/activity",
-			resp.Entries[0].Type, resp.Entries[1].Type)
-	}
-	if !strings.Contains(*resp.Entries[0].Content, "merge test") {
-		t.Fatalf("comment content lost in merge: %v", resp.Entries[0].Content)
-	}
-}
-
-// TestListTimeline_LegacyShapeForPreCursorClients pins the backwards-compat
-// contract for clients that predate cursor pagination (#2128). They call
-// /timeline with no query string and read the body as TimelineEntry[]
-// directly — returning the new wrapped shape there is what caused #2143 /
-// #2147. Asserts: array shape, ASC order, "[]" (not "null") on empty issue.
-func TestListTimeline_LegacyShapeForPreCursorClients(t *testing.T) {
-	issueID := createIssueForTimeline(t, "Legacy compat test")
-	seedTimelineEntries(t, issueID, 3, 2) // 5 total
-
-	w := httptest.NewRecorder()
-	req := newRequest("GET", "/api/issues/"+issueID+"/timeline", nil)
-	req = withURLParam(req, "id", issueID)
-	testHandler.ListTimeline(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	// Must decode as a bare array, not the wrapped TimelineResponse.
-	var entries []TimelineEntry
-	if err := json.NewDecoder(w.Body).Decode(&entries); err != nil {
-		t.Fatalf("legacy response must be a JSON array: %v", err)
-	}
-	if len(entries) != 5 {
-		t.Fatalf("expected 5 entries (3 comments + 2 activities), got %d", len(entries))
-	}
-	for i := 1; i < len(entries); i++ {
-		if entries[i-1].CreatedAt > entries[i].CreatedAt {
-			t.Fatalf("legacy contract requires ASC order, got %s before %s",
-				entries[i-1].CreatedAt, entries[i].CreatedAt)
+	// Handler tests don't register the activity listener (that lives in
+	// cmd/server), so issue creation does not seed an auto-activity here.
+	// We assert directly on the seeded comments.
+	commentEntries := []TimelineEntry{}
+	for _, e := range entries {
+		if e.Type == "comment" {
+			commentEntries = append(commentEntries, e)
 		}
 	}
-
-	// Empty issue must render as "[]" (not "null") — old client does
-	// `data: timeline = []` which defaults undefined but not null.
-	emptyID := createIssueForTimeline(t, "Empty legacy test")
-	w2 := httptest.NewRecorder()
-	req2 := newRequest("GET", "/api/issues/"+emptyID+"/timeline", nil)
-	req2 = withURLParam(req2, "id", emptyID)
-	testHandler.ListTimeline(w2, req2)
-	if w2.Code != http.StatusOK {
-		t.Fatalf("empty issue: expected 200, got %d", w2.Code)
+	if got, want := len(commentEntries), len(commentIDs); got != want {
+		t.Fatalf("comment count = %d, want %d", got, want)
 	}
-	if got := strings.TrimSpace(w2.Body.String()); got != "[]" {
-		t.Fatalf("empty issue must render as [], got %q", got)
+	for i, e := range commentEntries {
+		if e.ID != commentIDs[i] {
+			t.Errorf("entry %d: id = %s, want %s", i, e.ID, commentIDs[i])
+		}
+	}
+}
+
+func TestListTimeline_MergesCommentsAndActivities(t *testing.T) {
+	issueID := createIssueForTimeline(t, "Merged entries test")
+	seedTimelineEntries(t, issueID, 3, 2)
+
+	entries, status := fetchTimeline(t, issueID)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	// Verify chronological non-decreasing order across types.
+	for i := 1; i < len(entries); i++ {
+		if entries[i-1].CreatedAt > entries[i].CreatedAt {
+			t.Errorf("not chronological at %d: %q then %q",
+				i, entries[i-1].CreatedAt, entries[i].CreatedAt)
+		}
+	}
+	// 3 seeded comments + 2 seeded activities = 5. Handler tests don't
+	// register the activity listener, so there is no auto issue-created row.
+	if got, want := len(entries), 5; got != want {
+		t.Fatalf("entries = %d, want %d", got, want)
+	}
+}
+
+// fetchTimelineWrapped exercises the legacy wrapped response shape that
+// stale Multica.app v0.2.26+ builds still expect — sending any of
+// limit/before/after/around makes the server emit a TimelinePage-style
+// object (entries DESC, null cursors, has_more_*=false) instead of the new
+// flat array. Used to verify the boundary-compat path doesn't regress.
+func fetchTimelineWrapped(t *testing.T, issueID, query string) (timelinePaginatedResponse, int) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/"+issueID+"/timeline?"+query, nil)
+	req = withURLParam(req, "id", issueID)
+	testHandler.ListTimeline(w, req)
+	var resp timelinePaginatedResponse
+	if w.Code == http.StatusOK {
+		json.NewDecoder(w.Body).Decode(&resp)
+	}
+	return resp, w.Code
+}
+
+// Boundary-compat: a stale client between #2128 and #1929 sends ?limit=50
+// and parses the response with TimelinePageSchema. The handler must keep
+// returning the wrapped object so that path doesn't fall back to an empty
+// timeline.
+func TestListTimeline_LegacyWrappedShape_OnPaginationParams(t *testing.T) {
+	issueID := createIssueForTimeline(t, "Legacy wrapped shape test")
+	commentIDs, _ := seedTimelineEntries(t, issueID, 3, 0)
+
+	resp, status := fetchTimelineWrapped(t, issueID, "limit=50")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if resp.HasMoreBefore || resp.HasMoreAfter {
+		t.Errorf("has_more_*: want false/false, got before=%v after=%v",
+			resp.HasMoreBefore, resp.HasMoreAfter)
+	}
+	if resp.NextCursor != nil || resp.PrevCursor != nil {
+		t.Errorf("cursors: want nil/nil, got next=%v prev=%v", resp.NextCursor, resp.PrevCursor)
+	}
+	// DESC order: most recent comment first; activity from issue-creation
+	// sits at the bottom.
+	commentEntries := []TimelineEntry{}
+	for _, e := range resp.Entries {
+		if e.Type == "comment" {
+			commentEntries = append(commentEntries, e)
+		}
+	}
+	if got, want := len(commentEntries), len(commentIDs); got != want {
+		t.Fatalf("comment count = %d, want %d", got, want)
+	}
+	for i, e := range commentEntries {
+		want := commentIDs[len(commentIDs)-1-i]
+		if e.ID != want {
+			t.Errorf("DESC entry %d: id = %s, want %s", i, e.ID, want)
+		}
+	}
+}
+
+func TestListTimeline_LegacyWrappedShape_AroundFillsTargetIndex(t *testing.T) {
+	issueID := createIssueForTimeline(t, "Around target index test")
+	commentIDs, _ := seedTimelineEntries(t, issueID, 5, 0)
+	anchor := commentIDs[2] // pick a middle comment
+
+	resp, status := fetchTimelineWrapped(t, issueID, "around="+anchor)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if resp.TargetIndex == nil {
+		t.Fatalf("target_index: want non-nil for around mode")
+	}
+	if got := resp.Entries[*resp.TargetIndex].ID; got != anchor {
+		t.Errorf("target_index points at %s, want anchor %s", got, anchor)
+	}
+}
+
+func TestListTimeline_EmptyIssue(t *testing.T) {
+	issueID := createIssueForTimeline(t, "Empty timeline test")
+	entries, status := fetchTimeline(t, issueID)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	// Handler tests don't wire the activity listener, so a freshly-created
+	// issue with no comments has an empty timeline.
+	if got := len(entries); got != 0 {
+		t.Fatalf("entries = %d, want 0", got)
 	}
 }

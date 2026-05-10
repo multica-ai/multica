@@ -3,6 +3,8 @@ package handler
 import (
 	"net/http"
 	"os"
+
+	"github.com/multica-ai/multica/server/internal/analytics"
 )
 
 type AppConfig struct {
@@ -18,8 +20,9 @@ type AppConfig struct {
 	// into the frontend bundle via NEXT_PUBLIC_*) means self-hosted
 	// instances — whose server returns an empty key — automatically
 	// disable frontend event shipping too.
-	PosthogKey  string `json:"posthog_key"`
-	PosthogHost string `json:"posthog_host"`
+	PosthogKey           string `json:"posthog_key"`
+	PosthogHost          string `json:"posthog_host"`
+	AnalyticsEnvironment string `json:"analytics_environment"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -40,6 +43,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	if v := os.Getenv("ANALYTICS_DISABLED"); v != "true" && v != "1" {
 		config.PosthogKey = os.Getenv("POSTHOG_API_KEY")
 		config.PosthogHost = os.Getenv("POSTHOG_HOST")
+		config.AnalyticsEnvironment = analytics.EnvironmentFromEnv()
 		if config.PosthogHost == "" && config.PosthogKey != "" {
 			config.PosthogHost = "https://us.i.posthog.com"
 		}
