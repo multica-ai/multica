@@ -60,6 +60,7 @@ function Row({ task, workspaceSlug }: { task: RecentTask; workspaceSlug: string 
     if (task.issue_id) push(`/${workspaceSlug}/issues/${task.issue_id}`);
   };
   const ts = task.completed_at ?? task.started_at ?? task.created_at;
+  const title = task.task_title || task.issue_title || (task.chat_session_id ? "Chat task" : "ingen issue");
 
   return (
     <li>
@@ -82,7 +83,7 @@ function Row({ task, workspaceSlug }: { task: RecentTask; workspaceSlug: string 
         <span className="font-medium">{task.agent_name}</span>
         <span className="text-muted-foreground">·</span>
         <span className="truncate text-muted-foreground">
-          {task.issue_title ?? "ingen issue"}
+          {title}
         </span>
         <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
           {task.status}

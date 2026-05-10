@@ -1,6 +1,7 @@
 "use client";
 
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { useNavigation } from "@multica/views/navigation";
 import { cn } from "@multica/ui/lib/utils";
 import {
   CheckCircle2,
@@ -12,23 +13,16 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import type { DashboardOverview } from "../../core/api";
-import type { ActorScope } from "../../core/types";
 
 interface ActivityFeedProps {
   data: DashboardOverview | undefined;
   isLoading: boolean;
-  scope: ActorScope;
+  workspaceSlug: string;
 }
 
-// Renders the activity_log feed for the period. Filters client-side by
-// actor scope so toggling between Alle / Members / Agents reshapes the list
-// without a refetch.
-export function ActivityFeed({ data, isLoading, scope }: ActivityFeedProps) {
-  const entries = (data?.activity_feed ?? []).filter((e) => {
-    if (scope === "members") return e.actor_type === "member";
-    if (scope === "agents") return e.actor_type === "agent";
-    return true;
-  });
+// Renders the activity_log feed for the current server-side actor filter.
+export function ActivityFeed({ data, isLoading, workspaceSlug }: ActivityFeedProps) {
+  const entries = data?.activity_feed ?? [];
 
   return (
     <Card>
@@ -54,35 +48,70 @@ export function ActivityFeed({ data, isLoading, scope }: ActivityFeedProps) {
         ) : (
           <ul className="divide-y">
             {entries.slice(0, 30).map((entry) => (
-              <li key={entry.id} className="flex items-start gap-2 px-3 py-2 text-xs">
-                <span className="mt-0.5 shrink-0 text-muted-foreground">
-                  <ActionIcon action={entry.action} kind={entry.issue_kind} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="line-clamp-2">
-                    <span
-                      className={cn(
-                        "font-medium",
-                        entry.actor_type === "agent" && "text-purple-700 dark:text-purple-400",
-                      )}
-                    >
-                      {prettyActor(entry.actor_type)}
-                    </span>{" "}
-                    <span className="text-muted-foreground">{prettyAction(entry.action)}</span>{" "}
-                    {entry.issue_title && (
-                      <span className="font-medium">{truncate(entry.issue_title, 60)}</span>
-                    )}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {relativeTime(entry.created_at)}
-                  </p>
-                </div>
-              </li>
+              <Row key={entry.id} entry={entry} workspaceSlug={workspaceSlug} />
             ))}
           </ul>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function Row({
+  entry,
+  workspaceSlug,
+}: {
+  entry: NonNullable<DashboardOverview["activity_feed"]>[number];
+  workspaceSlug: string;
+}) {
+  const { push } = useNavigation();
+  const href = entry.issue_id
+    ? entry.issue_kind === "channel" || entry.issue_kind === "dm"
+      ? `/${workspaceSlug}/channels/${entry.issue_id}`
+      : `/${workspaceSlug}/issues/${entry.issue_id}`
+    : null;
+
+  const content = (
+    <>
+      <span className="mt-0.5 shrink-0 text-muted-foreground">
+        <ActionIcon action={entry.action} kind={entry.issue_kind} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="line-clamp-2">
+          <span
+            className={cn(
+              "font-medium",
+              entry.actor_type === "agent" && "text-purple-700 dark:text-purple-400",
+            )}
+          >
+            {entry.actor_name || prettyActor(entry.actor_type)}
+          </span>{" "}
+          <span className="text-muted-foreground">{prettyAction(entry.action)}</span>{" "}
+          {entry.issue_title && (
+            <span className="font-medium">{truncate(entry.issue_title, 60)}</span>
+          )}
+        </p>
+        <p className="text-[10px] text-muted-foreground">
+          {relativeTime(entry.created_at)}
+        </p>
+      </div>
+    </>
+  );
+
+  return (
+    <li>
+      {href ? (
+        <button
+          type="button"
+          onClick={() => push(href)}
+          className="flex w-full items-start gap-2 px-3 py-2 text-left text-xs hover:bg-accent/40"
+        >
+          {content}
+        </button>
+      ) : (
+        <div className="flex items-start gap-2 px-3 py-2 text-xs">{content}</div>
+      )}
+    </li>
   );
 }
 

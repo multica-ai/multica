@@ -39,12 +39,12 @@ func New(cerebro *cerebrodb.Queries, upstream *db.Queries) *Handler {
 // Range options accepted by the dashboard endpoint. The current and prior
 // windows have the same length so KPI deltas compare like-for-like.
 type rangeSpec struct {
-	now           time.Time
-	periodStart   time.Time
-	periodEnd     time.Time
-	priorStart    time.Time
-	priorEnd      time.Time
-	bucketsByDay  bool
+	now          time.Time
+	periodStart  time.Time
+	periodEnd    time.Time
+	priorStart   time.Time
+	priorEnd     time.Time
+	bucketsByDay bool
 }
 
 func parseRange(rangeStr string, now time.Time) rangeSpec {
@@ -95,16 +95,17 @@ type topActor struct {
 }
 
 type activityEntry struct {
-	ID              string          `json:"id"`
-	IssueID         string          `json:"issue_id,omitempty"`
-	IssueTitle      string          `json:"issue_title,omitempty"`
-	IssueNumber     int32           `json:"issue_number,omitempty"`
-	IssueKind       string          `json:"issue_kind,omitempty"`
-	ActorType       string          `json:"actor_type"`
-	ActorID         string          `json:"actor_id"`
-	Action          string          `json:"action"`
-	Details         json.RawMessage `json:"details,omitempty"`
-	CreatedAt       string          `json:"created_at"`
+	ID          string          `json:"id"`
+	IssueID     string          `json:"issue_id,omitempty"`
+	IssueTitle  string          `json:"issue_title,omitempty"`
+	IssueNumber int32           `json:"issue_number,omitempty"`
+	IssueKind   string          `json:"issue_kind,omitempty"`
+	ActorType   string          `json:"actor_type"`
+	ActorID     string          `json:"actor_id"`
+	ActorName   string          `json:"actor_name"`
+	Action      string          `json:"action"`
+	Details     json.RawMessage `json:"details,omitempty"`
+	CreatedAt   string          `json:"created_at"`
 }
 
 type recentTask struct {
@@ -112,9 +113,11 @@ type recentTask struct {
 	AgentID        string `json:"agent_id"`
 	AgentName      string `json:"agent_name"`
 	AgentAvatarURL string `json:"agent_avatar_url,omitempty"`
+	TaskTitle      string `json:"task_title,omitempty"`
 	IssueID        string `json:"issue_id,omitempty"`
 	IssueTitle     string `json:"issue_title,omitempty"`
 	IssueNumber    int32  `json:"issue_number,omitempty"`
+	ChatSessionID  string `json:"chat_session_id,omitempty"`
 	Status         string `json:"status"`
 	CompletedAt    string `json:"completed_at,omitempty"`
 	StartedAt      string `json:"started_at,omitempty"`
@@ -122,24 +125,24 @@ type recentTask struct {
 }
 
 type overviewResponse struct {
-	Range            string         `json:"range"`
-	PeriodStart      string         `json:"period_start"`
-	PeriodEnd        string         `json:"period_end"`
-	IssuesCreated    kpi            `json:"issues_created"`
-	IssuesCompleted  kpi            `json:"issues_completed"`
-	ChatMessages     kpi            `json:"chat_messages"`
-	ChannelMessages  kpi            `json:"channel_messages"`
-	ChannelsActive   kpi            `json:"channels_active"`
-	TasksCompleted   kpi            `json:"tasks_completed"`
-	TasksFailed      kpi            `json:"tasks_failed"`
-	AgentsActive     kpi            `json:"agents_active"`
-	MembersActive    kpi            `json:"members_active"`
-	SpendCents       kpi            `json:"spend_cents"`
-	IssuesByStatus   []bucket       `json:"issues_by_status"`
-	IssuesByPriority []bucket       `json:"issues_by_priority"`
-	Timeline         []dayBucket    `json:"timeline"`
-	TopAgents        []topActor     `json:"top_agents"`
-	TopMembers       []topActor     `json:"top_members"`
+	Range            string          `json:"range"`
+	PeriodStart      string          `json:"period_start"`
+	PeriodEnd        string          `json:"period_end"`
+	IssuesCreated    kpi             `json:"issues_created"`
+	IssuesCompleted  kpi             `json:"issues_completed"`
+	ChatMessages     kpi             `json:"chat_messages"`
+	ChannelMessages  kpi             `json:"channel_messages"`
+	ChannelsActive   kpi             `json:"channels_active"`
+	TasksCompleted   kpi             `json:"tasks_completed"`
+	TasksFailed      kpi             `json:"tasks_failed"`
+	AgentsActive     kpi             `json:"agents_active"`
+	MembersActive    kpi             `json:"members_active"`
+	SpendCents       kpi             `json:"spend_cents"`
+	IssuesByStatus   []bucket        `json:"issues_by_status"`
+	IssuesByPriority []bucket        `json:"issues_by_priority"`
+	Timeline         []dayBucket     `json:"timeline"`
+	TopAgents        []topActor      `json:"top_agents"`
+	TopMembers       []topActor      `json:"top_members"`
 	ActivityFeed     []activityEntry `json:"activity_feed"`
 	RecentTasks      []recentTask    `json:"recent_tasks"`
 }
@@ -159,6 +162,10 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rangeStr := r.URL.Query().Get("range")
+	actorType, actorID, ok := parseActorFilter(w, r)
+	if !ok {
+		return
+	}
 	spec := parseRange(rangeStr, time.Now())
 
 	out := overviewResponse{
@@ -186,13 +193,13 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	// --- Issues counts (current + prior) ---
 	runOne(func(c context.Context) error {
 		v, err := h.Cerebro.DashboardCountIssuesCreatedInPeriod(c, cerebrodb.DashboardCountIssuesCreatedInPeriodParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
 		}
 		p, _ := h.Cerebro.DashboardCountIssuesCreatedInPeriod(c, cerebrodb.DashboardCountIssuesCreatedInPeriodParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.priorStart), CreatedAt_2: ts(spec.priorEnd),
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.priorStart), CreatedAt_2: ts(spec.priorEnd), ActorType: actorType, ActorID: actorID,
 		})
 		mu.Lock()
 		out.IssuesCreated = kpi{Value: int(v), Prior: int(p)}
@@ -201,13 +208,13 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	})
 	runOne(func(c context.Context) error {
 		v, err := h.Cerebro.DashboardCountIssuesCompletedInPeriod(c, cerebrodb.DashboardCountIssuesCompletedInPeriodParams{
-			WorkspaceID: wsUUID, UpdatedAt: ts(spec.periodStart), UpdatedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, UpdatedAt: ts(spec.periodStart), UpdatedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
 		}
 		p, _ := h.Cerebro.DashboardCountIssuesCompletedInPeriod(c, cerebrodb.DashboardCountIssuesCompletedInPeriodParams{
-			WorkspaceID: wsUUID, UpdatedAt: ts(spec.priorStart), UpdatedAt_2: ts(spec.priorEnd),
+			WorkspaceID: wsUUID, UpdatedAt: ts(spec.priorStart), UpdatedAt_2: ts(spec.priorEnd), ActorType: actorType, ActorID: actorID,
 		})
 		mu.Lock()
 		out.IssuesCompleted = kpi{Value: int(v), Prior: int(p)}
@@ -218,13 +225,13 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	// --- Chat + channel + tasks counts ---
 	runOne(func(c context.Context) error {
 		v, err := h.Cerebro.DashboardCountChatMessagesInPeriod(c, cerebrodb.DashboardCountChatMessagesInPeriodParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
 		}
 		p, _ := h.Cerebro.DashboardCountChatMessagesInPeriod(c, cerebrodb.DashboardCountChatMessagesInPeriodParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.priorStart), CreatedAt_2: ts(spec.priorEnd),
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.priorStart), CreatedAt_2: ts(spec.priorEnd), ActorType: actorType, ActorID: actorID,
 		})
 		mu.Lock()
 		out.ChatMessages = kpi{Value: int(v), Prior: int(p)}
@@ -233,13 +240,13 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	})
 	runOne(func(c context.Context) error {
 		v, err := h.Cerebro.DashboardCountChannelMessagesInPeriod(c, cerebrodb.DashboardCountChannelMessagesInPeriodParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
 		}
 		p, _ := h.Cerebro.DashboardCountChannelMessagesInPeriod(c, cerebrodb.DashboardCountChannelMessagesInPeriodParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.priorStart), CreatedAt_2: ts(spec.priorEnd),
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.priorStart), CreatedAt_2: ts(spec.priorEnd), ActorType: actorType, ActorID: actorID,
 		})
 		mu.Lock()
 		out.ChannelMessages = kpi{Value: int(v), Prior: int(p)}
@@ -248,13 +255,13 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	})
 	runOne(func(c context.Context) error {
 		v, err := h.Cerebro.DashboardCountActiveChannelsInPeriod(c, cerebrodb.DashboardCountActiveChannelsInPeriodParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
 		}
 		p, _ := h.Cerebro.DashboardCountActiveChannelsInPeriod(c, cerebrodb.DashboardCountActiveChannelsInPeriodParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.priorStart), CreatedAt_2: ts(spec.priorEnd),
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.priorStart), CreatedAt_2: ts(spec.priorEnd), ActorType: actorType, ActorID: actorID,
 		})
 		mu.Lock()
 		out.ChannelsActive = kpi{Value: int(v), Prior: int(p)}
@@ -263,13 +270,13 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	})
 	runOne(func(c context.Context) error {
 		rows, err := h.Cerebro.DashboardCountTasksByStatusInPeriod(c, cerebrodb.DashboardCountTasksByStatusInPeriodParams{
-			WorkspaceID: wsUUID, CompletedAt: ts(spec.periodStart), CompletedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, CompletedAt: ts(spec.periodStart), CompletedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
 		}
 		priorRows, _ := h.Cerebro.DashboardCountTasksByStatusInPeriod(c, cerebrodb.DashboardCountTasksByStatusInPeriodParams{
-			WorkspaceID: wsUUID, CompletedAt: ts(spec.priorStart), CompletedAt_2: ts(spec.priorEnd),
+			WorkspaceID: wsUUID, CompletedAt: ts(spec.priorStart), CompletedAt_2: ts(spec.priorEnd), ActorType: actorType, ActorID: actorID,
 		})
 		var done, fail, doneP, failP int
 		for _, row := range rows {
@@ -298,13 +305,13 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	// --- Active actors ---
 	runOne(func(c context.Context) error {
 		v, err := h.Cerebro.DashboardActiveAgentCountInPeriod(c, cerebrodb.DashboardActiveAgentCountInPeriodParams{
-			WorkspaceID: wsUUID, CompletedAt: ts(spec.periodStart), CompletedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, CompletedAt: ts(spec.periodStart), CompletedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
 		}
 		p, _ := h.Cerebro.DashboardActiveAgentCountInPeriod(c, cerebrodb.DashboardActiveAgentCountInPeriodParams{
-			WorkspaceID: wsUUID, CompletedAt: ts(spec.priorStart), CompletedAt_2: ts(spec.priorEnd),
+			WorkspaceID: wsUUID, CompletedAt: ts(spec.priorStart), CompletedAt_2: ts(spec.priorEnd), ActorType: actorType, ActorID: actorID,
 		})
 		mu.Lock()
 		out.AgentsActive = kpi{Value: int(v), Prior: int(p)}
@@ -313,13 +320,13 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	})
 	runOne(func(c context.Context) error {
 		v, err := h.Cerebro.DashboardActiveMemberCountInPeriod(c, cerebrodb.DashboardActiveMemberCountInPeriodParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
 		}
 		p, _ := h.Cerebro.DashboardActiveMemberCountInPeriod(c, cerebrodb.DashboardActiveMemberCountInPeriodParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.priorStart), CreatedAt_2: ts(spec.priorEnd),
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.priorStart), CreatedAt_2: ts(spec.priorEnd), ActorType: actorType, ActorID: actorID,
 		})
 		mu.Lock()
 		out.MembersActive = kpi{Value: int(v), Prior: int(p)}
@@ -339,7 +346,9 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 
 	// --- Issues by status / priority (totals, not period-scoped) ---
 	runOne(func(c context.Context) error {
-		rows, err := h.Cerebro.DashboardCountIssuesByStatus(c, wsUUID)
+		rows, err := h.Cerebro.DashboardCountIssuesByStatus(c, cerebrodb.DashboardCountIssuesByStatusParams{
+			WorkspaceID: wsUUID, ActorType: actorType, ActorID: actorID,
+		})
 		if err != nil {
 			return err
 		}
@@ -351,7 +360,9 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	runOne(func(c context.Context) error {
-		rows, err := h.Cerebro.DashboardCountIssuesByPriority(c, wsUUID)
+		rows, err := h.Cerebro.DashboardCountIssuesByPriority(c, cerebrodb.DashboardCountIssuesByPriorityParams{
+			WorkspaceID: wsUUID, ActorType: actorType, ActorID: actorID,
+		})
 		if err != nil {
 			return err
 		}
@@ -368,7 +379,7 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		timeline := buildTimeline(spec)
 		// Issues created
 		created, _ := h.Cerebro.DashboardCountIssuesCreatedByDay(c, cerebrodb.DashboardCountIssuesCreatedByDayParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		for _, row := range created {
 			if i, ok := timeline.idx[row.Day]; ok {
@@ -377,7 +388,7 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		}
 		// Issues done
 		done, _ := h.Cerebro.DashboardCountIssuesCompletedByDay(c, cerebrodb.DashboardCountIssuesCompletedByDayParams{
-			WorkspaceID: wsUUID, UpdatedAt: ts(spec.periodStart), UpdatedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, UpdatedAt: ts(spec.periodStart), UpdatedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		for _, row := range done {
 			if i, ok := timeline.idx[row.Day]; ok {
@@ -386,7 +397,7 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		}
 		// Tasks by day
 		tasks, _ := h.Cerebro.DashboardCountTasksByDay(c, cerebrodb.DashboardCountTasksByDayParams{
-			WorkspaceID: wsUUID, CompletedAt: ts(spec.periodStart), CompletedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, CompletedAt: ts(spec.periodStart), CompletedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		for _, row := range tasks {
 			i, ok := timeline.idx[row.Day]
@@ -409,7 +420,7 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	// --- Top agents / top members ---
 	runOne(func(c context.Context) error {
 		rows, err := h.Cerebro.DashboardTopAgentsByActivityInPeriod(c, cerebrodb.DashboardTopAgentsByActivityInPeriodParams{
-			WorkspaceID: wsUUID, CompletedAt: ts(spec.periodStart), CompletedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, CompletedAt: ts(spec.periodStart), CompletedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
@@ -425,7 +436,7 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	})
 	runOne(func(c context.Context) error {
 		rows, err := h.Cerebro.DashboardTopMembersByActivityInPeriod(c, cerebrodb.DashboardTopMembersByActivityInPeriodParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd),
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd), ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
@@ -447,7 +458,7 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	// --- Activity feed (latest 30 in period) ---
 	runOne(func(c context.Context) error {
 		rows, err := h.Cerebro.DashboardActivityFeed(c, cerebrodb.DashboardActivityFeedParams{
-			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd), Limit: 30,
+			WorkspaceID: wsUUID, CreatedAt: ts(spec.periodStart), CreatedAt_2: ts(spec.periodEnd), Limit: 30, ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
@@ -457,6 +468,7 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 			entry := activityEntry{
 				ID:        util.UUIDToString(row.ID),
 				Action:    row.Action,
+				ActorName: row.ActorName,
 				CreatedAt: row.CreatedAt.Time.UTC().Format(time.RFC3339),
 			}
 			if row.ActorType.Valid {
@@ -491,7 +503,7 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	// --- Recent tasks (workspace-wide, limit 12) ---
 	runOne(func(c context.Context) error {
 		rows, err := h.Cerebro.DashboardRecentTasks(c, cerebrodb.DashboardRecentTasksParams{
-			WorkspaceID: wsUUID, Limit: 12,
+			WorkspaceID: wsUUID, Limit: 12, ActorType: actorType, ActorID: actorID,
 		})
 		if err != nil {
 			return err
@@ -508,6 +520,9 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 			if row.AgentAvatarUrl.Valid {
 				t.AgentAvatarURL = row.AgentAvatarUrl.String
 			}
+			if row.TaskTitle.Valid {
+				t.TaskTitle = row.TaskTitle.String
+			}
 			if row.IssueID.Valid {
 				t.IssueID = util.UUIDToString(row.IssueID)
 			}
@@ -516,6 +531,9 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 			}
 			if row.IssueNumber.Valid {
 				t.IssueNumber = row.IssueNumber.Int32
+			}
+			if row.ChatSessionID.Valid {
+				t.ChatSessionID = util.UUIDToString(row.ChatSessionID)
 			}
 			if row.CompletedAt.Valid {
 				t.CompletedAt = row.CompletedAt.Time.UTC().Format(time.RFC3339)
@@ -604,6 +622,39 @@ func rangeOrDefault(s string) string {
 	default:
 		return "7d"
 	}
+}
+
+func parseActorFilter(w http.ResponseWriter, r *http.Request) (pgtype.Text, pgtype.UUID, bool) {
+	rawType := r.URL.Query().Get("actor_type")
+	rawID := r.URL.Query().Get("actor_id")
+
+	var actorType pgtype.Text
+	switch rawType {
+	case "", "all":
+	case "member", "members":
+		actorType = pgtype.Text{String: "member", Valid: true}
+	case "agent", "agents":
+		actorType = pgtype.Text{String: "agent", Valid: true}
+	default:
+		writeError(w, http.StatusBadRequest, "invalid actor_type")
+		return pgtype.Text{}, pgtype.UUID{}, false
+	}
+
+	var actorID pgtype.UUID
+	if rawID != "" {
+		if !actorType.Valid {
+			writeError(w, http.StatusBadRequest, "actor_id requires actor_type")
+			return pgtype.Text{}, pgtype.UUID{}, false
+		}
+		parsed, err := util.ParseUUID(rawID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid actor_id")
+			return pgtype.Text{}, pgtype.UUID{}, false
+		}
+		actorID = parsed
+	}
+
+	return actorType, actorID, true
 }
 
 func requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {

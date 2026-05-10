@@ -1,6 +1,8 @@
 import { api } from "@multica/core/api";
+import type { ActorScope } from "./types";
 
 export type TimeRange = "24h" | "7d" | "30d";
+export type ActorType = "member" | "agent";
 
 export interface Kpi {
   value: number;
@@ -34,6 +36,7 @@ export interface ActivityEntry {
   issue_kind?: string;
   actor_type: string;
   actor_id: string;
+  actor_name: string;
   action: string;
   details?: unknown;
   created_at: string;
@@ -44,9 +47,11 @@ export interface RecentTask {
   agent_id: string;
   agent_name: string;
   agent_avatar_url?: string;
+  task_title?: string;
   issue_id?: string;
   issue_title?: string;
   issue_number?: number;
+  chat_session_id?: string;
   status: string;
   completed_at?: string;
   started_at?: string;
@@ -78,6 +83,17 @@ export interface DashboardOverview {
 
 export async function fetchDashboardOverview(
   range: TimeRange,
+  scope: ActorScope,
+  actorId: string | null,
 ): Promise<DashboardOverview> {
-  return api.getCerebroDashboardOverview<DashboardOverview>(range);
+  return api.getCerebroDashboardOverview<DashboardOverview>(range, {
+    actor_type: scopeToActorType(scope),
+    actor_id: actorId,
+  });
+}
+
+function scopeToActorType(scope: ActorScope): ActorType | undefined {
+  if (scope === "members") return "member";
+  if (scope === "agents") return "agent";
+  return undefined;
 }

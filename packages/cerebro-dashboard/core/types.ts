@@ -7,12 +7,14 @@ export interface DashboardFilter {
   scope: ActorScope;
   /** Optional specific actor id (member or agent) within the scope. */
   actorId: string | null;
+  actorName: string | null;
   range: TimeRange;
 }
 
 export const DEFAULT_FILTER: DashboardFilter = {
   scope: "all",
   actorId: null,
+  actorName: null,
   range: "7d",
 };
 

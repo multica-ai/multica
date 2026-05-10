@@ -10,9 +10,10 @@ import { DEFAULT_FILTER, type ActorScope, type TimeRange } from "./types";
 interface DashboardState {
   scope: ActorScope;
   actorId: string | null;
+  actorName: string | null;
   range: TimeRange;
   setScope: (scope: ActorScope) => void;
-  setActorId: (id: string | null) => void;
+  setActor: (id: string | null, name?: string | null) => void;
   setRange: (range: TimeRange) => void;
   reset: () => void;
 }
@@ -20,8 +21,8 @@ interface DashboardState {
 export const useDashboardStore = create<DashboardState>((set) => ({
   ...DEFAULT_FILTER,
   setScope: (scope) =>
-    set((s) => (s.scope === scope ? s : { scope, actorId: null })),
-  setActorId: (actorId) => set({ actorId }),
+    set((s) => (s.scope === scope ? s : { scope, actorId: null, actorName: null })),
+  setActor: (actorId, actorName = null) => set({ actorId, actorName }),
   setRange: (range) => set({ range }),
   reset: () => set(DEFAULT_FILTER),
 }));

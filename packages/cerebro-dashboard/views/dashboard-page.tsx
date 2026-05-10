@@ -24,9 +24,12 @@ export function DashboardPage() {
   const workspace = useCurrentWorkspace();
   const range = useDashboardStore((s) => s.range);
   const scope = useDashboardStore((s) => s.scope);
+  const actorId = useDashboardStore((s) => s.actorId);
+  const actorName = useDashboardStore((s) => s.actorName);
+  const setActor = useDashboardStore((s) => s.setActor);
 
   const wsId = workspace?.id ?? "";
-  const overview = useQuery(dashboardOverviewOptions(wsId, range));
+  const overview = useQuery(dashboardOverviewOptions(wsId, range, scope, actorId));
 
   if (!enabled) return null;
 
@@ -47,11 +50,20 @@ export function DashboardPage() {
           <h1 className="text-sm font-semibold">Dashboard</h1>
           <p className="truncate text-[11px] text-muted-foreground">
             {data
-              ? `${formatPeriodLabel(data.period_start, data.period_end)} — overblik`
+              ? `${formatPeriodLabel(data.period_start, data.period_end)} — ${actorName ?? scopeLabel(scope)}`
               : "Henter overblik…"}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {actorId && (
+            <button
+              type="button"
+              onClick={() => setActor(null)}
+              className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              {actorName ?? "Actor"} x
+            </button>
+          )}
           <ActorTabs />
           <TimeRangePicker />
         </div>
@@ -82,7 +94,11 @@ export function DashboardPage() {
           </section>
 
           <section aria-label="Recent" className="grid gap-3 lg:grid-cols-2">
-            <ActivityFeed data={data} isLoading={overview.isLoading} scope={scope} />
+            <ActivityFeed
+              data={data}
+              isLoading={overview.isLoading}
+              workspaceSlug={workspace.slug}
+            />
             <RecentTasksList data={data} isLoading={overview.isLoading} workspaceSlug={workspace.slug} />
           </section>
 
@@ -108,4 +124,10 @@ function formatPeriodLabel(start: string, end: string): string {
   } catch {
     return "";
   }
+}
+
+function scopeLabel(scope: "all" | "members" | "agents"): string {
+  if (scope === "members") return "Members";
+  if (scope === "agents") return "Agents";
+  return "Alle";
 }

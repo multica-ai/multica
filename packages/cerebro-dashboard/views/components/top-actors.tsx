@@ -2,8 +2,10 @@
 
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
+import { cn } from "@multica/ui/lib/utils";
 import { Bot, Users } from "lucide-react";
 import type { DashboardOverview, TopActor } from "../../core/api";
+import { useDashboardStore } from "../../core/store";
 
 interface TopActorsProps {
   data: DashboardOverview | undefined;
@@ -35,17 +37,39 @@ export function TopActors({ data, isLoading, kind }: TopActorsProps) {
             Ingen aktivitet i perioden.
           </p>
         ) : (
-          list.map((a) => <Row key={a.id} actor={a} maxCount={max} />)
+          list.map((a) => <Row key={a.id} actor={a} maxCount={max} kind={kind} />)
         )}
       </CardContent>
     </Card>
   );
 }
 
-function Row({ actor, maxCount }: { actor: TopActor; maxCount: number }) {
+function Row({
+  actor,
+  maxCount,
+  kind,
+}: {
+  actor: TopActor;
+  maxCount: number;
+  kind: "agents" | "members";
+}) {
+  const actorId = useDashboardStore((s) => s.actorId);
+  const setScope = useDashboardStore((s) => s.setScope);
+  const setActor = useDashboardStore((s) => s.setActor);
   const pct = maxCount === 0 ? 0 : Math.round((actor.count / maxCount) * 100);
+  const selected = actorId === actor.id;
   return (
-    <div className="flex items-center gap-2">
+    <button
+      type="button"
+      onClick={() => {
+        setScope(kind);
+        setActor(actor.id, actor.name || "Unknown");
+      }}
+      className={cn(
+        "flex w-full items-center gap-2 rounded-md p-1 text-left hover:bg-accent/50",
+        selected && "bg-accent",
+      )}
+    >
       <ActorAvatar
         name={actor.name || "?"}
         initials={(actor.name || "?").charAt(0).toUpperCase()}
@@ -68,6 +92,6 @@ function Row({ actor, maxCount }: { actor: TopActor; maxCount: number }) {
           />
         </div>
       </div>
-    </div>
+    </button>
   );
 }

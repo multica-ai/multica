@@ -18,16 +18,28 @@ JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= $2 AND atq.completed_at < $3
+  AND (
+    $4::text IS NULL
+    OR ($4::text = 'agent' AND ($5::uuid IS NULL OR a.id = $5::uuid))
+  )
 `
 
 type DashboardActiveAgentCountInPeriodParams struct {
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
 	CompletedAt_2 pgtype.Timestamptz `json:"completed_at_2"`
+	ActorType     pgtype.Text        `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
 }
 
 func (q *Queries) DashboardActiveAgentCountInPeriod(ctx context.Context, arg DashboardActiveAgentCountInPeriodParams) (int32, error) {
-	row := q.db.QueryRow(ctx, dashboardActiveAgentCountInPeriod, arg.WorkspaceID, arg.CompletedAt, arg.CompletedAt_2)
+	row := q.db.QueryRow(ctx, dashboardActiveAgentCountInPeriod,
+		arg.WorkspaceID,
+		arg.CompletedAt,
+		arg.CompletedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -38,16 +50,28 @@ SELECT COUNT(DISTINCT actor_id)::int
 FROM activity_log
 WHERE workspace_id = $1 AND actor_type = 'member'
   AND created_at >= $2 AND created_at < $3
+  AND (
+    $4::text IS NULL
+    OR ($4::text = 'member' AND ($5::uuid IS NULL OR actor_id = $5::uuid))
+  )
 `
 
 type DashboardActiveMemberCountInPeriodParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
 }
 
 func (q *Queries) DashboardActiveMemberCountInPeriod(ctx context.Context, arg DashboardActiveMemberCountInPeriodParams) (int32, error) {
-	row := q.db.QueryRow(ctx, dashboardActiveMemberCountInPeriod, arg.WorkspaceID, arg.CreatedAt, arg.CreatedAt_2)
+	row := q.db.QueryRow(ctx, dashboardActiveMemberCountInPeriod,
+		arg.WorkspaceID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -56,13 +80,20 @@ func (q *Queries) DashboardActiveMemberCountInPeriod(ctx context.Context, arg Da
 const dashboardActivityFeed = `-- name: DashboardActivityFeed :many
 SELECT al.id::uuid AS id, al.workspace_id, al.issue_id,
        al.actor_type, al.actor_id, al.action, al.details, al.created_at,
+       COALESCE(a.name, u.name, initcap(COALESCE(al.actor_type, 'system'))) AS actor_name,
        i.title AS issue_title,
        i.number AS issue_number,
        i.kind AS issue_kind
 FROM activity_log al
 LEFT JOIN issue i ON i.id = al.issue_id
+LEFT JOIN agent a ON a.id = al.actor_id AND al.actor_type = 'agent'
+LEFT JOIN "user" u ON u.id = al.actor_id AND al.actor_type = 'member'
 WHERE al.workspace_id = $1
   AND al.created_at >= $2 AND al.created_at < $3
+  AND (
+    $5::text IS NULL
+    OR (al.actor_type = $5::text AND ($6::uuid IS NULL OR al.actor_id = $6::uuid))
+  )
 ORDER BY al.created_at DESC
 LIMIT $4
 `
@@ -72,6 +103,8 @@ type DashboardActivityFeedParams struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
 	Limit       int32              `json:"limit"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
 }
 
 type DashboardActivityFeedRow struct {
@@ -83,6 +116,7 @@ type DashboardActivityFeedRow struct {
 	Action      string             `json:"action"`
 	Details     []byte             `json:"details"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ActorName   string             `json:"actor_name"`
 	IssueTitle  pgtype.Text        `json:"issue_title"`
 	IssueNumber pgtype.Int4        `json:"issue_number"`
 	IssueKind   pgtype.Text        `json:"issue_kind"`
@@ -94,6 +128,8 @@ func (q *Queries) DashboardActivityFeed(ctx context.Context, arg DashboardActivi
 		arg.CreatedAt,
 		arg.CreatedAt_2,
 		arg.Limit,
+		arg.ActorType,
+		arg.ActorID,
 	)
 	if err != nil {
 		return nil, err
@@ -111,6 +147,7 @@ func (q *Queries) DashboardActivityFeed(ctx context.Context, arg DashboardActivi
 			&i.Action,
 			&i.Details,
 			&i.CreatedAt,
+			&i.ActorName,
 			&i.IssueTitle,
 			&i.IssueNumber,
 			&i.IssueKind,
@@ -131,17 +168,29 @@ FROM issue i
 JOIN comment c ON c.issue_id = i.id
 WHERE i.workspace_id = $1 AND i.kind IN ('channel', 'dm')
   AND c.created_at >= $2 AND c.created_at < $3
+  AND (
+    $4::text IS NULL
+    OR (c.author_type = $4::text AND ($5::uuid IS NULL OR c.author_id = $5::uuid))
+  )
 `
 
 type DashboardCountActiveChannelsInPeriodParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
 }
 
 // Distinct channels/dms with at least one comment in the period.
 func (q *Queries) DashboardCountActiveChannelsInPeriod(ctx context.Context, arg DashboardCountActiveChannelsInPeriodParams) (int32, error) {
-	row := q.db.QueryRow(ctx, dashboardCountActiveChannelsInPeriod, arg.WorkspaceID, arg.CreatedAt, arg.CreatedAt_2)
+	row := q.db.QueryRow(ctx, dashboardCountActiveChannelsInPeriod,
+		arg.WorkspaceID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -153,17 +202,29 @@ FROM comment c
 JOIN issue i ON i.id = c.issue_id
 WHERE i.workspace_id = $1 AND i.kind IN ('channel', 'dm')
   AND c.created_at >= $2 AND c.created_at < $3
+  AND (
+    $4::text IS NULL
+    OR (c.author_type = $4::text AND ($5::uuid IS NULL OR c.author_id = $5::uuid))
+  )
 `
 
 type DashboardCountChannelMessagesInPeriodParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
 }
 
 // "Channel messages" = comments on issues with kind in (channel, dm).
 func (q *Queries) DashboardCountChannelMessagesInPeriod(ctx context.Context, arg DashboardCountChannelMessagesInPeriodParams) (int32, error) {
-	row := q.db.QueryRow(ctx, dashboardCountChannelMessagesInPeriod, arg.WorkspaceID, arg.CreatedAt, arg.CreatedAt_2)
+	row := q.db.QueryRow(ctx, dashboardCountChannelMessagesInPeriod,
+		arg.WorkspaceID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -175,35 +236,65 @@ FROM chat_message cm
 JOIN chat_session cs ON cs.id = cm.chat_session_id
 WHERE cs.workspace_id = $1
   AND cm.created_at >= $2 AND cm.created_at < $3
+  AND (
+    $4::text IS NULL
+    OR ($4::text = 'member' AND cm.role = 'user' AND ($5::uuid IS NULL OR cs.creator_id = $5::uuid))
+    OR ($4::text = 'agent' AND cm.role = 'assistant' AND ($5::uuid IS NULL OR cs.agent_id = $5::uuid))
+  )
 `
 
 type DashboardCountChatMessagesInPeriodParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
 }
 
 func (q *Queries) DashboardCountChatMessagesInPeriod(ctx context.Context, arg DashboardCountChatMessagesInPeriodParams) (int32, error) {
-	row := q.db.QueryRow(ctx, dashboardCountChatMessagesInPeriod, arg.WorkspaceID, arg.CreatedAt, arg.CreatedAt_2)
+	row := q.db.QueryRow(ctx, dashboardCountChatMessagesInPeriod,
+		arg.WorkspaceID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
 }
 
 const dashboardCountIssuesByPriority = `-- name: DashboardCountIssuesByPriority :many
-SELECT priority, COUNT(*)::int AS count
-FROM issue
-WHERE workspace_id = $1 AND kind = 'issue'
-GROUP BY priority
+SELECT i.priority, COUNT(*)::int AS count
+FROM issue i
+WHERE i.workspace_id = $1 AND i.kind = 'issue'
+  AND (
+    $2::text IS NULL
+    OR (i.creator_type = $2::text AND ($3::uuid IS NULL OR i.creator_id = $3::uuid))
+    OR (i.assignee_type = $2::text AND ($3::uuid IS NULL OR i.assignee_id = $3::uuid))
+    OR EXISTS (
+      SELECT 1 FROM activity_log al
+      WHERE al.issue_id = i.id
+        AND al.actor_type = $2::text
+        AND ($3::uuid IS NULL OR al.actor_id = $3::uuid)
+    )
+  )
+GROUP BY i.priority
 `
+
+type DashboardCountIssuesByPriorityParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ActorType   pgtype.Text `json:"actor_type"`
+	ActorID     pgtype.UUID `json:"actor_id"`
+}
 
 type DashboardCountIssuesByPriorityRow struct {
 	Priority string `json:"priority"`
 	Count    int32  `json:"count"`
 }
 
-func (q *Queries) DashboardCountIssuesByPriority(ctx context.Context, workspaceID pgtype.UUID) ([]DashboardCountIssuesByPriorityRow, error) {
-	rows, err := q.db.Query(ctx, dashboardCountIssuesByPriority, workspaceID)
+func (q *Queries) DashboardCountIssuesByPriority(ctx context.Context, arg DashboardCountIssuesByPriorityParams) ([]DashboardCountIssuesByPriorityRow, error) {
+	rows, err := q.db.Query(ctx, dashboardCountIssuesByPriority, arg.WorkspaceID, arg.ActorType, arg.ActorID)
 	if err != nil {
 		return nil, err
 	}
@@ -223,19 +314,36 @@ func (q *Queries) DashboardCountIssuesByPriority(ctx context.Context, workspaceI
 }
 
 const dashboardCountIssuesByStatus = `-- name: DashboardCountIssuesByStatus :many
-SELECT status, COUNT(*)::int AS count
-FROM issue
-WHERE workspace_id = $1 AND kind = 'issue'
-GROUP BY status
+SELECT i.status, COUNT(*)::int AS count
+FROM issue i
+WHERE i.workspace_id = $1 AND i.kind = 'issue'
+  AND (
+    $2::text IS NULL
+    OR (i.creator_type = $2::text AND ($3::uuid IS NULL OR i.creator_id = $3::uuid))
+    OR (i.assignee_type = $2::text AND ($3::uuid IS NULL OR i.assignee_id = $3::uuid))
+    OR EXISTS (
+      SELECT 1 FROM activity_log al
+      WHERE al.issue_id = i.id
+        AND al.actor_type = $2::text
+        AND ($3::uuid IS NULL OR al.actor_id = $3::uuid)
+    )
+  )
+GROUP BY i.status
 `
+
+type DashboardCountIssuesByStatusParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ActorType   pgtype.Text `json:"actor_type"`
+	ActorID     pgtype.UUID `json:"actor_id"`
+}
 
 type DashboardCountIssuesByStatusRow struct {
 	Status string `json:"status"`
 	Count  int32  `json:"count"`
 }
 
-func (q *Queries) DashboardCountIssuesByStatus(ctx context.Context, workspaceID pgtype.UUID) ([]DashboardCountIssuesByStatusRow, error) {
-	rows, err := q.db.Query(ctx, dashboardCountIssuesByStatus, workspaceID)
+func (q *Queries) DashboardCountIssuesByStatus(ctx context.Context, arg DashboardCountIssuesByStatusParams) ([]DashboardCountIssuesByStatusRow, error) {
+	rows, err := q.db.Query(ctx, dashboardCountIssuesByStatus, arg.WorkspaceID, arg.ActorType, arg.ActorID)
 	if err != nil {
 		return nil, err
 	}
@@ -257,8 +365,20 @@ func (q *Queries) DashboardCountIssuesByStatus(ctx context.Context, workspaceID 
 const dashboardCountIssuesCompletedByDay = `-- name: DashboardCountIssuesCompletedByDay :many
 SELECT DATE(updated_at)::text AS day, COUNT(*)::int AS count
 FROM issue
-WHERE workspace_id = $1 AND kind = 'issue' AND status = 'done'
+WHERE issue.workspace_id = $1 AND issue.kind = 'issue' AND issue.status = 'done'
   AND updated_at >= $2 AND updated_at < $3
+  AND (
+    $4::text IS NULL
+    OR (issue.creator_type = $4::text AND ($5::uuid IS NULL OR issue.creator_id = $5::uuid))
+    OR (issue.assignee_type = $4::text AND ($5::uuid IS NULL OR issue.assignee_id = $5::uuid))
+    OR EXISTS (
+      SELECT 1 FROM activity_log al
+      WHERE al.issue_id = issue.id
+        AND al.actor_type = $4::text
+        AND ($5::uuid IS NULL OR al.actor_id = $5::uuid)
+        AND al.created_at >= $2 AND al.created_at < $3
+    )
+  )
 GROUP BY DATE(updated_at)
 ORDER BY DATE(updated_at)
 `
@@ -267,6 +387,8 @@ type DashboardCountIssuesCompletedByDayParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	UpdatedAt_2 pgtype.Timestamptz `json:"updated_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
 }
 
 type DashboardCountIssuesCompletedByDayRow struct {
@@ -275,7 +397,13 @@ type DashboardCountIssuesCompletedByDayRow struct {
 }
 
 func (q *Queries) DashboardCountIssuesCompletedByDay(ctx context.Context, arg DashboardCountIssuesCompletedByDayParams) ([]DashboardCountIssuesCompletedByDayRow, error) {
-	rows, err := q.db.Query(ctx, dashboardCountIssuesCompletedByDay, arg.WorkspaceID, arg.UpdatedAt, arg.UpdatedAt_2)
+	rows, err := q.db.Query(ctx, dashboardCountIssuesCompletedByDay,
+		arg.WorkspaceID,
+		arg.UpdatedAt,
+		arg.UpdatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -297,19 +425,39 @@ func (q *Queries) DashboardCountIssuesCompletedByDay(ctx context.Context, arg Da
 const dashboardCountIssuesCompletedInPeriod = `-- name: DashboardCountIssuesCompletedInPeriod :one
 SELECT COUNT(*)::int
 FROM issue
-WHERE workspace_id = $1 AND kind = 'issue'
-  AND status = 'done'
+WHERE issue.workspace_id = $1 AND issue.kind = 'issue'
+  AND issue.status = 'done'
   AND updated_at >= $2 AND updated_at < $3
+  AND (
+    $4::text IS NULL
+    OR (issue.creator_type = $4::text AND ($5::uuid IS NULL OR issue.creator_id = $5::uuid))
+    OR (issue.assignee_type = $4::text AND ($5::uuid IS NULL OR issue.assignee_id = $5::uuid))
+    OR EXISTS (
+      SELECT 1 FROM activity_log al
+      WHERE al.issue_id = issue.id
+        AND al.actor_type = $4::text
+        AND ($5::uuid IS NULL OR al.actor_id = $5::uuid)
+        AND al.created_at >= $2 AND al.created_at < $3
+    )
+  )
 `
 
 type DashboardCountIssuesCompletedInPeriodParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	UpdatedAt_2 pgtype.Timestamptz `json:"updated_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
 }
 
 func (q *Queries) DashboardCountIssuesCompletedInPeriod(ctx context.Context, arg DashboardCountIssuesCompletedInPeriodParams) (int32, error) {
-	row := q.db.QueryRow(ctx, dashboardCountIssuesCompletedInPeriod, arg.WorkspaceID, arg.UpdatedAt, arg.UpdatedAt_2)
+	row := q.db.QueryRow(ctx, dashboardCountIssuesCompletedInPeriod,
+		arg.WorkspaceID,
+		arg.UpdatedAt,
+		arg.UpdatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -318,8 +466,13 @@ func (q *Queries) DashboardCountIssuesCompletedInPeriod(ctx context.Context, arg
 const dashboardCountIssuesCreatedByDay = `-- name: DashboardCountIssuesCreatedByDay :many
 SELECT DATE(created_at)::text AS day, COUNT(*)::int AS count
 FROM issue
-WHERE workspace_id = $1 AND kind = 'issue'
+WHERE issue.workspace_id = $1 AND issue.kind = 'issue'
   AND created_at >= $2 AND created_at < $3
+  AND (
+    $4::text IS NULL
+    OR (issue.creator_type = $4::text AND ($5::uuid IS NULL OR issue.creator_id = $5::uuid))
+    OR (issue.assignee_type = $4::text AND ($5::uuid IS NULL OR issue.assignee_id = $5::uuid))
+  )
 GROUP BY DATE(created_at)
 ORDER BY DATE(created_at)
 `
@@ -328,6 +481,8 @@ type DashboardCountIssuesCreatedByDayParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
 }
 
 type DashboardCountIssuesCreatedByDayRow struct {
@@ -336,7 +491,13 @@ type DashboardCountIssuesCreatedByDayRow struct {
 }
 
 func (q *Queries) DashboardCountIssuesCreatedByDay(ctx context.Context, arg DashboardCountIssuesCreatedByDayParams) ([]DashboardCountIssuesCreatedByDayRow, error) {
-	rows, err := q.db.Query(ctx, dashboardCountIssuesCreatedByDay, arg.WorkspaceID, arg.CreatedAt, arg.CreatedAt_2)
+	rows, err := q.db.Query(ctx, dashboardCountIssuesCreatedByDay,
+		arg.WorkspaceID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -358,18 +519,31 @@ func (q *Queries) DashboardCountIssuesCreatedByDay(ctx context.Context, arg Dash
 const dashboardCountIssuesCreatedInPeriod = `-- name: DashboardCountIssuesCreatedInPeriod :one
 SELECT COUNT(*)::int
 FROM issue
-WHERE workspace_id = $1 AND kind = 'issue'
+WHERE issue.workspace_id = $1 AND issue.kind = 'issue'
   AND created_at >= $2 AND created_at < $3
+  AND (
+    $4::text IS NULL
+    OR (issue.creator_type = $4::text AND ($5::uuid IS NULL OR issue.creator_id = $5::uuid))
+    OR (issue.assignee_type = $4::text AND ($5::uuid IS NULL OR issue.assignee_id = $5::uuid))
+  )
 `
 
 type DashboardCountIssuesCreatedInPeriodParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
 }
 
 func (q *Queries) DashboardCountIssuesCreatedInPeriod(ctx context.Context, arg DashboardCountIssuesCreatedInPeriodParams) (int32, error) {
-	row := q.db.QueryRow(ctx, dashboardCountIssuesCreatedInPeriod, arg.WorkspaceID, arg.CreatedAt, arg.CreatedAt_2)
+	row := q.db.QueryRow(ctx, dashboardCountIssuesCreatedInPeriod,
+		arg.WorkspaceID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -382,6 +556,10 @@ JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= $2 AND atq.completed_at < $3
+  AND (
+    $4::text IS NULL
+    OR ($4::text = 'agent' AND ($5::uuid IS NULL OR a.id = $5::uuid))
+  )
 GROUP BY DATE(atq.completed_at), atq.status
 ORDER BY DATE(atq.completed_at)
 `
@@ -390,6 +568,8 @@ type DashboardCountTasksByDayParams struct {
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
 	CompletedAt_2 pgtype.Timestamptz `json:"completed_at_2"`
+	ActorType     pgtype.Text        `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
 }
 
 type DashboardCountTasksByDayRow struct {
@@ -399,7 +579,13 @@ type DashboardCountTasksByDayRow struct {
 }
 
 func (q *Queries) DashboardCountTasksByDay(ctx context.Context, arg DashboardCountTasksByDayParams) ([]DashboardCountTasksByDayRow, error) {
-	rows, err := q.db.Query(ctx, dashboardCountTasksByDay, arg.WorkspaceID, arg.CompletedAt, arg.CompletedAt_2)
+	rows, err := q.db.Query(ctx, dashboardCountTasksByDay,
+		arg.WorkspaceID,
+		arg.CompletedAt,
+		arg.CompletedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -425,6 +611,10 @@ JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= $2 AND atq.completed_at < $3
+  AND (
+    $4::text IS NULL
+    OR ($4::text = 'agent' AND ($5::uuid IS NULL OR a.id = $5::uuid))
+  )
 GROUP BY atq.status
 `
 
@@ -432,6 +622,8 @@ type DashboardCountTasksByStatusInPeriodParams struct {
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
 	CompletedAt_2 pgtype.Timestamptz `json:"completed_at_2"`
+	ActorType     pgtype.Text        `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
 }
 
 type DashboardCountTasksByStatusInPeriodRow struct {
@@ -442,7 +634,13 @@ type DashboardCountTasksByStatusInPeriodRow struct {
 // Buckets tasks by terminal status (completed/failed/cancelled). Tasks still
 // queued or running don't have completed_at set so they're naturally excluded.
 func (q *Queries) DashboardCountTasksByStatusInPeriod(ctx context.Context, arg DashboardCountTasksByStatusInPeriodParams) ([]DashboardCountTasksByStatusInPeriodRow, error) {
-	rows, err := q.db.Query(ctx, dashboardCountTasksByStatusInPeriod, arg.WorkspaceID, arg.CompletedAt, arg.CompletedAt_2)
+	rows, err := q.db.Query(ctx, dashboardCountTasksByStatusInPeriod,
+		arg.WorkspaceID,
+		arg.CompletedAt,
+		arg.CompletedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -464,12 +662,17 @@ func (q *Queries) DashboardCountTasksByStatusInPeriod(ctx context.Context, arg D
 const dashboardRecentTasks = `-- name: DashboardRecentTasks :many
 SELECT atq.id::uuid AS task_id, atq.agent_id, atq.issue_id, atq.status,
        atq.dispatched_at, atq.started_at, atq.completed_at, atq.created_at,
+       atq.chat_session_id, atq.title AS task_title,
        a.name AS agent_name, a.avatar_url AS agent_avatar_url,
        i.title AS issue_title, i.number AS issue_number
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE a.workspace_id = $1
+  AND (
+    $3::text IS NULL
+    OR ($3::text = 'agent' AND ($4::uuid IS NULL OR a.id = $4::uuid))
+  )
 ORDER BY COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) DESC
 LIMIT $2
 `
@@ -477,6 +680,8 @@ LIMIT $2
 type DashboardRecentTasksParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Limit       int32       `json:"limit"`
+	ActorType   pgtype.Text `json:"actor_type"`
+	ActorID     pgtype.UUID `json:"actor_id"`
 }
 
 type DashboardRecentTasksRow struct {
@@ -488,6 +693,8 @@ type DashboardRecentTasksRow struct {
 	StartedAt      pgtype.Timestamptz `json:"started_at"`
 	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	TaskTitle      pgtype.Text        `json:"task_title"`
 	AgentName      string             `json:"agent_name"`
 	AgentAvatarUrl pgtype.Text        `json:"agent_avatar_url"`
 	IssueTitle     pgtype.Text        `json:"issue_title"`
@@ -495,7 +702,12 @@ type DashboardRecentTasksRow struct {
 }
 
 func (q *Queries) DashboardRecentTasks(ctx context.Context, arg DashboardRecentTasksParams) ([]DashboardRecentTasksRow, error) {
-	rows, err := q.db.Query(ctx, dashboardRecentTasks, arg.WorkspaceID, arg.Limit)
+	rows, err := q.db.Query(ctx, dashboardRecentTasks,
+		arg.WorkspaceID,
+		arg.Limit,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -512,6 +724,8 @@ func (q *Queries) DashboardRecentTasks(ctx context.Context, arg DashboardRecentT
 			&i.StartedAt,
 			&i.CompletedAt,
 			&i.CreatedAt,
+			&i.ChatSessionID,
+			&i.TaskTitle,
 			&i.AgentName,
 			&i.AgentAvatarUrl,
 			&i.IssueTitle,
@@ -534,6 +748,10 @@ JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= $2 AND atq.completed_at < $3
+  AND (
+    $4::text IS NULL
+    OR ($4::text = 'agent' AND ($5::uuid IS NULL OR a.id = $5::uuid))
+  )
 GROUP BY a.id, a.name
 ORDER BY COUNT(*) DESC
 LIMIT 5
@@ -543,6 +761,8 @@ type DashboardTopAgentsByActivityInPeriodParams struct {
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
 	CompletedAt_2 pgtype.Timestamptz `json:"completed_at_2"`
+	ActorType     pgtype.Text        `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
 }
 
 type DashboardTopAgentsByActivityInPeriodRow struct {
@@ -552,7 +772,13 @@ type DashboardTopAgentsByActivityInPeriodRow struct {
 }
 
 func (q *Queries) DashboardTopAgentsByActivityInPeriod(ctx context.Context, arg DashboardTopAgentsByActivityInPeriodParams) ([]DashboardTopAgentsByActivityInPeriodRow, error) {
-	rows, err := q.db.Query(ctx, dashboardTopAgentsByActivityInPeriod, arg.WorkspaceID, arg.CompletedAt, arg.CompletedAt_2)
+	rows, err := q.db.Query(ctx, dashboardTopAgentsByActivityInPeriod,
+		arg.WorkspaceID,
+		arg.CompletedAt,
+		arg.CompletedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -577,6 +803,10 @@ FROM activity_log al
 LEFT JOIN "user" u ON u.id = al.actor_id
 WHERE al.workspace_id = $1 AND al.actor_type = 'member'
   AND al.created_at >= $2 AND al.created_at < $3
+  AND (
+    $4::text IS NULL
+    OR ($4::text = 'member' AND ($5::uuid IS NULL OR al.actor_id = $5::uuid))
+  )
 GROUP BY al.actor_id, u.name
 ORDER BY COUNT(*) DESC
 LIMIT 5
@@ -586,6 +816,8 @@ type DashboardTopMembersByActivityInPeriodParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
 }
 
 type DashboardTopMembersByActivityInPeriodRow struct {
@@ -595,7 +827,13 @@ type DashboardTopMembersByActivityInPeriodRow struct {
 }
 
 func (q *Queries) DashboardTopMembersByActivityInPeriod(ctx context.Context, arg DashboardTopMembersByActivityInPeriodParams) ([]DashboardTopMembersByActivityInPeriodRow, error) {
-	rows, err := q.db.Query(ctx, dashboardTopMembersByActivityInPeriod, arg.WorkspaceID, arg.CreatedAt, arg.CreatedAt_2)
+	rows, err := q.db.Query(ctx, dashboardTopMembersByActivityInPeriod,
+		arg.WorkspaceID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.ActorType,
+		arg.ActorID,
+	)
 	if err != nil {
 		return nil, err
 	}

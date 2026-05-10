@@ -464,8 +464,15 @@ export class ApiClient {
   }
 
   // CEREBRO-PATCH(cerebro-dashboard-client): JEH-684 dashboard overview endpoint
-  async getCerebroDashboardOverview<T = unknown>(range: "24h" | "7d" | "30d"): Promise<T> {
-    return this.fetch<T>(`/api/cerebro/dashboard?range=${encodeURIComponent(range)}`);
+  async getCerebroDashboardOverview<T = unknown>(
+    range: "24h" | "7d" | "30d",
+    // CEREBRO-PATCH(cerebro-dashboard-client): actor filtering for JEH-684 dashboard drilldown
+    filter?: { actor_type?: "member" | "agent"; actor_id?: string | null },
+  ): Promise<T> {
+    const params = new URLSearchParams({ range });
+    if (filter?.actor_type) params.set("actor_type", filter.actor_type);
+    if (filter?.actor_id) params.set("actor_id", filter.actor_id);
+    return this.fetch<T>(`/api/cerebro/dashboard?${params.toString()}`);
   }
 
   // Web Push (per-device subscriptions). The server returns enabled=false
