@@ -29,10 +29,11 @@ import {
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
 import { notificationPreferenceOptions } from "../notification-preferences/queries";
+import { showSystemNotification } from "../notifications";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { chatKeys } from "../chat/queries";
 import { useChatStore } from "../chat";
-import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
+import { paths, resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
   MemberAddedPayload,
   WorkspaceDeletedPayload,
@@ -305,28 +306,19 @@ export function useRealtimeSync(
       // workspace B's inbox and 404.
       const slug = getCurrentSlug();
       if (!slug) return;
-      const desktopAPI = (
-        window as unknown as {
-          desktopAPI?: {
-            showNotification?: (payload: {
-              slug: string;
-              itemId: string;
-              issueKey: string;
-              title: string;
-              body: string;
-            }) => void;
-          };
-        }
-      ).desktopAPI;
       // `issueKey` matches the inbox page's URL selector (issue id when the
       // item is attached to an issue, otherwise the inbox item id). `itemId`
       // is the inbox row's own id, needed to fire markInboxRead on click.
-      desktopAPI?.showNotification?.({
+      // showSystemNotification handles both the Electron preload bridge and
+      // the browser Notifications API (web), so this single call works
+      // across all platforms — see notifications/system-notification.ts.
+      showSystemNotification({
         slug,
         itemId: item.id,
         issueKey: item.issue_id ?? item.id,
         title: item.title,
         body: item.body ?? "",
+        inboxPath: `${paths.workspace(slug).inbox()}?issue=${encodeURIComponent(item.issue_id ?? item.id)}`,
       });
     });
 

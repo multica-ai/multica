@@ -69,7 +69,15 @@
       "title": "系统通知",
       "description": "控制 Multica 在后台时是否显示操作系统的原生通知横幅。",
       "label": "显示系统通知",
-      "hint": "App 未获得焦点时，新的收件箱条目通过操作系统弹出通知横幅。"
+      "hint": "App 未获得焦点时，新的收件箱条目通过操作系统弹出通知横幅。",
+      "permission_default_hint": "浏览器尚未授权当前站点发送通知。再次打开开关时，浏览器会向你请求权限。",
+      "permission_denied_hint": "浏览器已拒绝通知权限。请在浏览器的站点权限设置中允许「通知」并刷新页面。",
+      "api_unavailable_hint": "当前浏览器不支持 Web 通知。请使用较新版本的 Chrome、Edge、Firefox、Safari，或改用 Multica 桌面端。",
+      "permission_denied_toast": "浏览器拒绝了通知权限。请在站点权限里手动允许。",
+      "unsupported_toast": "当前浏览器不支持通知。",
+      "test_button": "发送测试通知",
+      "test_title": "Multica 通知已生效",
+      "test_body": "Multica 不在前台时收到新的收件箱条目，会以这种横幅形式提醒你。"
     }
   },
   "tokens": {

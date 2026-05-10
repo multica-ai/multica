@@ -69,7 +69,15 @@
       "title": "System Notifications",
       "description": "Control native OS notification banners shown when Multica is in the background.",
       "label": "Show system notifications",
-      "hint": "Show a banner from your operating system for new inbox items when the app isn't focused."
+      "hint": "Show a banner from your operating system for new inbox items when the app isn't focused.",
+      "permission_default_hint": "Browser notifications are not yet authorized for this site. Toggling on again will prompt your browser for permission.",
+      "permission_denied_hint": "Browser notifications are blocked. Open the site permissions for this page in your browser settings, allow Notifications, then reload.",
+      "api_unavailable_hint": "This browser does not support Web Notifications. Try a recent version of Chrome, Edge, Firefox, or Safari, or use the Multica desktop app.",
+      "permission_denied_toast": "Browser blocked notification permission. Update your browser site settings to allow it.",
+      "unsupported_toast": "This browser does not support notifications.",
+      "test_button": "Send test notification",
+      "test_title": "Multica notifications are working",
+      "test_body": "You'll see banners like this when new inbox items arrive while Multica isn't focused."
     }
   },
   "tokens": {
