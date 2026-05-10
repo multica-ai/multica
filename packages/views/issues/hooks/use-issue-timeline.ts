@@ -73,11 +73,15 @@ export function useIssueTimeline(
   const qc = useQueryClient();
 
   // Internal anchor state. Starts as the caller's around prop; jumpToLatest
-  // clears it. A new around prop (e.g. user clicks a different inbox item)
-  // resets it via the effect below.
+  // clears it. A new around prop (e.g. user clicks a different inbox item for
+  // the same issue) resets it via the effect below. The guard-free assignment
+  // also handles the case where options.around goes truthy→falsy (e.g. the
+  // newest inbox item for the issue switches from a comment notification to an
+  // activity notification with no comment_id), ensuring we don't stay anchored
+  // on a stale around value.
   const [around, setAround] = useState<string | null>(options.around ?? null);
   useEffect(() => {
-    if (options.around) setAround(options.around);
+    setAround(options.around ?? null);
   }, [options.around]);
 
   const query = useInfiniteQuery(issueTimelineInfiniteOptions(issueId, around));
