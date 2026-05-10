@@ -670,6 +670,73 @@ describe("ShipReleasePage", () => {
     expect(screen.queryByTestId("release-rollback-button")).not.toBeInTheDocument();
   });
 
+  // Phase 7d follow-up — pending-second-approver banner. The banner
+  // shows when the release is using the "two" rule and exactly one
+  // signoff slot has been filled. The pending approver's name (sliced
+  // UUID, since the row only carries a UUID) lands in the banner so
+  // the team knows who to nudge.
+  it("renders the awaiting-second-approver banner when one slot has signed", () => {
+    detailFixture = {
+      release: makeRelease({
+        stage: "in_staging",
+        risk_level: "critical",
+        approver_id: "11111111-aaaa-bbbb-cccc-000000000001",
+        second_approver_id: "22222222-aaaa-bbbb-cccc-000000000002",
+      }),
+      pull_requests: [makeReleasePR()],
+      events: [],
+      signoffs: [
+        {
+          approver_slot: "first",
+          signed_by: "11111111-aaaa-bbbb-cccc-000000000001",
+          signed_at: "2026-05-09T01:00:00Z",
+          note: null,
+        },
+      ],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    const banner = screen.getByTestId("release-pending-second-approver-banner");
+    expect(banner).toBeInTheDocument();
+    // The pending side is the SECOND approver (the first signed). The
+    // banner uses the second_approver_id sliced to 8 chars.
+    expect(banner.textContent).toMatch(/22222222/);
+  });
+
+  it("does not render the awaiting banner once both slots have signed", () => {
+    detailFixture = {
+      release: makeRelease({
+        stage: "verifying",
+        risk_level: "critical",
+        approver_id: "11111111-aaaa-bbbb-cccc-000000000001",
+        second_approver_id: "22222222-aaaa-bbbb-cccc-000000000002",
+        qa_verified_at: "2026-05-09T02:00:00Z",
+        qa_verified_by: "22222222-aaaa-bbbb-cccc-000000000002",
+      }),
+      pull_requests: [makeReleasePR()],
+      events: [],
+      signoffs: [
+        {
+          approver_slot: "first",
+          signed_by: "11111111-aaaa-bbbb-cccc-000000000001",
+          signed_at: "2026-05-09T01:00:00Z",
+          note: null,
+        },
+        {
+          approver_slot: "second",
+          signed_by: "22222222-aaaa-bbbb-cccc-000000000002",
+          signed_at: "2026-05-09T02:00:00Z",
+          note: null,
+        },
+      ],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    expect(
+      screen.queryByTestId("release-pending-second-approver-banner"),
+    ).not.toBeInTheDocument();
+    // Verified banner takes over.
+    expect(screen.getByTestId("release-verified-banner")).toBeInTheDocument();
+  });
+
   it("hides the Mark production deployed escape hatch for the first 30s of promoting", () => {
     detailFixture = {
       release: makeRelease({

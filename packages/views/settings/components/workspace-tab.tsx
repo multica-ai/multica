@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Save,
   LogOut,
@@ -829,6 +829,12 @@ function ShipHubSettings({ workspace }: ShipHubSettingsProps) {
           every repo in the workspace, so the user only completes this
           flow once even with many repositories. */}
       {enabled && <WebhookSettings workspace={workspace} />}
+
+      {/* Phase 7d follow-up — configurable approval rules per risk
+          tier. Owner-only because the rule directly controls who can
+          ship to production; admins can reach everything else but the
+          policy decision belongs to ownership. */}
+      {enabled && <ApprovalSettings workspace={workspace} />}
     </div>
   );
 }
@@ -1079,6 +1085,218 @@ function WebhookSettings({ workspace }: WebhookSettingsProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/** normalizeApprovalRule clamps an arbitrary string from the wire
+ *  to one of the four known rule values. Unknown / undefined values
+ *  fall back to the per-tier default so an old server response (or
+ *  a malformed PATCH) never leaves the Select with no value. */
+function normalizeApprovalRule(
+  v: string | undefined,
+  fallback: "member" | "admin" | "approver" | "two",
+): "member" | "admin" | "approver" | "two" {
+  if (v === "member" || v === "admin" || v === "approver" || v === "two") {
+    return v;
+  }
+  return fallback;
+}
+
+interface ApprovalSettingsProps {
+  workspace: Workspace;
+}
+
+/**
+ * ApprovalSettings — workspace owner controls for the per-risk-tier
+ * verify/promote rule. Phase 7d follow-up.
+ *
+ * Each of the four risk tiers (low / medium / high / critical) gets
+ * its own Select with four rule values. Defaults preserve the legacy
+ * hardcoded behavior (low/medium → "member", high → "approver",
+ * critical → "two") so a workspace that hasn't touched these
+ * controls behaves exactly like it did before the migration.
+ *
+ * The "Allow PR authors to verify" checkbox flips
+ * `ship_hub_approver_can_be_author`; defaults to true (small teams
+ * typically self-verify; large teams flip it off).
+ *
+ * Saving sends paired-bool patches per field — only the rule(s) the
+ * user actually changed are sent, so concurrent edits from another
+ * tab don't get clobbered by an "echo back" of the cached state.
+ */
+function ApprovalSettings({ workspace }: ApprovalSettingsProps) {
+  const { t } = useT("settings");
+  const qc = useQueryClient();
+  // Type cast — the field is a free-form string on the wire (per the
+  // API drift contract); the UI normalizes to one of the four known
+  // rule values for the Select. An unrecognized value rendered before
+  // the user touched the picker is replaced by the legacy default
+  // for that tier so the dropdown never shows an empty trigger.
+  type Rule = "member" | "admin" | "approver" | "two";
+  const tiers: ReadonlyArray<{
+    risk: "low" | "medium" | "high" | "critical";
+    fallback: Rule;
+    field: "low" | "medium" | "high" | "critical";
+  }> = [
+    { risk: "low", fallback: "member", field: "low" },
+    { risk: "medium", fallback: "member", field: "medium" },
+    { risk: "high", fallback: "approver", field: "high" },
+    { risk: "critical", fallback: "two", field: "critical" },
+  ];
+
+  // norm is intentionally module-private — pulling it out of the
+  // component avoids a dependency-array entry on the useMemo below
+  // (and the corresponding identity churn on every render).
+  const initialRules = useMemo<Record<typeof tiers[number]["field"], Rule>>(
+    () => ({
+      low: normalizeApprovalRule(workspace.ship_hub_approval_low, "member"),
+      medium: normalizeApprovalRule(workspace.ship_hub_approval_medium, "member"),
+      high: normalizeApprovalRule(workspace.ship_hub_approval_high, "approver"),
+      critical: normalizeApprovalRule(workspace.ship_hub_approval_critical, "two"),
+    }),
+    [
+      workspace.ship_hub_approval_low,
+      workspace.ship_hub_approval_medium,
+      workspace.ship_hub_approval_high,
+      workspace.ship_hub_approval_critical,
+    ],
+  );
+
+  const initialAuthor = workspace.ship_hub_approver_can_be_author ?? true;
+
+  const [rules, setRules] = useState(initialRules);
+  const [allowAuthor, setAllowAuthor] = useState(initialAuthor);
+  const [saving, setSaving] = useState(false);
+
+  // Reconcile when the cached workspace updates (WS event, another tab).
+  useEffect(() => {
+    setRules(initialRules);
+    setAllowAuthor(initialAuthor);
+  }, [initialRules, initialAuthor]);
+
+  const dirty =
+    rules.low !== initialRules.low ||
+    rules.medium !== initialRules.medium ||
+    rules.high !== initialRules.high ||
+    rules.critical !== initialRules.critical ||
+    allowAuthor !== initialAuthor;
+
+  const handleSave = async () => {
+    if (!dirty || saving) return;
+    setSaving(true);
+    try {
+      const payload: Parameters<typeof api.updateWorkspace>[1] = {};
+      if (rules.low !== initialRules.low) {
+        payload.ship_hub_approval_low = rules.low;
+        payload.ship_hub_approval_low_set = true;
+      }
+      if (rules.medium !== initialRules.medium) {
+        payload.ship_hub_approval_medium = rules.medium;
+        payload.ship_hub_approval_medium_set = true;
+      }
+      if (rules.high !== initialRules.high) {
+        payload.ship_hub_approval_high = rules.high;
+        payload.ship_hub_approval_high_set = true;
+      }
+      if (rules.critical !== initialRules.critical) {
+        payload.ship_hub_approval_critical = rules.critical;
+        payload.ship_hub_approval_critical_set = true;
+      }
+      if (allowAuthor !== initialAuthor) {
+        payload.ship_hub_approver_can_be_author = allowAuthor;
+        payload.ship_hub_approver_can_be_author_set = true;
+      }
+      const updated = await api.updateWorkspace(workspace.id, payload);
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((w) => (w.id === updated.id ? updated : w)),
+      );
+      toast.success(t(($) => $.ship_hub.approval.toast_saved));
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : t(($) => $.ship_hub.approval.toast_save_failed),
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 border-t border-border pt-3">
+      <div className="text-sm font-medium">
+        {t(($) => $.ship_hub.approval.section_title)}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {t(($) => $.ship_hub.approval.section_description)}
+      </p>
+
+      {tiers.map(({ risk, field }) => (
+        <div key={field} className="space-y-1">
+          <Label className="text-xs text-muted-foreground" htmlFor={`approval-${field}`}>
+            {t(($) => $.ship_hub.approval.tier_label[risk])}
+          </Label>
+          <Select
+            value={rules[field]}
+            onValueChange={(v) => {
+              if (v === "member" || v === "admin" || v === "approver" || v === "two") {
+                setRules((prev) => ({ ...prev, [field]: v }));
+              }
+            }}
+            disabled={saving}
+          >
+            <SelectTrigger
+              id={`approval-${field}`}
+              data-testid={`approval-${field}-select`}
+              className="w-full"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="member">
+                {t(($) => $.ship_hub.approval.rule_options.member)}
+              </SelectItem>
+              <SelectItem value="admin">
+                {t(($) => $.ship_hub.approval.rule_options.admin)}
+              </SelectItem>
+              <SelectItem value="approver">
+                {t(($) => $.ship_hub.approval.rule_options.approver)}
+              </SelectItem>
+              <SelectItem value="two">
+                {t(($) => $.ship_hub.approval.rule_options.two)}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {t(($) => $.ship_hub.approval.tier_hint[risk])}
+          </p>
+        </div>
+      ))}
+
+      <label className="flex items-center gap-2 pt-2 text-sm">
+        <input
+          type="checkbox"
+          checked={allowAuthor}
+          onChange={(e) => setAllowAuthor(e.target.checked)}
+          disabled={saving}
+          data-testid="approval-allow-author-checkbox"
+        />
+        <span>{t(($) => $.ship_hub.approval.allow_author_label)}</span>
+      </label>
+      <p className="text-xs text-muted-foreground">
+        {t(($) => $.ship_hub.approval.allow_author_hint)}
+      </p>
+
+      <div className="pt-1">
+        <Button
+          size="sm"
+          onClick={handleSave}
+          disabled={!dirty || saving}
+          data-testid="approval-save-button"
+        >
+          <Save className="h-3 w-3" />
+          {saving ? t(($) => $.ship_hub.approval.saving) : t(($) => $.ship_hub.approval.save)}
+        </Button>
+      </div>
     </div>
   );
 }

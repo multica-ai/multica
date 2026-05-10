@@ -684,12 +684,25 @@ const ReleaseIssueRefSchema = z.object({
   status: z.string().optional(),
 }).loose();
 
+// Phase 7d follow-up — ship_release_signoff row shape. Defaults
+// every field so a malformed row downgrades to a renderable empty
+// signoff rather than throwing into the UI.
+const ReleaseSignoffSchema = z.object({
+  approver_slot: z.string().default(""),
+  signed_by: z.string().default(""),
+  signed_at: z.string().default(""),
+  note: z.string().nullable().default(null),
+}).loose();
+
 export const ReleaseDetailResponseSchema = z.object({
   release: ReleaseSchema,
   pull_requests: z.array(ReleasePullRequestSchema).default([]),
   events: z.array(ReleaseEventSchema).default([]),
   channel: ReleaseChannelRefSchema.nullable().optional(),
   issue: ReleaseIssueRefSchema.nullable().optional(),
+  // Optional: older servers don't include this field. The UI
+  // treats `signoffs` missing as an empty list.
+  signoffs: z.array(ReleaseSignoffSchema).default([]),
 }).loose();
 
 // EMPTY_RELEASE_DETAIL is rendered when a malformed detail response
@@ -724,6 +737,7 @@ export const EMPTY_RELEASE_DETAIL = {
   },
   pull_requests: [],
   events: [],
+  signoffs: [],
 };
 
 export const CreateReleaseResponseSchema = z.object({

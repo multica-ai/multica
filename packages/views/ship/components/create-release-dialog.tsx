@@ -197,6 +197,46 @@ export function CreateReleaseDialog({
     return selectedPullRequests.length === 0 ? "medium" : best;
   }, [selectedPullRequests]);
 
+  /** Workspace's configured rule for the highest-risk tier of the
+   *  selected PRs. Pulls from the new ship_hub_approval_* fields,
+   *  falling back to the legacy hardcoded behavior when the
+   *  workspace row predates migration 090.
+   *
+   *  Decides:
+   *   - Show the approver picker when the rule is "approver" or "two".
+   *     ("admin" doesn't need a per-release approver — the gate
+   *     resolves via member.role at verify time.)
+   *   - Show the second-approver picker only when the rule is "two".
+   */
+  const approvalRule = useMemo<"member" | "admin" | "approver" | "two">(() => {
+    const norm = (
+      v: string | undefined,
+      fallback: "member" | "admin" | "approver" | "two",
+    ): "member" | "admin" | "approver" | "two" => {
+      if (v === "member" || v === "admin" || v === "approver" || v === "two") {
+        return v;
+      }
+      return fallback;
+    };
+    if (!workspace) return "member";
+    switch (highestRisk) {
+      case "low":
+        return norm(workspace.ship_hub_approval_low, "member");
+      case "medium":
+        return norm(workspace.ship_hub_approval_medium, "member");
+      case "high":
+        return norm(workspace.ship_hub_approval_high, "approver");
+      case "critical":
+        return norm(workspace.ship_hub_approval_critical, "two");
+      default:
+        return "member";
+    }
+  }, [workspace, highestRisk]);
+
+  const showApproverField =
+    approvalRule === "approver" || approvalRule === "two";
+  const showSecondApproverField = approvalRule === "two";
+
   // Per-PR ineligibility messages. Renders as a list at the bottom
   // of the dialog AND blocks submit when non-empty.
   const ineligibilityMessages = useMemo(() => {
@@ -214,21 +254,23 @@ export function CreateReleaseDialog({
 
   // Soft warnings — same shape the server returns, computed
   // client-side so the dialog can surface them inline before
-  // submission.
+  // submission. Now driven by the workspace's configured rule
+  // (Phase 7d follow-up): only nag for an approver when the rule
+  // for the highest-risk tier actually needs one.
   const softWarnings = useMemo(() => {
     const out: string[] = [];
-    if (highestRisk !== "low" && !approverId) {
+    if (showApproverField && !approverId) {
       out.push(
         t(($) => $.releases.create_dialog.no_approver_required, {
           level: highestRisk,
         }),
       );
     }
-    if (highestRisk === "critical" && !secondApproverId) {
+    if (showSecondApproverField && !secondApproverId) {
       out.push(t(($) => $.releases.create_dialog.no_second_approver_required));
     }
     return out;
-  }, [highestRisk, approverId, secondApproverId, t]);
+  }, [showApproverField, showSecondApproverField, highestRisk, approverId, secondApproverId, t]);
 
   const submitDisabled =
     create.isPending ||
@@ -301,6 +343,7 @@ export function CreateReleaseDialog({
             />
           </div>
 
+          {showApproverField && (
           <div className="grid gap-1.5">
             <Label htmlFor="release-approver">
               {t(($) => $.releases.create_dialog.approver_label)}
@@ -320,8 +363,9 @@ export function CreateReleaseDialog({
               </SelectContent>
             </Select>
           </div>
+          )}
 
-          {highestRisk === "critical" && (
+          {showSecondApproverField && (
             <div className="grid gap-1.5">
               <Label htmlFor="release-second-approver">
                 {t(($) => $.releases.create_dialog.second_approver_label)}

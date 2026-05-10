@@ -482,6 +482,16 @@
       "manual_pass_note_label": "Note (optional)",
       "manual_pass_submit": "Mark passing"
     },
+    "approval_rule": {
+      "rule_member_disabled": "Any workspace member can verify",
+      "rule_admin_disabled": "A workspace admin must verify; ask an owner or admin",
+      "rule_approver_disabled": "Only the designated approver (or a workspace admin) can verify this release",
+      "rule_two_disabled": "Two approvers are required; assign both to enable Create release",
+      "rule_two_first_required": "Awaiting first approver: {{name}}",
+      "rule_two_second_required": "Awaiting second approver: {{name}}",
+      "rule_two_pending_self": "You've signed off — waiting on the second approver",
+      "rule_two_signoff_recorded": "Signoff recorded — waiting on the other approver"
+    },
     "verify": {
       "button": "Mark verified",
       "dialog_title": "Mark this release verified?",

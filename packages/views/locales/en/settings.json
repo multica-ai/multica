@@ -206,7 +206,35 @@
     "webhook_copy_url_tooltip": "Copy URL",
     "webhook_toast_generated": "Webhook secret generated",
     "webhook_toast_rotated": "Webhook secret rotated",
-    "webhook_toast_failed": "Failed to generate webhook secret"
+    "webhook_toast_failed": "Failed to generate webhook secret",
+    "approval": {
+      "section_title": "Approval requirements",
+      "section_description": "Choose who can verify and promote releases at each risk tier. Defaults match the original Ship Hub behavior; loosen the critical tier when a small team can't always source two distinct approvers.",
+      "rule_options": {
+        "member": "Any member",
+        "admin": "Workspace admin",
+        "approver": "Designated approver",
+        "two": "Two approvers"
+      },
+      "tier_label": {
+        "low": "Low risk",
+        "medium": "Medium risk",
+        "high": "High risk",
+        "critical": "Critical risk"
+      },
+      "tier_hint": {
+        "low": "Tests-only, docs-only, lint, formatting changes.",
+        "medium": "Standard product changes — refactors, feature work, UI tweaks.",
+        "high": "Schema migrations, auth/permission changes, billing-adjacent code.",
+        "critical": "Infra/k8s/Dockerfile changes, destructive migrations, CI runner switches."
+      },
+      "allow_author_label": "Allow PR authors to verify their own releases",
+      "allow_author_hint": "When off, separation-of-duties is enforced — a verifier in the release's PR-author set is rejected.",
+      "save": "Save approval rules",
+      "saving": "Saving…",
+      "toast_saved": "Approval rules saved",
+      "toast_save_failed": "Failed to save approval rules"
+    }
   },
   "delete_workspace_dialog": {
     "title": "Delete workspace",

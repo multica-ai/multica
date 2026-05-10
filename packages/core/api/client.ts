@@ -1016,6 +1016,21 @@ export class ApiClient {
       // existing token untouched.
       github_token?: string | null;
       github_token_set?: boolean;
+      // Phase 7d follow-up — per-risk-tier approval rule. Each tier
+      // uses the paired-bool gate (FooSet=true to apply; missing means
+      // "leave alone"). Server validates the value against the same
+      // enum the SQL CHECK enforces, so a typo round-trips as a 400
+      // not a 500.
+      ship_hub_approval_low?: string | null;
+      ship_hub_approval_low_set?: boolean;
+      ship_hub_approval_medium?: string | null;
+      ship_hub_approval_medium_set?: boolean;
+      ship_hub_approval_high?: string | null;
+      ship_hub_approval_high_set?: boolean;
+      ship_hub_approval_critical?: string | null;
+      ship_hub_approval_critical_set?: boolean;
+      ship_hub_approver_can_be_author?: boolean | null;
+      ship_hub_approver_can_be_author_set?: boolean;
     },
   ): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {

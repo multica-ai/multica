@@ -642,6 +642,10 @@ export interface ReleaseDetailResponse {
   channel?: { id: string; name: string; display_name?: string } | null;
   /** Auto-created tracking issue. Same opaque-typed treatment. */
   issue?: { id: string; identifier?: string; title?: string; status?: string } | null;
+  /** Phase 7d follow-up — ship_release_signoff rows for the "two"
+   *  approval rule. Empty for releases not using the rule. Older
+   *  servers don't include this field (treat undefined === []). */
+  signoffs?: import("./workspace").ReleaseSignoff[];
 }
 
 /** POST /api/projects/{id}/releases response. Same shape as the

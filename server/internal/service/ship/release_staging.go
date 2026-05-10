@@ -50,7 +50,53 @@ var (
 	ErrSmokeNotFinished      = errors.New("release: smoke tests have not completed")
 	ErrSmokeNotConfigured    = errors.New("release: smoke workflow is not configured for this workspace")
 	ErrApproverRequired      = errors.New("release: caller is not eligible to verify this release")
+	// ErrTwoApproverPending is returned when the workspace's per-tier
+	// rule is "two" and the caller has signed off as one approver, but
+	// the matching counterparty hasn't signed off yet. The release
+	// stays in_staging until the second slot is filled. The handler
+	// surfaces this as a 202 Accepted with a "waiting for second
+	// approver" message rather than a hard failure.
+	ErrTwoApproverPending = errors.New("release: awaiting second approver signoff")
 )
+
+// Approval rule constants. String enum mirrored on the SQL CHECK
+// constraint (see migration 090_ship_hub_approval_config.up.sql).
+const (
+	ApprovalRuleMember   = "member"   // any workspace member
+	ApprovalRuleAdmin    = "admin"    // workspace owner or admin
+	ApprovalRuleApprover = "approver" // release.approver_id (or admin)
+	ApprovalRuleTwo      = "two"      // both approver_id + second_approver_id
+)
+
+// SignoffSlot enum values. Stored on ship_release_signoff.approver_slot.
+const (
+	SignoffSlotFirst  = "first"
+	SignoffSlotSecond = "second"
+)
+
+// ApprovalContext bundles the per-call inputs the approval gate needs
+// beyond the release row itself. The handler builds it once after
+// resolving the workspace + the calling member's role.
+type ApprovalContext struct {
+	// Rule is the workspace-configured rule for the release's risk
+	// tier. Empty string falls back to the legacy hardcoded behavior
+	// (see resolveApprovalRule).
+	Rule string
+	// MemberRole is the caller's role on the workspace ("owner" |
+	// "admin" | "member"). Used by the "admin" / "approver" / "two"
+	// rules.
+	MemberRole string
+	// AllowAuthor controls whether the caller may verify if they
+	// authored one of the release's PRs. When false and the caller is
+	// in the PR-author set, the gate denies. The handler resolves the
+	// PR-author set via Queries.ListReleasePullRequests; we pass the
+	// resolved boolean down so the service layer doesn't fan out to
+	// queries the handler already ran.
+	IsAuthor bool
+	// CanBeAuthor mirrors workspace.ship_hub_approver_can_be_author.
+	// When false, IsAuthor=true denies.
+	CanBeAuthor bool
+}
 
 // Smoke status string vocabulary. Free-form on the wire (CLAUDE.md API
 // drift contract) — these constants are the values the service writes;
@@ -462,21 +508,35 @@ func (s *Service) MarkSmokeManualPass(
 // verifying (if smoke gated up directly) or stamps qa_verified_*
 // when already in verifying.
 //
-// Approver eligibility (per Phase 5 risk-tier rules):
-//   - low      — any workspace member
-//   - medium   — any workspace member (project member when project
-//                membership exists; today projects are workspace-wide
-//                so this collapses to "any workspace member")
-//   - high     — must equal release.approver_id
-//   - critical — must equal release.approver_id OR
-//                release.second_approver_id
+// Approver eligibility (per the workspace's configured rules):
+//   - "member"   — any workspace member
+//   - "admin"    — workspace owner or admin
+//   - "approver" — must equal release.approver_id (or workspace admin)
+//   - "two"      — must equal one of release.approver_id /
+//                  release.second_approver_id; both slots must sign
+//                  off before the release advances to verifying.
+//                  Workspace admins satisfy either slot but two
+//                  distinct admins are still required.
+//
+// Defaults (when ApprovalContext.Rule is "" — e.g. older workspace
+// row pre-migration): low/medium → "member", high → "approver",
+// critical → "two", which preserves the legacy hardcoded behavior.
 //
 // Handler is responsible for confirming workspace membership before
-// calling; this method only enforces the approver-equality rule.
+// calling; this method only enforces the rule-driven eligibility.
+//
+// For the "two" rule:
+//   - The caller's signoff is recorded on ship_release_signoff. If
+//     both slots already have a signoff, the stage flips to verifying
+//     (or stays in verifying with qa_verified_* stamped to the
+//     latest signer).
+//   - If only the caller's slot has a signoff, returns
+//     ErrTwoApproverPending so the handler can surface a 202.
 func (s *Service) MarkVerified(
 	ctx context.Context,
 	releaseID, requestedBy pgtype.UUID,
 	note string,
+	approval ApprovalContext,
 	deps *StagingDeps,
 ) (db.ShipRelease, error) {
 	release, err := s.Q.GetRelease(ctx, releaseID)
@@ -488,7 +548,9 @@ func (s *Service) MarkVerified(
 	if release.Stage != db.ReleaseStageInStaging && release.Stage != db.ReleaseStageVerifying {
 		return db.ShipRelease{}, fmt.Errorf("%w: stage=%s", ErrReleaseNotInStaging, release.Stage)
 	}
-	if !canVerifyRelease(release, requestedBy) {
+	rule := resolveApprovalRule(approval.Rule, release.RiskLevel)
+	slot, eligible := approverEligibility(rule, release, requestedBy, approval)
+	if !eligible {
 		return db.ShipRelease{}, ErrApproverRequired
 	}
 	// Smoke gate — high/critical risk releases additionally need
@@ -498,6 +560,46 @@ func (s *Service) MarkVerified(
 		if !smokePassedOrSkipped(release.SmokeStatus) {
 			return db.ShipRelease{}, ErrSmokeNotFinished
 		}
+	}
+
+	// "two" rule: record the slot signoff; if both slots have a row,
+	// proceed with the verify; otherwise return ErrTwoApproverPending.
+	if rule == ApprovalRuleTwo {
+		if _, err := s.Q.UpsertReleaseSignoff(ctx, db.UpsertReleaseSignoffParams{
+			ReleaseID:    releaseID,
+			ApproverSlot: slot,
+			SignedBy:     requestedBy,
+			Note:         pgtype.Text{String: note, Valid: note != ""},
+		}); err != nil {
+			return db.ShipRelease{}, fmt.Errorf("record signoff: %w", err)
+		}
+		signoffs, err := s.Q.ListReleaseSignoffs(ctx, releaseID)
+		if err != nil {
+			return db.ShipRelease{}, fmt.Errorf("list signoffs: %w", err)
+		}
+		_, _ = s.insertReleaseEvent(ctx, releaseID, "release_signoff", requestedBy, map[string]any{
+			"slot": slot,
+			"note": note,
+		})
+		if !bothSlotsSigned(signoffs) {
+			// Single-slot signoff. Emit a WS event so the UI can flip
+			// the banner ("awaiting second approver"); leave stage
+			// untouched.
+			if deps != nil && deps.Publisher != nil {
+				deps.Publisher.PublishMergeEvent(protocol.EventReleaseUpdated, uuidString(release.WorkspaceID), map[string]any{
+					"release_id": uuidString(releaseID),
+					"stage":      string(release.Stage),
+				})
+			}
+			postReleaseChannelStaging(deps, ctx, release.ChannelID, fmt.Sprintf(
+				"🟨 Release awaiting second approver · slot=%s signed",
+				slot,
+			))
+			return release, ErrTwoApproverPending
+		}
+		// Both slots signed — fall through to the standard verify
+		// stamp. The qa_verified_by ends up as the latest signer
+		// (either slot); the audit trail keeps both signoffs.
 	}
 
 	now := pgtype.Timestamptz{Time: deps.now(), Valid: true}
@@ -522,12 +624,13 @@ func (s *Service) MarkVerified(
 
 	_, _ = s.insertReleaseEvent(ctx, releaseID, "release_verified", requestedBy, map[string]any{
 		"note": note,
+		"rule": rule,
 	})
 	if deps != nil && deps.Publisher != nil {
 		deps.Publisher.PublishMergeEvent(protocol.EventReleaseVerified, uuidString(updated.WorkspaceID), map[string]any{
-			"release_id":   uuidString(releaseID),
-			"verified_by":  uuidString(requestedBy),
-			"verified_at":  deps.now().Format(time.RFC3339),
+			"release_id":  uuidString(releaseID),
+			"verified_by": uuidString(requestedBy),
+			"verified_at": deps.now().Format(time.RFC3339),
 		})
 		deps.Publisher.PublishMergeEvent(protocol.EventReleaseUpdated, uuidString(updated.WorkspaceID), map[string]any{
 			"release_id": uuidString(releaseID),
@@ -544,6 +647,9 @@ func (s *Service) MarkVerified(
 // Unverify reverses MarkVerified. Returns the release to in_staging
 // and clears qa_verified_*. Useful when QA spots an issue post-
 // verification but pre-promote.
+//
+// Also clears any ship_release_signoff rows so a re-verify under the
+// "two" rule starts fresh — both approvers must sign off again.
 func (s *Service) Unverify(
 	ctx context.Context,
 	releaseID, requestedBy pgtype.UUID,
@@ -560,6 +666,12 @@ func (s *Service) Unverify(
 	updated, err := s.Q.SetReleaseQAUnverified(ctx, releaseID)
 	if err != nil {
 		return db.ShipRelease{}, fmt.Errorf("clear qa verified: %w", err)
+	}
+	// Best-effort signoff wipe — failure here is informational; the
+	// stage rollback is the durable outcome.
+	if err := s.Q.DeleteReleaseSignoffs(ctx, releaseID); err != nil {
+		slog.Debug("ship: clear release signoffs failed",
+			"release_id", uuidString(releaseID), "error", err)
 	}
 	flipped, err := s.Q.UpdateReleaseStage(ctx, db.UpdateReleaseStageParams{
 		ID:    releaseID,
@@ -589,34 +701,130 @@ func (s *Service) Unverify(
 	return updated, nil
 }
 
-// canVerifyRelease applies the risk-tier eligibility rule.
+// resolveApprovalRule maps an empty / unrecognized rule string back
+// to the legacy hardcoded default for the release's risk tier. This
+// keeps existing workspaces (pre-migration) on the original behavior
+// without a backfill: low/medium → "member", high → "approver",
+// critical → "two".
+func resolveApprovalRule(rule string, risk db.RiskLevel) string {
+	switch rule {
+	case ApprovalRuleMember, ApprovalRuleAdmin, ApprovalRuleApprover, ApprovalRuleTwo:
+		return rule
+	}
+	switch risk {
+	case db.RiskLevelHigh:
+		return ApprovalRuleApprover
+	case db.RiskLevelCritical:
+		return ApprovalRuleTwo
+	}
+	return ApprovalRuleMember
+}
+
+// approverEligibility returns (slot, ok) for the given rule + caller.
+// `slot` is only meaningful when rule=="two" and ok==true: it tells
+// the caller which signoff row to upsert ("first" or "second").
+//
+// The four rule values:
+//
+//   - "member"   — any workspace member (handler-level membership
+//                  check is the floor; this returns true unconditionally
+//                  modulo IsAuthor).
+//   - "admin"    — caller's MemberRole must be "owner" or "admin".
+//   - "approver" — caller is release.approver_id, OR caller is a
+//                  workspace admin. Admin override matches the legacy
+//                  Phase 5 behavior so a workspace owner can always
+//                  unblock a release whose original approver is OOO.
+//   - "two"      — caller maps to one of the two approver slots.
+//                  An admin can satisfy either slot but not both
+//                  (uniqueness comes from the (release_id, slot)
+//                  PK on ship_release_signoff combined with the
+//                  signed_by column being a separate user per slot).
+//                  Returns slot="first" when the caller is the
+//                  primary approver, "second" otherwise. The caller
+//                  is responsible for tracking that BOTH slots have
+//                  signoff rows before advancing.
 //
 // Treats a zero requestedBy as "no caller identified" — fail closed.
 // Workspace-membership is enforced upstream by the handler.
-func canVerifyRelease(release db.ShipRelease, requestedBy pgtype.UUID) bool {
+func approverEligibility(
+	rule string,
+	release db.ShipRelease,
+	requestedBy pgtype.UUID,
+	approval ApprovalContext,
+) (string, bool) {
 	if !requestedBy.Valid {
+		return "", false
+	}
+	// PR-author separation-of-duties. When the workspace has flipped
+	// off "approver can be author" AND the caller is in the release's
+	// PR-author set, deny regardless of rule.
+	if approval.IsAuthor && !approval.CanBeAuthor {
+		return "", false
+	}
+
+	isAdmin := approval.MemberRole == "owner" || approval.MemberRole == "admin"
+	isPrimary := release.ApproverID.Valid &&
+		uuidString(release.ApproverID) == uuidString(requestedBy)
+	isSecondary := release.SecondApproverID.Valid &&
+		uuidString(release.SecondApproverID) == uuidString(requestedBy)
+
+	switch rule {
+	case ApprovalRuleMember:
+		return "", true
+	case ApprovalRuleAdmin:
+		return "", isAdmin
+	case ApprovalRuleApprover:
+		return "", isPrimary || isAdmin
+	case ApprovalRuleTwo:
+		// Pick the slot the caller fills. Primary approver match
+		// wins; otherwise secondary; otherwise an admin maps to
+		// whichever slot is still empty (the caller logic in
+		// MarkVerified treats both as fungible after both rows exist).
+		if isPrimary {
+			return SignoffSlotFirst, true
+		}
+		if isSecondary {
+			return SignoffSlotSecond, true
+		}
+		if isAdmin {
+			// Default admin → "first" slot. The MarkVerified caller
+			// handles the both-rows-needed check downstream; an admin
+			// signing off in slot "first" still requires a second
+			// person (admin or approver) to sign off in "second"
+			// because the (release_id, slot) PK rejects a duplicate
+			// row from the same caller.
+			return SignoffSlotFirst, true
+		}
+		return "", false
+	}
+	// Unknown rule — fail open for member-equivalent. The handler
+	// still gates on workspace membership.
+	return "", true
+}
+
+// bothSlotsSigned returns true when the slice of signoffs covers
+// both "first" and "second" slots with DISTINCT signers. We require
+// distinct signers so a single admin can't satisfy both slots by
+// signing twice (the (release_id, slot) PK already prevents a same-
+// slot duplicate; this guards against admin1→first + admin1→second
+// not satisfying separation-of-duties).
+func bothSlotsSigned(signoffs []db.ShipReleaseSignoff) bool {
+	var first, second db.ShipReleaseSignoff
+	var hasFirst, hasSecond bool
+	for _, s := range signoffs {
+		switch s.ApproverSlot {
+		case SignoffSlotFirst:
+			first = s
+			hasFirst = true
+		case SignoffSlotSecond:
+			second = s
+			hasSecond = true
+		}
+	}
+	if !hasFirst || !hasSecond {
 		return false
 	}
-	switch release.RiskLevel {
-	case db.RiskLevelLow, db.RiskLevelMedium:
-		return true
-	case db.RiskLevelHigh:
-		return release.ApproverID.Valid &&
-			uuidString(release.ApproverID) == uuidString(requestedBy)
-	case db.RiskLevelCritical:
-		if release.ApproverID.Valid &&
-			uuidString(release.ApproverID) == uuidString(requestedBy) {
-			return true
-		}
-		if release.SecondApproverID.Valid &&
-			uuidString(release.SecondApproverID) == uuidString(requestedBy) {
-			return true
-		}
-		return false
-	}
-	// Unknown risk — fail open for medium-risk equivalents. The
-	// handler still gates on workspace membership.
-	return true
+	return uuidString(first.SignedBy) != uuidString(second.SignedBy)
 }
 
 // smokePassedOrSkipped is the high/critical-risk smoke gate.

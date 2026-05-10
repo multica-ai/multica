@@ -206,7 +206,35 @@
     "webhook_copy_url_tooltip": "复制 URL",
     "webhook_toast_generated": "已生成网络钩子密钥",
     "webhook_toast_rotated": "已轮换网络钩子密钥",
-    "webhook_toast_failed": "生成网络钩子密钥失败"
+    "webhook_toast_failed": "生成网络钩子密钥失败",
+    "approval": {
+      "section_title": "审批要求",
+      "section_description": "为每个风险等级指定可以验证与发布的审批者。默认配置与原有 Ship Hub 行为一致；当小团队无法为「关键」等级凑齐两位审批者时，可在此放宽规则。",
+      "rule_options": {
+        "member": "任意成员",
+        "admin": "工作区管理员",
+        "approver": "指定审批者",
+        "two": "两位审批者"
+      },
+      "tier_label": {
+        "low": "低风险",
+        "medium": "中风险",
+        "high": "高风险",
+        "critical": "关键风险"
+      },
+      "tier_hint": {
+        "low": "仅测试、仅文档、Lint、格式调整。",
+        "medium": "常规产品变更 — 重构、功能开发、UI 微调。",
+        "high": "数据库迁移、鉴权/权限变更、计费相关代码。",
+        "critical": "基础设施/k8s/Dockerfile 变更、破坏性迁移、CI 运行器切换。"
+      },
+      "allow_author_label": "允许 PR 作者验证自己的发布",
+      "allow_author_hint": "关闭后强制职责分离 — 若发布的 PR 作者集合中包含验证者，则会被拒绝。",
+      "save": "保存审批规则",
+      "saving": "保存中…",
+      "toast_saved": "审批规则已保存",
+      "toast_save_failed": "保存审批规则失败"
+    }
   },
   "delete_workspace_dialog": {
     "title": "删除工作区",

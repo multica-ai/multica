@@ -1024,6 +1024,14 @@ type ShipReleasePullRequest struct {
 	RevertError    pgtype.Text        `json:"revert_error"`
 }
 
+type ShipReleaseSignoff struct {
+	ReleaseID    pgtype.UUID        `json:"release_id"`
+	ApproverSlot string             `json:"approver_slot"`
+	SignedBy     pgtype.UUID        `json:"signed_by"`
+	SignedAt     pgtype.Timestamptz `json:"signed_at"`
+	Note         pgtype.Text        `json:"note"`
+}
+
 type Skill struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -1128,23 +1136,28 @@ type VerificationCode struct {
 }
 
 type Workspace struct {
-	ID                   pgtype.UUID        `json:"id"`
-	Name                 string             `json:"name"`
-	Slug                 string             `json:"slug"`
-	Description          pgtype.Text        `json:"description"`
-	Settings             []byte             `json:"settings"`
-	CreatedAt            pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
-	Context              pgtype.Text        `json:"context"`
-	Repos                []byte             `json:"repos"`
-	IssuePrefix          string             `json:"issue_prefix"`
-	IssueCounter         int32              `json:"issue_counter"`
-	ChannelRetentionDays pgtype.Int4        `json:"channel_retention_days"`
-	ChannelsEnabled      bool               `json:"channels_enabled"`
-	OrchestratorAgentID  pgtype.UUID        `json:"orchestrator_agent_id"`
-	ShipHubEnabled       bool               `json:"ship_hub_enabled"`
-	ShipHubWebhookSecret pgtype.Text        `json:"ship_hub_webhook_secret"`
-	ShipHubSmokeWorkflow pgtype.Text        `json:"ship_hub_smoke_workflow"`
+	ID                         pgtype.UUID        `json:"id"`
+	Name                       string             `json:"name"`
+	Slug                       string             `json:"slug"`
+	Description                pgtype.Text        `json:"description"`
+	Settings                   []byte             `json:"settings"`
+	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
+	Context                    pgtype.Text        `json:"context"`
+	Repos                      []byte             `json:"repos"`
+	IssuePrefix                string             `json:"issue_prefix"`
+	IssueCounter               int32              `json:"issue_counter"`
+	ChannelRetentionDays       pgtype.Int4        `json:"channel_retention_days"`
+	ChannelsEnabled            bool               `json:"channels_enabled"`
+	OrchestratorAgentID        pgtype.UUID        `json:"orchestrator_agent_id"`
+	ShipHubEnabled             bool               `json:"ship_hub_enabled"`
+	ShipHubWebhookSecret       pgtype.Text        `json:"ship_hub_webhook_secret"`
+	ShipHubSmokeWorkflow       pgtype.Text        `json:"ship_hub_smoke_workflow"`
+	ShipHubApprovalLow         string             `json:"ship_hub_approval_low"`
+	ShipHubApprovalMedium      string             `json:"ship_hub_approval_medium"`
+	ShipHubApprovalHigh        string             `json:"ship_hub_approval_high"`
+	ShipHubApprovalCritical    string             `json:"ship_hub_approval_critical"`
+	ShipHubApproverCanBeAuthor bool               `json:"ship_hub_approver_can_be_author"`
 }
 
 type WorkspaceInvitation struct {

@@ -240,6 +240,16 @@ func releaseToResponse(r db.ShipRelease, prCount int) releaseResponse {
 	}
 }
 
+// releaseSignoffResponse is the wire shape for ship_release_signoff
+// rows. Returned by GET /api/releases/{id}; older clients ignore the
+// field per the API drift contract.
+type releaseSignoffResponse struct {
+	ApproverSlot string  `json:"approver_slot"`
+	SignedBy     string  `json:"signed_by"`
+	SignedAt     string  `json:"signed_at"`
+	Note         *string `json:"note"`
+}
+
 type releasePullRequestResponse struct {
 	pullRequestResponse
 	Position    int32   `json:"position"`
@@ -509,10 +519,25 @@ func (h *Handler) GetRelease(w http.ResponseWriter, r *http.Request) {
 		events[i] = releaseEventToResponse(e)
 	}
 
+	// Phase 7d follow-up — signoff rows for the "two" approval rule.
+	// Always returned (empty slice when none) so the client can render
+	// the "awaiting second approver" banner without an extra GET.
+	signoffRows, _ := h.Queries.ListReleaseSignoffs(r.Context(), rel.ID)
+	signoffs := make([]releaseSignoffResponse, 0, len(signoffRows))
+	for _, s := range signoffRows {
+		signoffs = append(signoffs, releaseSignoffResponse{
+			ApproverSlot: s.ApproverSlot,
+			SignedBy:     uuidToString(s.SignedBy),
+			SignedAt:     timestampToString(s.SignedAt),
+			Note:         textToPtr(s.Note),
+		})
+	}
+
 	body := map[string]any{
 		"release":       releaseToResponse(rel, len(prRows)),
 		"pull_requests": prs,
 		"events":        events,
+		"signoffs":      signoffs,
 	}
 	if rel.ChannelID.Valid {
 		ch, err := h.Queries.GetChannelInWorkspace(r.Context(), db.GetChannelInWorkspaceParams{

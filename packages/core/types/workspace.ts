@@ -52,6 +52,43 @@ export interface Workspace {
    * tests" button — when false, the button hides (it would 400 anyway)
    * and the smoke pill renders "Not configured" instead of empty. */
   ship_hub_smoke_workflow_set: boolean;
+  /**
+   * Per-risk-tier approval rule (Phase 7d follow-up — configurable
+   * approvals). One of `"member" | "admin" | "approver" | "two"`.
+   *
+   * Optional in the type so older Electron builds that fetch a fresh
+   * server response (which always includes the field) still typecheck
+   * against a cached older shape, AND so a server returning a stale
+   * row without the column degrades gracefully. The runtime gates
+   * fall back to legacy hardcoded behavior (low/medium → "member",
+   * high → "approver", critical → "two") when the field is missing
+   * or holds an unrecognized value.
+   */
+  ship_hub_approval_low?: ApprovalRule;
+  ship_hub_approval_medium?: ApprovalRule;
+  ship_hub_approval_high?: ApprovalRule;
+  ship_hub_approval_critical?: ApprovalRule;
+  /** When false, separation-of-duties is enforced — a verifier in
+   * the release's PR-author set is rejected. Defaults to true. */
+  ship_hub_approver_can_be_author?: boolean;
+}
+
+/**
+ * Per-risk-tier approval rule values. Mirrored on the Go side (
+ * `ship.ApprovalRule*` constants) and the SQL CHECK constraint in
+ * migration 090. Adding a value here without updating both other
+ * sources of truth will surface as a 400 from PATCH /workspaces/{id}.
+ */
+export type ApprovalRule = "member" | "admin" | "approver" | "two";
+
+/** Wire shape for ship_release_signoff rows returned by GET
+ *  /api/releases/{id}. Phase 7d follow-up — used by the "two"
+ *  approval rule to track first/second approver signoffs. */
+export interface ReleaseSignoff {
+  approver_slot: "first" | "second";
+  signed_by: string;
+  signed_at: string;
+  note: string | null;
 }
 
 export interface Member {

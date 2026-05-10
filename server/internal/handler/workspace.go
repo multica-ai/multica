@@ -83,6 +83,19 @@ type WorkspaceResponse struct {
 	// polish — adding this stops users clicking a button that's
 	// guaranteed to error.
 	ShipHubSmokeWorkflowSet bool `json:"ship_hub_smoke_workflow_set"`
+	// Phase 7d follow-up — per-risk-tier approval rule. One of
+	// "member" / "admin" / "approver" / "two". Defaults preserve the
+	// legacy hardcoded behavior (low/medium → "member", high →
+	// "approver", critical → "two") so existing workspaces don't see
+	// a silent change post-migration.
+	ShipHubApprovalLow      string `json:"ship_hub_approval_low"`
+	ShipHubApprovalMedium   string `json:"ship_hub_approval_medium"`
+	ShipHubApprovalHigh     string `json:"ship_hub_approval_high"`
+	ShipHubApprovalCritical string `json:"ship_hub_approval_critical"`
+	// ShipHubApproverCanBeAuthor — when false, separation-of-duties
+	// is enforced: a verifier in the release's PR-author set is
+	// rejected. Defaults to true (small teams typically self-verify).
+	ShipHubApproverCanBeAuthor bool `json:"ship_hub_approver_can_be_author"`
 }
 
 // shipHubSettingsKey is the JSON object inside workspace.settings that holds
@@ -207,24 +220,29 @@ func workspaceToResponseWithSecretFlags(w db.Workspace, flags secretFlags) Works
 		retention = &v
 	}
 	return WorkspaceResponse{
-		ID:                      uuidToString(w.ID),
-		Name:                    w.Name,
-		Slug:                    w.Slug,
-		Description:             textToPtr(w.Description),
-		Context:                 textToPtr(w.Context),
-		Settings:                settings,
-		Repos:                   repos,
-		IssuePrefix:             w.IssuePrefix,
-		OrchestratorAgentID:     uuidToPtr(w.OrchestratorAgentID),
-		CreatedAt:               timestampToString(w.CreatedAt),
-		UpdatedAt:               timestampToString(w.UpdatedAt),
-		ChannelsEnabled:         w.ChannelsEnabled,
-		ChannelRetentionDays:    retention,
-		ShipHubEnabled:          w.ShipHubEnabled,
-		GitHubTokenSet:          tokenSet,
-		ShipHubWebhookURL:       flags.WebhookURL, // pass-through; built upstream when a request is in scope
-		ShipHubWebhookSecretSet: webhookSet,
-		ShipHubSmokeWorkflowSet: w.ShipHubSmokeWorkflow.Valid && w.ShipHubSmokeWorkflow.String != "",
+		ID:                         uuidToString(w.ID),
+		Name:                       w.Name,
+		Slug:                       w.Slug,
+		Description:                textToPtr(w.Description),
+		Context:                    textToPtr(w.Context),
+		Settings:                   settings,
+		Repos:                      repos,
+		IssuePrefix:                w.IssuePrefix,
+		OrchestratorAgentID:        uuidToPtr(w.OrchestratorAgentID),
+		CreatedAt:                  timestampToString(w.CreatedAt),
+		UpdatedAt:                  timestampToString(w.UpdatedAt),
+		ChannelsEnabled:            w.ChannelsEnabled,
+		ChannelRetentionDays:       retention,
+		ShipHubEnabled:             w.ShipHubEnabled,
+		GitHubTokenSet:             tokenSet,
+		ShipHubWebhookURL:          flags.WebhookURL, // pass-through; built upstream when a request is in scope
+		ShipHubWebhookSecretSet:    webhookSet,
+		ShipHubSmokeWorkflowSet:    w.ShipHubSmokeWorkflow.Valid && w.ShipHubSmokeWorkflow.String != "",
+		ShipHubApprovalLow:         w.ShipHubApprovalLow,
+		ShipHubApprovalMedium:      w.ShipHubApprovalMedium,
+		ShipHubApprovalHigh:        w.ShipHubApprovalHigh,
+		ShipHubApprovalCritical:    w.ShipHubApprovalCritical,
+		ShipHubApproverCanBeAuthor: w.ShipHubApproverCanBeAuthor,
 	}
 }
 
@@ -435,6 +453,39 @@ type UpdateWorkspaceRequest struct {
 	// Set the bool true to apply; pass null in OrchestratorAgentID to clear.
 	OrchestratorAgentID    *string `json:"orchestrator_agent_id,omitempty"`
 	OrchestratorAgentIDSet bool    `json:"orchestrator_agent_id_set,omitempty"`
+	// Phase 7d follow-up — per-risk-tier approval rule. Each tier
+	// uses the paired-bool gate (FooSet=true to apply; missing means
+	// "leave alone"). Values are validated against the same enum the
+	// SQL CHECK constraint enforces, so a typo never reaches the DB.
+	ShipHubApprovalLow         *string `json:"ship_hub_approval_low,omitempty"`
+	ShipHubApprovalLowSet      bool    `json:"ship_hub_approval_low_set,omitempty"`
+	ShipHubApprovalMedium      *string `json:"ship_hub_approval_medium,omitempty"`
+	ShipHubApprovalMediumSet   bool    `json:"ship_hub_approval_medium_set,omitempty"`
+	ShipHubApprovalHigh        *string `json:"ship_hub_approval_high,omitempty"`
+	ShipHubApprovalHighSet     bool    `json:"ship_hub_approval_high_set,omitempty"`
+	ShipHubApprovalCritical    *string `json:"ship_hub_approval_critical,omitempty"`
+	ShipHubApprovalCriticalSet bool    `json:"ship_hub_approval_critical_set,omitempty"`
+	// ShipHubApproverCanBeAuthor — paired-bool gate for the
+	// "verifier may have authored a release PR" toggle.
+	ShipHubApproverCanBeAuthor    *bool `json:"ship_hub_approver_can_be_author,omitempty"`
+	ShipHubApproverCanBeAuthorSet bool  `json:"ship_hub_approver_can_be_author_set,omitempty"`
+}
+
+// validApprovalRule is the single source of truth for accepted rule
+// values. Mirrored on:
+//   - the SQL CHECK constraint in migration 090
+//   - ship.ApprovalRule* constants in the service package
+//   - the frontend types/workspace.ts ApprovalRule union
+//
+// Returns true when `s` is one of the four allowed values, otherwise
+// false. The handler rejects unknown values with a 400 so a typo
+// from a future client release doesn't silently drop into the DB.
+func validApprovalRule(s string) bool {
+	switch s {
+	case "member", "admin", "approver", "two":
+		return true
+	}
+	return false
 }
 
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -527,6 +578,55 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	params.ShipHubEnabledSet = req.ShipHubEnabledSet
 	if req.ShipHubEnabled != nil {
 		params.ShipHubEnabled = pgtype.Bool{Bool: *req.ShipHubEnabled, Valid: true}
+	}
+	// Approval rule patches. Each tier validates the value against
+	// the enum BEFORE persisting so a malformed PATCH lands as a 400
+	// rather than the SQL CHECK constraint surfacing a 500.
+	if req.ShipHubApprovalLowSet {
+		params.ShipHubApprovalLowSet = true
+		if req.ShipHubApprovalLow != nil {
+			if !validApprovalRule(*req.ShipHubApprovalLow) {
+				writeError(w, http.StatusBadRequest, "invalid ship_hub_approval_low value")
+				return
+			}
+			params.ShipHubApprovalLow = pgtype.Text{String: *req.ShipHubApprovalLow, Valid: true}
+		}
+	}
+	if req.ShipHubApprovalMediumSet {
+		params.ShipHubApprovalMediumSet = true
+		if req.ShipHubApprovalMedium != nil {
+			if !validApprovalRule(*req.ShipHubApprovalMedium) {
+				writeError(w, http.StatusBadRequest, "invalid ship_hub_approval_medium value")
+				return
+			}
+			params.ShipHubApprovalMedium = pgtype.Text{String: *req.ShipHubApprovalMedium, Valid: true}
+		}
+	}
+	if req.ShipHubApprovalHighSet {
+		params.ShipHubApprovalHighSet = true
+		if req.ShipHubApprovalHigh != nil {
+			if !validApprovalRule(*req.ShipHubApprovalHigh) {
+				writeError(w, http.StatusBadRequest, "invalid ship_hub_approval_high value")
+				return
+			}
+			params.ShipHubApprovalHigh = pgtype.Text{String: *req.ShipHubApprovalHigh, Valid: true}
+		}
+	}
+	if req.ShipHubApprovalCriticalSet {
+		params.ShipHubApprovalCriticalSet = true
+		if req.ShipHubApprovalCritical != nil {
+			if !validApprovalRule(*req.ShipHubApprovalCritical) {
+				writeError(w, http.StatusBadRequest, "invalid ship_hub_approval_critical value")
+				return
+			}
+			params.ShipHubApprovalCritical = pgtype.Text{String: *req.ShipHubApprovalCritical, Valid: true}
+		}
+	}
+	if req.ShipHubApproverCanBeAuthorSet {
+		params.ShipHubApproverCanBeAuthorSet = true
+		if req.ShipHubApproverCanBeAuthor != nil {
+			params.ShipHubApproverCanBeAuthor = pgtype.Bool{Bool: *req.ShipHubApproverCanBeAuthor, Valid: true}
+		}
 	}
 	if req.OrchestratorAgentIDSet {
 		params.OrchestratorAgentIDSet = true

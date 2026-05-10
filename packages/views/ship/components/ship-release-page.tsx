@@ -671,6 +671,35 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
             />
           )}
 
+          {/* Phase 7d follow-up — two-approver "awaiting second
+              signoff" banner. Renders when the release is using the
+              "two" rule and exactly one slot has signed off. The
+              pending approver gets the active Mark-verified button
+              from StagingActionButtons; everyone else's button is
+              gated by canVerifyRelease at the server. */}
+          {data.signoffs && data.signoffs.length === 1 && release.stage === "in_staging" && (
+            <div
+              className="flex items-start gap-2 rounded border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+              data-testid="release-pending-second-approver-banner"
+            >
+              <ShieldCheck className="mt-0.5 size-4" />
+              <div className="flex-1">
+                <p className="font-medium">
+                  {data.signoffs[0]?.approver_slot === "first"
+                    ? t(($) => $.releases.approval_rule.rule_two_second_required, {
+                        name: pendingSecondApproverName(release, data.signoffs ?? []),
+                      })
+                    : t(($) => $.releases.approval_rule.rule_two_first_required, {
+                        name: pendingSecondApproverName(release, data.signoffs ?? []),
+                      })}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t(($) => $.releases.approval_rule.rule_two_signoff_recorded)}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Verified banner — only when the release reached
               verifying via mark_verified. */}
           {isVerifying && release.qa_verified_at && (
@@ -2258,5 +2287,24 @@ function verifiedByLabel(
   if (release.qa_verified_by) {
     return release.qa_verified_by.slice(0, 8);
   }
+  return "—";
+}
+
+/** pendingSecondApproverName picks the still-needed approver's
+ *  short identifier for the "awaiting second approver" banner. The
+ *  release row carries the two slots as UUIDs (approver_id +
+ *  second_approver_id); the signoffs array tells us which slot is
+ *  filled. We slice to 8 chars for the same reason verifiedByLabel
+ *  does — the row only carries UUIDs. The full identity comes from
+ *  the audit log when the user clicks through. */
+function pendingSecondApproverName(
+  release: import("@multica/core/types").Release,
+  signoffs: import("@multica/core/types").ReleaseSignoff[],
+): string {
+  const filledFirst = signoffs.some((s) => s.approver_slot === "first");
+  // Pending = the slot WITHOUT a signoff. If first is filled, we're
+  // waiting on the second slot; otherwise the first.
+  const pendingId = filledFirst ? release.second_approver_id : release.approver_id;
+  if (pendingId) return pendingId.slice(0, 8);
   return "—";
 }

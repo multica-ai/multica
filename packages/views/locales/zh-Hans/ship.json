@@ -477,6 +477,16 @@
       "manual_pass_note_label": "备注 (可选)",
       "manual_pass_submit": "标记为通过"
     },
+    "approval_rule": {
+      "rule_member_disabled": "任意工作区成员均可验证",
+      "rule_admin_disabled": "需要工作区管理员验证；请联系所有者或管理员",
+      "rule_approver_disabled": "仅指定审批者（或工作区管理员）可验证此发布",
+      "rule_two_disabled": "需要两位审批者；为发布分配两位审批者后才能创建",
+      "rule_two_first_required": "等待第一位审批者: {{name}}",
+      "rule_two_second_required": "等待第二位审批者: {{name}}",
+      "rule_two_pending_self": "你已签字 — 等待第二位审批者",
+      "rule_two_signoff_recorded": "已记录签字 — 等待另一位审批者"
+    },
     "verify": {
       "button": "标记已验证",
       "dialog_title": "将此发布标记为已验证?",

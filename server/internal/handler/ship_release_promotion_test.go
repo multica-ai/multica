@@ -97,7 +97,7 @@ func TestPromoteRelease_LowRisk_AnyMember(t *testing.T) {
 	svc := &ship.Service{Q: testHandler.Queries}
 	deps := &ship.StagingDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
 	updated, err := svc.PromoteRelease(context.Background(),
-		parseUUID(releaseID), parseUUID(testUserID), deps)
+		parseUUID(releaseID), parseUUID(testUserID), ship.ApprovalContext{}, deps)
 	if err != nil {
 		t.Fatalf("PromoteRelease: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestPromoteRelease_HighRisk_RequiresApprover(t *testing.T) {
 	svc := &ship.Service{Q: testHandler.Queries}
 	deps := &ship.StagingDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
 	_, err := svc.PromoteRelease(context.Background(),
-		parseUUID(releaseID), parseUUID(testUserID), deps)
+		parseUUID(releaseID), parseUUID(testUserID), ship.ApprovalContext{}, deps)
 	if !errors.Is(err, ship.ErrApproverRequired) {
 		t.Fatalf("expected ErrApproverRequired with no approver set, got %v", err)
 	}
@@ -130,7 +130,7 @@ func TestPromoteRelease_HighRisk_RequiresApprover(t *testing.T) {
 		t.Fatalf("set approver: %v", err)
 	}
 	updated, err := svc.PromoteRelease(context.Background(),
-		parseUUID(releaseID), parseUUID(testUserID), deps)
+		parseUUID(releaseID), parseUUID(testUserID), ship.ApprovalContext{}, deps)
 	if err != nil {
 		t.Fatalf("PromoteRelease after approver set: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestPromoteRelease_WrongStage_Rejects(t *testing.T) {
 	svc := &ship.Service{Q: testHandler.Queries}
 	deps := &ship.StagingDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
 	_, err := svc.PromoteRelease(context.Background(),
-		parseUUID(releaseID), parseUUID(testUserID), deps)
+		parseUUID(releaseID), parseUUID(testUserID), ship.ApprovalContext{}, deps)
 	if !errors.Is(err, ship.ErrReleaseStageMismatch) {
 		t.Fatalf("expected ErrReleaseStageMismatch, got %v", err)
 	}
@@ -170,8 +170,8 @@ func TestLinkProductionDeploy_AdvancesToInProduction(t *testing.T) {
 	deps := &ship.StagingDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
 	// Promote first so we're in stage=promoting.
 	if _, err := svc.PromoteRelease(context.Background(),
-		parseUUID(releaseID), parseUUID(testUserID), deps); err != nil {
-		t.Fatalf("PromoteRelease: %v", err)
+		parseUUID(releaseID), parseUUID(testUserID), ship.ApprovalContext{}, deps); err != nil {
+		t.Fatalf("PromoteRelease setup: %v", err)
 	}
 
 	// Now seed a production deploy + invoke the linkage path.

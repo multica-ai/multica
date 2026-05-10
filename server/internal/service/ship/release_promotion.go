@@ -69,6 +69,7 @@ var (
 func (s *Service) PromoteRelease(
 	ctx context.Context,
 	releaseID, requestedBy pgtype.UUID,
+	approval ApprovalContext,
 	deps *StagingDeps,
 ) (db.ShipRelease, error) {
 	release, err := s.Q.GetRelease(ctx, releaseID)
@@ -80,9 +81,16 @@ func (s *Service) PromoteRelease(
 	}
 	// Approver eligibility — same rule as MarkVerified. We re-check
 	// here because the user who clicks Promote may not be the same
-	// user who verified (and high+/critical risk demands the right
+	// user who verified (and the configured rule demands the right
 	// approver every transition).
-	if !canVerifyRelease(release, requestedBy) {
+	//
+	// "two"-rule promotes don't need fresh signoffs: by the time we
+	// reach Promote, both signoffs already exist on the release (or
+	// the verify step would have returned ErrTwoApproverPending).
+	// The rule still gates on slot-match so a non-approver can't
+	// trigger Promote even if smoke + verify silently passed.
+	rule := resolveApprovalRule(approval.Rule, release.RiskLevel)
+	if _, ok := approverEligibility(rule, release, requestedBy, approval); !ok {
 		return db.ShipRelease{}, ErrApproverRequired
 	}
 

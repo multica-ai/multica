@@ -232,11 +232,12 @@ func (h *Handler) MarkSmokePass(w http.ResponseWriter, r *http.Request) {
 
 // MarkReleaseVerified — POST /api/releases/{id}/mark_verified.
 func (h *Handler) MarkReleaseVerified(w http.ResponseWriter, r *http.Request) {
-	rel, _, _, wsID, ok := h.loadReleaseAndProject(w, r)
+	rel, ws, _, wsID, ok := h.loadReleaseAndProject(w, r)
 	if !ok {
 		return
 	}
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(wsID), "workspace not found"); !ok {
+	member, ok := h.requireWorkspaceMember(w, r, uuidToString(wsID), "workspace not found")
+	if !ok {
 		return
 	}
 	userID, _ := requireUserID(w, r)
@@ -247,7 +248,8 @@ func (h *Handler) MarkReleaseVerified(w http.ResponseWriter, r *http.Request) {
 
 	svc := &ship.Service{Q: h.Queries}
 	deps := h.stagingDepsFor(wsID)
-	updated, err := svc.MarkVerified(r.Context(), rel.ID, requestedBy, strings.TrimSpace(req.Note), deps)
+	approval := buildApprovalContext(ws, rel, member.Role)
+	updated, err := svc.MarkVerified(r.Context(), rel.ID, requestedBy, strings.TrimSpace(req.Note), approval, deps)
 	if err != nil {
 		switch {
 		case errors.Is(err, ship.ErrReleaseNotInStaging):
@@ -256,6 +258,17 @@ func (h *Handler) MarkReleaseVerified(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, err.Error())
 		case errors.Is(err, ship.ErrSmokeNotFinished):
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
+		case errors.Is(err, ship.ErrTwoApproverPending):
+			// 202 — first slot signed off, awaiting second approver.
+			// Surface the current release shape so the UI can pick up
+			// the pending banner without an extra GET.
+			h.publish(protocol.EventReleaseUpdated, uuidToString(wsID), "member", userID, map[string]any{
+				"release_id": uuidToString(rel.ID),
+				"stage":      string(rel.Stage),
+			})
+			count, _ := h.Queries.CountActiveReleasePullRequests(r.Context(), rel.ID)
+			writeJSON(w, http.StatusAccepted, releaseToResponse(rel, int(count)))
+			return
 		default:
 			writeError(w, http.StatusInternalServerError, "failed to verify release: "+err.Error())
 		}
@@ -267,6 +280,40 @@ func (h *Handler) MarkReleaseVerified(w http.ResponseWriter, r *http.Request) {
 		"stage":      string(updated.Stage),
 	})
 	writeJSON(w, http.StatusOK, releaseToResponse(updated, int(count)))
+}
+
+// buildApprovalContext picks the workspace's configured rule for the
+// release's risk tier and bundles it with the caller's role so the
+// service layer can run the eligibility check without re-reading
+// either the workspace row or the member.
+//
+// IsAuthor is currently always false — the data model doesn't yet
+// link a Multica user to a GitHub username, so we can't reliably
+// detect whether the caller authored one of the release's PRs. The
+// CanBeAuthor toggle is plumbed end-to-end so the schema + UI ship
+// in the same migration; the runtime enforcement turns on once a
+// future user.github_login column exists.
+func buildApprovalContext(ws db.Workspace, rel db.ShipRelease, memberRole string) ship.ApprovalContext {
+	return ship.ApprovalContext{
+		Rule:        approvalRuleForRisk(ws, rel.RiskLevel),
+		MemberRole:  memberRole,
+		CanBeAuthor: ws.ShipHubApproverCanBeAuthor,
+		IsAuthor:    false,
+	}
+}
+
+func approvalRuleForRisk(ws db.Workspace, risk db.RiskLevel) string {
+	switch risk {
+	case db.RiskLevelLow:
+		return ws.ShipHubApprovalLow
+	case db.RiskLevelMedium:
+		return ws.ShipHubApprovalMedium
+	case db.RiskLevelHigh:
+		return ws.ShipHubApprovalHigh
+	case db.RiskLevelCritical:
+		return ws.ShipHubApprovalCritical
+	}
+	return ""
 }
 
 // UnverifyRelease — POST /api/releases/{id}/unverify. Reverses

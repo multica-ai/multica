@@ -63,11 +63,12 @@ type RollbackReleaseRequest struct {
 // (or the manual mark_production_deployed escape hatch) will land the
 // linkage and advance to in_production.
 func (h *Handler) PromoteRelease(w http.ResponseWriter, r *http.Request) {
-	rel, _, _, wsID, ok := h.loadReleaseAndProject(w, r)
+	rel, ws, _, wsID, ok := h.loadReleaseAndProject(w, r)
 	if !ok {
 		return
 	}
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(wsID), "workspace not found"); !ok {
+	member, ok := h.requireWorkspaceMember(w, r, uuidToString(wsID), "workspace not found")
+	if !ok {
 		return
 	}
 	userID, _ := requireUserID(w, r)
@@ -78,7 +79,8 @@ func (h *Handler) PromoteRelease(w http.ResponseWriter, r *http.Request) {
 
 	svc := &ship.Service{Q: h.Queries}
 	deps := h.stagingDepsFor(wsID)
-	updated, err := svc.PromoteRelease(r.Context(), rel.ID, requestedBy, deps)
+	approval := buildApprovalContext(ws, rel, member.Role)
+	updated, err := svc.PromoteRelease(r.Context(), rel.ID, requestedBy, approval, deps)
 	if err != nil {
 		switch {
 		case errors.Is(err, ship.ErrReleaseStageMismatch):

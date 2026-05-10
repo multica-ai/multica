@@ -367,7 +367,7 @@ func TestMarkVerified_LowRisk_AnyMember(t *testing.T) {
 	svc := &ship.Service{Q: testHandler.Queries}
 	deps := &ship.StagingDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
 	updated, err := svc.MarkVerified(context.Background(),
-		parseUUID(releaseID), parseUUID(testUserID), "looks good", deps)
+		parseUUID(releaseID), parseUUID(testUserID), "looks good", ship.ApprovalContext{}, deps)
 	if err != nil {
 		t.Fatalf("MarkVerified: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestMarkVerified_HighRisk_RequiresApprover(t *testing.T) {
 	deps := &ship.StagingDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
 
 	_, err := svc.MarkVerified(context.Background(),
-		parseUUID(releaseID), parseUUID(testUserID), "", deps)
+		parseUUID(releaseID), parseUUID(testUserID), "", ship.ApprovalContext{}, deps)
 	if !errors.Is(err, ship.ErrApproverRequired) {
 		t.Fatalf("expected ErrApproverRequired with no approver set, got %v", err)
 	}
@@ -406,7 +406,7 @@ func TestMarkVerified_HighRisk_RequiresApprover(t *testing.T) {
 		t.Fatalf("set approver: %v", err)
 	}
 	updated, err := svc.MarkVerified(context.Background(),
-		parseUUID(releaseID), parseUUID(testUserID), "approved", deps)
+		parseUUID(releaseID), parseUUID(testUserID), "approved", ship.ApprovalContext{}, deps)
 	if err != nil {
 		t.Fatalf("MarkVerified after approver set: %v", err)
 	}
@@ -430,7 +430,7 @@ func TestMarkVerified_HighRisk_NoSmoke_Blocks(t *testing.T) {
 	svc := &ship.Service{Q: testHandler.Queries}
 	deps := &ship.StagingDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
 	_, err := svc.MarkVerified(context.Background(),
-		parseUUID(releaseID), parseUUID(testUserID), "", deps)
+		parseUUID(releaseID), parseUUID(testUserID), "", ship.ApprovalContext{}, deps)
 	if !errors.Is(err, ship.ErrSmokeNotFinished) {
 		t.Fatalf("expected ErrSmokeNotFinished, got %v", err)
 	}
@@ -444,8 +444,8 @@ func TestUnverify_ReturnsToInStaging(t *testing.T) {
 	svc := &ship.Service{Q: testHandler.Queries}
 	deps := &ship.StagingDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
 	if _, err := svc.MarkVerified(context.Background(),
-		parseUUID(releaseID), parseUUID(testUserID), "", deps); err != nil {
-		t.Fatalf("MarkVerified: %v", err)
+		parseUUID(releaseID), parseUUID(testUserID), "", ship.ApprovalContext{}, deps); err != nil {
+		t.Fatalf("MarkVerified for unverify seed: %v", err)
 	}
 
 	updated, err := svc.Unverify(context.Background(),
