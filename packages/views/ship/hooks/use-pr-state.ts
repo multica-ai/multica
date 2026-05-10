@@ -123,6 +123,20 @@ export function deriveShipKanbanColumn(
   // in Phase 5 once we record deploy history per SHA.
   if (inProd) return "done";
 
+  // Bug fix — fall back to release stage when SHA matching has nothing
+  // to say. Squash-merging changes the commit SHA, so a PR's head_sha
+  // never matches main's deploy SHA and the snapshot-based logic above
+  // can't promote merged PRs out of "merged_pre_staging" even after
+  // they've been deployed via a release. The release object tracks
+  // user-intent ("this PR shipped in this release, the release is in
+  // production") which is the source of truth when the snapshot lags.
+  //
+  // Only apply this fallback when SHA-matching had nothing definitive
+  // — if the snapshot says "in production right now" we still trust
+  // that over a stale release stage.
+  const releaseCol = releaseStageToColumn(pr.active_release?.stage);
+  if (releaseCol) return releaseCol;
+
   if (pr.pr_merged_at) {
     const mergedAt = new Date(pr.pr_merged_at).getTime();
     if (Number.isFinite(mergedAt)) {
@@ -136,6 +150,36 @@ export function deriveShipKanbanColumn(
   // Defensive: merged PR with no merged_at timestamp (server bug) lands in
   // pre-staging so it stays visible. Better to show than to drop silently.
   return "merged_pre_staging";
+}
+
+/** Map a release stage to a Kanban column when the snapshot SHA-matching
+ *  path can't place a merged PR. Returns null for stages where the
+ *  release doesn't tell us anything more advanced than the default
+ *  (pre-staging) — those fall through to the merge-age based logic.
+ *
+ *  Defensive against server-driven enum drift (CLAUDE.md "Enum drift
+ *  downgrades, not crashes"): unknown stage strings return null and the
+ *  PR keeps its pre-existing column. */
+function releaseStageToColumn(
+  stage: string | undefined,
+): ShipKanbanColumn | null {
+  switch (stage) {
+    case "in_staging":
+    case "verifying":
+      return "in_staging";
+    case "promoting":
+      return "promoting";
+    case "in_production":
+      return "in_production";
+    case "done":
+    case "rolled_back":
+      return "done";
+    // assembling / merging / cancelled / unknown → no override, let the
+    // age-based default decide ("merged_pre_staging" for recent, "done"
+    // for old).
+    default:
+      return null;
+  }
 }
 
 /**

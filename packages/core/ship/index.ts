@@ -91,3 +91,7 @@ export {
   useShipPrDetailStore,
   useShipPrDetailOpenId,
 } from "./pr-detail-store";
+
+// Persisted per-workspace project-collapse preferences for the Ship
+// Hub landing page. See collapsed-projects-store.ts.
+export { useCollapsedProjects } from "./collapsed-projects-store";

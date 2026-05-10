@@ -5,7 +5,11 @@ import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, AlertCircle, ChevronRight } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
-import { useProjectPullRequests, useSyncProject } from "@multica/core/ship";
+import {
+  useCollapsedProjects,
+  useProjectPullRequests,
+  useSyncProject,
+} from "@multica/core/ship";
 import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -120,14 +124,19 @@ export function ShipProjectSection({ project }: ShipProjectSectionProps) {
 
   const banner = errorBanner ?? fetchErrorBanner;
 
-  // Phase 7e — collapsible per-project sections. With several projects on
-  // the Ship Hub page, the user often only cares about one or two; the
-  // others can be folded so the relevant Kanban + deploy lanes stay
-  // above the fold. State is intentionally local + ephemeral (CLAUDE.md
-  // "Don't persist ephemeral UI state" — collapse on a fresh page load
-  // is fine; the in-memory store survives sync refetches but not
-  // navigation).
-  const [collapsed, setCollapsed] = useState(false);
+  // Phase 7e — collapsible per-project sections. With several projects
+  // on the Ship Hub page, the user often only cares about one or two;
+  // the others can be folded so the relevant Kanban + deploy lanes
+  // stay above the fold.
+  //
+  // State is persisted per-workspace via a Zustand store so the user's
+  // collapse choices survive page reloads and navigation. Treating
+  // this as a preference (like view-mode toggles) rather than
+  // ephemeral state — the original useState reset on every render and
+  // forced the user to re-collapse RC Mobile / Control Panel etc. on
+  // every visit.
+  const collapsed = useCollapsedProjects((s) => s.collapsed.has(project.id));
+  const toggleCollapsed = useCollapsedProjects((s) => s.toggle);
 
   // Summary counts shown in the header (always visible, but most useful
   // when collapsed — they tell the user "is there anything to act on
@@ -158,7 +167,7 @@ export function ShipProjectSection({ project }: ShipProjectSectionProps) {
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
-          onClick={() => setCollapsed((c) => !c)}
+          onClick={() => toggleCollapsed(project.id)}
           className="flex size-6 shrink-0 items-center justify-center rounded hover:bg-muted"
           aria-expanded={!collapsed}
           aria-controls={sectionId}

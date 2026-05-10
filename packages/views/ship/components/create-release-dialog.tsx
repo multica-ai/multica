@@ -74,6 +74,15 @@ const RISK_RANK: Record<string, number> = {
  *  the merge train can't operate on already-merged PRs and tracking-
  *  only mode can't merge open ones. */
 function eligibilityReason(pr: PullRequest): string | null {
+  // A PR that's already in a non-terminal active release is reserved
+  // for that release. The server enforces this with a 400 ("pull
+  // request is already in an active release: PR #N") — we surface it
+  // up front with the existing release title so the user understands
+  // *why* and which release to look at, rather than reading a raw
+  // service-prefixed error after submit.
+  if (pr.active_release && !isTerminalReleaseStage(pr.active_release.stage)) {
+    return `already in active release: ${pr.active_release.title}`;
+  }
   if (pr.state === "merged") {
     // Merged PRs are eligible by construction — they already cleared
     // GitHub's own merge gate. Skip the rest of the open-PR rules.
@@ -87,6 +96,22 @@ function eligibilityReason(pr: PullRequest): string | null {
     return `review: ${pr.review_decision}`;
   }
   return null;
+}
+
+/** Mirrors the backend's IsTerminalStage helper — a release in any
+ *  of these stages is "done" from a deduplication standpoint and a
+ *  PR can re-enter a new release. */
+function isTerminalReleaseStage(stage: string | undefined): boolean {
+  return stage === "done" || stage === "rolled_back" || stage === "cancelled";
+}
+
+/** Strip the Go service-error prefix from a server error message so
+ *  the user sees "pull request is already in an active release: PR
+ *  #299" instead of "release: pull request is already in an active
+ *  release: PR #299". The known prefixes are produced by the
+ *  ship/release service's `fmt.Errorf` calls. */
+function humanizeServerError(message: string): string {
+  return message.replace(/^(release|merge_train|ship): /, "");
 }
 
 /** Auto-suggest a release title from the PR set.
@@ -315,8 +340,8 @@ export function CreateReleaseDialog({
         navigation.push(`/${slug}/ship/release/${resp.release.id}`);
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setSubmitError(msg);
+      const raw = err instanceof Error ? err.message : String(err);
+      setSubmitError(humanizeServerError(raw));
     }
   };
 
