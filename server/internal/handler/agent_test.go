@@ -185,3 +185,26 @@ func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 		t.Fatalf("second CreateAgent with duplicate name: expected 409, got %d: %s", w2.Code, w2.Body.String())
 	}
 }
+
+func TestWorkspaceAlwaysRedactEnv(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings []byte
+		want     bool
+	}{
+		{"nil settings", nil, false},
+		{"empty settings", []byte(`{}`), false},
+		{"false", []byte(`{"always_redact_env": false}`), false},
+		{"true", []byte(`{"always_redact_env": true}`), true},
+		{"invalid json", []byte(`not json`), false},
+		{"other fields only", []byte(`{"theme": "dark"}`), false},
+		{"true among other fields", []byte(`{"theme": "dark", "always_redact_env": true}`), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := workspaceAlwaysRedactEnv(tt.settings); got != tt.want {
+				t.Errorf("workspaceAlwaysRedactEnv(%q) = %v, want %v", tt.settings, got, tt.want)
+			}
+		})
+	}
+}
