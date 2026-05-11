@@ -396,12 +396,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
   }, [issue, issueLoading, onDelete]);
 
-  // Custom hooks — encapsulate timeline, reactions, subscribers
+  // Custom hooks — encapsulate timeline, reactions, subscribers.
+  // Use the resolved UUID (issue.id) for the timeline hook so WS event
+  // comparisons work correctly — event payloads always carry UUIDs, but the
+  // route param `id` may be a human-readable identifier (e.g. "OPE-460")
+  // after the URL canonicalization effect below. Falling back to the raw
+  // `id` for the initial render before the issue detail query resolves.
+  const timelineIssueId = issue?.id ?? id;
   const {
     timeline, loading: timelineLoading,
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
-  } = useIssueTimeline(id, user?.id, requestedCommentId);
+  } = useIssueTimeline(timelineIssueId, user?.id, requestedCommentId);
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
@@ -508,11 +514,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const {
     reactions: issueReactions,
     toggleReaction: handleToggleIssueReaction,
-  } = useIssueReactions(id, user?.id);
+  } = useIssueReactions(timelineIssueId, user?.id);
 
   const {
     subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
-  } = useIssueSubscribers(id, user?.id);
+  } = useIssueSubscribers(timelineIssueId, user?.id);
 
   // Token usage
   const { data: usage } = useQuery(issueUsageOptions(id));
@@ -1188,7 +1194,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 The execution log itself (per-task timeline + past runs)
                 lives in the right panel via ExecutionLogSection — this
                 card is just a header-style "agent is working" anchor. */}
-            <AgentLiveCard key={id} issueId={id} />
+            <AgentLiveCard key={timelineIssueId} issueId={timelineIssueId} />
 
             {/* Timeline entries */}
             {timelineLoading && timelineView.groups.length === 0 ? (
