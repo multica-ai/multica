@@ -288,6 +288,17 @@ if (!gotTheLock) {
       return openExternalSafely(url);
     });
 
+    // IPC: download a file by URL through Electron's native download system.
+    // Unlike shell.openExternal (which opens the URL in the system browser),
+    // webContents.downloadURL shows a native save dialog and downloads the
+    // file directly. This avoids issues where the browser renders HTML files
+    // inline instead of downloading them — a known problem on Linux/Ubuntu
+    // when the system browser handles Content-Type: text/html responses.
+    ipcMain.handle("file:download-url", (_event, url: string) => {
+      if (!mainWindow) return;
+      mainWindow.webContents.downloadURL(url);
+    });
+
     // Sync IPC: app version + normalized OS for preload. Sync (not invoke) so
     // preload can attach the values to `desktopAPI.appInfo` before any renderer
     // code reads them, ensuring the very first HTTP request from the renderer
