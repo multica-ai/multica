@@ -17,8 +17,13 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-multica}
       POSTGRES_USER: ${POSTGRES_USER:-multica}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multica}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+    # Postgres is only reached from the backend container over the
+    # docker network (DATABASE_URL=postgres://...@postgres:5432/...);
+    # publishing to the host port is needless and collides with any
+    # existing local postgres (homebrew, a leftover dev container
+    # from `make db-up`, etc.). Self-hosters who want host access
+    # (for backups/psql) can add their own override file with the
+    # ports: block from previous revisions of this file.
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
