@@ -32,11 +32,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	gh "github.com/multica-ai/multica/server/pkg/github"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -135,7 +137,108 @@ func (s *Service) PromoteRelease(
 		"🚀 Promoted to production · sha=%s · awaiting production deploy",
 		shortSHA(textValue(updated.MergedMainSha)),
 	))
+
+	// Auto-deploy hook: if the production env opted in (auto_deploy=true
+	// AND deploy_workflow_filename is set), fire workflow_dispatch on
+	// the project's repo so the merge-and-promote flow ends in an
+	// actual production deploy instead of "awaiting deploy" forever.
+	// Best-effort: log warnings on failure but don't block the promote
+	// — operators can still click Run Workflow on GH or Mark deployed.
+	s.maybeAutoDispatchProductionDeploy(ctx, updated, requestedBy, deps)
+
 	return updated, nil
+}
+
+// maybeAutoDispatchProductionDeploy fires the production env's
+// workflow_dispatch when auto_deploy is set. No-op (with a debug log)
+// when prerequisites aren't met. Errors don't fail the surrounding
+// PromoteRelease — the user already got the stage transition, and
+// they can recover by clicking Run Workflow on GitHub directly.
+func (s *Service) maybeAutoDispatchProductionDeploy(
+	ctx context.Context,
+	release db.ShipRelease,
+	actor pgtype.UUID,
+	deps *StagingDeps,
+) {
+	if s.Github == nil {
+		slog.Debug("ship: auto-deploy skipped, github client unset",
+			"release_id", uuidString(release.ID))
+		return
+	}
+	envs, err := s.Q.ListDeployEnvironmentsByProject(ctx, release.ProjectID)
+	if err != nil {
+		slog.Warn("ship: auto-deploy lookup envs failed",
+			"release_id", uuidString(release.ID), "error", err)
+		return
+	}
+	var prodEnv *db.DeployEnvironment
+	for i, e := range envs {
+		if e.Kind == db.DeployEnvironmentKindProduction {
+			prodEnv = &envs[i]
+			break
+		}
+	}
+	if prodEnv == nil || !prodEnv.AutoDeploy {
+		return
+	}
+	filename := strings.TrimSpace(textValue(prodEnv.DeployWorkflowFilename))
+	if filename == "" {
+		slog.Info("ship: auto-deploy skipped, no deploy_workflow_filename on prod env",
+			"release_id", uuidString(release.ID), "env_id", uuidString(prodEnv.ID))
+		return
+	}
+	// Resolve repo URL from the project's github_repo resource.
+	resources, err := s.Q.ListProjectResources(ctx, release.ProjectID)
+	if err != nil {
+		slog.Warn("ship: auto-deploy list resources failed",
+			"release_id", uuidString(release.ID), "error", err)
+		return
+	}
+	var repoURL string
+	for _, r := range resources {
+		if r.ResourceType != "github_repo" {
+			continue
+		}
+		if u, err := repoURLFromResource(r.ResourceRef); err == nil {
+			repoURL = u
+			break
+		}
+	}
+	if repoURL == "" {
+		slog.Info("ship: auto-deploy skipped, project has no github_repo resource",
+			"release_id", uuidString(release.ID))
+		return
+	}
+	owner, repo, err := gh.ParseRepoURL(repoURL)
+	if err != nil {
+		slog.Warn("ship: auto-deploy unparseable repo url",
+			"release_id", uuidString(release.ID), "url", repoURL, "error", err)
+		return
+	}
+	branch := strings.TrimSpace(prodEnv.TargetBranch)
+	if branch == "" {
+		branch = "main"
+	}
+	if err := s.Github.DispatchWorkflow(ctx, owner, repo, filename, branch, nil); err != nil {
+		slog.Warn("ship: auto-deploy workflow_dispatch failed",
+			"release_id", uuidString(release.ID),
+			"owner", owner, "repo", repo, "workflow", filename, "ref", branch,
+			"error", err)
+		_, _ = s.insertReleaseEvent(ctx, release.ID, "release_auto_dispatch_failed", actor, map[string]any{
+			"workflow": filename, "ref": branch, "error": err.Error(),
+		})
+		return
+	}
+	slog.Info("ship: auto-deploy dispatched",
+		"release_id", uuidString(release.ID),
+		"owner", owner, "repo", repo, "workflow", filename, "ref", branch)
+	_, _ = s.insertReleaseEvent(ctx, release.ID, "release_auto_dispatched", actor, map[string]any{
+		"workflow": filename, "ref": branch,
+	})
+	postReleaseChannelStaging(deps, ctx, release.ChannelID, fmt.Sprintf(
+		"⚡ Auto-dispatched %s on %s — production deploy starting",
+		filename, branch,
+	))
 }
 
 // LinkProductionDeploy is the webhook-side counterpart to PromoteRelease.

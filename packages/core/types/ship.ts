@@ -118,6 +118,15 @@ export interface DeployEnvironment {
    *  workspaces use this to point each project at its own repo's
    *  workflow file. */
   deploy_workflow_filename?: string | null;
+  /** When true, the release stage transition into this env's deploy
+   *  stage (promoting for production, in_staging for staging) fires
+   *  workflow_dispatch on `deploy_workflow_filename` against the
+   *  project's GitHub repo. Turns Promote into a real one-click
+   *  production deploy — no more "awaiting deploy" forever. Requires
+   *  the workspace's GitHub PAT plus this env's deploy_workflow_filename
+   *  to actually fire; otherwise the dispatch is logged as skipped.
+   *  Defaults to false; opt-in via the Configure deploy env dialog. */
+  auto_deploy?: boolean;
 }
 
 /** Phase 6 — entry returned by GET /api/deploy/adapters. */
@@ -198,6 +207,7 @@ export interface CreateDeployEnvironmentRequest {
   target_url?: string | null;
   auto_promote?: boolean;
   deploy_workflow_filename?: string | null;
+  auto_deploy?: boolean;
 }
 
 export interface UpdateDeployEnvironmentRequest {
@@ -206,6 +216,7 @@ export interface UpdateDeployEnvironmentRequest {
   target_url?: string | null;
   auto_promote?: boolean;
   deploy_workflow_filename?: string | null;
+  auto_deploy?: boolean;
 }
 
 export interface LogDeployRequest {

@@ -646,6 +646,7 @@ type DeployEnvironment struct {
 	UpdatedAt              pgtype.Timestamptz    `json:"updated_at"`
 	AdapterKind            string                `json:"adapter_kind"`
 	DeployWorkflowFilename pgtype.Text           `json:"deploy_workflow_filename"`
+	AutoDeploy             bool                  `json:"auto_deploy"`
 }
 
 type DeployHealthSnapshot struct {

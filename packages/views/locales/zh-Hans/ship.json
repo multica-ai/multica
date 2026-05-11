@@ -284,6 +284,8 @@
     "url_placeholder": "https://app.example.com",
     "auto_promote_label": "预发自动晋升至生产",
     "auto_promote_hint": "Phase 2 功能 — 暂列在此保持各处选项一致。",
+    "auto_deploy_label": "阶段切换时自动触发部署",
+    "auto_deploy_hint": "Promote（或预发部署）发生时，Multica 会对上方文件调用 workflow_dispatch。需配置工作区 GitHub 令牌和部署 Workflow 文件名；否则将跳过派发并记日志。",
     "workflow_filename_label": "部署 Workflow 文件名（可选）",
     "workflow_filename_placeholder": "如 deploy-production.yml",
     "workflow_filename_hint": "覆盖此环境监听的 GitHub Actions workflow 文件名。留空则回退到工作区级设置。",

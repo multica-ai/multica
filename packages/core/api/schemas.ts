@@ -250,6 +250,10 @@ export const DeployEnvironmentSchema = z.object({
   // them parseable, and `parseWithFallback` will surface `undefined`
   // which the UI treats as "fall back to workspace default".
   deploy_workflow_filename: z.string().nullable().optional(),
+  // Per-env opt-in to "fire workflow_dispatch on stage transition into
+  // this env's deploy stage". Older backends (pre-migration 093) omit
+  // this; default to false so older servers behave like tracking-only.
+  auto_deploy: z.boolean().optional().default(false),
 }).loose();
 
 export const ListDeployEnvironmentsResponseSchema = z.object({

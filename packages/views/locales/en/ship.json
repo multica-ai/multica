@@ -287,6 +287,8 @@
     "url_placeholder": "https://app.example.com",
     "auto_promote_label": "Auto-promote staging to production",
     "auto_promote_hint": "Phase 2 feature — visible here so the toggle is consistent across surfaces.",
+    "auto_deploy_label": "Auto-dispatch deploy on stage transition",
+    "auto_deploy_hint": "When Promote (or staging deploy) fires, Multica calls workflow_dispatch on the file above. Needs the workspace GitHub token + Deploy workflow filename set — otherwise the dispatch is skipped with a log.",
     "workflow_filename_label": "Deploy workflow filename (optional)",
     "workflow_filename_placeholder": "e.g. deploy-production.yml",
     "workflow_filename_hint": "Per-env override for the GitHub Actions workflow filename Ship Hub watches. Leave blank to fall back to the workspace-level setting.",

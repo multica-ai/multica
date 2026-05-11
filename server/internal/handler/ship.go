@@ -204,8 +204,15 @@ type deployEnvironmentResponse struct {
 	CurrentDeployedAt      *string `json:"current_deployed_at"`
 	AutoPromote            bool    `json:"auto_promote"`
 	DeployWorkflowFilename *string `json:"deploy_workflow_filename"`
-	CreatedAt              string  `json:"created_at"`
-	UpdatedAt              string  `json:"updated_at"`
+	// AutoDeploy is the per-env opt-in for Multica to fire the
+	// deploy_workflow_filename via workflow_dispatch when this env's
+	// release transitions into its deploy stage (in_staging for
+	// staging, promoting for production). Hides Ship Hub's
+	// tracking-only legacy and turns Promote into a real one-click
+	// production deploy.
+	AutoDeploy bool   `json:"auto_deploy"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
 }
 
 func deployEnvironmentToResponse(e db.DeployEnvironment) deployEnvironmentResponse {
@@ -221,6 +228,7 @@ func deployEnvironmentToResponse(e db.DeployEnvironment) deployEnvironmentRespon
 		CurrentDeployedAt:      timestampToPtr(e.CurrentDeployedAt),
 		AutoPromote:            e.AutoPromote,
 		DeployWorkflowFilename: textToPtr(e.DeployWorkflowFilename),
+		AutoDeploy:             e.AutoDeploy,
 		CreatedAt:              timestampToString(e.CreatedAt),
 		UpdatedAt:              timestampToString(e.UpdatedAt),
 	}
@@ -464,6 +472,11 @@ type CreateDeployEnvironmentRequest struct {
 	TargetURL              *string `json:"target_url"`
 	AutoPromote            *bool   `json:"auto_promote"`
 	DeployWorkflowFilename *string `json:"deploy_workflow_filename"`
+	// AutoDeploy — when true and DeployWorkflowFilename is set, the
+	// release transition into this env's deploy stage fires the
+	// workflow_dispatch on the project's repo. See migration 093 and
+	// the PromoteRelease service hook for the dispatch trigger.
+	AutoDeploy *bool `json:"auto_deploy"`
 }
 
 func (h *Handler) CreateProjectDeployEnvironment(w http.ResponseWriter, r *http.Request) {
@@ -494,6 +507,10 @@ func (h *Handler) CreateProjectDeployEnvironment(w http.ResponseWriter, r *http.
 	if req.AutoPromote != nil {
 		autoPromote = *req.AutoPromote
 	}
+	autoDeploy := false
+	if req.AutoDeploy != nil {
+		autoDeploy = *req.AutoDeploy
+	}
 	env, err := h.Queries.UpsertDeployEnvironment(r.Context(), db.UpsertDeployEnvironmentParams{
 		WorkspaceID:            wsID,
 		ProjectID:              project.ID,
@@ -503,6 +520,7 @@ func (h *Handler) CreateProjectDeployEnvironment(w http.ResponseWriter, r *http.
 		TargetUrl:              ptrToText(req.TargetURL),
 		AutoPromote:            autoPromote,
 		DeployWorkflowFilename: ptrToText(req.DeployWorkflowFilename),
+		AutoDeploy:             autoDeploy,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create deploy environment")
@@ -520,6 +538,7 @@ type UpdateDeployEnvironmentRequest struct {
 	TargetURL              *string `json:"target_url"`
 	AutoPromote            *bool   `json:"auto_promote"`
 	DeployWorkflowFilename *string `json:"deploy_workflow_filename"`
+	AutoDeploy             *bool   `json:"auto_deploy"`
 }
 
 // loadDeployEnvironment resolves the environment ID URL param and verifies
@@ -560,6 +579,7 @@ func (h *Handler) UpdateDeployEnvironment(w http.ResponseWriter, r *http.Request
 		TargetUrl:              ptrToText(req.TargetURL),
 		AutoPromote:            pgBoolPtr(req.AutoPromote),
 		DeployWorkflowFilename: ptrToText(req.DeployWorkflowFilename),
+		AutoDeploy:             pgBoolPtr(req.AutoDeploy),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update deploy environment")

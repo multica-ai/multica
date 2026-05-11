@@ -73,6 +73,12 @@ export function ConfigureDeployEnvDialog({
   const [branch, setBranch] = useState(existing?.target_branch ?? "main");
   const [url, setUrl] = useState(existing?.target_url ?? "");
   const [autoPromote, setAutoPromote] = useState(existing?.auto_promote ?? false);
+  // Per-env opt-in to "fire workflow_dispatch on stage transition into
+  // this env's deploy stage". When true + deploy_workflow_filename is
+  // set, Multica turns Promote into a real one-click production
+  // deploy. Disabled by default so existing tracking-only flows don't
+  // start auto-dispatching unexpectedly.
+  const [autoDeploy, setAutoDeploy] = useState(existing?.auto_deploy ?? false);
   // Per-env override for the GitHub Actions workflow filename the auto-detect
   // poller watches. Empty string means "use the workspace-level setting".
   // The backend distinguishes "unset" (NULL) from "explicit empty" but we
@@ -109,6 +115,7 @@ export function ConfigureDeployEnvDialog({
     setBranch(existing?.target_branch ?? "main");
     setUrl(existing?.target_url ?? "");
     setAutoPromote(existing?.auto_promote ?? false);
+    setAutoDeploy(existing?.auto_deploy ?? false);
     setWorkflowFilename(existing?.deploy_workflow_filename ?? "");
     setError(null);
     setAdapterKind(existing?.adapter_kind ?? "github_actions");
@@ -133,6 +140,7 @@ export function ConfigureDeployEnvDialog({
       target_url: url.trim() || null,
       auto_promote: autoPromote,
       deploy_workflow_filename: workflowFilename.trim() || null,
+      auto_deploy: autoDeploy,
     };
     try {
       await upsert.mutateAsync(payload);
@@ -352,6 +360,22 @@ export function ConfigureDeployEnvDialog({
               checked={autoPromote}
               onCheckedChange={setAutoPromote}
               aria-label={t(($) => $.configure_dialog.auto_promote_label)}
+            />
+          </div>
+
+          <div className="flex items-start justify-between gap-3 rounded-md border bg-muted/20 p-3">
+            <div>
+              <p className="text-sm font-medium">
+                {t(($) => $.configure_dialog.auto_deploy_label)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.configure_dialog.auto_deploy_hint)}
+              </p>
+            </div>
+            <Switch
+              checked={autoDeploy}
+              onCheckedChange={setAutoDeploy}
+              aria-label={t(($) => $.configure_dialog.auto_deploy_label)}
             />
           </div>
 

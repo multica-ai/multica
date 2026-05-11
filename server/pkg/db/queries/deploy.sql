@@ -37,9 +37,9 @@ GROUP BY project_id;
 -- with its own repo's workflow filename.
 INSERT INTO deploy_environment (
     workspace_id, project_id, kind, name, target_branch, target_url,
-    auto_promote, deploy_workflow_filename
+    auto_promote, deploy_workflow_filename, auto_deploy
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
 ON CONFLICT (project_id, kind) DO UPDATE SET
     name                     = EXCLUDED.name,
@@ -47,6 +47,7 @@ ON CONFLICT (project_id, kind) DO UPDATE SET
     target_url               = EXCLUDED.target_url,
     auto_promote             = EXCLUDED.auto_promote,
     deploy_workflow_filename = EXCLUDED.deploy_workflow_filename,
+    auto_deploy              = EXCLUDED.auto_deploy,
     updated_at               = now()
 RETURNING *;
 
@@ -63,6 +64,7 @@ UPDATE deploy_environment SET
     target_url               = sqlc.narg('target_url'),
     auto_promote             = COALESCE(sqlc.narg('auto_promote'), auto_promote),
     deploy_workflow_filename = COALESCE(sqlc.narg('deploy_workflow_filename'), deploy_workflow_filename),
+    auto_deploy              = COALESCE(sqlc.narg('auto_deploy'), auto_deploy),
     updated_at               = now()
 WHERE id = $1
 RETURNING *;
