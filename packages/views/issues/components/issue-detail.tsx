@@ -328,11 +328,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const timelineView = useMemo(() => {
     const topLevel = timeline.filter((e) => e.type === "activity" || !e.parent_id);
     const repliesByParent = new Map<string, TimelineEntry[]>();
+    const commentById = new Map<string, TimelineEntry>();
     for (const e of timeline) {
-      if (e.type === "comment" && e.parent_id) {
-        const list = repliesByParent.get(e.parent_id) ?? [];
-        list.push(e);
-        repliesByParent.set(e.parent_id, list);
+      if (e.type === "comment") {
+        commentById.set(e.id, e);
+        if (e.parent_id) {
+          const list = repliesByParent.get(e.parent_id) ?? [];
+          list.push(e);
+          repliesByParent.set(e.parent_id, list);
+        }
       }
     }
 
@@ -375,7 +379,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
     }
 
-    return { repliesByParent, groups };
+    return { commentById, repliesByParent, groups };
   }, [timeline]);
 
   const {
@@ -1101,6 +1105,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                         issueId={id}
                         entry={entry}
                         allReplies={timelineView.repliesByParent}
+                        commentById={timelineView.commentById}
+                        agents={agents}
+                        issueOpen={issue.status !== "done" && issue.status !== "cancelled"}
                         currentUserId={user?.id}
                         canModerate={canModerateComments}
                         onReply={submitReply}

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { TimelineEntry } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -15,6 +16,7 @@ const mockGetShareableUrl = vi.hoisted(() =>
   vi.fn((path: string) => `https://share.test${path}`),
 );
 const mockCopyMarkdown = vi.hoisted(() => vi.fn());
+const mockRetryAgentComment = vi.hoisted(() => vi.fn());
 
 vi.mock("sonner", () => ({
   toast: {
@@ -51,7 +53,9 @@ vi.mock("@multica/core/hooks/use-file-upload", () => ({
 }));
 
 vi.mock("@multica/core/api", () => ({
-  api: {},
+  api: {
+    retryAgentComment: mockRetryAgentComment,
+  },
 }));
 
 vi.mock("@multica/core/paths", async () => {
@@ -174,26 +178,53 @@ const entry: TimelineEntry = {
   comment_type: "comment",
 };
 
-function renderCommentCard() {
+function renderCommentCard({
+  cardEntry = entry,
+  allReplies = new Map<string, TimelineEntry[]>(),
+  commentById = new Map<string, TimelineEntry>([[cardEntry.id, cardEntry]]),
+  agents = [],
+  issueOpen = true,
+  currentUserId = "user-1",
+}: {
+  cardEntry?: TimelineEntry;
+  allReplies?: Map<string, TimelineEntry[]>;
+  commentById?: Map<string, TimelineEntry>;
+  agents?: Array<{ id: string; owner_id?: string | null }>;
+  issueOpen?: boolean;
+  currentUserId?: string;
+} = {}) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+
   return render(
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <CommentCard
-        issueId="issue-1"
-        entry={entry}
-        allReplies={new Map()}
-        currentUserId="user-1"
-        onReply={async () => {}}
-        onEdit={async () => {}}
-        onDelete={() => {}}
-        onToggleReaction={() => {}}
-      />
-    </I18nProvider>,
+    <QueryClientProvider client={queryClient}>
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <CommentCard
+          issueId="issue-1"
+          entry={cardEntry}
+          allReplies={allReplies}
+          commentById={commentById}
+          agents={agents as never[]}
+          issueOpen={issueOpen}
+          currentUserId={currentUserId}
+          onReply={async () => {}}
+          onEdit={async () => {}}
+          onDelete={() => {}}
+          onToggleReaction={() => {}}
+        />
+      </I18nProvider>
+    </QueryClientProvider>,
   );
 }
 
 describe("CommentCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRetryAgentComment.mockResolvedValue(undefined);
     Object.assign(navigator, {
       clipboard: {
         writeText: mockClipboardWriteText,
@@ -213,5 +244,77 @@ describe("CommentCard", () => {
       "https://share.test/test/issues/issue-1?comment=comment-1",
     );
     expect(mockToastSuccess).toHaveBeenCalled();
+  });
+
+  it("shows retry for a task-run system comment and calls the retry API", async () => {
+    const systemComment: TimelineEntry = {
+      ...entry,
+      id: "agent-system-1",
+      actor_type: "agent",
+      actor_id: "agent-1",
+      comment_type: "system",
+    };
+
+    renderCommentCard({
+      cardEntry: systemComment,
+      commentById: new Map([[systemComment.id, systemComment]]),
+      agents: [{ id: "agent-1", owner_id: "user-1" }],
+    });
+
+    await userEvent.click(screen.getByText("Retry"));
+
+    await waitFor(() => {
+      expect(mockRetryAgentComment).toHaveBeenCalledWith("agent-system-1");
+    });
+    expect(mockToastSuccess).toHaveBeenCalledWith("Agent run queued");
+  });
+
+  it("does not show retry for a non-system agent comment", () => {
+    const agentComment: TimelineEntry = {
+      ...entry,
+      id: "agent-comment-1",
+      actor_type: "agent",
+      actor_id: "agent-1",
+      comment_type: "comment",
+    };
+
+    renderCommentCard({
+      cardEntry: agentComment,
+      commentById: new Map([[agentComment.id, agentComment]]),
+      agents: [{ id: "agent-1", owner_id: "user-1" }],
+    });
+
+    expect(screen.queryByText("Retry")).toBeNull();
+  });
+
+  it("shows retry for a system reply when the current user authored the trigger comment", () => {
+    const memberThreadRoot: TimelineEntry = {
+      ...entry,
+      id: "member-root-1",
+      actor_type: "member",
+      actor_id: "user-1",
+      comment_type: "comment",
+      parent_id: null,
+    };
+    const systemReply: TimelineEntry = {
+      ...entry,
+      id: "agent-system-reply-1",
+      actor_type: "agent",
+      actor_id: "agent-2",
+      comment_type: "system",
+      parent_id: "member-root-1",
+    };
+
+    renderCommentCard({
+      cardEntry: memberThreadRoot,
+      allReplies: new Map([["member-root-1", [systemReply]]]),
+      commentById: new Map([
+        [memberThreadRoot.id, memberThreadRoot],
+        [systemReply.id, systemReply],
+      ]),
+      agents: [{ id: "agent-2", owner_id: "someone-else" }],
+    });
+
+    expect(screen.getByText("Retry")).toBeTruthy();
   });
 });
