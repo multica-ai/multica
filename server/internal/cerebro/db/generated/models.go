@@ -223,6 +223,15 @@ type BudgetState struct {
 	LastUpdated pgtype.Timestamptz `json:"last_updated"`
 }
 
+type CerebroAccount struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Provider      string             `json:"provider"`
+	LoginIdentity string             `json:"login_identity"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroChannelAgentSetting struct {
 	ChannelID  pgtype.UUID        `json:"channel_id"`
 	AgentID    pgtype.UUID        `json:"agent_id"`

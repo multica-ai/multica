@@ -16,6 +16,8 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 account handler import
+	cerebroaccount "github.com/multica-ai/multica/server/internal/cerebro/account"
 	cerebrochannels "github.com/multica-ai/multica/server/internal/cerebro/channels"
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler import
 	cerebrodashboard "github.com/multica-ai/multica/server/internal/cerebro/dashboard"
@@ -180,6 +182,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-groups-routes): JEH-721 workspace groups handler
 	cerebroGroupsHandler := cerebrogroups.New(cerebroQueries, queries, bus)
+	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 workspace accounts handler
+	cerebroAccountHandler := cerebroaccount.New(cerebroQueries, bus)
 
 	r := chi.NewRouter()
 
@@ -406,6 +410,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(cerebro-groups-routes): workspace group CRUD entrypoint.
 					r.Get("/groups", cerebroGroupsHandler.List)
 					r.Post("/groups", cerebroGroupsHandler.Create)
+					// CEREBRO-PATCH(cerebro-account-routes): workspace accounts CRUD.
+					r.Get("/accounts", cerebroAccountHandler.List)
+					r.Post("/accounts", cerebroAccountHandler.Create)
+					r.Get("/accounts/{id}", cerebroAccountHandler.Get)
+					r.Delete("/accounts/{id}", cerebroAccountHandler.Delete)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {

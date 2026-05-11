@@ -56,6 +56,8 @@ import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
 import { useT } from "../../i18n";
+// CEREBRO-PATCH(runtime-detail-accounts): JEH-921 read-only workspace accounts panel
+import { RuntimeAccountsCard } from "@multica/cerebro-runtime";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
   if (
@@ -226,6 +228,8 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               presenceMap={presenceMap}
               agentHref={(id) => paths.agentDetail(id)}
             />
+            {/* CEREBRO-PATCH(runtime-detail-accounts): JEH-921 read-only accounts list */}
+            <RuntimeAccountsCard />
             <DiagnosticsCard
               runtime={runtime}
               cliVersion={cliVersion}

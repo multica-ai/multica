@@ -198,6 +198,20 @@ export interface ImportStarterContentResponse {
   welcome_issue_id: string | null;
 }
 
+// CEREBRO-PATCH(cerebro-account-client): JEH-921 workspace account types.
+export interface CerebroAccount {
+  id: string;
+  workspace_id: string;
+  provider: string;
+  login_identity: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface CreateCerebroAccountRequest {
+  provider: string;
+  login_identity: string;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly statusText: string;
@@ -470,6 +484,27 @@ export class ApiClient {
     await this.fetch(`/api/workspaces/${wsId}/feature-flags/${key}`, {
       method: "PUT",
       body: JSON.stringify({ enabled }),
+    });
+  }
+
+  // CEREBRO-PATCH(cerebro-account-client): JEH-921 workspace accounts CRUD.
+  async listCerebroAccounts(wsId: string): Promise<CerebroAccount[]> {
+    return this.fetch(`/api/workspaces/${wsId}/accounts`);
+  }
+
+  async createCerebroAccount(
+    wsId: string,
+    body: CreateCerebroAccountRequest,
+  ): Promise<CerebroAccount> {
+    return this.fetch(`/api/workspaces/${wsId}/accounts`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteCerebroAccount(wsId: string, id: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/accounts/${id}`, {
+      method: "DELETE",
     });
   }
 
