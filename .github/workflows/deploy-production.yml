@@ -216,31 +216,41 @@ jobs:
           docker compose ${COMPOSE_FILES} up -d --build frontend backend
 
       - name: Health check
-        # Hit the frontend INSIDE the docker network rather than via
-        # the host port mapping. The host port is whatever the operator
-        # set in `.env` (FRONTEND_PORT) plus whatever else lives on
-        # the box; we shouldn't couple the deploy gate to that. The
-        # in-network port is always 3000 (HOSTNAME=0.0.0.0 PORT=3000
-        # set by the frontend Dockerfile).
+        # Curl the published frontend port from the runner. The host
+        # port comes from FRONTEND_PORT in the operator .env (default
+        # 3000); we re-source it here for the same reason as preflight.
+        #
+        # Previous attempts tried docker compose exec + wget inside
+        # the container; the Next.js standalone alpine image doesn't
+        # ship wget, so the command silently returned an empty status
+        # and the deploy waited the full 60s for nothing. Hitting the
+        # exposed port from the host avoids the in-container tooling
+        # problem entirely.
         #
         # We poll for up to ~60s because Next.js can take 5-15s to
         # actually accept traffic after the container reports started.
         run: |
-          export PATH="${DOCKER_PATH_EXTRAS}:${PATH}"
+          if [ -f .env ]; then
+            set -o allexport
+            # shellcheck disable=SC1091
+            . ./.env
+            set +o allexport
+          fi
+          FRONTEND_HOST_PORT="${FRONTEND_PORT:-3000}"
           for i in $(seq 1 30); do
-            code=$(docker compose ${COMPOSE_FILES} exec -T frontend \
-                     sh -c 'wget -qO- -S http://localhost:3000/ 2>&1 | grep -m1 "HTTP/" | awk "{print \$2}"' \
-                   2>/dev/null | tr -d "\r" || echo 000)
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+                     "http://localhost:${FRONTEND_HOST_PORT}/" || echo 000)
             if [ "$code" = "200" ]; then
-              echo "Frontend healthy after ${i} attempts (code=${code})"
+              echo "Frontend healthy after ${i} attempts (code=${code}) on port ${FRONTEND_HOST_PORT}"
               exit 0
             fi
-            echo "Attempt ${i}: code=${code}, retrying in 2s..."
+            echo "Attempt ${i}: code=${code} on port ${FRONTEND_HOST_PORT}, retrying in 2s..."
             sleep 2
           done
           echo "Frontend never returned 200 within 60s; failing deploy."
           # Dump recent backend + frontend logs so the failed run gives
           # us something to grep when triaging.
+          export PATH="${DOCKER_PATH_EXTRAS}:${PATH}"
           docker compose ${COMPOSE_FILES} logs --tail 50 backend frontend || true
           exit 1
 
