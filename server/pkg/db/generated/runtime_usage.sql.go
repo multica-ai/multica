@@ -270,13 +270,14 @@ SELECT
     SUM(cache_write_tokens)::bigint AS cache_write_tokens
 FROM task_usage_daily
 WHERE runtime_id = $1
-  AND bucket_date >= DATE($2::timestamptz)
+  AND bucket_date >= (($3::timestamptz AT TIME ZONE $2::text)::date)
 GROUP BY bucket_date, provider, model
 ORDER BY bucket_date DESC, provider, model
 `
 
 type ListRuntimeUsageDailyParams struct {
 	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	Tz        string             `json:"tz"`
 	Since     pgtype.Timestamptz `json:"since"`
 }
 
@@ -301,16 +302,16 @@ type ListRuntimeUsageDailyRow struct {
 // helper from migration 076).
 //
 // bucket_date is already materialized in the runtime's tz (migration
-// 082), so this query does NOT need @tz; the Go layer must still
-// compute @since as the runtime-local start-of-day cutoff so the
-// comparison lines up with how those buckets were stored.
+// 082). The cutoff still needs @tz because DATE(timestamptz) would cast in
+// the Postgres session timezone; positive-offset runtimes would otherwise
+// include one extra UTC day.
 //
 // The PK on task_usage_daily already collapses to one row per
 // (bucket_date, runtime_id, provider, model), but SUM/GROUP BY is kept
 // so future schema changes (extra dimensions promoted into the table)
 // don't silently change query semantics.
 func (q *Queries) ListRuntimeUsageDaily(ctx context.Context, arg ListRuntimeUsageDailyParams) ([]ListRuntimeUsageDailyRow, error) {
-	rows, err := q.db.Query(ctx, listRuntimeUsageDaily, arg.RuntimeID, arg.Since)
+	rows, err := q.db.Query(ctx, listRuntimeUsageDaily, arg.RuntimeID, arg.Tz, arg.Since)
 	if err != nil {
 		return nil, err
 	}

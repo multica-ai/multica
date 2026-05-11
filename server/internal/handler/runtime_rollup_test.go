@@ -172,6 +172,84 @@ func TestRollupTaskUsageDaily_AggregatesAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRollupTaskUsageDaily_UsesRuntimeTimezone(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, timezone, last_seen_at
+		)
+		VALUES ($1, NULL, 'runtime-tz-rollup', 'cloud', 'runtime-tz-rollup', 'online', '{}'::jsonb, '{}'::jsonb, 'Asia/Shanghai', now())
+		RETURNING id
+	`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type)
+		VALUES ($1, 'runtime tz rollup test', $2, 'member')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	usageAt := time.Date(2020, 6, 15, 18, 0, 0, 0, time.UTC) // 2020-06-16 02:00 Asia/Shanghai
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, created_at)
+		VALUES ($1, $2, $3, 'completed', $4)
+		RETURNING id
+	`, agentID, issueID, runtimeID, usageAt).Scan(&taskID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at, updated_at)
+		VALUES ($1, 'claude', 'claude-3-5-sonnet', 321, 0, $2, $2)
+	`, taskID, usageAt); err != nil {
+		t.Fatalf("insert task_usage: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM task_usage_daily WHERE runtime_id = $1`, runtimeID)
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		SELECT rollup_task_usage_daily_window($1::timestamptz, $2::timestamptz)
+	`, usageAt.Add(-time.Minute), usageAt.Add(time.Minute)); err != nil {
+		t.Fatalf("rollup_task_usage_daily_window: %v", err)
+	}
+
+	var bucketDate string
+	var inputTokens int64
+	if err := testPool.QueryRow(ctx, `
+		SELECT bucket_date::text, input_tokens
+		  FROM task_usage_daily
+		 WHERE runtime_id = $1 AND provider = 'claude' AND model = 'claude-3-5-sonnet'
+	`, runtimeID).Scan(&bucketDate, &inputTokens); err != nil {
+		t.Fatalf("read rolled up row: %v", err)
+	}
+	if bucketDate != "2020-06-16" {
+		t.Fatalf("expected Asia/Shanghai bucket date 2020-06-16, got %s", bucketDate)
+	}
+	if inputTokens != 321 {
+		t.Fatalf("expected rolled up input tokens 321, got %d", inputTokens)
+	}
+}
+
 // TestRollupTaskUsageDaily_WatermarkAdvances verifies the cron entry
 // point: rollup_task_usage_daily() consults task_usage_rollup_state to
 // decide its window, performs the upsert, and bumps the watermark.

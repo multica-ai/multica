@@ -48,13 +48,57 @@ RETURNING *, (xmax = 0) AS inserted;
 
 -- name: UpdateAgentRuntimeTimezone :one
 -- Operator-driven override of the runtime's reporting timezone (MUL-1950).
--- The new value gets picked up by the next rollup tick: any task_usage row
--- that touches a bucket for this runtime after the change will rebuild
--- that bucket under the new tz; existing buckets stay where they were.
 UPDATE agent_runtime
 SET timezone = @timezone, updated_at = now()
 WHERE id = @id
 RETURNING *;
+
+-- name: DeleteTaskUsageDailyForRuntime :execrows
+-- First step of an explicit user timezone edit rebuild. Delete old materialized
+-- rows before re-inserting under the runtime's new timezone.
+DELETE FROM task_usage_daily
+WHERE runtime_id = $1;
+
+-- name: DeleteTaskUsageDailyDirtyForRuntime :execrows
+-- Drop queued dirty keys computed under the old timezone; the ordered rebuild
+-- in the same transaction will write the current aggregate instead.
+DELETE FROM task_usage_daily_dirty
+WHERE runtime_id = $1;
+
+-- name: InsertTaskUsageDailyForRuntime :execrows
+-- Final step of an explicit user timezone edit rebuild. This is intentionally
+-- called only for user edits, not by the migration itself: deploys do not
+-- backfill history, but a user-driven change must not leave old UTC rows next
+-- to newly computed local rows.
+INSERT INTO task_usage_daily AS d (
+    bucket_date, workspace_id, runtime_id, provider, model,
+    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+    event_count
+)
+SELECT
+    DATE(tu.created_at AT TIME ZONE rt.timezone) AS bucket_date,
+    a.workspace_id,
+    atq.runtime_id,
+    tu.provider,
+    tu.model,
+    SUM(tu.input_tokens)::bigint       AS input_tokens,
+    SUM(tu.output_tokens)::bigint      AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint  AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COUNT(*)::bigint                   AS event_count
+  FROM task_usage tu
+  JOIN agent_task_queue atq ON atq.id = tu.task_id
+  JOIN agent            a   ON a.id = atq.agent_id
+  JOIN agent_runtime    rt  ON rt.id = atq.runtime_id
+ WHERE atq.runtime_id = $1
+ GROUP BY 1, 2, 3, 4, 5
+ON CONFLICT (bucket_date, workspace_id, runtime_id, provider, model) DO UPDATE
+    SET input_tokens       = EXCLUDED.input_tokens,
+        output_tokens      = EXCLUDED.output_tokens,
+        cache_read_tokens  = EXCLUDED.cache_read_tokens,
+        cache_write_tokens = EXCLUDED.cache_write_tokens,
+        event_count        = EXCLUDED.event_count,
+        updated_at         = now();
 
 -- name: TouchAgentRuntimeLastSeen :execrows
 -- Bumps last_seen_at on an already-online runtime. Deliberately does NOT

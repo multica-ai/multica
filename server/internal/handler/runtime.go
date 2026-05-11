@@ -118,6 +118,7 @@ func (h *Handler) listRuntimeUsage(ctx context.Context, runtimeID pgtype.UUID, t
 		rows, err := h.Queries.ListRuntimeUsageDaily(ctx, db.ListRuntimeUsageDailyParams{
 			RuntimeID: runtimeID,
 			Since:     since,
+			Tz:        tz,
 		})
 		if err != nil {
 			return nil, err
@@ -456,7 +457,12 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
+	member, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found")
+	if !ok {
+		return
+	}
+	if !canEditRuntime(member, rt) {
+		writeError(w, http.StatusForbidden, "you can only edit your own runtimes")
 		return
 	}
 
@@ -475,7 +481,21 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid IANA timezone")
 			return
 		}
-		updated, err := h.Queries.UpdateAgentRuntimeTimezone(r.Context(), db.UpdateAgentRuntimeTimezoneParams{
+
+		if tz == rt.Timezone {
+			writeJSON(w, http.StatusOK, runtimeToResponse(rt))
+			return
+		}
+
+		tx, err := h.TxStarter.Begin(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update runtime")
+			return
+		}
+		defer tx.Rollback(r.Context())
+
+		qtx := h.Queries.WithTx(tx)
+		updated, err := qtx.UpdateAgentRuntimeTimezone(r.Context(), db.UpdateAgentRuntimeTimezoneParams{
 			ID:       runtimeUUID,
 			Timezone: tz,
 		})
@@ -484,10 +504,37 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to update runtime")
 			return
 		}
+		if _, err := qtx.DeleteTaskUsageDailyForRuntime(r.Context(), runtimeUUID); err != nil {
+			slog.Error("DeleteTaskUsageDailyForRuntime failed", "error", err, "runtime_id", runtimeID)
+			writeError(w, http.StatusInternalServerError, "failed to rebuild runtime usage")
+			return
+		}
+		if _, err := qtx.DeleteTaskUsageDailyDirtyForRuntime(r.Context(), runtimeUUID); err != nil {
+			slog.Error("DeleteTaskUsageDailyDirtyForRuntime failed", "error", err, "runtime_id", runtimeID)
+			writeError(w, http.StatusInternalServerError, "failed to rebuild runtime usage")
+			return
+		}
+		if _, err := qtx.InsertTaskUsageDailyForRuntime(r.Context(), runtimeUUID); err != nil {
+			slog.Error("InsertTaskUsageDailyForRuntime failed", "error", err, "runtime_id", runtimeID)
+			writeError(w, http.StatusInternalServerError, "failed to rebuild runtime usage")
+			return
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			slog.Error("runtime timezone transaction commit failed", "error", err, "runtime_id", runtimeID)
+			writeError(w, http.StatusInternalServerError, "failed to update runtime")
+			return
+		}
 		rt = updated
 	}
 
 	writeJSON(w, http.StatusOK, runtimeToResponse(rt))
+}
+
+func canEditRuntime(member db.Member, rt db.AgentRuntime) bool {
+	if roleAllowed(member.Role, "owner", "admin") {
+		return true
+	}
+	return rt.OwnerID.Valid && uuidToString(rt.OwnerID) == uuidToString(member.UserID)
 }
 
 func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
@@ -543,13 +590,11 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Permission: owner/admin can delete any runtime; members can only delete their own.
-	userID := uuidToString(member.UserID)
-	isAdmin := roleAllowed(member.Role, "owner", "admin")
-	isOwner := rt.OwnerID.Valid && uuidToString(rt.OwnerID) == userID
-	if !isAdmin && !isOwner {
+	if !canEditRuntime(member, rt) {
 		writeError(w, http.StatusForbidden, "you can only delete your own runtimes")
 		return
 	}
+	userID := uuidToString(member.UserID)
 
 	// Check if any active (non-archived) agents are bound to this runtime.
 	activeCount, err := h.Queries.CountActiveAgentsByRuntime(r.Context(), rt.ID)

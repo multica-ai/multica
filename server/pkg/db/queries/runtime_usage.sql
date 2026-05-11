@@ -33,9 +33,9 @@ ORDER BY DATE(tu.created_at AT TIME ZONE @tz::text) DESC, tu.provider, tu.model;
 -- helper from migration 076).
 --
 -- bucket_date is already materialized in the runtime's tz (migration
--- 082), so this query does NOT need @tz; the Go layer must still
--- compute @since as the runtime-local start-of-day cutoff so the
--- comparison lines up with how those buckets were stored.
+-- 082). The cutoff still needs @tz because DATE(timestamptz) would cast in
+-- the Postgres session timezone; positive-offset runtimes would otherwise
+-- include one extra UTC day.
 --
 -- The PK on task_usage_daily already collapses to one row per
 -- (bucket_date, runtime_id, provider, model), but SUM/GROUP BY is kept
@@ -51,7 +51,7 @@ SELECT
     SUM(cache_write_tokens)::bigint AS cache_write_tokens
 FROM task_usage_daily
 WHERE runtime_id = $1
-  AND bucket_date >= DATE(@since::timestamptz)
+  AND bucket_date >= ((sqlc.arg('since')::timestamptz AT TIME ZONE sqlc.arg('tz')::text)::date)
 GROUP BY bucket_date, provider, model
 ORDER BY bucket_date DESC, provider, model;
 

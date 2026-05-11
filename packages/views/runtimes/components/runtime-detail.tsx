@@ -509,7 +509,11 @@ function DiagnosticsCard({
           <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
             {t(($) => $.detail.diagnostics_timezone)}
           </div>
-          <TimezoneEditor runtime={runtime} />
+          {canDelete ? (
+            <TimezoneEditor runtime={runtime} />
+          ) : (
+            <TimezoneReadout runtime={runtime} />
+          )}
         </div>
         {isLocal && (
           <div className="border-t pt-3">
@@ -574,6 +578,20 @@ function browserTimezone(): string {
   } catch {
     return "UTC";
   }
+}
+
+function TimezoneReadout({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  return (
+    <div className="space-y-1.5">
+      <div className="rounded-md border bg-muted/30 px-2 py-1.5 font-mono text-xs">
+        {runtime.timezone || "UTC"}
+      </div>
+      <p className="text-[11px] leading-snug text-muted-foreground">
+        {t(($) => $.detail.timezone_hint)}
+      </p>
+    </div>
+  );
 }
 
 // TimezoneEditor renders the current runtime tz, a dropdown of common zones
