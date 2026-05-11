@@ -275,7 +275,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           className="relative flex flex-1 min-h-full flex-col"
           onMouseDown={handleContainerMouseDown}
         >
-          <EditorContent className="flex-1 min-h-full" editor={editor} />
+          <EditorContent className="flex flex-1 flex-col" editor={editor} />
           {showBubbleMenu && (
             <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
           )}
