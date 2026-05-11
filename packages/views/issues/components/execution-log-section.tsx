@@ -18,6 +18,37 @@ import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
 
+// ─── Agent group coloring ──────────────────────────────────────────────────
+// 8-color palette; each unique agent_id gets a stable color based on
+// first-appearance order (sorted by created_at).
+
+const AGENT_COLORS = [
+  "border-l-blue-500",
+  "border-l-emerald-500",
+  "border-l-amber-500",
+  "border-l-violet-500",
+  "border-l-rose-500",
+  "border-l-cyan-500",
+  "border-l-orange-500",
+  "border-l-fuchsia-500",
+];
+
+function useAgentColorMap(tasks: AgentTask[]): Map<string, string> | null {
+  return useMemo(() => {
+    const map = new Map<string, string>();
+    const sorted = [...tasks].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    );
+    for (const t of sorted) {
+      if (t.agent_id && !map.has(t.agent_id)) {
+        map.set(t.agent_id, AGENT_COLORS[map.size % AGENT_COLORS.length]!);
+      }
+    }
+    // Only show colors when there are multiple agents
+    return map.size > 1 ? map : null;
+  }, [tasks]);
+}
+
 // Mask gradient that fades the trigger-summary text into transparency at
 // the right edge. Mirrors the pattern used by the desktop tab bar
 // (apps/desktop/.../tab-bar.tsx) and the sidebar pin item
@@ -54,6 +85,7 @@ const TRIGGER_MASK_STYLE: React.CSSProperties = {
 
 interface ExecutionLogSectionProps {
   issueId: string;
+  onHighlightComment?: (commentId: string) => void;
 }
 
 // Past-runs sort priority: failed first (needs attention), then
@@ -65,7 +97,7 @@ const PAST_STATUS_RANK: Record<string, number> = {
   completed: 2,
 };
 
-export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
+export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLogSectionProps) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(true);
   const [showPast, setShowPast] = useState(false);
@@ -81,6 +113,8 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
     staleTime: 30_000,
     refetchOnWindowFocus: true,
   });
+
+  const agentColorMap = useAgentColorMap(tasks);
 
   const activeTasks = useMemo(
     () =>
@@ -130,6 +164,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
             open ? "rotate-90" : ""
           }`}
         />
+        <RunStats tasks={pastTasks} />
         {activeTasks.length > 0 && (
           <span className="ml-auto inline-flex items-center gap-1 text-info">
             <span className="h-1.5 w-1.5 rounded-full bg-info animate-pulse" />
@@ -140,7 +175,13 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
       {open && (
         <div className="space-y-0.5 pl-2">
           {activeTasks.map((task) => (
-            <ActiveRow key={task.id} task={task} issueId={issueId} />
+            <ActiveRow
+              key={task.id}
+              task={task}
+              issueId={issueId}
+              colorClass={agentColorMap?.get(task.agent_id)}
+              onHighlightComment={onHighlightComment}
+            />
           ))}
 
           {pastTasks.length > 0 && (
@@ -165,7 +206,12 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
               {showPast && (
                 <div className="mt-0.5 space-y-0.5">
                   {pastTasks.map((task) => (
-                    <PastRow key={task.id} task={task} />
+                    <PastRow
+                      key={task.id}
+                      task={task}
+                      colorClass={agentColorMap?.get(task.agent_id)}
+                      onHighlightComment={onHighlightComment}
+                    />
                   ))}
                 </div>
               )}
@@ -252,7 +298,17 @@ function useStatusLabel(status: AgentTask["status"]): string {
   }
 }
 
-function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
+function ActiveRow({
+  task,
+  issueId,
+  colorClass,
+  onHighlightComment,
+}: {
+  task: AgentTask;
+  issueId: string;
+  colorClass?: string;
+  onHighlightComment?: (commentId: string) => void;
+}) {
   const { t } = useT("issues");
   const [cancelling, setCancelling] = useState(false);
   const tone = STATUS_TONE[task.status];
@@ -275,9 +331,14 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
     }
   };
 
+  const handleTriggerClick =
+    task.trigger_comment_id && onHighlightComment
+      ? () => onHighlightComment(task.trigger_comment_id!)
+      : undefined;
+
   return (
-    <RowShell task={task}>
-      <TriggerText text={trigger} />
+    <RowShell task={task} colorClass={colorClass}>
+      <TriggerText text={trigger} onClick={handleTriggerClick} />
       {/* Status + time always visible — actions append on hover, never
           replace. Same pattern as desktop tab bar / sidebar pins. */}
       <span className="shrink-0 whitespace-nowrap text-xs">
@@ -320,7 +381,15 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 
 // ─── Past row ──────────────────────────────────────────────────────────────
 
-function PastRow({ task }: { task: AgentTask }) {
+function PastRow({
+  task,
+  colorClass,
+  onHighlightComment,
+}: {
+  task: AgentTask;
+  colorClass?: string;
+  onHighlightComment?: (commentId: string) => void;
+}) {
   const { t } = useT("issues");
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
@@ -331,9 +400,14 @@ function PastRow({ task }: { task: AgentTask }) {
       ? failureReasonLabel[task.failure_reason as TaskFailureReason]
       : null;
 
+  const handleTriggerClick =
+    task.trigger_comment_id && onHighlightComment
+      ? () => onHighlightComment(task.trigger_comment_id!)
+      : undefined;
+
   return (
-    <RowShell task={task}>
-      <TriggerText text={trigger} />
+    <RowShell task={task} colorClass={colorClass}>
+      <TriggerText text={trigger} onClick={handleTriggerClick} />
       <span className="shrink-0 whitespace-nowrap text-xs">
         <span className={tone}>{failureLabel ?? label}</span>
         <span className="text-muted-foreground"> · {time}</span>
@@ -349,15 +423,21 @@ function PastRow({ task }: { task: AgentTask }) {
 
 function RowShell({
   task,
+  colorClass,
   children,
 }: {
   task: AgentTask;
+  colorClass?: string;
   children: React.ReactNode;
 }) {
   // `relative` so the absolute-positioned RowActions slot anchors to this
   // row instead of an outer container.
   return (
-    <div className="group relative flex items-center gap-2 rounded px-1 py-1.5 transition-colors hover:bg-accent/40">
+    <div
+      className={`group relative flex items-center gap-2 rounded px-1 py-1.5 transition-colors hover:bg-accent/40${
+        colorClass ? ` border-l-2 ${colorClass}` : ""
+      }`}
+    >
       {task.agent_id ? (
         <ActorAvatar
           actorType="agent"
@@ -377,14 +457,19 @@ function RowShell({
 // transparency in the trailing 12px for the same reason desktop tab /
 // sidebar pin do it: avoids a hard truncate cut against neighbouring
 // content.
-function TriggerText({ text }: { text: string }) {
+function TriggerText({ text, onClick }: { text: string; onClick?: () => void }) {
+  const Tag = onClick ? "button" : "span";
   return (
-    <span
-      className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-xs text-muted-foreground"
+    <Tag
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
+      className={`min-w-0 flex-1 overflow-hidden whitespace-nowrap text-xs text-muted-foreground text-left${
+        onClick ? " hover:underline cursor-pointer" : ""
+      }`}
       style={TRIGGER_MASK_STYLE}
     >
       {text}
-    </span>
+    </Tag>
   );
 }
 
@@ -409,5 +494,39 @@ function RowActions({ children }: { children: React.ReactNode }) {
     >
       {children}
     </div>
+  );
+}
+
+// ─── Run statistics overview ───────────────────────────────────────────────
+// Compact ✓/✗/⊘ counters shown in the section title bar, left of the
+// active-pulse indicator. Only counts terminal statuses.
+function RunStats({ tasks }: { tasks: AgentTask[] }) {
+  const counts = useMemo(() => {
+    let completed = 0;
+    let failed = 0;
+    let cancelled = 0;
+    for (const t of tasks) {
+      if (t.status === "completed") completed++;
+      else if (t.status === "failed") failed++;
+      else if (t.status === "cancelled") cancelled++;
+    }
+    return { completed, failed, cancelled, total: completed + failed + cancelled };
+  }, [tasks]);
+
+  if (counts.total === 0) return null;
+
+  return (
+    <span className="ml-auto flex items-center gap-1.5 text-xs tabular-nums text-muted-foreground">
+      {counts.completed > 0 && (
+        // eslint-disable-next-line i18next/no-literal-string
+        <span className="text-success">{counts.completed}✓</span>
+      )}
+      {counts.failed > 0 && (
+        // eslint-disable-next-line i18next/no-literal-string
+        <span className="text-destructive">{counts.failed}✗</span>
+      )}
+      {/* eslint-disable-next-line i18next/no-literal-string */}
+      {counts.cancelled > 0 && <span>{counts.cancelled}⊘</span>}
+    </span>
   );
 }
