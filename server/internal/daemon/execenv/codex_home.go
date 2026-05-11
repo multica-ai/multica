@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -41,6 +42,9 @@ type CodexHomeOptions struct {
 	// Empty means use runtime.GOOS. Primarily exists so tests can exercise
 	// both macOS and Linux paths deterministically.
 	GOOS string
+	// RuntimeConfig is the agent-level runtime_config JSON from Multica.
+	// Codex consumes only explicitly supported keys from it.
+	RuntimeConfig json.RawMessage
 }
 
 // prepareCodexHome is a thin wrapper around prepareCodexHomeWithOpts kept for
@@ -123,6 +127,10 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// codex_multi_agent.go for the full rationale and escape hatch.
 	if err := ensureCodexMultiAgentConfig(filepath.Join(codexHome, "config.toml"), logger); err != nil {
 		logger.Warn("execenv: codex-home ensure multi-agent config failed", "error", err)
+	}
+
+	if err := ensureCodexRuntimeConfig(filepath.Join(codexHome, "config.toml"), opts.RuntimeConfig); err != nil {
+		logger.Warn("execenv: codex-home ensure runtime config failed", "error", err)
 	}
 
 	return nil

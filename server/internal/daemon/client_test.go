@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -79,6 +80,42 @@ func TestClient_VersionOmittedWhenUnset(t *testing.T) {
 	c := NewClient(srv.URL)
 	if err := c.postJSON(context.Background(), "/api/daemon/test", nil, nil); err != nil {
 		t.Fatalf("postJSON: %v", err)
+	}
+}
+
+func TestClientClaimTaskPreservesAgentRuntimeConfig(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"task": {
+				"id": "task-1",
+				"agent_id": "agent-1",
+				"runtime_id": "runtime-1",
+				"issue_id": "issue-1",
+				"workspace_id": "workspace-1",
+				"agent": {
+					"id": "agent-1",
+					"name": "Codex Agent",
+					"runtime_config": {"model_reasoning_effort": "high"}
+				}
+			}
+		}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	task, err := c.ClaimTask(context.Background(), "runtime-1")
+	if err != nil {
+		t.Fatalf("ClaimTask: %v", err)
+	}
+	if task == nil || task.Agent == nil {
+		t.Fatal("expected claimed task with agent data")
+	}
+	if !json.Valid(task.Agent.RuntimeConfig) {
+		t.Fatalf("runtime_config should be preserved as JSON, got %q", task.Agent.RuntimeConfig)
+	}
+	if !bytes.Contains(task.Agent.RuntimeConfig, []byte(`"model_reasoning_effort"`)) {
+		t.Fatalf("runtime_config missing model_reasoning_effort: %s", task.Agent.RuntimeConfig)
 	}
 }
 

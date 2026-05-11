@@ -1633,11 +1633,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var agentID string
 	var skills []SkillData
 	var instructions string
+	var runtimeConfig json.RawMessage
 	if task.Agent != nil {
 		agentID = task.Agent.ID
 		agentName = task.Agent.Name
 		skills = task.Agent.Skills
 		instructions = task.Agent.Instructions
+		runtimeConfig = task.Agent.RuntimeConfig
 	}
 
 	// Prepare isolated execution environment.
@@ -1649,6 +1651,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentID:                 agentID,
 		AgentName:               agentName,
 		AgentInstructions:       instructions,
+		RuntimeConfig:           runtimeConfig,
 		AgentSkills:             convertSkillsForEnv(skills),
 		Repos:                   convertReposForEnv(task.Repos),
 		ProjectID:               task.ProjectID,
