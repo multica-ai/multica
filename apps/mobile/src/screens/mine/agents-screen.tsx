@@ -458,16 +458,14 @@ function AgentDetailModal({
     ? runtimes.find((item) => item.id === agent.runtime_id) ?? null
     : null;
   const isArchived = !!agent?.archived_at;
-  const isOwner = !!agent && !!currentUserId && agent.owner_id === currentUserId;
   const membership = members.find((member) => member.user_id === currentUserId);
-  const canDuplicate =
+  const isAdminLike = membership?.role === "owner" || membership?.role === "admin";
+  // Mirror the backend canManageAgent rule: agent owner OR workspace admin/owner.
+  const canEdit =
     !!agent &&
-    !isArchived &&
     !!currentUserId &&
-    !!membership &&
-    (agent.owner_id === currentUserId ||
-      membership.role === "owner" ||
-      membership.role === "admin");
+    (isAdminLike || agent.owner_id === currentUserId);
+  const canDuplicate = canEdit && !isArchived;
 
   useEffect(() => {
     if (!open) setActiveTab("overview");
@@ -489,14 +487,14 @@ function AgentDetailModal({
                   onPress={() => void onDuplicate(agent)}
                 />
               ) : null}
-              {isArchived && isOwner ? (
+              {isArchived && canEdit ? (
                 <IconAction
                   accessibilityLabel={t("agents.restore")}
                   icon={RotateCcw}
                   onPress={() => void onRestore(agent)}
                 />
               ) : null}
-              {!isArchived && isOwner ? (
+              {!isArchived && canEdit ? (
                 <IconAction
                   accessibilityLabel={t("agents.archive")}
                   destructive
@@ -546,26 +544,26 @@ function AgentDetailModal({
             <OverviewTab agent={agent} owner={members.find((m) => m.user_id === agent.owner_id) ?? null} runtime={runtime} />
           ) : null}
           {activeTab === "instructions" ? (
-            <InstructionsTab agent={agent} readOnly={!isOwner || isArchived} onUpdate={onUpdate} />
+            <InstructionsTab agent={agent} readOnly={!canEdit || isArchived} onUpdate={onUpdate} />
           ) : null}
           {activeTab === "tasks" ? (
             <TasksTab agent={agent} workspaceId={workspaceId} />
           ) : null}
           {activeTab === "skills" ? (
-            <SkillsTab agent={agent} readOnly={!isOwner || isArchived} workspaceId={workspaceId} />
+            <SkillsTab agent={agent} readOnly={!canEdit || isArchived} workspaceId={workspaceId} />
           ) : null}
           {activeTab === "settings" ? (
             <SettingsTab
               agent={agent}
               currentUserId={currentUserId}
               members={members}
-              readOnly={!isOwner || isArchived}
+              readOnly={!canEdit || isArchived}
               runtimes={runtimes}
               onUpdate={onUpdate}
             />
           ) : null}
           {activeTab === "advanced" ? (
-            <AdvancedTab agent={agent} readOnly={!isOwner || isArchived} onUpdate={onUpdate} />
+            <AdvancedTab agent={agent} readOnly={!canEdit || isArchived} onUpdate={onUpdate} />
           ) : null}
         </ScrollView>
       </Screen>
