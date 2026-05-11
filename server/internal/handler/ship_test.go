@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,16 +25,16 @@ func enableShipHub(t *testing.T, withToken bool) {
 		t.Fatalf("enable ship hub: %v", err)
 	}
 	if withToken {
-		// Seed a settings JSON with a token. We use jsonb_set so any
-		// existing settings are preserved.
+		// Seed a settings JSON with a token. jsonb_set with
+		// create_missing=true only creates the LAST key in path —
+		// intermediate objects must already exist. The legacy
+		// `{ship_hub,github_token}` call silently no-ops when
+		// settings was '{}'. Use jsonb concat instead so the whole
+		// ship_hub container is created in one shot.
 		if _, err := testPool.Exec(ctx, `
 			UPDATE workspace
-			SET settings = jsonb_set(
-				COALESCE(settings, '{}'::jsonb),
-				'{ship_hub,github_token}',
-				to_jsonb('test-token-xyz'::text),
-				true
-			)
+			SET settings = COALESCE(settings, '{}'::jsonb) ||
+				jsonb_build_object('ship_hub', jsonb_build_object('github_token', 'test-token-xyz'))
 			WHERE id = $1
 		`, testWorkspaceID); err != nil {
 			t.Fatalf("seed github token: %v", err)
@@ -366,10 +367,11 @@ func TestShip_ListDeploys_NewestFirst(t *testing.T) {
 		t.Fatalf("insert env: %v", err)
 	}
 	for i, sha := range []string{"sha-1", "sha-2", "sha-3"} {
+		age := fmt.Sprintf("%d seconds", i)
 		_, _ = testPool.Exec(context.Background(), `
 			INSERT INTO deploy (workspace_id, environment_id, ref, sha, status, triggered_at)
-			VALUES ($1, $2, 'main', $3, 'succeeded', now() + ($4 || ' seconds')::interval)
-		`, testWorkspaceID, envID, sha, i)
+			VALUES ($1, $2, 'main', $3, 'succeeded', now() + ($4)::interval)
+		`, testWorkspaceID, envID, sha, age)
 	}
 
 	w := httptest.NewRecorder()
@@ -392,8 +394,15 @@ func TestShip_ListDeploys_NewestFirst(t *testing.T) {
 
 // mustSeedPR inserts a row directly into pull_request. Used by tests that
 // don't want to depend on the GitHub-talking sync path.
+//
+// PG 17 won't reuse a single parameter as both INT (for pr_number) and TEXT
+// (for url/interval string concatenation) — explicit ::text casts aren't
+// enough, so the URL + age offset are formatted in Go and passed as their
+// own parameters.
 func mustSeedPR(t *testing.T, projectID, repoURL string, number int, state string) {
 	t.Helper()
+	url := fmt.Sprintf("https://example.com/%d", number)
+	age := fmt.Sprintf("%d seconds", number)
 	if _, err := testPool.Exec(context.Background(), `
 		INSERT INTO pull_request (
 			workspace_id, project_id, repo_url, pr_number, title, state,
@@ -401,10 +410,10 @@ func mustSeedPR(t *testing.T, projectID, repoURL string, number int, state strin
 			pr_created_at, pr_updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6::pull_request_state,
-			'alice', 'main', 'feat/x', 'sha', 'https://example.com/' || $4,
-			now(), now() + ($4 || ' seconds')::interval
+			'alice', 'main', 'feat/x', 'sha', $7,
+			now(), now() + ($8)::interval
 		)
-	`, testWorkspaceID, projectID, repoURL, number, "PR "+state, state); err != nil {
+	`, testWorkspaceID, projectID, repoURL, number, "PR "+state, state, url, age); err != nil {
 		t.Fatalf("seed PR %d: %v", number, err)
 	}
 }

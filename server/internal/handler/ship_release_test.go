@@ -9,6 +9,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -70,6 +71,9 @@ func enableShipReleaseTest(t *testing.T) {
 // the PR id as a UUID string.
 func seedReleasePR(t *testing.T, projectID, repoURL string, number int) string {
 	t.Helper()
+	headSHA := fmt.Sprintf("sha-%d", number)
+	htmlURL := fmt.Sprintf("https://example.com/%d", number)
+	age := fmt.Sprintf("%d seconds", number)
 	var id string
 	if err := testPool.QueryRow(context.Background(), `
 		INSERT INTO pull_request (
@@ -79,12 +83,12 @@ func seedReleasePR(t *testing.T, projectID, repoURL string, number int) string {
 			pr_created_at, pr_updated_at, risk_level
 		) VALUES (
 			$1, $2, $3, $4, $5, 'open',
-			FALSE, 'alice', 'main', 'feat/x', 'sha-' || $4, 'https://example.com/' || $4,
+			FALSE, 'alice', 'main', 'feat/x', $6, $7,
 			'success', 'APPROVED', 'MERGEABLE',
-			NOW(), NOW() + ($4 || ' seconds')::interval, 'medium'
+			NOW(), NOW() + ($8)::interval, 'medium'
 		)
 		RETURNING id
-	`, testWorkspaceID, projectID, repoURL, number, "Release PR "+repoURL).Scan(&id); err != nil {
+	`, testWorkspaceID, projectID, repoURL, number, "Release PR "+repoURL, headSHA, htmlURL, age).Scan(&id); err != nil {
 		t.Fatalf("seed release PR %d: %v", number, err)
 	}
 	return id

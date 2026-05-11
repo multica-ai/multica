@@ -24,6 +24,15 @@
     "sync_failed_title": "Sync failed",
     "sync_failed_description": "Couldn't fetch the latest pull requests. {{message}}"
   },
+  "project_summary": {
+    "open_title": "{{count}} open",
+    "ready_pill": "{{count}} ready",
+    "ready_title": "{{count}} ready to merge",
+    "blocked_pill": "{{count}} blocked",
+    "blocked_title": "{{count}} blocked (failing CI or conflicts)",
+    "draft_pill": "{{count}} draft",
+    "draft_title": "{{count}} draft"
+  },
   "kanban": {
     "drafted": "Drafted",
     "in_review": "In Review",

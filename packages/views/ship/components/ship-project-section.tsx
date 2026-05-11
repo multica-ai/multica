@@ -199,32 +199,46 @@ export function ShipProjectSection({ project }: ShipProjectSectionProps) {
             quiet for projects with nothing notable. */}
         <span
           className="text-xs text-muted-foreground tabular-nums"
-          title={`${summary.open} open`}
+          title={t(($) => $.project_summary.open_title, {
+            count: summary.open,
+          })}
         >
           {summary.open}
         </span>
         {summary.readyToMerge > 0 && (
           <span
             className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 tabular-nums dark:text-emerald-300"
-            title={`${summary.readyToMerge} ready to merge`}
+            title={t(($) => $.project_summary.ready_title, {
+              count: summary.readyToMerge,
+            })}
           >
-            {summary.readyToMerge} ready
+            {t(($) => $.project_summary.ready_pill, {
+              count: summary.readyToMerge,
+            })}
           </span>
         )}
         {summary.blocked > 0 && (
           <span
             className="rounded border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive tabular-nums"
-            title={`${summary.blocked} blocked (failing CI or conflicts)`}
+            title={t(($) => $.project_summary.blocked_title, {
+              count: summary.blocked,
+            })}
           >
-            {summary.blocked} blocked
+            {t(($) => $.project_summary.blocked_pill, {
+              count: summary.blocked,
+            })}
           </span>
         )}
         {summary.draft > 0 && (
           <span
             className="rounded border border-muted-foreground/30 bg-muted/30 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground tabular-nums"
-            title={`${summary.draft} draft`}
+            title={t(($) => $.project_summary.draft_title, {
+              count: summary.draft,
+            })}
           >
-            {summary.draft} draft
+            {t(($) => $.project_summary.draft_pill, {
+              count: summary.draft,
+            })}
           </span>
         )}
         <div className="ml-auto">

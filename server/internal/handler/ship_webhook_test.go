@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -469,6 +470,8 @@ func TestWebhook_SecretMigration_MovesSettingsToken(t *testing.T) {
 // payloads (every webhook fixture pins head_sha=abc123def4567890).
 func mustSeedPRWithSHA(t *testing.T, projectID, repoURL string, number int, state, headSHA string) {
 	t.Helper()
+	url := fmt.Sprintf("https://example.com/%d", number)
+	age := fmt.Sprintf("%d seconds", number)
 	if _, err := testPool.Exec(context.Background(), `
 		INSERT INTO pull_request (
 			workspace_id, project_id, repo_url, pr_number, title, state,
@@ -476,10 +479,10 @@ func mustSeedPRWithSHA(t *testing.T, projectID, repoURL string, number int, stat
 			pr_created_at, pr_updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6::pull_request_state,
-			'alice', 'main', 'feat/x', $7, 'https://example.com/' || $4,
-			now(), now() + ($4 || ' seconds')::interval
+			'alice', 'main', 'feat/x', $7, $8,
+			now(), now() + ($9)::interval
 		)
-	`, testWorkspaceID, projectID, repoURL, number, "PR "+state, state, headSHA); err != nil {
+	`, testWorkspaceID, projectID, repoURL, number, "PR "+state, state, headSHA, url, age); err != nil {
 		t.Fatalf("seed PR %d: %v", number, err)
 	}
 }

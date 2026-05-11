@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +19,7 @@ func mustSeedPRWithLinkage(t *testing.T, projectID, repoURL string, number int, 
 	if !shipHubMigrationApplied(t) {
 		t.Skip("ship hub not migrated")
 	}
+	url := fmt.Sprintf("https://example.com/%d", number)
 	var prID string
 	q := `
 		INSERT INTO pull_request (
@@ -28,7 +30,7 @@ func mustSeedPRWithLinkage(t *testing.T, projectID, repoURL string, number int, 
 			auto_close_issue_on_merge, source
 		) VALUES (
 			$1, $2, $3, $4, $5, $6::pull_request_state,
-			'alice', 'main', 'feat/x', 'sha', 'https://example.com/' || $4,
+			'alice', 'main', 'feat/x', 'sha', $11,
 			now(), now(),
 			NULLIF($7, '')::uuid, NULLIF($8, '')::uuid,
 			$9, $10
@@ -37,7 +39,7 @@ func mustSeedPRWithLinkage(t *testing.T, projectID, repoURL string, number int, 
 	`
 	if err := testPool.QueryRow(context.Background(), q,
 		testWorkspaceID, projectID, repoURL, number, "PR "+state, state,
-		originatingIssueID, originatingTaskID, autoClose, source,
+		originatingIssueID, originatingTaskID, autoClose, source, url,
 	).Scan(&prID); err != nil {
 		t.Fatalf("seed PR %d: %v", number, err)
 	}
@@ -222,12 +224,12 @@ func TestShipPhase4_PullRequestStacks_TwoLevel(t *testing.T) {
 			pr_created_at, pr_updated_at, source
 		) VALUES (
 			$1, $2, 'https://github.com/foo/bar', $3, 'PR open', 'open',
-			'alice', 'main', $4, 'sha', 'https://example.com/' || $3,
+			'alice', 'main', $4, 'sha', $5,
 			now(), now(), 'multica_human'
 		) RETURNING id
 	`
 	if err := testPool.QueryRow(context.Background(), q,
-		testWorkspaceID, projectID, 50, "feat/a").Scan(&rootID); err != nil {
+		testWorkspaceID, projectID, 50, "feat/a", "https://example.com/50").Scan(&rootID); err != nil {
 		t.Fatalf("seed root: %v", err)
 	}
 	// Child PR: base=feat/a, head=feat/b. stack_parent_pr_id points at root.
@@ -238,12 +240,12 @@ func TestShipPhase4_PullRequestStacks_TwoLevel(t *testing.T) {
 			pr_created_at, pr_updated_at, source, stack_parent_pr_id
 		) VALUES (
 			$1, $2, 'https://github.com/foo/bar', $3, 'PR open child', 'open',
-			'alice', $4, $5, 'sha', 'https://example.com/' || $3,
+			'alice', $4, $5, 'sha', $7,
 			now(), now(), 'multica_human', $6
 		) RETURNING id
 	`
 	if err := testPool.QueryRow(context.Background(), q2,
-		testWorkspaceID, projectID, 51, "feat/a", "feat/b", rootID).Scan(&childID); err != nil {
+		testWorkspaceID, projectID, 51, "feat/a", "feat/b", rootID, "https://example.com/51").Scan(&childID); err != nil {
 		t.Fatalf("seed child: %v", err)
 	}
 

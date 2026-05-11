@@ -24,6 +24,15 @@
     "sync_failed_title": "同步失败",
     "sync_failed_description": "无法获取最新 PR。{{message}}"
   },
+  "project_summary": {
+    "open_title": "{{count}} 个待处理",
+    "ready_pill": "{{count}} 可合并",
+    "ready_title": "{{count}} 个可合并",
+    "blocked_pill": "{{count}} 阻塞",
+    "blocked_title": "{{count}} 个阻塞（CI 失败或冲突）",
+    "draft_pill": "{{count}} 草稿",
+    "draft_title": "{{count}} 个草稿"
+  },
   "kanban": {
     "drafted": "草稿",
     "in_review": "审查中",

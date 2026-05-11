@@ -455,10 +455,12 @@ func seedRollbackPR(t *testing.T, projectID, releaseID string, position int, mer
 			(workspace_id, project_id, repo_url, pr_number, title, state, is_draft,
 			 author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url,
 			 body, ci_status, review_decision, mergeable,
-			 additions, deletions, changed_files, labels)
+			 additions, deletions, changed_files, labels,
+			 pr_created_at, pr_updated_at)
 		 VALUES ($1, $2, 'https://github.com/example/example', $3, 'rollback test', 'open',
 			 false, 'tester', '', 'main', 'feat', 'sha-feat', 'https://example.com',
-			 '', 'success', 'APPROVED', 'MERGEABLE', 0, 0, 0, '[]'::jsonb)
+			 '', 'success', 'APPROVED', 'MERGEABLE', 0, 0, 0, '[]'::jsonb,
+			 NOW(), NOW())
 		 RETURNING id`,
 		testWorkspaceID, projectID, position+9000).Scan(&prID)
 	if err != nil {

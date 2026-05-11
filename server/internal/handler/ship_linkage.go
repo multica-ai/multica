@@ -509,11 +509,19 @@ func (h *Handler) ListProjectPRStacks(w http.ResponseWriter, r *http.Request) {
 	// Build a children-by-parent map and a "is referenced as parent"
 	// set so we can pick the actual roots (rows whose stack_parent_pr_id
 	// is null OR whose parent isn't itself in the open list).
+	//
+	// Two passes: rows arrive ordered by pr_updated_at DESC, so a child
+	// can sit ahead of its parent. Build byID first, then resolve
+	// parent links — otherwise the parent lookup in the second pass
+	// would miss the not-yet-seen root and the child would be
+	// promoted to its own stack.
 	byID := map[string]db.PullRequest{}
+	for _, pr := range rows {
+		byID[uuidToString(pr.ID)] = pr
+	}
 	childrenByParent := map[string][]string{}
 	hasParent := map[string]bool{}
 	for _, pr := range rows {
-		byID[uuidToString(pr.ID)] = pr
 		if pr.StackParentPrID.Valid {
 			pid := uuidToString(pr.StackParentPrID)
 			if _, ok := byID[pid]; ok {
@@ -553,6 +561,14 @@ func (h *Handler) ListProjectPRStacks(w http.ResponseWriter, r *http.Request) {
 func repoSlugFromURL(url string) string {
 	url = strings.TrimSuffix(url, "/")
 	url = strings.TrimSuffix(url, ".git")
+	// SSH form: git@github.com:owner/repo — strip the host:user prefix so
+	// the owner/repo portion lines up with the HTTPS form. Anything before
+	// the last `:` is the SSH user@host; what's after is "owner/repo".
+	if !strings.Contains(url, "//") {
+		if i := strings.LastIndex(url, ":"); i >= 0 {
+			url = url[i+1:]
+		}
+	}
 	parts := strings.Split(url, "/")
 	if len(parts) < 2 {
 		return strings.ToLower(strings.Join(parts, "-"))

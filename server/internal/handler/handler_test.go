@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -146,7 +147,22 @@ func cleanupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) error {
 func newRequest(method, path string, body any) *http.Request {
 	var buf bytes.Buffer
 	if body != nil {
-		json.NewEncoder(&buf).Encode(body)
+		// Three forms callers use:
+		// - struct/map -> JSON-encode via json.Encoder
+		// - []byte (pre-marshaled JSON) -> write raw bytes
+		// - io.Reader (e.g. strings.NewReader of a JSON literal) ->
+		//   stream raw bytes
+		// Without the latter two fast paths the generic Encode call
+		// would base64-encode a []byte or JSON-encode a Reader's
+		// struct fields, producing garbage on the server side.
+		switch v := body.(type) {
+		case []byte:
+			buf.Write(v)
+		case io.Reader:
+			io.Copy(&buf, v)
+		default:
+			json.NewEncoder(&buf).Encode(body)
+		}
 	}
 	req := httptest.NewRequest(method, path, &buf)
 	req.Header.Set("Content-Type", "application/json")
@@ -156,7 +172,13 @@ func newRequest(method, path string, body any) *http.Request {
 }
 
 func withURLParam(req *http.Request, key, value string) *http.Request {
-	rctx := chi.NewRouteContext()
+	// Reuse the existing chi route context if a prior withURLParam call
+	// already attached one — otherwise calls compose destructively
+	// (second key wipes the first).
+	rctx, ok := req.Context().Value(chi.RouteCtxKey).(*chi.Context)
+	if !ok || rctx == nil {
+		rctx = chi.NewRouteContext()
+	}
 	rctx.URLParams.Add(key, value)
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 }

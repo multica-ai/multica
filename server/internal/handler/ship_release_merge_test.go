@@ -202,6 +202,17 @@ func TestMergeTrain_HappyPath_ThreePRs(t *testing.T) {
 	waitFor(t, "stage=in_staging", func() bool {
 		return readReleaseStage(t, releaseID) == "in_staging"
 	})
+	// stage=in_staging is set inside completeMergeTrain BEFORE the
+	// merge_completed event is published — a separate poll is needed
+	// to avoid checking pub.types() between those two operations.
+	waitFor(t, "merge_completed event", func() bool {
+		for _, tp := range pub.types() {
+			if tp == "release:merge_completed" {
+				return true
+			}
+		}
+		return false
+	})
 
 	states := readMergeStates(t, releaseID)
 	for _, prID := range prIDs {

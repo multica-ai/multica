@@ -235,16 +235,16 @@ func TestShipPRDetails_StackChildren(t *testing.T) {
 			pr_created_at, pr_updated_at, source, stack_parent_pr_id
 		) VALUES (
 			$1, $2, 'https://github.com/foo/bar', $3, 'child', 'open',
-			'alice', 'feat/root', $4, 'sha', 'https://example.com/' || $3,
+			'alice', 'feat/root', $4, 'sha', $6,
 			now(), now(), 'multica_human', $5
 		) RETURNING id
 	`
 	if err := testPool.QueryRow(context.Background(), q,
-		testWorkspaceID, projectID, 302, "feat/c2", rootID).Scan(&childB); err != nil {
+		testWorkspaceID, projectID, 302, "feat/c2", rootID, "https://example.com/302").Scan(&childB); err != nil {
 		t.Fatalf("seed childB: %v", err)
 	}
 	if err := testPool.QueryRow(context.Background(), q,
-		testWorkspaceID, projectID, 301, "feat/c1", rootID).Scan(&childA); err != nil {
+		testWorkspaceID, projectID, 301, "feat/c1", rootID, "https://example.com/301").Scan(&childA); err != nil {
 		t.Fatalf("seed childA: %v", err)
 	}
 

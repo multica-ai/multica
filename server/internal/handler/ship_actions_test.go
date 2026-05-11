@@ -673,10 +673,22 @@ func TestActions_SubmitReview_PostsToConversationChannel(t *testing.T) {
 	enableShipHub(t, true)
 	_, prID := seedPRForActions(t, "https://github.com/multica-ai/multica", 204)
 
-	// Attach a fake channel id directly on the PR row so the service
-	// hook fires. Real flow uses GetOrCreatePRConversationChannel; we
-	// shortcut here so the test stays narrow.
-	chanID := pgtype.UUID{Bytes: [16]byte{0xCA, 0xFE, 0xBE, 0xEF}, Valid: true}
+	// Attach a real channel id to the PR row so the service hook
+	// fires. Real flow uses GetOrCreatePRConversationChannel; we
+	// shortcut by inserting a minimal channel row, since the
+	// pull_request.conversation_channel_id column has an FK on
+	// channel.id and rejects synthetic UUIDs.
+	var chanID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO channel (
+			workspace_id, name, kind, visibility,
+			created_by_type, created_by_id
+		)
+		VALUES ($1, $2, 'channel', 'public', 'system', gen_random_uuid())
+		RETURNING id`,
+		testWorkspaceID, "review-channel-"+t.Name()).Scan(&chanID); err != nil {
+		t.Fatalf("insert conversation channel: %v", err)
+	}
 	if _, err := testPool.Exec(context.Background(),
 		`UPDATE pull_request SET conversation_channel_id = $1 WHERE id = $2`,
 		chanID, prID); err != nil {
