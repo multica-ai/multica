@@ -300,6 +300,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, []);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const didHighlightRef = useRef<string | null>(null);
+
+  // Scroll to and briefly highlight a comment — used by ExecutionLogSection
+  // when clicking a comment-triggered run's trigger text.
+  const handleHighlightComment = useCallback((commentId: string) => {
+    const el = document.getElementById(`comment-${commentId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightedId(commentId);
+      setTimeout(() => setHighlightedId(null), 2000);
+    }
+  }, []);
+
   const [clearHistoryDialogOpen, setClearHistoryDialogOpen] = useState(false);
   const clearHistoryMutation = useClearIssueHistory();
 
@@ -667,7 +679,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {/* Execution log — active runs + collapsed past runs. Self-contained;
           owns its own collapse state and WS subscriptions. Hides itself
           when there are no runs to show. */}
-      <ExecutionLogSection issueId={id} />
+      <ExecutionLogSection issueId={id} onHighlightComment={handleHighlightComment} />
 
       {/* Token usage */}
       {usage && usage.task_count > 0 && (

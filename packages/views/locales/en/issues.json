@@ -219,7 +219,8 @@
     "status_running": "Working",
     "status_completed": "Completed",
     "status_failed": "Failed",
-    "status_cancelled": "Cancelled"
+    "status_cancelled": "Cancelled",
+    "filter_placeholder": "Filter runs..."
   },
   "batch": {
     "selected": "{{count}} selected",

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 
 	"strconv"
 	"strings"
@@ -85,10 +86,15 @@ func truncateForSummary(s string, maxRunes int) string {
 	return string(rs[:maxRunes]) + "…"
 }
 
-// buildCommentTriggerSummary fetches the comment content and truncates
-// it for storage on the task row. Returns an invalid pgtype.Text when
-// the comment is missing (deleted / wrong workspace / etc) so the column
-// stays NULL — front-end falls back to a structural label in that case.
+// mentionRe matches markdown mention links like [@name](mention://agent/uuid)
+// so they can be stripped from trigger summaries — the agent name adds noise
+// and is already shown via the avatar in the execution log row.
+var mentionRe = regexp.MustCompile(`\[@[^\]]*\]\(mention://[^)]*\)`)
+
+// buildCommentTriggerSummary fetches the comment content, strips mention
+// syntax, and truncates it for storage on the task row. Returns an invalid
+// pgtype.Text when the comment is missing (deleted / wrong workspace / etc)
+// so the column stays NULL — front-end falls back to a structural label.
 func (s *TaskService) buildCommentTriggerSummary(ctx context.Context, commentID pgtype.UUID) pgtype.Text {
 	if !commentID.Valid {
 		return pgtype.Text{}
@@ -97,7 +103,10 @@ func (s *TaskService) buildCommentTriggerSummary(ctx context.Context, commentID 
 	if err != nil {
 		return pgtype.Text{}
 	}
-	summary := truncateForSummary(comment.Content, triggerSummaryMaxLen)
+	// Strip mention links before truncating — they're visual noise in a summary.
+	cleaned := mentionRe.ReplaceAllString(comment.Content, "")
+	cleaned = strings.TrimSpace(cleaned)
+	summary := truncateForSummary(cleaned, triggerSummaryMaxLen)
 	if summary == "" {
 		return pgtype.Text{}
 	}
