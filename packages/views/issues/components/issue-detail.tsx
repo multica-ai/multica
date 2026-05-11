@@ -267,6 +267,12 @@ class TimelineErrorBoundary extends Component<TimelineErrorBoundaryProps, Timeli
 
 export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
   const { t } = useT("issues");
+  // `issueId` is the raw route param — may be a UUID *or* a human-readable
+  // identifier (e.g. "OPE-460") when the URL has been canonicalized.  We keep
+  // it around only for the initial detail query (the API accepts both formats)
+  // and for URL-related operations.  `resolvedId` (derived below after the
+  // issue loads) is the canonical UUID and must be used for everything that
+  // touches WebSocket event payloads, React Query cache keys, or mutations.
   const id = issueId;
   const router = useNavigation();
   const linkedCommentId = router.searchParams.get("comment")?.trim() || null;
@@ -359,7 +365,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { data: issue = null, isLoading: issueLoading } = useQuery({
     ...issueDetailOptions(wsId, id),
     initialData: () => {
-      const cached = allIssues.find((i) => i.id === id);
+      const cached = allIssues.find((i) => i.id === id || i.identifier === id);
       return cached?.description != null ? cached : undefined;
     },
   });
@@ -396,12 +402,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
   }, [issue, issueLoading, onDelete]);
 
-  // Custom hooks — encapsulate timeline, reactions, subscribers
+  // Custom hooks — encapsulate timeline, reactions, subscribers.
+  //
+  // Resolved UUID: once the detail query loads, `issue.id` is the canonical
+  // UUID returned by the server.  We use it for all WS-aware hooks and query
+  // keys so that event payload comparisons (`comment.issue_id !== issueId`)
+  // always compare UUIDs.  Before the query resolves we fall back to the raw
+  // route param — the API accepts both formats, so the initial fetch works;
+  // WS events arriving before the issue loads are an acceptable edge case
+  // (the refetch-on-mount will pick them up).
+  const resolvedId = issue?.id ?? id;
   const {
     timeline, loading: timelineLoading,
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
-  } = useIssueTimeline(id, user?.id, requestedCommentId);
+  } = useIssueTimeline(resolvedId, user?.id, requestedCommentId);
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
@@ -508,14 +523,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const {
     reactions: issueReactions,
     toggleReaction: handleToggleIssueReaction,
-  } = useIssueReactions(id, user?.id);
+  } = useIssueReactions(resolvedId, user?.id);
 
   const {
     subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
-  } = useIssueSubscribers(id, user?.id);
+  } = useIssueSubscribers(resolvedId, user?.id);
 
   // Token usage
-  const { data: usage } = useQuery(issueUsageOptions(id));
+  const { data: usage } = useQuery(issueUsageOptions(resolvedId));
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
@@ -525,7 +540,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     initialData: () => allIssues.find((i) => i.id === parentIssueId),
   });
   const { data: childIssues = [] } = useQuery({
-    ...childIssuesOptions(wsId, id),
+    ...childIssuesOptions(wsId, resolvedId),
     enabled: !!issue,
   });
   // Parent's children — used to render the "x/y" progress next to the
@@ -599,7 +614,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const handleClearHistory = async () => {
     try {
       const result = await clearHistoryMutation.mutateAsync({
-        issueId: id,
+        issueId: resolvedId,
         clearComments: true,
         clearTasks: true,
       });
@@ -756,7 +771,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {/* Execution log — active runs + collapsed past runs. Self-contained;
           owns its own collapse state and WS subscriptions. Hides itself
           when there are no runs to show. */}
-      <ExecutionLogSection issueId={id} onHighlightComment={handleHighlightComment} />
+      <ExecutionLogSection issueId={resolvedId} onHighlightComment={handleHighlightComment} />
 
       {/* Token usage */}
       {usage && usage.task_count > 0 && (
@@ -967,7 +982,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               onUpdate={(md) => handleUpdateField({ description: md })}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
-              currentIssueId={id}
+              currentIssueId={resolvedId}
             />
 
             <div className="flex items-center gap-1 mt-3">
@@ -1188,7 +1203,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 The execution log itself (per-task timeline + past runs)
                 lives in the right panel via ExecutionLogSection — this
                 card is just a header-style "agent is working" anchor. */}
-            <AgentLiveCard key={id} issueId={id} />
+            <AgentLiveCard key={resolvedId} issueId={resolvedId} />
 
             {/* Timeline entries */}
             {timelineLoading && timelineView.groups.length === 0 ? (
@@ -1217,7 +1232,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   return (
                     <div key={entry.id} id={`comment-${entry.id}`}>
                       <CommentCard
-                        issueId={id}
+                        issueId={resolvedId}
                         entry={entry}
                         replies={timelineView.threadReplies.get(entry.id) ?? EMPTY_REPLIES}
                         commentById={timelineView.commentById}
@@ -1301,7 +1316,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
             {/* Bottom comment input — no avatar, full width */}
             <div className="mt-4">
-              <CommentInput issueId={id} onSubmit={submitComment} />
+              <CommentInput issueId={resolvedId} onSubmit={submitComment} />
             </div>
           </div>
         </div>
