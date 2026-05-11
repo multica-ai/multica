@@ -23,6 +23,7 @@ export const mockWorkspace: Workspace = {
   settings: {},
   repos: [],
   issue_prefix: "TES",
+  invite_token: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -38,6 +39,7 @@ export const mockMembers: MemberWithUser[] = [
     name: "Test User",
     email: "test@multica.ai",
     avatar_url: null,
+    invited_by: null,
   },
 ];
 

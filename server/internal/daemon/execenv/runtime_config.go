@@ -42,6 +42,14 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n\n")
 	}
 
+	// Inject workspace-level context (design guidelines, naming conventions, etc.)
+	// so the agent has project-specific guidance when executing tasks.
+	if ctx.WorkspaceContext != "" {
+		b.WriteString("## Workspace Context\n\n")
+		b.WriteString(ctx.WorkspaceContext)
+		b.WriteString("\n\n")
+	}
+
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Always use `--output json` for all read commands** to get structured data with full IDs.\n\n")
 	b.WriteString("### Read\n")

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus, Users } from "lucide-react";
+import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus, Users, Link, Copy, RefreshCw, Link2Off } from "lucide-react";
 import { ActorAvatar } from "@/components/common/actor-avatar";
 import type { MemberWithUser, MemberRole } from "@/shared/types";
 import { Input } from "@/components/ui/input";
@@ -38,7 +38,7 @@ import {
 import { toast } from "sonner";
 import { useAuthStore } from "@/features/auth";
 import { useWorkspaceStore } from "@/features/workspace";
-import { useWorkspaceSettingsMutations } from "@/features/settings/mutations";
+import { useWorkspaceSettingsMutations, useInviteLinkMutations } from "@/features/settings/mutations";
 
 const roleConfig: Record<MemberRole, { label: string; icon: typeof Crown; description: string }> = {
   owner: { label: "Owner", icon: Crown, description: "Full access, manage all settings" },
@@ -137,6 +137,96 @@ function MemberRow({
   );
 }
 
+/** Invite link section — visible to admin/owner only. */
+function InviteLinkSection() {
+  const workspace = useWorkspaceStore((s) => s.workspace);
+  const { resetInviteLink, disableInviteLink, loadInviteToken, resetting, disabling, loading } =
+    useInviteLinkMutations();
+
+  const inviteUrl = workspace?.invite_token
+    ? `${window.location.origin}/invite/${workspace.invite_token}`
+    : null;
+
+  const handleCopy = () => {
+    if (!inviteUrl) return;
+    navigator.clipboard.writeText(inviteUrl).then(() => toast.success("Link copied"));
+  };
+
+  const handleReset = async () => {
+    try {
+      await resetInviteLink();
+      toast.success("Invite link reset");
+    } catch {
+      toast.error("Failed to reset invite link");
+    }
+  };
+
+  const handleDisable = async () => {
+    try {
+      await disableInviteLink();
+      toast.success("Invite link disabled");
+    } catch {
+      toast.error("Failed to disable invite link");
+    }
+  };
+
+  const handleLoad = async () => {
+    try {
+      await loadInviteToken();
+    } catch {
+      toast.error("Failed to load invite link");
+    }
+  };
+
+  return (
+    <Card>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Link className="h-4 w-4 text-muted-foreground" />
+          <h3 className="text-sm font-medium">Invite link</h3>
+        </div>
+        {inviteUrl === null && workspace?.invite_token === undefined ? (
+          // invite_token not yet loaded — show load button
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Load invite link status</span>
+            <Button size="sm" variant="outline" onClick={handleLoad} disabled={loading}>
+              {loading ? "Loading..." : "Load"}
+            </Button>
+          </div>
+        ) : inviteUrl ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
+              <span className="flex-1 truncate text-xs font-mono text-muted-foreground">{inviteUrl}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={handleCopy}>
+                <Copy className="h-3.5 w-3.5" />
+                Copy
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleReset} disabled={resetting}>
+                <RefreshCw className="h-3.5 w-3.5" />
+                {resetting ? "Resetting..." : "Reset"}
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleDisable} disabled={disabling}>
+                <Link2Off className="h-3.5 w-3.5" />
+                {disabling ? "Disabling..." : "Disable"}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          // invite_token is null — link disabled
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Invite link is disabled.</span>
+            <Button size="sm" variant="outline" onClick={handleReset} disabled={resetting}>
+              {resetting ? "Generating..." : "Generate link"}
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function MembersTab() {
   const user = useAuthStore((s) => s.user);
   const workspace = useWorkspaceStore((s) => s.workspace);
@@ -146,6 +236,7 @@ export function MembersTab() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
   const [memberActionId, setMemberActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
@@ -161,6 +252,7 @@ export function MembersTab() {
   const handleAddMember = async () => {
     if (!workspace) return;
     setInviteLoading(true);
+    setInviteError(null);
     try {
       await createMember({
         email: inviteEmail,
@@ -170,7 +262,13 @@ export function MembersTab() {
       setInviteRole("member");
       toast.success("Member added");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to add member");
+      const msg = e instanceof Error ? e.message : "Failed to add member";
+      // Show contextual hint when the user is not yet registered.
+      if (msg.toLowerCase().includes("not registered")) {
+        setInviteError("This email is not registered. Share the invite link instead.");
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setInviteLoading(false);
     }
@@ -220,36 +318,47 @@ export function MembersTab() {
         </div>
 
         {canManageWorkspace && (
-          <Card>
-            <CardContent className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Plus className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-sm font-medium">Add member</h3>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
-                <Input
-                  type="email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="user@company.com"
-                />
-                <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
-                  <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="member">Member</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    {isOwner && <SelectItem value="owner">Owner</SelectItem>}
-                  </SelectContent>
-                </Select>
-                <Button
-                  onClick={handleAddMember}
-                  disabled={inviteLoading || !inviteEmail.trim()}
-                >
-                  {inviteLoading ? "Adding..." : "Add"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <>
+            <InviteLinkSection />
+
+            <Card>
+              <CardContent className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Plus className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="text-sm font-medium">Add registered member</h3>
+                </div>
+                <p className="text-xs text-muted-foreground">Enter the email of a registered user.</p>
+                <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
+                  <Input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => {
+                      setInviteEmail(e.target.value);
+                      setInviteError(null);
+                    }}
+                    placeholder="user@company.com"
+                  />
+                  <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
+                    <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="member">Member</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      {isOwner && <SelectItem value="owner">Owner</SelectItem>}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    onClick={handleAddMember}
+                    disabled={inviteLoading || !inviteEmail.trim()}
+                  >
+                    {inviteLoading ? "Adding..." : "Add"}
+                  </Button>
+                </div>
+                {inviteError && (
+                  <p className="text-xs text-destructive">{inviteError}</p>
+                )}
+              </CardContent>
+            </Card>
+          </>
         )}
 
         {members.length > 0 ? (
@@ -296,3 +405,4 @@ export function MembersTab() {
     </div>
   );
 }
+

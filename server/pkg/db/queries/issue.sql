@@ -233,3 +233,28 @@ WHERE workspace_id = $1
 GROUP BY assignee_type, assignee_id;
 
 -- SearchIssues: moved to handler (dynamic SQL for multi-word search support).
+
+-- name: ListOpenIssuesForMember :many
+-- Fetches open issues assigned to a member, ordered by priority then due date.
+-- Used by daily review / plan generation services.
+SELECT * FROM issue
+WHERE workspace_id = $1
+  AND assignee_type = 'member'
+  AND assignee_id = $2
+  AND status NOT IN ('done', 'cancelled')
+ORDER BY
+  CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END,
+  due_date ASC NULLS LAST
+LIMIT 20;
+
+-- name: ListRecentlyCompletedIssuesForMember :many
+-- Fetches issues completed by a member after a given timestamp.
+-- Used by daily review generation to summarise what was done today.
+SELECT * FROM issue
+WHERE workspace_id = $1
+  AND assignee_type = 'member'
+  AND assignee_id = $2
+  AND status = 'done'
+  AND updated_at >= $3
+ORDER BY updated_at DESC
+LIMIT 10;

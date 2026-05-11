@@ -6,6 +6,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { useAuthStore } from "@/features/auth";
 import { useNavigationStore } from "@/features/navigation";
 import { useWorkspaceStore } from "@/features/workspace";
+import { GlobalSearchDialog, useSearchStore } from "@/features/search";
 import { usePathname, useRouter } from "@/shared/router";
 import { AppSidebar } from "./app-sidebar";
 import { MobileWorkspaceToolbar } from "./mobile-workspace-toolbar";
@@ -30,6 +31,18 @@ export function DashboardLayout({
   useEffect(() => {
     useNavigationStore.getState().onPathChange(pathname);
   }, [pathname]);
+
+  // Register Cmd+K / Ctrl+K to open global search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        useSearchStore.getState().toggle();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   if (isLoading) {
     return (
@@ -56,6 +69,7 @@ export function DashboardLayout({
           )}
         </div>
       </SidebarInset>
+      <GlobalSearchDialog />
     </SidebarProvider>
   );
 }

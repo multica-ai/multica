@@ -246,13 +246,21 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Include workspace ID and repos so the daemon can set up worktrees.
+	// Include workspace ID, repos, and context so the daemon can set up the
+	// execution environment and inject workspace-level guidance into the agent.
 	if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 		resp.WorkspaceID = uuidToString(issue.WorkspaceID)
-		if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
-			var repos []RepoData
-			if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-				resp.Repos = repos
+		if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil {
+			if ws.Repos != nil {
+				var repos []RepoData
+				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+					resp.Repos = repos
+				}
+			}
+			// Propagate workspace.context so the daemon can inject it into the
+			// agent's runtime config (CLAUDE.md / AGENTS.md).
+			if ws.Context.Valid && ws.Context.String != "" {
+				resp.WorkspaceContext = ws.Context.String
 			}
 		}
 	}

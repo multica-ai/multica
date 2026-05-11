@@ -15,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/ntfy"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/scheduler"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -59,7 +60,7 @@ func main() {
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries, ntfy.New())
 
-	r := NewRouter(pool, hub, bus)
+	r, deps := NewRouter(pool, hub, bus)
 
 	srv := &http.Server{
 		Addr:    ":" + port,
@@ -68,7 +69,11 @@ func main() {
 
 	// Start background sweeper to mark stale runtimes as offline.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
-	go runRuntimeSweeper(sweepCtx, queries, bus)
+	go runRuntimeSweeper(sweepCtx, deps.Queries, bus)
+
+	// Start nightly scheduler for daily review and plan generation.
+	sched := scheduler.New(deps.ReviewSvc, deps.PlanSvc, deps.Queries, scheduler.DefaultConfig())
+	sched.Start(sweepCtx)
 
 	// Graceful shutdown
 	go func() {

@@ -49,7 +49,11 @@ export type WSEventType =
   | "reaction:added"
   | "reaction:removed"
   | "issue_reaction:added"
-  | "issue_reaction:removed";
+  | "issue_reaction:removed"
+  | "time_entry:started"
+  | "time_entry:stopped"
+  | "time_entry:updated"
+  | "time_entry:deleted";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -248,4 +252,20 @@ export interface IssueReactionRemovedPayload {
   emoji: string;
   actor_type: string;
   actor_id: string;
+}
+
+export interface TimeEntryStartedPayload {
+  time_entry: import("./time-entry").TimeEntry;
+}
+
+export interface TimeEntryStoppedPayload {
+  time_entry: import("./time-entry").TimeEntry;
+}
+
+export interface TimeEntryUpdatedPayload {
+  time_entry: import("./time-entry").TimeEntry;
+}
+
+export interface TimeEntryDeletedPayload {
+  time_entry_id: string;
 }

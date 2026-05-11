@@ -50,17 +50,20 @@ import { useAuthStore } from "@/features/auth";
 import { useIssueStore } from "@/features/issues";
 import { STATUS_CONFIG } from "@/features/issues/config";
 import { StatusIcon } from "@/features/issues/components";
+import { useActorName } from "@/features/workspace/hooks";
 import { MobileDetailHeader } from "@/features/layout/components/mobile-detail-header";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Link, useRouter } from "@/shared/router";
-import type { CreateProjectRequest, Project, UpdateProjectRequest } from "@/shared/types";
+import type { CreateProjectRequest, Issue, Project, UpdateProjectRequest } from "@/shared/types";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ProjectProgress } from "./project-progress";
 import { PROJECT_STATUS_CONFIG, PROJECT_STATUS_ORDER } from "../config";
 import {
   useCreateProjectMutation,
   useDeleteProjectMutation,
   useUpdateProjectMutation,
 } from "../mutations";
-import { useProjectsQuery } from "../queries";
+import { useProjectsQuery, useProjectTimeStatsQuery } from "../queries";
 
 function CreateProjectDialog({
   open,
@@ -161,10 +164,12 @@ function ProjectListItem({
   project,
   isSelected,
   onClick,
+  issues,
 }: {
   project: Project;
   isSelected: boolean;
   onClick: () => void;
+  issues: Issue[];
 }) {
   const statusConfig = PROJECT_STATUS_CONFIG[project.status];
 
@@ -189,6 +194,10 @@ function ProjectListItem({
             No description yet
           </div>
         )}
+        {/* Mini progress bar; renders null automatically when there are no active issues */}
+        <div className="mt-1.5">
+          <ProjectProgress issues={issues} compact />
+        </div>
       </div>
       <Badge className={`${statusConfig.badgeBg} ${statusConfig.badgeText}`} variant="secondary">
         {statusConfig.label}
@@ -209,11 +218,15 @@ function ProjectDetailPanel({
   boardHref: string;
 }) {
   const issues = useIssueStore((state) => state.issues);
+  const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
   const [title, setTitle] = useState(project.title);
   const [description, setDescription] = useState(project.description ?? "");
   const [icon, setIcon] = useState(project.icon ?? "📁");
   const [saving, setSaving] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+
+  // Total time logged against issues in this project.
+  const { data: timeStats } = useProjectTimeStatsQuery(project.id);
 
   useEffect(() => {
     setTitle(project.title);
@@ -304,6 +317,49 @@ function ProjectDetailPanel({
         >
           <Trash2 className="h-4 w-4" />
         </Button>
+      </div>
+
+      {/* Progress and lead summary strip */}
+      <div className="border-b px-4 py-3 space-y-3">
+        <ProjectProgress issues={relatedIssues} />
+
+        {/* Time spent row */}
+        {timeStats !== undefined && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Time spent:</span>
+            <span className="font-medium">
+              {timeStats.total_seconds >= 3600
+                ? `${Math.floor(timeStats.total_seconds / 3600)}h ${Math.floor((timeStats.total_seconds % 3600) / 60)}m`
+                : `${Math.floor(timeStats.total_seconds / 60)}m`}
+              {" total"}
+            </span>
+          </div>
+        )}
+
+        {/* Lead row */}
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Lead:</span>
+          {project.lead_type && project.lead_id ? (
+            <>
+              <Avatar size="sm" className="h-6 w-6">
+                {getActorAvatarUrl(project.lead_type, project.lead_id) ? (
+                  <AvatarImage
+                    src={getActorAvatarUrl(project.lead_type, project.lead_id)!}
+                    alt={getActorName(project.lead_type, project.lead_id)}
+                  />
+                ) : null}
+                <AvatarFallback>
+                  {getActorInitials(project.lead_type, project.lead_id)}
+                </AvatarFallback>
+              </Avatar>
+              <span className="text-sm">
+                {getActorName(project.lead_type, project.lead_id)}
+              </span>
+            </>
+          ) : (
+            <span className="text-muted-foreground">No lead</span>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-5">
@@ -416,6 +472,7 @@ export function ProjectsPage({
   const isMobile = useIsMobile();
   const isLoading = useAuthStore((state) => state.isLoading);
   const { data: projects = [], isLoading: projectsLoading } = useProjectsQuery();
+  const allIssues = useIssueStore((state) => state.issues);
   const createProject = useCreateProjectMutation();
   const updateProject = useUpdateProjectMutation();
   const deleteProject = useDeleteProjectMutation();
@@ -590,6 +647,7 @@ export function ProjectsPage({
                   project={project}
                   isSelected={false}
                   onClick={() => handleSelect(project.id)}
+                  issues={allIssues.filter((i) => i.project_id === project.id)}
                 />
               ))}
             </div>
@@ -655,6 +713,7 @@ export function ProjectsPage({
                   project={project}
                   isSelected={project.id === activeSelectedId}
                   onClick={() => handleSelect(project.id)}
+                  issues={allIssues.filter((i) => i.project_id === project.id)}
                 />
               ))}
             </div>

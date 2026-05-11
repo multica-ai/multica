@@ -34,6 +34,12 @@ import { RuntimesPage } from "@/features/runtimes";
 import { ProjectsPage } from "@/features/projects";
 import { ProjectBoardPage } from "@/features/projects/components/project-board-page";
 import { SkillsPage } from "@/features/skills";
+import { MyTimePage } from "@/features/time-tracking/pages/MyTimePage";
+import { MyTimeCalendarPage } from "@/features/time-tracking/pages/MyTimeCalendarPage";
+import { TeamTimePage } from "@/features/time-tracking/pages/TeamTimePage";
+import { PomodoroPage } from "@/features/time-tracking/pages/PomodoroPage";
+import { IssueCalendarPage } from "@/features/issues/components/IssueCalendarPage";
+import { InvitePage } from "@/features/invite";
 
 function LoadingScreen() {
   return (
@@ -276,9 +282,51 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
+const myTimeRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "my-time",
+  component: MyTimePage,
+});
+
+const myTimeCalendarRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "my-time/calendar",
+  component: MyTimeCalendarPage,
+});
+
+const teamTimeRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "team-time",
+  component: TeamTimePage,
+});
+
+const pomodoroRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "pomodoro",
+  component: PomodoroPage,
+});
+
+const issueCalendarRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "calendar",
+  component: IssueCalendarPage,
+});
+
+function InvitePageRoute() {
+  const { token } = inviteRoute.useParams();
+  return <InvitePage token={token} />;
+}
+
+const inviteRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "invite/$token",
+  component: InvitePageRoute,
+});
+
 const routeTree = rootRoute.addChildren([
   homeRoute,
   loginRoute,
+  inviteRoute,
   protectedRoute.addChildren([
     issuesRoute,
     issueDetailRoute,
@@ -298,6 +346,11 @@ const routeTree = rootRoute.addChildren([
     runtimesRoute,
     skillsRoute,
     settingsRoute,
+    myTimeRoute,
+    myTimeCalendarRoute,
+    teamTimeRoute,
+    pomodoroRoute,
+    issueCalendarRoute,
   ]),
 ]);
 

@@ -6,7 +6,8 @@
 
 import pg from "pg";
 
-const API_BASE = process.env.VITE_API_URL ?? `http://localhost:${process.env.PORT ?? "8080"}`;
+const envApiBase = process.env.VITE_API_URL;
+const API_BASE = envApiBase && envApiBase.length > 0 ? envApiBase : `http://localhost:${process.env.PORT ?? "8080"}`;
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://multica:multica@localhost:5432/multica?sslmode=disable";
 
 interface TestWorkspace {
@@ -20,7 +21,10 @@ export class TestApiClient {
   private workspaceId: string | null = null;
   private createdIssueIds: string[] = [];
   private createdProjectIds: string[] = [];
+  private createdTimeEntryIds: string[] = [];
   private user: Record<string, unknown> | null = null;
+  /** Whether a pomodoro session was started during this test (needs reset in cleanup). */
+  private pomodoroSessionActive = false;
 
   async login(email: string, name: string) {
     const client = new pg.Client(DATABASE_URL);
@@ -248,6 +252,109 @@ export class TestApiClient {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
+  // ── Time entry helpers ─────────────────────────────────────────────────────
+
+  /** Start a live timer (no stop_time). Returns the created TimeEntry. */
+  async startTimer(opts?: { issue_id?: string; description?: string }): Promise<Record<string, unknown>> {
+    const res = await this.authedFetch("/api/time-entries", {
+      method: "POST",
+      body: JSON.stringify({
+        start_time: new Date().toISOString(),
+        ...opts,
+      }),
+    });
+    const entry = await res.json();
+    this.createdTimeEntryIds.push(entry.id);
+    return entry;
+  }
+
+  /** Create a finished (manual) time entry. */
+  async createTimeEntry(opts: {
+    start_time: string;
+    stop_time: string;
+    description?: string;
+    issue_id?: string;
+  }): Promise<Record<string, unknown>> {
+    const res = await this.authedFetch("/api/time-entries", {
+      method: "POST",
+      body: JSON.stringify(opts),
+    });
+    const entry = await res.json();
+    this.createdTimeEntryIds.push(entry.id);
+    return entry;
+  }
+
+  /** Stop the currently running timer by entry id. */
+  async stopTimer(entryId: string): Promise<Record<string, unknown>> {
+    const res = await this.authedFetch(`/api/time-entries/${entryId}/stop`, {
+      method: "PATCH",
+    });
+    return res.json();
+  }
+
+  /** Delete a time entry. */
+  async deleteTimeEntry(id: string): Promise<void> {
+    await this.authedFetch(`/api/time-entries/${id}`, { method: "DELETE" });
+    this.createdTimeEntryIds = this.createdTimeEntryIds.filter((tid) => tid !== id);
+  }
+
+  // ── Pomodoro session helpers ───────────────────────────────────────────────
+
+  /** Start (or resume) the user's pomodoro session. */
+  async startPomodoroSession(): Promise<Record<string, unknown>> {
+    const res = await this.authedFetch("/api/pomodoro/start", { method: "POST" });
+    this.pomodoroSessionActive = true;
+    return res.json();
+  }
+
+  /** Pause the running pomodoro session. */
+  async pausePomodoroSession(): Promise<Record<string, unknown>> {
+    const res = await this.authedFetch("/api/pomodoro/pause", { method: "POST" });
+    return res.json();
+  }
+
+  /**
+   * Complete the current work phase — creates a time_entry with type='pomodoro'.
+   * @param opts Optional issue_id and note to attach.
+   */
+  async completePomodoroSession(opts?: {
+    issue_id?: string;
+    note?: string;
+    long_break_after?: number;
+  }): Promise<Record<string, unknown>> {
+    const res = await this.authedFetch("/api/pomodoro/complete", {
+      method: "POST",
+      body: JSON.stringify(opts ?? {}),
+    });
+    return res.json();
+  }
+
+  /** Reset the pomodoro session back to idle. */
+  async resetPomodoroSession(): Promise<void> {
+    await this.authedFetch("/api/pomodoro/reset", { method: "POST" });
+    this.pomodoroSessionActive = false;
+  }
+
+  /** Fetch the current pomodoro session (GET /api/pomodoro/current). */
+  async getCurrentPomodoroSession(): Promise<Record<string, unknown> | null> {
+    const res = await this.authedFetch("/api/pomodoro/current");
+    if (res.status === 404) return null;
+    return res.json();
+  }
+
+  /** Fetch pomodoro history and stats. */
+  async getPomodoroHistory(params?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<Record<string, unknown>> {
+    const query = new URLSearchParams();
+    if (params?.limit !== undefined) query.set("limit", String(params.limit));
+    if (params?.offset !== undefined) query.set("offset", String(params.offset));
+    const qs = query.toString();
+    const res = await this.authedFetch(`/api/pomodoro/history${qs ? `?${qs}` : ""}`);
+    return res.json();
+  }
+
   /** Clean up all issues created during this test. */
   async cleanup() {
     for (const id of this.createdIssueIds) {
@@ -267,6 +374,23 @@ export class TestApiClient {
       }
     }
     this.createdProjectIds = [];
+
+    for (const id of this.createdTimeEntryIds) {
+      try {
+        await this.deleteTimeEntry(id);
+      } catch {
+        /* ignore — may already be deleted */
+      }
+    }
+    this.createdTimeEntryIds = [];
+
+    if (this.pomodoroSessionActive) {
+      try {
+        await this.resetPomodoroSession();
+      } catch {
+        /* ignore — session may already be idle */
+      }
+    }
   }
 
   getToken() {

@@ -1,0 +1,2 @@
+ALTER TABLE member DROP COLUMN IF EXISTS invited_by;
+ALTER TABLE workspace DROP COLUMN IF EXISTS invite_token;

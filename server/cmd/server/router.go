@@ -15,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/llm"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -45,8 +46,18 @@ func allowedOrigins() []string {
 	return origins
 }
 
+// RouterDeps holds services created during router initialization that the server
+// needs for background jobs (scheduler, sweeper, etc.).
+type RouterDeps struct {
+	Queries    *db.Queries
+	ReviewSvc  *service.ReviewService
+	PlanSvc    *service.DailyPlanService
+	StandupSvc *service.StandupService
+}
+
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
-func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Router {
+// It also returns RouterDeps so main can wire up the scheduler and other background jobs.
+func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Router, RouterDeps) {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
@@ -63,6 +74,15 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	}
 
 	h := handler.New(queries, pool, hub, bus, emailSvc, fileStorage, cfSigner)
+
+	// Initialize daily review, plan, and standup handlers.
+	llmClient := llm.NewClient()
+	reviewSvc := service.NewReviewService(queries, llmClient)
+	planSvc := service.NewDailyPlanService(queries, llmClient)
+	standupSvc := service.NewStandupService(queries, llmClient)
+	reviewHandler := handler.NewDailyReviewHandler(reviewSvc)
+	planHandler := handler.NewDailyPlanHandler(planSvc)
+	automationHandler := handler.NewAutomationHandler(queries, standupSvc)
 
 	r := chi.NewRouter()
 
@@ -99,6 +119,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 	r.Post("/auth/send-code", h.SendCode)
 	r.Post("/auth/verify-code", h.VerifyCode)
 
+	// Public invite info (no auth required)
+	r.Get("/api/invite/{token}", h.GetInviteInfo)
+
 	// Daemon API routes (all require a valid token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.Auth(queries))
@@ -132,6 +155,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		r.Patch("/api/me", h.UpdateMe)
 		r.Post("/api/upload-file", h.UploadFile)
 
+		// Join workspace via invite link (requires auth, no workspace membership)
+		r.Post("/api/invite/{token}/join", h.JoinByInviteToken)
+
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
 			r.Post("/", h.CreateWorkspace)
@@ -158,6 +184,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 						r.Patch("/", h.UpdateMember)
 						r.Delete("/", h.DeleteMember)
 					})
+					// Invite link management (admin/owner only)
+					r.Get("/invite-link", h.GetWorkspaceWithInviteToken)
+					r.Post("/invite-link/reset", h.ResetInviteLink)
+					r.Delete("/invite-link", h.DisableInviteLink)
 				})
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
@@ -203,6 +233,23 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
+					// Time entries linked to this issue.
+					r.Post("/time-entries", h.CreateTimeEntry)
+					r.Get("/time-entries", h.ListIssueTimeEntries)
+				})
+			})
+
+			// Time entries (standalone, current user)
+			r.Route("/api/time-entries", func(r chi.Router) {
+				r.Post("/", h.CreateTimeEntry)
+				r.Get("/", h.ListTimeEntries)
+				r.Get("/current", h.GetCurrentTimeEntry)
+				// Workspace-level aggregation for team time review.
+				r.Get("/team-stats", h.GetTeamTimeStats)
+				r.Route("/{entry_id}", func(r chi.Router) {
+					r.Patch("/", h.UpdateTimeEntry)
+					r.Delete("/", h.DeleteTimeEntry)
+					r.Patch("/stop", h.StopTimeEntry)
 				})
 			})
 
@@ -214,6 +261,8 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
+					// Time spent aggregated for this project.
+					r.Get("/time-stats", h.GetProjectTimeStats)
 				})
 			})
 
@@ -300,6 +349,39 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				r.Put("/", h.UpsertNotificationPreference)
 				r.Post("/test", h.TestNotificationPreference)
 			})
+
+			// Daily Reviews
+			r.Route("/api/daily-reviews", func(r chi.Router) {
+				r.Post("/generate", reviewHandler.GenerateReview)
+				r.Get("/today", reviewHandler.GetTodayReview)
+				r.Get("/", reviewHandler.ListReviews)
+				r.Post("/{id}/confirm", reviewHandler.ConfirmReview)
+			})
+
+			// Daily Plans
+			r.Route("/api/daily-plans", func(r chi.Router) {
+				r.Post("/generate", planHandler.GeneratePlan)
+				r.Get("/tomorrow", planHandler.GetTomorrowPlan)
+				r.Get("/", planHandler.ListPlans)
+				r.Post("/{id}/confirm", planHandler.ConfirmPlan)
+			})
+
+			// Automation templates and rules
+			r.Route("/api/automation", func(r chi.Router) {
+				r.Get("/templates", automationHandler.ListTemplates)
+				r.Post("/rules", automationHandler.EnableRule)
+				r.Delete("/rules/{templateId}", automationHandler.DisableRule)
+				r.Post("/rules/{templateId}/run", automationHandler.RunRule)
+			})
+
+			// Pomodoro session persistence
+			ph := handler.NewPomodoroHandler(queries)
+			r.Get("/api/pomodoro/current", ph.GetCurrentPomodoro)
+			r.Get("/api/pomodoro/history", ph.GetPomodoroHistory)
+			r.Post("/api/pomodoro/start", ph.StartPomodoro)
+			r.Post("/api/pomodoro/pause", ph.PausePomodoro)
+			r.Post("/api/pomodoro/complete", ph.CompletePomodoro)
+			r.Post("/api/pomodoro/reset", ph.ResetPomodoro)
 		})
 	})
 
@@ -309,7 +391,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 
 	r.NotFound(newFrontendHandler().ServeHTTP)
 
-	return r
+	deps := RouterDeps{
+		Queries:    queries,
+		ReviewSvc:  reviewSvc,
+		PlanSvc:    planSvc,
+		StandupSvc: standupSvc,
+	}
+	return r, deps
 }
 
 // membershipChecker implements realtime.MembershipChecker using database queries.

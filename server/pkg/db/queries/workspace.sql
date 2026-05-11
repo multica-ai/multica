@@ -36,3 +36,16 @@ RETURNING issue_counter;
 
 -- name: DeleteWorkspace :exec
 DELETE FROM workspace WHERE id = $1;
+
+-- name: GetWorkspaceByInviteToken :one
+SELECT * FROM workspace WHERE invite_token = $1;
+
+-- name: SetWorkspaceInviteToken :one
+UPDATE workspace SET invite_token = $2, updated_at = now() WHERE id = $1 RETURNING *;
+
+-- name: ClearWorkspaceInviteToken :one
+UPDATE workspace SET invite_token = NULL, updated_at = now() WHERE id = $1 RETURNING *;
+
+-- name: ListAllWorkspaces :many
+-- Fetches all workspaces. Used by the nightly scheduler.
+SELECT * FROM workspace ORDER BY created_at ASC;

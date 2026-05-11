@@ -377,3 +377,29 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventProjectDeleted, workspaceID, actorType, actorID, map[string]any{"project_id": id})
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// ProjectTimeStatsResponse is returned by GET /api/projects/:id/time-stats.
+type ProjectTimeStatsResponse struct {
+	TotalSeconds int64 `json:"total_seconds"`
+}
+
+// GetProjectTimeStats handles GET /api/projects/:id/time-stats.
+// Returns the total stopped time (in seconds) for all time entries linked to issues in this project.
+func (h *Handler) GetProjectTimeStats(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	project, ok := h.loadProjectForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	totalSeconds, err := h.Queries.SumTimeEntriesForProject(r.Context(), db.SumTimeEntriesForProjectParams{
+		ProjectID:   project.ID,
+		WorkspaceID: project.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get project time stats")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ProjectTimeStatsResponse{TotalSeconds: totalSeconds})
+}

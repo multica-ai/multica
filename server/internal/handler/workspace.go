@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -39,6 +41,9 @@ type WorkspaceResponse struct {
 	Settings    any     `json:"settings"`
 	Repos       any     `json:"repos"`
 	IssuePrefix string  `json:"issue_prefix"`
+	// InviteToken is only populated for admin/owner callers via dedicated endpoints.
+	// It is omitted (null) from general workspace responses.
+	InviteToken *string `json:"invite_token"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
 }
@@ -67,9 +72,18 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		Settings:    settings,
 		Repos:       repos,
 		IssuePrefix: w.IssuePrefix,
+		InviteToken: nil, // never expose invite token in general responses
 		CreatedAt:   timestampToString(w.CreatedAt),
 		UpdatedAt:   timestampToString(w.UpdatedAt),
 	}
+}
+
+// workspaceToResponseWithToken builds a WorkspaceResponse including the invite token.
+// Only used in admin/owner-facing invite-link management endpoints.
+func workspaceToResponseWithToken(w db.Workspace) WorkspaceResponse {
+	resp := workspaceToResponse(w)
+	resp.InviteToken = textToPtr(w.InviteToken)
+	return resp
 }
 
 type MemberResponse struct {
@@ -289,6 +303,7 @@ type MemberWithUserResponse struct {
 	Name        string  `json:"name"`
 	Email       string  `json:"email"`
 	AvatarURL   *string `json:"avatar_url"`
+	InvitedBy   *string `json:"invited_by"`
 }
 
 func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
@@ -311,6 +326,7 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 			Name:        m.UserName,
 			Email:       m.UserEmail,
 			AvatarURL:   textToPtr(m.UserAvatarUrl),
+			InvitedBy:   uuidToPtr(m.InvitedBy),
 		}
 	}
 
@@ -332,6 +348,7 @@ func memberWithUserResponse(member db.Member, user db.User) MemberWithUserRespon
 		Name:        user.Name,
 		Email:       user.Email,
 		AvatarURL:   textToPtr(user.AvatarUrl),
+		InvitedBy:   uuidToPtr(member.InvitedBy),
 	}
 }
 
@@ -381,25 +398,19 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 	user, err := h.Queries.GetUserByEmail(r.Context(), email)
 	if err != nil {
 		if isNotFound(err) {
-			// Auto-create user with email so they can be invited before signing up
-			user, err = h.Queries.CreateUser(r.Context(), db.CreateUserParams{
-				Name:  email,
-				Email: email,
-			})
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to create user")
-				return
-			}
-		} else {
-			writeError(w, http.StatusInternalServerError, "failed to load user")
+			writeError(w, http.StatusNotFound, "user with this email is not registered")
 			return
 		}
+		writeError(w, http.StatusInternalServerError, "failed to load user")
+		return
 	}
 
-	member, err := h.Queries.CreateMember(r.Context(), db.CreateMemberParams{
+	requesterUserID := requestUserID(r)
+	member, err := h.Queries.CreateMemberWithInvitedBy(r.Context(), db.CreateMemberWithInvitedByParams{
 		WorkspaceID: parseUUID(workspaceID),
 		UserID:      user.ID,
 		Role:        role,
+		InvitedBy:   parseUUID(requesterUserID),
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -412,12 +423,11 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("member added", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "email", email, "role", role)...)
-	userID := requestUserID(r)
 	eventPayload := map[string]any{"member": memberWithUserResponse(member, user)}
 	if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID)); err == nil {
 		eventPayload["workspace_name"] = ws.Name
 	}
-	h.publish(protocol.EventMemberAdded, workspaceID, "member", userID, eventPayload)
+	h.publish(protocol.EventMemberAdded, workspaceID, "member", requesterUserID, eventPayload)
 
 	writeJSON(w, http.StatusCreated, memberWithUserResponse(member, user))
 }
@@ -595,4 +605,159 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// generateInviteToken creates a random hex token for invite links.
+func generateInviteToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// GetInviteInfo returns basic workspace info for a given invite token.
+// Public endpoint — no authentication required.
+func (h *Handler) GetInviteInfo(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	ws, err := h.Queries.GetWorkspaceByInviteToken(r.Context(), pgtype.Text{String: token, Valid: true})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "invalid or disabled invite link")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":   uuidToString(ws.ID),
+		"name": ws.Name,
+		"slug": ws.Slug,
+	})
+}
+
+// JoinByInviteToken adds the authenticated user to the workspace identified by the invite token.
+// Idempotent: already-members receive 200 OK with their existing membership.
+func (h *Handler) JoinByInviteToken(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	ws, err := h.Queries.GetWorkspaceByInviteToken(r.Context(), pgtype.Text{String: token, Valid: true})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "invalid or disabled invite link")
+		return
+	}
+
+	// Idempotent: if already a member, return 200 with existing membership.
+	existing, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+		UserID:      parseUUID(userID),
+		WorkspaceID: ws.ID,
+	})
+	if err == nil {
+		user, err := h.Queries.GetUser(r.Context(), existing.UserID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load user")
+			return
+		}
+		writeJSON(w, http.StatusOK, memberWithUserResponse(existing, user))
+		return
+	}
+
+	// Add as a regular member; invited_by is NULL because the user self-joined.
+	member, err := h.Queries.CreateMemberWithInvitedBy(r.Context(), db.CreateMemberWithInvitedByParams{
+		WorkspaceID: ws.ID,
+		UserID:      parseUUID(userID),
+		Role:        "member",
+		InvitedBy:   pgtype.UUID{Valid: false},
+	})
+	if err != nil {
+		if isUniqueViolation(err) {
+			// Race condition: already joined between the check and the insert.
+			// Fetch and return the existing membership.
+			existing, ferr := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+				UserID:      parseUUID(userID),
+				WorkspaceID: ws.ID,
+			})
+			if ferr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to load member")
+				return
+			}
+			user, ferr := h.Queries.GetUser(r.Context(), existing.UserID)
+			if ferr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to load user")
+				return
+			}
+			writeJSON(w, http.StatusOK, memberWithUserResponse(existing, user))
+			return
+		}
+		slog.Warn("join by invite token failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", uuidToString(ws.ID), "user_id", userID)...)
+		writeError(w, http.StatusInternalServerError, "failed to join workspace")
+		return
+	}
+
+	user, err := h.Queries.GetUser(r.Context(), member.UserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load user")
+		return
+	}
+
+	slog.Info("member joined via invite link", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", uuidToString(ws.ID), "user_id", userID)...)
+	workspaceID := uuidToString(ws.ID)
+	eventPayload := map[string]any{"member": memberWithUserResponse(member, user)}
+	eventPayload["workspace_name"] = ws.Name
+	h.publish(protocol.EventMemberAdded, workspaceID, "member", userID, eventPayload)
+
+	writeJSON(w, http.StatusCreated, memberWithUserResponse(member, user))
+}
+
+// ResetInviteLink generates a new invite token for the workspace.
+// Requires admin or owner role.
+func (h *Handler) ResetInviteLink(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "id")
+
+	token, err := generateInviteToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate invite token")
+		return
+	}
+
+	ws, err := h.Queries.SetWorkspaceInviteToken(r.Context(), db.SetWorkspaceInviteTokenParams{
+		ID:          parseUUID(workspaceID),
+		InviteToken: pgtype.Text{String: token, Valid: true},
+	})
+	if err != nil {
+		slog.Warn("reset invite link failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to reset invite link")
+		return
+	}
+
+	slog.Info("invite link reset", append(logger.RequestAttrs(r), "workspace_id", workspaceID)...)
+	writeJSON(w, http.StatusOK, workspaceToResponseWithToken(ws))
+}
+
+// DisableInviteLink removes the invite token, disabling the invite link.
+// Requires admin or owner role.
+func (h *Handler) DisableInviteLink(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "id")
+
+	ws, err := h.Queries.ClearWorkspaceInviteToken(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		slog.Warn("disable invite link failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to disable invite link")
+		return
+	}
+
+	slog.Info("invite link disabled", append(logger.RequestAttrs(r), "workspace_id", workspaceID)...)
+	writeJSON(w, http.StatusOK, workspaceToResponseWithToken(ws))
+}
+
+// GetWorkspaceWithInviteToken returns the workspace including the invite token for admin/owner callers.
+func (h *Handler) GetWorkspaceWithInviteToken(w http.ResponseWriter, r *http.Request) {
+	id := workspaceIDFromURL(r, "id")
+
+	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(id))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, workspaceToResponseWithToken(ws))
 }
