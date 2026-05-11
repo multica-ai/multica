@@ -6,12 +6,20 @@ import { createMarkdownPasteExtension } from "./markdown-paste";
 
 interface FakeClipboard {
   files: never[];
+  items?: Array<{ kind: string; getAsFile: () => File | null }>;
   getData: (type: string) => string;
 }
 
-function fakePasteEvent(text: string, html?: string) {
+function fakePasteEvent(
+  text: string,
+  html?: string,
+  options?: {
+    items?: Array<{ kind: string; getAsFile: () => File | null }>;
+  },
+) {
   const data: FakeClipboard = {
     files: [],
+    items: options?.items,
     getData: (type) =>
       type === "text/plain" ? text : type === "text/html" ? (html ?? "") : "",
   };
@@ -190,5 +198,26 @@ describe("markdownPaste — code block context", () => {
 
     expectLiteralPaste(editor, text);
     expect(parseJsonSpy).not.toHaveBeenCalled();
+  });
+
+  it("defers to file upload when clipboard items contain an image file", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    const screenshot = new File(["x"], "paste.png", { type: "image/png" });
+    const event = fakePasteEvent("", "", {
+      items: [{ kind: "file", getAsFile: () => screenshot }],
+    });
+    const currentEditor = editor;
+
+    const handled =
+      currentEditor.view.someProp("handlePaste", (handler) =>
+        handler(currentEditor.view, event, currentEditor.view.state.selection.content()),
+      ) === true;
+
+    // markdownPaste should return false (defers to fileUpload which is not loaded in this test)
+    expect(handled).toBe(false);
   });
 });
