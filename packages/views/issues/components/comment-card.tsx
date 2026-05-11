@@ -1,7 +1,8 @@
 "use client";
 
 import { memo, useCallback, useRef, useState } from "react";
-import { ChevronRight, Copy, Download, FileText, Link2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, Download, FileText, Link2, MoreHorizontal, Pencil, RotateCw, Trash2 } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Card } from "@multica/ui/components/ui/card";
@@ -35,6 +36,8 @@ import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, us
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
+import { issueKeys } from "@multica/core/issues/queries";
+import type { Agent } from "@multica/core/types/agent";
 import { useNavigation } from "../../navigation";
 import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
@@ -49,6 +52,9 @@ interface CommentCardProps {
   issueId: string;
   entry: TimelineEntry;
   allReplies: Map<string, TimelineEntry[]>;
+  commentById: Map<string, TimelineEntry>;
+  agents: Agent[];
+  issueOpen: boolean;
   currentUserId?: string;
   /**
    * True when the current user is a workspace owner/admin and can therefore
@@ -64,6 +70,25 @@ interface CommentCardProps {
   onToggleReaction: (commentId: string, emoji: string) => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
+}
+
+function findMemberAncestorComment(
+  entry: TimelineEntry,
+  commentById: Map<string, TimelineEntry>,
+): TimelineEntry | null {
+  const seen = new Set<string>();
+  let cur: TimelineEntry | undefined = entry;
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    if (cur.actor_type === "member") return cur;
+    if (!cur.parent_id) break;
+    cur = commentById.get(cur.parent_id);
+  }
+  return null;
+}
+
+function isTaskRunSystemComment(entry: TimelineEntry): boolean {
+  return entry.type === "comment" && entry.actor_type === "agent" && entry.comment_type === "system";
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +204,22 @@ function useCopyCommentLink(issueId: string) {
   }, [issueId, navigation, paths, t]);
 }
 
+function useRetryAgentComment(issueId: string, commentId: string) {
+  const { t } = useT("issues");
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.retryAgentComment(commentId),
+    onSuccess: () => {
+      toast.success(t(($) => $.comment.retry_success));
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : t(($) => $.comment.retry_failed));
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Single comment row (used for both parent and replies within the same Card)
 // ---------------------------------------------------------------------------
@@ -186,6 +227,9 @@ function useCopyCommentLink(issueId: string) {
 function CommentRow({
   issueId,
   entry,
+  commentById,
+  agents,
+  issueOpen,
   currentUserId,
   canModerate = false,
   onEdit,
@@ -194,6 +238,9 @@ function CommentRow({
 }: {
   issueId: string;
   entry: TimelineEntry;
+  commentById: Map<string, TimelineEntry>;
+  agents: Agent[];
+  issueOpen: boolean;
   currentUserId?: string;
   canModerate?: boolean;
   onEdit: (commentId: string, content: string) => Promise<void>;
@@ -217,6 +264,21 @@ function CommentRow({
   const canDeleteEntry = isOwn || canModerate;
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const agentMeta = isTaskRunSystemComment(entry) ? agents.find((agent) => agent.id === entry.actor_id) : undefined;
+  const memberAncestor = isTaskRunSystemComment(entry) ? findMemberAncestorComment(entry, commentById) : null;
+  const isAgentOwner = !!(agentMeta?.owner_id && currentUserId && agentMeta.owner_id === currentUserId);
+  const isTriggerMember = !!(
+    memberAncestor &&
+    currentUserId &&
+    memberAncestor.actor_type === "member" &&
+    memberAncestor.actor_id === currentUserId
+  );
+  const canRetryAgentComment =
+    isTaskRunSystemComment(entry) &&
+    !isTemp &&
+    issueOpen &&
+    (canModerate || isAgentOwner || isTriggerMember);
+  const retryAgentComment = useRetryAgentComment(issueId, entry.id);
 
   const startEdit = () => {
     cancelledRef.current = false;
@@ -296,6 +358,16 @@ function CommentRow({
                 <Link2 className="h-3.5 w-3.5" />
                 {t(($) => $.actions.copy_link)}
               </DropdownMenuItem>
+              {canRetryAgentComment && <DropdownMenuSeparator />}
+              {canRetryAgentComment && (
+                <DropdownMenuItem
+                  disabled={retryAgentComment.isPending}
+                  onClick={() => retryAgentComment.mutate()}
+                >
+                  <RotateCw className="h-3.5 w-3.5" />
+                  {t(($) => $.comment.retry_action)}
+                </DropdownMenuItem>
+              )}
               {(canEditEntry || canDeleteEntry) && (
                 <>
                   <DropdownMenuSeparator />
@@ -384,6 +456,9 @@ function CommentCardImpl({
   issueId,
   entry,
   allReplies,
+  commentById,
+  agents,
+  issueOpen,
   currentUserId,
   canModerate = false,
   onReply,
@@ -417,6 +492,21 @@ function CommentCardImpl({
   const canDeleteEntry = isOwn || canModerate;
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const agentMeta = isTaskRunSystemComment(entry) ? agents.find((agent) => agent.id === entry.actor_id) : undefined;
+  const memberAncestor = isTaskRunSystemComment(entry) ? findMemberAncestorComment(entry, commentById) : null;
+  const isAgentOwner = !!(agentMeta?.owner_id && currentUserId && agentMeta.owner_id === currentUserId);
+  const isTriggerMember = !!(
+    memberAncestor &&
+    currentUserId &&
+    memberAncestor.actor_type === "member" &&
+    memberAncestor.actor_id === currentUserId
+  );
+  const canRetryAgentComment =
+    isTaskRunSystemComment(entry) &&
+    !isTemp &&
+    issueOpen &&
+    (canModerate || isAgentOwner || isTriggerMember);
+  const retryAgentComment = useRetryAgentComment(issueId, entry.id);
 
   const startEdit = () => {
     cancelledRef.current = false;
@@ -528,6 +618,16 @@ function CommentCardImpl({
                     <Link2 className="h-3.5 w-3.5" />
                     {t(($) => $.actions.copy_link)}
                   </DropdownMenuItem>
+                  {canRetryAgentComment && <DropdownMenuSeparator />}
+                  {canRetryAgentComment && (
+                    <DropdownMenuItem
+                      disabled={retryAgentComment.isPending}
+                      onClick={() => retryAgentComment.mutate()}
+                    >
+                      <RotateCw className="h-3.5 w-3.5" />
+                      {t(($) => $.comment.retry_action)}
+                    </DropdownMenuItem>
+                  )}
                   {(canEditEntry || canDeleteEntry) && (
                     <>
                       <DropdownMenuSeparator />
@@ -618,6 +718,9 @@ function CommentCardImpl({
               <CommentRow
                 issueId={issueId}
                 entry={reply}
+                commentById={commentById}
+                agents={agents}
+                issueOpen={issueOpen}
                 currentUserId={currentUserId}
                 canModerate={canModerate}
                 onEdit={onEdit}
