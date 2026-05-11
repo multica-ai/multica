@@ -62,7 +62,6 @@ import {
   useReleaseHealth,
 } from "@multica/core/ship";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
-import { useWorkspaceId } from "@multica/core";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { shipKeys } from "@multica/core/ship";
 import type { ReleasePullRequest } from "@multica/core/types";
@@ -115,7 +114,11 @@ interface ShipReleasePageProps {
 export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
   const { t, i18n } = useT("ship");
   const workspace = useCurrentWorkspace();
-  const wsId = useWorkspaceId();
+  // Read wsId from the workspace store (same source as `workspace` above)
+  // rather than the React Context — tests mock the store directly and
+  // don't wrap WorkspaceIdProvider, so a Context-based read crashes the
+  // test mount.
+  const wsId = workspace?.id ?? "";
   const wsPaths = useWorkspacePaths();
   const queryClient = useQueryClient();
   const { data, isLoading, isError, isFetching } = useReleaseDetail(

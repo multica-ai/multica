@@ -137,6 +137,7 @@ vi.mock("@multica/core/paths", () => ({
   // need the unconfigured path can override the workspace ref before
   // mounting (none currently exercise that path).
   useCurrentWorkspace: () => ({
+    id: "ws-test",
     slug: "acme",
     ship_hub_smoke_workflow_set: true,
     // Approval rule configuration — medium-risk releases now require
@@ -147,6 +148,10 @@ vi.mock("@multica/core/paths", () => ({
     // depends on this rule being explicitly set; the default would
     // be `member` (no approver required).
     ship_hub_approval_medium: "approver",
+  }),
+  // Path helpers used by the release page header's project chip.
+  useWorkspacePaths: () => ({
+    projectDetail: (id: string) => `/acme/projects/${id}`,
   }),
 }));
 
