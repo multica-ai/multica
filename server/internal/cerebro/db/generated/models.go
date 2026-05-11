@@ -270,6 +270,21 @@ type CerebroGroupMember struct {
 	AddedAt pgtype.Timestamptz `json:"added_at"`
 }
 
+type CerebroIssueReference struct {
+	ID            pgtype.UUID        `json:"id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	Object        string             `json:"object"`
+	Type          pgtype.Text        `json:"type"`
+	RefID         string             `json:"ref_id"`
+	Label         pgtype.Text        `json:"label"`
+	Url           pgtype.Text        `json:"url"`
+	Metadata      []byte             `json:"metadata"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ChatMessage struct {
 	ID            pgtype.UUID        `json:"id"`
 	ChatSessionID pgtype.UUID        `json:"chat_session_id"`

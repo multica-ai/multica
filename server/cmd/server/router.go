@@ -27,6 +27,8 @@ import (
 	cerebrogroups "github.com/multica-ai/multica/server/internal/cerebro/groups"
 	cerebroinbox "github.com/multica-ai/multica/server/internal/cerebro/inbox"
 	cerebronotifications "github.com/multica-ai/multica/server/internal/cerebro/notifications"
+	// CEREBRO-PATCH(references-routes): JEH-837 issue references handler import.
+	cerebroreferences "github.com/multica-ai/multica/server/internal/cerebro/references"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -184,6 +186,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroGroupsHandler := cerebrogroups.New(cerebroQueries, queries, bus)
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 workspace accounts handler
 	cerebroAccountHandler := cerebroaccount.New(cerebroQueries, bus)
+	// CEREBRO-PATCH(references-routes): JEH-837 issue references handler instance.
+	cerebroReferencesHandler := cerebroreferences.New(cerebroQueries, queries, bus)
 
 	r := chi.NewRouter()
 
@@ -340,6 +344,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.With(issueScope).Put("/api/issues/{id}", h.UpdateIssue)
 			r.With(issueScope).Get("/api/issues/{id}/comments", h.ListComments)
 			r.With(issueScope).Post("/api/issues/{id}/comments", h.CreateComment)
+			// CEREBRO-PATCH(references-routes): JEH-837 issue-attached references.
+			r.With(issueScope).Get("/api/issues/{id}/references", cerebroReferencesHandler.ListByIssue)
+			r.With(issueScope).Post("/api/issues/{id}/references", cerebroReferencesHandler.Create)
 		})
 
 		// Workspace member listing for mention lookup. The wider
@@ -780,6 +787,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard overview endpoint
 			r.Get("/api/cerebro/dashboard", cerebroDashboardHandler.Overview)
+			// CEREBRO-PATCH(references-routes): JEH-837 reference-by-id mutations + reverse-lookup.
+			r.Route("/api/cerebro/references", func(r chi.Router) {
+				r.Get("/", cerebroReferencesHandler.ListByObject)
+				r.Patch("/{refId}", cerebroReferencesHandler.Update)
+				r.Delete("/{refId}", cerebroReferencesHandler.Delete)
+			})
 		})
 	})
 

@@ -342,6 +342,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `realtime-events` | server/internal/realtime/hub.go | 0 | Realtime additions |
 | `realtime-handlers` | packages/core/realtime/use-realtime-sync.ts | 0 | Wires cerebro realtime handlers |
 | `realtime-setup-jwt-test` | server/internal/realtime/setup_jwt_test.go | 9 | Realtime additions |
+| `references-routes` | server/cmd/server/router.go | 4 | JEH-837 — mounts `/api/issues/{id}/references` (list/create) and `/api/cerebro/references` (reverse-lookup, patch, delete). Two patch lines: one import (`cerebroreferences`) and one handler instantiation; two route blocks. Handler lives in `server/internal/cerebro/references/`. |
 | `reply-input-cerebro` | packages/views/issues/components/reply-input.tsx | 7 | Reply-input cerebro additions |
 | `restricted-lock` | packages/views/common/restricted-lock.tsx | 37 | Privacy/restricted-access UI primitives |
 | `restricted-ref` | packages/views/common/restricted-ref.tsx | 56 | Privacy/restricted-access UI primitives |
