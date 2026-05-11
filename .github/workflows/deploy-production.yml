@@ -71,6 +71,22 @@ jobs:
           # bump this.
           fetch-depth: 1
 
+      - name: Materialize operator .env from stable host path
+        # actions/checkout wipes untracked files in the workdir on
+        # every run, including any .env the operator dropped there
+        # manually. Operators store their per-host config (port
+        # overrides, secrets, etc.) at ~/multica-deploy.env (a path
+        # outside the runner workdir, so it survives checkout); we
+        # copy it in here so docker compose AND the preflight step
+        # both see the same values.
+        run: |
+          if [ -f "${HOME}/multica-deploy.env" ]; then
+            cp "${HOME}/multica-deploy.env" .env
+            echo "Loaded operator config from ~/multica-deploy.env"
+          else
+            echo "No ~/multica-deploy.env on this host; using compose defaults."
+          fi
+
       # Record the deployment in GitHub so the timeline + Ship Hub get
       # an immediate signal instead of waiting for the 2-min poller.
       - name: Create deployment
