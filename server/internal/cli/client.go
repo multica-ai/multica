@@ -181,32 +181,48 @@ func (c *APIClient) DeleteJSON(ctx context.Context, path string) error {
 
 // PostJSON performs a POST request with a JSON body.
 func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any) error {
-	data, err := json.Marshal(body)
+	respData, err := c.PostJSONBytes(ctx, path, body)
 	if err != nil {
 		return err
+	}
+	if out == nil {
+		return nil
+	}
+	return json.Unmarshal(respData, out)
+}
+
+// PostJSONBytes performs a POST request with a JSON body and returns the raw
+// response bytes after the server has returned a 2xx/3xx status. This is useful
+// for side-effecting commands that must not turn a successful write into a
+// retryable failure merely because local response decoding/formatting failed.
+func (c *APIClient) PostJSONBytes(ctx context.Context, path string, body any) ([]byte, error) {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(data))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("POST %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(respData)))
+		return nil, fmt.Errorf("POST %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(respData)))
 	}
-	if out == nil {
-		return nil
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return respData, fmt.Errorf("read POST %s response: %w", path, err)
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return respData, nil
 }
 
 // PutJSON performs a PUT request with a JSON body.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
@@ -954,8 +955,17 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		body["attachment_ids"] = attachmentIDs
 	}
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/issues/"+issueID+"/comments", body, &result); err != nil {
-		return fmt.Errorf("add comment: %w", err)
+	respData, postErr := client.PostJSONBytes(ctx, "/api/issues/"+issueID+"/comments", body)
+	if postErr != nil {
+		return fmt.Errorf("add comment: %w", postErr)
+	}
+	if len(strings.TrimSpace(string(respData))) > 0 {
+		if err := json.Unmarshal(respData, &result); err != nil {
+			// The comment has already been accepted by the server. Returning a
+			// non-zero exit here invites agent retries that duplicate the comment,
+			// so keep the command successful and surface only a warning.
+			fmt.Fprintf(os.Stderr, "warning: comment was accepted but response decoding failed: %v\n", err)
+		}
 	}
 
 	fmt.Fprintf(os.Stderr, "Comment added to issue %s.\n", issueRef.Display)
@@ -963,6 +973,9 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		return nil
+	}
+	if result == nil {
+		result = map[string]any{"status": "posted"}
 	}
 	return cli.PrintJSON(os.Stdout, result)
 }

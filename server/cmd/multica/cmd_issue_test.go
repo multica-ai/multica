@@ -484,6 +484,47 @@ func TestRunIssueRunMessagesResolvesShortTaskPrefix(t *testing.T) {
 	}
 }
 
+func TestRunIssueCommentAddTreatsAcceptedInvalidJSONAsSuccess(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+	postCount := 0
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1852":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         issueID,
+				"identifier": "MUL-1852",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/comments":
+			postCount++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id"`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := &cobra.Command{Use: "add"}
+	cmd.Flags().String("content", "", "")
+	cmd.Flags().Bool("content-stdin", false, "")
+	cmd.Flags().String("parent", "", "")
+	cmd.Flags().StringSlice("attachment", nil, "")
+	cmd.Flags().String("output", "json", "")
+	_ = cmd.Flags().Set("content", "hello")
+
+	if err := runIssueCommentAdd(cmd, []string{"MUL-1852"}); err != nil {
+		t.Fatalf("accepted comment should not return retryable error, got %v", err)
+	}
+	if postCount != 1 {
+		t.Fatalf("postCount = %d, want 1", postCount)
+	}
+}
+
 func TestResolveAssignee(t *testing.T) {
 	membersResp := []map[string]any{
 		{"user_id": "user-1111", "name": "Alice Smith"},
