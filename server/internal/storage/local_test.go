@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -211,5 +213,124 @@ func TestLocalStorage_KeyFromURL_Empty(t *testing.T) {
 
 	if got := store.KeyFromURL(""); got != "" {
 		t.Errorf("KeyFromURL(\"\") = %q, want empty string", got)
+	}
+}
+
+// TestLocalStorage_ServeFile_ContentDispositionFromSidecar verifies the fix
+// for issue #2442: downloads served from /uploads/* must carry the original
+// uploaded filename in Content-Disposition, mirroring the S3 Upload path's
+// existing ContentDisposition behavior. Without this, browsers fall back to
+// the storage-key basename (UUID + ext) for the download filename.
+func TestLocalStorage_ServeFile_ContentDispositionFromSidecar(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	cases := []struct {
+		name        string
+		key         string
+		contentType string
+		filename    string
+		wantHeader  string
+	}{
+		{
+			name:        "attachment for non-inline type",
+			key:         "workspaces/ws-1/abc.xlsx",
+			contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			filename:    "Bwave JE_V1.xlsx",
+			wantHeader:  `attachment; filename="Bwave JE_V1.xlsx"`,
+		},
+		{
+			name:        "inline for image",
+			key:         "workspaces/ws-1/def.png",
+			contentType: "image/png",
+			filename:    "screenshot 2026-05-11.png",
+			wantHeader:  `inline; filename="screenshot 2026-05-11.png"`,
+		},
+		{
+			name:        "filename with header-injection characters is sanitized",
+			key:         "workspaces/ws-1/ghi.txt",
+			contentType: "text/plain",
+			filename:    "weird\";name.txt",
+			wantHeader:  `attachment; filename="weird__name.txt"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			if _, err := store.Upload(ctx, tc.key, []byte("body"), tc.contentType, tc.filename); err != nil {
+				t.Fatalf("Upload failed: %v", err)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/uploads/"+tc.key, nil)
+			rec := httptest.NewRecorder()
+			store.ServeFile(rec, req, tc.key)
+
+			got := rec.Header().Get("Content-Disposition")
+			if got != tc.wantHeader {
+				t.Errorf("Content-Disposition = %q, want %q", got, tc.wantHeader)
+			}
+		})
+	}
+}
+
+// TestLocalStorage_ServeFile_NoSidecarFallback documents the graceful
+// degradation path: files uploaded before the sidecar landed (or written
+// out-of-band) have no .meta.json on disk and ServeFile must not set
+// Content-Disposition — leaving the existing pre-fix behavior intact.
+func TestLocalStorage_ServeFile_NoSidecarFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	key := "legacy-no-sidecar.txt"
+	if err := os.WriteFile(filepath.Join(tmpDir, key), []byte("body"), 0644); err != nil {
+		t.Fatalf("seed write failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/uploads/"+key, nil)
+	rec := httptest.NewRecorder()
+	store.ServeFile(rec, req, key)
+
+	if got := rec.Header().Get("Content-Disposition"); got != "" {
+		t.Errorf("Content-Disposition = %q, want empty (no sidecar fallback)", got)
+	}
+}
+
+// TestLocalStorage_Delete_RemovesSidecar verifies the cleanup half of the
+// fix: when the upload is deleted, its sidecar metadata file disappears too.
+// Otherwise the upload directory grows orphan .meta.json files forever.
+func TestLocalStorage_Delete_RemovesSidecar(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	ctx := context.Background()
+	key := "deleteme.txt"
+	if _, err := store.Upload(ctx, key, []byte("body"), "text/plain", "original.txt"); err != nil {
+		t.Fatalf("Upload failed: %v", err)
+	}
+	sidecar := filepath.Join(tmpDir, key+metaSuffix)
+	if _, err := os.Stat(sidecar); err != nil {
+		t.Fatalf("sidecar should exist after Upload: %v", err)
+	}
+
+	store.Delete(ctx, key)
+
+	if _, err := os.Stat(sidecar); !os.IsNotExist(err) {
+		t.Errorf("sidecar should be removed after Delete, got err=%v", err)
 	}
 }
