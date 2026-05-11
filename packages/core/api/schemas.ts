@@ -244,6 +244,12 @@ export const DeployEnvironmentSchema = z.object({
   // CLAUDE.md API Response Compatibility (don't pin to an enum that
   // forces a TS-side migration whenever a server adapter ships).
   adapter_kind: z.string().optional().default("github_actions"),
+  // Per-env GitHub Actions workflow filename. Nullable — when null the
+  // poller falls back to the workspace-level setting. Older backends
+  // (pre-migration 092) won't return this field; `.optional()` keeps
+  // them parseable, and `parseWithFallback` will surface `undefined`
+  // which the UI treats as "fall back to workspace default".
+  deploy_workflow_filename: z.string().nullable().optional(),
 }).loose();
 
 export const ListDeployEnvironmentsResponseSchema = z.object({

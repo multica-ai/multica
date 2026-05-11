@@ -11,6 +11,34 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addTagToAgent = `-- name: AddTagToAgent :exec
+INSERT INTO agent_to_tag (agent_id, tag_id)
+SELECT $1::uuid, $2::uuid
+WHERE EXISTS (
+    SELECT 1 FROM agent a
+    WHERE a.id = $1::uuid
+      AND a.workspace_id = $3::uuid
+)
+AND EXISTS (
+    SELECT 1 FROM agent_tag t
+    WHERE t.id = $2::uuid
+      AND t.workspace_id = $3::uuid
+)
+ON CONFLICT DO NOTHING
+`
+
+type AddTagToAgentParams struct {
+	AgentID     pgtype.UUID `json:"agent_id"`
+	TagID       pgtype.UUID `json:"tag_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Workspace-guarded: both the agent and tag must belong to the same workspace.
+func (q *Queries) AddTagToAgent(ctx context.Context, arg AddTagToAgentParams) error {
+	_, err := q.db.Exec(ctx, addTagToAgent, arg.AgentID, arg.TagID, arg.WorkspaceID)
+	return err
+}
+
 const createAgentTag = `-- name: CreateAgentTag :one
 INSERT INTO agent_tag (workspace_id, name)
 VALUES ($1, $2)
@@ -32,6 +60,24 @@ func (q *Queries) CreateAgentTag(ctx context.Context, arg CreateAgentTagParams) 
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const deleteAgentTag = `-- name: DeleteAgentTag :one
+DELETE FROM agent_tag
+WHERE id = $1 AND workspace_id = $2
+RETURNING id
+`
+
+type DeleteAgentTagParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteAgentTag(ctx context.Context, arg DeleteAgentTagParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, deleteAgentTag, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const getAgentTag = `-- name: GetAgentTag :one
@@ -109,71 +155,64 @@ func (q *Queries) ListAgentTags(ctx context.Context, workspaceID pgtype.UUID) ([
 	return items, nil
 }
 
-const deleteAgentTag = `-- name: DeleteAgentTag :one
-DELETE FROM agent_tag
-WHERE id = $1 AND workspace_id = $2
-RETURNING id
+const listAgentsByTag = `-- name: ListAgentsByTag :many
+SELECT a.id, a.workspace_id, a.name, a.avatar_url, a.runtime_mode, a.runtime_config, a.visibility, a.status, a.max_concurrent_tasks, a.owner_id, a.created_at, a.updated_at, a.description, a.runtime_id, a.instructions, a.archived_at, a.archived_by, a.custom_env, a.custom_args, a.mcp_config, a.model
+FROM agent a
+JOIN agent_to_tag att ON att.agent_id = a.id
+JOIN agent_tag t ON t.id = att.tag_id
+WHERE t.workspace_id = $1::uuid
+  AND t.name = $2::text
+  AND a.archived_at IS NULL
+ORDER BY a.created_at ASC
 `
 
-type DeleteAgentTagParams struct {
-	ID          pgtype.UUID `json:"id"`
+type ListAgentsByTagParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	TagName     string      `json:"tag_name"`
 }
 
-func (q *Queries) DeleteAgentTag(ctx context.Context, arg DeleteAgentTagParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, deleteAgentTag, arg.ID, arg.WorkspaceID)
-	var id pgtype.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
-const addTagToAgent = `-- name: AddTagToAgent :exec
-INSERT INTO agent_to_tag (agent_id, tag_id)
-SELECT $1::uuid, $2::uuid
-WHERE EXISTS (
-    SELECT 1 FROM agent a
-    WHERE a.id = $1::uuid
-      AND a.workspace_id = $3::uuid
-)
-AND EXISTS (
-    SELECT 1 FROM agent_tag t
-    WHERE t.id = $2::uuid
-      AND t.workspace_id = $3::uuid
-)
-ON CONFLICT DO NOTHING
-`
-
-type AddTagToAgentParams struct {
-	AgentID     pgtype.UUID `json:"agent_id"`
-	TagID       pgtype.UUID `json:"tag_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-func (q *Queries) AddTagToAgent(ctx context.Context, arg AddTagToAgentParams) error {
-	_, err := q.db.Exec(ctx, addTagToAgent, arg.AgentID, arg.TagID, arg.WorkspaceID)
-	return err
-}
-
-const removeTagFromAgent = `-- name: RemoveTagFromAgent :exec
-DELETE FROM agent_to_tag
-WHERE agent_id = $1::uuid
-  AND tag_id = $2::uuid
-  AND EXISTS (
-      SELECT 1 FROM agent a
-      WHERE a.id = $1::uuid
-        AND a.workspace_id = $3::uuid
-  )
-`
-
-type RemoveTagFromAgentParams struct {
-	AgentID     pgtype.UUID `json:"agent_id"`
-	TagID       pgtype.UUID `json:"tag_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-func (q *Queries) RemoveTagFromAgent(ctx context.Context, arg RemoveTagFromAgentParams) error {
-	_, err := q.db.Exec(ctx, removeTagFromAgent, arg.AgentID, arg.TagID, arg.WorkspaceID)
-	return err
+// Resolves @@ tag-scoped broadcast mentions to a list of agents.
+// Returns all non-archived workspace agents that hold the named tag.
+func (q *Queries) ListAgentsByTag(ctx context.Context, arg ListAgentsByTagParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listAgentsByTag, arg.WorkspaceID, arg.TagName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listTagsByAgent = `-- name: ListTagsByAgent :many
@@ -215,60 +254,24 @@ func (q *Queries) ListTagsByAgent(ctx context.Context, arg ListTagsByAgentParams
 	return items, nil
 }
 
-const listAgentsByTag = `-- name: ListAgentsByTag :many
-SELECT a.id, a.workspace_id, a.name, a.avatar_url, a.runtime_mode, a.runtime_config, a.visibility, a.status, a.max_concurrent_tasks, a.owner_id, a.created_at, a.updated_at, a.description, a.runtime_id, a.instructions, a.archived_at, a.archived_by, a.custom_env, a.custom_args, a.mcp_config, a.model
-FROM agent a
-JOIN agent_to_tag att ON att.agent_id = a.id
-JOIN agent_tag t ON t.id = att.tag_id
-WHERE t.workspace_id = $1::uuid
-  AND t.name = $2::text
-  AND a.archived_at IS NULL
-ORDER BY a.created_at ASC
+const removeTagFromAgent = `-- name: RemoveTagFromAgent :exec
+DELETE FROM agent_to_tag
+WHERE agent_id = $1::uuid
+  AND tag_id = $2::uuid
+  AND EXISTS (
+      SELECT 1 FROM agent a
+      WHERE a.id = $1::uuid
+        AND a.workspace_id = $3::uuid
+  )
 `
 
-type ListAgentsByTagParams struct {
+type RemoveTagFromAgentParams struct {
+	AgentID     pgtype.UUID `json:"agent_id"`
+	TagID       pgtype.UUID `json:"tag_id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	TagName     string      `json:"tag_name"`
 }
 
-func (q *Queries) ListAgentsByTag(ctx context.Context, arg ListAgentsByTagParams) ([]Agent, error) {
-	rows, err := q.db.Query(ctx, listAgentsByTag, arg.WorkspaceID, arg.TagName)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Agent{}
-	for rows.Next() {
-		var i Agent
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.Name,
-			&i.AvatarUrl,
-			&i.RuntimeMode,
-			&i.RuntimeConfig,
-			&i.Visibility,
-			&i.Status,
-			&i.MaxConcurrentTasks,
-			&i.OwnerID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Description,
-			&i.RuntimeID,
-			&i.Instructions,
-			&i.ArchivedAt,
-			&i.ArchivedBy,
-			&i.CustomEnv,
-			&i.CustomArgs,
-			&i.McpConfig,
-			&i.Model,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+func (q *Queries) RemoveTagFromAgent(ctx context.Context, arg RemoveTagFromAgentParams) error {
+	_, err := q.db.Exec(ctx, removeTagFromAgent, arg.AgentID, arg.TagID, arg.WorkspaceID)
+	return err
 }

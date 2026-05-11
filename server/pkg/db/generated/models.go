@@ -389,11 +389,6 @@ type AgentTag struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type AgentToTag struct {
-	AgentID pgtype.UUID `json:"agent_id"`
-	TagID   pgtype.UUID `json:"tag_id"`
-}
-
 type AgentTaskQueue struct {
 	ID                pgtype.UUID        `json:"id"`
 	AgentID           pgtype.UUID        `json:"agent_id"`
@@ -419,6 +414,11 @@ type AgentTaskQueue struct {
 	FailureReason     pgtype.Text        `json:"failure_reason"`
 	TriggerSummary    pgtype.Text        `json:"trigger_summary"`
 	ForceFreshSession bool               `json:"force_fresh_session"`
+}
+
+type AgentToTag struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	TagID   pgtype.UUID `json:"tag_id"`
 }
 
 type Attachment struct {
@@ -632,19 +632,20 @@ type DeployAdapterConfig struct {
 }
 
 type DeployEnvironment struct {
-	ID                pgtype.UUID           `json:"id"`
-	WorkspaceID       pgtype.UUID           `json:"workspace_id"`
-	ProjectID         pgtype.UUID           `json:"project_id"`
-	Kind              DeployEnvironmentKind `json:"kind"`
-	Name              string                `json:"name"`
-	TargetBranch      string                `json:"target_branch"`
-	TargetUrl         pgtype.Text           `json:"target_url"`
-	CurrentSha        pgtype.Text           `json:"current_sha"`
-	CurrentDeployedAt pgtype.Timestamptz    `json:"current_deployed_at"`
-	AutoPromote       bool                  `json:"auto_promote"`
-	CreatedAt         pgtype.Timestamptz    `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz    `json:"updated_at"`
-	AdapterKind       string                `json:"adapter_kind"`
+	ID                     pgtype.UUID           `json:"id"`
+	WorkspaceID            pgtype.UUID           `json:"workspace_id"`
+	ProjectID              pgtype.UUID           `json:"project_id"`
+	Kind                   DeployEnvironmentKind `json:"kind"`
+	Name                   string                `json:"name"`
+	TargetBranch           string                `json:"target_branch"`
+	TargetUrl              pgtype.Text           `json:"target_url"`
+	CurrentSha             pgtype.Text           `json:"current_sha"`
+	CurrentDeployedAt      pgtype.Timestamptz    `json:"current_deployed_at"`
+	AutoPromote            bool                  `json:"auto_promote"`
+	CreatedAt              pgtype.Timestamptz    `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz    `json:"updated_at"`
+	AdapterKind            string                `json:"adapter_kind"`
+	DeployWorkflowFilename pgtype.Text           `json:"deploy_workflow_filename"`
 }
 
 type DeployHealthSnapshot struct {
