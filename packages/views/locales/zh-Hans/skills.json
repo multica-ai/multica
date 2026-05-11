@@ -60,7 +60,8 @@
     "source_runtime_provider": "来自 {{provider}} 运行时",
     "source_runtime_unknown": "来自某个运行时",
     "source_clawhub": "来自 ClawHub",
-    "source_skills_sh": "来自 Skills.sh"
+    "source_skills_sh": "来自 Skills.sh",
+    "source_github": "来自 GitHub"
   },
   "detail": {
     "all_skills": "全部 skill",
@@ -82,6 +83,7 @@
       "origin_runtime_unknown": "本地运行时",
       "origin_clawhub": "导入自 · ClawHub",
       "origin_skills_sh": "导入自 · Skills.sh",
+      "origin_github": "导入自 · GitHub",
       "origin_workspace": "工作区",
       "updated_label": "{{when}}更新",
       "by_creator": "由 {{name}}"
@@ -116,6 +118,7 @@
       "imported_runtime": "从本地运行时导入",
       "imported_clawhub": "从 ClawHub 导入",
       "imported_skills_sh": "从 Skills.sh 导入",
+      "imported_github": "从 GitHub 导入",
       "provider": "provider · {{provider}}"
     },
     "not_found": {
@@ -201,6 +204,7 @@
       "importing": "导入中...",
       "importing_clawhub": "正在从 ClawHub 导入...",
       "importing_skills_sh": "正在从 Skills.sh 导入...",
+      "importing_github": "正在从 GitHub 导入...",
       "name_conflict_hint": "导入的 skill 名称已存在——请先删除已有的再重试。",
       "fallback_error": "导入失败",
       "cancel": "取消",

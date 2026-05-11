@@ -45,4 +45,7 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	if cfg.PosthogHost != "https://eu.i.posthog.com" {
 		t.Fatalf("posthog_host: want https://eu.i.posthog.com, got %q", cfg.PosthogHost)
 	}
+	if cfg.AnalyticsEnvironment != "dev" {
+		t.Fatalf("analytics_environment: want dev, got %q", cfg.AnalyticsEnvironment)
+	}
 }

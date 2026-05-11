@@ -450,6 +450,7 @@ func recordMentionEmailDelivery(
 		)
 	}
 }
+
 // parentBubbleNotifTypes is the allowlist of inbox notification types that
 // bubble up from a sub-issue to subscribers of its parent. Other event types
 // only notify subscribers of the sub-issue itself, to keep parent watchers'
@@ -461,18 +462,18 @@ var parentBubbleNotifTypes = map[string]bool{
 // notifTypeToGroup maps each InboxItemType to a user-configurable preference
 // group. Types not in this map are always delivered (not configurable).
 var notifTypeToGroup = map[string]string{
-	"issue_assigned":  "assignments",
-	"unassigned":      "assignments",
+	"issue_assigned":   "assignments",
+	"unassigned":       "assignments",
 	"assignee_changed": "assignments",
-	"status_changed":  "status_changes",
-	"new_comment":     "comments",
-	"mentioned":       "comments",
+	"status_changed":   "status_changes",
+	"new_comment":      "comments",
+	"mentioned":        "comments",
 	"priority_changed": "updates",
 	"due_date_changed": "updates",
-	"task_completed":  "agent_activity",
-	"task_failed":     "agent_activity",
-	"agent_blocked":   "agent_activity",
-	"agent_completed": "agent_activity",
+	"task_completed":   "agent_activity",
+	"task_failed":      "agent_activity",
+	"agent_blocked":    "agent_activity",
+	"agent_completed":  "agent_activity",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -608,6 +609,75 @@ func customWebhookPreferenceEventType(notificationType string) string {
 	default:
 		return ""
 	}
+}
+
+// terminalStatusForTaskFailedDismiss is the set of issue statuses that mark
+// the issue as "the user no longer needs to triage past failures." When a
+// status change lands on one of these, any pre-existing task_failed inbox
+// rows for the issue are archived so the inbox stays a fresh-signal surface.
+// `in_review` is included because in Multica's agent flow that's the most
+// reliable "work delivered" handoff — and a status flip back to in_progress
+// will simply produce new task_failed rows that surface normally.
+var terminalStatusForTaskFailedDismiss = map[string]bool{
+	"in_review": true,
+	"done":      true,
+	"cancelled": true,
+}
+
+// archiveStaleTaskFailedInbox archives all task_failed inbox rows for the
+// given issue and notifies each affected member recipient via
+// inbox:batch-archived so connected clients self-heal.
+func archiveStaleTaskFailedInbox(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	workspaceID string,
+	issueID string,
+) {
+	rows, err := queries.ArchiveInboxByIssueAndType(ctx, db.ArchiveInboxByIssueAndTypeParams{
+		WorkspaceID: parseUUID(workspaceID),
+		IssueID:     parseUUID(issueID),
+		Type:        "task_failed",
+	})
+	if err != nil {
+		slog.Error("auto-archive task_failed inbox: query failed",
+			"workspace_id", workspaceID, "issue_id", issueID, "error", err)
+		return
+	}
+	if len(rows) == 0 {
+		return
+	}
+
+	// Dedupe recipients: the listener creates one row per failure event per
+	// subscriber, so a long-running issue can yield several rows for the
+	// same recipient.
+	counts := map[string]int{}
+	for _, row := range rows {
+		// Inbox rows for task_failed only target member recipients today
+		// (notifySubscribers skips agent subscribers), but defend the WS
+		// layer against future widening — only members get a personal feed.
+		if row.RecipientType != "member" {
+			continue
+		}
+		counts[util.UUIDToString(row.RecipientID)]++
+	}
+
+	for recipientID, count := range counts {
+		bus.Publish(events.Event{
+			Type:        protocol.EventInboxBatchArchived,
+			WorkspaceID: workspaceID,
+			Payload: map[string]any{
+				"recipient_id": recipientID,
+				"count":        int64(count),
+				"issue_id":     issueID,
+				"reason":       "issue_status_terminal",
+			},
+		})
+	}
+
+	slog.Info("auto-archive task_failed inbox: archived stale rows",
+		"workspace_id", workspaceID, "issue_id", issueID,
+		"row_count", len(rows), "recipient_count", len(counts))
 }
 
 // notifySubscribers queries the subscriber table for an issue, excludes the
@@ -1070,6 +1140,14 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				nil, "status_changed", "info",
 				issue.Title, "",
 				statusDetails)
+
+			// When the issue progresses past the failure (in_review / done /
+			// cancelled), retire any stale task_failed inbox rows so the
+			// inbox reflects the current state of the work, not its history.
+			// The activity log keeps the full failure history for audit.
+			if terminalStatusForTaskFailedDismiss[issue.Status] {
+				archiveStaleTaskFailedInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
+			}
 		}
 
 		if priorityChanged, _ := payload["priority_changed"].(bool); priorityChanged {

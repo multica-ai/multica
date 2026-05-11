@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { labelListOptions, useCreateLabel, useUpdateLabel, useDeleteLabel } from "@multica/core/labels";
 import type { Label } from "@multica/core/types";
+import { isImeComposing } from "@multica/core/utils";
 import { LabelChip } from "../../labels/label-chip";
 import { useT } from "../../i18n";
 
@@ -116,6 +117,7 @@ export function LabelsPanel() {
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           onKeyDown={(e) => {
+            if (isImeComposing(e)) return;
             if (e.key === "Enter") handleCreate();
           }}
           className="flex-1"
@@ -152,8 +154,12 @@ export function LabelsPanel() {
                         if (e.target.value.trim()) setEditError("");
                       }}
                       onKeyDown={(e) => {
+                        if (e.key === "Escape") {
+                          cancelEdit();
+                          return;
+                        }
+                        if (isImeComposing(e)) return;
                         if (e.key === "Enter") saveEdit(label.id);
-                        if (e.key === "Escape") cancelEdit();
                       }}
                       className="flex-1 h-8"
                       maxLength={32}

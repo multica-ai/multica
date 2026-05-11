@@ -303,9 +303,11 @@ func discoverPiModels(ctx context.Context, executablePath string) ([]Model, erro
 	return parsePiModels(text), nil
 }
 
-// parsePiModels accepts the `pi --list-models` output and extracts
-// model IDs. Pi's format uses `provider:model` rows; we normalize to
-// the same `provider/model` form as opencode for UI consistency.
+// parsePiModels accepts the `pi --list-models` output. Pi historically
+// emitted `provider:model` per line and now emits a multi-column table
+// (`provider  model  context …`); both shapes are normalized to
+// `provider/model` to match opencode/UI conventions. The case-insensitive
+// `provider` token in column 0 is treated as the table header and skipped.
 func parsePiModels(output string) []Model {
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -316,16 +318,25 @@ func parsePiModels(output string) []Model {
 		if line == "" {
 			continue
 		}
-		first := strings.Fields(line)
-		if len(first) == 0 {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
 			continue
 		}
-		id := first[0]
-		if !strings.ContainsAny(id, ":/") {
+		first := fields[0]
+		if strings.EqualFold(first, "provider") {
 			continue
 		}
-		// Normalize ":" to "/" since pi uses colon but opencode/UI uses slash.
-		id = strings.Replace(id, ":", "/", 1)
+		var id string
+		if strings.ContainsAny(first, ":/") {
+			// Legacy `provider:model` format — normalize colon to slash.
+			// Restricted to this branch so a model name with a `:` in
+			// the table format's column 1 is not silently rewritten.
+			id = strings.Replace(first, ":", "/", 1)
+		} else if len(fields) >= 2 {
+			id = first + "/" + fields[1]
+		} else {
+			continue
+		}
 		if seen[id] {
 			continue
 		}

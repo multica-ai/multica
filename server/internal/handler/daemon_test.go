@@ -2480,3 +2480,217 @@ func TestClaimTask_ChatLegacyNullRuntimeFallsBackToTaskRow(t *testing.T) {
 		t.Fatalf("legacy fallback: expected PriorWorkDir='/tmp/legacy-fallback-workdir', got %q", task.PriorWorkDir)
 	}
 }
+
+// TestGetChatSessionGCCheck verifies the chat session gc-check endpoint
+// matches the same anti-enumeration shape as GetIssueGCCheck: cross-workspace
+// daemon tokens get 404, same-workspace tokens get the live status.
+func TestGetChatSessionGCCheck(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var sessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
+		VALUES ($1, $2, $3, 'gc-check fixture', 'active')
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&sessionID); err != nil {
+		t.Fatalf("setup: create chat session: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID)
+
+	// Cross-workspace daemon token must 404 with no oracle.
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil,
+		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
+	req = withURLParam(req, "sessionId", sessionID)
+	testHandler.GetChatSessionGCCheck(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Same-workspace daemon token sees the live row.
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil,
+		testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "sessionId", sessionID)
+	testHandler.GetChatSessionGCCheck(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("same-workspace token: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Status    string `json:"status"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Status != "active" {
+		t.Fatalf("expected status %q, got %q", "active", resp.Status)
+	}
+	if resp.UpdatedAt == "" {
+		t.Fatal("expected updated_at to be set")
+	}
+
+	// Hard-deleted session: 404 — exactly what the daemon needs to reclaim
+	// the workdir on the next GC pass after a user runs DeleteChatSession.
+	if _, err := testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID); err != nil {
+		t.Fatalf("delete chat session: %v", err)
+	}
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil,
+		testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "sessionId", sessionID)
+	testHandler.GetChatSessionGCCheck(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("hard-deleted session: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestGetAutopilotRunGCCheck verifies the autopilot-run gc-check endpoint:
+// 200 with status+completed_at on success, 404 on cross-workspace probe.
+func TestGetAutopilotRunGCCheck(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var autopilotID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot (
+			workspace_id, title, assignee_id, execution_mode,
+			created_by_type, created_by_id
+		)
+		VALUES ($1, 'gc-check autopilot', $2, 'run_only', 'member', $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
+		t.Fatalf("setup: create autopilot: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+
+	var runID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot_run (autopilot_id, source, status, completed_at)
+		VALUES ($1, 'manual', 'completed', NOW() - INTERVAL '6 days')
+		RETURNING id
+	`, autopilotID).Scan(&runID); err != nil {
+		t.Fatalf("setup: create autopilot_run: %v", err)
+	}
+
+	// Cross-workspace probe.
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("GET", "/api/daemon/autopilot-runs/"+runID+"/gc-check", nil,
+		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
+	req = withURLParam(req, "runId", runID)
+	testHandler.GetAutopilotRunGCCheck(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Same-workspace probe.
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("GET", "/api/daemon/autopilot-runs/"+runID+"/gc-check", nil,
+		testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "runId", runID)
+	testHandler.GetAutopilotRunGCCheck(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("same-workspace token: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Status      string `json:"status"`
+		CompletedAt string `json:"completed_at"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Status != "completed" {
+		t.Fatalf("expected status %q, got %q", "completed", resp.Status)
+	}
+	if resp.CompletedAt == "" {
+		t.Fatal("expected completed_at to be set for terminal run")
+	}
+}
+
+// TestGetTaskGCCheck verifies the task gc-check endpoint that quick-create
+// workdirs key on. Same anti-enumeration shape via requireDaemonTaskAccess.
+func TestGetTaskGCCheck(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	// Quick-create-shaped task: no issue_id, no chat_session_id, no run id.
+	// context.type is set so ResolveTaskWorkspaceID can recover workspace.
+	quickContext, _ := json.Marshal(map[string]any{
+		"type":         "quick_create",
+		"prompt":       "fixture",
+		"requester_id": testUserID,
+		"workspace_id": testWorkspaceID,
+	})
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, status, priority, context, completed_at
+		)
+		VALUES ($1, $2, 'completed', 0, $3, NOW())
+		RETURNING id
+	`, agentID, runtimeID, quickContext).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create quick-create task: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+
+	// Cross-workspace probe.
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("GET", "/api/daemon/tasks/"+taskID+"/gc-check", nil,
+		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
+	req = withURLParam(req, "taskId", taskID)
+	testHandler.GetTaskGCCheck(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Same-workspace probe — terminal task returns its status.
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("GET", "/api/daemon/tasks/"+taskID+"/gc-check", nil,
+		testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "taskId", taskID)
+	testHandler.GetTaskGCCheck(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("same-workspace token: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Status      string `json:"status"`
+		CompletedAt string `json:"completed_at"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Status != "completed" {
+		t.Fatalf("expected status %q, got %q", "completed", resp.Status)
+	}
+	if resp.CompletedAt == "" {
+		t.Fatal("expected completed_at to be set for completed task")
+	}
+}

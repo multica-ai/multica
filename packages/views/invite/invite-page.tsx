@@ -87,7 +87,10 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
         await api.acceptInviteLink(invitationId);
       }
       // Belt to the backend's braces: keep local user state in sync.
-      await api.markOnboardingComplete({ completion_path: "invite_accept" });
+      await api.markOnboardingComplete({
+        completion_path: "invite_accept",
+        workspace_id: invitation?.workspace_id,
+      });
       await useAuthStore.getState().refreshMe();
       setDone("accepted");
       // Fetch the refreshed workspace list so we know the joined workspace's slug.

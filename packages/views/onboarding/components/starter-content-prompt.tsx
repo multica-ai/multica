@@ -25,7 +25,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
-import { buildImportPayload } from "../utils/starter-content-templates";
+import {
+  buildImportPayload,
+  type StarterContentLocale,
+} from "../utils/starter-content-templates";
 import { useT } from "../../i18n";
 
 /**
@@ -44,7 +47,7 @@ import { useT } from "../../i18n";
  * no client-side cache timing, no stale decisions, no Unknown bugs.
  */
 export function StarterContentPrompt() {
-  const { t } = useT("onboarding");
+  const { t, i18n } = useT("onboarding");
   const workspace = useCurrentWorkspace();
   const user = useAuthStore((s) => s.user);
   const refreshMe = useAuthStore((s) => s.refreshMe);
@@ -87,6 +90,7 @@ export function StarterContentPrompt() {
         workspaceId: workspace.id,
         userName: user.name || user.email,
         questionnaire,
+        locale: resolveLocale(i18n.language),
       });
       const result = await api.importStarterContent(payload);
 
@@ -197,6 +201,12 @@ export function StarterContentPrompt() {
       </DialogContent>
     </Dialog>
   );
+}
+
+// i18next resolves locale names like "zh-Hans-CN" or "en-US"; we only
+// ship en + zh-Hans starter content, so default everything else to en.
+function resolveLocale(language: string): StarterContentLocale {
+  return language.startsWith("zh") ? "zh-Hans" : "en";
 }
 
 // Local helper — mirrors the onboarding flow's mergeQuestionnaire.

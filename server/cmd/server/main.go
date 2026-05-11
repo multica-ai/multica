@@ -280,10 +280,17 @@ func main() {
 		}
 	}
 
+	// Construct the BatchedHeartbeatScheduler before the router so it can
+	// be injected into the Handler. The Run goroutine starts below
+	// alongside the sweeper, and Stop is called explicitly during graceful
+	// shutdown so any pending bumps are flushed before we exit.
+	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
+
 	r := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
-		HTTPMetrics:  httpMetrics,
-		DaemonHub:    daemonHub,
-		DaemonWakeup: daemonWakeup,
+		HTTPMetrics:        httpMetrics,
+		DaemonHub:          daemonHub,
+		DaemonWakeup:       daemonWakeup,
+		HeartbeatScheduler: heartbeatScheduler,
 	})
 
 	srv := &http.Server{
@@ -295,6 +302,7 @@ func main() {
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
+	taskSvc.Analytics = analyticsClient
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
 
@@ -309,8 +317,10 @@ func main() {
 
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
+	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runNotificationDeliveryDispatcher(sweepCtx, queries, service.NewEmailService())
+	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
 
 	if metricsServer != nil {
@@ -335,9 +345,12 @@ func main() {
 	<-quit
 
 	slog.Info("shutting down server")
-	sweepCancel()
 	autopilotCancel()
 
+	// Order matters: drain in-flight HTTP first so any heartbeat handlers
+	// finish calling Schedule() before we stop the scheduler. Otherwise a
+	// late heartbeat could enqueue a pending ID after Run has already
+	// drained and exited, and Stop() would not flush it.
 	apiShutdownCtx, apiShutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := srv.Shutdown(apiShutdownCtx); err != nil {
 		apiShutdownCancel()
@@ -345,6 +358,11 @@ func main() {
 		os.Exit(1)
 	}
 	apiShutdownCancel()
+
+	// HTTP is fully drained — safe to stop the sweeper and flush the
+	// final batch of queued heartbeat bumps.
+	sweepCancel()
+	heartbeatScheduler.Stop()
 
 	if metricsServer != nil {
 		metricsShutdownCtx, metricsShutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)

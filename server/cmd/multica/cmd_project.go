@@ -104,6 +104,7 @@ func init() {
 
 	// project list
 	projectListCmd.Flags().String("output", "table", "Output format: table or json")
+	projectListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	projectListCmd.Flags().String("status", "", "Filter by status")
 
 	// project get
@@ -120,6 +121,7 @@ func init() {
 
 	// project resource list
 	projectResourceListCmd.Flags().String("output", "table", "Output format: table or json")
+	projectResourceListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 
 	// project resource add — generic shape: any --type with a JSON --ref payload
 	// works without further CLI changes. github_repo is supported via the
@@ -187,6 +189,8 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 		return cli.PrintJSON(os.Stdout, projectsRaw)
 	}
 
+	fullID, _ := cmd.Flags().GetBool("full-id")
+	actors := loadActorDisplayLookup(ctx, client)
 	headers := []string{"ID", "TITLE", "STATUS", "LEAD", "CREATED"}
 	rows := make([][]string, 0, len(projectsRaw))
 	for _, raw := range projectsRaw {
@@ -194,13 +198,13 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 		if !ok {
 			continue
 		}
-		lead := formatLead(p)
+		lead := formatLead(p, actors)
 		created := strVal(p, "created_at")
 		if len(created) >= 10 {
 			created = created[:10]
 		}
 		rows = append(rows, []string{
-			truncateID(strVal(p, "id")),
+			displayID(strVal(p, "id"), fullID),
 			strVal(p, "title"),
 			strVal(p, "status"),
 			lead,
@@ -220,8 +224,13 @@ func runProjectGet(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
 	var project map[string]any
-	if err := client.GetJSON(ctx, "/api/projects/"+args[0], &project); err != nil {
+	if err := client.GetJSON(ctx, "/api/projects/"+projectRef.ID, &project); err != nil {
 		return fmt.Errorf("get project: %w", err)
 	}
 
@@ -235,10 +244,11 @@ func runProjectGet(cmd *cobra.Command, args []string) error {
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
-		lead := formatLead(project)
+		actors := loadActorDisplayLookup(ctx, client)
+		lead := formatLead(project, actors)
 		headers := []string{"ID", "TITLE", "STATUS", "LEAD", "DESCRIPTION"}
 		rows := [][]string{{
-			truncateID(strVal(project, "id")),
+			strVal(project, "id"),
 			strVal(project, "title"),
 			strVal(project, "status"),
 			lead,
@@ -314,7 +324,7 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 	if output == "table" {
 		headers := []string{"ID", "TITLE", "STATUS"}
 		rows := [][]string{{
-			truncateID(strVal(result, "id")),
+			strVal(result, "id"),
 			strVal(result, "title"),
 			strVal(result, "status"),
 		}}
@@ -333,6 +343,11 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
 
 	body := map[string]any{}
 	if cmd.Flags().Changed("title") {
@@ -366,7 +381,7 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/projects/"+args[0], body, &result); err != nil {
+	if err := client.PutJSON(ctx, "/api/projects/"+projectRef.ID, body, &result); err != nil {
 		return fmt.Errorf("update project: %w", err)
 	}
 
@@ -374,7 +389,7 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 	if output == "table" {
 		headers := []string{"ID", "TITLE", "STATUS"}
 		rows := [][]string{{
-			truncateID(strVal(result, "id")),
+			strVal(result, "id"),
 			strVal(result, "title"),
 			strVal(result, "status"),
 		}}
@@ -394,11 +409,16 @@ func runProjectDelete(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	if err := client.DeleteJSON(ctx, "/api/projects/"+args[0]); err != nil {
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
+	if err := client.DeleteJSON(ctx, "/api/projects/"+projectRef.ID); err != nil {
 		return fmt.Errorf("delete project: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Project %s deleted.\n", truncateID(args[0]))
+	fmt.Fprintf(os.Stderr, "Project %s deleted.\n", projectRef.Display)
 	return nil
 }
 
@@ -425,13 +445,18 @@ func runProjectStatus(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	projectRef, err := resolveProjectID(ctx, client, id)
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
 	body := map[string]any{"status": status}
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/projects/"+id, body, &result); err != nil {
+	if err := client.PutJSON(ctx, "/api/projects/"+projectRef.ID, body, &result); err != nil {
 		return fmt.Errorf("update status: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Project %s status changed to %s.\n", truncateID(id), status)
+	fmt.Fprintf(os.Stderr, "Project %s status changed to %s.\n", strVal(result, "title"), status)
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
@@ -453,8 +478,13 @@ func runProjectResourceList(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
 	var result map[string]any
-	if err := client.GetJSON(ctx, "/api/projects/"+args[0]+"/resources", &result); err != nil {
+	if err := client.GetJSON(ctx, "/api/projects/"+projectRef.ID+"/resources", &result); err != nil {
 		return fmt.Errorf("list project resources: %w", err)
 	}
 	resourcesRaw, _ := result["resources"].([]any)
@@ -464,6 +494,7 @@ func runProjectResourceList(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, resourcesRaw)
 	}
 
+	fullID, _ := cmd.Flags().GetBool("full-id")
 	headers := []string{"ID", "TYPE", "REF", "LABEL"}
 	rows := make([][]string, 0, len(resourcesRaw))
 	for _, raw := range resourcesRaw {
@@ -472,7 +503,7 @@ func runProjectResourceList(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		rows = append(rows, []string{
-			truncateID(strVal(r, "id")),
+			displayID(strVal(r, "id"), fullID),
 			strVal(r, "resource_type"),
 			summarizeResourceRef(r["resource_ref"]),
 			strVal(r, "label"),
@@ -530,8 +561,13 @@ func runProjectResourceAdd(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/projects/"+args[0]+"/resources", body, &result); err != nil {
+	if err := client.PostJSON(ctx, "/api/projects/"+projectRef.ID+"/resources", body, &result); err != nil {
 		return fmt.Errorf("add project resource: %w", err)
 	}
 
@@ -539,7 +575,7 @@ func runProjectResourceAdd(cmd *cobra.Command, args []string) error {
 	if output == "table" {
 		headers := []string{"ID", "TYPE", "REF"}
 		rows := [][]string{{
-			truncateID(strVal(result, "id")),
+			strVal(result, "id"),
 			strVal(result, "resource_type"),
 			summarizeResourceRef(result["resource_ref"]),
 		}}
@@ -558,11 +594,20 @@ func runProjectResourceRemove(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	if err := client.DeleteJSON(ctx, "/api/projects/"+args[0]+"/resources/"+args[1]); err != nil {
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+	resourceRef, err := resolveProjectResourceID(ctx, client, projectRef.ID, args[1])
+	if err != nil {
+		return fmt.Errorf("resolve project resource: %w", err)
+	}
+
+	if err := client.DeleteJSON(ctx, "/api/projects/"+projectRef.ID+"/resources/"+resourceRef.ID); err != nil {
 		return fmt.Errorf("remove project resource: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Resource %s removed from project %s.\n", truncateID(args[1]), truncateID(args[0]))
+	fmt.Fprintf(os.Stderr, "Resource %s removed from project %s.\n", resourceRef.Display, projectRef.Display)
 	return nil
 }
 
@@ -586,11 +631,11 @@ func summarizeResourceRef(raw any) string {
 // Helpers
 // ---------------------------------------------------------------------------
 
-func formatLead(project map[string]any) string {
+func formatLead(project map[string]any, actors actorDisplayLookup) string {
 	lType := strVal(project, "lead_type")
 	lID := strVal(project, "lead_id")
 	if lType == "" || lID == "" {
 		return ""
 	}
-	return lType + ":" + truncateID(lID)
+	return actors.actor(lType, lID)
 }

@@ -12,6 +12,7 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
+import { isImeComposing } from "@multica/core/utils";
 import { useT } from "../../i18n";
 
 /**
@@ -83,6 +84,7 @@ export function DeleteWorkspaceDialog({
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
             onKeyDown={(e) => {
+              if (isImeComposing(e)) return;
               if (e.key === "Enter") {
                 e.preventDefault();
                 submit();

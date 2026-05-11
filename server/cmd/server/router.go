@@ -72,6 +72,11 @@ type RouterOptions struct {
 	HTTPMetrics  *obsmetrics.HTTPMetrics
 	DaemonHub    *daemonws.Hub
 	DaemonWakeup service.TaskWakeupNotifier
+	// HeartbeatScheduler, when non-nil, replaces the default synchronous
+	// passthrough scheduler on the constructed Handler. main.go injects a
+	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
+	// tests leave this nil and get the legacy synchronous behavior.
+	HeartbeatScheduler handler.HeartbeatScheduler
 }
 
 func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) chi.Router {
@@ -97,9 +102,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
 
 	signupConfig := handler.Config{
-		AllowSignup:         os.Getenv("ALLOW_SIGNUP") != "false",
-		AllowedEmails:       splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
-		AllowedEmailDomains: splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+		AllowSignup:                   os.Getenv("ALLOW_SIGNUP") != "false",
+		AllowedEmails:                 splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
+		AllowedEmailDomains:           splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+		UseDailyRollupForRuntimeUsage: os.Getenv("USAGE_DAILY_ROLLUP_ENABLED") == "true",
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	if opts.DaemonWakeup != nil {
@@ -111,6 +117,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
 		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
 		h.LivenessStore = handler.NewRedisLivenessStore(rdb)
+	}
+	if opts.HeartbeatScheduler != nil {
+		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
 	// Auth caches: PAT cache is shared between the regular Auth middleware,
 	// the DaemonAuth fallback (mul_) path, and the revoke handler
@@ -239,6 +248,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
 
 		r.Get("/issues/{issueId}/gc-check", h.GetIssueGCCheck)
+		r.Get("/chat-sessions/{sessionId}/gc-check", h.GetChatSessionGCCheck)
+		r.Get("/autopilot-runs/{runId}/gc-check", h.GetAutopilotRunGCCheck)
+		r.Get("/tasks/{taskId}/gc-check", h.GetTaskGCCheck)
 
 		r.Post("/runtimes/{runtimeId}/recover-orphans", h.RecoverOrphanedTasks)
 		r.Post("/tasks/{taskId}/session", h.PinTaskSession)
@@ -430,14 +442,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)
 			r.Delete("/api/attachments/{id}", h.DeleteAttachment)
 
-			// Comments
-			r.Route("/api/comments/{commentId}", func(r chi.Router) {
-				r.Put("/", h.UpdateComment)
-				r.Delete("/", h.DeleteComment)
-				r.Post("/retry-agent", h.RetryAgentComment)
-				r.Post("/reactions", h.AddReaction)
-				r.Delete("/reactions", h.RemoveReaction)
-			})
+				// Comments
+				r.Route("/api/comments/{commentId}", func(r chi.Router) {
+					r.Put("/", h.UpdateComment)
+					r.Delete("/", h.DeleteComment)
+					r.Post("/retry-agent", h.RetryAgentComment)
+					r.Post("/resolve", h.ResolveComment)
+					r.Delete("/resolve", h.UnresolveComment)
+					r.Post("/reactions", h.AddReaction)
+					r.Delete("/reactions", h.RemoveReaction)
+				})
 
 			// Agents
 			r.Route("/api/agents", func(r chi.Router) {

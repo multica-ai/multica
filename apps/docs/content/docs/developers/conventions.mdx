@@ -95,17 +95,26 @@ Multica's product nouns split into two categories:
 
 This rule is aligned with `apps/docs/content/docs/*.zh.mdx` — the docs are the de facto Chinese voice standard and have been battle-tested across 20+ pages.
 
-### Don't translate — entities (lowercase English)
+### Entities — mixed rule (`issue` / `skill` / `task`)
 
-| Term | Render in Chinese | Example |
+`issue` / `skill` / `task` are Multica's core entities. They have schema columns, API fields, and product UI labels that are all English. In Chinese text, they follow a **mixed rule** — what to use depends on where the word appears:
+
+| Context | Render | Example |
 | --- | --- | --- |
-| Issue | `issue` (lowercase) | "把 issue 分配给智能体"、"创建子 issue" |
-| Skill | `skill` (lowercase) | "为智能体注入 skill" |
-| Task | `task` (lowercase) | "排队中的 task" |
+| **UI strings, state names, code references** | lowercase English | "排队中的 task"、"创建子 issue"、"为智能体注入 skill" |
+| **Doc titles / section headings** | Title-case English **or** the Chinese term | "Issue 与 project"、"Skills"、"执行任务" |
+| **Long-form doc prose, when the entity is the running subject** | Chinese term, with English in parentheses on first mention | "**执行任务**（task）是智能体每一次工作的单位" |
+| **API / DB fields** | always `task` / `issue` / `skill` | `task_id`, `issue_status`, `skill_uuid` |
 
-**Why `issue` / `skill` / `task` stay English while `project` / `autopilot` are translated**:
+Chinese term reference:
 
-- **`issue` / `task`**: dev teams talk in English. The Chinese candidates ("任务" — too vague, almost synonymous with "工作"; "工单" — IT ticket connotation; "议题" — GitHub-style but doesn't match the product feel) all read worse than `issue`.
+- `task` ↔ `执行任务` (or shortened to `任务` once context is clear)
+- `issue` has no settled Chinese translation — leave English; titles may capitalize as `Issue`
+- `skill` has no settled Chinese translation — leave English; titles may capitalize as `Skills`
+
+**Why `issue` / `skill` / `task` aren't forced into Chinese the way `project` / `autopilot` are**:
+
+- **`issue` / `task`**: dev teams talk in English. The Chinese candidates ("任务" — too vague, almost synonymous with "工作"; "工单" — IT ticket connotation; "议题" — GitHub-style but doesn't match the product feel) all read worse than `issue`. **But** in long-form doc prose, repeating lowercase `task` 50× breaks the rhythm — so prose is allowed to use `执行任务`, while UI strings and state names stay lowercase English.
 - **`skill`**: Multica-specific concept with no established Chinese term.
 - **`project` → "项目"**: settled mainstream Chinese word. Feishu / Tower / Teambition / PingCode / GitHub Projects — every Chinese product translates it. No product keeps `project` in Chinese context.
 - **`autopilot` → "自动化"**: in Chinese, "autopilot" associates with Tesla's "自动驾驶" and doesn't match what the feature does (run tasks on a schedule). Notion and Feishu both use "自动化"; that's the industry consensus.

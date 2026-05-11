@@ -8,6 +8,7 @@ import { Byline, NumberedCards, NumberedCard, NumberedSteps, Step } from "@/comp
 import { i18n, type Lang } from "@/lib/i18n";
 import { homeCopy } from "@/lib/translations";
 import { docsAlternates } from "@/lib/site";
+import { DocsLocaleProvider, LocaleLink } from "@/components/locale-link";
 
 function asLang(lang: string): Lang {
   return (i18n.languages as readonly string[]).includes(lang)
@@ -52,15 +53,18 @@ export default async function Page({
       />
       <Byline items={[...copy.byline]} />
       <DocsBody>
-        <MDX
-          components={{
-            ...defaultMdxComponents,
-            NumberedCards,
-            NumberedCard,
-            NumberedSteps,
-            Step,
-          }}
-        />
+        <DocsLocaleProvider lang={lang}>
+          <MDX
+            components={{
+              ...defaultMdxComponents,
+              a: LocaleLink,
+              NumberedCards,
+              NumberedCard,
+              NumberedSteps,
+              Step,
+            }}
+          />
+        </DocsLocaleProvider>
       </DocsBody>
     </DocsPage>
   );

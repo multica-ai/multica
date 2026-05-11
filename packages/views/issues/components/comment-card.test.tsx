@@ -180,7 +180,7 @@ function renderCommentCard() {
       <CommentCard
         issueId="issue-1"
         entry={entry}
-        allReplies={new Map()}
+        replies={[]}
         currentUserId="user-1"
         onReply={async () => {}}
         onEdit={async () => {}}
