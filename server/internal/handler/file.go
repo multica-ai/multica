@@ -188,19 +188,25 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if issueID := r.FormValue("issue_id"); issueID != "" {
-			issueUUID, ok := parseUUIDOrBadRequest(w, issueID, "issue_id")
-			if !ok {
-				return
+			// Support both UUID and human-readable identifier (e.g. "OPE-42")
+			// so callers using identifier-based URLs work correctly.
+			if issue, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
+				params.IssueID = issue.ID
+			} else {
+				issueUUID, ok := parseUUIDOrBadRequest(w, issueID, "issue_id")
+				if !ok {
+					return
+				}
+				issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+					ID:          issueUUID,
+					WorkspaceID: parseUUID(workspaceID),
+				})
+				if err != nil {
+					writeError(w, http.StatusForbidden, "invalid issue_id")
+					return
+				}
+				params.IssueID = issue.ID
 			}
-			issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
-				ID:          issueUUID,
-				WorkspaceID: parseUUID(workspaceID),
-			})
-			if err != nil {
-				writeError(w, http.StatusForbidden, "invalid issue_id")
-				return
-			}
-			params.IssueID = issue.ID
 		}
 		if commentID := r.FormValue("comment_id"); commentID != "" {
 			commentUUID, ok := parseUUIDOrBadRequest(w, commentID, "comment_id")

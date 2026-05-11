@@ -29,6 +29,7 @@
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Slice } from "@tiptap/pm/model";
+import { getClipboardFiles } from "./file-upload";
 
 const LARGE_PASTE_TEXT_THRESHOLD = 50_000;
 
@@ -91,13 +92,18 @@ export function createMarkdownPasteExtension() {
               const clipboard = event.clipboardData;
               if (!clipboard) return false;
 
+              // If clipboard has files/items, defer to the fileUpload extension.
+              if (getClipboardFiles(clipboard).length > 0) return false;
+
               const text = clipboard.getData("text/plain");
+              if (!text) return false;
+
               const html = clipboard.getData("text/html");
               const { $from } = view.state.selection;
               const mode = classifyPaste({
                 text,
                 html,
-                hasFiles: Boolean(clipboard.files?.length),
+                hasFiles: false,
                 isInsideCodeBlock: $from.parent.type.name === "codeBlock",
               });
 
