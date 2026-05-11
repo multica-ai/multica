@@ -265,11 +265,9 @@ describe("createMentionSuggestion", () => {
     expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(false);
   });
 
-  it("shows everyone's personal agents to a workspace admin", () => {
-    // Role lives in the member fixture, not in authState — promoting the
-    // current user to admin here is enough to flip the gate. Backend gate
-    // allows admins to assign anyone's personal agent, so the @mention
-    // list mirrors that.
+  it("does not show other users' personal agents to a workspace admin", () => {
+    // Even admins should not see or @mention agents owned by other users —
+    // agent visibility in the @mention list is strictly per owner_id.
     const qc = fakeQc({
       members: [
         { user_id: "u-current", name: "CurrentUser", role: "admin" },
@@ -291,7 +289,7 @@ describe("createMentionSuggestion", () => {
     const result = config.items!({ query: "a", editor: {} as never });
     const items = result as MentionItem[];
 
-    expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(true);
+    expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(false);
   });
 
   it("includes cached issues in the synchronous response", () => {

@@ -66,19 +66,23 @@ describe("workspace mention targets", () => {
     ]);
   });
 
-  it("shows all agents to a workspace admin regardless of owner", () => {
+  it("does not show other users' agents to a workspace admin", () => {
     const targets = buildWorkspaceMentionTargets(
       [member({ user_id: "admin-1", name: "Admin", role: "admin" })],
       [
         agent({ id: "other-agent", name: "Other Bot", visibility: "workspace", owner_id: "other-user" }),
         agent({ id: "private-agent", name: "Private Bot", visibility: "private", owner_id: "other-user" }),
+        agent({ id: "own-agent", name: "My Bot", owner_id: "admin-1" }),
+        agent({ id: "legacy-agent", name: "Legacy Bot", owner_id: null }),
       ],
       { userId: "admin-1", role: "admin" },
     );
 
     const agentLabels = targets.filter((t) => t.type === "agent").map((t) => t.label);
-    expect(agentLabels).toContain("Other Bot");
-    expect(agentLabels).toContain("Private Bot");
+    expect(agentLabels).not.toContain("Other Bot");
+    expect(agentLabels).not.toContain("Private Bot");
+    expect(agentLabels).toContain("My Bot");
+    expect(agentLabels).toContain("Legacy Bot");
   });
 
   it("maps issues to issue mention targets", () => {

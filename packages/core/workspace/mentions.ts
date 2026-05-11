@@ -24,7 +24,6 @@ export function buildWorkspaceMentionTargets(
   agents: Agent[],
   ctx: MentionPermissionContext,
 ): WorkspaceMentionTarget[] {
-  const isAdmin = ctx.role === "owner" || ctx.role === "admin";
   return [
     { id: "all", label: "All members", type: "all" },
     ...members.map((member) => ({
@@ -36,11 +35,9 @@ export function buildWorkspaceMentionTargets(
       .filter(
         (agent) =>
           !agent.archived_at &&
-          // Only show the current user's own agents. Admins/owners see all.
+          // Only show the current user's own agents, regardless of role.
           // Legacy agents (owner_id null) remain visible to everyone.
-          (agent.owner_id === null ||
-            agent.owner_id === ctx.userId ||
-            isAdmin),
+          (agent.owner_id === null || agent.owner_id === ctx.userId),
       )
       .map((agent) => ({
         id: agent.id,
