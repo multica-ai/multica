@@ -15,6 +15,12 @@ WHERE id = $1 AND workspace_id = $2;
 -- (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
 -- that updated an existing row (false). Analytics reads this to fire
 -- runtime_registered/runtime_ready only on first-time registration.
+--
+-- @timezone is set on INSERT only. On conflict we deliberately KEEP the
+-- existing agent_runtime.timezone — once an operator overrides the tz via
+-- the web UI we don't want a daemon reconnect (which sends its own system
+-- tz) to silently revert it. Daemons can still set the initial value when
+-- they're the first to register a brand-new runtime row.
 INSERT INTO agent_runtime (
     workspace_id,
     daemon_id,
@@ -25,8 +31,9 @@ INSERT INTO agent_runtime (
     device_info,
     metadata,
     owner_id,
+    timezone,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, @timezone, now())
 ON CONFLICT (workspace_id, daemon_id, provider)
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -38,6 +45,16 @@ DO UPDATE SET
     last_seen_at = now(),
     updated_at = now()
 RETURNING *, (xmax = 0) AS inserted;
+
+-- name: UpdateAgentRuntimeTimezone :one
+-- Operator-driven override of the runtime's reporting timezone (MUL-1950).
+-- The new value gets picked up by the next rollup tick: any task_usage row
+-- that touches a bucket for this runtime after the change will rebuild
+-- that bucket under the new tz; existing buckets stay where they were.
+UPDATE agent_runtime
+SET timezone = @timezone, updated_at = now()
+WHERE id = @id
+RETURNING *;
 
 -- name: TouchAgentRuntimeLastSeen :execrows
 -- Bumps last_seen_at on an already-online runtime. Deliberately does NOT

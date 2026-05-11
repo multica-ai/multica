@@ -63,6 +63,11 @@
     "no_agents": "还没有智能体绑定到这个运行时。",
     "diagnostics_title": "诊断",
     "diagnostics_cli": "CLI",
+    "diagnostics_timezone": "时区",
+    "timezone_browser_suffix": "（浏览器）",
+    "timezone_hint": "该 Runtime 的 Token 用量图表会按此时区进行日期分桶。",
+    "timezone_toast_updated": "时区已更新为 {{tz}}",
+    "timezone_toast_failed": "更新时区失败",
     "delete_dialog": {
       "title": "删除运行时",
       "description": "确定要删除\"{{name}}\"吗？此操作不可撤销。",

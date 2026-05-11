@@ -657,6 +657,16 @@ export class ApiClient {
     await this.fetch(`/api/runtimes/${runtimeId}`, { method: "DELETE" });
   }
 
+  async updateRuntime(
+    runtimeId: string,
+    patch: { timezone?: string },
+  ): Promise<AgentRuntime> {
+    return this.fetch(`/api/runtimes/${runtimeId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  }
+
   async getRuntimeUsage(runtimeId: string, params?: { days?: number }): Promise<RuntimeUsage[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));

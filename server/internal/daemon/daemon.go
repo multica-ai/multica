@@ -370,6 +370,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"device_name":       d.cfg.DeviceName,
 		"cli_version":       d.cfg.CLIVersion,
 		"launched_by":       d.cfg.LaunchedBy,
+		"timezone":          detectLocalTimezone(),
 		"runtimes":          runtimes,
 	}
 
@@ -381,6 +382,27 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		return nil, fmt.Errorf("register runtimes: empty response")
 	}
 	return resp, nil
+}
+
+// detectLocalTimezone returns an IANA zone name for the daemon host, used as
+// the initial value of agent_runtime.timezone on first registration. The
+// server treats any unparseable value as "UTC", but we still try harder
+// here because (a) we'd rather a real "Asia/Shanghai" than a silent UTC
+// fallback, and (b) time.Local.String() can return "Local" on hosts where
+// /etc/localtime isn't a symlink, which is useless for AT TIME ZONE on
+// the Postgres side.
+func detectLocalTimezone() string {
+	if tz := strings.TrimSpace(os.Getenv("TZ")); tz != "" {
+		if _, err := time.LoadLocation(tz); err == nil {
+			return tz
+		}
+	}
+	if name := time.Local.String(); name != "" && name != "Local" {
+		if _, err := time.LoadLocation(name); err == nil {
+			return name
+		}
+	}
+	return "UTC"
 }
 
 func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion string, repos []RepoData, settings json.RawMessage) *workspaceState {

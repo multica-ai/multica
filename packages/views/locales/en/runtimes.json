@@ -64,6 +64,11 @@
     "no_agents": "No agents are bound to this runtime yet.",
     "diagnostics_title": "Diagnostics",
     "diagnostics_cli": "CLI",
+    "diagnostics_timezone": "Timezone",
+    "timezone_browser_suffix": " (browser)",
+    "timezone_hint": "Token-usage charts on this runtime bucket dates by this timezone.",
+    "timezone_toast_updated": "Timezone updated to {{tz}}",
+    "timezone_toast_failed": "Failed to update timezone",
     "delete_dialog": {
       "title": "Delete Runtime",
       "description": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",

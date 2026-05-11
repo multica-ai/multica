@@ -14,7 +14,7 @@ import type { AgentRuntime, Agent, MemberWithUser } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useDeleteRuntime } from "@multica/core/runtimes/mutations";
+import { useDeleteRuntime, useUpdateRuntime } from "@multica/core/runtimes/mutations";
 import { deriveRuntimeHealth } from "@multica/core/runtimes";
 import {
   type AgentPresenceDetail,
@@ -505,8 +505,14 @@ function DiagnosticsCard({
         <span className="text-xs font-semibold">{t(($) => $.detail.diagnostics_title)}</span>
       </div>
       <div className="space-y-3 p-4">
+        <div>
+          <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+            {t(($) => $.detail.diagnostics_timezone)}
+          </div>
+          <TimezoneEditor runtime={runtime} />
+        </div>
         {isLocal && (
-          <div>
+          <div className="border-t pt-3">
             <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
               {t(($) => $.detail.diagnostics_cli)}
             </div>
@@ -519,7 +525,7 @@ function DiagnosticsCard({
           </div>
         )}
         {canDelete && (
-          <div className={isLocal ? "border-t pt-3" : ""}>
+          <div className="border-t pt-3">
             <Button
               variant="ghost"
               size="sm"
@@ -532,6 +538,90 @@ function DiagnosticsCard({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Common IANA zones offered as quick picks. The dropdown still accepts any
+// zone via a free-text input — the curated list is just for the 90% case
+// (operator picks from a familiar regional name instead of typing).
+const COMMON_TIMEZONES = [
+  "UTC",
+  "America/Los_Angeles",
+  "America/Denver",
+  "America/Chicago",
+  "America/New_York",
+  "America/Sao_Paulo",
+  "Europe/London",
+  "Europe/Berlin",
+  "Europe/Paris",
+  "Europe/Moscow",
+  "Africa/Cairo",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Bangkok",
+  "Asia/Shanghai",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+];
+
+function browserTimezone(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return tz || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+// TimezoneEditor renders the current runtime tz, a dropdown of common zones
+// (plus the runtime's current value if it isn't in the curated list), and
+// commits the change via PATCH /api/runtimes/:id. We deliberately don't
+// gate this behind a separate "edit" mode — the list is small and the
+// change is reversible, so a single change-on-select is the cheapest UX.
+function TimezoneEditor({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  const wsId = useWorkspaceId();
+  const updateRuntime = useUpdateRuntime(wsId);
+  const current = runtime.timezone || "UTC";
+  const browser = browserTimezone();
+  const browserSuffix = t(($) => $.detail.timezone_browser_suffix);
+
+  const options = Array.from(
+    new Set([current, browser, ...COMMON_TIMEZONES]),
+  ).filter(Boolean);
+
+  return (
+    <div className="space-y-1.5">
+      <select
+        value={current}
+        disabled={updateRuntime.isPending}
+        className="block w-full rounded-md border bg-background px-2 py-1.5 text-xs disabled:opacity-50"
+        onChange={(e) => {
+          const next = e.target.value;
+          if (next === current) return;
+          updateRuntime.mutate(
+            { runtimeId: runtime.id, patch: { timezone: next } },
+            {
+              onSuccess: () =>
+                toast.success(t(($) => $.detail.timezone_toast_updated, { tz: next })),
+              onError: () =>
+                toast.error(t(($) => $.detail.timezone_toast_failed)),
+            },
+          );
+        }}
+      >
+        {options.map((tz) => (
+          <option key={tz} value={tz}>
+            {tz === browser ? `${tz}${browserSuffix}` : tz}
+          </option>
+        ))}
+      </select>
+      <p className="text-[11px] leading-snug text-muted-foreground">
+        {t(($) => $.detail.timezone_hint)}
+      </p>
     </div>
   );
 }
