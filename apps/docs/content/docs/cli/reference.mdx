@@ -23,6 +23,12 @@ multica login --token
 
 Authenticate by pasting a personal access token directly. Useful for headless environments.
 
+For non-interactive login (e.g. CI), pipe the token via stdin:
+
+```bash
+echo "mul_..." | multica login --token -
+```
+
 ### Check Status
 
 ```bash
@@ -38,6 +44,15 @@ multica auth logout
 ```
 
 Removes the stored authentication token.
+
+### Setup Commands
+
+One-shot setup commands that combine login + configuration:
+
+```bash
+multica setup cloud        # Set up for Multica Cloud (login + install daemon)
+multica setup self-host    # Set up for a self-hosted backend
+```
 
 ## Agent Daemon
 
@@ -63,6 +78,12 @@ multica daemon start --foreground
 multica daemon stop
 ```
 
+### Restart
+
+```bash
+multica daemon restart
+```
+
 ### Status
 
 ```bash
@@ -80,6 +101,16 @@ multica daemon logs -f           # Follow (tail -f)
 multica daemon logs -n 100       # Last 100 lines
 ```
 
+### Disk Usage
+
+```bash
+multica daemon disk-usage
+multica daemon disk-usage --by-workspace
+multica daemon disk-usage --top 10
+```
+
+Shows storage used by daemon workspaces. `--by-workspace` breaks down per workspace, `--top N` shows the N largest items.
+
 ### Supported Agents
 
 The daemon auto-detects these AI CLIs on your PATH:
@@ -88,8 +119,19 @@ The daemon auto-detects these AI CLIs on your PATH:
 |-----|---------|-------------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude` | Anthropic's coding agent |
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
+| [OpenCode](https://github.com/opencode-ai/opencode) | `opencode` | Open-source coding agent |
+| [Hermes](https://github.com/nousresearch/hermes-agent) | `hermes` | Nous Research agent |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` | Google's coding agent |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
+
+<Callout type="warn">
+The daemon starts with a minimal `PATH` and does not source your shell profile (`.zshrc`, `.bashrc`). If agent CLIs are installed in `/opt/homebrew/bin`, `~/.local/bin`, or other non-standard locations, the daemon won't find them. Fix by starting with an explicit PATH:
+
+```bash
+PATH=/opt/homebrew/bin:/usr/local/bin:$HOME/bin:$HOME/.local/bin:$PATH multica daemon start
+```
+</Callout>
 
 ### How It Works
 
@@ -187,7 +229,34 @@ multica workspace get <workspace-id> --output json
 multica workspace members <workspace-id>
 ```
 
+### Update Workspace
+
+```bash
+multica workspace update <id> --name "New Name"
+multica workspace update <id> --description "Updated description"
+multica workspace update <id> --context "Team context for agents"
+multica workspace update <id> --issue-prefix "TEAM"
+```
+
+Long fields support stdin for piping:
+
+```bash
+echo "Long description here..." | multica workspace update <id> --description-stdin
+cat context.md | multica workspace update <id> --context-stdin
+```
+
 ## Issues
+
+### Short IDs
+
+List commands (`issue list`, `autopilot list`, `project list`, etc.) print short, copy-paste-ready IDs by default — issue keys like `MUL-123` for issues, short UUID prefixes for the rest. The `<id>` argument on follow-up commands accepts either the short ID or the full UUID, so the typical flow is:
+
+```bash
+multica issue list          # copy the key, e.g. MUL-42
+multica issue get MUL-42    # works with the short key
+```
+
+Pass `--full-id` to any list command when you need the canonical UUID.
 
 ### List Issues
 
@@ -195,15 +264,17 @@ multica workspace members <workspace-id>
 multica issue list
 multica issue list --status in_progress
 multica issue list --priority urgent --assignee "Agent Name"
+multica issue list --project <project-id>
 multica issue list --limit 20 --output json
+multica issue list --full-id
 ```
 
-Available filters: `--status`, `--priority`, `--assignee`, `--limit`.
+Available filters: `--status`, `--priority`, `--assignee`, `--project`, `--limit`, `--full-id`.
 
 ### Get Issue
 
 ```bash
-multica issue get <id>
+multica issue get <id>              # accepts issue key or UUID
 multica issue get <id> --output json
 ```
 
@@ -211,30 +282,50 @@ multica issue get <id> --output json
 
 ```bash
 multica issue create --title "Fix login bug" --description "..." --priority high --assignee "Lambda"
+multica issue create --title "New feature" --project <project-id> --due-date 2025-12-31T00:00:00Z
 ```
 
-Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee`, `--parent`, `--due-date`.
+Flags: `--title` (required), `--description`, `--status`, `--priority` (`none`, `low`, `medium`, `high`, `urgent`), `--assignee`, `--parent`, `--due-date` (RFC 3339), `--project`, `--attachment` (comma-separated file paths).
 
 ### Update Issue
 
 ```bash
 multica issue update <id> --title "New title" --priority urgent
+multica issue update <id> --status done --assignee "Lambda"
+multica issue update <id> --project <project-id> --parent <parent-issue-id>
 ```
 
 ### Assign Issue
 
 ```bash
-multica issue assign <id> --to "Lambda"
+multica issue assign <id> --agent <agent-slug>
 multica issue assign <id> --unassign
 ```
+
+`--agent` assigns to an agent by slug and triggers a task immediately.
 
 ### Change Status
 
 ```bash
-multica issue status <id> in_progress
+multica issue status <id> --set in_progress
 ```
 
 Valid statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`.
+
+### Search
+
+```bash
+multica issue search "login error"
+multica issue search "deploy" --include-closed --limit 10
+```
+
+### Rerun
+
+```bash
+multica issue rerun <id>
+```
+
+Re-enqueues a fresh task for the issue's current agent assignee.
 
 ### Comments
 
@@ -245,11 +336,33 @@ multica issue comment list <issue-id>
 # Add a comment
 multica issue comment add <issue-id> --content "Looks good, merging now"
 
+# Add a comment with an attachment
+multica issue comment add <issue-id> --content "Screenshot attached" --attachment screenshot.png
+
 # Reply to a specific comment
 multica issue comment add <issue-id> --parent <comment-id> --content "Thanks!"
 
+# Pipe long content via stdin
+echo "Long comment body..." | multica issue comment add <issue-id> --content-stdin
+
 # Delete a comment
 multica issue comment delete <comment-id>
+```
+
+### Labels
+
+```bash
+multica issue label list <issue-id>
+multica issue label add <issue-id> --label "bug"
+multica issue label remove <issue-id> --label "bug"
+```
+
+### Subscribers
+
+```bash
+multica issue subscriber list <issue-id>
+multica issue subscriber add <issue-id> --user <user-id>
+multica issue subscriber remove <issue-id> --user <user-id>
 ```
 
 ### Execution History
@@ -266,6 +379,177 @@ multica issue run-messages <task-id> --output json
 # Incremental fetch (only messages after a given sequence number)
 multica issue run-messages <task-id> --since 42 --output json
 ```
+
+## Labels
+
+Manage workspace-level labels:
+
+```bash
+multica label list
+multica label get <id>
+multica label create --name "bug" --description "Bug reports" --color "#ff0000"
+multica label update <id> --name "enhancement" --color "#00ff00"
+multica label delete <id>
+```
+
+## Projects
+
+```bash
+multica project list
+multica project get <id>
+multica project create --title "Website Redesign" --description "..." --icon 🚀 --lead "Alice"
+multica project update <id> --title "Updated title" --status active
+multica project status <id> active
+multica project delete <id>
+```
+
+### Project Resources
+
+Attach external resources (e.g. GitHub repos) to projects:
+
+```bash
+multica project resource list <project-id>
+multica project resource add <project-id> --type github_repo --url https://github.com/org/repo
+multica project resource remove <project-id> <resource-id>
+```
+
+## Agents
+
+```bash
+multica agent list
+multica agent get <slug>
+multica agent tasks <slug>        # Show task history (requires full UUID on some versions)
+```
+
+### Create an Agent
+
+```bash
+multica agent create --name "My Agent" --runtime-id <runtime-id> --description "Agent description" --instructions "You are a helpful coding assistant."
+```
+
+Flags: `--name` (required), `--runtime-id` (required), `--description`, `--instructions`, `--visibility` (`private` or `workspace`), `--model`, `--custom-args`, `--custom-env`.
+
+### Update an Agent
+
+```bash
+multica agent update <slug> --name "New Name" --instructions "Updated instructions"
+multica agent update <slug> --max-concurrent-tasks 10 --status idle
+```
+
+### Archive / Restore
+
+```bash
+multica agent archive <slug>
+multica agent restore <slug>
+```
+
+### Agent Skills
+
+```bash
+multica agent skills list <agent-id>
+multica agent skills set <agent-id> --skill-ids id1,id2,id3
+```
+
+### Agent Avatar
+
+```bash
+multica agent avatar <id> --file /path/to/image.png
+```
+
+## Skills
+
+```bash
+multica skill list
+multica skill get <id>
+multica skill create --name "my-skill" --description "Description" --content "Skill body text"
+multica skill update <id> --name "Updated name" --description "..." --content "Updated body"
+multica skill delete <id> --yes
+```
+
+### Skill Files
+
+```bash
+multica skill files list <skill-id>
+multica skill files upsert <skill-id> --path "references/api.md" --content "File content"
+multica skill files delete <skill-id> <file-id>
+```
+
+### Import Skills
+
+```bash
+multica skill import --url https://clawhub.com/skills/my-skill
+multica skill import --url https://skills.sh/skills/my-skill
+multica skill import --url https://github.com/user/repo
+```
+
+<Callout type="info">
+When passing long content via `--content`, special characters (backticks, quotes, `&`, `<`, `>`) can break shell escaping. Use process substitution to avoid issues:
+
+```bash
+multica skill create --name "my-skill" --content "$(cat /tmp/skill.md)"
+```
+
+Or write to a temp file first:
+
+```bash
+cat > /tmp/skill.md << 'EOF'
+---
+name: my-skill
+---
+Skill content here...
+EOF
+multica skill create --name "my-skill" --content "$(cat /tmp/skill.md)"
+```
+</Callout>
+
+## Autopilots
+
+Autopilots run agents on a schedule.
+
+```bash
+multica autopilot list
+multica autopilot get <id>
+multica autopilot create --title "Daily Review" --agent "reviewer" --mode create_issue --description "Review all open PRs"
+multica autopilot update <id> --title "Updated title"
+multica autopilot delete <id>
+multica autopilot runs <id>
+multica autopilot trigger <id>    # Trigger a manual run
+```
+
+### Scheduled Triggers
+
+```bash
+# Add a cron trigger
+multica autopilot trigger-add <id> --cron "0 9 * * 1-5" --timezone "America/New_York" --label "weekday-morning"
+
+# Update a trigger
+multica autopilot trigger-update <trigger-id> --cron "0 10 * * 1-5"
+
+# Delete a trigger
+multica autopilot trigger-delete <trigger-id>
+```
+
+<Callout type="warn">
+`--timezone` defaults to UTC. Always set it explicitly for non-UTC schedules.
+</Callout>
+
+## Runtimes
+
+```bash
+multica runtime list
+multica runtime usage <runtime-id> [--days 7]
+multica runtime activity <runtime-id>
+multica runtime update <runtime-id> --target-version <version> [--wait]
+```
+
+## Repo Checkout
+
+```bash
+multica repo checkout https://github.com/org/repo
+multica repo checkout https://github.com/org/repo --ref main
+```
+
+Clones a project's repository into the local workspace directory for agents to access.
 
 ## Configuration
 
@@ -285,12 +569,19 @@ multica config set app_url https://app.example.com
 multica config set workspace_id <workspace-id>
 ```
 
+## Attachments
+
+```bash
+multica attachment download <id>
+multica attachment download <id> -o /path/to/dir
+```
+
 ## Other Commands
 
 ```bash
-multica version              # Show CLI version and commit hash
+multica version              # Show CLI version, commit hash, and build time
 multica update               # Update to latest version
-multica agent list           # List agents in the current workspace
+multica update --download-timeout 300  # Custom download timeout in seconds
 ```
 
 ## Output Formats
@@ -303,4 +594,82 @@ Most commands support `--output` with two formats:
 ```bash
 multica issue list --output json
 multica daemon status --output json
+```
+
+## Global Flags
+
+| Flag | Description |
+|------|-------------|
+| `--workspace-id <uuid>` | Override the default workspace for this command |
+| `--server-url <url>` | Override the server URL for this command |
+| `--profile <name>` | Use an isolated config profile |
+| `--full-id` | List commands: print full UUIDs instead of short keys |
+| `--output json\|table` | Set the output format |
+
+## Gotchas & Common Pitfalls
+
+### Daemon Can't Find Agent CLIs
+
+The daemon starts with a minimal `PATH` and does not source shell profiles. If agent CLIs are installed in non-standard locations (`/opt/homebrew/bin`, `~/.local/bin`), start the daemon with an explicit PATH:
+
+```bash
+PATH=/opt/homebrew/bin:/usr/local/bin:$HOME/bin:$HOME/.local/bin:$PATH multica daemon start
+```
+
+### Long Content Breaks Shell Escaping
+
+Passing long content via `--content` or `--instructions` can fail when the content contains special characters (backticks, quotes, `&`, `<`, `>`). Use process substitution:
+
+```bash
+multica skill create --name "my-skill" --content "$(cat /tmp/content.md)"
+multica agent update <id> --instructions "$(cat /tmp/instructions.txt)"
+```
+
+Or for `issue comment add`, use `--content-stdin`:
+
+```bash
+echo "Comment with \`backticks\` and 'quotes'" | multica issue comment add <id> --content-stdin
+```
+
+Note: `skill update` does **not** support `--content-stdin` — only `issue comment add` does.
+
+### Tokens Are Per-Instance
+
+Authentication tokens are specific to each Multica instance (cloud vs self-hosted). When switching between instances:
+
+```bash
+multica config set server_url <new-url>
+multica config set workspace_id <new-workspace-id>
+multica login --token <new-token>
+multica daemon stop && multica daemon start
+```
+
+### Manual CLI Upgrade
+
+When `multica update` fails with permission errors (common with Homebrew installations):
+
+```bash
+multica daemon stop
+cd /tmp && curl -L -o multica-cli.tar.gz \
+  'https://github.com/multica-ai/multica/releases/latest/download/multica-cli-latest-darwin-arm64.tar.gz'
+tar xzf multica-cli.tar.gz
+chmod u+w /opt/homebrew/Cellar/multica/*/bin/multica
+cp /tmp/multica /opt/homebrew/Cellar/multica/*/bin/multica
+chmod 755 /opt/homebrew/Cellar/multica/*/bin/multica
+multica version  # verify
+multica daemon start
+```
+
+### Install Behind Restricted Networks
+
+If `get.multica.ai` is blocked, install directly from GitHub releases:
+
+```bash
+cd /tmp
+curl -L -o multica-cli.tar.gz \
+  'https://github.com/multica-ai/multica/releases/latest/download/multica-cli-latest-linux-amd64.tar.gz'
+tar xzf multica-cli.tar.gz
+mkdir -p ~/bin
+mv multica ~/bin/
+export PATH="$HOME/bin:$PATH"
 ```
