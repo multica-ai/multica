@@ -2,12 +2,13 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Loader2, Square } from "lucide-react";
+import { ChevronRight, Loader2, Search, Square, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask, TaskFailureReason } from "@multica/core/types";
 import { timeAgo } from "@multica/core/utils";
+import { useActorName } from "@multica/core/workspace/hooks";
 import {
   Tooltip,
   TooltipContent,
@@ -101,6 +102,7 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
   const { t } = useT("issues");
   const [open, setOpen] = useState(true);
   const [showPast, setShowPast] = useState(false);
+  const [filter, setFilter] = useState("");
 
   // Cache key registered in `issueKeys.tasks` (packages/core/issues/queries.ts)
   // so the global useRealtimeSync `task:` prefix path invalidates it via
@@ -115,6 +117,19 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
   });
 
   const agentColorMap = useAgentColorMap(tasks);
+
+  // Run index: sequential #1, #2, #3 across all tasks, ordered by created_at.
+  // The index is an identity label — it stays stable when filtering.
+  const taskIndexMap = useMemo(() => {
+    const sorted = [...tasks].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    );
+    const map = new Map<string, number>();
+    sorted.forEach((t, i) => map.set(t.id, i + 1));
+    return map;
+  }, [tasks]);
+
+  const { getAgentName } = useActorName();
 
   const activeTasks = useMemo(
     () =>
@@ -148,6 +163,26 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
     });
   }, [tasks]);
 
+  // Filter runs by agent name or trigger summary text
+  const matchesFilter = useMemo(() => {
+    if (!filter) return () => true;
+    const q = filter.toLowerCase();
+    return (t: AgentTask) => {
+      const agentName = t.agent_id ? getAgentName(t.agent_id).toLowerCase() : "";
+      const summary = (t.trigger_summary ?? "").toLowerCase();
+      return agentName.includes(q) || summary.includes(q);
+    };
+  }, [filter, getAgentName]);
+
+  const filteredActive = useMemo(
+    () => activeTasks.filter(matchesFilter),
+    [activeTasks, matchesFilter],
+  );
+  const filteredPast = useMemo(
+    () => pastTasks.filter(matchesFilter),
+    [pastTasks, matchesFilter],
+  );
+
   if (activeTasks.length === 0 && pastTasks.length === 0) return null;
 
   return (
@@ -174,19 +209,39 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
       </button>
       {open && (
         <div className="space-y-0.5 pl-2">
-          {activeTasks.map((task) => (
+          {/* Filter bar — only shown when there are enough runs to warrant it */}
+          {tasks.length > 3 && (
+            <div className="flex items-center gap-1 px-2 mb-1">
+              <Search className="h-3 w-3 text-muted-foreground shrink-0" />
+              <input
+                type="text"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder={t(($) => $.execution_log.filter_placeholder)}
+                className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/50"
+              />
+              {filter && (
+                <button type="button" onClick={() => setFilter("")} className="text-muted-foreground hover:text-foreground">
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          )}
+
+          {filteredActive.map((task) => (
             <ActiveRow
               key={task.id}
               task={task}
               issueId={issueId}
+              runIndex={taskIndexMap.get(task.id)}
               colorClass={agentColorMap?.get(task.agent_id)}
               onHighlightComment={onHighlightComment}
             />
           ))}
 
-          {pastTasks.length > 0 && (
+          {filteredPast.length > 0 && (
             <>
-              {activeTasks.length > 0 && (
+              {filteredActive.length > 0 && (
                 <div className="my-1.5 border-t border-border/60" />
               )}
               <button
@@ -200,15 +255,16 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
                   }`}
                 />
                 {showPast
-                  ? t(($) => $.execution_log.hide_past, { count: pastTasks.length })
-                  : t(($) => $.execution_log.show_past, { count: pastTasks.length })}
+                  ? t(($) => $.execution_log.hide_past, { count: filteredPast.length })
+                  : t(($) => $.execution_log.show_past, { count: filteredPast.length })}
               </button>
               {showPast && (
                 <div className="mt-0.5 space-y-0.5">
-                  {pastTasks.map((task) => (
+                  {filteredPast.map((task) => (
                     <PastRow
                       key={task.id}
                       task={task}
+                      runIndex={taskIndexMap.get(task.id)}
                       colorClass={agentColorMap?.get(task.agent_id)}
                       onHighlightComment={onHighlightComment}
                     />
@@ -269,20 +325,24 @@ function activeTimeText(task: AgentTask): string {
 function useTriggerText(task: AgentTask): string {
   const { t } = useT("issues");
   const isRetry = !!task.parent_task_id;
-  const retryPrefix = isRetry
-    ? task.attempt && task.attempt > 1
-      ? t(($) => $.execution_log.trigger_retry_attempt_prefix, { attempt: task.attempt })
-      : t(($) => $.execution_log.trigger_retry_prefix)
-    : "";
 
-  if (task.trigger_summary) return retryPrefix + task.trigger_summary;
+  // Retry: label prefix + summary
   if (isRetry) {
-    return task.attempt && task.attempt > 1
+    const retryLabel = task.attempt && task.attempt > 1
       ? t(($) => $.execution_log.trigger_retry_attempt, { attempt: task.attempt })
       : t(($) => $.execution_log.trigger_retry);
+    return task.trigger_summary ? `${retryLabel} · ${task.trigger_summary}` : retryLabel;
   }
-  if (task.autopilot_run_id) return t(($) => $.execution_log.trigger_autopilot);
-  if (task.trigger_comment_id) return t(($) => $.execution_log.trigger_comment);
+
+  // Semantic label + cleaned context summary
+  if (task.autopilot_run_id) {
+    const label = t(($) => $.execution_log.trigger_autopilot);
+    return task.trigger_summary ? `${label} · ${task.trigger_summary}` : label;
+  }
+  if (task.trigger_comment_id) {
+    const label = t(($) => $.execution_log.trigger_comment);
+    return task.trigger_summary ? `${label} · ${task.trigger_summary}` : label;
+  }
   return t(($) => $.execution_log.trigger_initial);
 }
 
@@ -301,11 +361,13 @@ function useStatusLabel(status: AgentTask["status"]): string {
 function ActiveRow({
   task,
   issueId,
+  runIndex,
   colorClass,
   onHighlightComment,
 }: {
   task: AgentTask;
   issueId: string;
+  runIndex?: number;
   colorClass?: string;
   onHighlightComment?: (commentId: string) => void;
 }) {
@@ -337,8 +399,8 @@ function ActiveRow({
       : undefined;
 
   return (
-    <RowShell task={task} colorClass={colorClass}>
-      <TriggerText text={trigger} onClick={handleTriggerClick} />
+    <RowShell task={task} runIndex={runIndex} colorClass={colorClass}>
+      <TriggerText text={trigger} fullText={task.trigger_summary} onClick={handleTriggerClick} />
       {/* Status + time always visible — actions append on hover, never
           replace. Same pattern as desktop tab bar / sidebar pins. */}
       <span className="shrink-0 whitespace-nowrap text-xs">
@@ -383,10 +445,12 @@ function ActiveRow({
 
 function PastRow({
   task,
+  runIndex,
   colorClass,
   onHighlightComment,
 }: {
   task: AgentTask;
+  runIndex?: number;
   colorClass?: string;
   onHighlightComment?: (commentId: string) => void;
 }) {
@@ -406,8 +470,8 @@ function PastRow({
       : undefined;
 
   return (
-    <RowShell task={task} colorClass={colorClass}>
-      <TriggerText text={trigger} onClick={handleTriggerClick} />
+    <RowShell task={task} runIndex={runIndex} colorClass={colorClass}>
+      <TriggerText text={trigger} fullText={task.trigger_summary} onClick={handleTriggerClick} />
       <span className="shrink-0 whitespace-nowrap text-xs">
         <span className={tone}>{failureLabel ?? label}</span>
         <span className="text-muted-foreground"> · {time}</span>
@@ -423,10 +487,12 @@ function PastRow({
 
 function RowShell({
   task,
+  runIndex,
   colorClass,
   children,
 }: {
   task: AgentTask;
+  runIndex?: number;
   colorClass?: string;
   children: React.ReactNode;
 }) {
@@ -438,6 +504,12 @@ function RowShell({
         colorClass ? ` border-l-2 ${colorClass}` : ""
       }`}
     >
+      {runIndex != null && (
+        // eslint-disable-next-line i18next/no-literal-string
+        <span className="shrink-0 w-5 text-right text-[10px] font-mono tabular-nums text-muted-foreground/60">
+          #{runIndex}
+        </span>
+      )}
       {task.agent_id ? (
         <ActorAvatar
           actorType="agent"
@@ -456,10 +528,11 @@ function RowShell({
 // Trigger description with a mask-gradient right edge — text fades into
 // transparency in the trailing 12px for the same reason desktop tab /
 // sidebar pin do it: avoids a hard truncate cut against neighbouring
-// content.
-function TriggerText({ text, onClick }: { text: string; onClick?: () => void }) {
+// content. When the display text is truncated and fullText is provided,
+// a Tooltip reveals the complete trigger_summary on hover.
+function TriggerText({ text, fullText, onClick }: { text: string; fullText?: string; onClick?: () => void }) {
   const Tag = onClick ? "button" : "span";
-  return (
+  const content = (
     <Tag
       type={onClick ? "button" : undefined}
       onClick={onClick}
@@ -470,6 +543,18 @@ function TriggerText({ text, onClick }: { text: string; onClick?: () => void }) 
     >
       {text}
     </Tag>
+  );
+
+  if (!fullText || fullText === text) return content;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={content}
+        className="min-w-0 flex-1"
+      />
+      <TooltipContent className="max-w-xs whitespace-pre-wrap text-xs">{fullText}</TooltipContent>
+    </Tooltip>
   );
 }
 

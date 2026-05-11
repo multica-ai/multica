@@ -213,7 +213,8 @@
     "status_running": "处理中",
     "status_completed": "已完成",
     "status_failed": "失败",
-    "status_cancelled": "已取消"
+    "status_cancelled": "已取消",
+    "filter_placeholder": "筛选运行记录..."
   },
   "batch": {
     "selected": "已选择 {{count}} 个",
