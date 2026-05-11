@@ -9,6 +9,7 @@
     "errors": {
       "slug_format": "Solo letras minúsculas, números y guiones",
       "slug_taken": "Esa URL de espacio de trabajo ya está en uso.",
+      "slug_reserved": "Esa URL de espacio de trabajo está reservada y no puede usarse.",
       "slug_conflict_toast": "Elige una URL diferente para el espacio de trabajo",
       "create_failed": "Error al crear el espacio de trabajo"
     }

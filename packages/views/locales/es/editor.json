@@ -52,6 +52,9 @@
   "file_card": {
     "uploading": "Subiendo {{filename}}"
   },
+  "attachment": {
+    "download_failed": "No se pudo obtener el enlace de descarga. Inténtalo de nuevo en un momento."
+  },
   "title_editor": {
     "title_aria_label": "Título"
   },

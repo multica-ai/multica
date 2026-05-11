@@ -9,7 +9,9 @@
     "placeholder_no_agent": "Crea un agente para empezar a chatear",
     "placeholder_archived": "Esta sesión está archivada",
     "placeholder_named": "Dile a {{name}} qué hacer…",
-    "placeholder_default": "Dime qué hacer…"
+    "placeholder_default": "Dime qué hacer…",
+    "send_tooltip": "Enviar",
+    "stop_tooltip": "Detener"
   },
   "message_list": {
     "show_details": "Mostrar detalles",
@@ -27,9 +29,6 @@
     "copy_failed_toast": "Error al copiar"
   },
   "session_history": {
-    "back_tooltip": "Atrás",
-    "header": "Historial de chat",
-    "empty": "Sin sesiones de chat todavía",
     "untitled": "Sin título",
     "time": {
       "just_now": "ahora mismo",
@@ -38,7 +37,6 @@
       "days": "hace {{count}}d"
     },
     "row_delete_aria": "Eliminar sesión de chat",
-    "row_delete_tooltip": "Eliminar",
     "delete_dialog": {
       "title": "Eliminar sesión de chat",
       "description_with_title": "«{{title}}» y sus mensajes se eliminarán permanentemente. Esta acción no se puede deshacer.",
@@ -62,8 +60,9 @@
     "my_agents": "Mis agentes",
     "others": "Otros",
     "no_agents": "Sin agentes",
-    "history_show_tooltip": "Historial de chat",
-    "history_back_tooltip": "Volver al chat"
+    "active_group": "Activo",
+    "archived_group_one": "{{count}} chat archivado",
+    "archived_group_other": "{{count}} chats archivados"
   },
   "empty_state": {
     "first_time_title": "Chatea con tus agentes",

@@ -134,11 +134,7 @@
     "workdir_path_unavailable": "Aún no hay un directorio de trabajo local — la incidencia no ha sido ejecutada por un agente local"
   },
   "timeline": {
-    "show_older": "Mostrar más antiguos",
-    "show_newer": "Mostrar más recientes",
-    "loading": "Cargando...",
-    "jump_to_latest": "Ir al más reciente",
-    "jump_to_latest_with_count": "Ir al más reciente · {{count}} nuevos"
+    "loading": "Cargando..."
   },
   "activity": {
     "created": "creó esta incidencia",
@@ -177,8 +173,20 @@
     "reply_count_one": "{{count}} respuesta",
     "reply_count_other": "{{count}} respuestas",
     "leave_comment_placeholder": "Escribe un comentario...",
+    "send_tooltip": "Enviar",
     "expand_tooltip": "Expandir",
-    "collapse_tooltip": "Contraer"
+    "collapse_tooltip": "Contraer",
+    "resolve": {
+      "resolve_action": "Resolver hilo",
+      "unresolve_action": "Desresolver hilo",
+      "collapse": "Contraer",
+      "bar_one": "{{count}} comentario resuelto de {{authors}}",
+      "bar_other": "{{count}} comentarios resueltos de {{authors}}",
+      "bar_authors_more_one": "{{names}} y {{count}} más",
+      "bar_authors_more_other": "{{names}} y {{count}} más",
+      "resolve_failed": "Error al resolver el hilo",
+      "unresolve_failed": "Error al desresolver el hilo"
+    }
   },
   "reply": {
     "placeholder": "Escribe una respuesta...",
@@ -187,6 +195,8 @@
   },
   "agent_live": {
     "is_working": "{{name}} está trabajando",
+    "is_queued": "{{name}} está en cola",
+    "queued_elapsed_prefix": "en cola durante {{elapsed}}",
     "fallback_name": "Agente",
     "tool_count_one": "{{count}} herramienta",
     "tool_count_other": "{{count}} herramientas",
@@ -201,6 +211,9 @@
     "hide_past": "Ocultar ejecuciones anteriores ({{count}})",
     "cancel_task_tooltip": "Cancelar tarea",
     "cancel_task_aria": "Cancelar tarea",
+    "retry_task_tooltip": "Reintentar tarea",
+    "retry_task_aria": "Reintentar tarea",
+    "retry_failed": "Error al reintentar la tarea",
     "transcript_tooltip": "Ver transcripción",
     "cancel_failed": "Error al cancelar la tarea",
     "trigger_retry": "Reintentar",

@@ -107,6 +107,8 @@
     "back_to_agents_full": "Volver a agentes",
     "not_found_title": "Agente no encontrado",
     "not_found_default": "Este agente puede haber sido archivado o eliminado.",
+    "no_access_title": "No tienes acceso a este agente",
+    "no_access_hint": "Solo el propietario del agente o un administrador del espacio de trabajo pueden ver este agente privado.",
     "try_again": "Intentar de nuevo",
     "archived_banner": "Este agente está archivado. No puede ser asignado ni mencionado.",
     "restore": "Restaurar",
@@ -259,7 +261,9 @@
       "remove_failed_toast": "Error al eliminar la habilidad",
       "add_dialog_title": "Añadir habilidad",
       "add_dialog_description": "Selecciona una habilidad del espacio de trabajo para asignar a este agente.",
+      "add_dialog_search_placeholder": "Buscar habilidades",
       "add_dialog_empty": "Todas las habilidades del espacio de trabajo ya están asignadas.",
+      "add_dialog_no_match": "Ninguna habilidad coincide con tu búsqueda.",
       "add_dialog_cancel": "Cancelar",
       "add_failed_toast": "Error al añadir la habilidad"
     },
