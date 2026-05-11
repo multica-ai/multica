@@ -102,8 +102,13 @@ function findMemberAncestorComment(
   return null;
 }
 
-function isTaskRunSystemComment(entry: TimelineEntry): boolean {
-  return entry.type === "comment" && entry.actor_type === "agent" && entry.comment_type === "system";
+/** Any comment authored by an agent — used to gate the Retry action.
+ *  The backend RetryAgentComment handler only requires author_type=agent,
+ *  so the frontend should match. The previous isTaskRunSystemComment check
+ *  (comment_type==="system") was too narrow: normal agent output also needs
+ *  the Retry affordance. */
+function isAgentComment(entry: TimelineEntry): boolean {
+  return entry.type === "comment" && entry.actor_type === "agent";
 }
 
 // ---------------------------------------------------------------------------
@@ -279,8 +284,9 @@ function CommentRow({
   const canDeleteEntry = isOwn || canModerate;
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const agentMeta = isTaskRunSystemComment(entry) ? agents.find((agent) => agent.id === entry.actor_id) : undefined;
-  const memberAncestor = isTaskRunSystemComment(entry) ? findMemberAncestorComment(entry, commentById) : null;
+  const isAgent = isAgentComment(entry);
+  const agentMeta = isAgent ? agents.find((agent) => agent.id === entry.actor_id) : undefined;
+  const memberAncestor = isAgent ? findMemberAncestorComment(entry, commentById) : null;
   const isAgentOwner = !!(agentMeta?.owner_id && currentUserId && agentMeta.owner_id === currentUserId);
   const isTriggerMember = !!(
     memberAncestor &&
@@ -289,7 +295,7 @@ function CommentRow({
     memberAncestor.actor_id === currentUserId
   );
   const canRetryAgentComment =
-    isTaskRunSystemComment(entry) &&
+    isAgent &&
     !isTemp &&
     issueOpen &&
     (canModerate || isAgentOwner || isTriggerMember);
@@ -509,8 +515,9 @@ function CommentCardImpl({
   const canDeleteEntry = isOwn || canModerate;
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const agentMeta = isTaskRunSystemComment(entry) ? agents.find((agent) => agent.id === entry.actor_id) : undefined;
-  const memberAncestor = isTaskRunSystemComment(entry) ? findMemberAncestorComment(entry, commentById) : null;
+  const isAgent = isAgentComment(entry);
+  const agentMeta = isAgent ? agents.find((agent) => agent.id === entry.actor_id) : undefined;
+  const memberAncestor = isAgent ? findMemberAncestorComment(entry, commentById) : null;
   const isAgentOwner = !!(agentMeta?.owner_id && currentUserId && agentMeta.owner_id === currentUserId);
   const isTriggerMember = !!(
     memberAncestor &&
@@ -519,7 +526,7 @@ function CommentCardImpl({
     memberAncestor.actor_id === currentUserId
   );
   const canRetryAgentComment =
-    isTaskRunSystemComment(entry) &&
+    isAgent &&
     !isTemp &&
     issueOpen &&
     (canModerate || isAgentOwner || isTriggerMember);
