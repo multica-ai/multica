@@ -410,9 +410,12 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
         (a) =>
           !a.archived_at &&
           a.name.toLowerCase().includes(q) &&
-          // Only show the current user's own agents, regardless of role.
+          // Workspace agents are shared — always visible to all members.
+          // Private agents are restricted to their owner only.
           // Legacy agents (owner_id null) remain visible to everyone.
-          (a.owner_id === null || a.owner_id === userId),
+          (a.visibility === "workspace" ||
+            a.owner_id === null ||
+            a.owner_id === userId),
       )
       .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
 

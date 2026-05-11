@@ -35,9 +35,12 @@ export function buildWorkspaceMentionTargets(
       .filter(
         (agent) =>
           !agent.archived_at &&
-          // Only show the current user's own agents, regardless of role.
+          // Workspace agents are shared — always visible to all members.
+          // Private agents are restricted to their owner only.
           // Legacy agents (owner_id null) remain visible to everyone.
-          (agent.owner_id === null || agent.owner_id === ctx.userId),
+          (agent.visibility === "workspace" ||
+            agent.owner_id === null ||
+            agent.owner_id === ctx.userId),
       )
       .map((agent) => ({
         id: agent.id,

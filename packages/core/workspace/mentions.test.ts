@@ -46,7 +46,7 @@ function agent(overrides: Partial<Agent>): Agent {
 }
 
 describe("workspace mention targets", () => {
-  it("filters agents owned by other users from mention targets", () => {
+  it("filters private agents from other users but keeps workspace agents", () => {
     const targets = buildWorkspaceMentionTargets(
       [member({ user_id: "user-1", name: "Alice" })],
       [
@@ -62,15 +62,16 @@ describe("workspace mention targets", () => {
       "all:All members",
       "member:Alice",
       "agent:Team Bot",
+      "agent:Other WS Bot",
       "agent:My Bot",
     ]);
   });
 
-  it("does not show other users' agents to a workspace admin", () => {
+  it("hides private agents from other users even for workspace admin", () => {
     const targets = buildWorkspaceMentionTargets(
       [member({ user_id: "admin-1", name: "Admin", role: "admin" })],
       [
-        agent({ id: "other-agent", name: "Other Bot", visibility: "workspace", owner_id: "other-user" }),
+        agent({ id: "other-ws-agent", name: "Other WS Bot", visibility: "workspace", owner_id: "other-user" }),
         agent({ id: "private-agent", name: "Private Bot", visibility: "private", owner_id: "other-user" }),
         agent({ id: "own-agent", name: "My Bot", owner_id: "admin-1" }),
         agent({ id: "legacy-agent", name: "Legacy Bot", owner_id: null }),
@@ -79,7 +80,9 @@ describe("workspace mention targets", () => {
     );
 
     const agentLabels = targets.filter((t) => t.type === "agent").map((t) => t.label);
-    expect(agentLabels).not.toContain("Other Bot");
+    // Workspace agents are shared — always visible.
+    expect(agentLabels).toContain("Other WS Bot");
+    // Private agents from other users are hidden even for admins.
     expect(agentLabels).not.toContain("Private Bot");
     expect(agentLabels).toContain("My Bot");
     expect(agentLabels).toContain("Legacy Bot");
