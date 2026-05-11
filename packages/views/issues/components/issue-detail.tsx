@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { Component, useState, useEffect, useCallback, useMemo, useRef } from "react";
+import type { ReactNode } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -213,6 +214,35 @@ function TimelineSkeleton() {
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// TimelineErrorBoundary — catches render crashes in the timeline section
+// ---------------------------------------------------------------------------
+
+class TimelineErrorBoundary extends Component<
+  { children: ReactNode; fallback?: ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: ReactNode; fallback?: ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback ?? (
+        <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-center text-sm text-muted-foreground">
+          Failed to load comments. Please refresh the page.
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 interface IssueDetailProps {
   issueId: string;
@@ -1143,6 +1173,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <TimelineSkeleton />
             ) : (
             <>
+            <TimelineErrorBoundary>
             <div className="mt-4 flex flex-col gap-3">
               {timelineView.groups.map((group) => {
                 if (group.type === "comment") {
@@ -1237,6 +1268,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 );
               })}
             </div>
+            </TimelineErrorBoundary>
             </>
             )}
 

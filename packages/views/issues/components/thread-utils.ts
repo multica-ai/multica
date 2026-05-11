@@ -12,7 +12,10 @@ export function collectThreadReplies(
   repliesByParent: Map<string, TimelineEntry[]>,
 ): TimelineEntry[] {
   const out: TimelineEntry[] = [];
+  const visited = new Set<string>();
   const walk = (id: string) => {
+    if (visited.has(id)) return;
+    visited.add(id);
     const children = repliesByParent.get(id) ?? [];
     for (const child of children) {
       out.push(child);
