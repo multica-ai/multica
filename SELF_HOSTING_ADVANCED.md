@@ -191,7 +191,8 @@ In production, put a reverse proxy in front of both the backend and frontend to 
 ```
 multica.example.com {
     # WebSocket route — must come before the catch-all
-    handle /ws* {
+    @multica_ws path /ws /ws/*
+    handle @multica_ws {
         reverse_proxy localhost:8080 {
             flush_interval -1
         }
@@ -210,7 +211,8 @@ app.example.com {
 }
 
 api.example.com {
-    handle /ws* {
+    @multica_ws path /ws /ws/*
+    handle @multica_ws {
         reverse_proxy localhost:8080 {
             flush_interval -1
         }
@@ -222,7 +224,7 @@ api.example.com {
 
 Two non-obvious bits inside the `/ws` block are worth calling out — both are common reasons real-time updates "stop working" on a Caddy-fronted self-host:
 
-- **`handle /ws*` (not `/ws`)** — `handle /ws` is an exact-path matcher, so future path variants (`/ws/subscribe`, `/ws/v2`, ...) fall through to the frontend block. The trailing `*` makes it a prefix match.
+- **`path /ws /ws/*` (not `/ws*`)** — bare `handle /ws` is an exact match, so future path variants under `/ws/` fall through to the frontend block. The obvious shortcut `handle /ws*` overcorrects in the other direction: Caddy's `*` is a glob without a path-segment boundary, so it would also catch unrelated paths like `/ws-foo`, which is a legitimate workspace URL (only the exact slug `ws` is reserved). Listing `/ws` and `/ws/*` explicitly covers both real cases without overreach.
 - **`flush_interval -1`** — disables response buffering so WebSocket frames are forwarded as soon as they arrive. Without it, frames can sit behind Caddy's default flush window, which looks like delayed comments, missing typing indicators, or "comments only appear after a page refresh."
 
 ### Nginx
