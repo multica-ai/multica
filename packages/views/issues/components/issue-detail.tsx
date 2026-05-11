@@ -722,7 +722,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (el) {
       didHighlightRef.current = highlightCommentId;
       requestAnimationFrame(() => {
-        el.scrollIntoView({ behavior: "instant", block: "center" });
+        // CEREBRO-PATCH(issue-detail-mobile-scroll-to-start): block:start anchors the comment top to the viewport top (JEH-1002). Upstream's block:center leaves visible whitespace above the message on mobile, where vertical space is precious — the result feels "off".
+        el.scrollIntoView({ behavior: "instant", block: "start" });
         setHighlightedId(highlightCommentId);
         const timer = setTimeout(() => setHighlightedId(null), 2000);
         return () => clearTimeout(timer);
