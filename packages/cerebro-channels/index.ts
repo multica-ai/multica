@@ -4,3 +4,4 @@
 export { ChannelAgentInlineRow } from "./channel-agent-inline-row";
 export { useChannelFavoritesStore, actorKey } from "./favorites-store";
 export type { ActorKey } from "./favorites-store";
+export { useArchiveChannel, useUnarchiveChannel } from "./archive-mutations";

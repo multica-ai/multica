@@ -99,9 +99,11 @@ type Handler struct {
 // handler call the cerebro service without importing it (which would create
 // an import cycle: handler → cerebro/channels → uses TaskService → ...).
 //
-// CEREBRO-PATCH(handler-channel-listen-iface): seam for cerebro listen-mode.
+// CEREBRO-PATCH(handler-channel-listen-iface): seam for cerebro listen-mode +
+// channel-list archived filter.
 type ChannelListenInvoker interface {
 	EnqueueChannelListenerTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string)
+	FilterArchivedChannels(ctx context.Context, userID pgtype.UUID, rows []db.ListChannelsForUserRow, includeArchived bool) []db.ListChannelsForUserRow
 }
 
 // New constructs a Handler. The pushService argument is cerebro-specific

@@ -75,6 +75,9 @@ export type WSEventType =
   | "artifact:created"
   | "artifact:updated"
   | "artifact:deleted"
+  // CEREBRO-PATCH(channel-archive-events): JEH-851 — per-user channel archive WS events.
+  | "cerebro_channel_archived"
+  | "cerebro_channel_unarchived"
   // Connection liveness — emitted periodically by the server so the client can
   // detect a half-open or system-suspended (iOS PWA background) socket.
   | "server:ping";

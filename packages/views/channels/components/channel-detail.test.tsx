@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { Channel } from "@multica/core/types";
 
 const mockArchive = vi.hoisted(() => vi.fn());
+const mockArchiveChannel = vi.hoisted(() => vi.fn());
 const mockMarkChannelRead = vi.hoisted(() => vi.fn());
 const mockCreatePin = vi.hoisted(() => vi.fn());
 const mockDeletePin = vi.hoisted(() => vi.fn());
@@ -58,6 +59,16 @@ vi.mock("@multica/core/inbox/queries", () => ({
 vi.mock("@multica/core/inbox/mutations", () => ({
   useArchiveInbox: () => ({ mutate: mockArchive }),
 }));
+
+vi.mock("@multica/cerebro-channels", async () => {
+  const actual = await vi.importActual<typeof import("@multica/cerebro-channels")>(
+    "@multica/cerebro-channels",
+  );
+  return {
+    ...actual,
+    useArchiveChannel: () => ({ mutate: mockArchiveChannel }),
+  };
+});
 
 vi.mock("@multica/core/pins", () => ({
   pinListOptions: () => ({
@@ -189,6 +200,7 @@ describe("ChannelDetail thread header", () => {
   beforeEach(() => {
     mockMarkChannelRead.mockClear();
     mockArchive.mockClear();
+    mockArchiveChannel.mockClear();
   });
 
   it("renders channel title, description and participant stack (excluding self)", () => {
@@ -251,8 +263,9 @@ describe("ChannelDetail thread header", () => {
       />,
     );
     await user.click(screen.getByLabelText("Archive conversation"));
-    // No inbox row exists in this test, so archive is a no-op on the
-    // mutation but the parent is still told to clear its selection.
+    // Channel archive always fires, regardless of whether an inbox row
+    // exists. Parent is also told to clear its selection.
+    expect(mockArchiveChannel).toHaveBeenCalledWith("c1");
     expect(onArchive).toHaveBeenCalledTimes(1);
   });
 

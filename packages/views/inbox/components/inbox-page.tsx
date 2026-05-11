@@ -26,6 +26,8 @@ import {
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 // CEREBRO-PATCH(inbox-keyboard-shortcuts): cerebro keyboard shortcuts (e = archive)
 import { useInboxKeyboardShortcuts, CerebroSwipeArchive } from "@multica/cerebro-inbox";
+// CEREBRO-PATCH(inbox-channel-archive-import): JEH-851 — per-user channel archive mutation.
+import { useArchiveChannel } from "@multica/cerebro-channels";
 import { useInboxViewStore, INBOX_VIEW_OPTIONS, type InboxView } from "@multica/core/inbox";
 import { channelListOptions } from "@multica/core/channels";
 import { useChatStore } from "@multica/core/chat";
@@ -331,6 +333,8 @@ export function InboxPage() {
 
   const markReadMutation = useMarkInboxRead();
   const archiveMutation = useArchiveInbox();
+  // CEREBRO-PATCH(inbox-channel-archive-mut): JEH-851 — per-user channel archive.
+  const archiveChannelMutation = useArchiveChannel();
   const markAllReadMutation = useMarkAllInboxRead();
   const archiveAllMutation = useArchiveAllInbox();
   const archiveAllReadMutation = useArchiveAllReadInbox();
@@ -658,10 +662,17 @@ export function InboxPage() {
           isSelected={channel.id === selectedKey}
           onClick={() => setSelectedKey("issue", channel.id)}
           onArchive={() => {
-            // Channels currently archive via the issue API by archiving any
-            // inbox row attached to them — same behavior as issues.
-            const itemForChannel = items.find((i) => i.issue_id === channel.id);
-            if (itemForChannel) handleArchive(itemForChannel.id);
+            // CEREBRO-PATCH(inbox-channel-archive): JEH-851 — channels/DMs
+            // archive via per-user `cerebro_channel_archived` row, not via
+            // inbox_item.archived. Also archive any open inbox notifications
+            // for the channel so unread badges clear in the same gesture.
+            if (channel.id === selectedKey) setSelectedKey(null, "");
+            archiveChannelMutation.mutate(channel.id, {
+              onError: () => toast.error(t(($) => $.errors.archive_failed)),
+            });
+            items
+              .filter((i) => i.issue_id === channel.id && !i.archived)
+              .forEach((i) => archiveMutation.mutate(i.id));
           }}
         />
       );

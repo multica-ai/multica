@@ -261,6 +261,13 @@ func (h *Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CEREBRO-PATCH(channel-list-archived-filter): hide channels archived by
+	// the caller unless `?include_archived=true` is passed (used by the
+	// "Show archived" view in the frontend). JEH-851.
+	if h.ChannelListen != nil {
+		rows = h.ChannelListen.FilterArchivedChannels(r.Context(), parseUUID(userID), rows, r.URL.Query().Get("include_archived") == "true")
+	}
+
 	// Batch the latest-message lookup so the inbox can render previews
 	// without N+1 round-trips.
 	channelIDs := make([]pgtype.UUID, 0, len(rows))

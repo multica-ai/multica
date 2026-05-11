@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // ListenModeAlways means the agent reacts to every comment in the channel.
@@ -51,14 +52,19 @@ type Service struct {
 	Bus            *events.Bus
 }
 
-// New constructs a Service. Callers wire it from the router.
+// New constructs a Service. Callers wire it from the router. Registers a
+// re-surface listener on the bus so that any new inbox_item for an archived
+// channel/dm clears the per-user archive flag and notifies the user's WS
+// sessions.
 func New(cerebroQueries *cerebrodb.Queries, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus) *Service {
-	return &Service{
+	s := &Service{
 		CerebroQueries: cerebroQueries,
 		Queries:        queries,
 		TaskService:    taskSvc,
 		Bus:            bus,
 	}
+	s.registerArchiveResurfaceListener()
+	return s
 }
 
 // EnqueueChannelListenerTasks enqueues a task for every agent subscribed to
@@ -226,4 +232,118 @@ func (s *Service) GetChannelArchivedAt(ctx context.Context, channelID, userID pg
 		return pgtype.Timestamptz{}, false, err
 	}
 	return ts, true, nil
+}
+
+// FilterArchivedChannels removes channels archived by userID from rows. When
+// includeArchived is true the input is returned unchanged so the "Show
+// archived" view can still reach the rows. Failures fall through to the
+// unfiltered list so a transient DB error doesn't hide the inbox entirely.
+func (s *Service) FilterArchivedChannels(
+	ctx context.Context,
+	userID pgtype.UUID,
+	rows []db.ListChannelsForUserRow,
+	includeArchived bool,
+) []db.ListChannelsForUserRow {
+	if includeArchived || len(rows) == 0 {
+		return rows
+	}
+	archived, err := s.CerebroQueries.ListArchivedChannelsForUser(ctx, userID)
+	if err != nil {
+		slog.Warn("channel-list: list archived failed", "user_id", util.UUIDToString(userID), "error", err)
+		return rows
+	}
+	if len(archived) == 0 {
+		return rows
+	}
+	skip := make(map[string]bool, len(archived))
+	for _, a := range archived {
+		skip[util.UUIDToString(a.ChannelID)] = true
+	}
+	out := rows[:0]
+	for _, row := range rows {
+		if !skip[util.UUIDToString(row.ID)] {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// registerArchiveResurfaceListener subscribes to inbox:new events. When a new
+// inbox item lands for a member-recipient on a channel/dm that the recipient
+// has archived, the archive row is deleted and a cerebro_channel_unarchived
+// event is published to the recipient's own WS sessions. Best-effort: any
+// failure is logged but does not bubble — re-surface is a UX nicety, not a
+// correctness gate.
+func (s *Service) registerArchiveResurfaceListener() {
+	if s.Bus == nil {
+		return
+	}
+	s.Bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		item, ok := payload["item"].(map[string]any)
+		if !ok {
+			return
+		}
+		recipientType, _ := item["recipient_type"].(string)
+		if recipientType != "member" {
+			return
+		}
+		recipientIDStr, _ := item["recipient_id"].(string)
+		issueIDPtr, _ := item["issue_id"].(*string)
+		if recipientIDStr == "" || issueIDPtr == nil || *issueIDPtr == "" {
+			return
+		}
+		recipientID, err := util.ParseUUID(recipientIDStr)
+		if err != nil {
+			return
+		}
+		channelID, err := util.ParseUUID(*issueIDPtr)
+		if err != nil {
+			return
+		}
+		s.maybeUnarchiveOnInbox(context.Background(), channelID, recipientID, e.WorkspaceID, e.ActorType, e.ActorID)
+	})
+}
+
+// maybeUnarchiveOnInbox re-surfaces a channel/dm in the recipient's inbox
+// when a new inbox_item lands for it. No-op for non-channel issues or when
+// the recipient hasn't archived the channel.
+func (s *Service) maybeUnarchiveOnInbox(
+	ctx context.Context,
+	channelID, userID pgtype.UUID,
+	workspaceID, actorType, actorID string,
+) {
+	issue, err := s.Queries.GetIssue(ctx, channelID)
+	if err != nil {
+		return
+	}
+	if issue.Kind != "channel" && issue.Kind != "dm" {
+		return
+	}
+	_, archived, err := s.GetChannelArchivedAt(ctx, channelID, userID)
+	if err != nil || !archived {
+		return
+	}
+	if err := s.UnarchiveChannel(ctx, channelID, userID); err != nil {
+		slog.Warn("re-surface: unarchive failed",
+			"channel_id", util.UUIDToString(channelID),
+			"user_id", util.UUIDToString(userID),
+			"error", err)
+		return
+	}
+	userIDStr := util.UUIDToString(userID)
+	s.Bus.Publish(events.Event{
+		Type:        EventChannelUnarchived,
+		WorkspaceID: workspaceID,
+		ActorType:   actorType,
+		ActorID:     actorID,
+		Payload: map[string]any{
+			"channel_id": util.UUIDToString(channelID),
+			"user_id":    userIDStr,
+		},
+		AudienceUserIDs: []string{userIDStr},
+	})
 }

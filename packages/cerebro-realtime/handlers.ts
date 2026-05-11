@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { WSClient } from "@multica/core/api/ws-client";
 import { getCurrentWsId } from "@multica/core/platform";
 import { artifactKeys } from "@multica/cerebro-artifacts/core";
+import { channelKeys } from "@multica/core/channels";
 import { chatKeys } from "@multica/core/chat/queries";
 import type { ChatSession } from "@multica/core/types";
 
@@ -92,10 +93,30 @@ export function registerCerebroHandlers(
     qc.invalidateQueries({ queryKey: chatKeys.allSessions(wsId) });
   });
 
+  // JEH-851 — channel archive flips the row in/out of the user's channel
+  // list. The originating tab already optimistically updated its caches; this
+  // handler keeps the user's other tabs/devices in sync, and re-surface
+  // (server-side delete on a new inbox_item) reaches every device too.
+  const invalidateChannelList = () => {
+    const wsId = getCurrentWsId();
+    if (!wsId) return;
+    qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
+  };
+  const unsubChannelArchived = ws.on(
+    "cerebro_channel_archived",
+    invalidateChannelList,
+  );
+  const unsubChannelUnarchived = ws.on(
+    "cerebro_channel_unarchived",
+    invalidateChannelList,
+  );
+
   return () => {
     unsubArtifactCreated();
     unsubArtifactUpdated();
     unsubArtifactDeleted();
     unsubChatSessionUpdated();
+    unsubChannelArchived();
+    unsubChannelUnarchived();
   };
 }

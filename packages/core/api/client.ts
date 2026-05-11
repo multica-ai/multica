@@ -966,6 +966,18 @@ export class ApiClient {
     return this.fetch(`/api/channels/${id}/read`, { method: "POST" });
   }
 
+  // CEREBRO-PATCH(channel-archive-client): JEH-851 — per-user channel archive
+  // endpoints. Archive hides the channel from the user's channel list until
+  // a new inbox_item lands for it (server clears the row in re-surface
+  // listener), at which point the channel reappears.
+  async archiveChannel(id: string): Promise<{ archived_at: string }> {
+    return this.fetch(`/api/channels/${id}/archive`, { method: "POST" });
+  }
+
+  async unarchiveChannel(id: string): Promise<void> {
+    await this.fetch(`/api/channels/${id}/archive`, { method: "DELETE" });
+  }
+
   // CEREBRO-PATCH(channel-listen-client): JEH-699 — per (channel × agent)
   // listen-mode endpoints. Default 'always' applies when no explicit row
   // exists for an agent; the response only contains overrides, so the

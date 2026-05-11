@@ -14,6 +14,8 @@ import {
 } from "@multica/core/channels";
 import { inboxListOptions } from "@multica/core/inbox/queries";
 import { useArchiveInbox } from "@multica/core/inbox/mutations";
+// CEREBRO-PATCH(channel-detail-archive): JEH-851 — per-user channel archive mutation.
+import { useArchiveChannel } from "@multica/cerebro-channels";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import type { Channel, ChannelMember, InboxItem, TimelineEntry } from "@multica/core/types";
 import { useIssueTimeline } from "../../issues/hooks/use-issue-timeline";
@@ -102,14 +104,15 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
   const [participantsOpen, setParticipantsOpen] = useState(false);
 
   const archiveInbox = useArchiveInbox();
+  // CEREBRO-PATCH(channel-detail-archive): JEH-851 — channels/DMs archive
+  // via per-user `cerebro_channel_archived` row, then any open inbox
+  // notifications for the channel are also archived in the same gesture.
+  const archiveChannelMutation = useArchiveChannel();
   const handleArchive = () => {
-    // Channels archive by archiving the inbox row pointing at them. If the
-    // user hasn't been notified yet (no inbox row exists) the action is a
-    // no-op — the row will get archived next time it lands.
-    const item = inboxItems.find(
-      (i: InboxItem) => i.issue_id === channelId && !i.archived,
-    );
-    if (item) archiveInbox.mutate(item.id);
+    archiveChannelMutation.mutate(channelId);
+    inboxItems
+      .filter((i: InboxItem) => i.issue_id === channelId && !i.archived)
+      .forEach((i: InboxItem) => archiveInbox.mutate(i.id));
     onArchive?.();
   };
 
