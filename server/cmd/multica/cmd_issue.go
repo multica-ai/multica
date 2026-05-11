@@ -16,20 +16,42 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-// resolveTextFlag picks between a `--<name>` flag value and a paired
-// `--<name>-stdin` flag, mirroring the existing `--content` / `--content-stdin`
-// pattern. It returns the resolved string and an error when both are set or
-// stdin is requested but produces no body. Inline flag values are passed
-// through util.UnescapeBackslashEscapes so bash-double-quoted `\n` becomes a
-// real newline; stdin bodies are returned verbatim so literal backslashes
+// resolveTextFlag picks between a `--<name>` inline value, a `--<name>-stdin`
+// flag, and a `--<name>-file <path>` flag, mirroring the existing `--content`
+// / `--content-stdin` pattern. It returns the resolved string and an error
+// when more than one source is set, or when stdin/file is requested but
+// produces no body. Inline flag values are passed through
+// util.UnescapeBackslashEscapes so bash-double-quoted `\n` becomes a real
+// newline; stdin and file bodies are returned verbatim so literal backslashes
 // survive intact.
+//
+// The `-file` source exists for Windows agents: piping HEREDOC content to
+// `--<name>-stdin` from Windows PowerShell silently drops non-ASCII bytes
+// (PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping
+// to a native command), so Chinese / Cyrillic / any non-ASCII content
+// arrives as `?`. Reading a UTF-8 file directly bypasses the shell's pipe
+// re-encoding entirely. See issues #2198 / #2236 / #2376.
 func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) {
 	stdinFlag := flagName + "-stdin"
+	fileFlag := flagName + "-file"
 	useStdin, _ := cmd.Flags().GetBool(stdinFlag)
 	inline, _ := cmd.Flags().GetString(flagName)
-	if useStdin && inline != "" {
-		return "", false, fmt.Errorf("--%s and --%s are mutually exclusive", flagName, stdinFlag)
+	filePath, _ := cmd.Flags().GetString(fileFlag)
+
+	sources := 0
+	if useStdin {
+		sources++
 	}
+	if inline != "" {
+		sources++
+	}
+	if filePath != "" {
+		sources++
+	}
+	if sources > 1 {
+		return "", false, fmt.Errorf("--%s, --%s, and --%s are mutually exclusive", flagName, stdinFlag, fileFlag)
+	}
+
 	if useStdin {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
@@ -38,6 +60,17 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 		body := strings.TrimSuffix(string(data), "\n")
 		if body == "" {
 			return "", false, fmt.Errorf("stdin content for --%s is empty", stdinFlag)
+		}
+		return body, true, nil
+	}
+	if filePath != "" {
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return "", false, fmt.Errorf("read file for --%s: %w", fileFlag, err)
+		}
+		body := strings.TrimSuffix(string(data), "\n")
+		if body == "" {
+			return "", false, fmt.Errorf("file content for --%s is empty", fileFlag)
 		}
 		return body, true, nil
 	}
@@ -222,6 +255,7 @@ func init() {
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
 	issueCreateCmd.Flags().String("description", "", "Issue description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueCreateCmd.Flags().Bool("description-stdin", false, "Read issue description from stdin (preserves multi-line content verbatim)")
+	issueCreateCmd.Flags().String("description-file", "", "Read issue description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member or agent; fuzzy match)")
@@ -236,6 +270,7 @@ func init() {
 	issueUpdateCmd.Flags().String("title", "", "New title")
 	issueUpdateCmd.Flags().String("description", "", "New description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
+	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member or agent; fuzzy match)")
@@ -273,6 +308,7 @@ func init() {
 	// issue comment add
 	issueCommentAddCmd.Flags().String("content", "", "Comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
 	issueCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (preserves multi-line content verbatim)")
+	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID (reply to a specific comment)")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
@@ -623,7 +659,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("title")
 		body["title"] = v
 	}
-	if cmd.Flags().Changed("description") || cmd.Flags().Changed("description-stdin") {
+	if cmd.Flags().Changed("description") || cmd.Flags().Changed("description-stdin") || cmd.Flags().Changed("description-file") {
 		desc, _, err := resolveTextFlag(cmd, "description")
 		if err != nil {
 			return err
@@ -881,7 +917,7 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if !hasContent {
-		return fmt.Errorf("--content or --content-stdin is required")
+		return fmt.Errorf("--content, --content-stdin, or --content-file is required")
 	}
 
 	client, err := newAPIClient(cmd)
