@@ -443,6 +443,173 @@ func TestBuildClaudeArgsBlocksMcpConfig(t *testing.T) {
 	}
 }
 
+// TestClaudeExecutePropagatesMcpConfigToClaude is the integration check
+// for the per-agent MCP wiring acceptance criterion: when ExecOptions
+// carries an McpConfig payload, the spawned claude process must observe
+// both --mcp-config <path> AND --strict-mcp-config on its argv, and the
+// file at <path> must contain exactly the bytes we set on the agent.
+//
+// We use a POSIX shell fixture so the fake binary can dump its argv and
+// the mcp config file contents to disk, then assert on those after the
+// session completes. The fixture exits without writing any stream-json,
+// so the run is reported as failed — that's fine for this test; we only
+// care about the spawn-side contract.
+func TestClaudeExecutePropagatesMcpConfigToClaude(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	dir := t.TempDir()
+	argvPath := filepath.Join(dir, "argv.txt")
+	mcpDumpPath := filepath.Join(dir, "mcp.json")
+
+	fakePath := filepath.Join(dir, "claude")
+	// Drain stdin so writeClaudeInput doesn't fail; then walk the args
+	// looking for --mcp-config, copy the file it points at, and dump the
+	// full argv list to argvPath. Exit non-zero so Execute reports failed.
+	script := `#!/bin/sh
+cat >/dev/null
+i=0
+for arg in "$@"; do
+  i=$((i+1))
+  echo "$arg" >>` + argvPath + `
+  if [ "$arg" = "--mcp-config" ]; then
+    next_arg_index=$((i+1))
+  fi
+done
+shift $((next_arg_index-1))
+cp "$1" ` + mcpDumpPath + ` 2>/dev/null || true
+exit 0
+`
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("claude", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	mcpConfig := json.RawMessage(`{"mcpServers":{"gmail":{"command":"node","args":["./gmail-mcp.js"],"env":{"OAUTH_TOKEN":"sentinel-value"}}}}`)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:   5 * time.Second,
+		McpConfig: mcpConfig,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	// Drain message stream so the lifecycle goroutine can complete.
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	// argvPath now contains one arg per line. Confirm both --mcp-config
+	// and --strict-mcp-config landed on the spawn, and grab the path
+	// claude was pointed at.
+	argvBytes, err := os.ReadFile(argvPath)
+	if err != nil {
+		t.Fatalf("read argv dump: %v", err)
+	}
+	argv := strings.Split(strings.TrimRight(string(argvBytes), "\n"), "\n")
+
+	hasFlag := func(name string) bool {
+		for _, a := range argv {
+			if a == name {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasFlag("--strict-mcp-config") {
+		t.Fatalf("expected --strict-mcp-config in argv, got %v", argv)
+	}
+	if !hasFlag("--mcp-config") {
+		t.Fatalf("expected --mcp-config in argv, got %v", argv)
+	}
+	var mcpPath string
+	for i, a := range argv {
+		if a == "--mcp-config" && i+1 < len(argv) {
+			mcpPath = argv[i+1]
+			break
+		}
+	}
+	if mcpPath == "" {
+		t.Fatalf("--mcp-config value missing from argv: %v", argv)
+	}
+	// The temp file is removed by the spawn lifecycle once the session
+	// goroutine finishes; the fixture copies it to mcpDumpPath while
+	// claude is still alive.
+	got, err := os.ReadFile(mcpDumpPath)
+	if err != nil {
+		t.Fatalf("read mcp config dump: %v", err)
+	}
+	if !bytes.Equal(bytes.TrimSpace(got), bytes.TrimSpace(mcpConfig)) {
+		t.Fatalf("mcp_config file content mismatch:\n got: %s\nwant: %s", got, mcpConfig)
+	}
+}
+
+// TestClaudeExecuteWithoutMcpConfigOmitsFlag asserts the no-op contract
+// from the acceptance criteria: an agent with mcp_config: null spawns
+// claude exactly as before, with no --mcp-config flag attached.
+func TestClaudeExecuteWithoutMcpConfigOmitsFlag(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	dir := t.TempDir()
+	argvPath := filepath.Join(dir, "argv.txt")
+	fakePath := filepath.Join(dir, "claude")
+	script := `#!/bin/sh
+cat >/dev/null
+for arg in "$@"; do
+  echo "$arg" >>` + argvPath + `
+done
+exit 0
+`
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("claude", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	argvBytes, err := os.ReadFile(argvPath)
+	if err != nil {
+		t.Fatalf("read argv dump: %v", err)
+	}
+	if strings.Contains(string(argvBytes), "--mcp-config") {
+		t.Fatalf("expected no --mcp-config on argv when McpConfig is empty, got: %s", argvBytes)
+	}
+	// --strict-mcp-config is always present by design, regardless of
+	// whether a config is provided.
+	if !strings.Contains(string(argvBytes), "--strict-mcp-config") {
+		t.Fatalf("expected --strict-mcp-config to remain on argv, got: %s", argvBytes)
+	}
+}
+
 func TestWriteMcpConfigToTemp(t *testing.T) {
 	t.Parallel()
 

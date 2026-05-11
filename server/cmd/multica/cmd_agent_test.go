@@ -29,6 +29,17 @@ func freshAgentUpdateCmd() *cobra.Command {
 	return c
 }
 
+// freshMcpConfigCmd returns a standalone cobra.Command with the three
+// --mcp-config-* flags registered, isolated from any package-level state
+// so subtests can mutate flag values without leaking across each other.
+func freshMcpConfigCmd() *cobra.Command {
+	c := &cobra.Command{Use: "update"}
+	c.Flags().String("mcp-config-file", "", "")
+	c.Flags().Bool("mcp-config-stdin", false, "")
+	c.Flags().Bool("mcp-config-clear", false, "")
+	return c
+}
+
 // TestResolveWorkspaceID_AgentContextSkipsConfig is a regression test for
 // the cross-workspace contamination bug (#1235). Inside a daemon-spawned
 // agent task (MULTICA_AGENT_ID / MULTICA_TASK_ID set), the CLI must NOT
@@ -491,6 +502,433 @@ func TestResolveCustomEnv(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, map[string]string{}) {
 			t.Fatalf("file {}: got %v, want empty map", got)
+		}
+	})
+}
+
+// TestParseMcpConfig covers the client-side schema validator. The CLI must
+// reject obviously-broken payloads before sending them to the server so the
+// caller gets an actionable error without depending on the server response.
+// The server runs the same validation as defense in depth.
+func TestParseMcpConfig(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		wantErr bool
+		// wantSub, when non-empty, is a substring that must appear in the
+		// error message. Useful for asserting the user sees a meaningful
+		// hint, not a generic "bad JSON".
+		wantSub string
+	}{
+		{
+			name: "stdio transport",
+			raw:  `{"mcpServers":{"echo":{"command":"echo","args":["hi"],"env":{"K":"v"}}}}`,
+		},
+		{
+			name: "http transport",
+			raw:  `{"mcpServers":{"remote":{"url":"https://example.com/mcp","headers":{"Authorization":"Bearer x"}}}}`,
+		},
+		{
+			name: "type field accepted",
+			raw:  `{"mcpServers":{"echo":{"command":"echo","type":"stdio"}}}`,
+		},
+		{
+			name:    "empty input",
+			raw:     ``,
+			wantErr: true,
+			wantSub: "empty input",
+		},
+		{
+			name:    "explicit null",
+			raw:     `null`,
+			wantErr: true,
+			wantSub: "--mcp-config-clear",
+		},
+		{
+			name:    "missing mcpServers key",
+			raw:     `{"mcp_servers":{}}`,
+			wantErr: true,
+			wantSub: "mcpServers",
+		},
+		{
+			name:    "mcpServers wrong type",
+			raw:     `{"mcpServers":[]}`,
+			wantErr: true,
+			wantSub: "mcpServers",
+		},
+		{
+			name:    "empty mcpServers map",
+			raw:     `{"mcpServers":{}}`,
+			wantErr: true,
+			wantSub: "at least one server",
+		},
+		{
+			name:    "server missing transport",
+			raw:     `{"mcpServers":{"oauth":{"env":{"TOKEN":"x"}}}}`,
+			wantErr: true,
+			wantSub: "must set either",
+		},
+		{
+			name:    "unknown field in server spec",
+			raw:     `{"mcpServers":{"weird":{"command":"echo","bogus":true}}}`,
+			wantErr: true,
+			wantSub: "invalid shape",
+		},
+		{
+			name:    "wrong type for args",
+			raw:     `{"mcpServers":{"echo":{"command":"echo","args":"oops"}}}`,
+			wantErr: true,
+			wantSub: "invalid shape",
+		},
+		{
+			name:    "not JSON",
+			raw:     `not-json`,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseMcpConfig([]byte(tc.raw))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseMcpConfig(%q): expected error, got nil (result=%s)", tc.raw, got)
+				}
+				if !strings.Contains(err.Error(), "--mcp-config") {
+					t.Fatalf("parseMcpConfig(%q): error must mention --mcp-config, got %q", tc.raw, err)
+				}
+				if tc.wantSub != "" && !strings.Contains(err.Error(), tc.wantSub) {
+					t.Fatalf("parseMcpConfig(%q): expected error to contain %q, got %q", tc.raw, tc.wantSub, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseMcpConfig(%q): unexpected error: %v", tc.raw, err)
+			}
+			// Normalised output must still parse cleanly.
+			var roundTrip map[string]any
+			if err := json.Unmarshal(got, &roundTrip); err != nil {
+				t.Fatalf("normalised output is not valid JSON: %v", err)
+			}
+		})
+	}
+}
+
+// TestParseMcpConfigErrorSanitization guards against future changes
+// re-introducing %w wrapping of json.Unmarshal errors on the mcp_config
+// path. The flag is documented to carry secret material (OAuth tokens in
+// env / args / headers), so errors must never echo input fragments.
+func TestParseMcpConfigErrorSanitization(t *testing.T) {
+	secretish := `{"mcpServers":{"gmail":{"command":"node","env":{"OAUTH_TOKEN":verySensitiveValue}}}}` // invalid JSON
+	_, err := parseMcpConfig([]byte(secretish))
+	if err == nil {
+		t.Fatal("expected parse error for invalid JSON")
+	}
+	for _, leak := range []string{"OAUTH_TOKEN", "verySensitiveValue"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Fatalf("parseMcpConfig error leaked input fragment %q: %q", leak, err.Error())
+		}
+	}
+}
+
+// TestResolveMcpConfig exercises the three-channel resolver: file, stdin,
+// clear, mutual exclusion, and the "not supplied" path. Mirrors the
+// resolveCustomEnv tests so future contributors recognise the pattern.
+func TestResolveMcpConfig(t *testing.T) {
+	validConfig := `{"mcpServers":{"echo":{"command":"echo"}}}`
+
+	t.Run("not supplied", func(t *testing.T) {
+		cmd := freshMcpConfigCmd()
+		got, action, err := resolveMcpConfig(cmd)
+		if err != nil || got != nil || action != mcpConfigUnchanged {
+			t.Fatalf("unset flags: got=%s action=%d err=%v", got, action, err)
+		}
+	})
+
+	t.Run("clear flag returns mcpConfigClear", func(t *testing.T) {
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-clear", "true")
+		got, action, err := resolveMcpConfig(cmd)
+		if err != nil {
+			t.Fatalf("clear: err=%v", err)
+		}
+		if action != mcpConfigClear {
+			t.Fatalf("clear: action=%d, want %d", action, mcpConfigClear)
+		}
+		if got != nil {
+			t.Fatalf("clear: got=%s, want nil payload", got)
+		}
+	})
+
+	t.Run("stdin", func(t *testing.T) {
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-stdin", "true")
+		cmd.SetIn(bytes.NewBufferString(validConfig))
+		got, action, err := resolveMcpConfig(cmd)
+		if err != nil || action != mcpConfigSet {
+			t.Fatalf("stdin: action=%d err=%v", action, err)
+		}
+		var v map[string]any
+		if err := json.Unmarshal(got, &v); err != nil {
+			t.Fatalf("stdin: parse normalised: %v", err)
+		}
+		if _, ok := v["mcpServers"]; !ok {
+			t.Fatalf("stdin: normalised payload missing mcpServers: %s", got)
+		}
+	})
+
+	t.Run("file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "mcp.json")
+		if err := os.WriteFile(path, []byte(validConfig), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-file", path)
+		_, action, err := resolveMcpConfig(cmd)
+		if err != nil || action != mcpConfigSet {
+			t.Fatalf("file: action=%d err=%v", action, err)
+		}
+	})
+
+	t.Run("mutually exclusive: file + stdin", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "mcp.json")
+		if err := os.WriteFile(path, []byte(validConfig), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-file", path)
+		_ = cmd.Flags().Set("mcp-config-stdin", "true")
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("expected mutual-exclusion error, got %v", err)
+		}
+	})
+
+	t.Run("mutually exclusive: file + clear", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "mcp.json")
+		if err := os.WriteFile(path, []byte(validConfig), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-file", path)
+		_ = cmd.Flags().Set("mcp-config-clear", "true")
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("expected mutual-exclusion error, got %v", err)
+		}
+	})
+
+	t.Run("mutually exclusive: stdin + clear", func(t *testing.T) {
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-stdin", "true")
+		_ = cmd.Flags().Set("mcp-config-clear", "true")
+		cmd.SetIn(bytes.NewBufferString(validConfig))
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("expected mutual-exclusion error, got %v", err)
+		}
+	})
+
+	t.Run("file: missing path surfaces filesystem error", func(t *testing.T) {
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-file", filepath.Join(t.TempDir(), "does-not-exist.json"))
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "--mcp-config-file") {
+			t.Fatalf("expected --mcp-config-file error, got %v", err)
+		}
+	})
+
+	t.Run("file: empty path errors", func(t *testing.T) {
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-file", "")
+		if !cmd.Flags().Changed("mcp-config-file") {
+			t.Fatal("setup: expected mcp-config-file flag to be marked Changed")
+		}
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "--mcp-config-file") {
+			t.Fatalf("expected --mcp-config-file empty-path error, got %v", err)
+		}
+	})
+
+	t.Run("file: empty contents errors", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "empty.json")
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-file", path)
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "--mcp-config-file") || !strings.Contains(err.Error(), "--mcp-config-clear") {
+			t.Fatalf("expected --mcp-config-file empty-contents error mentioning --mcp-config-clear, got %v", err)
+		}
+	})
+
+	t.Run("stdin: empty input errors", func(t *testing.T) {
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-stdin", "true")
+		cmd.SetIn(bytes.NewBufferString(""))
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "--mcp-config-stdin") || !strings.Contains(err.Error(), "--mcp-config-clear") {
+			t.Fatalf("expected --mcp-config-stdin empty-input error mentioning --mcp-config-clear, got %v", err)
+		}
+	})
+
+	t.Run("file: invalid JSON propagates parser error", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "bad.json")
+		if err := os.WriteFile(path, []byte(`{"mcp_servers":{}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshMcpConfigCmd()
+		_ = cmd.Flags().Set("mcp-config-file", path)
+		_, _, err := resolveMcpConfig(cmd)
+		if err == nil || !strings.Contains(err.Error(), "mcpServers") {
+			t.Fatalf("expected mcpServers validation error, got %v", err)
+		}
+	})
+}
+
+// TestAgentUpdateExposesMcpConfigFlags pins the three flag names on the
+// real package-level command. The point of these flags is to let workspace
+// owners wire MCPs from CLI without going through the server admin — if
+// any of them disappears from --help, that feature breaks silently.
+func TestAgentUpdateExposesMcpConfigFlags(t *testing.T) {
+	for _, flag := range []string{"mcp-config-file", "mcp-config-stdin", "mcp-config-clear"} {
+		if agentUpdateCmd.Flag(flag) == nil {
+			t.Fatalf("agent update must expose --%s", flag)
+		}
+	}
+}
+
+// TestAgentUpdateMcpConfigEndToEnd wires runAgentUpdate against a fake
+// server and asserts the PUT body shape for each of the three channels.
+// Acceptance criteria for this issue are written in terms of the body the
+// server sees, so this is the highest-leverage CLI test.
+func TestAgentUpdateMcpConfigEndToEnd(t *testing.T) {
+	type capture struct {
+		body map[string]any
+	}
+
+	newCmd := func(t *testing.T, captured *capture) *cobra.Command {
+		t.Helper()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPut && r.URL.Path == "/api/agents/agent-123" {
+				_ = json.NewDecoder(r.Body).Decode(&captured.body)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"id":                  "agent-123",
+					"name":                "TestAgent",
+					"mcp_config":          "<redacted>",
+					"mcp_config_redacted": true,
+				})
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		t.Cleanup(srv.Close)
+		t.Setenv("MULTICA_SERVER_URL", srv.URL)
+		t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+		t.Setenv("MULTICA_TOKEN", "test-token")
+		t.Setenv("HOME", t.TempDir())
+
+		cmd := &cobra.Command{Use: "update"}
+		cmd.Flags().String("name", "", "")
+		cmd.Flags().String("description", "", "")
+		cmd.Flags().String("instructions", "", "")
+		cmd.Flags().String("runtime-id", "", "")
+		cmd.Flags().String("runtime-config", "", "")
+		cmd.Flags().String("model", "", "")
+		cmd.Flags().String("custom-args", "", "")
+		cmd.Flags().String("custom-env", "", "")
+		cmd.Flags().Bool("custom-env-stdin", false, "")
+		cmd.Flags().String("custom-env-file", "", "")
+		cmd.Flags().String("mcp-config-file", "", "")
+		cmd.Flags().Bool("mcp-config-stdin", false, "")
+		cmd.Flags().Bool("mcp-config-clear", false, "")
+		cmd.Flags().String("visibility", "", "")
+		cmd.Flags().String("status", "", "")
+		cmd.Flags().Int32("max-concurrent-tasks", 0, "")
+		cmd.Flags().String("output", "json", "")
+		cmd.Flags().String("profile", "", "")
+		return cmd
+	}
+
+	t.Run("file channel sets mcp_config", func(t *testing.T) {
+		captured := &capture{}
+		cmd := newCmd(t, captured)
+		dir := t.TempDir()
+		path := filepath.Join(dir, "mcp.json")
+		if err := os.WriteFile(path, []byte(`{"mcpServers":{"echo":{"command":"echo"}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_ = cmd.Flags().Set("mcp-config-file", path)
+		if err := runAgentUpdate(cmd, []string{"agent-123"}); err != nil {
+			t.Fatalf("runAgentUpdate: %v", err)
+		}
+		mc, ok := captured.body["mcp_config"]
+		if !ok {
+			t.Fatalf("expected body to include mcp_config, got %+v", captured.body)
+		}
+		// Verified server-side: top-level is the mcpServers object.
+		m, ok := mc.(map[string]any)
+		if !ok || m["mcpServers"] == nil {
+			t.Fatalf("expected mcp_config to be an object with mcpServers, got %T (%v)", mc, mc)
+		}
+	})
+
+	t.Run("stdin channel sets mcp_config", func(t *testing.T) {
+		captured := &capture{}
+		cmd := newCmd(t, captured)
+		_ = cmd.Flags().Set("mcp-config-stdin", "true")
+		cmd.SetIn(bytes.NewBufferString(`{"mcpServers":{"echo":{"command":"echo"}}}`))
+		if err := runAgentUpdate(cmd, []string{"agent-123"}); err != nil {
+			t.Fatalf("runAgentUpdate: %v", err)
+		}
+		if _, ok := captured.body["mcp_config"]; !ok {
+			t.Fatalf("expected body to include mcp_config, got %+v", captured.body)
+		}
+	})
+
+	t.Run("clear flag sends explicit null", func(t *testing.T) {
+		captured := &capture{}
+		cmd := newCmd(t, captured)
+		_ = cmd.Flags().Set("mcp-config-clear", "true")
+		if err := runAgentUpdate(cmd, []string{"agent-123"}); err != nil {
+			t.Fatalf("runAgentUpdate: %v", err)
+		}
+		// Explicit-null is the contract between the CLI and the server's
+		// ClearAgentMcpConfig branch. Any other value here regresses the
+		// clear path.
+		mc, ok := captured.body["mcp_config"]
+		if !ok {
+			t.Fatalf("expected body to include mcp_config key, got %+v", captured.body)
+		}
+		if mc != nil {
+			t.Fatalf("expected mcp_config to be JSON null, got %T (%v)", mc, mc)
+		}
+	})
+
+	t.Run("invalid file payload rejected before send", func(t *testing.T) {
+		captured := &capture{}
+		cmd := newCmd(t, captured)
+		dir := t.TempDir()
+		path := filepath.Join(dir, "bad.json")
+		if err := os.WriteFile(path, []byte(`{"mcp_servers":{}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_ = cmd.Flags().Set("mcp-config-file", path)
+		err := runAgentUpdate(cmd, []string{"agent-123"})
+		if err == nil {
+			t.Fatal("expected validation error, got nil")
+		}
+		if !strings.Contains(err.Error(), "mcpServers") {
+			t.Fatalf("expected mcpServers validation error, got %v", err)
+		}
+		if captured.body != nil {
+			t.Fatalf("server must not be called on validation error, got %+v", captured.body)
 		}
 	})
 }

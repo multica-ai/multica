@@ -296,11 +296,15 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
 		}
-		// Redact sensitive fields for users who are not the agent owner or workspace owner/admin.
+		// custom_env keeps its role-based redaction (owners/admins see the
+		// real values to debug their own agents). mcp_config is always
+		// redacted on the API regardless of role — the database holds the
+		// only authoritative copy, the daemon claim endpoint is the only
+		// reader that ever sees raw bytes.
 		if !canViewAgentEnv(a, userID, member.Role) {
 			redactEnv(&resp)
-			redactMcpConfig(&resp)
 		}
+		redactMcpConfig(&resp)
 		visible = append(visible, resp)
 	}
 
@@ -334,14 +338,16 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Redact sensitive fields for users who are not the agent owner or workspace owner/admin.
+	// custom_env: role-based redaction (see ListAgents). mcp_config:
+	// always redacted on user-facing reads; only the daemon claim endpoint
+	// receives the raw bytes.
 	userID := requestUserID(r)
 	if member, ok := ctxMember(r.Context()); ok {
 		if !canViewAgentEnv(agent, userID, member.Role) {
 			redactEnv(&resp)
-			redactMcpConfig(&resp)
 		}
 	}
+	redactMcpConfig(&resp)
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -467,6 +473,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 
 	var mc []byte
 	if rawMcpConfig, ok := rawFields["mcp_config"]; ok && !bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null")) {
+		if err := validateMcpConfig(rawMcpConfig); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		mc = append([]byte(nil), rawMcpConfig...)
 	}
 
@@ -507,6 +517,9 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := agentToResponse(agent)
+	// Redact mcp_config on every read surface, including realtime events.
+	// The daemon claim endpoint is the only place raw bytes leave the DB.
+	redactMcpConfig(&resp)
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
 
@@ -561,14 +574,89 @@ func redactEnv(resp *AgentResponse) {
 	resp.CustomEnvRedacted = true
 }
 
-// redactMcpConfig removes the mcp_config value from the response when the caller is not
-// authorised to view it. The field is set to null; McpConfigRedacted is set to true so
-// callers know a config exists without seeing its contents (which may contain secrets).
+// mcpConfigRedactedSentinel is the value returned in the mcp_config field of
+// API responses whenever the underlying column is non-null. The plumbing for
+// secrets in mcp_config (OAuth tokens, command args with credentials) is the
+// same as custom_env: the raw value lives in the database and is only ever
+// re-emitted to the trusted daemon claim path. Every other read path —
+// including the workspace owner viewing their own agent — gets a sentinel,
+// because the goal is "never put raw tokens on the wire", not "redact only
+// for less-privileged readers". null in the response unambiguously means
+// "field is unset"; "<redacted>" means "field is set, contents withheld".
+var mcpConfigRedactedSentinel = json.RawMessage(`"<redacted>"`)
+
+// redactMcpConfig replaces the mcp_config value in the response with the
+// sentinel string "<redacted>" whenever the field is set, and flips
+// McpConfigRedacted to true. Callers know a config exists without seeing its
+// contents.
 func redactMcpConfig(resp *AgentResponse) {
 	if resp.McpConfig != nil {
-		resp.McpConfig = nil
+		resp.McpConfig = append(json.RawMessage(nil), mcpConfigRedactedSentinel...)
 		resp.McpConfigRedacted = true
 	}
+}
+
+// validateMcpConfig enforces the wire shape Claude Code expects from
+// --mcp-config: a top-level object with a single key "mcpServers" whose value
+// is itself an object mapping server name → server spec. Each spec may carry
+// command/args/env/url/headers/type, all optional. We reject anything that
+// doesn't match the shape so a typo (e.g. {"mcp_servers":{...}}) fails at
+// write time instead of producing an agent that silently spawns claude
+// without any MCP servers attached.
+//
+// Validation is intentionally shallow: per-server fields are type-checked but
+// not semantically (we don't, for example, demand that "command" be a path
+// that exists on disk). The CLI applies the same validation client-side as
+// defense in depth; the server is the authoritative gate.
+func validateMcpConfig(raw json.RawMessage) error {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		// Clearing the field is handled by ClearAgentMcpConfig; if we reach
+		// this function with an empty or explicit-null payload, the caller is
+		// confused about which code path to take.
+		return errors.New("mcp_config: payload is empty; pass null to clear")
+	}
+
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &top); err != nil {
+		return errors.New("mcp_config: must be a JSON object with an \"mcpServers\" key")
+	}
+	servers, ok := top["mcpServers"]
+	if !ok {
+		return errors.New("mcp_config: missing required top-level key \"mcpServers\"")
+	}
+
+	var serverMap map[string]json.RawMessage
+	if err := json.Unmarshal(servers, &serverMap); err != nil {
+		return errors.New("mcp_config: \"mcpServers\" must be an object mapping server name to spec")
+	}
+	if len(serverMap) == 0 {
+		return errors.New("mcp_config: \"mcpServers\" must declare at least one server")
+	}
+
+	type serverSpec struct {
+		Command *string            `json:"command,omitempty"`
+		Args    *[]string          `json:"args,omitempty"`
+		Env     *map[string]string `json:"env,omitempty"`
+		URL     *string            `json:"url,omitempty"`
+		Headers *map[string]string `json:"headers,omitempty"`
+		Type    *string            `json:"type,omitempty"`
+	}
+	for name, specRaw := range serverMap {
+		if name == "" {
+			return errors.New("mcp_config: server name must be non-empty")
+		}
+		dec := json.NewDecoder(bytes.NewReader(specRaw))
+		dec.DisallowUnknownFields()
+		var spec serverSpec
+		if err := dec.Decode(&spec); err != nil {
+			return fmt.Errorf("mcp_config: server %q has invalid shape; allowed fields: command, args, env, url, headers, type", name)
+		}
+		if spec.Command == nil && spec.URL == nil {
+			return fmt.Errorf("mcp_config: server %q must set either \"command\" (stdio transport) or \"url\" (http transport)", name)
+		}
+	}
+	return nil
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
@@ -640,6 +728,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	rawMcpConfig, hasMcpConfig := rawFields["mcp_config"]
 	shouldClearMcpConfig := hasMcpConfig && bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null"))
 	if hasMcpConfig && !shouldClearMcpConfig {
+		if err := validateMcpConfig(rawMcpConfig); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		params.McpConfig = append([]byte(nil), rawMcpConfig...)
 	}
 	if req.RuntimeID != nil {
@@ -690,6 +782,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := agentToResponse(agent)
+	redactMcpConfig(&resp)
 	slog.Info("agent updated", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", uuidToString(agent.WorkspaceID))...)
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(agent.WorkspaceID))
@@ -735,6 +828,7 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	wsID := uuidToString(archived.WorkspaceID)
 	slog.Info("agent archived", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", wsID)...)
 	resp := agentToResponse(archived)
+	redactMcpConfig(&resp)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentArchived, wsID, actorType, actorID, map[string]any{"agent": resp})
 	writeJSON(w, http.StatusOK, resp)
@@ -764,6 +858,7 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	wsID := uuidToString(restored.WorkspaceID)
 	slog.Info("agent restored", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", wsID)...)
 	resp := agentToResponse(restored)
+	redactMcpConfig(&resp)
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentRestored, wsID, actorType, actorID, map[string]any{"agent": resp})

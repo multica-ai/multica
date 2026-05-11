@@ -1217,7 +1217,7 @@ func TestAgentCRUD(t *testing.T) {
 }
 
 func TestUpdateAgentMcpConfigAbsentPreservesValue(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "Handler Mcp Preserve", []byte(`{"preset":"keep"}`))
+	agentID := createHandlerTestAgent(t, "Handler Mcp Preserve", []byte(`{"mcpServers":{"keep":{"command":"echo"}}}`))
 
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
@@ -1233,12 +1233,18 @@ func TestUpdateAgentMcpConfigAbsentPreservesValue(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
 		t.Fatalf("UpdateAgent: decode response: %v", err)
 	}
-	assertJSONEqual(t, updated.McpConfig, `{"preset":"keep"}`)
-	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"keep"}`)
+	// Wire responses always carry the redaction sentinel — raw config is
+	// only ever read back via the daemon claim endpoint. DB state is the
+	// authoritative check that the row wasn't clobbered.
+	assertJSONEqual(t, updated.McpConfig, `"<redacted>"`)
+	if !updated.McpConfigRedacted {
+		t.Fatalf("UpdateAgent: expected mcp_config_redacted=true when value is set")
+	}
+	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"mcpServers":{"keep":{"command":"echo"}}}`)
 }
 
 func TestUpdateAgentMcpConfigNullClearsValue(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "Handler Mcp Clear", []byte(`{"preset":"clear"}`))
+	agentID := createHandlerTestAgent(t, "Handler Mcp Clear", []byte(`{"mcpServers":{"clear":{"command":"echo"}}}`))
 
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
@@ -1254,18 +1260,27 @@ func TestUpdateAgentMcpConfigNullClearsValue(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
 		t.Fatalf("UpdateAgent: decode response: %v", err)
 	}
+	// Cleared field: response carries null, redacted flag false (so the UI
+	// can tell "unset" from "set but redacted").
 	assertJSONEqual(t, updated.McpConfig, `null`)
+	if updated.McpConfigRedacted {
+		t.Fatalf("UpdateAgent: expected mcp_config_redacted=false after clearing")
+	}
 	if fetchAgentMcpConfig(t, agentID) != nil {
 		t.Fatalf("UpdateAgent: expected DB mcp_config to be SQL NULL")
 	}
 }
 
 func TestUpdateAgentMcpConfigObjectUpdatesValue(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "Handler Mcp Update", []byte(`{"preset":"old"}`))
+	agentID := createHandlerTestAgent(t, "Handler Mcp Update", []byte(`{"mcpServers":{"old":{"command":"echo"}}}`))
 
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
-		"mcp_config": map[string]any{"preset": "new"},
+		"mcp_config": map[string]any{
+			"mcpServers": map[string]any{
+				"new": map[string]any{"command": "echo"},
+			},
+		},
 	})
 	req = withURLParam(req, "id", agentID)
 	testHandler.UpdateAgent(w, req)
@@ -1277,8 +1292,79 @@ func TestUpdateAgentMcpConfigObjectUpdatesValue(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
 		t.Fatalf("UpdateAgent: decode response: %v", err)
 	}
-	assertJSONEqual(t, updated.McpConfig, `{"preset":"new"}`)
-	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"new"}`)
+	assertJSONEqual(t, updated.McpConfig, `"<redacted>"`)
+	if !updated.McpConfigRedacted {
+		t.Fatalf("UpdateAgent: expected mcp_config_redacted=true after setting value")
+	}
+	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"mcpServers":{"new":{"command":"echo"}}}`)
+}
+
+// TestUpdateAgentMcpConfigInvalidRejected covers the validation gate added
+// in this feature: malformed payloads must surface a 400 with a clear
+// message and leave the DB untouched, so a typo can't silently wipe out a
+// working configuration.
+func TestUpdateAgentMcpConfigInvalidRejected(t *testing.T) {
+	original := []byte(`{"mcpServers":{"good":{"command":"echo"}}}`)
+	agentID := createHandlerTestAgent(t, "Handler Mcp Invalid", original)
+
+	cases := []struct {
+		name    string
+		payload any
+		wantSub string
+	}{
+		{
+			name:    "missing mcpServers key",
+			payload: map[string]any{"mcp_servers": map[string]any{}},
+			wantSub: "mcpServers",
+		},
+		{
+			name:    "mcpServers must be object",
+			payload: map[string]any{"mcpServers": []any{"oops"}},
+			wantSub: "mcpServers",
+		},
+		{
+			name:    "empty mcpServers map",
+			payload: map[string]any{"mcpServers": map[string]any{}},
+			wantSub: "at least one server",
+		},
+		{
+			name: "server spec missing transport",
+			payload: map[string]any{
+				"mcpServers": map[string]any{
+					"oauth": map[string]any{"env": map[string]string{"TOKEN": "x"}},
+				},
+			},
+			wantSub: "must set either",
+		},
+		{
+			name: "unknown field in server spec",
+			payload: map[string]any{
+				"mcpServers": map[string]any{
+					"weird": map[string]any{"command": "echo", "bogus": true},
+				},
+			},
+			wantSub: "invalid shape",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+				"mcp_config": tc.payload,
+			})
+			req = withURLParam(req, "id", agentID)
+			testHandler.UpdateAgent(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("UpdateAgent: expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), tc.wantSub) {
+				t.Fatalf("UpdateAgent: expected error to mention %q, got %q", tc.wantSub, w.Body.String())
+			}
+			// Original value must be intact — no partial write.
+			assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), string(original))
+		})
+	}
 }
 
 func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
@@ -1304,8 +1390,61 @@ func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
 	})
 
 	assertJSONEqual(t, created.McpConfig, `null`)
+	if created.McpConfigRedacted {
+		t.Fatalf("CreateAgent: expected mcp_config_redacted=false when field is unset")
+	}
 	if fetchAgentMcpConfig(t, created.ID) != nil {
 		t.Fatalf("CreateAgent: expected DB mcp_config to be SQL NULL")
+	}
+}
+
+// TestCreateAgentMcpConfigInvalidRejected ensures the validator fires on
+// create as well as update — otherwise a malformed config could land via
+// the create path and only get caught when the daemon tried to spawn it.
+func TestCreateAgentMcpConfigInvalidRejected(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents", map[string]any{
+		"name":        "Handler Mcp Create Invalid",
+		"runtime_id":  handlerTestRuntimeID(t),
+		"mcp_config":  map[string]any{"mcp_servers": map[string]any{}},
+		"custom_env":  map[string]string{},
+		"custom_args": []string{},
+	})
+	testHandler.CreateAgent(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateAgent: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "mcpServers") {
+		t.Fatalf("CreateAgent: expected error to mention mcpServers, got %q", w.Body.String())
+	}
+}
+
+// TestGetAgentMcpConfigRedactsForOwner is the redaction contract the CLI
+// caller depends on: even the workspace owner reading their own agent must
+// see "<redacted>" — the database is the only authoritative store.
+func TestGetAgentMcpConfigRedactsForOwner(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Mcp Get", []byte(`{"mcpServers":{"gmail":{"command":"node","env":{"TOKEN":"secret-do-not-leak"}}}}`))
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/agents/"+agentID, nil)
+	req = withURLParam(req, "id", agentID)
+	testHandler.GetAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	body := w.Body.String()
+	if strings.Contains(body, "secret-do-not-leak") {
+		t.Fatalf("GetAgent: response leaked raw mcp_config contents: %q", body)
+	}
+
+	var got AgentResponse
+	if err := json.NewDecoder(strings.NewReader(body)).Decode(&got); err != nil {
+		t.Fatalf("GetAgent: decode response: %v", err)
+	}
+	assertJSONEqual(t, got.McpConfig, `"<redacted>"`)
+	if !got.McpConfigRedacted {
+		t.Fatalf("GetAgent: expected mcp_config_redacted=true")
 	}
 }
 
