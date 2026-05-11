@@ -31,10 +31,10 @@ type ProjectResponse struct {
 	IssueCount  int64   `json:"issue_count"`
 	DoneCount   int64   `json:"done_count"`
 	// ResourceCount is a breadcrumb pointing at the sub-collection at
-	// /api/projects/{id}/resources. Resources themselves stay out of this
-	// payload to keep parent metadata and child collections separate; clients
-	// that need the list call ListProjectResources directly.
-	ResourceCount int64 `json:"resource_count"`
+	// /api/projects/{id}/resources. Resources are included on list/detail payloads
+	// so CRM can show already-linked projects without N+1 client requests.
+	ResourceCount int64                     `json:"resource_count"`
+	Resources     []ProjectResourceResponse `json:"resources,omitempty"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -51,6 +51,18 @@ func projectToResponse(p db.Project) ProjectResponse {
 		CreatedAt:   timestampToString(p.CreatedAt),
 		UpdatedAt:   timestampToString(p.UpdatedAt),
 	}
+}
+
+func (h *Handler) loadProjectResourcesForResponse(ctx context.Context, projectID pgtype.UUID) []ProjectResourceResponse {
+	rows := h.listProjectResourcesForProject(ctx, projectID)
+	if len(rows) == 0 {
+		return nil
+	}
+	resources := make([]ProjectResourceResponse, len(rows))
+	for i, row := range rows {
+		resources[i] = projectResourceToResponse(row)
+	}
+	return resources
 }
 
 func (h *Handler) loadProjectIssueStats(ctx context.Context, projectID pgtype.UUID) (int64, int64) {
@@ -154,6 +166,7 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 			resp[i].DoneCount = s.DoneCount
 		}
 		resp[i].ResourceCount = resourceCountMap[resp[i].ID]
+		resp[i].Resources = h.loadProjectResourcesForResponse(r.Context(), p.ID)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"projects": resp, "total": len(resp)})
 }
@@ -179,6 +192,7 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
+	resp.Resources = h.loadProjectResourcesForResponse(r.Context(), project.ID)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -254,6 +268,10 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if len(req.Resources) == 0 {
 		project, err := h.Queries.CreateProject(r.Context(), createParams)
 		if err != nil {
+			if isUniqueViolation(err) {
+				writeError(w, http.StatusConflict, "project title already exists")
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "failed to create project")
 			return
 		}
@@ -274,6 +292,10 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 
 	project, err := qtx.CreateProject(r.Context(), createParams)
 	if err != nil {
+		if isUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "project title already exists")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to create project")
 		return
 	}
@@ -423,6 +445,10 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)
 	if err != nil {
+		if isUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "project title already exists")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to update project")
 		return
 	}

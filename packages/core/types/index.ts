@@ -68,6 +68,7 @@ export type {
   CreateProjectResourceRequest,
   ListProjectResourcesResponse,
 } from "./project";
+export type * from "./crm";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {
   Autopilot,

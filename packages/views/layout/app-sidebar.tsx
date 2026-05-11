@@ -29,6 +29,8 @@ import {
   SquarePen,
   CircleUser,
   FolderKanban,
+  Mail,
+  Users,
   X,
   Zap,
 } from "lucide-react";
@@ -104,6 +106,9 @@ type NavKey =
   | "myIssues"
   | "issues"
   | "projects"
+  | "crm"
+  | "crmCustomers"
+  | "crmEmails"
   | "autopilots"
   | "agents"
   | "runtimes"
@@ -116,6 +121,9 @@ type NavLabelKey =
   | "my_issues"
   | "issues"
   | "projects"
+  | "crm"
+  | "customers"
+  | "emails"
   | "autopilots"
   | "agents"
   | "runtimes"
@@ -132,6 +140,11 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
   { key: "projects", labelKey: "projects", icon: FolderKanban },
   { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "agents", labelKey: "agents", icon: Bot },
+];
+
+const crmNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
+  { key: "crmCustomers", labelKey: "customers", icon: Users },
+  { key: "crmEmails", labelKey: "emails", icon: Mail },
 ];
 
 const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
@@ -667,6 +680,30 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {workspaceNav.map((item) => {
+                  const href = p[item.key]();
+                  const isActive = isNavActive(pathname, href);
+                  return (
+                    <SidebarMenuItem key={item.key}>
+                      <SidebarMenuButton
+                        isActive={isActive}
+                        render={<AppLink href={href} />}
+                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                      >
+                        <item.icon />
+                        <span>{t(($) => $.nav[item.labelKey])}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+
+          <SidebarGroup>
+            <SidebarGroupLabel>{t(($) => $.sidebar.crm_group)}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-0.5">
+                {crmNav.map((item) => {
                   const href = p[item.key]();
                   const isActive = isNavActive(pathname, href);
                   return (

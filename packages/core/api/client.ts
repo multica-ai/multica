@@ -60,6 +60,26 @@ import type {
   ProjectResource,
   CreateProjectResourceRequest,
   ListProjectResourcesResponse,
+  CRMAccount,
+  CRMContact,
+  CRMAccountProfile,
+  CRMCommunicationNote,
+  CRMEmailThread,
+  CRMEmailMessage,
+  LinkCRMAccountProjectRequest,
+  LinkCRMAccountProjectsResponse,
+  CreateCRMFollowUpIssueRequest,
+  CreateCRMAccountRequest,
+  CreateCRMContactRequest,
+  CreateCRMEmailThreadRequest,
+  CreateCRMEmailMessageRequest,
+  CreateCRMCommunicationNoteRequest,
+  UpsertCRMAccountProfileRequest,
+  ListCRMAccountsResponse,
+  ListCRMContactsResponse,
+  ListCRMEmailThreadsResponse,
+  ListCRMEmailMessagesResponse,
+  ListCRMCommunicationNotesResponse,
   Label,
   CreateLabelRequest,
   UpdateLabelRequest,
@@ -1139,6 +1159,131 @@ export class ApiClient {
   ): Promise<void> {
     await this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
       method: "DELETE",
+    });
+  }
+
+  // CRM
+  async listCRMAccounts(params?: { status?: string; search?: string }): Promise<ListCRMAccountsResponse> {
+    const search = new URLSearchParams();
+    if (params?.status) search.set("status", params.status);
+    if (params?.search) search.set("search", params.search);
+    return this.fetch(`/api/crm/accounts?${search}`);
+  }
+
+  async getCRMAccount(id: string): Promise<CRMAccount> {
+    return this.fetch(`/api/crm/accounts/${id}`);
+  }
+
+  async createCRMAccount(data: CreateCRMAccountRequest): Promise<CRMAccount> {
+    return this.fetch("/api/crm/accounts", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateCRMAccount(id: string, data: CreateCRMAccountRequest): Promise<CRMAccount> {
+    return this.fetch(`/api/crm/accounts/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteCRMAccount(id: string): Promise<void> {
+    return this.fetch(`/api/crm/accounts/${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listCRMContacts(accountId: string): Promise<ListCRMContactsResponse> {
+    return this.fetch(`/api/crm/accounts/${accountId}/contacts`);
+  }
+
+  async createCRMContact(accountId: string, data: CreateCRMContactRequest): Promise<CRMContact> {
+    return this.fetch(`/api/crm/accounts/${accountId}/contacts`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateCRMContact(accountId: string, contactId: string, data: CreateCRMContactRequest): Promise<CRMContact> {
+    return this.fetch(`/api/crm/accounts/${accountId}/contacts/${contactId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteCRMContact(accountId: string, contactId: string): Promise<void> {
+    return this.fetch(`/api/crm/accounts/${accountId}/contacts/${contactId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async upsertCRMAccountProfile(
+    accountId: string,
+    data: UpsertCRMAccountProfileRequest,
+  ): Promise<CRMAccountProfile> {
+    return this.fetch(`/api/crm/accounts/${accountId}/profile`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listCRMEmailThreads(params?: { account_id?: string }): Promise<ListCRMEmailThreadsResponse> {
+    const search = new URLSearchParams();
+    if (params?.account_id) search.set("account_id", params.account_id);
+    const qs = search.toString();
+    return this.fetch(`/api/crm/email-threads${qs ? `?${qs}` : ""}`);
+  }
+
+  async createCRMEmailThread(data: CreateCRMEmailThreadRequest): Promise<CRMEmailThread> {
+    return this.fetch("/api/crm/email-threads", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listCRMEmailMessages(threadId: string): Promise<ListCRMEmailMessagesResponse> {
+    return this.fetch(`/api/crm/email-threads/${threadId}/messages`);
+  }
+
+  async createCRMEmailMessage(threadId: string, data: CreateCRMEmailMessageRequest): Promise<CRMEmailMessage> {
+    return this.fetch(`/api/crm/email-threads/${threadId}/messages`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listCRMCommunicationNotes(accountId: string): Promise<ListCRMCommunicationNotesResponse> {
+    return this.fetch(`/api/crm/accounts/${accountId}/notes`);
+  }
+
+  async createCRMCommunicationNote(
+    accountId: string,
+    data: CreateCRMCommunicationNoteRequest,
+  ): Promise<CRMCommunicationNote> {
+    return this.fetch(`/api/crm/accounts/${accountId}/notes`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async linkCRMAccountProject(
+    accountId: string,
+    data: LinkCRMAccountProjectRequest,
+  ): Promise<ProjectResource | LinkCRMAccountProjectsResponse> {
+    return this.fetch(`/api/crm/accounts/${accountId}/projects`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async createCRMFollowUpIssue(
+    accountId: string,
+    data: CreateCRMFollowUpIssueRequest,
+  ): Promise<{ issue: Issue }> {
+    return this.fetch(`/api/crm/accounts/${accountId}/follow-up-issues`, {
+      method: "POST",
+      body: JSON.stringify(data),
     });
   }
 

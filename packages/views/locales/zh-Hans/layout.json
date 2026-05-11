@@ -4,6 +4,9 @@
     "my_issues": "我的 Issue",
     "issues": "Issue",
     "projects": "项目",
+    "crm": "CRM",
+    "customers": "客户",
+    "emails": "邮件",
     "autopilots": "自动化",
     "agents": "智能体",
     "runtimes": "运行时",
@@ -33,6 +36,7 @@
     "new_issue_shortcut": "C",
     "pinned_label": "固定",
     "workspace_group": "工作区",
+    "crm_group": "客户关系",
     "configure_group": "配置",
     "unread_overflow": "99+"
   }

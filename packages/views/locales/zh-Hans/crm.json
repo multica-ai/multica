@@ -1,0 +1,163 @@
+{
+  "common": {
+    "module": "CRM",
+    "not_available": "暂无",
+    "count_contacts": "{{count}} 个联系人",
+    "count_messages": "{{count}} 封邮件"
+  },
+  "actions": {
+    "cancel": "取消",
+    "save": "保存",
+    "edit": "编辑",
+    "delete": "删除"
+  },
+  "tabs": {
+    "overview": "概览",
+    "contacts": "联系人",
+    "profile": "客户画像",
+    "projects": "项目跟进",
+    "emails": "邮件",
+    "notes": "备注与动态"
+  },
+  "customers": {
+    "title": "客户",
+    "search_placeholder": "搜索客户",
+    "new_customer_name": "新客户名称",
+    "country": "国家",
+    "industry": "行业",
+    "add_customer": "添加客户",
+    "create_error": "创建客户失败。",
+    "empty": "暂无客户。",
+    "select_or_create": "请选择或创建一个客户。",
+    "no_profile": "暂无画像",
+    "basic_profile": "基础客户资料",
+    "status": "状态",
+    "website": "网站",
+    "region": "地区",
+    "notes": "备注",
+    "account_type": "客户类型",
+    "rating": "评级",
+    "priority": "优先级",
+    "city": "城市",
+    "last_contacted_at": "上次联系",
+    "next_follow_up_at": "下次跟进",
+    "source": "来源",
+    "tags": "标签",
+    "annual_revenue": "年营收",
+    "employee_count": "员工人数",
+    "country_name": "国家名称",
+    "sub_industry": "细分行业",
+    "tags_placeholder": "标签，用逗号分隔",
+    "edit_customer": "编辑客户",
+    "delete_confirm": "确定删除这个客户吗？"
+  },
+  "statuses": {
+    "active": "活跃",
+    "inactive": "停用",
+    "prospect": "潜在客户",
+    "archived": "已归档"
+  },
+  "channels": {
+    "manual": "手动",
+    "email": "邮件",
+    "whatsapp": "WhatsApp",
+    "phone": "电话",
+    "meeting": "会议",
+    "other": "其他"
+  },
+  "contacts": {
+    "title": "联系人",
+    "empty": "暂无联系人。",
+    "add_title": "添加联系人",
+    "edit_title": "编辑联系人",
+    "name": "姓名",
+    "email": "邮箱",
+    "whatsapp": "WhatsApp",
+    "add": "添加联系人",
+    "create_error": "添加联系人失败。",
+    "phone": "电话",
+    "mobile": "手机",
+    "wechat": "微信",
+    "job_title": "职位",
+    "department": "部门",
+    "decision_role": "决策角色",
+    "preferred_language": "偏好语言",
+    "timezone": "时区",
+    "is_primary": "主要联系人",
+    "notes": "备注"
+  },
+  "profile": {
+    "title": "客户画像",
+    "summary_title": "画像摘要",
+    "metadata_title": "客户详情"
+  },
+  "projects": {
+    "title": "项目跟进",
+    "link_title": "关联项目",
+    "select": "选择项目",
+    "link": "将客户关联到项目",
+    "link_error": "关联项目失败。",
+    "link_success": "项目已关联。",
+    "follow_up_title": "跟进 Issue",
+    "follow_up_placeholder": "跟进：{{name}}",
+    "create_follow_up": "创建跟进 Issue",
+    "follow_up_error": "创建跟进 Issue 失败。",
+    "follow_up_success": "跟进 Issue 已创建。",
+    "create_linked_project": "创建并关联项目",
+    "create_project_error": "创建关联项目失败。",
+    "create_project_success": "关联项目已创建。"
+  },
+  "emails": {
+    "title": "邮件",
+    "search_placeholder": "搜索客户邮件",
+    "empty_title": "客户邮件尚未接入",
+    "empty_description": "这个 CRM 独立邮件板块已预留给客户邮件线程。路由继续绑定 workspace 以保证客户隔离，但布局上作为独立 CRM 模块呈现。",
+    "account_empty": "暂无关联邮件。"
+  },
+  "notes": {
+    "title": "备注与动态",
+    "placeholder": "添加手动客户备注",
+    "add": "添加备注",
+    "create_error": "添加备注失败。",
+    "empty": "暂无备注。"
+  },
+  "account_types": {
+    "prospect": "潜在客户",
+    "customer": "正式客户",
+    "partner": "合作伙伴",
+    "supplier": "供应商",
+    "competitor": "竞争对手",
+    "other": "其他"
+  },
+  "ratings": {
+    "hot": "高意向",
+    "warm": "中意向",
+    "cold": "低意向",
+    "unknown": "未知"
+  },
+  "priorities": {
+    "high": "高",
+    "medium": "中",
+    "low": "低"
+  },
+  "sources": {
+    "manual": "手动",
+    "email": "邮件",
+    "whatsapp": "WhatsApp",
+    "website": "网站",
+    "referral": "转介绍",
+    "trade_show": "展会",
+    "linkedin": "LinkedIn",
+    "other": "其他"
+  },
+  "decision_roles": {
+    "decision_maker": "决策人",
+    "influencer": "影响者",
+    "buyer": "采购",
+    "user": "使用者",
+    "finance": "财务",
+    "technical": "技术",
+    "gatekeeper": "把关人",
+    "other": "其他"
+  }
+}

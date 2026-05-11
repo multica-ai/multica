@@ -65,14 +65,41 @@ func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (
 	switch resourceType {
 	case "github_repo":
 		return validateGithubRepoRef(ref)
+	case "crm_account":
+		return validateCRMAccountResourceRef(ref)
 	default:
 		return nil, fmt.Errorf("unknown resource_type %q", resourceType)
 	}
 }
 
+type crmAccountResourceRef struct {
+	AccountID string `json:"account_id"`
+	Name      string `json:"name,omitempty"`
+}
+
+func validateCRMAccountResourceRef(ref json.RawMessage) (json.RawMessage, error) {
+	var payload crmAccountResourceRef
+	if err := json.Unmarshal(ref, &payload); err != nil {
+		return nil, fmt.Errorf("invalid crm_account payload: %w", err)
+	}
+	payload.AccountID = strings.TrimSpace(payload.AccountID)
+	if payload.AccountID == "" {
+		return nil, errors.New("crm_account: account_id is required")
+	}
+	if _, err := parseUUIDLoose(payload.AccountID); err != nil {
+		return nil, errors.New("crm_account: account_id must be a valid uuid")
+	}
+	payload.Name = strings.TrimSpace(payload.Name)
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 type githubRepoRef struct {
-	URL                string `json:"url"`
-	DefaultBranchHint  string `json:"default_branch_hint,omitempty"`
+	URL               string `json:"url"`
+	DefaultBranchHint string `json:"default_branch_hint,omitempty"`
 }
 
 func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {

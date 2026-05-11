@@ -1,0 +1,163 @@
+{
+  "common": {
+    "module": "CRM",
+    "not_available": "Not available",
+    "count_contacts": "{{count}} contacts",
+    "count_messages": "{{count}} messages"
+  },
+  "actions": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "edit": "Edit",
+    "delete": "Delete"
+  },
+  "tabs": {
+    "overview": "Overview",
+    "contacts": "Contacts",
+    "profile": "Customer Profile",
+    "projects": "Projects",
+    "emails": "Emails",
+    "notes": "Notes"
+  },
+  "customers": {
+    "title": "Customers",
+    "search_placeholder": "Search customers",
+    "new_customer_name": "New customer name",
+    "country": "Country",
+    "industry": "Industry",
+    "add_customer": "Add customer",
+    "create_error": "Failed to create customer.",
+    "empty": "No customers yet.",
+    "select_or_create": "Select or create a customer account.",
+    "no_profile": "No profile yet",
+    "basic_profile": "Basic customer profile",
+    "status": "Status",
+    "website": "Website",
+    "region": "Region",
+    "notes": "Notes",
+    "account_type": "Account type",
+    "rating": "Rating",
+    "priority": "Priority",
+    "city": "City",
+    "last_contacted_at": "Last contacted",
+    "next_follow_up_at": "Next follow-up",
+    "source": "Source",
+    "tags": "Tags",
+    "annual_revenue": "Annual revenue",
+    "employee_count": "Employee count",
+    "country_name": "Country name",
+    "sub_industry": "Sub-industry",
+    "tags_placeholder": "Tags, comma separated",
+    "edit_customer": "Edit customer",
+    "delete_confirm": "Delete this customer?"
+  },
+  "statuses": {
+    "active": "Active",
+    "inactive": "Inactive",
+    "prospect": "Prospect",
+    "archived": "Archived"
+  },
+  "channels": {
+    "manual": "Manual",
+    "email": "Email",
+    "whatsapp": "WhatsApp",
+    "phone": "Phone",
+    "meeting": "Meeting",
+    "other": "Other"
+  },
+  "contacts": {
+    "title": "Contacts",
+    "empty": "No contacts yet.",
+    "add_title": "Add contact",
+    "edit_title": "Edit contact",
+    "name": "Name",
+    "email": "Email",
+    "whatsapp": "WhatsApp",
+    "add": "Add contact",
+    "create_error": "Failed to add contact.",
+    "phone": "Phone",
+    "mobile": "Mobile",
+    "wechat": "WeChat",
+    "job_title": "Job title",
+    "department": "Department",
+    "decision_role": "Decision role",
+    "preferred_language": "Preferred language",
+    "timezone": "Timezone",
+    "is_primary": "Primary contact",
+    "notes": "Notes"
+  },
+  "profile": {
+    "title": "Customer profile",
+    "summary_title": "Profile summary",
+    "metadata_title": "Account details"
+  },
+  "projects": {
+    "title": "Projects",
+    "link_title": "Project link",
+    "select": "Select project",
+    "link": "Link customer to project",
+    "link_error": "Failed to link project.",
+    "link_success": "Project linked.",
+    "follow_up_title": "Follow-up issue",
+    "follow_up_placeholder": "Follow up: {{name}}",
+    "create_follow_up": "Create follow-up issue",
+    "follow_up_error": "Failed to create follow-up issue.",
+    "follow_up_success": "Follow-up issue created.",
+    "create_linked_project": "Create linked project",
+    "create_project_error": "Failed to create linked project.",
+    "create_project_success": "Linked project created."
+  },
+  "emails": {
+    "title": "Emails",
+    "search_placeholder": "Search customer emails",
+    "empty_title": "Customer emails are not connected yet",
+    "empty_description": "This CRM-owned section is ready for linked email threads. It keeps the route workspace-scoped for customer isolation while presenting email work as part of the standalone CRM module.",
+    "account_empty": "No linked emails yet."
+  },
+  "notes": {
+    "title": "Notes & activity",
+    "placeholder": "Add a manual customer note",
+    "add": "Add note",
+    "create_error": "Failed to add note.",
+    "empty": "No notes yet."
+  },
+  "account_types": {
+    "prospect": "Prospect",
+    "customer": "Customer",
+    "partner": "Partner",
+    "supplier": "Supplier",
+    "competitor": "Competitor",
+    "other": "Other"
+  },
+  "ratings": {
+    "hot": "Hot",
+    "warm": "Warm",
+    "cold": "Cold",
+    "unknown": "Unknown"
+  },
+  "priorities": {
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low"
+  },
+  "sources": {
+    "manual": "Manual",
+    "email": "Email",
+    "whatsapp": "WhatsApp",
+    "website": "Website",
+    "referral": "Referral",
+    "trade_show": "Trade show",
+    "linkedin": "LinkedIn",
+    "other": "Other"
+  },
+  "decision_roles": {
+    "decision_maker": "Decision maker",
+    "influencer": "Influencer",
+    "buyer": "Buyer",
+    "user": "User",
+    "finance": "Finance",
+    "technical": "Technical",
+    "gatekeeper": "Gatekeeper",
+    "other": "Other"
+  }
+}

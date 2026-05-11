@@ -372,6 +372,38 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// CRM
+			r.Route("/api/crm", func(r chi.Router) {
+				r.Route("/accounts", func(r chi.Router) {
+					r.Get("/", h.ListCRMAccounts)
+					r.Post("/", h.CreateCRMAccount)
+					r.Route("/{accountId}", func(r chi.Router) {
+						r.Get("/", h.GetCRMAccount)
+						r.Put("/", h.UpdateCRMAccount)
+						r.Delete("/", h.DeleteCRMAccount)
+						r.Get("/contacts", h.ListCRMContacts)
+						r.Post("/contacts", h.CreateCRMContact)
+						r.Route("/contacts/{contactId}", func(r chi.Router) {
+							r.Put("/", h.UpdateCRMContact)
+							r.Delete("/", h.DeleteCRMContact)
+						})
+						r.Get("/notes", h.ListCRMCommunicationNotes)
+						r.Post("/notes", h.CreateCRMCommunicationNote)
+						r.Post("/projects", h.LinkCRMAccountProject)
+						r.Post("/follow-up-issues", h.CreateCRMFollowUpIssue)
+						r.Put("/profile", h.UpsertCRMAccountProfile)
+					})
+				})
+				r.Route("/email-threads", func(r chi.Router) {
+					r.Get("/", h.ListCRMEmailThreads)
+					r.Post("/", h.CreateCRMEmailThread)
+					r.Route("/{threadId}", func(r chi.Router) {
+						r.Get("/messages", h.ListCRMEmailMessages)
+						r.Post("/messages", h.CreateCRMEmailMessage)
+					})
+				})
+			})
+
 			// Autopilots
 			r.Route("/api/autopilots", func(r chi.Router) {
 				r.Get("/", h.ListAutopilots)
