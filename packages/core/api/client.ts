@@ -88,8 +88,10 @@ import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
+  AttachmentResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
+  EMPTY_ATTACHMENT,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_TIMELINE_ENTRIES,
   ListIssuesResponseSchema,
@@ -1097,6 +1099,17 @@ export class ApiClient {
 
   async listAttachments(issueId: string): Promise<Attachment[]> {
     return this.fetch(`/api/issues/${issueId}/attachments`);
+  }
+
+  // Fetches a fresh attachment metadata record. The server re-signs
+  // `download_url` on every call (30 min expiry), so the click-time
+  // download flow uses this endpoint to avoid handing the user a stale
+  // signed URL cached in TanStack Query.
+  async getAttachment(id: string): Promise<Attachment> {
+    const raw = await this.fetch<unknown>(`/api/attachments/${id}`);
+    return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+      endpoint: "GET /api/attachments/{id}",
+    });
   }
 
   async deleteAttachment(id: string): Promise<void> {

@@ -109,6 +109,10 @@ vi.mock("../../navigation", () => ({
 vi.mock("../../editor", () => ({
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
+  // No-op so comment-card's AttachmentList can render without hitting the
+  // real API singleton; tests that care about download wiring should write
+  // dedicated specs against `use-download-attachment.test.tsx`.
+  useDownloadAttachment: () => vi.fn(),
   ReadonlyContent: ({ content }: { content: string }) => (
     <div data-testid="readonly-content">{content}</div>
   ),

@@ -30,7 +30,7 @@ import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-pick
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
-import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -122,6 +122,7 @@ function DeleteCommentDialog({
 // ---------------------------------------------------------------------------
 
 function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
+  const download = useDownloadAttachment();
   if (!attachments?.length) return null;
   // Skip attachments whose URL is already referenced in the markdown content,
   // and duplicates of the same file (same name/type/size) that are referenced.
@@ -155,15 +156,13 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm">{a.filename}</p>
           </div>
-          {a.download_url && (
-            <button
-              type="button"
-              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              onClick={() => window.open(a.download_url, "_blank", "noopener,noreferrer")}
-            >
-              <Download className="size-3.5" />
-            </button>
-          )}
+          <button
+            type="button"
+            className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            onClick={() => download(a.id)}
+          >
+            <Download className="size-3.5" />
+          </button>
         </div>
       ))}
     </div>
@@ -343,7 +342,7 @@ function CommentRow({
       ) : (
         <>
           <div className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85">
-            <ReadonlyContent content={entry.content ?? ""} />
+            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
           {!isTemp && (
@@ -604,7 +603,7 @@ function CommentCardImpl({
             ) : (
               <>
                 <div className="pl-10 text-sm leading-relaxed text-foreground/85">
-                  <ReadonlyContent content={entry.content ?? ""} />
+                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
                 {!isTemp && (
