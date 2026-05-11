@@ -509,6 +509,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListAgentRuntimes)
 				r.Get("/cli-update-manifest", h.GetCLIUpdateManifest)
 				r.Route("/{runtimeId}", func(r chi.Router) {
+					r.Patch("/", h.UpdateAgentRuntime)
 					r.Get("/usage", h.GetRuntimeUsage)
 					r.Get("/usage/by-agent", h.GetRuntimeUsageByAgent)
 					r.Get("/usage/by-hour", h.GetRuntimeUsageByHour)

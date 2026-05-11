@@ -17,8 +17,11 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { cn } from "@multica/ui/lib/utils";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
+import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
+import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
+import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 import { useAuthStore } from "@multica/core/auth";
 
@@ -121,7 +124,13 @@ function removeDraft(key: string, expectedUpdatedAt?: number) {
 function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const { t } = useT("issues");
   const editorRef = useRef<ContentEditorRef>(null);
-  const [isEmpty, setIsEmpty] = useState(true);
+  // Read the persisted draft once on mount. ContentEditor only honors
+  // `defaultValue` at mount time, so this snapshot drives both the editor's
+  // initial content and the submit-button enable state — without this the
+  // button would be disabled even though the editor visibly contains text.
+  const draftKey = `new:${issueId}` as const;
+  const initialDraft = useCommentDraftStore.getState().getDraft(draftKey);
+  const [isEmpty, setIsEmpty] = useState(() => !initialDraft?.trim());
   const [submitting, setSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);

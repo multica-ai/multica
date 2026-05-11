@@ -9,13 +9,17 @@ import (
 
 // BuildPrompt constructs the task prompt for an agent CLI.
 // Keep this minimal — detailed instructions live in CLAUDE.md / AGENTS.md
-// injected by execenv.InjectRuntimeConfig.
-func BuildPrompt(task Task) string {
+// injected by execenv.InjectRuntimeConfig. The provider string is used by
+// comment-triggered tasks: Codex's per-turn reply template needs the
+// platform-aware "stdin or file" variant, every other provider gets a
+// lightweight inline template (or Windows file for any provider on
+// Windows).
+func BuildPrompt(task Task, provider string) string {
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
 	if task.TriggerCommentID != "" {
-		return buildCommentPrompt(task)
+		return buildCommentPrompt(task, provider)
 	}
 	if task.AutopilotRunID != "" {
 		return buildAutopilotPrompt(task)
@@ -107,7 +111,7 @@ func buildQuickCreatePrompt(task Task) string {
 // The reply instructions (including the current TriggerCommentID as --parent)
 // are re-emitted on every turn so resumed sessions cannot carry forward a
 // previous turn's --parent UUID.
-func buildCommentPrompt(task Task) string {
+func buildCommentPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
@@ -128,7 +132,7 @@ func buildCommentPrompt(task Task) string {
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
 	fmt.Fprintf(&b, "If you need comment history, `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). Pass `--since <RFC3339>` to fetch only comments newer than a known cursor.\n\n", task.IssueID)
-	b.WriteString(execenv.BuildCommentReplyInstructions(task.IssueID, task.TriggerCommentID))
+	b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
 	return b.String()
 }
 

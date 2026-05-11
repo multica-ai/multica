@@ -104,14 +104,27 @@ type DaemonHeartbeatRequestPayload struct {
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.
 // JSON shape mirrors the HTTP heartbeat response so daemon code can decode either.
+//
+// RuntimeGone is the WebSocket replacement for the HTTP 404 "runtime not found"
+// response. When the server discovers the runtime row was deleted (UI delete,
+// 7-day offline GC), it sends back an ack with Status=HeartbeatStatusRuntimeGone
+// and RuntimeGone=true rather than tearing down the connection with an error.
+// The daemon reads this signal, prunes the stale runtime from its local state
+// and re-registers; without it the dead UUID would keep heartbeating until the
+// daemon process restarts.
 type DaemonHeartbeatAckPayload struct {
 	RuntimeID               string                                  `json:"runtime_id"`
 	Status                  string                                  `json:"status"`
+	RuntimeGone             bool                                    `json:"runtime_gone,omitempty"`
 	PendingUpdate           *DaemonHeartbeatPendingUpdate           `json:"pending_update,omitempty"`
 	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`
 	PendingLocalSkills      *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`
 	PendingLocalSkillImport *DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
 }
+
+// HeartbeatStatusRuntimeGone is the ack Status used when the runtime row no
+// longer exists server-side. Companion to DaemonHeartbeatAckPayload.RuntimeGone.
+const HeartbeatStatusRuntimeGone = "runtime_gone"
 
 // DaemonHeartbeatPendingUpdate describes a CLI-update action the daemon
 // should run for the runtime.

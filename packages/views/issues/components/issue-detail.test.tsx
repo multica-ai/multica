@@ -121,6 +121,10 @@ vi.mock("../../navigation", () => ({
 vi.mock("../../editor", () => ({
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
+  // No-op so comment-card's AttachmentList can render without hitting the
+  // real API singleton; tests that care about download wiring should write
+  // dedicated specs against `use-download-attachment.test.tsx`.
+  useDownloadAttachment: () => vi.fn(),
   ReadonlyContent: ({ content }: { content: string }) => (
     <div data-testid="readonly-content">{content}</div>
   ),
@@ -212,6 +216,7 @@ const mockApiObj = vi.hoisted(() => ({
   listIssueReactions: vi.fn().mockResolvedValue([]),
   addIssueReaction: vi.fn(),
   removeIssueReaction: vi.fn(),
+  listAttachments: vi.fn().mockResolvedValue([]),
   addCommentReaction: vi.fn(),
   removeCommentReaction: vi.fn(),
   listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
@@ -253,11 +258,18 @@ const mockRecordVisit = vi.fn();
 vi.mock("@multica/core/issues/stores", () => ({
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
-      const state = { items: [], recordVisit: mockRecordVisit };
+      const state = { byWorkspace: {}, recordVisit: mockRecordVisit, pruneWorkspaces: vi.fn() };
       return selector ? selector(state) : state;
     },
-    { getState: () => ({ items: [], recordVisit: mockRecordVisit }) },
+    {
+      getState: () => ({
+        byWorkspace: {},
+        recordVisit: mockRecordVisit,
+        pruneWorkspaces: vi.fn(),
+      }),
+    },
   ),
+  selectRecentIssues: () => () => [],
   useCommentCollapseStore: (selector?: any) => {
     const state = {
       collapsedByIssue: {},
@@ -266,6 +278,39 @@ vi.mock("@multica/core/issues/stores", () => ({
     };
     return selector ? selector(state) : state;
   },
+  useCommentDraftStore: Object.assign(
+    (selector?: any) => {
+      const state = {
+        drafts: {} as Record<string, { content: string; updatedAt: number }>,
+        getDraft: () => undefined,
+        setDraft: () => {},
+        clearDraft: () => {},
+      };
+      return selector ? selector(state) : state;
+    },
+    {
+      getState: () => ({
+        drafts: {} as Record<string, { content: string; updatedAt: number }>,
+        getDraft: () => undefined,
+        setDraft: () => {},
+        clearDraft: () => {},
+      }),
+    },
+  ),
+}));
+
+// Mock react-virtuoso: jsdom has no real layout, so the real Virtuoso would
+// compute a 0-height viewport and render nothing. The mock renders every item
+// inline, which matches how the unvirtualized .map used to behave and keeps
+// existing assertions (`getByText('Started working on this')` etc.) working.
+vi.mock("react-virtuoso", () => ({
+  Virtuoso: ({ data, itemContent }: { data: unknown[]; itemContent: (i: number, item: unknown) => unknown }) => (
+    <div data-testid="virtuoso-mock">
+      {data.map((item, i) => (
+        <div key={i}>{itemContent(i, item) as React.ReactElement}</div>
+      ))}
+    </div>
+  ),
 }));
 
 // Mock modals
@@ -422,6 +467,30 @@ function renderIssueDetail(issueId = "issue-1") {
   );
 }
 
+function renderIssueDetailWithHighlight(
+  highlightCommentId: string,
+  issueId = "issue-1",
+  options: { seedTimeline?: boolean } = {},
+) {
+  const queryClient = createTestQueryClient();
+  if (options.seedTimeline) {
+    // Pre-populate the timeline cache so the first render sees timeline.length>0.
+    // This reproduces the inbox-click race: timeline data is available before
+    // the issue itself has finished loading, so the effect that scrolls to
+    // the comment fires once with `loading=true` (skeleton still rendered,
+    // no comment DOM) and must re-fire when `loading` flips to false.
+    queryClient.setQueryData(["issues", "timeline", issueId], mockTimeline);
+  }
+  const result = render(
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={queryClient}>
+        <IssueDetail issueId={issueId} highlightCommentId={highlightCommentId} />
+      </QueryClientProvider>
+    </I18nProvider>,
+  );
+  return { ...result, queryClient };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -574,17 +643,64 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
   });
 
-  it("anchors the initial timeline fetch on the comment from URL search params", async () => {
-    mockNavigationSearchParams.current = new URLSearchParams({
-      comment: "comment-2",
+  describe("highlightCommentId scroll-to-comment", () => {
+    let scrollIntoViewSpy: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      scrollIntoViewSpy = vi.fn();
+      Element.prototype.scrollIntoView =
+        scrollIntoViewSpy as unknown as Element["scrollIntoView"];
     });
 
-    renderIssueDetail();
+    it("scrolls to the highlighted comment after both issue and timeline finish loading", async () => {
+      renderIssueDetailWithHighlight("comment-2");
 
-    await waitFor(() => {
-      expect(mockApiObj.listTimeline).toHaveBeenCalledWith("issue-1", {
-        mode: "around",
-        id: "comment-2",
+      // Under virtualization the DOM anchor is a `data-comment-id` attribute
+      // on the item wrapper; we no longer rely on element id="comment-...".
+      await waitFor(() => {
+        expect(
+          document.querySelector('[data-comment-id="comment-2"]'),
+        ).not.toBeNull();
+      });
+
+      // The deep-link useEffect polls until the target mounts, then calls
+      // scrollIntoView on the wrapper element.
+      await waitFor(() => {
+        expect(scrollIntoViewSpy).toHaveBeenCalled();
+      });
+
+      const callContext = scrollIntoViewSpy.mock.contexts[0] as HTMLElement;
+      expect(callContext.getAttribute("data-comment-id")).toBe("comment-2");
+    });
+
+    it("still scrolls when the timeline is ready before the issue (regression for inbox click)", async () => {
+      // Reproduces the inbox-click race: timeline data is in the cache before
+      // the issue resolves. While `loading` is true the timeline skeleton is
+      // shown and no comment wrapper is mounted. The deep-link polling loop
+      // must keep retrying (up to ~320ms of rAFs) until the issue resolves
+      // and the target's `data-comment-id` appears in the DOM.
+      let resolveIssue: (value: Issue) => void = () => {};
+      const issuePromise = new Promise<Issue>((resolve) => {
+        resolveIssue = resolve;
+      });
+      mockApiObj.getIssue.mockReturnValue(issuePromise);
+
+      renderIssueDetailWithHighlight("comment-2", "issue-1", { seedTimeline: true });
+
+      expect(
+        document.querySelector('[data-comment-id="comment-2"]'),
+      ).toBeNull();
+      expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+
+      resolveIssue(mockIssue);
+
+      await waitFor(() => {
+        expect(
+          document.querySelector('[data-comment-id="comment-2"]'),
+        ).not.toBeNull();
+      });
+      await waitFor(() => {
+        expect(scrollIntoViewSpy).toHaveBeenCalled();
       });
     });
   });

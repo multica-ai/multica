@@ -22,10 +22,6 @@ type CreateChatSessionRequest struct {
 	Title   string `json:"title"`
 }
 
-func canAccessChatAgent(agent db.Agent, userID string) bool {
-	return agent.Visibility != "private" || uuidToString(agent.OwnerID) == userID
-}
-
 func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -64,9 +60,12 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "agent is archived")
 		return
 	}
-	// Private agents can only be chatted with by their owner.
-	if agent.Visibility == "private" && uuidToString(agent.OwnerID) != userID {
-		writeError(w, http.StatusForbidden, "private agent belongs to another user")
+	// Private-agent gate: members must be in allowed_principals to start
+	// a chat with a private agent. Agent-to-agent chat sessions bypass
+	// the gate so A2A collaboration still works.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return
 	}
 
@@ -92,16 +91,24 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	workspaceUUID := parseUUID(workspaceID)
 
-	status := r.URL.Query().Get("status")
-	agents, err := h.Queries.ListAllAgents(r.Context(), workspaceUUID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load chat agents")
+	// Compute the accessible-agents set once and use it to drop sessions
+	// whose target agent the caller no longer has access to — without this,
+	// a member whose role was downgraded would still see the session list
+	// (and transcripts via ListChatMessages) for any private agent they
+	// previously had access to. Falls back to the user's role from the
+	// workspace member context.
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
 		return
 	}
-	agentByID := make(map[string]db.Agent, len(agents))
-	for _, agent := range agents {
-		agentByID[uuidToString(agent.ID)] = agent
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
 	}
+
+	status := r.URL.Query().Get("status")
 
 	// Two call sites → two row types with identical shape. Collect into a
 	// common response slice via small per-branch loops.
@@ -117,8 +124,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		resp = make([]ChatSessionResponse, 0, len(rows))
 		for _, s := range rows {
-			agent, ok := agentByID[uuidToString(s.AgentID)]
-			if !ok || !canAccessChatAgent(agent, userID) {
+			if _, ok := allowed[uuidToString(s.AgentID)]; !ok {
 				continue
 			}
 			resp = append(resp, ChatSessionResponse{
@@ -144,8 +150,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		resp = make([]ChatSessionResponse, 0, len(rows))
 		for _, s := range rows {
-			agent, ok := agentByID[uuidToString(s.AgentID)]
-			if !ok || !canAccessChatAgent(agent, userID) {
+			if _, ok := allowed[uuidToString(s.AgentID)]; !ok {
 				continue
 			}
 			resp = append(resp, ChatSessionResponse{
@@ -185,16 +190,27 @@ func (h *Handler) loadChatSessionForUser(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusForbidden, "not your chat session")
 		return db.ChatSession{}, false
 	}
-	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-		ID:          session.AgentID,
-		WorkspaceID: workspaceUUID,
-	})
+	return session, true
+}
+
+// gateChatSessionForUser combines the session ownership check with the
+// private-agent access gate so a member who has lost access to the target
+// agent (role downgrade, ownership transfer, agent flipped to private)
+// cannot continue reading the chat transcript even though they remain the
+// session creator. Returns ok=false after writing the error response.
+func (h *Handler) gateChatSessionForUser(w http.ResponseWriter, r *http.Request, userID, workspaceID, sessionID string) (db.ChatSession, bool) {
+	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return db.ChatSession{}, false
+	}
+	agent, err := h.Queries.GetAgent(r.Context(), session.AgentID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return db.ChatSession{}, false
 	}
-	if !canAccessChatAgent(agent, userID) {
-		writeError(w, http.StatusForbidden, "private agent belongs to another user")
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return db.ChatSession{}, false
 	}
 	return session, true
@@ -208,7 +224,7 @@ func (h *Handler) GetChatSession(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
@@ -322,8 +338,12 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load chat session.
-	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	// Load chat session and re-check the private-agent gate on every send.
+	// The session's creator passed the gate at create time, but their
+	// workspace role (or the agent's owner) may have changed since — keep
+	// stale sessions from being a back-door into a private agent the user
+	// can no longer reach. Agent senders bypass to preserve A2A collaboration.
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
@@ -395,7 +415,7 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
@@ -436,7 +456,7 @@ func (h *Handler) MarkChatSessionRead(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}
@@ -467,13 +487,25 @@ type PendingChatTaskItem struct {
 
 // ListPendingChatTasks returns every in-flight chat task owned by the current
 // user in this workspace. Drives the FAB's "running" indicator when the chat
-// window is closed (no per-session query is subscribed).
+// window is closed (no per-session query is subscribed). Tasks belonging to
+// private agents the caller has lost access to are dropped from the response.
 func (h *Handler) ListPendingChatTasks(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
 
 	rows, err := h.Queries.ListPendingChatTasksByCreator(r.Context(), db.ListPendingChatTasksByCreatorParams{
 		WorkspaceID: parseUUID(workspaceID),
@@ -484,13 +516,37 @@ func (h *Handler) ListPendingChatTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items := make([]PendingChatTaskItem, len(rows))
-	for i, row := range rows {
-		items[i] = PendingChatTaskItem{
+	// Map session → agent so we can filter without an N+1. The user's own
+	// session list is small, so one extra query is cheaper than per-row
+	// lookups.
+	sessions, err := h.Queries.ListAllChatSessionsByCreator(r.Context(), db.ListAllChatSessionsByCreatorParams{
+		WorkspaceID: parseUUID(workspaceID),
+		CreatorID:   parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve chat session agents")
+		return
+	}
+	sessionAgent := make(map[string]string, len(sessions))
+	for _, s := range sessions {
+		sessionAgent[uuidToString(s.ID)] = uuidToString(s.AgentID)
+	}
+
+	items := make([]PendingChatTaskItem, 0, len(rows))
+	for _, row := range rows {
+		sessionID := uuidToString(row.ChatSessionID)
+		agentID, hasAgent := sessionAgent[sessionID]
+		if !hasAgent {
+			continue
+		}
+		if _, ok := allowed[agentID]; !ok {
+			continue
+		}
+		items = append(items, PendingChatTaskItem{
 			TaskID:        uuidToString(row.TaskID),
 			Status:        row.Status,
-			ChatSessionID: uuidToString(row.ChatSessionID),
-		}
+			ChatSessionID: sessionID,
+		})
 	}
 	writeJSON(w, http.StatusOK, PendingChatTasksResponse{Tasks: items})
 }
@@ -506,7 +562,7 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return
 	}

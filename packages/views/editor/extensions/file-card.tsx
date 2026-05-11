@@ -19,6 +19,7 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { FileText, Loader2, Download } from "lucide-react";
 import { useT } from "../../i18n";
+import { useAttachmentDownloadResolver } from "../attachment-download-context";
 
 
 // ---------------------------------------------------------------------------
@@ -34,9 +35,10 @@ function FileCardView({ node }: NodeViewProps) {
   const href = (node.attrs.href as string) || "";
   const filename = (node.attrs.filename as string) || "";
   const uploading = node.attrs.uploading as boolean;
+  const { openByUrl } = useAttachmentDownloadResolver();
 
   const openFile = () => {
-    window.open(href, "_blank", "noopener,noreferrer");
+    openByUrl(href);
   };
 
   return (
