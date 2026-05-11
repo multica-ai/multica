@@ -89,7 +89,7 @@ func checkOrigin(r *http.Request) bool {
 	// allowlist below defends against) does not apply. This matches the
 	// gorilla/websocket default CheckOrigin behavior; the allowlist exists
 	// in addition to support cross-origin browser clients (web/desktop).
-	if u, err := url.Parse(origin); err == nil && u.Host == r.Host {
+	if u, err := url.Parse(origin); err == nil && strings.EqualFold(u.Host, r.Host) {
 		return true
 	}
 	origins := allowedWSOrigins.Load().([]string)
