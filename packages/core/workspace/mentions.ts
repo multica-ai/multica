@@ -1,9 +1,7 @@
-import { canAssignAgentToIssue } from "../permissions";
 import type {
   Agent,
   Issue,
   IssueStatus,
-  MemberRole,
   MemberWithUser,
   MentionFrequencyEntry,
 } from "../types";
@@ -18,7 +16,7 @@ export type WorkspaceMentionTarget = {
 
 export type MentionPermissionContext = {
   userId: string | null;
-  role: MemberRole | null;
+  role: "owner" | "admin" | "member" | null;
 };
 
 export function buildWorkspaceMentionTargets(
@@ -26,6 +24,7 @@ export function buildWorkspaceMentionTargets(
   agents: Agent[],
   ctx: MentionPermissionContext,
 ): WorkspaceMentionTarget[] {
+  const isAdmin = ctx.role === "owner" || ctx.role === "admin";
   return [
     { id: "all", label: "All members", type: "all" },
     ...members.map((member) => ({
@@ -37,7 +36,11 @@ export function buildWorkspaceMentionTargets(
       .filter(
         (agent) =>
           !agent.archived_at &&
-          canAssignAgentToIssue(agent, ctx).allowed,
+          // Only show the current user's own agents. Admins/owners see all.
+          // Legacy agents (owner_id null) remain visible to everyone.
+          (agent.owner_id === null ||
+            agent.owner_id === ctx.userId ||
+            isAdmin),
       )
       .map((agent) => ({
         id: agent.id,

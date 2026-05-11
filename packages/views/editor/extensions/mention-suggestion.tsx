@@ -16,7 +16,6 @@ import { getCurrentWsId } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { api } from "@multica/core/api";
 import type {
   Issue,
@@ -409,7 +408,13 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
         (a) =>
           !a.archived_at &&
           a.name.toLowerCase().includes(q) &&
-          canAssignAgentToIssue(a, { userId, role: myRole }).allowed,
+          // Only show the current user's own agents in the @mention list.
+          // Admins/owners can see all agents; legacy agents (owner_id null)
+          // remain visible to everyone.
+          (a.owner_id === null ||
+            a.owner_id === userId ||
+            myRole === "owner" ||
+            myRole === "admin"),
       )
       .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
 

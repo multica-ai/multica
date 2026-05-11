@@ -46,12 +46,14 @@ function agent(overrides: Partial<Agent>): Agent {
 }
 
 describe("workspace mention targets", () => {
-  it("filters private agents the caller cannot assign", () => {
+  it("filters agents owned by other users from mention targets", () => {
     const targets = buildWorkspaceMentionTargets(
       [member({ user_id: "user-1", name: "Alice" })],
       [
         agent({ id: "workspace-agent", name: "Team Bot", visibility: "workspace" }),
+        agent({ id: "other-ws-agent", name: "Other WS Bot", visibility: "workspace", owner_id: "other-user" }),
         agent({ id: "private-agent", name: "Private Bot", visibility: "private", owner_id: "other-user" }),
+        agent({ id: "own-agent", name: "My Bot", visibility: "private", owner_id: "user-1" }),
       ],
       { userId: "user-1", role: "member" },
     );
@@ -60,7 +62,23 @@ describe("workspace mention targets", () => {
       "all:All members",
       "member:Alice",
       "agent:Team Bot",
+      "agent:My Bot",
     ]);
+  });
+
+  it("shows all agents to a workspace admin regardless of owner", () => {
+    const targets = buildWorkspaceMentionTargets(
+      [member({ user_id: "admin-1", name: "Admin", role: "admin" })],
+      [
+        agent({ id: "other-agent", name: "Other Bot", visibility: "workspace", owner_id: "other-user" }),
+        agent({ id: "private-agent", name: "Private Bot", visibility: "private", owner_id: "other-user" }),
+      ],
+      { userId: "admin-1", role: "admin" },
+    );
+
+    const agentLabels = targets.filter((t) => t.type === "agent").map((t) => t.label);
+    expect(agentLabels).toContain("Other Bot");
+    expect(agentLabels).toContain("Private Bot");
   });
 
   it("maps issues to issue mention targets", () => {

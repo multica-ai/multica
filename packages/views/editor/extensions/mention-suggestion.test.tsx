@@ -148,7 +148,7 @@ describe("createMentionSuggestion", () => {
     );
   });
 
-  it("filters private agents owned by other users from mention suggestions", () => {
+  it("filters agents owned by other users from mention suggestions", () => {
     const qc = fakeQc({
       members: [{ user_id: "u-current", name: "CurrentUser", role: "member" }],
       agents: [
@@ -182,7 +182,8 @@ describe("createMentionSuggestion", () => {
     const agentIds = result.filter((i) => i.type === "agent").map((i) => i.id);
 
     expect(agentIds).toContain("own-private");
-    expect(agentIds).toContain("other-workspace");
+    // Workspace-visible agents owned by other users are now hidden too.
+    expect(agentIds).not.toContain("other-workspace");
     expect(agentIds).not.toContain("other-private");
   });
 
@@ -219,7 +220,7 @@ describe("createMentionSuggestion", () => {
     ).toBe(true);
   });
 
-  it("hides personal agents owned by someone else from a regular member", () => {
+  it("hides all agents owned by someone else from a regular member", () => {
     const qc = fakeQc({
       members: [
         { user_id: "u-current", name: "CurrentUser", role: "member" },
@@ -243,7 +244,7 @@ describe("createMentionSuggestion", () => {
           visibility: "private",
           owner_id: "u-current",
         },
-        // Workspace agent — visible to everyone.
+        // Workspace agent owned by Bob — hidden from regular members.
         {
           id: "a-shared",
           name: "Aether",
@@ -260,7 +261,7 @@ describe("createMentionSuggestion", () => {
     const items = result as MentionItem[];
 
     expect(items.some((i) => i.type === "agent" && i.label === "Athena")).toBe(true);
-    expect(items.some((i) => i.type === "agent" && i.label === "Aether")).toBe(true);
+    expect(items.some((i) => i.type === "agent" && i.label === "Aether")).toBe(false);
     expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(false);
   });
 
