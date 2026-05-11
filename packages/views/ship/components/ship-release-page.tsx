@@ -32,6 +32,7 @@ import {
   MessagesSquare,
   Pause,
   Play,
+  RefreshCw,
   Rocket,
   RotateCcw,
   ShieldCheck,
@@ -60,8 +61,12 @@ import {
   useOpenReleaseChannel,
   useReleaseHealth,
 } from "@multica/core/ship";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspaceId } from "@multica/core";
+import { projectListOptions } from "@multica/core/projects/queries";
+import { shipKeys } from "@multica/core/ship";
 import type { ReleasePullRequest } from "@multica/core/types";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
@@ -110,7 +115,22 @@ interface ShipReleasePageProps {
 export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
   const { t, i18n } = useT("ship");
   const workspace = useCurrentWorkspace();
-  const { data, isLoading, isError } = useReleaseDetail(releaseId, true);
+  const wsId = useWorkspaceId();
+  const wsPaths = useWorkspacePaths();
+  const queryClient = useQueryClient();
+  const { data, isLoading, isError, isFetching } = useReleaseDetail(
+    releaseId,
+    true,
+  );
+  // Used for the project chip in the header. Hits the projects cache,
+  // so no extra round-trip when the user lands here from the Ship Hub
+  // page — that page already populated this query.
+  const projectsQuery = useQuery(projectListOptions(wsId));
+  const project = useMemo(() => {
+    const pid = data?.release.project_id;
+    if (!pid) return null;
+    return (projectsQuery.data ?? []).find((p) => p.id === pid) ?? null;
+  }, [projectsQuery.data, data?.release.project_id]);
   const cancelMutation = useCancelRelease(releaseId);
   const removePR = useRemovePullRequestFromRelease(releaseId);
   const startMerge = useStartMergeTrain(releaseId);
@@ -282,7 +302,26 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
     <div className="flex h-full flex-col">
       <PageHeader className="px-5">
         <Train className="size-4 text-primary" />
-        <h1 className="ml-2 text-sm font-medium">{release.title}</h1>
+        {project && (
+          <>
+            <AppLink
+              href={wsPaths.projectDetail(project.id)}
+              className="ml-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              data-testid="release-header-project-chip"
+            >
+              <span className="truncate max-w-[12rem]">{project.title}</span>
+            </AppLink>
+            <span className="text-xs text-muted-foreground/60">/</span>
+          </>
+        )}
+        <h1
+          className={cn(
+            "text-sm font-medium",
+            !project && "ml-2",
+          )}
+        >
+          {release.title}
+        </h1>
       </PageHeader>
 
       <div className="flex-1 overflow-y-auto">
@@ -309,6 +348,30 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
               </span>
             )}
             <div className="ml-auto flex items-center gap-2">
+              {/* Always-on refresh. Backstops the WS / auto-poll for the
+                  case where the tab was backgrounded long enough for
+                  the WS hub to disconnect. The spinner state reflects
+                  any in-flight refetch — automatic OR manual. */}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  queryClient.invalidateQueries({
+                    queryKey: shipKeys.releaseDetail(wsId, releaseId),
+                  })
+                }
+                disabled={isFetching}
+                title={t(($) => $.releases.detail.refresh_tooltip)}
+                aria-label={t(($) => $.releases.detail.refresh_aria)}
+                data-testid="release-refresh-button"
+              >
+                <RefreshCw
+                  className={cn(
+                    "size-3.5",
+                    isFetching && "animate-spin",
+                  )}
+                />
+              </Button>
               {isAssembling && (
                 <>
                   <Button

@@ -439,6 +439,8 @@
     "detail": {
       "stage_label": "Stage",
       "risk_label": "Risk",
+      "refresh_tooltip": "Refresh release state. Auto-polls every 5s while merging or promoting; click here to force an immediate fetch.",
+      "refresh_aria": "Refresh release",
       "approver_label": "Approver",
       "second_approver_label": "Second approver",
       "channel_link": "Discussion channel",

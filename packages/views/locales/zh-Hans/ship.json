@@ -434,6 +434,8 @@
     "detail": {
       "stage_label": "阶段",
       "risk_label": "风险",
+      "refresh_tooltip": "刷新发布状态。合并 / 升生产期间每 5 秒自动刷新；点击此处立即获取最新数据。",
+      "refresh_aria": "刷新发布",
       "approver_label": "审批人",
       "second_approver_label": "第二审批人",
       "channel_link": "讨论频道",
