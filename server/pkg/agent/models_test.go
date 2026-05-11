@@ -129,7 +129,12 @@ func TestInferCopilotProvider(t *testing.T) {
 		"gpt-5.4-mini":      "openai",
 		"gpt-5.3-codex":     "openai",
 		"gpt-4.1":           "openai",
+		"o1":                "openai",
+		"o3":                "openai",
 		"o3-mini":           "openai",
+		"o4-mini":           "openai",
+		"o5":                "openai", // future-proof: any o<digit>+
+		"o6-mini-high":      "openai",
 		"claude-opus-4.7":   "anthropic",
 		"claude-sonnet-4.6": "anthropic",
 		"claude-haiku-4.5":  "anthropic",
@@ -137,6 +142,11 @@ func TestInferCopilotProvider(t *testing.T) {
 		"grok-code-fast-1":  "xai",
 		"auto":              "",
 		"raptor-mini":       "",
+		// negative cases: must not be misidentified as OpenAI
+		// reasoning series even though they start with `o`.
+		"opus-fake":         "",
+		"omni":              "",
+		"o":                 "",
 	}
 	for id, want := range cases {
 		if got := inferCopilotProvider(id); got != want {

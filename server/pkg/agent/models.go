@@ -235,9 +235,13 @@ func copilotStaticModels() []Model {
 // the prefix. Returning "" leaves the entry ungrouped, which
 // matches what other ACP discovery paths (hermes/kimi) do for
 // non-prefixed IDs.
+//
+// The OpenAI reasoning series (`o1`, `o3`, `o3-mini`, `o4-mini`,
+// future `o5`/`o6`/…) is matched by the generic `o<digit>…`
+// pattern so we don't have to chase every new generation.
 func inferCopilotProvider(modelID string) string {
 	switch {
-	case strings.HasPrefix(modelID, "gpt-") || strings.HasPrefix(modelID, "o1") || strings.HasPrefix(modelID, "o3") || strings.HasPrefix(modelID, "o4"):
+	case strings.HasPrefix(modelID, "gpt-") || isOpenAIReasoningSeriesID(modelID):
 		return "openai"
 	case strings.HasPrefix(modelID, "claude-"):
 		return "anthropic"
@@ -248,6 +252,25 @@ func inferCopilotProvider(modelID string) string {
 	default:
 		return ""
 	}
+}
+
+// isOpenAIReasoningSeriesID matches IDs in OpenAI's `o`-prefixed
+// reasoning family: lowercase `o` followed by at least one digit
+// and then either end-of-string or a `-` separator (e.g. `o3`,
+// `o3-mini`, `o4-mini-high`). Avoids false positives like
+// `opus-…` or random IDs that happen to start with `o`.
+func isOpenAIReasoningSeriesID(id string) bool {
+	if len(id) < 2 || id[0] != 'o' {
+		return false
+	}
+	i := 1
+	for i < len(id) && id[i] >= '0' && id[i] <= '9' {
+		i++
+	}
+	if i == 1 {
+		return false
+	}
+	return i == len(id) || id[i] == '-'
 }
 
 // ── Dynamic discovery ──
@@ -446,11 +469,15 @@ func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, er
 // the Copilot ACP payload doesn't include one, but the UI groups
 // by Provider, so deriving it from the ID prefix keeps OpenAI /
 // Anthropic / Gemini sections distinct.
+//
+// No extra env or permission flags are needed: discovery only
+// drives `initialize` + `session/new`, neither of which triggers
+// a tool-permission prompt — the model catalog is part of the
+// session/new response itself.
 func discoverCopilotModels(ctx context.Context, executablePath string) ([]Model, error) {
 	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
 		defaultBin:   "copilot",
 		clientName:   "multica-model-discovery",
-		extraEnv:     []string{"COPILOT_ALLOW_ALL=1"},
 		tmpdirPrefix: "multica-copilot-discovery-",
 		acpArgs:      []string{"--acp"},
 	})
