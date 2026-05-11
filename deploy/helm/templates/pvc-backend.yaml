@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "multica.backend.fullname" . }}-uploads
+  labels:
+    {{- include "multica.backend.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.backend.storage.accessMode | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.backend.storage.size }}
+  {{- if .Values.backend.storage.storageClass }}
+  storageClassName: {{ .Values.backend.storage.storageClass | quote }}
+  {{- end }}

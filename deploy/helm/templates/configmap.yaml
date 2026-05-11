@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "multica.configMapName" . }}
+  labels:
+    {{- include "multica.labels" . | nindent 4 }}
+data:
+  APP_ENV: "production"
+  PORT: "8080"
+  MULTICA_APP_URL: {{ required "config.appUrl is required" .Values.config.appUrl | quote }}
+  FRONTEND_ORIGIN: {{ default .Values.config.appUrl .Values.config.frontendOrigin | quote }}
+  CORS_ALLOWED_ORIGINS: {{ default .Values.config.appUrl .Values.config.corsAllowedOrigins | quote }}
+  ALLOW_SIGNUP: {{ .Values.config.allowSignup | quote }}
+  RESEND_FROM_EMAIL: {{ .Values.config.resend.fromEmail | quote }}
+  {{- if .Values.config.allowedEmails }}
+  ALLOWED_EMAILS: {{ .Values.config.allowedEmails | quote }}
+  {{- end }}
+  {{- if .Values.config.allowedEmailDomains }}
+  ALLOWED_EMAIL_DOMAINS: {{ .Values.config.allowedEmailDomains | quote }}
+  {{- end }}
+  {{- if .Values.config.cookieDomain }}
+  COOKIE_DOMAIN: {{ .Values.config.cookieDomain | quote }}
+  {{- end }}
+  {{- if .Values.config.google.redirectUri }}
+  GOOGLE_REDIRECT_URI: {{ .Values.config.google.redirectUri | quote }}
+  {{- end }}
+  {{- if .Values.config.s3.bucket }}
+  S3_BUCKET: {{ .Values.config.s3.bucket | quote }}
+  S3_REGION: {{ .Values.config.s3.region | quote }}
+  {{- end }}
+  {{- if .Values.config.s3.endpointUrl }}
+  S3_ENDPOINT_URL: {{ .Values.config.s3.endpointUrl | quote }}
+  {{- end }}
+  {{- if .Values.config.cloudfront.domain }}
+  CLOUDFRONT_DOMAIN: {{ .Values.config.cloudfront.domain | quote }}
+  {{- end }}
+  {{- if .Values.config.cloudfront.keyPairId }}
+  CLOUDFRONT_KEY_PAIR_ID: {{ .Values.config.cloudfront.keyPairId | quote }}
+  {{- end }}
+  {{- if .Values.metrics.enabled }}
+  METRICS_ADDR: {{ .Values.metrics.addr | quote }}
+  {{- end }}
