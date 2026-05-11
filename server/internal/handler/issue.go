@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -856,9 +857,15 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 // create task, and returns 202 immediately. The agent translates the prompt
 // into a `multica issue create` invocation in the background; success and
 // failure both surface as inbox notifications to the requester.
+//
+// ProjectID is optional and lets the modal target a specific project so
+// the agent's `multica issue create` invocation passes `--project <uuid>`
+// instead of letting it default. The frontend remembers the user's last
+// pick per workspace, so frequent users skip retyping "in project X".
 type QuickCreateIssueRequest struct {
-	AgentID string `json:"agent_id"`
-	Prompt  string `json:"prompt"`
+	AgentID   string `json:"agent_id"`
+	Prompt    string `json:"prompt"`
+	ProjectID string `json:"project_id,omitempty"`
 }
 
 // QuickCreateIssueResponse echoes the queued task id so the frontend can
@@ -944,7 +951,27 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, prompt)
+	// Optional project_id — validate it belongs to the same workspace before
+	// pinning the task to it. The handler is the trust boundary; the frontend
+	// already only shows projects from the active workspace, but we re-check
+	// here so a forged request can't smuggle a foreign project ID through.
+	var projectUUID pgtype.UUID
+	if strings.TrimSpace(req.ProjectID) != "" {
+		pid, ok := parseUUIDOrBadRequest(w, req.ProjectID, "project_id")
+		if !ok {
+			return
+		}
+		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+			ID:          pid,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			writeError(w, http.StatusBadRequest, "project not found")
+			return
+		}
+		projectUUID = pid
+	}
+
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, prompt, projectUUID)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
@@ -1279,6 +1306,44 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		"issue":      resp,
 		"app_origin": requestAppOrigin(r),
 	})
+	analyticsActorID := actualCreatorID
+	analyticsAgentID := ""
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" {
+		analyticsAgentID = uuidToString(issue.AssigneeID)
+	}
+	if creatorType == "agent" {
+		analyticsActorID = "agent:" + actualCreatorID
+		if analyticsAgentID == "" {
+			analyticsAgentID = actualCreatorID
+		}
+	}
+	analyticsSource := analytics.SourceManual
+	analyticsTaskID := ""
+	analyticsAutopilotRunID := ""
+	if originType.Valid {
+		switch originType.String {
+		case "quick_create":
+			analyticsSource = analytics.SourceManual
+			analyticsTaskID = uuidToString(originID)
+		case "autopilot":
+			analyticsSource = analytics.SourceAutopilot
+			analyticsAutopilotRunID = uuidToString(originID)
+		default:
+			slog.Warn("analytics: unknown issue origin type",
+				"origin_type", originType.String,
+				"issue_id", uuidToString(issue.ID),
+			)
+		}
+	}
+	h.Analytics.Capture(analytics.IssueCreated(
+		analyticsActorID,
+		workspaceID,
+		uuidToString(issue.ID),
+		analyticsAgentID,
+		analyticsTaskID,
+		analyticsAutopilotRunID,
+		analyticsSource,
+	))
 
 	// Enqueue agent task when an agent-assigned issue is created.
 	if issue.AssigneeType.Valid && issue.AssigneeID.Valid {

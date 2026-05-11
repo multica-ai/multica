@@ -96,7 +96,7 @@ function getEventLabel(item: TimelineItem): string {
 function getEventSummary(item: TimelineItem): string {
   switch (item.type) {
     case "text":
-      return item.content?.split("\n").filter(Boolean).pop() ?? "";
+      return item.content?.split("\n").find((l) => l.trim().length > 0) ?? "";
     case "thinking":
       return item.content?.slice(0, 200) ?? "";
     case "tool_use": {

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
@@ -60,10 +60,23 @@ function nodeText(node: JsonNode): string {
   return (node.content ?? []).map(nodeText).join("");
 }
 
+function expectLiteralPaste(editor: Editor, text: string) {
+  editor.commands.setTextSelection(1);
+  const parseSpy = vi.spyOn(editor.markdown!, "parse");
+
+  const handled = paste(editor, text);
+
+  expect(handled).toBe(true);
+  expect(parseSpy).not.toHaveBeenCalled();
+  expect(editor.getText()).toBe(text);
+  expect(editor.getMarkdown()).toBe(text);
+}
+
 describe("markdownPaste — code block context", () => {
   let editor: Editor | null = null;
 
   afterEach(() => {
+    vi.restoreAllMocks();
     editor?.destroy();
     editor = null;
     document.body.innerHTML = "";
@@ -126,5 +139,56 @@ describe("markdownPaste — code block context", () => {
     const types = (json.content ?? []).map((n) => n.type);
     // Markdown parsing produced a heading at the top.
     expect(types).toContain("heading");
+  });
+
+  it("inserts JSON clipboard text without running the Markdown parser", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    const json = JSON.stringify(
+      {
+        type: "issue.comment",
+        payload: {
+          title: "Paste JSON into a reply",
+          nested: { ok: true, count: 3 },
+          items: ["alpha", "beta", "gamma"],
+        },
+      },
+      null,
+      2,
+    );
+
+    expectLiteralPaste(editor, json);
+  });
+
+  it("inserts very large plain text without running the Markdown parser", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    const text = Array.from(
+      { length: 1600 },
+      (_, index) => `log ${index}: ${"payload".repeat(6)}`,
+    ).join("\n");
+    expect(text.length).toBeGreaterThan(50_000);
+
+    expectLiteralPaste(editor, text);
+  });
+
+  it("does not parse oversized bracketed plain text as JSON", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    const parseJsonSpy = vi.spyOn(JSON, "parse");
+    const text = `{${"not-json".repeat(7_000)}}`;
+    expect(text.length).toBeGreaterThan(50_000);
+
+    expectLiteralPaste(editor, text);
+    expect(parseJsonSpy).not.toHaveBeenCalled();
   });
 });

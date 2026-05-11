@@ -112,7 +112,7 @@ vi.mock("../../navigation", () => ({
     replace: mockNavigationReplace,
     pathname: "/issues/issue-1",
     searchParams: mockNavigationSearchParams.current,
-    getShareableUrl: undefined,
+    getShareableUrl: (p: string) => `https://app.multica.com${p}`,
   }),
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
@@ -193,13 +193,7 @@ vi.mock("../../projects/components/project-picker", () => ({
 // Mock api
 const mockApiObj = vi.hoisted(() => ({
   getIssue: vi.fn(),
-  listTimeline: vi.fn().mockResolvedValue({
-    entries: [],
-    next_cursor: null,
-    prev_cursor: null,
-    has_more_before: false,
-    has_more_after: false,
-  }),
+  listTimeline: vi.fn().mockResolvedValue([]),
   listComments: vi.fn().mockResolvedValue([]),
   createComment: vi.fn(),
   updateComment: vi.fn(),
@@ -439,18 +433,8 @@ describe("IssueDetail (shared)", () => {
     mockNavigationSearchParams.current = new URLSearchParams();
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
-    // Cursor-paginated timeline endpoint returns a TimelinePage. The DESC
-    // order is required because the hook reverses pages → ASC for the UI.
-    const descTimeline = [...mockTimeline].sort((a, b) =>
-      b.created_at.localeCompare(a.created_at),
-    );
-    mockApiObj.listTimeline.mockResolvedValue({
-      entries: descTimeline,
-      next_cursor: null,
-      prev_cursor: null,
-      has_more_before: false,
-      has_more_after: false,
-    });
+    // /timeline returns the entries flat in chronological order (oldest first).
+    mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });

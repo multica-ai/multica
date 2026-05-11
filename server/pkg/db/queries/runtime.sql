@@ -13,8 +13,8 @@ WHERE id = $1 AND workspace_id = $2;
 
 -- name: UpsertAgentRuntime :one
 -- (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
--- that updated an existing row (false). Analytics reads this to fire the
--- runtime_registered event only on first-time registration.
+-- that updated an existing row (false). Analytics reads this to fire
+-- runtime_registered/runtime_ready only on first-time registration.
 INSERT INTO agent_runtime (
     workspace_id,
     daemon_id,
@@ -56,6 +56,20 @@ UPDATE agent_runtime
 SET last_seen_at = now()
 WHERE id = $1 AND status = 'online';
 
+-- name: TouchAgentRuntimesLastSeenBatch :execrows
+-- Bulk variant of TouchAgentRuntimeLastSeen used by the BatchedHeartbeatScheduler:
+-- coalesces N per-runtime "bump last_seen_at" requests into a single UPDATE so a
+-- fleet beating every 15s costs ~1 DB transaction per batch tick instead of N.
+--
+-- Same load-bearing predicate as the single-id form: status='online' avoids
+-- silently un-deleting a sweeper-flipped offline row, and we deliberately do
+-- NOT touch updated_at so the rows stay HOT-eligible. Affected-rows < len(ids)
+-- means some IDs raced to offline between Schedule and flush; their next beat
+-- will fall through the recordHeartbeat sync path and call MarkAgentRuntimeOnline.
+UPDATE agent_runtime
+SET last_seen_at = now()
+WHERE id = ANY(@ids::uuid[]) AND status = 'online';
+
 -- name: MarkAgentRuntimeOnline :one
 -- Used on the offline→online transition (and on first heartbeat after
 -- registration). Writes status, last_seen_at, and updated_at because the
@@ -75,7 +89,7 @@ WHERE id = $1;
 -- sweeper uses this as a candidate set, then optionally filters via the
 -- LivenessStore before flipping rows to offline (a fresh Redis liveness
 -- record means the DB row is just lagging, not actually dead).
-SELECT id, workspace_id FROM agent_runtime
+SELECT id, workspace_id, owner_id, daemon_id, provider FROM agent_runtime
 WHERE status = 'online'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision);
 
@@ -96,7 +110,7 @@ SET status = 'offline', updated_at = now()
 WHERE status = 'online'
   AND id = ANY(@ids::uuid[])
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
-RETURNING id, workspace_id;
+RETURNING id, workspace_id, owner_id, daemon_id, provider;
 
 -- name: FailTasksForOfflineRuntimes :many
 -- Marks dispatched/running tasks as failed when their runtime is offline.

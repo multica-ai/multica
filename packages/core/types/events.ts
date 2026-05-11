@@ -15,6 +15,8 @@ export type WSEventType =
   | "comment:created"
   | "comment:updated"
   | "comment:deleted"
+  | "comment:resolved"
+  | "comment:unresolved"
   | "agent:status"
   | "agent:created"
   | "agent:archived"
@@ -147,6 +149,14 @@ export interface CommentUpdatedPayload {
 export interface CommentDeletedPayload {
   comment_id: string;
   issue_id: string;
+}
+
+export interface CommentResolvedPayload {
+  comment: Comment;
+}
+
+export interface CommentUnresolvedPayload {
+  comment: Comment;
 }
 
 export interface WorkspaceUpdatedPayload {

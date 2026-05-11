@@ -180,14 +180,12 @@ const entry: TimelineEntry = {
 
 function renderCommentCard({
   cardEntry = entry,
-  allReplies = new Map<string, TimelineEntry[]>(),
   commentById = new Map<string, TimelineEntry>([[cardEntry.id, cardEntry]]),
   agents = [],
   issueOpen = true,
   currentUserId = "user-1",
 }: {
   cardEntry?: TimelineEntry;
-  allReplies?: Map<string, TimelineEntry[]>;
   commentById?: Map<string, TimelineEntry>;
   agents?: Array<{ id: string; owner_id?: string | null }>;
   issueOpen?: boolean;
@@ -206,7 +204,7 @@ function renderCommentCard({
         <CommentCard
           issueId="issue-1"
           entry={cardEntry}
-          allReplies={allReplies}
+          replies={[]}
           commentById={commentById}
           agents={agents as never[]}
           issueOpen={issueOpen}
@@ -307,7 +305,6 @@ describe("CommentCard", () => {
 
     renderCommentCard({
       cardEntry: memberThreadRoot,
-      allReplies: new Map([["member-root-1", [systemReply]]]),
       commentById: new Map([
         [memberThreadRoot.id, memberThreadRoot],
         [systemReply.id, systemReply],

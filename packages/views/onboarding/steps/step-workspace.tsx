@@ -23,18 +23,18 @@ import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { cn } from "@multica/ui/lib/utils";
 import { useCreateWorkspace } from "@multica/core/workspace/mutations";
 import type { Workspace } from "@multica/core/types";
+import { isImeComposing } from "@multica/core/utils";
 import { DragStrip } from "@multica/views/platform";
 import { StepHeader } from "../components/step-header";
 import { RadioMark } from "../components/option-card";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useT } from "../../i18n";
 import {
-  WORKSPACE_SLUG_CONFLICT_ERROR,
-  WORKSPACE_SLUG_FORMAT_ERROR,
   WORKSPACE_SLUG_REGEX,
   isWorkspaceSlugConflict,
   nameToWorkspaceSlug,
 } from "../../workspace/slug";
+import { isReservedSlug } from "@multica/core/paths";
 
 /**
  * Step 2 — create your first workspace, or continue with one set up in
@@ -101,9 +101,13 @@ export function StepWorkspace({
 
   const slugValidationError =
     slug.length > 0 && !WORKSPACE_SLUG_REGEX.test(slug)
-      ? WORKSPACE_SLUG_FORMAT_ERROR
+      ? t(($) => $.step_workspace.slug_format_error)
       : null;
-  const slugError = slugValidationError ?? slugServerError;
+  const slugReservedError =
+    slug.length > 0 && isReservedSlug(slug)
+      ? t(($) => $.step_workspace.slug_reserved_error)
+      : null;
+  const slugError = slugValidationError ?? slugReservedError ?? slugServerError;
   const canCreate =
     name.trim().length > 0 && slug.trim().length > 0 && !slugError;
 
@@ -131,7 +135,7 @@ export function StepWorkspace({
         onSuccess: onCreated,
         onError: (error) => {
           if (isWorkspaceSlugConflict(error)) {
-            setSlugServerError(WORKSPACE_SLUG_CONFLICT_ERROR);
+            setSlugServerError(t(($) => $.step_workspace.slug_taken_error));
             toast.error(t(($) => $.step_workspace.slug_conflict_toast));
             return;
           }
@@ -201,7 +205,10 @@ export function StepWorkspace({
           value={name}
           onChange={(e) => handleNameChange(e.target.value)}
           placeholder={t(($) => $.step_workspace.name_placeholder)}
-          onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+          onKeyDown={(e) => {
+            if (isImeComposing(e)) return;
+            if (e.key === "Enter") handleCreate();
+          }}
         />
       </div>
       <div className="flex flex-col gap-1.5">
@@ -222,7 +229,10 @@ export function StepWorkspace({
             onChange={(e) => handleSlugChange(e.target.value)}
             placeholder={t(($) => $.step_workspace.slug_placeholder)}
             className="border-0 bg-transparent font-mono shadow-none focus-visible:ring-0"
-            onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+            onKeyDown={(e) => {
+              if (isImeComposing(e)) return;
+              if (e.key === "Enter") handleCreate();
+            }}
           />
         </div>
         {slugError && <p className="text-xs text-destructive">{slugError}</p>}

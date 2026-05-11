@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -357,6 +358,16 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	if err := h.Queries.TouchChatSession(r.Context(), session.ID); err != nil {
 		slog.Warn("failed to touch chat session", "session_id", sessionID, "error", err)
 	}
+	taskContext := h.TaskService.AnalyticsContextForTask(r.Context(), task)
+	h.Analytics.Capture(analytics.ChatMessageSent(
+		userID,
+		workspaceID,
+		uuidToString(session.ID),
+		uuidToString(task.ID),
+		uuidToString(session.AgentID),
+		taskContext.RuntimeMode,
+		taskContext.Provider,
+	))
 
 	// Broadcast the user message.
 	resolvedSessionID := uuidToString(session.ID)

@@ -99,4 +99,18 @@ describe("CreateWorkspaceForm", () => {
       screen.getByRole("button", { name: /create workspace/i }),
     ).toBeDisabled();
   });
+
+  it("disables submit when slug is reserved", () => {
+    renderForm();
+    fireEvent.change(screen.getByLabelText(/workspace name/i), {
+      target: { value: "Valid Name" },
+    });
+    fireEvent.change(screen.getByLabelText(/workspace url/i), {
+      target: { value: "admin" },
+    });
+    expect(
+      screen.getByRole("button", { name: /create workspace/i }),
+    ).toBeDisabled();
+    expect(screen.getByText(/reserved and cannot be used/i)).toBeInTheDocument();
+  });
 });

@@ -30,31 +30,31 @@ import (
 const maxAgentDescriptionLength = 255
 
 type AgentResponse struct {
-	ID                 string            `json:"id"`
-	WorkspaceID        string            `json:"workspace_id"`
-	RuntimeID          string            `json:"runtime_id"`
-	Name               string            `json:"name"`
-	Description        string            `json:"description"`
-	Instructions       string            `json:"instructions"`
-	AvatarURL          *string           `json:"avatar_url"`
-	RuntimeMode        string            `json:"runtime_mode"`
-	RuntimeConfig      any               `json:"runtime_config"`
-	CustomEnv          map[string]string `json:"custom_env"`
-	CustomArgs         []string          `json:"custom_args"`
-	McpConfig          json.RawMessage   `json:"mcp_config"`
-	CustomEnvRedacted  bool              `json:"custom_env_redacted"`
-	McpConfigRedacted  bool              `json:"mcp_config_redacted"`
-	Visibility         string            `json:"visibility"`
-	Status             string            `json:"status"`
-	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
-	Model              string            `json:"model"`
-	OwnerID            *string           `json:"owner_id"`
-	Skills             []SkillResponse   `json:"skills"`
-	CreatedAt          string            `json:"created_at"`
-	UpdatedAt          string            `json:"updated_at"`
-	ArchivedAt              *string           `json:"archived_at"`
-	ArchivedBy              *string           `json:"archived_by"`
-	CustomEnvCopiedPending  bool              `json:"custom_env_copied_pending"`
+	ID                     string              `json:"id"`
+	WorkspaceID            string              `json:"workspace_id"`
+	RuntimeID              string              `json:"runtime_id"`
+	Name                   string              `json:"name"`
+	Description            string              `json:"description"`
+	Instructions           string              `json:"instructions"`
+	AvatarURL              *string             `json:"avatar_url"`
+	RuntimeMode            string              `json:"runtime_mode"`
+	RuntimeConfig          any                 `json:"runtime_config"`
+	CustomEnv              map[string]string   `json:"custom_env"`
+	CustomArgs             []string            `json:"custom_args"`
+	McpConfig              json.RawMessage     `json:"mcp_config"`
+	CustomEnvRedacted      bool                `json:"custom_env_redacted"`
+	McpConfigRedacted      bool                `json:"mcp_config_redacted"`
+	Visibility             string              `json:"visibility"`
+	Status                 string              `json:"status"`
+	MaxConcurrentTasks     int32               `json:"max_concurrent_tasks"`
+	Model                  string              `json:"model"`
+	OwnerID                *string             `json:"owner_id"`
+	Skills                 []AgentSkillSummary `json:"skills"`
+	CreatedAt              string              `json:"created_at"`
+	UpdatedAt              string              `json:"updated_at"`
+	ArchivedAt             *string             `json:"archived_at"`
+	ArchivedBy             *string             `json:"archived_by"`
+	CustomEnvCopiedPending bool                `json:"custom_env_copied_pending"`
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
@@ -92,26 +92,26 @@ func agentToResponse(a db.Agent) AgentResponse {
 	}
 
 	return AgentResponse{
-		ID:                 uuidToString(a.ID),
-		WorkspaceID:        uuidToString(a.WorkspaceID),
-		RuntimeID:          uuidToString(a.RuntimeID),
-		Name:               a.Name,
-		Description:        a.Description,
-		Instructions:       a.Instructions,
-		AvatarURL:          textToPtr(a.AvatarUrl),
-		RuntimeMode:        a.RuntimeMode,
-		RuntimeConfig:      rc,
-		CustomEnv:          customEnv,
-		CustomArgs:         customArgs,
-		McpConfig:          mcpConfig,
-		Visibility:         a.Visibility,
-		Status:             a.Status,
-		MaxConcurrentTasks: a.MaxConcurrentTasks,
-		Model:              a.Model.String,
-		OwnerID:            uuidToPtr(a.OwnerID),
-		Skills:             []SkillResponse{},
-		CreatedAt:          timestampToString(a.CreatedAt),
-		UpdatedAt:          timestampToString(a.UpdatedAt),
+		ID:                     uuidToString(a.ID),
+		WorkspaceID:            uuidToString(a.WorkspaceID),
+		RuntimeID:              uuidToString(a.RuntimeID),
+		Name:                   a.Name,
+		Description:            a.Description,
+		Instructions:           a.Instructions,
+		AvatarURL:              textToPtr(a.AvatarUrl),
+		RuntimeMode:            a.RuntimeMode,
+		RuntimeConfig:          rc,
+		CustomEnv:              customEnv,
+		CustomArgs:             customArgs,
+		McpConfig:              mcpConfig,
+		Visibility:             a.Visibility,
+		Status:                 a.Status,
+		MaxConcurrentTasks:     a.MaxConcurrentTasks,
+		Model:                  a.Model.String,
+		OwnerID:                uuidToPtr(a.OwnerID),
+		Skills:                 []AgentSkillSummary{},
+		CreatedAt:              timestampToString(a.CreatedAt),
+		UpdatedAt:              timestampToString(a.UpdatedAt),
 		ArchivedAt:             timestampToPtr(a.ArchivedAt),
 		ArchivedBy:             uuidToPtr(a.ArchivedBy),
 		CustomEnvCopiedPending: a.CustomEnvCopiedPending,
@@ -171,37 +171,38 @@ type AgentTaskResponse struct {
 	CompletedAt             *string               `json:"completed_at"`
 	Result                  any                   `json:"result"`
 	Error                   *string               `json:"error"`
-	FailureReason           string                `json:"failure_reason,omitempty"`
+	FailureReason           string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
 	Attempt                 int32                 `json:"attempt"`
 	MaxAttempts             int32                 `json:"max_attempts"`
 	ParentTaskID            *string               `json:"parent_task_id,omitempty"`
 	Agent                   *TaskAgentData        `json:"agent,omitempty"`
 	Repos                   []RepoData            `json:"repos,omitempty"`
-	ProjectID               string                `json:"project_id,omitempty"`
-	ProjectTitle            string                `json:"project_title,omitempty"`
-	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"`
+	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
+	ProjectTitle            string                `json:"project_title,omitempty"`     // for surfacing in agent context
+	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
 	CreatedAt               string                `json:"created_at"`
-	PriorSessionID          string                `json:"prior_session_id,omitempty"`
-	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`
-	TriggerCommentID        *string               `json:"trigger_comment_id,omitempty"`
-	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`
+	PriorSessionID          string                `json:"prior_session_id,omitempty"`        // session ID from a previous task on same issue
+	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on same issue
+	WorkDir                 string                `json:"work_dir,omitempty"`                // local working directory pinned for this task; populated once the daemon reports it
+	TriggerCommentID        *string               `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
+	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	TriggerSource           string                `json:"trigger_source,omitempty"`
 	TriggerActorType        string                `json:"trigger_actor_type,omitempty"`
 	TriggerActorID          string                `json:"trigger_actor_id,omitempty"`
 	TriggerActorOwnerID     string                `json:"trigger_actor_owner_id,omitempty"`
-	TriggerSummary          *string               `json:"trigger_summary,omitempty"`
-	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`
-	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`
-	ChatSessionID           string                `json:"chat_session_id,omitempty"`
-	ChatMessage             string                `json:"chat_message,omitempty"`
-	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`
-	AutopilotID             string                `json:"autopilot_id,omitempty"`
-	AutopilotTitle          string                `json:"autopilot_title,omitempty"`
-	AutopilotDescription    string                `json:"autopilot_description,omitempty"`
-	AutopilotSource         string                `json:"autopilot_source,omitempty"`
-	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"`
-	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`
-	Kind                    string                `json:"kind"`
+	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
+	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
+	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
+	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
+	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks
+	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
+	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
+	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context
+	AutopilotDescription    string                `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
+	AutopilotSource         string                `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
+	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
+	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	Kind                    string                `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -228,6 +229,10 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 	if t.FailureReason.Valid {
 		failureReason = t.FailureReason.String
 	}
+	workDir := ""
+	if t.WorkDir.Valid {
+		workDir = t.WorkDir.String
+	}
 	return AgentTaskResponse{
 		ID:               uuidToString(t.ID),
 		AgentID:          uuidToString(t.AgentID),
@@ -250,6 +255,7 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		TriggerActorType: t.TriggerActorType.String,
 		TriggerActorID:   uuidToString(t.TriggerActorID),
 		TriggerSummary:   textToPtr(t.TriggerSummary),
+		WorkDir:          workDir,
 		// Surface task source so the UI can distinguish issue-linked tasks
 		// from chat-spawned or autopilot-spawned ones; all three may arrive
 		// with issue_id = "" once a task has no linked issue.
@@ -324,10 +330,10 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
 		return
 	}
-	skillMap := map[string][]SkillResponse{}
+	skillMap := map[string][]AgentSkillSummary{}
 	for _, row := range skillRows {
 		agentID := uuidToString(row.AgentID)
-		skillMap[agentID] = append(skillMap[agentID], SkillResponse{
+		skillMap[agentID] = append(skillMap[agentID], AgentSkillSummary{
 			ID:          uuidToString(row.ID),
 			Name:        row.Name,
 			Description: row.Description,
@@ -359,15 +365,23 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := agentToResponse(agent)
-	skills, err := h.Queries.ListAgentSkills(r.Context(), agent.ID)
+	// Use the summary query (no `content` column) — the embedded
+	// AgentSkillSummary only needs id/name/description, and reading large
+	// SKILL.md bodies just to discard them is the exact regression we fixed
+	// in #2174.
+	skills, err := h.Queries.ListAgentSkillSummaries(r.Context(), agent.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
 		return
 	}
 	if len(skills) > 0 {
-		resp.Skills = make([]SkillResponse, len(skills))
+		resp.Skills = make([]AgentSkillSummary, len(skills))
 		for i, s := range skills {
-			resp.Skills[i] = skillToResponse(s)
+			resp.Skills[i] = AgentSkillSummary{
+				ID:          uuidToString(s.ID),
+				Name:        s.Name,
+				Description: s.Description,
+			}
 		}
 	}
 
@@ -565,6 +579,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		workspaceID,
 		uuidToString(agent.ID),
 		runtime.Provider,
+		runtime.RuntimeMode,
 		req.Template,
 		isFirstAgent,
 	))
@@ -683,22 +698,22 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 	qtx := h.Queries.WithTx(tx)
 
 	newAgent, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
-		WorkspaceID:              sourceAgent.WorkspaceID,
-		Name:                     newName,
-		Description:              sourceAgent.Description,
-		Instructions:             sourceAgent.Instructions,
-		AvatarUrl:                sourceAgent.AvatarUrl,
-		RuntimeMode:              sourceAgent.RuntimeMode,
-		RuntimeConfig:            rc,
-		RuntimeID:                sourceAgent.RuntimeID,
-		Visibility:               sourceAgent.Visibility,
-		MaxConcurrentTasks:       sourceAgent.MaxConcurrentTasks,
-		OwnerID:                  parseUUID(userID),
-		CustomEnv:                ce,
-		CustomArgs:               ca,
-		McpConfig:                mc,
-		Model:                    sourceAgent.Model,
-		CustomEnvCopiedPending:   envCopiedPending,
+		WorkspaceID:            sourceAgent.WorkspaceID,
+		Name:                   newName,
+		Description:            sourceAgent.Description,
+		Instructions:           sourceAgent.Instructions,
+		AvatarUrl:              sourceAgent.AvatarUrl,
+		RuntimeMode:            sourceAgent.RuntimeMode,
+		RuntimeConfig:          rc,
+		RuntimeID:              sourceAgent.RuntimeID,
+		Visibility:             sourceAgent.Visibility,
+		MaxConcurrentTasks:     sourceAgent.MaxConcurrentTasks,
+		OwnerID:                parseUUID(userID),
+		CustomEnv:              ce,
+		CustomArgs:             ca,
+		McpConfig:              mc,
+		Model:                  sourceAgent.Model,
+		CustomEnvCopiedPending: envCopiedPending,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -739,11 +754,15 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := agentToResponse(newAgent)
-	skillRows, err := h.Queries.ListAgentSkills(r.Context(), newAgent.ID)
+	skillRows, err := h.Queries.ListAgentSkillSummaries(r.Context(), newAgent.ID)
 	if err == nil && len(skillRows) > 0 {
-		resp.Skills = make([]SkillResponse, len(skillRows))
+		resp.Skills = make([]AgentSkillSummary, len(skillRows))
 		for i, s := range skillRows {
-			resp.Skills[i] = skillToResponse(s)
+			resp.Skills[i] = AgentSkillSummary{
+				ID:          uuidToString(s.ID),
+				Name:        s.Name,
+				Description: s.Description,
+			}
 		}
 	}
 
@@ -974,8 +993,10 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	// rows here — the agent:archived event below already triggers a full
 	// active-tasks invalidation on every connected client, so per-task
 	// task:cancelled events would be redundant noise.
-	if _, err := h.Queries.CancelAgentTasksByAgent(r.Context(), agent.ID); err != nil {
+	if cancelled, err := h.Queries.CancelAgentTasksByAgent(r.Context(), agent.ID); err != nil {
 		slog.Warn("cancel agent tasks on archive failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+	} else {
+		h.TaskService.CaptureCancelledTasks(r.Context(), cancelled)
 	}
 
 	wsID := uuidToString(archived.WorkspaceID)

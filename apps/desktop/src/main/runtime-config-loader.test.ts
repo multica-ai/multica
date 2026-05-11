@@ -69,7 +69,7 @@ describe("loadRuntimeConfig", () => {
         schemaVersion: 1,
         apiUrl: "https://api.example.com",
         wsUrl: "wss://api.example.com/ws",
-        appUrl: "https://api.example.com",
+        appUrl: "https://example.com",
       },
     });
   });

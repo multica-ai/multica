@@ -2098,7 +2098,11 @@ func TestWriteReadGCMeta(t *testing.T) {
 	issueID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 	wsID := "ws-test-001"
 
-	if err := WriteGCMeta(dir, issueID, wsID, discardLogger()); err != nil {
+	if err := WriteGCMeta(dir, GCMeta{
+		Kind:        GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: wsID,
+	}, discardLogger()); err != nil {
 		t.Fatalf("WriteGCMeta: %v", err)
 	}
 
@@ -2107,6 +2111,9 @@ func TestWriteReadGCMeta(t *testing.T) {
 		t.Fatalf("ReadGCMeta: %v", err)
 	}
 
+	if meta.Kind != GCKindIssue {
+		t.Errorf("Kind = %q, want %q", meta.Kind, GCKindIssue)
+	}
 	if meta.IssueID != issueID {
 		t.Errorf("IssueID = %q, want %q", meta.IssueID, issueID)
 	}
@@ -2120,20 +2127,74 @@ func TestWriteReadGCMeta(t *testing.T) {
 
 func TestWriteGCMeta_EmptyRoot(t *testing.T) {
 	t.Parallel()
-	if err := WriteGCMeta("", "issue", "ws", discardLogger()); err != nil {
+	if err := WriteGCMeta("", GCMeta{Kind: GCKindIssue, IssueID: "x", WorkspaceID: "ws"}, discardLogger()); err != nil {
 		t.Fatalf("expected nil for empty root, got %v", err)
 	}
 }
 
-func TestWriteGCMeta_EmptyIssueID(t *testing.T) {
+func TestWriteGCMeta_EmptyKind(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	if err := WriteGCMeta(dir, "", "ws", discardLogger()); err != nil {
-		t.Fatalf("expected nil for empty issue ID, got %v", err)
+	if err := WriteGCMeta(dir, GCMeta{WorkspaceID: "ws"}, discardLogger()); err != nil {
+		t.Fatalf("expected nil for empty kind, got %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, gcMetaFile)); !os.IsNotExist(err) {
 		t.Fatalf("expected gc meta file to be absent, got err=%v", err)
+	}
+}
+
+// Pre-v2 meta files lacked the kind field. ReadGCMeta must default an empty
+// kind to GCKindIssue so the existing on-disk meta files keep flowing
+// through the issue path.
+func TestReadGCMeta_LegacyFileDefaultsToIssueKind(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	legacy := []byte(`{"issue_id":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","workspace_id":"ws","completed_at":"2025-01-01T00:00:00Z"}`)
+	if err := os.WriteFile(filepath.Join(dir, gcMetaFile), legacy, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := ReadGCMeta(dir)
+	if err != nil {
+		t.Fatalf("ReadGCMeta: %v", err)
+	}
+	if meta.Kind != GCKindIssue {
+		t.Fatalf("legacy kind: want %q, got %q", GCKindIssue, meta.Kind)
+	}
+	if meta.IssueID != "a1b2c3d4-e5f6-7890-abcd-ef1234567890" {
+		t.Fatalf("legacy issue_id: got %q", meta.IssueID)
+	}
+}
+
+// New v2 meta files for chat / autopilot / quick-create round-trip without
+// being misclassified as the issue kind.
+func TestWriteReadGCMeta_KindRoundTrip(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		meta GCMeta
+		want GCMetaKind
+	}{
+		{"chat", GCMeta{Kind: GCKindChat, ChatSessionID: "cs-1", WorkspaceID: "ws"}, GCKindChat},
+		{"autopilot_run", GCMeta{Kind: GCKindAutopilotRun, AutopilotRunID: "ar-1", WorkspaceID: "ws"}, GCKindAutopilotRun},
+		{"quick_create", GCMeta{Kind: GCKindQuickCreate, TaskID: "t-1", WorkspaceID: "ws"}, GCKindQuickCreate},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if err := WriteGCMeta(dir, tc.meta, discardLogger()); err != nil {
+				t.Fatalf("WriteGCMeta: %v", err)
+			}
+			got, err := ReadGCMeta(dir)
+			if err != nil {
+				t.Fatalf("ReadGCMeta: %v", err)
+			}
+			if got.Kind != tc.want {
+				t.Fatalf("Kind: want %q, got %q", tc.want, got.Kind)
+			}
+		})
 	}
 }
 

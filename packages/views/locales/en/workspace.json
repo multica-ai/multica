@@ -9,6 +9,7 @@
     "errors": {
       "slug_format": "Only lowercase letters, numbers, and hyphens",
       "slug_taken": "That workspace URL is already taken.",
+      "slug_reserved": "That workspace URL is reserved and cannot be used.",
       "slug_conflict_toast": "Choose a different workspace URL",
       "create_failed": "Failed to create workspace"
     }

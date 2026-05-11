@@ -23,6 +23,16 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 		fmt.Fprintf(os.Stderr, "Install path:     %s\n", installedPath)
 	}
 
+	if cli.IsBrewInstall() {
+		fmt.Fprintln(os.Stderr, "Updating via Homebrew...")
+		output, err := cli.UpdateViaBrew()
+		if err != nil {
+			return fmt.Errorf("update failed: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "%s\nUpdate complete.\n", output)
+		return nil
+	}
+
 	latest, err := cli.FetchLatestRelease()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not check latest version: %v\n", err)
