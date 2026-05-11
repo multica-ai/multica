@@ -41,11 +41,12 @@ func pipeStdin(t *testing.T, body string, fn func()) {
 }
 
 // newFlagTestCmd builds a throwaway cobra.Command carrying the inline +
-// stdin flag pair that resolveTextFlag expects.
+// stdin + file flag triplet that resolveTextFlag expects.
 func newFlagTestCmd(name string) *cobra.Command {
 	c := &cobra.Command{Use: "test"}
 	c.Flags().String(name, "", "")
 	c.Flags().Bool(name+"-stdin", false, "")
+	c.Flags().String(name+"-file", "", "")
 	return c
 }
 
@@ -96,6 +97,85 @@ func TestResolveTextFlag(t *testing.T) {
 		}
 		if ok || got != "" {
 			t.Errorf("expected absent flag to yield (\"\", false), got (%q, %v)", got, ok)
+		}
+	})
+
+	// --content-file / --description-file exists for Windows agents — piping
+	// HEREDOC content through Windows PowerShell silently drops non-ASCII
+	// bytes (PS 5.1's $OutputEncoding defaults to ASCIIEncoding when piping
+	// to a native command), so Chinese / Cyrillic / etc. arrive as `?`.
+	// Reading the body straight off disk skips the shell entirely.
+	// See issues #2198, #2236, #2376.
+	t.Run("file body is preserved verbatim with non-ASCII content", func(t *testing.T) {
+		dir := t.TempDir()
+		path := dir + string(os.PathSeparator) + "desc.md"
+		body := "标题 / Заголовок\n\n中文段落 with `code` and \"quotes\".\n"
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", path)
+		got, ok, err := resolveTextFlag(c, "description")
+		if err != nil || !ok {
+			t.Fatalf("unexpected: ok=%v err=%v", ok, err)
+		}
+		want := "标题 / Заголовок\n\n中文段落 with `code` and \"quotes\"."
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("file path that doesn't exist surfaces a useful error", func(t *testing.T) {
+		c := newFlagTestCmd("content")
+		_ = c.Flags().Set("content-file", "/this/path/does/not/exist.txt")
+		_, _, err := resolveTextFlag(c, "content")
+		if err == nil {
+			t.Fatalf("expected error for missing file")
+		}
+		if !strings.Contains(err.Error(), "content-file") {
+			t.Errorf("error should mention --content-file, got %v", err)
+		}
+	})
+
+	t.Run("empty file is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		path := dir + string(os.PathSeparator) + "empty.md"
+		if err := os.WriteFile(path, []byte(""), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", path)
+		_, _, err := resolveTextFlag(c, "description")
+		if err == nil {
+			t.Fatalf("expected error for empty file")
+		}
+	})
+
+	t.Run("file plus inline is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		path := dir + string(os.PathSeparator) + "x.md"
+		if err := os.WriteFile(path, []byte("body"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description", "inline")
+		_ = c.Flags().Set("description-file", path)
+		if _, _, err := resolveTextFlag(c, "description"); err == nil {
+			t.Fatalf("expected mutually-exclusive error for inline + file")
+		}
+	})
+
+	t.Run("file plus stdin is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		path := dir + string(os.PathSeparator) + "x.md"
+		if err := os.WriteFile(path, []byte("body"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-stdin", "true")
+		_ = c.Flags().Set("description-file", path)
+		if _, _, err := resolveTextFlag(c, "description"); err == nil {
+			t.Fatalf("expected mutually-exclusive error for stdin + file")
 		}
 	})
 }

@@ -33,6 +33,9 @@
     "link_copied": "Link copied",
     "copy_link_failed": "Failed to copy link"
   },
+  "attachment": {
+    "download_failed": "Couldn't fetch a download link. Try again in a moment."
+  },
   "link_hover": {
     "copy_link": "Copy link",
     "open_link": "Open link",

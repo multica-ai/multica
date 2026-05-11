@@ -54,6 +54,16 @@ UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: ArchiveAgentsByRuntime :many
+-- Bulk-archives every active agent bound to any runtime in the given set.
+-- Used when revoking a leaving member's runtimes so agents pinned to those
+-- runtimes can no longer be assigned new work. Returns the affected rows so
+-- the caller can broadcast agent:archived per agent.
+UPDATE agent
+SET archived_at = now(), archived_by = @archived_by, updated_at = now()
+WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND archived_at IS NULL
+RETURNING *;
+
 -- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1

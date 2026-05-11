@@ -43,24 +43,43 @@ func (q *Queries) CreateDaemonToken(ctx context.Context, arg CreateDaemonTokenPa
 	return i, err
 }
 
-const deleteDaemonTokensByWorkspaceAndDaemon = `-- name: DeleteDaemonTokensByWorkspaceAndDaemon :exec
+const deleteDaemonTokensByWorkspaceAndDaemons = `-- name: DeleteDaemonTokensByWorkspaceAndDaemons :many
 DELETE FROM daemon_token
-WHERE workspace_id = $1 AND daemon_id = $2
+WHERE workspace_id = $1
+  AND daemon_id = ANY($2::text[])
+RETURNING token_hash
 `
 
-type DeleteDaemonTokensByWorkspaceAndDaemonParams struct {
+type DeleteDaemonTokensByWorkspaceAndDaemonsParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	DaemonID    string      `json:"daemon_id"`
+	DaemonIds   []string    `json:"daemon_ids"`
 }
 
-// Callers MUST also invalidate auth.DaemonTokenCache for each affected
-// token_hash so the deletion takes effect before the cache TTL expires.
-// Today this query has no caller; when a deregister / rotate flow lands,
-// change this to :many RETURNING token_hash and call
-// DaemonTokenCache.Invalidate(hash) for each row.
-func (q *Queries) DeleteDaemonTokensByWorkspaceAndDaemon(ctx context.Context, arg DeleteDaemonTokensByWorkspaceAndDaemonParams) error {
-	_, err := q.db.Exec(ctx, deleteDaemonTokensByWorkspaceAndDaemon, arg.WorkspaceID, arg.DaemonID)
-	return err
+// Deletes every daemon_token row matching the (workspace_id, daemon_id)
+// pairs implied by `daemon_ids`. Used by the member-revocation flow to
+// nuke tokens for all runtimes a leaving member owned in one shot.
+// Returns token_hash so the caller can invalidate auth.DaemonTokenCache
+// before the 10-minute TTL expires — without that invalidate, a daemon
+// can keep using its stale token until cache eviction even though the
+// DB row is gone.
+func (q *Queries) DeleteDaemonTokensByWorkspaceAndDaemons(ctx context.Context, arg DeleteDaemonTokensByWorkspaceAndDaemonsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, deleteDaemonTokensByWorkspaceAndDaemons, arg.WorkspaceID, arg.DaemonIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var token_hash string
+		if err := rows.Scan(&token_hash); err != nil {
+			return nil, err
+		}
+		items = append(items, token_hash)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const deleteExpiredDaemonTokens = `-- name: DeleteExpiredDaemonTokens :exec

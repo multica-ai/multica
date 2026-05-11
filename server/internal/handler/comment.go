@@ -426,20 +426,23 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 			continue
 		}
 		agentUUID := parseUUID(m.ID)
-		// Load the agent to check visibility, archive status, and trigger config.
-		agent, err := h.Queries.GetAgent(ctx, agentUUID)
+		// Load the agent scoped to the current issue's workspace. Using the
+		// bare GetAgent here would let a mention resolve to an agent in a
+		// different workspace, and the visibility check below would then be
+		// applied against the wrong workspace's roles (a workspace owner in
+		// THIS workspace would pass the gate for a private agent that lives
+		// in someone else's workspace).
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          agentUUID,
+			WorkspaceID: issue.WorkspaceID,
+		})
 		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 			continue
 		}
-		// Private agents can only be mentioned by the agent owner or workspace admin/owner.
-		if agent.Visibility == "private" && authorType == "member" {
-			isOwner := uuidToString(agent.OwnerID) == authorID
-			if !isOwner {
-				member, err := h.getWorkspaceMember(ctx, authorID, wsID)
-				if err != nil || !roleAllowed(member.Role, "owner", "admin") {
-					continue
-				}
-			}
+		// Private-agent gate (member→private requires allowed_principals;
+		// agent→agent always passes).
+		if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
+			continue
 		}
 		// Dedup: skip if this agent already has a pending task for this issue.
 		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{

@@ -30,6 +30,13 @@ var (
 	isBrewInstall        = cli.IsBrewInstall
 	getBrewPrefix        = cli.GetBrewPrefix
 	matchKnownBrewPrefix = cli.MatchKnownBrewPrefix
+
+	// detectAgentVersion / checkAgentMinVersion are indirections over the
+	// real agent helpers so tests can run the registration path without
+	// shelling out to a real CLI. Mirrors the pattern used for the brew
+	// helpers above.
+	detectAgentVersion   = agent.DetectVersion
+	checkAgentMinVersion = agent.CheckMinVersion
 )
 
 // workspaceState tracks registered runtimes for a single workspace.
@@ -75,7 +82,16 @@ type Daemon struct {
 	wsHBMu      sync.RWMutex         // guards wsHBLastAck
 	wsHBLastAck map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 
+	// runtimeGoneMu guards runtimeGoneInflight and reregisterNextAttempt. The
+	// state lets heartbeat / poller / WS-ack handlers converge on a single
+	// recovery path when they each detect that a runtime row was deleted
+	// server-side without three of them stampeding registerRuntimesForWorkspace.
+	runtimeGoneMu         sync.Mutex
+	runtimeGoneInflight   map[string]struct{}  // runtime_id -> currently recovering
+	reregisterNextAttempt map[string]time.Time // workspace_id -> earliest time the next re-register attempt may run
+
 	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
+	rootCtx       context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
 	restartBinary string             // non-empty after a successful update; path to the new binary
 	updating      atomic.Bool        // prevents concurrent update attempts
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
@@ -99,16 +115,18 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
 	return &Daemon{
-		cfg:            cfg,
-		client:         client,
-		repoCache:      repocache.New(cacheRoot, logger),
-		logger:         logger,
-		workspaces:     make(map[string]*workspaceState),
-		runtimeIndex:   make(map[string]Runtime),
-		runtimeSet:     newRuntimeSetWatcher(),
-		agentVersions:  make(map[string]string),
-		wsHBLastAck:    make(map[string]time.Time),
-		activeEnvRoots: make(map[string]int),
+		cfg:                   cfg,
+		client:                client,
+		repoCache:             repocache.New(cacheRoot, logger),
+		logger:                logger,
+		workspaces:            make(map[string]*workspaceState),
+		runtimeIndex:          make(map[string]Runtime),
+		runtimeSet:            newRuntimeSetWatcher(),
+		agentVersions:         make(map[string]string),
+		wsHBLastAck:           make(map[string]time.Time),
+		activeEnvRoots:        make(map[string]int),
+		runtimeGoneInflight:   make(map[string]struct{}),
+		reregisterNextAttempt: make(map[string]time.Time),
 	}
 }
 
@@ -130,6 +148,247 @@ func (d *Daemon) agentVersion(provider string) string {
 
 func (d *Daemon) notifyRuntimeSetChanged() {
 	d.runtimeSet.notify()
+}
+
+// reregisterCoalesceWindow caps how often the daemon re-registers a workspace
+// after detecting a runtime_not_found response. Many stale runtime IDs may be
+// reported within seconds of each other (one delete clears all of a daemon's
+// runtimes), and a single re-register call replaces every runtime in the
+// workspace, so concurrent recoveries must collapse to one API call.
+const reregisterCoalesceWindow = 30 * time.Second
+
+// reregisterFailureBackoff is the additional wait inserted before the next
+// re-register attempt when the previous one failed. This prevents heartbeat
+// ticks (~15s) from converting a server-side log flood into a re-register
+// flood when re-registration itself is failing (workspace removed, server
+// unreachable, ...).
+const reregisterFailureBackoff = 60 * time.Second
+
+// handleRuntimeGone is the single recovery entry point shared by the HTTP
+// heartbeat path, the runtime poller, and the WebSocket runtime_gone ack
+// handler. All three may notice the same stale runtime within a few ms of
+// each other, so this function:
+//
+//   - keys an in-flight set on runtimeID to drop concurrent calls for the same
+//     ID after the first one is already cleaning up; and
+//   - keys a per-workspace next-attempt timestamp on workspaceID so that
+//     concurrent recoveries triggered by the SAME initial event coalesce to a
+//     single registerRuntimesForWorkspace call. The slot is cleared on success
+//     so a later distinct runtime deletion in the same workspace can trigger
+//     its own recovery without waiting for the coalesce window to expire.
+//
+// On failure of the underlying re-register, the next-attempt timestamp is
+// extended by reregisterFailureBackoff so we don't replace a server-side log
+// flood with a daemon-side register flood. workspaceSyncLoop will retry
+// independently every DefaultWorkspaceSyncInterval as a safety net.
+//
+// The recovery HTTP call uses the daemon root context, not the caller's. The
+// heartbeat path's per-runtime ctx is cancelled by notifyRuntimeSetChanged the
+// moment we prune the dead UUID, and if we forwarded that ctx the in-flight
+// register would self-cancel mid-flight.
+func (d *Daemon) handleRuntimeGone(runtimeID string) {
+	if runtimeID == "" {
+		return
+	}
+
+	// Stampede control per runtime ID.
+	d.runtimeGoneMu.Lock()
+	if _, inflight := d.runtimeGoneInflight[runtimeID]; inflight {
+		d.runtimeGoneMu.Unlock()
+		return
+	}
+	d.runtimeGoneInflight[runtimeID] = struct{}{}
+	d.runtimeGoneMu.Unlock()
+	defer func() {
+		d.runtimeGoneMu.Lock()
+		delete(d.runtimeGoneInflight, runtimeID)
+		d.runtimeGoneMu.Unlock()
+	}()
+
+	workspaceID, removed := d.removeStaleRuntime(runtimeID)
+	if !removed {
+		// Already gone from local state — a parallel recovery already
+		// cleaned this up, or workspaceSyncLoop pruned the whole workspace.
+		return
+	}
+
+	d.logger.Info("runtime deleted server-side; pruned from local state",
+		"runtime_id", runtimeID, "workspace_id", workspaceID)
+	d.notifyRuntimeSetChanged()
+
+	// Per-workspace coalescing: claim the slot atomically. The first caller
+	// past this check is the only one that will run
+	// registerRuntimesForWorkspace while the coalesce window is open. We
+	// clear the slot on success so a separate later deletion in the same
+	// workspace is NOT suppressed; the inflight set above is what keeps two
+	// callers from racing the same recovery.
+	now := time.Now()
+	d.runtimeGoneMu.Lock()
+	if next, ok := d.reregisterNextAttempt[workspaceID]; ok && now.Before(next) {
+		d.runtimeGoneMu.Unlock()
+		d.logger.Debug("skip re-register: coalescing with recent attempt",
+			"workspace_id", workspaceID)
+		return
+	}
+	d.reregisterNextAttempt[workspaceID] = now.Add(reregisterCoalesceWindow)
+	d.runtimeGoneMu.Unlock()
+
+	if err := d.reregisterWorkspaceAfterRuntimeGone(d.recoveryContext(), workspaceID); err != nil {
+		d.runtimeGoneMu.Lock()
+		d.reregisterNextAttempt[workspaceID] = time.Now().Add(reregisterFailureBackoff)
+		d.runtimeGoneMu.Unlock()
+		// Logged at Warn (not Error) because workspaceSyncLoop retries
+		// independently every DefaultWorkspaceSyncInterval, so a transient
+		// failure here is not a stuck state — just an extra wait.
+		d.logger.Warn("re-register after runtime gone failed",
+			"workspace_id", workspaceID, "error", err)
+		return
+	}
+	// Success: clear the coalesce slot so a future distinct runtime deletion
+	// in this workspace can trigger its own recovery immediately. The
+	// inflight set on runtimeID still prevents same-event stampedes.
+	d.runtimeGoneMu.Lock()
+	delete(d.reregisterNextAttempt, workspaceID)
+	d.runtimeGoneMu.Unlock()
+}
+
+// recoveryContext returns the daemon root context for long-running recovery
+// HTTP calls (re-register, recover-orphans) that must survive the heartbeat
+// loop tearing down a per-runtime context. Falls back to Background when the
+// daemon was not started via Run(), e.g. unit-test fixtures.
+func (d *Daemon) recoveryContext() context.Context {
+	if d.rootCtx != nil {
+		return d.rootCtx
+	}
+	return context.Background()
+}
+
+// removeStaleRuntime drops a runtime ID from its owning workspace's runtimeIDs
+// list, the daemon-level runtimeIndex, and the WS heartbeat freshness map.
+// Returns the workspace ID and true if the runtime was tracked, "" and false
+// otherwise.
+//
+// Callers must NOT replace workspaceState pointers — only mutate fields in
+// place — because ensureRepoReady holds workspaceState.repoRefreshMu through
+// long repo-sync calls. See syncWorkspacesFromAPI for the same invariant.
+func (d *Daemon) removeStaleRuntime(runtimeID string) (string, bool) {
+	d.mu.Lock()
+	var workspaceID string
+	for wsID, ws := range d.workspaces {
+		found := false
+		filtered := ws.runtimeIDs[:0:0]
+		for _, rid := range ws.runtimeIDs {
+			if rid == runtimeID {
+				found = true
+				continue
+			}
+			filtered = append(filtered, rid)
+		}
+		if found {
+			ws.runtimeIDs = filtered
+			workspaceID = wsID
+			break
+		}
+	}
+	if workspaceID == "" {
+		d.mu.Unlock()
+		return "", false
+	}
+	delete(d.runtimeIndex, runtimeID)
+	d.mu.Unlock()
+
+	d.wsHBMu.Lock()
+	delete(d.wsHBLastAck, runtimeID)
+	d.wsHBMu.Unlock()
+
+	return workspaceID, true
+}
+
+// workspaceNeedsRuntimeRecovery reports whether a tracked workspace currently
+// has zero runtime IDs — the state reached when handleRuntimeGone pruned every
+// runtime and its inline re-register failed. workspaceSyncLoop calls this on
+// each tick so the workspace can recover without waiting for an external
+// trigger.
+func (d *Daemon) workspaceNeedsRuntimeRecovery(workspaceID string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok {
+		return false
+	}
+	return len(ws.runtimeIDs) == 0
+}
+
+// reregisterWorkspaceAfterRuntimeGone calls registerRuntimesForWorkspace and
+// updates the existing workspaceState in place. The register response is
+// authoritative for this workspace's runtime set — every configured provider
+// is included, with UpsertAgentRuntime returning the same row ID for surviving
+// providers and a fresh ID for any that were deleted server-side. Replacing
+// (rather than appending) is required: a partial recovery, where only one
+// runtime in a multi-provider workspace was deleted, would otherwise produce
+// duplicates for every provider that wasn't deleted.
+//
+// The workspaceState pointer is NEVER replaced (see syncWorkspacesFromAPI's
+// invariant about repoRefreshMu). Only fields are mutated.
+func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, workspaceID string) error {
+	resp, err := d.registerRuntimesForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("register runtimes: %w", err)
+	}
+
+	newIDs := make([]string, 0, len(resp.Runtimes))
+	newIDSet := make(map[string]struct{}, len(resp.Runtimes))
+	for _, rt := range resp.Runtimes {
+		newIDs = append(newIDs, rt.ID)
+		newIDSet[rt.ID] = struct{}{}
+	}
+
+	d.mu.Lock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok {
+		d.mu.Unlock()
+		return fmt.Errorf("workspace %s no longer tracked", workspaceID)
+	}
+	// Drop runtimeIndex entries for prior runtime IDs that the server did not
+	// return — typically there are none for upsert-on-existing-provider, but
+	// a daemon config change (provider removed) would leak entries otherwise.
+	for _, oldID := range ws.runtimeIDs {
+		if _, kept := newIDSet[oldID]; !kept {
+			delete(d.runtimeIndex, oldID)
+		}
+	}
+	for _, rt := range resp.Runtimes {
+		d.runtimeIndex[rt.ID] = rt
+	}
+	// Response is authoritative — replace, do not append. Replacing also
+	// catches the rare case where UpsertAgentRuntime returns a different ID
+	// for a surviving provider (e.g. schema change); the daemon converges on
+	// what the server says without leaving stale heartbeat goroutines.
+	ws.runtimeIDs = newIDs
+	if resp.ReposVersion != "" {
+		ws.reposVersion = resp.ReposVersion
+		ws.allowedRepoURLs = repoAllowlist(resp.Repos)
+	}
+	if len(resp.Settings) > 0 {
+		ws.settings = resp.Settings
+	}
+	d.mu.Unlock()
+
+	for _, rid := range newIDs {
+		d.logger.Info("re-registered runtime after server-side deletion",
+			"workspace_id", workspaceID, "runtime_id", rid)
+	}
+	d.notifyRuntimeSetChanged()
+
+	// Tell the server about any tasks the previous (now-deleted) runtime
+	// was working on, mirroring the registration path's recover-orphans call.
+	for _, rid := range newIDs {
+		if err := d.client.RecoverOrphans(ctx, rid); err != nil {
+			d.logger.Warn("recover-orphans after re-register failed",
+				"runtime_id", rid, "error", err)
+		}
+	}
+	return nil
 }
 
 // runtimeSetWatcher is a tiny pub/sub for runtime-set changes. It exists
@@ -226,6 +485,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Wrap context so handleUpdate can cancel the daemon for restart.
 	ctx, cancel := context.WithCancel(ctx)
 	d.cancelFunc = cancel
+	d.rootCtx = ctx
 
 	// Bind health port early to detect another running daemon.
 	healthLn, err := d.listenHealth()
@@ -338,12 +598,12 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
 	var runtimes []map[string]string
 	for name, entry := range d.cfg.Agents {
-		version, err := agent.DetectVersion(ctx, entry.Path)
+		version, err := detectAgentVersion(ctx, entry.Path)
 		if err != nil {
 			d.logger.Warn("skip registering runtime", "name", name, "error", err)
 			continue
 		}
-		if err := agent.CheckMinVersion(name, version); err != nil {
+		if err := checkAgentMinVersion(name, version); err != nil {
 			d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
 			continue
 		}
@@ -370,6 +630,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"device_name":       d.cfg.DeviceName,
 		"cli_version":       d.cfg.CLIVersion,
 		"launched_by":       d.cfg.LaunchedBy,
+		"timezone":          detectLocalTimezone(),
 		"runtimes":          runtimes,
 	}
 
@@ -381,6 +642,41 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		return nil, fmt.Errorf("register runtimes: empty response")
 	}
 	return resp, nil
+}
+
+// detectLocalTimezone returns an IANA zone name for the daemon host, used as
+// the initial value of agent_runtime.timezone on first registration. The
+// server treats any unparseable value as "UTC", but we still try harder here
+// because we'd rather a real "Asia/Shanghai" than a silent UTC fallback.
+// Short abbreviations like "EST" are intentionally ignored: they lose DST
+// rules and are a poor reporting timezone.
+func detectLocalTimezone() string {
+	if tz, ok := canonicalTimezoneName(os.Getenv("TZ")); ok {
+		return tz
+	}
+	if data, err := os.ReadFile("/etc/timezone"); err == nil {
+		if tz, ok := canonicalTimezoneName(string(data)); ok {
+			return tz
+		}
+	}
+	if tz, ok := canonicalTimezoneName(time.Local.String()); ok {
+		return tz
+	}
+	return "UTC"
+}
+
+func canonicalTimezoneName(raw string) (string, bool) {
+	tz := strings.TrimSpace(raw)
+	if tz == "" || tz == "Local" {
+		return "", false
+	}
+	if tz != "UTC" && !strings.Contains(tz, "/") {
+		return "", false
+	}
+	if _, err := time.LoadLocation(tz); err != nil {
+		return "", false
+	}
+	return tz, true
 }
 
 func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion string, repos []RepoData, settings json.RawMessage) *workspaceState {
@@ -659,7 +955,21 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	var removed int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
-			continue // important: never replace existing workspaceState; ensureRepoReady holds ws.repoRefreshMu from the original pointer
+			// Already tracked: only intervene if the workspace lost all of
+			// its runtimes (most commonly because handleRuntimeGone pruned
+			// them and its inline re-register failed). The pointer is not
+			// replaced here either — ensureRepoReady holds repoRefreshMu
+			// from the original pointer.
+			if !d.workspaceNeedsRuntimeRecovery(id) {
+				continue
+			}
+			d.logger.Info("workspace has no runtimes; retrying registration", "workspace_id", id, "name", name)
+			if err := d.reregisterWorkspaceAfterRuntimeGone(ctx, id); err != nil {
+				d.logger.Warn("retry register failed", "workspace_id", id, "error", err)
+				continue
+			}
+			registered++
+			continue
 		}
 		resp, err := d.registerRuntimesForWorkspace(ctx, id)
 		if err != nil {
@@ -814,8 +1124,24 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 	resp, err := d.client.SendHeartbeat(ctx, rid)
 	if err != nil {
 		if ctx.Err() == nil {
+			if isRuntimeNotFoundError(err) {
+				// Server says this runtime is gone — recover instead of
+				// looping on the dead UUID. handleRuntimeGone coalesces
+				// concurrent callers and runs the recovery HTTP call under
+				// the daemon root context so notifyRuntimeSetChanged
+				// tearing down this heartbeat goroutine cannot abort it.
+				go d.handleRuntimeGone(rid)
+				return
+			}
 			d.logger.Warn("heartbeat failed", "runtime_id", rid, "error", err)
 		}
+		return
+	}
+	if resp != nil && resp.RuntimeGone {
+		// The WS path returns a successful ack with RuntimeGone=true for the
+		// same scenario; treat it the same way here in case HTTP starts
+		// surfacing this signal too.
+		go d.handleRuntimeGone(rid)
 		return
 	}
 	d.handleHeartbeatActions(ctx, rid, resp)
@@ -1334,6 +1660,14 @@ func (d *Daemon) runRuntimePoller(
 		if err != nil {
 			sem <- slot
 			if pollerCtx.Err() == nil {
+				if isRuntimeNotFoundError(err) {
+					// Server says this runtime is gone — recover and exit
+					// the poller; the runtime-set watcher will tear this
+					// goroutine down via pollerCtx once the workspace is
+					// re-registered with a new runtime ID.
+					go d.handleRuntimeGone(rid)
+					return
+				}
 				d.logger.Warn("claim task failed", "runtime_id", rid, "error", err)
 			}
 			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
@@ -1716,7 +2050,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// the same (agent, issue) pair. The work_dir path is stored in DB on
 	// task completion and passed back via PriorWorkDir on the next claim.
 
-	prompt := BuildPrompt(task)
+	prompt := BuildPrompt(task, provider)
 
 	// Pass the daemon's auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).

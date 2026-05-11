@@ -28,7 +28,7 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { SearchIssueResult, SearchProjectResult } from "@multica/core/types";
 import { api } from "@multica/core/api";
-import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { selectRecentIssues, useRecentIssuesStore } from "@multica/core/issues/stores";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useWorkspaceId } from "@multica/core";
 import { paths, useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -139,8 +139,8 @@ export function SearchCommand() {
   const { push, pathname, getShareableUrl } = useNavigation();
   const open = useSearchStore((s) => s.open);
   const setOpen = useSearchStore((s) => s.setOpen);
-  const recentItems = useRecentIssuesStore((s) => s.items);
   const wsId = useWorkspaceId();
+  const recentItems = useRecentIssuesStore(selectRecentIssues(wsId));
   const p: WorkspacePaths = useWorkspacePaths();
   const { theme, setTheme } = useTheme();
   const currentWorkspace = useCurrentWorkspace();

@@ -66,7 +66,9 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 			return discoverCursorModels(ctx, executablePath)
 		})
 	case "copilot":
-		return copilotStaticModels(), nil
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverCopilotModels(ctx, executablePath)
+		})
 	case "hermes":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverHermesModels(ctx, executablePath)
@@ -198,15 +200,77 @@ func cursorStaticModels() []Model {
 	}
 }
 
-// copilotStaticModels — GitHub Copilot CLI resolves models via the
-// user's GitHub account, not via CLI args. We deliberately mark no
-// Default: the right model is whatever GitHub routes the request
-// to, and forcing one here would override that.
+// copilotStaticModels — fallback used when GitHub Copilot CLI is
+// missing on PATH or the user hasn't logged in. Normal operation
+// goes through discoverCopilotModels(), which speaks ACP to the
+// CLI and gets the live catalog (including which IDs the user's
+// account actually has access to). This list is just a safety net
+// so the UI dropdown still has reasonable options when the live
+// query fails.
+//
+// Source: https://docs.github.com/en/copilot/reference/ai-models/supported-models
+// IDs use the dotted form `copilot --model <id>` actually accepts.
 func copilotStaticModels() []Model {
 	return []Model{
+		// OpenAI
+		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai"},
 		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai"},
-		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic"},
+		{ID: "gpt-5.4-mini", Label: "GPT-5.4 mini", Provider: "openai"},
+		{ID: "gpt-5.3-codex", Label: "GPT-5.3-Codex", Provider: "openai"},
+		{ID: "gpt-5.2-codex", Label: "GPT-5.2-Codex", Provider: "openai"},
+		{ID: "gpt-5.2", Label: "GPT-5.2", Provider: "openai"},
+		{ID: "gpt-5-mini", Label: "GPT-5 mini", Provider: "openai"},
+		{ID: "gpt-4.1", Label: "GPT-4.1", Provider: "openai"},
+		// Anthropic
+		{ID: "claude-opus-4.7", Label: "Claude Opus 4.7", Provider: "anthropic"},
+		{ID: "claude-sonnet-4.6", Label: "Claude Sonnet 4.6", Provider: "anthropic"},
+		{ID: "claude-sonnet-4.5", Label: "Claude Sonnet 4.5", Provider: "anthropic"},
+		{ID: "claude-haiku-4.5", Label: "Claude Haiku 4.5", Provider: "anthropic"},
 	}
+}
+
+// inferCopilotProvider tags Copilot model IDs with a vendor name so
+// the UI can group them. The Copilot CLI's ACP `availableModels`
+// payload exposes only `modelId`/`name`; the vendor is implicit in
+// the prefix. Returning "" leaves the entry ungrouped, which
+// matches what other ACP discovery paths (hermes/kimi) do for
+// non-prefixed IDs.
+//
+// The OpenAI reasoning series (`o1`, `o3`, `o3-mini`, `o4-mini`,
+// future `o5`/`o6`/…) is matched by the generic `o<digit>…`
+// pattern so we don't have to chase every new generation.
+func inferCopilotProvider(modelID string) string {
+	switch {
+	case strings.HasPrefix(modelID, "gpt-") || isOpenAIReasoningSeriesID(modelID):
+		return "openai"
+	case strings.HasPrefix(modelID, "claude-"):
+		return "anthropic"
+	case strings.HasPrefix(modelID, "gemini-"):
+		return "google"
+	case strings.HasPrefix(modelID, "grok-"):
+		return "xai"
+	default:
+		return ""
+	}
+}
+
+// isOpenAIReasoningSeriesID matches IDs in OpenAI's `o`-prefixed
+// reasoning family: lowercase `o` followed by at least one digit
+// and then either end-of-string or a `-` separator (e.g. `o3`,
+// `o3-mini`, `o4-mini-high`). Avoids false positives like
+// `opus-…` or random IDs that happen to start with `o`.
+func isOpenAIReasoningSeriesID(id string) bool {
+	if len(id) < 2 || id[0] != 'o' {
+		return false
+	}
+	i := 1
+	for i < len(id) && id[i] >= '0' && id[i] <= '9' {
+		i++
+	}
+	if i == 1 {
+		return false
+	}
+	return i == len(id) || id[i] == '-'
 }
 
 // ── Dynamic discovery ──
@@ -391,17 +455,59 @@ func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, er
 	})
 }
 
+// discoverCopilotModels spins up `copilot --acp` and reads the
+// `availableModels` block from session/new. The catalog is keyed
+// off the user's GitHub account, so this is the only way to know
+// which IDs they actually have access to (Pro vs Pro+ vs
+// Enterprise vs evaluation models).
+//
+// Falls back to copilotStaticModels() when the binary is missing
+// or when the ACP handshake fails (auth missing, network down,
+// etc.) so the UI dropdown always has something to show.
+//
+// We also tag each entry with a vendor in the Provider field —
+// the Copilot ACP payload doesn't include one, but the UI groups
+// by Provider, so deriving it from the ID prefix keeps OpenAI /
+// Anthropic / Gemini sections distinct.
+//
+// No extra env or permission flags are needed: discovery only
+// drives `initialize` + `session/new`, neither of which triggers
+// a tool-permission prompt — the model catalog is part of the
+// session/new response itself.
+func discoverCopilotModels(ctx context.Context, executablePath string) ([]Model, error) {
+	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "copilot",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-copilot-discovery-",
+		acpArgs:      []string{"--acp"},
+	})
+	if err != nil || len(models) == 0 {
+		return copilotStaticModels(), nil
+	}
+	for i := range models {
+		if models[i].Provider == "" {
+			models[i].Provider = inferCopilotProvider(models[i].ID)
+		}
+	}
+	return models, nil
+}
+
 // acpDiscoveryProvider configures how discoverACPModels launches an
 // ACP-speaking agent CLI. The shared helper drives every CLI in
 // the same way (initialize → session/new → parse models block) — the
 // per-provider differences are which binary to spawn, which env
-// vars suppress interactive prompts during init, and what to label
-// temporary work directories so they're easy to identify in logs.
+// vars suppress interactive prompts during init, what argv puts
+// the binary into ACP server mode (most use `acp`, Copilot uses
+// `--acp`), and what to label temporary work directories so they're
+// easy to identify in logs.
 type acpDiscoveryProvider struct {
 	defaultBin   string
 	clientName   string
 	extraEnv     []string
 	tmpdirPrefix string
+	// acpArgs is the argv passed to the binary to start it in ACP
+	// server mode. Defaults to []string{"acp"} when nil/empty.
+	acpArgs []string
 }
 
 // discoverACPModels runs the ACP handshake for any agent CLI that
@@ -420,7 +526,11 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, executablePath, "acp")
+	cmdArgs := p.acpArgs
+	if len(cmdArgs) == 0 {
+		cmdArgs = []string{"acp"}
+	}
+	cmd := exec.CommandContext(runCtx, executablePath, cmdArgs...)
 	hideAgentWindow(cmd)
 	if len(p.extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), p.extraEnv...)

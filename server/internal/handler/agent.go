@@ -289,9 +289,17 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// All agents (including private) are visible to workspace members.
+	// Resolve the request actor once. Agents bypass the private-agent gate
+	// to preserve A2A collaboration; members must be in allowed_principals
+	// (agent owner or workspace owner/admin) to see private agents.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
+		if a.Visibility == "private" && actorType == "member" {
+			if !memberAllowedForPrivateAgent(a, actorID, member.Role) {
+				continue
+			}
+		}
 		resp := agentToResponse(a)
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
@@ -311,6 +319,16 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	agent, ok := h.loadAgentForUser(w, r, id)
 	if !ok {
+		return
+	}
+	// Private-agent gate: members must be in allowed_principals to view
+	// (and therefore navigate to) a private agent. The 403 lets the front-end
+	// render an explicit "no access" placeholder instead of a 404 — see
+	// agent-detail-page.tsx.
+	workspaceID := uuidToString(agent.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return
 	}
 	resp := agentToResponse(agent)
@@ -437,6 +455,15 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid runtime_id")
+		return
+	}
+
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	if !canUseRuntimeForAgent(member, runtime) {
+		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
 		return
 	}
 
@@ -655,6 +682,17 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid runtime_id")
 			return
 		}
+		// Same gate as CreateAgent — prevents UpdateAgent from being used to
+		// re-bind an agent onto someone else's private runtime, which would
+		// otherwise be a quiet end-run around the CreateAgent check.
+		member, ok := h.workspaceMember(w, r, uuidToString(agent.WorkspaceID))
+		if !ok {
+			return
+		}
+		if !canUseRuntimeForAgent(member, runtime) {
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can move agents onto it")
+			return
+		}
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 	}
@@ -814,6 +852,14 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Run history is part of the private-agent gate ("查看历史会话"). Same
+	// 403 semantics as GetAgent.
+	workspaceID := uuidToString(agent.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+		writeError(w, http.StatusForbidden, "you do not have access to this agent")
+		return
+	}
 
 	tasks, err := h.Queries.ListAgentTasks(r.Context(), agent.ID)
 	if err != nil {
@@ -850,7 +896,8 @@ type AgentRunCount struct {
 // activity to keep the Agents list cheap regardless of agent count.
 func (h *Handler) GetWorkspaceAgentRunCounts(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
 		return
 	}
 
@@ -860,12 +907,23 @@ func (h *Handler) GetWorkspaceAgentRunCounts(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	resp := make([]AgentRunCount, len(rows))
-	for i, row := range rows {
-		resp[i] = AgentRunCount{
-			AgentID:  uuidToString(row.AgentID),
-			RunCount: row.RunCount,
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
+
+	resp := make([]AgentRunCount, 0, len(rows))
+	for _, row := range rows {
+		agentID := uuidToString(row.AgentID)
+		if _, ok := allowed[agentID]; !ok {
+			continue
 		}
+		resp = append(resp, AgentRunCount{
+			AgentID:  agentID,
+			RunCount: row.RunCount,
+		})
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -879,7 +937,8 @@ func (h *Handler) GetWorkspaceAgentRunCounts(w http.ResponseWriter, r *http.Requ
 // empty buckets to keep the response small.
 func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
 		return
 	}
 
@@ -889,14 +948,25 @@ func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	resp := make([]AgentActivityBucket, len(rows))
-	for i, row := range rows {
-		resp[i] = AgentActivityBucket{
-			AgentID:     uuidToString(row.AgentID),
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
+
+	resp := make([]AgentActivityBucket, 0, len(rows))
+	for _, row := range rows {
+		agentID := uuidToString(row.AgentID)
+		if _, ok := allowed[agentID]; !ok {
+			continue
+		}
+		resp = append(resp, AgentActivityBucket{
+			AgentID:     agentID,
 			BucketAt:    timestampToString(row.Bucket),
 			TaskCount:   row.TaskCount,
 			FailedCount: row.FailedCount,
-		}
+		})
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -913,7 +983,8 @@ func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Re
 // snapshot.
 func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
 		return
 	}
 
@@ -923,9 +994,19 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 		return
 	}
 
-	resp := make([]AgentTaskResponse, len(tasks))
-	for i, t := range tasks {
-		resp[i] = taskToResponse(t)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
+
+	resp := make([]AgentTaskResponse, 0, len(tasks))
+	for _, t := range tasks {
+		if _, ok := allowed[uuidToString(t.AgentID)]; !ok {
+			continue
+		}
+		resp = append(resp, taskToResponse(t))
 	}
 
 	writeJSON(w, http.StatusOK, resp)

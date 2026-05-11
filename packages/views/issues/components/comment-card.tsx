@@ -30,13 +30,13 @@ import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-pick
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
-import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
-import { useCommentCollapseStore } from "@multica/core/issues/stores";
+import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------
@@ -122,6 +122,7 @@ function DeleteCommentDialog({
 // ---------------------------------------------------------------------------
 
 function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
+  const download = useDownloadAttachment();
   if (!attachments?.length) return null;
   // Skip attachments whose URL is already referenced in the markdown content,
   // and duplicates of the same file (same name/type/size) that are referenced.
@@ -155,15 +156,13 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm">{a.filename}</p>
           </div>
-          {a.download_url && (
-            <button
-              type="button"
-              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              onClick={() => window.open(a.download_url, "_blank", "noopener,noreferrer")}
-            >
-              <Download className="size-3.5" />
-            </button>
-          )}
+          <button
+            type="button"
+            className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            onClick={() => download(a.id)}
+          >
+            <Download className="size-3.5" />
+          </button>
         </div>
       ))}
     </div>
@@ -202,6 +201,22 @@ function CommentRow({
     enabled: editing,
   });
 
+  // Edit-mode draft: virtualization unmounts the card when it scrolls out
+  // of viewport, taking the in-progress edit with it. Persist via store
+  // so a scroll-away + scroll-back round-trip restores the user's edits.
+  // Key includes issueId so two issues with the same comment id (impossible
+  // but defensive) don't collide; cleared on cancel and on save.
+  const editDraftKey = `edit:${issueId}:${entry.id}` as const;
+  const getEditDraft = useCommentDraftStore.getState().getDraft;
+  const setEditDraft = useCommentDraftStore((s) => s.setDraft);
+  const clearEditDraft = useCommentDraftStore((s) => s.clearDraft);
+  // Read the snapshot once when the edit pass mounts; ContentEditor only
+  // honors `defaultValue` on mount, so a live store subscription here would
+  // cause an extra unmount/remount on every keystroke.
+  const editInitialValue = editing
+    ? (getEditDraft(editDraftKey) ?? entry.content ?? "")
+    : (entry.content ?? "");
+
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
   const canDeleteEntry = isOwn || canModerate;
@@ -216,6 +231,7 @@ function CommentRow({
   const cancelEdit = () => {
     cancelledRef.current = true;
     setEditing(false);
+    clearEditDraft(editDraftKey);
   };
 
   const saveEdit = async () => {
@@ -226,11 +242,13 @@ function CommentRow({
       .trim();
     if (!trimmed || trimmed === (entry.content ?? "").trim()) {
       setEditing(false);
+      clearEditDraft(editDraftKey);
       return;
     }
     try {
       await onEdit(entry.id, trimmed);
       setEditing(false);
+      clearEditDraft(editDraftKey);
     } catch {
       toast.error(t(($) => $.comment.update_failed));
     }
@@ -320,12 +338,17 @@ function CommentRow({
           <div className="text-sm leading-relaxed">
             <ContentEditor
               ref={editEditorRef}
-              defaultValue={entry.content ?? ""}
+              defaultValue={editInitialValue}
               placeholder={t(($) => $.comment.edit_placeholder)}
+              onUpdate={(md) => {
+                if (md.trim().length > 0) setEditDraft(editDraftKey, md);
+                else clearEditDraft(editDraftKey);
+              }}
               onSubmit={saveEdit}
               onUploadFile={(file) => uploadWithToast(file, { issueId })}
               debounceMs={100}
               currentIssueId={issueId}
+              attachments={entry.attachments}
             />
           </div>
           <div className="flex items-center justify-between mt-2">
@@ -343,7 +366,7 @@ function CommentRow({
       ) : (
         <>
           <div className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85">
-            <ReadonlyContent content={entry.content ?? ""} />
+            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
           {!isTemp && (
@@ -395,6 +418,15 @@ function CommentCardImpl({
     enabled: editing,
   });
 
+  // Edit-mode draft (root comment). Same rationale as CommentRow's draft.
+  const parentEditDraftKey = `edit:${issueId}:${entry.id}` as const;
+  const getParentEditDraft = useCommentDraftStore.getState().getDraft;
+  const setParentEditDraft = useCommentDraftStore((s) => s.setDraft);
+  const clearParentEditDraft = useCommentDraftStore((s) => s.clearDraft);
+  const parentEditInitialValue = editing
+    ? (getParentEditDraft(parentEditDraftKey) ?? entry.content ?? "")
+    : (entry.content ?? "");
+
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   // Author-only edit is the same as before; admins additionally get edit
   // *and* delete on member-authored comments, plus delete on agent-authored
@@ -413,6 +445,7 @@ function CommentCardImpl({
   const cancelEdit = () => {
     cancelledRef.current = true;
     setEditing(false);
+    clearParentEditDraft(parentEditDraftKey);
   };
 
   const saveEdit = async () => {
@@ -423,11 +456,13 @@ function CommentCardImpl({
       .trim();
     if (!trimmed || trimmed === (entry.content ?? "").trim()) {
       setEditing(false);
+      clearParentEditDraft(parentEditDraftKey);
       return;
     }
     try {
       await onEdit(entry.id, trimmed);
       setEditing(false);
+      clearParentEditDraft(parentEditDraftKey);
     } catch {
       toast.error(t(($) => $.comment.update_failed));
     }
@@ -581,12 +616,17 @@ function CommentCardImpl({
                 <div className="text-sm leading-relaxed">
                   <ContentEditor
                     ref={editEditorRef}
-                    defaultValue={entry.content ?? ""}
+                    defaultValue={parentEditInitialValue}
                     placeholder={t(($) => $.comment.edit_placeholder)}
+                    onUpdate={(md) => {
+                      if (md.trim().length > 0) setParentEditDraft(parentEditDraftKey, md);
+                      else clearParentEditDraft(parentEditDraftKey);
+                    }}
                     onSubmit={saveEdit}
                     onUploadFile={(file) => uploadWithToast(file, { issueId })}
                     debounceMs={100}
                     currentIssueId={issueId}
+                    attachments={entry.attachments}
                   />
                 </div>
                 <div className="flex items-center justify-between mt-2">
@@ -604,7 +644,7 @@ function CommentCardImpl({
             ) : (
               <>
                 <div className="pl-10 text-sm leading-relaxed text-foreground/85">
-                  <ReadonlyContent content={entry.content ?? ""} />
+                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
                 {!isTemp && (
@@ -623,7 +663,7 @@ function CommentCardImpl({
 
           {/* Replies */}
           {allNestedReplies.map((reply) => (
-            <div key={reply.id} id={`comment-${reply.id}`} className={cn("border-t border-border/50 px-4 transition-colors duration-700", highlightedCommentId === reply.id && "bg-brand/5")}>
+            <div key={reply.id} data-comment-id={reply.id} className={cn("border-t border-border/50 px-4 transition-colors duration-700", highlightedCommentId === reply.id && "bg-brand/5")}>
               <CommentRow
                 issueId={issueId}
                 entry={reply}
@@ -644,6 +684,7 @@ function CommentCardImpl({
               size="sm"
               avatarType="member"
               avatarId={currentUserId ?? ""}
+              draftKey={`reply:${issueId}:${entry.id}`}
               onSubmit={(content, attachmentIds) => onReply(entry.id, content, attachmentIds)}
             />
           </div>

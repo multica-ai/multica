@@ -125,6 +125,8 @@
     "pin_tooltip": "固定到侧边栏",
     "unpin_tooltip": "从侧边栏取消固定",
     "sidebar_tooltip": "切换侧边栏",
+    "cmdf_toast_title": "页面内查找仅覆盖可见区",
+    "cmdf_toast_description": "评论列表已虚拟滚动,⌘F 找不到视口外的评论。完整应用内搜索即将推出。",
     "update_failed": "更新 issue 失败",
     "link_copied": "已复制链接",
     "link_copy_failed": "复制链接失败",
@@ -171,6 +173,7 @@
     "delete_failed": "删除评论失败",
     "reply_count_other": "{{count}} 条回复",
     "leave_comment_placeholder": "留下评论...",
+    "send_tooltip": "发送",
     "expand_tooltip": "展开",
     "collapse_tooltip": "收起",
     "resolve": {

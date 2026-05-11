@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
+  Lock,
   MoreHorizontal,
   Trash2,
 } from "lucide-react";
@@ -14,7 +15,7 @@ import {
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -78,6 +79,19 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const presence: AgentPresenceDetail | null =
     agent ? presenceMap.get(agent.id) ?? null : null;
 
+  // Fallback fetch: when the agent is missing from the workspace list, hit
+  // GET /api/agents/{id} directly to disambiguate "doesn't exist" (404) from
+  // "you can't see this private agent" (403). Only fires after the list has
+  // settled, so the common path makes zero extra requests.
+  const { error: detailError } = useQuery({
+    queryKey: ["agent-detail-probe", wsId, agentId],
+    queryFn: () => api.getAgent(agentId),
+    enabled: !agentsLoading && !agent && !!agentId,
+    retry: false,
+  });
+  const isForbidden =
+    detailError instanceof ApiError && detailError.status === 403;
+
   // Permission hook MUST be called unconditionally — its `agent | null`
   // signature handles the not-found / loading case internally so the early
   // returns below don't violate the rules of hooks. Backend gates archive
@@ -120,6 +134,31 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   // --- Loading ---
   if (agentsLoading && !agent) {
     return <DetailLoadingSkeleton />;
+  }
+
+  // --- No permission (private agent the caller is not in allowed_principals for) ---
+  if (!agent && isForbidden) {
+    return (
+      <div className="flex flex-1 min-h-0 flex-col">
+        <BackHeader paths={paths.agents()} title={t(($) => $.detail.back_to_agents)} />
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+          <Lock className="h-8 w-8 text-muted-foreground" />
+          <div>
+            <p className="text-sm font-medium">{t(($) => $.detail.no_access_title)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t(($) => $.detail.no_access_hint)}
+            </p>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => navigation.push(paths.agents())}
+          >
+            {t(($) => $.detail.back_to_agents_full)}
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   // --- Not found / error ---

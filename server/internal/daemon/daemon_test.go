@@ -214,7 +214,7 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 				{Name: "Concise", Content: "Be concise."},
 			},
 		},
-	})
+	}, "claude")
 
 	// Prompt should contain the issue ID and CLI hint.
 	for _, want := range []string{
@@ -240,7 +240,7 @@ func TestBuildPromptNoIssueDetails(t *testing.T) {
 	prompt := BuildPrompt(Task{
 		IssueID: "test-id",
 		Agent:   &AgentData{Name: "Test"},
-	})
+	}, "claude")
 
 	// Prompt should not contain issue title/description (agent fetches via CLI).
 	for _, absent := range []string{"**Issue:**", "**Summary:**"} {
@@ -259,7 +259,7 @@ func TestBuildPromptAutopilotRunOnly(t *testing.T) {
 		AutopilotTitle:       "Daily dependency check",
 		AutopilotDescription: "Check dependencies and report outdated packages.",
 		AutopilotSource:      "manual",
-	})
+	}, "claude")
 
 	for _, want := range []string{
 		"run-only mode",
@@ -291,7 +291,7 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 		TriggerCommentID:      commentID,
 		TriggerCommentContent: commentContent,
 		Agent:                 &AgentData{Name: "Test"},
-	})
+	}, "claude")
 
 	// Prompt should contain the comment content, the trigger comment id, and
 	// the full reply command with --parent. Re-emitting --parent on every turn
@@ -336,7 +336,7 @@ func TestBuildPromptCommentTriggeredByAgent(t *testing.T) {
 		TriggerAuthorType:     "agent",
 		TriggerAuthorName:     "Atlas",
 		Agent:                 &AgentData{Name: "Test"},
-	})
+	}, "claude")
 
 	for _, want := range []string{
 		"Another agent (Atlas)",
@@ -362,7 +362,7 @@ func TestBuildPromptCommentTriggeredByMember(t *testing.T) {
 		TriggerAuthorType:     "member",
 		TriggerAuthorName:     "Alice",
 		Agent:                 &AgentData{Name: "Test"},
-	})
+	}, "claude")
 
 	if !strings.Contains(prompt, "A user just left a new comment") {
 		t.Fatalf("member-triggered prompt should label the author as a user\n---\n%s", prompt)
@@ -391,7 +391,7 @@ func TestBuildPromptCommentTriggeredNoContent(t *testing.T) {
 		IssueID:          "test-id",
 		TriggerCommentID: "comment-id",
 		Agent:            &AgentData{Name: "Test"},
-	})
+	}, "claude")
 
 	if !strings.Contains(prompt, "multica issue get") {
 		t.Fatal("prompt missing CLI hint")
@@ -474,6 +474,87 @@ func TestIsTaskNotFoundError(t *testing.T) {
 			t.Parallel()
 			if got := isTaskNotFoundError(tc.err); got != tc.want {
 				t.Fatalf("isTaskNotFoundError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsRuntimeNotFoundError(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "404 with runtime not found body from heartbeat",
+			err: &requestError{
+				Method:     http.MethodPost,
+				Path:       "/api/daemon/heartbeat",
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"runtime not found"}`,
+			},
+			want: true,
+		},
+		{
+			name: "404 with runtime not found body from claim",
+			err: &requestError{
+				Method:     http.MethodPost,
+				Path:       "/api/daemon/runtimes/abc/tasks/claim",
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"runtime not found"}`,
+			},
+			want: true,
+		},
+		{
+			name: "mixed-case body still matches",
+			err: &requestError{
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"Runtime Not Found"}`,
+			},
+			want: true,
+		},
+		{
+			name: "500 with same body must NOT be treated as runtime-not-found",
+			err: &requestError{
+				StatusCode: http.StatusInternalServerError,
+				Body:       `{"error":"runtime not found"}`,
+			},
+			want: false,
+		},
+		{
+			name: "404 with task-not-found body is not runtime-not-found",
+			err: &requestError{
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"task not found"}`,
+			},
+			want: false,
+		},
+		{
+			name: "404 with workspace-not-found body is not runtime-not-found",
+			err: &requestError{
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"workspace not found"}`,
+			},
+			want: false,
+		},
+		{
+			name: "non-requestError",
+			err:  errors.New("network down"),
+			want: false,
+		},
+		{
+			name: "nil",
+			err:  nil,
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isRuntimeNotFoundError(tc.err); got != tc.want {
+				t.Fatalf("isRuntimeNotFoundError(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
 	}
