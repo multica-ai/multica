@@ -112,6 +112,12 @@ export interface DeployEnvironment {
    *  switches on it MUST have a default branch so a server-side enum
    *  addition doesn't crash older Electron builds. */
   adapter_kind?: string;
+  /** Per-env GitHub Actions workflow filename the auto-detect poller
+   *  watches. Null when the env inherits the workspace-level setting
+   *  (`workspace.ship_hub_deploy_workflow_<kind>`). Multi-project
+   *  workspaces use this to point each project at its own repo's
+   *  workflow file. */
+  deploy_workflow_filename?: string | null;
 }
 
 /** Phase 6 — entry returned by GET /api/deploy/adapters. */
@@ -191,6 +197,7 @@ export interface CreateDeployEnvironmentRequest {
   target_branch?: string | null;
   target_url?: string | null;
   auto_promote?: boolean;
+  deploy_workflow_filename?: string | null;
 }
 
 export interface UpdateDeployEnvironmentRequest {
@@ -198,6 +205,7 @@ export interface UpdateDeployEnvironmentRequest {
   target_branch?: string | null;
   target_url?: string | null;
   auto_promote?: boolean;
+  deploy_workflow_filename?: string | null;
 }
 
 export interface LogDeployRequest {

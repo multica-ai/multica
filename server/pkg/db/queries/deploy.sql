@@ -28,29 +28,42 @@ GROUP BY project_id;
 -- name: UpsertDeployEnvironment :one
 -- Setup endpoint: creating or reconfiguring (project, kind). The unique
 -- constraint on (project_id, kind) makes this safe to call repeatedly.
+--
+-- `deploy_workflow_filename` is the per-env GitHub Actions workflow
+-- the auto-detect poller watches for this environment. Nullable —
+-- when null, the poller falls back to the workspace-level setting
+-- (`workspace.ship_hub_deploy_workflow_<kind>`). When the workspace
+-- has multiple projects, each project's env can override the default
+-- with its own repo's workflow filename.
 INSERT INTO deploy_environment (
     workspace_id, project_id, kind, name, target_branch, target_url,
-    auto_promote
+    auto_promote, deploy_workflow_filename
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
 ON CONFLICT (project_id, kind) DO UPDATE SET
-    name          = EXCLUDED.name,
-    target_branch = EXCLUDED.target_branch,
-    target_url    = EXCLUDED.target_url,
-    auto_promote  = EXCLUDED.auto_promote,
-    updated_at    = now()
+    name                     = EXCLUDED.name,
+    target_branch            = EXCLUDED.target_branch,
+    target_url               = EXCLUDED.target_url,
+    auto_promote             = EXCLUDED.auto_promote,
+    deploy_workflow_filename = EXCLUDED.deploy_workflow_filename,
+    updated_at               = now()
 RETURNING *;
 
 -- name: UpdateDeployEnvironment :one
 -- PATCH path. narg fields are nullable for "leave alone" semantics. Every
 -- update bumps updated_at unconditionally.
+--
+-- `deploy_workflow_filename` uses sqlc.narg (not COALESCE) so passing
+-- an explicit empty string clears the override (poller falls back to
+-- workspace setting); passing NULL leaves the current value alone.
 UPDATE deploy_environment SET
-    name          = COALESCE(sqlc.narg('name'), name),
-    target_branch = COALESCE(sqlc.narg('target_branch'), target_branch),
-    target_url    = sqlc.narg('target_url'),
-    auto_promote  = COALESCE(sqlc.narg('auto_promote'), auto_promote),
-    updated_at    = now()
+    name                     = COALESCE(sqlc.narg('name'), name),
+    target_branch            = COALESCE(sqlc.narg('target_branch'), target_branch),
+    target_url               = sqlc.narg('target_url'),
+    auto_promote             = COALESCE(sqlc.narg('auto_promote'), auto_promote),
+    deploy_workflow_filename = COALESCE(sqlc.narg('deploy_workflow_filename'), deploy_workflow_filename),
+    updated_at               = now()
 WHERE id = $1
 RETURNING *;
 

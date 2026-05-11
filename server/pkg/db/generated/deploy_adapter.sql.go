@@ -81,7 +81,7 @@ func (q *Queries) ListDeployAdapterConfigsByKind(ctx context.Context, adapterKin
 }
 
 const listDeployEnvironmentsByAdapter = `-- name: ListDeployEnvironmentsByAdapter :many
-SELECT id, workspace_id, project_id, kind, name, target_branch, target_url, current_sha, current_deployed_at, auto_promote, created_at, updated_at, adapter_kind FROM deploy_environment
+SELECT id, workspace_id, project_id, kind, name, target_branch, target_url, current_sha, current_deployed_at, auto_promote, created_at, updated_at, adapter_kind, deploy_workflow_filename FROM deploy_environment
 WHERE adapter_kind = ANY($1::text[])
 ORDER BY id
 `
@@ -111,6 +111,7 @@ func (q *Queries) ListDeployEnvironmentsByAdapter(ctx context.Context, kinds []s
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AdapterKind,
+			&i.DeployWorkflowFilename,
 		); err != nil {
 			return nil, err
 		}

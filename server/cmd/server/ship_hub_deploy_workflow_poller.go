@@ -120,11 +120,17 @@ func runShipHubDeployWorkflowPollOnce(ctx context.Context, queries *db.Queries, 
 			prodWf = ws.ShipHubDeployWorkflowProduction.String
 		}
 		if stagingWf == "" && prodWf == "" {
-			// Workspace enabled the feature but didn't configure
-			// auto-detection — the manual Mark-deployed button is
-			// the active path. Skip silently (not even Debug level —
-			// this is the common case for new workspaces).
-			continue
+			// Workspace-level defaults are empty. We still need to
+			// check whether any project's env has its own override
+			// before skipping — a multi-project workspace might use
+			// only per-env settings and leave the workspace-level
+			// fields blank.
+			if !workspaceHasAnyEnvWorkflowOverride(ctx, queries, ws.ID) {
+				// No workspace default AND no per-env override —
+				// the manual Mark-deployed button is the active
+				// path. Skip silently.
+				continue
+			}
 		}
 
 		token := loadShipHubTokenForWorkspace(ctx, queries, ws)
@@ -167,9 +173,18 @@ func loadShipHubTokenForWorkspace(ctx context.Context, queries *db.Queries, ws d
 
 // pollWorkspaceDeployWorkflows iterates every project in the
 // workspace that has a github_repo resource attached and polls the
-// configured workflow(s) on it. We list every project (ListProjects
-// excludes archived by default) and read its github_repo URL — the
-// same pattern repoURLForRelease uses on the request path.
+// configured workflow(s) on it.
+//
+// Workflow filename precedence (per environment):
+//  1. Environment's own `deploy_workflow_filename` (set via the
+//     deploy env edit dialog) — preferred. Lets multi-project
+//     workspaces target the right workflow file per repo.
+//  2. Workspace-level `ship_hub_deploy_workflow_<kind>` — fallback
+//     for backward compat with single-project workspaces that
+//     configured the setting before per-env support landed.
+//
+// `stagingWf` / `prodWf` come in as the workspace-level defaults; the
+// env-level override is read inline below.
 func pollWorkspaceDeployWorkflows(
 	ctx context.Context,
 	queries *db.Queries,
@@ -200,13 +215,83 @@ func pollWorkspaceDeployWorkflows(
 				"project_id", p.ID, "url", repoURL, "error", err)
 			continue
 		}
-		if stagingWf != "" {
-			pollEnvironmentForRelease(ctx, queries, bus, ws, p, client, owner, repo, stagingWf, db.DeployEnvironmentKindStaging)
+		// Resolve per-env workflow filename overrides. Empty result
+		// means "use the workspace-level default for this kind."
+		envWorkflows := loadEnvWorkflowFilenames(ctx, queries, p.ID)
+		stagingFile := resolveWorkflowFilename(envWorkflows[db.DeployEnvironmentKindStaging], stagingWf)
+		prodFile := resolveWorkflowFilename(envWorkflows[db.DeployEnvironmentKindProduction], prodWf)
+		if stagingFile != "" {
+			pollEnvironmentForRelease(ctx, queries, bus, ws, p, client, owner, repo, stagingFile, db.DeployEnvironmentKindStaging)
 		}
-		if prodWf != "" {
-			pollEnvironmentForRelease(ctx, queries, bus, ws, p, client, owner, repo, prodWf, db.DeployEnvironmentKindProduction)
+		if prodFile != "" {
+			pollEnvironmentForRelease(ctx, queries, bus, ws, p, client, owner, repo, prodFile, db.DeployEnvironmentKindProduction)
 		}
 	}
+}
+
+// loadEnvWorkflowFilenames returns a map[kind]filename of the per-env
+// deploy_workflow_filename overrides for one project's environments.
+// Missing kinds + null/empty values return "" (caller falls back to
+// the workspace default).
+func loadEnvWorkflowFilenames(
+	ctx context.Context,
+	queries *db.Queries,
+	projectID pgtype.UUID,
+) map[db.DeployEnvironmentKind]string {
+	out := map[db.DeployEnvironmentKind]string{}
+	envs, err := queries.ListDeployEnvironmentsByProject(ctx, projectID)
+	if err != nil {
+		// Non-fatal — fall back entirely to the workspace defaults
+		// rather than skipping the whole project.
+		slog.Debug("ship hub deploy poller: list envs failed",
+			"project_id", projectID, "error", err)
+		return out
+	}
+	for _, env := range envs {
+		if env.DeployWorkflowFilename.Valid {
+			out[env.Kind] = env.DeployWorkflowFilename.String
+		}
+	}
+	return out
+}
+
+// resolveWorkflowFilename returns the env-level override when non-empty,
+// otherwise the workspace-level default. Either may be "" — caller
+// checks before polling.
+func resolveWorkflowFilename(envLevel, workspaceLevel string) string {
+	if envLevel != "" {
+		return envLevel
+	}
+	return workspaceLevel
+}
+
+// workspaceHasAnyEnvWorkflowOverride returns true when at least one
+// deploy_environment in the workspace has a non-empty
+// deploy_workflow_filename. Used as an early-skip guard so workspaces
+// that haven't configured ANY workflow (neither workspace-level nor
+// per-env) don't trigger the deploy-env listing per project.
+//
+// Cheap: one indexed query that scans the env rows for this workspace.
+// The result isn't cached — workspace count stays low and the poller
+// runs every 2 minutes, so a per-tick recheck is fine.
+func workspaceHasAnyEnvWorkflowOverride(
+	ctx context.Context,
+	queries *db.Queries,
+	workspaceID pgtype.UUID,
+) bool {
+	envs, err := queries.ListDeployEnvironmentsByWorkspace(ctx, workspaceID)
+	if err != nil {
+		// If the listing fails, fall back to "no overrides" — the
+		// safer-skip path. The error would surface on the next
+		// tick if it persists.
+		return false
+	}
+	for _, env := range envs {
+		if env.DeployWorkflowFilename.Valid && env.DeployWorkflowFilename.String != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // firstGitHubRepoURL — the project's first github_repo resource_ref

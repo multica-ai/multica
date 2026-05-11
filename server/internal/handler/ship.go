@@ -193,34 +193,36 @@ func pullRequestToResponse(pr db.PullRequest) pullRequestResponse {
 }
 
 type deployEnvironmentResponse struct {
-	ID                string  `json:"id"`
-	WorkspaceID       string  `json:"workspace_id"`
-	ProjectID         string  `json:"project_id"`
-	Kind              string  `json:"kind"`
-	Name              string  `json:"name"`
-	TargetBranch      string  `json:"target_branch"`
-	TargetURL         *string `json:"target_url"`
-	CurrentSHA        *string `json:"current_sha"`
-	CurrentDeployedAt *string `json:"current_deployed_at"`
-	AutoPromote       bool    `json:"auto_promote"`
-	CreatedAt         string  `json:"created_at"`
-	UpdatedAt         string  `json:"updated_at"`
+	ID                     string  `json:"id"`
+	WorkspaceID            string  `json:"workspace_id"`
+	ProjectID              string  `json:"project_id"`
+	Kind                   string  `json:"kind"`
+	Name                   string  `json:"name"`
+	TargetBranch           string  `json:"target_branch"`
+	TargetURL              *string `json:"target_url"`
+	CurrentSHA             *string `json:"current_sha"`
+	CurrentDeployedAt      *string `json:"current_deployed_at"`
+	AutoPromote            bool    `json:"auto_promote"`
+	DeployWorkflowFilename *string `json:"deploy_workflow_filename"`
+	CreatedAt              string  `json:"created_at"`
+	UpdatedAt              string  `json:"updated_at"`
 }
 
 func deployEnvironmentToResponse(e db.DeployEnvironment) deployEnvironmentResponse {
 	return deployEnvironmentResponse{
-		ID:                uuidToString(e.ID),
-		WorkspaceID:       uuidToString(e.WorkspaceID),
-		ProjectID:         uuidToString(e.ProjectID),
-		Kind:              string(e.Kind),
-		Name:              e.Name,
-		TargetBranch:      e.TargetBranch,
-		TargetURL:         textToPtr(e.TargetUrl),
-		CurrentSHA:        textToPtr(e.CurrentSha),
-		CurrentDeployedAt: timestampToPtr(e.CurrentDeployedAt),
-		AutoPromote:       e.AutoPromote,
-		CreatedAt:         timestampToString(e.CreatedAt),
-		UpdatedAt:         timestampToString(e.UpdatedAt),
+		ID:                     uuidToString(e.ID),
+		WorkspaceID:            uuidToString(e.WorkspaceID),
+		ProjectID:              uuidToString(e.ProjectID),
+		Kind:                   string(e.Kind),
+		Name:                   e.Name,
+		TargetBranch:           e.TargetBranch,
+		TargetURL:              textToPtr(e.TargetUrl),
+		CurrentSHA:             textToPtr(e.CurrentSha),
+		CurrentDeployedAt:      timestampToPtr(e.CurrentDeployedAt),
+		AutoPromote:            e.AutoPromote,
+		DeployWorkflowFilename: textToPtr(e.DeployWorkflowFilename),
+		CreatedAt:              timestampToString(e.CreatedAt),
+		UpdatedAt:              timestampToString(e.UpdatedAt),
 	}
 }
 
@@ -447,12 +449,21 @@ func (h *Handler) ListProjectDeployEnvironments(w http.ResponseWriter, r *http.R
 }
 
 // CreateDeployEnvironmentRequest is the body for POST /api/projects/{id}/deploy_environments.
+//
+// `DeployWorkflowFilename` is optional; when set, the auto-detect
+// deploy poller watches this specific workflow file in the project's
+// GitHub repo. When null/empty, the poller falls back to the
+// workspace-level `ship_hub_deploy_workflow_<kind>` setting (legacy
+// default for single-project workspaces). Per-env override is
+// required for multi-project workspaces where each repo's workflow
+// filename differs.
 type CreateDeployEnvironmentRequest struct {
-	Kind         string  `json:"kind"`
-	Name         string  `json:"name"`
-	TargetBranch *string `json:"target_branch"`
-	TargetURL    *string `json:"target_url"`
-	AutoPromote  *bool   `json:"auto_promote"`
+	Kind                   string  `json:"kind"`
+	Name                   string  `json:"name"`
+	TargetBranch           *string `json:"target_branch"`
+	TargetURL              *string `json:"target_url"`
+	AutoPromote            *bool   `json:"auto_promote"`
+	DeployWorkflowFilename *string `json:"deploy_workflow_filename"`
 }
 
 func (h *Handler) CreateProjectDeployEnvironment(w http.ResponseWriter, r *http.Request) {
@@ -484,13 +495,14 @@ func (h *Handler) CreateProjectDeployEnvironment(w http.ResponseWriter, r *http.
 		autoPromote = *req.AutoPromote
 	}
 	env, err := h.Queries.UpsertDeployEnvironment(r.Context(), db.UpsertDeployEnvironmentParams{
-		WorkspaceID:  wsID,
-		ProjectID:    project.ID,
-		Kind:         kind,
-		Name:         name,
-		TargetBranch: branch,
-		TargetUrl:    ptrToText(req.TargetURL),
-		AutoPromote:  autoPromote,
+		WorkspaceID:            wsID,
+		ProjectID:              project.ID,
+		Kind:                   kind,
+		Name:                   name,
+		TargetBranch:           branch,
+		TargetUrl:              ptrToText(req.TargetURL),
+		AutoPromote:            autoPromote,
+		DeployWorkflowFilename: ptrToText(req.DeployWorkflowFilename),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create deploy environment")
@@ -503,10 +515,11 @@ func (h *Handler) CreateProjectDeployEnvironment(w http.ResponseWriter, r *http.
 // Pointer fields distinguish "not present" from "present and empty"; nil
 // leaves the column unchanged.
 type UpdateDeployEnvironmentRequest struct {
-	Name         *string `json:"name"`
-	TargetBranch *string `json:"target_branch"`
-	TargetURL    *string `json:"target_url"`
-	AutoPromote  *bool   `json:"auto_promote"`
+	Name                   *string `json:"name"`
+	TargetBranch           *string `json:"target_branch"`
+	TargetURL              *string `json:"target_url"`
+	AutoPromote            *bool   `json:"auto_promote"`
+	DeployWorkflowFilename *string `json:"deploy_workflow_filename"`
 }
 
 // loadDeployEnvironment resolves the environment ID URL param and verifies
@@ -541,11 +554,12 @@ func (h *Handler) UpdateDeployEnvironment(w http.ResponseWriter, r *http.Request
 		return
 	}
 	updated, err := h.Queries.UpdateDeployEnvironment(r.Context(), db.UpdateDeployEnvironmentParams{
-		ID:           env.ID,
-		Name:         ptrToText(req.Name),
-		TargetBranch: ptrToText(req.TargetBranch),
-		TargetUrl:    ptrToText(req.TargetURL),
-		AutoPromote:  pgBoolPtr(req.AutoPromote),
+		ID:                     env.ID,
+		Name:                   ptrToText(req.Name),
+		TargetBranch:           ptrToText(req.TargetBranch),
+		TargetUrl:              ptrToText(req.TargetURL),
+		AutoPromote:            pgBoolPtr(req.AutoPromote),
+		DeployWorkflowFilename: ptrToText(req.DeployWorkflowFilename),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update deploy environment")

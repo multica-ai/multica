@@ -73,6 +73,14 @@ export function ConfigureDeployEnvDialog({
   const [branch, setBranch] = useState(existing?.target_branch ?? "main");
   const [url, setUrl] = useState(existing?.target_url ?? "");
   const [autoPromote, setAutoPromote] = useState(existing?.auto_promote ?? false);
+  // Per-env override for the GitHub Actions workflow filename the auto-detect
+  // poller watches. Empty string means "use the workspace-level setting".
+  // The backend distinguishes "unset" (NULL) from "explicit empty" but we
+  // collapse both to "" in the UI for simplicity — a blank field always
+  // means "fall back to the workspace default".
+  const [workflowFilename, setWorkflowFilename] = useState(
+    existing?.deploy_workflow_filename ?? "",
+  );
   const [error, setError] = useState<string | null>(null);
 
   // Phase 6 — adapter config state. Defaults to whatever the env was
@@ -101,6 +109,7 @@ export function ConfigureDeployEnvDialog({
     setBranch(existing?.target_branch ?? "main");
     setUrl(existing?.target_url ?? "");
     setAutoPromote(existing?.auto_promote ?? false);
+    setWorkflowFilename(existing?.deploy_workflow_filename ?? "");
     setError(null);
     setAdapterKind(existing?.adapter_kind ?? "github_actions");
     setAdapterConfig("");
@@ -123,6 +132,7 @@ export function ConfigureDeployEnvDialog({
       target_branch: branch.trim() || null,
       target_url: url.trim() || null,
       auto_promote: autoPromote,
+      deploy_workflow_filename: workflowFilename.trim() || null,
     };
     try {
       await upsert.mutateAsync(payload);
@@ -306,6 +316,27 @@ export function ConfigureDeployEnvDialog({
               onChange={(e) => setUrl(e.target.value)}
               placeholder={t(($) => $.configure_dialog.url_placeholder)}
             />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label
+              className="text-xs text-muted-foreground"
+              htmlFor="ship-env-workflow-filename"
+            >
+              {t(($) => $.configure_dialog.workflow_filename_label)}
+            </Label>
+            <Input
+              id="ship-env-workflow-filename"
+              value={workflowFilename}
+              onChange={(e) => setWorkflowFilename(e.target.value)}
+              placeholder={t(
+                ($) => $.configure_dialog.workflow_filename_placeholder,
+              )}
+              className="font-mono text-[11px]"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              {t(($) => $.configure_dialog.workflow_filename_hint)}
+            </p>
           </div>
 
           <div className="flex items-start justify-between gap-3 rounded-md border bg-muted/20 p-3">
