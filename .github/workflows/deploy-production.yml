@@ -110,20 +110,63 @@ jobs:
               auto_inactive: false,
             });
 
+      - name: Stop orphaned containers from prior builds
+        # `docker compose up` only manages containers under its OWN
+        # project name (here: `multica`, set via `name:` in
+        # docker-compose.selfhost.yml). Containers left over from a
+        # prior local build that didn't use the same project name
+        # still hold the host ports we're about to bind, and the up
+        # command fails with "Bind for 0.0.0.0:PORT failed: port is
+        # already allocated".
+        #
+        # Sweep any leftover containers whose name starts with
+        # `multica-` (from a no-project-name compose) OR matches
+        # known service names. Idempotent — silently no-ops on a
+        # clean host. Force-rm because we'll recreate them in the
+        # next step.
+        #
+        # Runs BEFORE the preflight port check so our own stale
+        # containers (multica-backend-1 from a half-failed prior
+        # deploy still holding :8080) don't trip the preflight.
+        run: |
+          export PATH="${DOCKER_PATH_EXTRAS}:${PATH}"
+          set -e
+          # Tear down anything still labeled with this project first.
+          docker compose ${COMPOSE_FILES} down --remove-orphans || true
+          # Then catch loose containers from outside the project name
+          # (old `docker compose up` runs that didn't use `name:`).
+          for n in $(docker ps -aq --filter "name=multica-"); do
+            echo "Removing orphan container $n"
+            docker rm -f "$n" || true
+          done
+
       - name: Pre-flight — required host ports are free
-        # If a non-docker process holds the port we're about to bind
-        # (homebrew node, an old `pnpm dev:web`, PM2-managed service,
-        # launchd job, etc.) docker fails with the unhelpful
+        # If something OUTSIDE our own docker project holds the port
+        # we're about to bind — another tenant container on this Mac
+        # mini (pisignage-server, winery-manager, etc.), a homebrew
+        # node, an old `pnpm dev:web`, a PM2-managed service, a
+        # launchd job — docker fails with the unhelpful
         # `Bind for 0.0.0.0:PORT failed` *only after* a full image
         # rebuild that can take 5+ minutes. Detect early and fail
         # loud with the offending pid so the operator knows what to
-        # kill on the host.
+        # kill on the host or which `*_PORT` env var to retarget.
         #
         # We check the host ports that compose will try to bind:
         #   - backend:  ${PORT:-8080}
         #   - frontend: ${FRONTEND_PORT:-3000}
         # (postgres no longer publishes a host port — see PR #26.)
+        #
+        # Source the operator's .env first so the values here line up
+        # with what docker compose will actually use — otherwise the
+        # preflight checks the defaults (3000/8080) even when .env
+        # retargets the frontend onto a different host port.
         run: |
+          if [ -f .env ]; then
+            set -o allexport
+            # shellcheck disable=SC1091
+            . ./.env
+            set +o allexport
+          fi
           BACKEND_PORT="${PORT:-8080}"
           FRONTEND_HOST_PORT="${FRONTEND_PORT:-3000}"
           fail=0
@@ -140,36 +183,11 @@ jobs:
           if [ $fail -eq 1 ]; then
             echo ""
             echo "Free the port(s) above (kill the process or stop the service)"
-            echo "and re-run the workflow. The orphan-container sweep in the"
-            echo "next step only handles docker-managed processes."
+            echo "and re-run the workflow. The orphan-container sweep above"
+            echo "only handles multica's own docker-managed containers — anything"
+            echo "outside our project shows up here and needs operator action."
             exit 1
           fi
-
-      - name: Stop orphaned containers from prior builds
-        # `docker compose up` only manages containers under its OWN
-        # project name (here: `multica`, set via `name:` in
-        # docker-compose.selfhost.yml). Containers left over from a
-        # prior local build that didn't use the same project name
-        # still hold the host ports we're about to bind, and the up
-        # command fails with "Bind for 0.0.0.0:PORT failed: port is
-        # already allocated".
-        #
-        # Sweep any leftover containers whose name starts with
-        # `multica-` (from a no-project-name compose) OR matches
-        # known service names. Idempotent — silently no-ops on a
-        # clean host. Force-rm because we'll recreate them in the
-        # next step.
-        run: |
-          export PATH="${DOCKER_PATH_EXTRAS}:${PATH}"
-          set -e
-          # Tear down anything still labeled with this project first.
-          docker compose ${COMPOSE_FILES} down --remove-orphans || true
-          # Then catch loose containers from outside the project name
-          # (old `docker compose up` runs that didn't use `name:`).
-          for n in $(docker ps -aq --filter "name=multica-"); do
-            echo "Removing orphan container $n"
-            docker rm -f "$n" || true
-          done
 
       - name: Build + restart containers
         # `up -d --build` is idempotent: rebuilds images that changed,
