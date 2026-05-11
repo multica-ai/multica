@@ -110,6 +110,41 @@ jobs:
               auto_inactive: false,
             });
 
+      - name: Pre-flight — required host ports are free
+        # If a non-docker process holds the port we're about to bind
+        # (homebrew node, an old `pnpm dev:web`, PM2-managed service,
+        # launchd job, etc.) docker fails with the unhelpful
+        # `Bind for 0.0.0.0:PORT failed` *only after* a full image
+        # rebuild that can take 5+ minutes. Detect early and fail
+        # loud with the offending pid so the operator knows what to
+        # kill on the host.
+        #
+        # We check the host ports that compose will try to bind:
+        #   - backend:  ${PORT:-8080}
+        #   - frontend: ${FRONTEND_PORT:-3000}
+        # (postgres no longer publishes a host port — see PR #26.)
+        run: |
+          BACKEND_PORT="${PORT:-8080}"
+          FRONTEND_HOST_PORT="${FRONTEND_PORT:-3000}"
+          fail=0
+          for port in "$BACKEND_PORT" "$FRONTEND_HOST_PORT"; do
+            holder=$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | tail -n +2 || true)
+            if [ -n "$holder" ]; then
+              echo "::error::Port $port is already bound on the host:"
+              echo "$holder"
+              fail=1
+            else
+              echo "Port $port is free."
+            fi
+          done
+          if [ $fail -eq 1 ]; then
+            echo ""
+            echo "Free the port(s) above (kill the process or stop the service)"
+            echo "and re-run the workflow. The orphan-container sweep in the"
+            echo "next step only handles docker-managed processes."
+            exit 1
+          fi
+
       - name: Stop orphaned containers from prior builds
         # `docker compose up` only manages containers under its OWN
         # project name (here: `multica`, set via `name:` in
