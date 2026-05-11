@@ -1516,9 +1516,14 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 				"type":        comment.Type,
 				"parent_id":   util.UUIDToPtr(comment.ParentID),
 				"created_at":  comment.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+				"updated_at":  comment.UpdatedAt.Time.Format("2006-01-02T15:04:05Z"),
+				"reactions":   []any{},
+				"attachments": []any{},
 			},
-			"issue_title":  issue.Title,
-			"issue_status": issue.Status,
+			"issue_title":         issue.Title,
+			"issue_assignee_type": util.TextToPtr(issue.AssigneeType),
+			"issue_assignee_id":   util.UUIDToPtr(issue.AssigneeID),
+			"issue_status":        issue.Status,
 		},
 	})
 }
