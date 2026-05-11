@@ -148,7 +148,7 @@ describe("createMentionSuggestion", () => {
     );
   });
 
-  it("filters agents owned by other users from mention suggestions", () => {
+  it("filters private agents from other users but keeps workspace agents", () => {
     const qc = fakeQc({
       members: [{ user_id: "u-current", name: "CurrentUser", role: "member" }],
       agents: [
@@ -182,8 +182,9 @@ describe("createMentionSuggestion", () => {
     const agentIds = result.filter((i) => i.type === "agent").map((i) => i.id);
 
     expect(agentIds).toContain("own-private");
-    // Workspace-visible agents owned by other users are now hidden too.
-    expect(agentIds).not.toContain("other-workspace");
+    // Workspace agents are shared — always visible regardless of owner.
+    expect(agentIds).toContain("other-workspace");
+    // Private agents from other users are hidden.
     expect(agentIds).not.toContain("other-private");
   });
 
@@ -220,7 +221,7 @@ describe("createMentionSuggestion", () => {
     ).toBe(true);
   });
 
-  it("hides all agents owned by someone else from a regular member", () => {
+  it("hides private agents from other users but keeps workspace agents visible", () => {
     const qc = fakeQc({
       members: [
         { user_id: "u-current", name: "CurrentUser", role: "member" },
@@ -228,7 +229,7 @@ describe("createMentionSuggestion", () => {
         { user_id: "u2", name: "Bob", role: "member" },
       ],
       agents: [
-        // Bob's personal agent — current user should not see it.
+        // Bob's private agent — current user should NOT see it.
         {
           id: "a-personal-bob",
           name: "Atlas",
@@ -236,7 +237,7 @@ describe("createMentionSuggestion", () => {
           visibility: "private",
           owner_id: "u2",
         },
-        // Current user's own personal agent — should be visible.
+        // Current user's own private agent — should be visible.
         {
           id: "a-personal-alice",
           name: "Athena",
@@ -244,7 +245,7 @@ describe("createMentionSuggestion", () => {
           visibility: "private",
           owner_id: "u-current",
         },
-        // Workspace agent owned by Bob — hidden from regular members.
+        // Workspace agent owned by Bob — should be visible (shared).
         {
           id: "a-shared",
           name: "Aether",
@@ -261,13 +262,11 @@ describe("createMentionSuggestion", () => {
     const items = result as MentionItem[];
 
     expect(items.some((i) => i.type === "agent" && i.label === "Athena")).toBe(true);
-    expect(items.some((i) => i.type === "agent" && i.label === "Aether")).toBe(false);
+    expect(items.some((i) => i.type === "agent" && i.label === "Aether")).toBe(true);
     expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(false);
   });
 
-  it("does not show other users' personal agents to a workspace admin", () => {
-    // Even admins should not see or @mention agents owned by other users —
-    // agent visibility in the @mention list is strictly per owner_id.
+  it("hides other users' private agents even from a workspace admin", () => {
     const qc = fakeQc({
       members: [
         { user_id: "u-current", name: "CurrentUser", role: "admin" },
