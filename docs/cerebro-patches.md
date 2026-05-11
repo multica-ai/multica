@@ -77,6 +77,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `auth-jwt-test` | server/internal/auth/jwt_test.go | 65 | Auth additions (master-code, JWT) |
 | `auth-master-code-handler` | server/internal/handler/auth_master_code_test.go | 69 | Auth additions (master-code, JWT) |
 | `autopilot-cerebro` | server/internal/handler/autopilot_cerebro.go | 130 | Scope visibility helpers (workspace/personal/group) for the upstream autopilot handler — JEH-724 |
+| `autopilot-recovery-preflight` | server/internal/service/autopilot.go<br>server/internal/cerebro/autopilotutil/template.go<br>server/internal/cerebro/issue_recovery/preflight.go | 9 (hook) + 364 (cerebro zone) | JEH-822 — generate deterministic issue-recovery worklists from platform data before agent runs and support Firtal autopilot title tokens (`{{.Date}}`, `{{.ISOWeek}}`) |
 | `autopilot-scope-cli` | server/cmd/multica/cerebro_autopilot_scope.go | ~330 | CLI flags, validation, and owner/group resolution for autopilot scopes — JEH-725 |
 | `autopilot-scope-cli-create-body` | server/cmd/multica/cmd_autopilot.go | 2 | Add scope/owner_user_id/group_id to autopilot create request bodies — JEH-725 |
 | `autopilot-scope-cli-list-query` | server/cmd/multica/cmd_autopilot.go | 2 | Add optional `scope` query parameter for autopilot list — JEH-725 |

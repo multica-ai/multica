@@ -10,6 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	// CEREBRO-PATCH(autopilot-recovery-preflight): Firtal issue-recovery autopilots get platform-generated worklists; title templates support Firtal's Go-style date tokens.
+	cerebroautopilot "github.com/multica-ai/multica/server/internal/cerebro/autopilotutil"
+	issuerecovery "github.com/multica-ai/multica/server/internal/cerebro/issue_recovery"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -110,6 +113,10 @@ func (s *AutopilotService) DispatchAutopilot(
 
 // dispatchCreateIssue creates an issue and enqueues a task for the agent.
 func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
+	now := time.Now()
+	title := s.interpolateTemplate(ap, now)
+	description := s.buildIssueDescription(ctx, ap, now)
+
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -123,9 +130,6 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	if err != nil {
 		return fmt.Errorf("increment issue counter: %w", err)
 	}
-
-	title := s.interpolateTemplate(ap)
-	description := s.buildIssueDescription(ap)
 
 	issue, err := qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 		WorkspaceID:   ap.WorkspaceID,
@@ -560,21 +564,23 @@ func autopilotRunDurationMS(run db.AutopilotRun) int64 {
 // buildIssueDescription appends an autopilot system instruction to the
 // user-provided description, asking the agent to rename the issue after
 // it understands the actual work.
-func (s *AutopilotService) buildIssueDescription(ap db.Autopilot) pgtype.Text {
-	now := time.Now().UTC().Format("2006-01-02 15:04 UTC")
-	note := fmt.Sprintf("\n\n---\n*Autopilot run triggered at %s. After starting work, rename this issue to accurately reflect what you are doing.*", now)
+func (s *AutopilotService) buildIssueDescription(ctx context.Context, ap db.Autopilot, now time.Time) pgtype.Text {
+	triggeredAt := now.UTC().Format("2006-01-02 15:04 UTC")
+	note := fmt.Sprintf("\n\n---\n*Autopilot run triggered at %s. After starting work, rename this issue to accurately reflect what you are doing.*", triggeredAt)
 	base := ap.Description.String
-	return pgtype.Text{String: base + note, Valid: true}
+	// CEREBRO-PATCH(autopilot-recovery-preflight): append deterministic issue-recovery scan data before the agent starts.
+	description := issuerecovery.AppendPreflight(ctx, s.Queries, ap, base+note, now)
+	return pgtype.Text{String: description, Valid: true}
 }
 
-// interpolateTemplate replaces {{date}} in the issue title template.
-func (s *AutopilotService) interpolateTemplate(ap db.Autopilot) string {
+// interpolateTemplate replaces supported date tokens in the issue title template.
+func (s *AutopilotService) interpolateTemplate(ap db.Autopilot, now time.Time) string {
 	tmpl := ap.Title
 	if ap.IssueTitleTemplate.Valid && ap.IssueTitleTemplate.String != "" {
 		tmpl = ap.IssueTitleTemplate.String
 	}
-	now := time.Now().UTC().Format("2006-01-02")
-	return strings.ReplaceAll(tmpl, "{{date}}", now)
+	// CEREBRO-PATCH(autopilot-recovery-preflight): delegate Firtal token support to cerebro zone.
+	return cerebroautopilot.InterpolateTitleTemplate(tmpl, now)
 }
 
 func (s *AutopilotService) getIssuePrefix(workspaceID pgtype.UUID) string {
