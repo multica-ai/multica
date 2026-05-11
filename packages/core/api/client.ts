@@ -70,6 +70,7 @@ import type {
   ChatSession,
   ChatMessage,
   ChatPendingTask,
+  ChatSessionUsage,
   PendingChatTasksResponse,
   SendChatMessageResponse,
   Channel,
@@ -1473,6 +1474,10 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ content }),
     });
+  }
+
+  async getChatSessionUsage(sessionId: string): Promise<ChatSessionUsage> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/usage`);
   }
 
   async getPendingChatTask(sessionId: string): Promise<ChatPendingTask> {

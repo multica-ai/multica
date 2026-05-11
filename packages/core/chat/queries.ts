@@ -23,6 +23,8 @@ export const chatKeys = {
   pendingTasks: (wsId: string) => [...chatKeys.all(wsId), "pending-tasks"] as const,
   /** Per-task execution messages — shared with issue agent cards. */
   taskMessages: (taskId: string) => ["task-messages", taskId] as const,
+  /** Aggregate token + cost spend for a chat session — JEH-736. */
+  usage: (sessionId: string) => ["chat", "usage", sessionId] as const,
 };
 
 export function chatSessionsOptions(wsId: string) {
@@ -100,6 +102,21 @@ export function pendingChatTasksOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.pendingTasks(wsId),
     queryFn: () => api.listPendingChatTasks(),
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * JEH-736 — token + cost spend for a chat session, used by the chat
+ * session header to expose "Session price" + token breakdown. Invalidated
+ * on `chat:done` / `task:completed` / `task:failed` so the number tracks
+ * the live spend.
+ */
+export function chatSessionUsageOptions(sessionId: string) {
+  return queryOptions({
+    queryKey: chatKeys.usage(sessionId),
+    queryFn: () => api.getChatSessionUsage(sessionId),
+    enabled: !!sessionId,
     staleTime: Infinity,
   });
 }

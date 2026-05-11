@@ -2126,7 +2126,13 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// GetIssueUsage returns aggregated token usage for all tasks belonging to an issue.
+// GetIssueUsage returns aggregated token usage and cost for all tasks
+// belonging to an issue, plus the same totals for the full sub-issue
+// subtree. Cost is computed against pkg/pricing (the same authoritative
+// table used for budget enforcement). Both cost numbers are always
+// returned, even when the issue has no children — the sidebar then
+// renders "Cost (this issue)" and "Cost (incl. sub-issues)" with the
+// same value.
 func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -2134,18 +2140,54 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, err := h.Queries.GetIssueUsageSummary(r.Context(), issue.ID)
+	selfRows, err := h.Queries.GetIssueUsageByModel(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get issue usage")
 		return
 	}
+	subtreeRows, err := h.Queries.GetIssueSubtreeUsageByModel(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get issue subtree usage")
+		return
+	}
+
+	var (
+		selfInput, selfOutput, selfCacheRead, selfCacheWrite int64
+		selfTaskCount                                        int32
+		selfCostCents                                        int64
+	)
+	for _, row := range selfRows {
+		selfInput += row.TotalInputTokens
+		selfOutput += row.TotalOutputTokens
+		selfCacheRead += row.TotalCacheReadTokens
+		selfCacheWrite += row.TotalCacheWriteTokens
+		selfTaskCount += row.TaskCount
+		selfCostCents += pricing.ComputeCents(row.Model, pricing.Usage{
+			InputTokens:      row.TotalInputTokens,
+			OutputTokens:     row.TotalOutputTokens,
+			CacheReadTokens:  row.TotalCacheReadTokens,
+			CacheWriteTokens: row.TotalCacheWriteTokens,
+		})
+	}
+
+	var subtreeCostCents int64
+	for _, row := range subtreeRows {
+		subtreeCostCents += pricing.ComputeCents(row.Model, pricing.Usage{
+			InputTokens:      row.TotalInputTokens,
+			OutputTokens:     row.TotalOutputTokens,
+			CacheReadTokens:  row.TotalCacheReadTokens,
+			CacheWriteTokens: row.TotalCacheWriteTokens,
+		})
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"total_input_tokens":       row.TotalInputTokens,
-		"total_output_tokens":      row.TotalOutputTokens,
-		"total_cache_read_tokens":  row.TotalCacheReadTokens,
-		"total_cache_write_tokens": row.TotalCacheWriteTokens,
-		"task_count":               row.TaskCount,
+		"total_input_tokens":       selfInput,
+		"total_output_tokens":      selfOutput,
+		"total_cache_read_tokens":  selfCacheRead,
+		"total_cache_write_tokens": selfCacheWrite,
+		"task_count":               selfTaskCount,
+		"cost_cents":               selfCostCents,
+		"subtree_cost_cents":       subtreeCostCents,
 	})
 }
 

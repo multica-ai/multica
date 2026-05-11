@@ -82,7 +82,7 @@ export type {
   UpdateArtifactFolderRequest,
   ListArtifactsParams,
 } from "./artifact";
-export type { ChatSession, ChatMessage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
+export type { ChatSession, ChatMessage, ChatPendingTask, ChatSessionUsage, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
 // CEREBRO-PATCH(core-types-index-channel-listen): JEH-699 — re-export
 // listen-mode types alongside the upstream channel types.
 export type {

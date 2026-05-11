@@ -191,6 +191,10 @@ export function useRealtimeSync(
         // every list-of-tasks query stale" so cache stays fresh even
         // when the relevant component isn't currently mounted.
         qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
+        // Any task:* event can shift token + cost spend on the issue and
+        // its ancestors. Invalidate by prefix — an open ancestor's subtree
+        // rollup covers a descendant we don't have the parent chain for here.
+        qc.invalidateQueries({ queryKey: ["issues", "usage"] });
       },
     };
 
@@ -655,6 +659,8 @@ export function useRealtimeSync(
       // would otherwise be hidden during the refetch round-trip.
       qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      // Refresh session price chip after a completed task.
+      qc.invalidateQueries({ queryKey: chatKeys.usage(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
 
@@ -676,6 +682,8 @@ export function useRealtimeSync(
       // requiring a page refresh.
       qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      // Failed tasks still report partial usage — refresh the session price.
+      qc.invalidateQueries({ queryKey: chatKeys.usage(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
 

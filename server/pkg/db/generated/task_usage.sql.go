@@ -11,6 +11,173 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getChatSessionUsageByModel = `-- name: GetChatSessionUsageByModel :many
+SELECT
+    tu.model,
+    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
+    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.chat_session_id = $1
+GROUP BY tu.model
+`
+
+type GetChatSessionUsageByModelRow struct {
+	Model                 string `json:"model"`
+	TotalInputTokens      int64  `json:"total_input_tokens"`
+	TotalOutputTokens     int64  `json:"total_output_tokens"`
+	TotalCacheReadTokens  int64  `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int64  `json:"total_cache_write_tokens"`
+	TaskCount             int32  `json:"task_count"`
+}
+
+// Per-model token totals for tasks belonging to this chat session. Used by
+// the chat session header to expose session price + token breakdown.
+func (q *Queries) GetChatSessionUsageByModel(ctx context.Context, chatSessionID pgtype.UUID) ([]GetChatSessionUsageByModelRow, error) {
+	rows, err := q.db.Query(ctx, getChatSessionUsageByModel, chatSessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetChatSessionUsageByModelRow{}
+	for rows.Next() {
+		var i GetChatSessionUsageByModelRow
+		if err := rows.Scan(
+			&i.Model,
+			&i.TotalInputTokens,
+			&i.TotalOutputTokens,
+			&i.TotalCacheReadTokens,
+			&i.TotalCacheWriteTokens,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getIssueSubtreeUsageByModel = `-- name: GetIssueSubtreeUsageByModel :many
+WITH RECURSIVE subtree AS (
+    SELECT issue.id FROM issue WHERE issue.id = $1
+    UNION ALL
+    SELECT i.id
+    FROM issue i
+    JOIN subtree s ON i.parent_issue_id = s.id
+)
+SELECT
+    tu.model,
+    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
+    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.issue_id IN (SELECT id FROM subtree)
+GROUP BY tu.model
+`
+
+type GetIssueSubtreeUsageByModelRow struct {
+	Model                 string `json:"model"`
+	TotalInputTokens      int64  `json:"total_input_tokens"`
+	TotalOutputTokens     int64  `json:"total_output_tokens"`
+	TotalCacheReadTokens  int64  `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int64  `json:"total_cache_write_tokens"`
+	TaskCount             int32  `json:"task_count"`
+}
+
+// Per-model token totals across the issue and all descendants (recursive).
+// The subtree CTE walks parent_issue_id at every level so deeply nested
+// sub-issues roll up into their root. Cost is summed per model in Go and
+// returned alongside the "this issue only" total.
+func (q *Queries) GetIssueSubtreeUsageByModel(ctx context.Context, id pgtype.UUID) ([]GetIssueSubtreeUsageByModelRow, error) {
+	rows, err := q.db.Query(ctx, getIssueSubtreeUsageByModel, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetIssueSubtreeUsageByModelRow{}
+	for rows.Next() {
+		var i GetIssueSubtreeUsageByModelRow
+		if err := rows.Scan(
+			&i.Model,
+			&i.TotalInputTokens,
+			&i.TotalOutputTokens,
+			&i.TotalCacheReadTokens,
+			&i.TotalCacheWriteTokens,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getIssueUsageByModel = `-- name: GetIssueUsageByModel :many
+SELECT
+    tu.model,
+    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
+    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.issue_id = $1
+GROUP BY tu.model
+`
+
+type GetIssueUsageByModelRow struct {
+	Model                 string `json:"model"`
+	TotalInputTokens      int64  `json:"total_input_tokens"`
+	TotalOutputTokens     int64  `json:"total_output_tokens"`
+	TotalCacheReadTokens  int64  `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int64  `json:"total_cache_write_tokens"`
+	TaskCount             int32  `json:"task_count"`
+}
+
+// Per-model token totals for tasks belonging to this issue. Used by the
+// handler to compute cost via pkg/pricing — the same authoritative table
+// used for budget enforcement, so the sidebar number matches what the
+// workspace was actually charged.
+func (q *Queries) GetIssueUsageByModel(ctx context.Context, issueID pgtype.UUID) ([]GetIssueUsageByModelRow, error) {
+	rows, err := q.db.Query(ctx, getIssueUsageByModel, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetIssueUsageByModelRow{}
+	for rows.Next() {
+		var i GetIssueUsageByModelRow
+		if err := rows.Scan(
+			&i.Model,
+			&i.TotalInputTokens,
+			&i.TotalOutputTokens,
+			&i.TotalCacheReadTokens,
+			&i.TotalCacheWriteTokens,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getIssueUsageSummary = `-- name: GetIssueUsageSummary :one
 SELECT
     COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,

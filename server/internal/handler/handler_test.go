@@ -942,6 +942,18 @@ func TestGetChatSessionRejectsMalformedSessionID(t *testing.T) {
 	}
 }
 
+// JEH-736 — usage endpoint shares the same loadChatSessionForUser path as
+// GetChatSession, so the malformed UUID rejection should be consistent.
+func TestGetChatSessionUsageRejectsMalformedSessionID(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/chat/sessions/not-a-uuid/usage", nil)
+	req = withURLParam(req, "sessionId", "not-a-uuid")
+	testHandler.GetChatSessionUsage(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("GetChatSessionUsage: expected 400 for malformed sessionId, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestCreateAutopilotRejectsMalformedAssigneeID(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/autopilots", map[string]any{

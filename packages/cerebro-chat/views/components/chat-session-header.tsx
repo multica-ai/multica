@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Archive, ArchiveRestore, Check, MoreHorizontal, FileText, Pencil, X } from "lucide-react";
 import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
@@ -28,6 +29,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
+import { chatSessionUsageOptions } from "@multica/core/chat/queries";
 import type { ChatSession } from "@multica/core/types";
 import {
   useUpdateChatSession,
@@ -57,6 +59,13 @@ export function ChatSessionHeader({ session }: { session: ChatSession | null }) 
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<Pending>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // JEH-736 — token + cost spend for the active session. WS invalidation
+  // (use-realtime-sync) refreshes this on chat:done / task:completed /
+  // task:failed so the chip tracks live spend without polling.
+  const { data: usage } = useQuery({
+    ...chatSessionUsageOptions(session?.id ?? ""),
+    enabled: !!session?.id,
+  });
 
   // Drop edit mode + clear pending dialog if the session changes underneath us.
   useEffect(() => {
@@ -195,7 +204,39 @@ export function ChatSessionHeader({ session }: { session: ChatSession | null }) 
         </button>
       )}
 
-      <div className="flex shrink-0 items-center gap-0.5">
+      <div className="flex shrink-0 items-center gap-1">
+        {/* JEH-736 — session price chip with token breakdown tooltip.
+            Hidden until the session has logged at least one task so a brand-new
+            session doesn't carry a misleading "$0.00" badge. */}
+        {usage && usage.task_count > 0 && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  aria-label={s.session_price_aria}
+                  className="rounded-md bg-accent/60 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground"
+                >
+                  {formatChatCost(usage.cost_cents)}
+                </span>
+              }
+            />
+            <TooltipContent side="bottom" className="text-xs">
+              <div className="font-medium">{s.session_price_label}: {formatChatCost(usage.cost_cents)}</div>
+              <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 text-[11px] text-muted-foreground">
+                <span>{s.session_token_breakdown_input}</span>
+                <span className="text-right">{formatChatTokens(usage.total_input_tokens)}</span>
+                <span>{s.session_token_breakdown_output}</span>
+                <span className="text-right">{formatChatTokens(usage.total_output_tokens)}</span>
+                <span>{s.session_token_breakdown_cache_read}</span>
+                <span className="text-right">{formatChatTokens(usage.total_cache_read_tokens)}</span>
+                <span>{s.session_token_breakdown_cache_write}</span>
+                <span className="text-right">{formatChatTokens(usage.total_cache_write_tokens)}</span>
+                <span>{s.session_token_breakdown_runs}</span>
+                <span className="text-right">{usage.task_count}</span>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        )}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -308,4 +349,19 @@ export function ChatSessionHeader({ session }: { session: ChatSession | null }) 
       </AlertDialog>
     </div>
   );
+}
+
+// JEH-736 — keep the formatters local so this component does not depend
+// on @multica/views (which would create a circular package edge).
+function formatChatCost(cents: number): string {
+  const usd = cents / 100;
+  if (usd === 0) return "$0.00";
+  if (usd < 0.01) return "<$0.01";
+  return `$${usd.toFixed(2)}`;
+}
+
+function formatChatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
 }

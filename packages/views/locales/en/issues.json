@@ -114,6 +114,8 @@
     "prop_cache": "Cache",
     "prop_cache_value": "{{read}} read / {{write}} write",
     "prop_runs": "Runs",
+    "prop_cost_self": "Cost (this issue)",
+    "prop_cost_subtree": "Cost (incl. sub-issues)",
     "activity_section": "Activity",
     "subscribe": "Subscribe",
     "unsubscribe": "Unsubscribe",

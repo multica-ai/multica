@@ -67,3 +67,59 @@ SELECT
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1;
+
+-- name: GetIssueUsageByModel :many
+-- Per-model token totals for tasks belonging to this issue. Used by the
+-- handler to compute cost via pkg/pricing — the same authoritative table
+-- used for budget enforcement, so the sidebar number matches what the
+-- workspace was actually charged.
+SELECT
+    tu.model,
+    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
+    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.issue_id = $1
+GROUP BY tu.model;
+
+-- name: GetIssueSubtreeUsageByModel :many
+-- Per-model token totals across the issue and all descendants (recursive).
+-- The subtree CTE walks parent_issue_id at every level so deeply nested
+-- sub-issues roll up into their root. Cost is summed per model in Go and
+-- returned alongside the "this issue only" total.
+WITH RECURSIVE subtree AS (
+    SELECT issue.id FROM issue WHERE issue.id = $1
+    UNION ALL
+    SELECT i.id
+    FROM issue i
+    JOIN subtree s ON i.parent_issue_id = s.id
+)
+SELECT
+    tu.model,
+    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
+    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.issue_id IN (SELECT id FROM subtree)
+GROUP BY tu.model;
+
+-- name: GetChatSessionUsageByModel :many
+-- Per-model token totals for tasks belonging to this chat session. Used by
+-- the chat session header to expose session price + token breakdown.
+SELECT
+    tu.model,
+    COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
+    COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.chat_session_id = $1
+GROUP BY tu.model;

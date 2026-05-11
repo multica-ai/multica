@@ -339,6 +339,11 @@ export interface IssueUsageSummary {
   total_cache_read_tokens: number;
   total_cache_write_tokens: number;
   task_count: number;
+  // Server-computed cost in USD-cents for the issue itself and the full
+  // sub-issue subtree. The sidebar always renders both lines; equal values
+  // mean the issue has no children.
+  cost_cents: number;
+  subtree_cost_cents: number;
 }
 
 export interface RuntimeUsage {

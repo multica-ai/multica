@@ -113,6 +113,8 @@
     "prop_cache": "缓存",
     "prop_cache_value": "{{read}} 读 / {{write}} 写",
     "prop_runs": "运行次数",
+    "prop_cost_self": "费用（本议题）",
+    "prop_cost_subtree": "费用（含子议题）",
     "activity_section": "动态",
     "subscribe": "订阅",
     "unsubscribe": "取消订阅",

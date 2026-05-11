@@ -80,3 +80,18 @@ export interface ChatPendingTask {
   status?: string;
   created_at?: string;
 }
+
+/**
+ * Aggregate token + cost spend for a chat session. Mirrors IssueUsageSummary
+ * so the chat session header can show the same "Session price + token
+ * breakdown" the issue sidebar shows. Cost cents come from pkg/pricing on
+ * the server.
+ */
+export interface ChatSessionUsage {
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+  task_count: number;
+  cost_cents: number;
+}

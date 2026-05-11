@@ -30,6 +30,14 @@ type StringTable = {
   untitled: string;
   toast_converted: string;
   toast_convert_failed: string;
+  // JEH-736 — session price chip + token breakdown tooltip.
+  session_price_label: string;
+  session_price_aria: string;
+  session_token_breakdown_input: string;
+  session_token_breakdown_output: string;
+  session_token_breakdown_cache_read: string;
+  session_token_breakdown_cache_write: string;
+  session_token_breakdown_runs: string;
 };
 
 const en: StringTable = {
@@ -59,6 +67,13 @@ const en: StringTable = {
   untitled: "New chat",
   toast_converted: "Issue created",
   toast_convert_failed: "Failed to create issue",
+  session_price_label: "Session price",
+  session_price_aria: "Session price and token breakdown",
+  session_token_breakdown_input: "Input",
+  session_token_breakdown_output: "Output",
+  session_token_breakdown_cache_read: "Cache read",
+  session_token_breakdown_cache_write: "Cache write",
+  session_token_breakdown_runs: "Runs",
 };
 
 const da: StringTable = {
@@ -88,6 +103,13 @@ const da: StringTable = {
   untitled: "Ny chat",
   toast_converted: "Issue oprettet",
   toast_convert_failed: "Kunne ikke oprette issue",
+  session_price_label: "Sessions-pris",
+  session_price_aria: "Sessions-pris og token-fordeling",
+  session_token_breakdown_input: "Input",
+  session_token_breakdown_output: "Output",
+  session_token_breakdown_cache_read: "Cache read",
+  session_token_breakdown_cache_write: "Cache write",
+  session_token_breakdown_runs: "Kørsler",
 };
 
 export function useCerebroChatHeaderStrings(): StringTable {

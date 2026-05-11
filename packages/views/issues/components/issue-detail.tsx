@@ -214,6 +214,15 @@ function shallowEqualEntries(a: TimelineEntry[], b: TimelineEntry[]): boolean {
   return true;
 }
 
+// Render server-returned cents as USD with a precision floor so single-digit
+// cent runs don't render as "$0.00".
+function formatCostCents(cents: number): string {
+  const usd = cents / 100;
+  if (usd === 0) return "$0.00";
+  if (usd < 0.01) return "<$0.01";
+  return `$${usd.toFixed(2)}`;
+}
+
 function TimelineSkeleton() {
   return (
     <div className="mt-4 flex flex-col gap-3">
@@ -1057,8 +1066,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           when there are no runs to show. */}
       <ExecutionLogSection issueId={id} />
 
-      {/* Token usage */}
-      {usage && usage.task_count > 0 && (
+      {/* Token usage + cost. Also rendered when the issue itself has no runs
+          but a sub-issue does, so the rollup stays visible on parent stories. */}
+      {usage && (usage.task_count > 0 || usage.subtree_cost_cents > 0) && (
         <div>
           <button
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${tokenUsageOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
@@ -1068,24 +1078,36 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${tokenUsageOpen ? "rotate-90" : ""}`} />
           </button>
           {tokenUsageOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
-            <PropRow label={t(($) => $.detail.prop_input)}>
-              <span className="text-muted-foreground">{formatTokenCount(usage.total_input_tokens)}</span>
-            </PropRow>
-            <PropRow label={t(($) => $.detail.prop_output)}>
-              <span className="text-muted-foreground">{formatTokenCount(usage.total_output_tokens)}</span>
-            </PropRow>
-            {(usage.total_cache_read_tokens > 0 || usage.total_cache_write_tokens > 0) && (
-              <PropRow label={t(($) => $.detail.prop_cache)}>
-                <span className="text-muted-foreground">
-                  {t(($) => $.detail.prop_cache_value, {
-                    read: formatTokenCount(usage.total_cache_read_tokens),
-                    write: formatTokenCount(usage.total_cache_write_tokens),
-                  })}
-                </span>
-              </PropRow>
+            {usage.task_count > 0 && (
+              <>
+                <PropRow label={t(($) => $.detail.prop_input)}>
+                  <span className="text-muted-foreground">{formatTokenCount(usage.total_input_tokens)}</span>
+                </PropRow>
+                <PropRow label={t(($) => $.detail.prop_output)}>
+                  <span className="text-muted-foreground">{formatTokenCount(usage.total_output_tokens)}</span>
+                </PropRow>
+                {(usage.total_cache_read_tokens > 0 || usage.total_cache_write_tokens > 0) && (
+                  <PropRow label={t(($) => $.detail.prop_cache)}>
+                    <span className="text-muted-foreground">
+                      {t(($) => $.detail.prop_cache_value, {
+                        read: formatTokenCount(usage.total_cache_read_tokens),
+                        write: formatTokenCount(usage.total_cache_write_tokens),
+                      })}
+                    </span>
+                  </PropRow>
+                )}
+                <PropRow label={t(($) => $.detail.prop_runs)}>
+                  <span className="text-muted-foreground">{usage.task_count}</span>
+                </PropRow>
+              </>
             )}
-            <PropRow label={t(($) => $.detail.prop_runs)}>
-              <span className="text-muted-foreground">{usage.task_count}</span>
+            {/* Always render both cost lines — when the issue has no
+                children they collapse to the same value. */}
+            <PropRow label={t(($) => $.detail.prop_cost_self)}>
+              <span className="text-muted-foreground">{formatCostCents(usage.cost_cents)}</span>
+            </PropRow>
+            <PropRow label={t(($) => $.detail.prop_cost_subtree)}>
+              <span className="text-muted-foreground">{formatCostCents(usage.subtree_cost_cents)}</span>
             </PropRow>
           </div>}
         </div>

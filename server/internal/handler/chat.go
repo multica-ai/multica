@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/pricing"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -198,6 +199,59 @@ func (h *Handler) GetChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, chatSessionToResponse(session))
+}
+
+// GetChatSessionUsage returns aggregate token + cost spend for a chat
+// session. Mirrors GetIssueUsage so the chat session header can show the
+// same "Session price + token breakdown" the issue sidebar shows. Cost is
+// computed against pkg/pricing (single source of truth shared with budget
+// enforcement); the frontend just formats cents → USD.
+func (h *Handler) GetChatSessionUsage(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+
+	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+
+	rows, err := h.Queries.GetChatSessionUsageByModel(r.Context(), session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get chat session usage")
+		return
+	}
+
+	var (
+		totalInput, totalOutput, totalCacheRead, totalCacheWrite int64
+		taskCount                                                int32
+		costCents                                                int64
+	)
+	for _, row := range rows {
+		totalInput += row.TotalInputTokens
+		totalOutput += row.TotalOutputTokens
+		totalCacheRead += row.TotalCacheReadTokens
+		totalCacheWrite += row.TotalCacheWriteTokens
+		taskCount += row.TaskCount
+		costCents += pricing.ComputeCents(row.Model, pricing.Usage{
+			InputTokens:      row.TotalInputTokens,
+			OutputTokens:     row.TotalOutputTokens,
+			CacheReadTokens:  row.TotalCacheReadTokens,
+			CacheWriteTokens: row.TotalCacheWriteTokens,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total_input_tokens":       totalInput,
+		"total_output_tokens":      totalOutput,
+		"total_cache_read_tokens":  totalCacheRead,
+		"total_cache_write_tokens": totalCacheWrite,
+		"task_count":               taskCount,
+		"cost_cents":               costCents,
+	})
 }
 
 // DeleteChatSession hard-deletes a chat session owned by the caller. The
