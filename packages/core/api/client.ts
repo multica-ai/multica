@@ -108,6 +108,11 @@ import type {
   NotificationPreferences,
   AgentDefaults,
   AgentDefaultsWithUser,
+  WikiPage,
+  ListWikiPagesResponse,
+  CreateWikiPageRequest,
+  UpdateWikiPageRequest,
+  ReorderWikiPagesRequest,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -1050,6 +1055,40 @@ export class ApiClient {
   async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; wiki_content?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[] }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Wiki pages
+  async listWikiPages(): Promise<ListWikiPagesResponse> {
+    return this.fetch("/api/wiki-pages");
+  }
+
+  async getWikiPage(id: string): Promise<WikiPage> {
+    return this.fetch(`/api/wiki-pages/${id}`);
+  }
+
+  async createWikiPage(data: CreateWikiPageRequest): Promise<WikiPage> {
+    return this.fetch("/api/wiki-pages", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateWikiPage(id: string, data: UpdateWikiPageRequest): Promise<WikiPage> {
+    return this.fetch(`/api/wiki-pages/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteWikiPage(id: string): Promise<{ deleted: boolean; page_id: string; child_count: number }> {
+    return this.fetch(`/api/wiki-pages/${id}`, { method: "DELETE" });
+  }
+
+  async reorderWikiPages(data: ReorderWikiPagesRequest): Promise<ListWikiPagesResponse> {
+    return this.fetch("/api/wiki-pages/reorder", {
+      method: "PUT",
       body: JSON.stringify(data),
     });
   }
