@@ -91,7 +91,6 @@ type AgentTaskQueue struct {
 	MaxAttempts       int32              `json:"max_attempts"`
 	ParentTaskID      pgtype.UUID        `json:"parent_task_id"`
 	FailureReason     pgtype.Text        `json:"failure_reason"`
-	LastHeartbeatAt   pgtype.Timestamptz `json:"last_heartbeat_at"`
 	TriggerSource     pgtype.Text        `json:"trigger_source"`
 	TriggerActorType  pgtype.Text        `json:"trigger_actor_type"`
 	TriggerActorID    pgtype.UUID        `json:"trigger_actor_id"`
