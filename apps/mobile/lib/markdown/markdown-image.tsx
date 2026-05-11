@@ -50,7 +50,7 @@ export function MarkdownImage({ uri }: Props) {
   }, [uri]);
 
   return (
-    <Pressable onPress={() => open(uri)} className="mb-3">
+    <Pressable onPress={() => open(uri)}>
       <View className="rounded-lg overflow-hidden bg-muted">
         <ExpoImage
           source={{ uri }}

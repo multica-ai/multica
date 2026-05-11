@@ -89,7 +89,13 @@ export function Markdown({ content }: Props) {
   if (segments.length === 0) return null;
 
   return (
-    <View>
+    // `gap-3` enforces 12px between every segment sibling (prose ↔ code,
+    // code ↔ code, image ↔ anything). Going through gap instead of
+    // per-child marginVertical avoids a NativeWind 4 / Yoga quirk where
+    // adjacent `marginVertical` siblings collapse closer than the sum
+    // would suggest — `gap` is layout-level spacing that doesn't depend
+    // on margin behaviour.
+    <View className="gap-3">
       {segments.map((seg, i) => {
         switch (seg.type) {
           case "prose":
