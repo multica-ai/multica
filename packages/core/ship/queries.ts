@@ -684,7 +684,21 @@ export function useProjectReleases(
   return useQuery(projectReleasesOptions(wsId, projectId, status));
 }
 
-/** Release detail. */
+/** Release detail.
+ *
+ *  WS events (release:merge_*, release:updated) already invalidate this
+ *  query in real time. But if the WS hub is briefly disconnected — a
+ *  sleeping laptop, a tab the OS backgrounded for too long, a flaky
+ *  network — the user sees a stale page until they navigate away and
+ *  back. The auto-poll below catches that:
+ *
+ *  - Active stages (merging / promoting): poll every 5s so a paused
+ *    train or in-flight deploy surfaces quickly even without WS.
+ *  - Terminal/idle stages (in_staging awaiting verify, in_production,
+ *    done, cancelled): no polling; staleTime handles re-visits.
+ *
+ *  The page header also has a manual Refresh button for the impatient
+ *  case during a long merge or build. */
 export function releaseDetailOptions(
   wsId: string,
   releaseId: string,
@@ -695,6 +709,10 @@ export function releaseDetailOptions(
     queryFn: () => api.getRelease(releaseId),
     enabled,
     staleTime: 15_000,
+    refetchInterval: (q) => {
+      const stage = q.state.data?.release?.stage;
+      return stage === "merging" || stage === "promoting" ? 5_000 : false;
+    },
   });
 }
 
