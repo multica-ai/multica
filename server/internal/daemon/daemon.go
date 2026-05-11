@@ -335,6 +335,60 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 	return nil
 }
 
+// dropStaleRuntime removes a runtime ID from local tracking after the server
+// reported it no longer exists (404 "runtime not found" on heartbeat or
+// claim). It also empties the owning workspaceState if this was its last
+// runtime so the next workspaceSyncLoop tick treats the workspace as fresh
+// and goes through registerRuntimesForWorkspace again — without this, the
+// daemon would never recover from a delete because syncWorkspacesFromAPI
+// skips workspaces that already exist in d.workspaces.
+//
+// Idempotent: a second call for the same ID is a cheap no-op (handy because
+// both heartbeat and claim paths may discover the 404 concurrently).
+func (d *Daemon) dropStaleRuntime(runtimeID string) {
+	d.mu.Lock()
+	rt, hadRuntime := d.runtimeIndex[runtimeID]
+	delete(d.runtimeIndex, runtimeID)
+
+	emptiedWorkspace := ""
+	for wsID, ws := range d.workspaces {
+		kept := ws.runtimeIDs[:0]
+		removed := false
+		for _, id := range ws.runtimeIDs {
+			if id == runtimeID {
+				removed = true
+				continue
+			}
+			kept = append(kept, id)
+		}
+		if !removed {
+			continue
+		}
+		ws.runtimeIDs = kept
+		if len(ws.runtimeIDs) == 0 {
+			emptiedWorkspace = wsID
+			delete(d.workspaces, wsID)
+		}
+		break
+	}
+	d.mu.Unlock()
+
+	d.wsHBMu.Lock()
+	delete(d.wsHBLastAck, runtimeID)
+	d.wsHBMu.Unlock()
+
+	if !hadRuntime && emptiedWorkspace == "" {
+		return
+	}
+	if hadRuntime {
+		d.logger.Info("dropped stale runtime from local cache", "runtime_id", runtimeID, "provider", rt.Provider)
+	}
+	if emptiedWorkspace != "" {
+		d.logger.Info("workspace has no runtimes left; next sync will re-register", "workspace_id", emptiedWorkspace)
+	}
+	d.notifyRuntimeSetChanged()
+}
+
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
 	var runtimes []map[string]string
 	for name, entry := range d.cfg.Agents {
@@ -814,6 +868,14 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 	resp, err := d.client.SendHeartbeat(ctx, rid)
 	if err != nil {
 		if ctx.Err() == nil {
+			if isRuntimeNotFoundError(err) {
+				// Runtime row is gone server-side (UI delete or 7-day GC).
+				// Drop locally so this loop tears down on the next runtime-set
+				// sync instead of beating against a tombstone every 15s.
+				d.logger.Info("heartbeat: runtime no longer exists server-side; pruning", "runtime_id", rid)
+				d.dropStaleRuntime(rid)
+				return
+			}
 			d.logger.Warn("heartbeat failed", "runtime_id", rid, "error", err)
 		}
 		return
@@ -1334,6 +1396,14 @@ func (d *Daemon) runRuntimePoller(
 		if err != nil {
 			sem <- slot
 			if pollerCtx.Err() == nil {
+				if isRuntimeNotFoundError(err) {
+					// Server-side runtime deletion races the poller; prune
+					// locally and exit so pollLoop's next sync tears this
+					// goroutine down rather than logging Warn every poll.
+					d.logger.Info("claim: runtime no longer exists server-side; pruning", "runtime_id", rid)
+					d.dropStaleRuntime(rid)
+					return
+				}
 				d.logger.Warn("claim task failed", "runtime_id", rid, "error", err)
 			}
 			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {

@@ -55,6 +55,24 @@ func isTaskNotFoundError(err error) bool {
 	return strings.Contains(strings.ToLower(reqErr.Body), "task not found")
 }
 
+// isRuntimeNotFoundError returns true if the error is a 404 with "runtime not
+// found" body. The daemon uses this to detect that a runtime row was deleted
+// server-side (user pressed Delete in the UI, 7-day offline GC fired) while
+// this daemon was still heartbeating or claiming tasks against it — without
+// this signal the daemon would spam Warn ("heartbeat failed", "claim task
+// failed") indefinitely for a dead ID until restart. Callers drop the runtime
+// from local tracking on a true return.
+func isRuntimeNotFoundError(err error) bool {
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		return false
+	}
+	if reqErr.StatusCode != http.StatusNotFound {
+		return false
+	}
+	return strings.Contains(strings.ToLower(reqErr.Body), "runtime not found")
+}
+
 // Client handles HTTP communication with the Multica server daemon API.
 type Client struct {
 	baseURL string
