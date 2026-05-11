@@ -11,6 +11,7 @@
 #   MULTICA_APP_URL     - HTTP URL of the Multica web app
 #   MULTICA_TOKEN       - personal access token (mul_...) for the daemon user
 #   ANTHROPIC_API_KEY   - API key consumed by `claude` (Claude Code) at runtime
+#   GH_TOKEN            - GitHub PAT used by `gh` as a git credential helper
 set -euo pipefail
 
 require() {
@@ -25,6 +26,7 @@ require MULTICA_SERVER_URL
 require MULTICA_APP_URL
 require MULTICA_TOKEN
 require ANTHROPIC_API_KEY
+require GH_TOKEN
 
 config_dir="$HOME/.multica"
 config_file="$config_dir/config.json"
@@ -40,5 +42,7 @@ cat > "$config_file" <<JSON
 JSON
 
 multica auth status || true
+
+gh auth setup-git --hostname github.com
 
 exec multica daemon start --foreground

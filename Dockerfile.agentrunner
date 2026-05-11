@@ -31,7 +31,8 @@ RUN apk add --no-cache \
       npm \
       rsync \
       jq \
-      kubectl
+      kubectl \
+      github-cli
 
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
     && npm cache clean --force
