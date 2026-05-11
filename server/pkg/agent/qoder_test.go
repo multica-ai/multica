@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -253,5 +254,84 @@ func TestQoderBackendDoesNotWaitForeverForReaderAfterPromptDone(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("qoder result blocked waiting for reader shutdown")
+	}
+}
+
+func TestConvertMcpConfigForACP_Stdio(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"mcpServers":{"github":{"command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{"GITHUB_TOKEN":"ghp_abc"}}}}`)
+	servers := convertMcpConfigForACP(raw)
+	if len(servers) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(servers))
+	}
+	srv, ok := servers[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected map, got %T", servers[0])
+	}
+	if srv["name"] != "github" {
+		t.Errorf("name=%v", srv["name"])
+	}
+	if srv["command"] != "npx" {
+		t.Errorf("command=%v", srv["command"])
+	}
+	args, ok := srv["args"].([]any)
+	if !ok || len(args) != 2 {
+		t.Errorf("args=%v", srv["args"])
+	}
+	env, ok := srv["env"].([]any)
+	if !ok || len(env) != 1 {
+		t.Fatalf("env=%v", srv["env"])
+	}
+	envEntry, ok := env[0].(map[string]any)
+	if !ok || envEntry["name"] != "GITHUB_TOKEN" || envEntry["value"] != "ghp_abc" {
+		t.Errorf("env entry=%v", envEntry)
+	}
+}
+
+func TestConvertMcpConfigForACP_SSE(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"mcpServers":{"fetch":{"type":"sse","url":"https://example.com/sse","headers":{"Authorization":"Bearer tok"}}}}`)
+	servers := convertMcpConfigForACP(raw)
+	if len(servers) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(servers))
+	}
+	srv := servers[0].(map[string]any)
+	if srv["name"] != "fetch" {
+		t.Errorf("name=%v", srv["name"])
+	}
+	if srv["type"] != "sse" {
+		t.Errorf("type=%v", srv["type"])
+	}
+	if srv["url"] != "https://example.com/sse" {
+		t.Errorf("url=%v", srv["url"])
+	}
+}
+
+func TestConvertMcpConfigForACP_EmptyAndNil(t *testing.T) {
+	t.Parallel()
+	if s := convertMcpConfigForACP(nil); s != nil {
+		t.Errorf("nil input: got %v, want nil", s)
+	}
+	if s := convertMcpConfigForACP(json.RawMessage(`{}`)); s != nil {
+		t.Errorf("empty mcpServers: got %v, want nil", s)
+	}
+	if s := convertMcpConfigForACP(json.RawMessage(`{"mcpServers":{}}`)); s != nil {
+		t.Errorf("empty mcpServers map: got %v, want nil", s)
+	}
+}
+
+func TestConvertMcpConfigForACP_Multiple(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"mcpServers":{"a":{"command":"echo","args":["a"]},"b":{"command":"echo","args":["b"]}}}`)
+	servers := convertMcpConfigForACP(raw)
+	if len(servers) != 2 {
+		t.Fatalf("expected 2 servers, got %d", len(servers))
+	}
+	names := map[string]bool{}
+	for _, s := range servers {
+		names[s.(map[string]any)["name"].(string)] = true
+	}
+	if !names["a"] || !names["b"] {
+		t.Errorf("expected names a and b, got %v", names)
 	}
 }

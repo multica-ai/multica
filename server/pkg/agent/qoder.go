@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
@@ -37,6 +38,52 @@ type qoderBackend struct {
 }
 
 var qoderReaderDrainGrace = 2 * time.Second
+
+// convertMcpConfigForACP converts MCP server config from the Claude object-map
+// format ({"mcpServers": {"name": {...}}}) into the ACP array format
+// ([{"name": "...", "command": "...", ...}]) expected by session/new.
+func convertMcpConfigForACP(raw json.RawMessage) []any {
+	var wrapper struct {
+		McpServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(raw, &wrapper); err != nil || len(wrapper.McpServers) == 0 {
+		return nil
+	}
+	var servers []any
+	for name, cfg := range wrapper.McpServers {
+		var parsed map[string]any
+		if err := json.Unmarshal(cfg, &parsed); err != nil {
+			continue
+		}
+		entry := map[string]any{"name": name}
+		if v, ok := parsed["command"]; ok {
+			entry["command"] = v
+		}
+		if v, ok := parsed["args"]; ok {
+			entry["args"] = v
+		}
+		if envMap, ok := parsed["env"].(map[string]any); ok && len(envMap) > 0 {
+			envArr := make([]any, 0, len(envMap))
+			for k, v := range envMap {
+				envArr = append(envArr, map[string]any{"name": k, "value": fmt.Sprintf("%v", v)})
+			}
+			entry["env"] = envArr
+		} else {
+			entry["env"] = []any{}
+		}
+		// SSE / HTTP remote servers
+		if v, ok := parsed["url"]; ok {
+			entry["url"] = v
+			if t, ok := parsed["type"]; ok {
+				entry["type"] = t
+			} else {
+				entry["type"] = "sse"
+			}
+		}
+		servers = append(servers, entry)
+	}
+	return servers
+}
 
 func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
@@ -176,10 +223,18 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			cwd = "."
 		}
 
+		mcpServers := []any{}
+		if len(opts.McpConfig) > 0 {
+			if servers := convertMcpConfigForACP(opts.McpConfig); len(servers) > 0 {
+				mcpServers = servers
+			}
+		}
+
 		if opts.ResumeSessionID != "" {
 			result, err := c.request(runCtx, "session/resume", map[string]any{
-				"cwd":       cwd,
-				"sessionId": opts.ResumeSessionID,
+				"cwd":        cwd,
+				"sessionId":  opts.ResumeSessionID,
+				"mcpServers": mcpServers,
 			})
 			if err != nil {
 				finalStatus = "failed"
@@ -199,7 +254,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,
-				"mcpServers": []any{},
+				"mcpServers": mcpServers,
 			})
 			if err != nil {
 				finalStatus = "failed"
