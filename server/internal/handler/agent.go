@@ -386,12 +386,17 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Redact sensitive fields for users who are not the agent owner or workspace owner/admin.
+	// Use workspaceMember (with DB fallback) instead of bare ctxMember so redaction
+	// is never silently skipped if the middleware context is missing.
 	userID := requestUserID(r)
-	if member, ok := ctxMember(r.Context()); ok {
-		if !canViewAgentEnv(agent, userID, member.Role) {
-			redactEnv(&resp)
-			redactMcpConfig(&resp)
-		}
+	wsID := uuidToString(agent.WorkspaceID)
+	member, ok := h.workspaceMember(w, r, wsID)
+	if !ok {
+		return
+	}
+	if !canViewAgentEnv(agent, userID, member.Role) {
+		redactEnv(&resp)
+		redactMcpConfig(&resp)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

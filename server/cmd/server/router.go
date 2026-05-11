@@ -412,6 +412,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Wiki pages
+			r.Route("/api/wiki-pages", func(r chi.Router) {
+				r.Get("/", h.ListWikiPages)
+				r.Post("/", h.CreateWikiPage)
+				r.Put("/reorder", h.ReorderWikiPages)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetWikiPage)
+					r.Patch("/", h.UpdateWikiPage)
+					r.Delete("/", h.DeleteWikiPage)
+				})
+			})
+
 			// Autopilots
 			r.Route("/api/autopilots", func(r chi.Router) {
 				r.Get("/", h.ListAutopilots)

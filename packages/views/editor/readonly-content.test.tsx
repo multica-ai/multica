@@ -139,6 +139,25 @@ describe("ReadonlyContent line breaks", () => {
     expect(openInNewTabSpy).toHaveBeenCalledWith("/test/issues/uuid-123");
     expect(pushSpy).not.toHaveBeenCalled();
   });
+
+  it("renders standalone JSON payloads as formatted json code blocks", () => {
+    const payload = "{\"error\":{\"message\":\"openai_error\",\"code\":\"bad_response_status_code\"}}";
+    const pretty = JSON.stringify(JSON.parse(payload), null, 2);
+    const { container } = render(<ReadonlyContent content={payload} />);
+
+    const code = container.querySelector("pre code.language-json");
+    expect(code).not.toBeNull();
+    expect(code?.textContent?.trimEnd()).toBe(pretty);
+  });
+
+  it("keeps mixed prose plus JSON as regular markdown content", () => {
+    const { container } = render(
+      <ReadonlyContent content={"Error payload: {\"error\":{\"message\":\"openai_error\"}}"} />,
+    );
+
+    expect(container.querySelector("pre code.language-json")).toBeNull();
+    expect(container.querySelector("p")?.textContent).toContain("Error payload:");
+  });
 });
 
 describe("ReadonlyContent Mermaid rendering", () => {

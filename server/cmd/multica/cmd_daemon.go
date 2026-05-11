@@ -639,7 +639,7 @@ func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--top must be a non-negative integer")
 	}
 
-	workspacesRoot, err := daemon.ResolveWorkspacesRoot(profile, rootOverride)
+	workspacesRoot, err := daemon.ResolveWorkspacesRoot(profile, "", rootOverride)
 	if err != nil {
 		return fmt.Errorf("resolve workspaces root: %w", err)
 	}

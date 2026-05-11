@@ -113,3 +113,11 @@ export type {
   ListAutopilotRunsResponse,
 } from "./autopilot";
 export type { AgentDefaults, AgentDefaultsWithUser } from "./agent-defaults";
+export type {
+  WikiPage,
+  WikiPageSummary,
+  ListWikiPagesResponse,
+  CreateWikiPageRequest,
+  UpdateWikiPageRequest,
+  ReorderWikiPagesRequest,
+} from "./wiki";

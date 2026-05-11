@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
+
 	"strconv"
 	"strings"
 	"sync"
@@ -93,10 +95,15 @@ func truncateForSummary(s string, maxRunes int) string {
 
 const taskAnalyticsContextCacheMax = 4096
 
-// buildCommentTriggerSummary fetches the comment content and truncates
-// it for storage on the task row. Returns an invalid pgtype.Text when
-// the comment is missing (deleted / wrong workspace / etc) so the column
-// stays NULL — front-end falls back to a structural label in that case.
+// mentionRe matches markdown mention links like [@name](mention://agent/uuid)
+// so they can be stripped from trigger summaries — the agent name adds noise
+// and is already shown via the avatar in the execution log row.
+var mentionRe = regexp.MustCompile(`\[@[^\]]*\]\(mention://[^)]*\)`)
+
+// buildCommentTriggerSummary fetches the comment content, strips mention
+// syntax, and truncates it for storage on the task row. Returns an invalid
+// pgtype.Text when the comment is missing (deleted / wrong workspace / etc)
+// so the column stays NULL — front-end falls back to a structural label.
 func (s *TaskService) buildCommentTriggerSummary(ctx context.Context, commentID pgtype.UUID) pgtype.Text {
 	if !commentID.Valid {
 		return pgtype.Text{}
@@ -105,7 +112,10 @@ func (s *TaskService) buildCommentTriggerSummary(ctx context.Context, commentID 
 	if err != nil {
 		return pgtype.Text{}
 	}
-	summary := truncateForSummary(comment.Content, triggerSummaryMaxLen)
+	// Strip mention links before truncating — they're visual noise in a summary.
+	cleaned := mentionRe.ReplaceAllString(comment.Content, "")
+	cleaned = strings.TrimSpace(cleaned)
+	summary := truncateForSummary(cleaned, triggerSummaryMaxLen)
 	if summary == "" {
 		return pgtype.Text{}
 	}
@@ -573,13 +583,13 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	}
 
 	task, err := s.Queries.CreateChatTask(ctx, db.CreateChatTaskParams{
-		AgentID:       chatSession.AgentID,
-		RuntimeID:     agent.RuntimeID,
-		Priority:      2, // medium priority for chat
-		ChatSessionID: chatSession.ID,
-		TriggerSource: trigger.sourceText(),
+		AgentID:          chatSession.AgentID,
+		RuntimeID:        agent.RuntimeID,
+		Priority:         2, // medium priority for chat
+		ChatSessionID:    chatSession.ID,
+		TriggerSource:    trigger.sourceText(),
 		TriggerActorType: trigger.actorTypeText(),
-		TriggerActorID: trigger.ActorID,
+		TriggerActorID:   trigger.ActorID,
 	})
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -976,10 +986,10 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// comment on the issue, so the user always sees something when a run
 	// ends. If the agent posted a comment during execution (result, progress
 	// ping, or CLI reply), HasAgentCommentedSince returns true and we skip.
-	// Otherwise, synthesize one from the final output. For comment-triggered
-	// tasks, TriggerCommentID threads the fallback under the original comment;
-	// for assignment-triggered tasks it is NULL and the fallback is top-level.
-	// Chat tasks have no IssueID and are handled separately below.
+	// Otherwise, synthesize one from the final output. Keep that fallback as a
+	// top-level comment so it remains visible even when the original trigger
+	// thread is outside the current timeline window. Chat tasks have no IssueID
+	// and are handled separately below.
 	if task.IssueID.Valid {
 		agentCommented, _ := s.Queries.HasAgentCommentedSince(ctx, db.HasAgentCommentedSinceParams{
 			IssueID:  task.IssueID,
@@ -995,7 +1005,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 					// decoded into real newlines before the comment hits the DB. See
 					// util.UnescapeBackslashEscapes for the exact contract.
 					body := util.UnescapeBackslashEscapes(payload.Output)
-					s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID)
+					s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", pgtype.UUID{})
 				}
 			}
 		}
@@ -1148,7 +1158,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// want to spam the issue with "task timed out" messages on every
 	// daemon hiccup.
 	if errMsg != "" && task.IssueID.Valid && retried == nil {
-		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
+		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", pgtype.UUID{})
 	}
 
 	// Mirror the issue fallback for chat tasks: write an assistant
@@ -1801,9 +1811,14 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 				"type":        comment.Type,
 				"parent_id":   util.UUIDToPtr(comment.ParentID),
 				"created_at":  comment.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+				"updated_at":  comment.UpdatedAt.Time.Format("2006-01-02T15:04:05Z"),
+				"reactions":   []any{},
+				"attachments": []any{},
 			},
-			"issue_title":  issue.Title,
-			"issue_status": issue.Status,
+			"issue_title":         issue.Title,
+			"issue_assignee_type": util.TextToPtr(issue.AssigneeType),
+			"issue_assignee_id":   util.UUIDToPtr(issue.AssigneeID),
+			"issue_status":        issue.Status,
 		},
 	})
 	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "agent", util.UUIDToString(agentID))

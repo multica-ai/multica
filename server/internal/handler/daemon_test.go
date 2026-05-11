@@ -524,6 +524,70 @@ func TestGetActiveTaskForIssue_CrossWorkspace_Returns404(t *testing.T) {
 	}
 }
 
+// TestGetActiveTaskForIssue_QueuedTask_ReturnsTask verifies that queued tasks
+// are treated as active for issue detail, matching the workspace presence
+// contract and keeping the middle issue panel in sync with the right sidebar.
+func TestGetActiveTaskForIssue_QueuedTask_ReturnsTask(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id
+		FROM agent a
+		WHERE a.workspace_id = $1 AND a.archived_at IS NULL AND a.runtime_id IS NOT NULL
+		ORDER BY a.created_at ASC
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent/runtime: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type)
+		VALUES ($1, 'active-task-queued-fixture', 'todo', 'medium', $2, 'member')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		VALUES ($1, $2, 'queued', $3)
+	`, agentID, issueID, runtimeID); err != nil {
+		t.Fatalf("setup: create queued task: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/"+issueID+"/active-task", nil)
+	req = withURLParam(req, "id", issueID)
+
+	testHandler.GetActiveTaskForIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetActiveTaskForIssue with queued task: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Tasks []db.AgentTaskQueue `json:"tasks"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Tasks) != 1 {
+		t.Fatalf("expected 1 active task, got %d", len(resp.Tasks))
+	}
+	if resp.Tasks[0].Status != "queued" {
+		t.Fatalf("expected queued task, got %q", resp.Tasks[0].Status)
+	}
+}
+
 // TestCancelTask_CrossWorkspace_Returns404 verifies that a member of workspace
 // A cannot cancel a task that lives in workspace B. Critically, the task must
 // remain in its original status — no side effect before the access check.

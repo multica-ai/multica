@@ -215,20 +215,37 @@ function TimelineSkeleton() {
 // Props
 // ---------------------------------------------------------------------------
 
+interface IssueDetailProps {
+  issueId: string;
+  onDelete?: () => void;
+  /** Called after the issue is marked as done via the toolbar button. */
+  onDone?: () => void;
+  defaultSidebarOpen?: boolean;
+  layoutId?: string;
+  /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
+  highlightCommentId?: string;
+}
+
 // ---------------------------------------------------------------------------
 // TimelineErrorBoundary — catches render crashes in the timeline section
 // ---------------------------------------------------------------------------
 
-class TimelineErrorBoundary extends Component<
-  { children: ReactNode; fallback?: ReactNode },
-  { hasError: boolean }
-> {
-  constructor(props: { children: ReactNode; fallback?: ReactNode }) {
+type TimelineErrorBoundaryProps = {
+  children: ReactNode;
+  fallback?: ReactNode;
+};
+
+type TimelineErrorBoundaryState = {
+  hasError: boolean;
+};
+
+class TimelineErrorBoundary extends Component<TimelineErrorBoundaryProps, TimelineErrorBoundaryState> {
+  constructor(props: TimelineErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
   }
 
-  static getDerivedStateFromError(): { hasError: boolean } {
+  static getDerivedStateFromError(): TimelineErrorBoundaryState {
     return { hasError: true };
   }
 
@@ -242,17 +259,6 @@ class TimelineErrorBoundary extends Component<
     }
     return this.props.children;
   }
-}
-
-interface IssueDetailProps {
-  issueId: string;
-  onDelete?: () => void;
-  /** Called after the issue is marked as done via the toolbar button. */
-  onDone?: () => void;
-  defaultSidebarOpen?: boolean;
-  layoutId?: string;
-  /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
-  highlightCommentId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -332,6 +338,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     });
   }, []);
   const didHighlightRef = useRef<string | null>(null);
+
+  // Scroll to and briefly highlight a comment — used by ExecutionLogSection
+  // when clicking a comment-triggered run's trigger text.
+  const handleHighlightComment = useCallback((commentId: string) => {
+    const el = document.getElementById(`comment-${commentId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightedId(commentId);
+      setTimeout(() => setHighlightedId(null), 2000);
+    }
+  }, []);
+
   const [clearHistoryDialogOpen, setClearHistoryDialogOpen] = useState(false);
   const clearHistoryMutation = useClearIssueHistory();
 
@@ -417,11 +435,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       (e) => e.type === "activity" || !e.parent_id,
     );
     const repliesByParent = new Map<string, TimelineEntry[]>();
+    const commentById = new Map<string, TimelineEntry>();
     for (const e of timeline) {
-      if (e.type === "comment" && e.parent_id) {
-        const list = repliesByParent.get(e.parent_id) ?? [];
-        list.push(e);
-        repliesByParent.set(e.parent_id, list);
+      if (e.type === "comment") {
+        commentById.set(e.id, e);
+        if (e.parent_id) {
+          const list = repliesByParent.get(e.parent_id) ?? [];
+          list.push(e);
+          repliesByParent.set(e.parent_id, list);
+        }
       }
     }
 
@@ -480,7 +502,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
     }
 
-    return { threadReplies, groups };
+    return { threadReplies, commentById, groups };
   }, [timeline]);
 
   const {
@@ -734,7 +756,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {/* Execution log — active runs + collapsed past runs. Self-contained;
           owns its own collapse state and WS subscriptions. Hides itself
           when there are no runs to show. */}
-      <ExecutionLogSection issueId={id} />
+      <ExecutionLogSection issueId={id} onHighlightComment={handleHighlightComment} />
 
       {/* Token usage */}
       {usage && usage.task_count > 0 && (
@@ -1173,6 +1195,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <TimelineSkeleton />
             ) : (
             <>
+
             <TimelineErrorBoundary>
             <div className="mt-4 flex flex-col gap-3">
               {timelineView.groups.map((group) => {
@@ -1197,6 +1220,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                         issueId={id}
                         entry={entry}
                         replies={timelineView.threadReplies.get(entry.id) ?? EMPTY_REPLIES}
+                        commentById={timelineView.commentById}
+                        agents={agents}
+                        issueOpen={issue.status !== "done" && issue.status !== "cancelled"}
                         currentUserId={user?.id}
                         canModerate={canModerateComments}
                         onReply={submitReply}
@@ -1269,6 +1295,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               })}
             </div>
             </TimelineErrorBoundary>
+
             </>
             )}
 

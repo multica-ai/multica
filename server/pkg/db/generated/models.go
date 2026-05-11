@@ -91,6 +91,7 @@ type AgentTaskQueue struct {
 	MaxAttempts       int32              `json:"max_attempts"`
 	ParentTaskID      pgtype.UUID        `json:"parent_task_id"`
 	FailureReason     pgtype.Text        `json:"failure_reason"`
+	LastHeartbeatAt   pgtype.Timestamptz `json:"last_heartbeat_at"`
 	TriggerSource     pgtype.Text        `json:"trigger_source"`
 	TriggerActorType  pgtype.Text        `json:"trigger_actor_type"`
 	TriggerActorID    pgtype.UUID        `json:"trigger_actor_id"`
@@ -601,6 +602,20 @@ type Workspace struct {
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
 	WikiContent  pgtype.Text        `json:"wiki_content"`
+}
+
+type WikiPage struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ParentID    pgtype.UUID        `json:"parent_id"`
+	Title       string             `json:"title"`
+	Slug        string             `json:"slug"`
+	Content     string             `json:"content"`
+	Position    float64            `json:"position"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	UpdatedBy   pgtype.UUID        `json:"updated_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type WorkspaceInvitation struct {

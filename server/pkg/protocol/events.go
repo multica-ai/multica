@@ -29,8 +29,8 @@ const (
 	// subscribes by `task:` prefix and invalidates the workspace task
 	// snapshot, so the granularity here is "what does the user want to see
 	// change" — not "every internal status flip".
-	EventTaskQueued    = "task:queued"    // ∅ → queued (enqueue / retry create)
-	EventTaskDispatch  = "task:dispatch"  // queued → dispatched (daemon claim)
+	EventTaskQueued    = "task:queued"   // ∅ → queued (enqueue / retry create)
+	EventTaskDispatch  = "task:dispatch" // queued → dispatched (daemon claim)
 	EventTaskProgress  = "task:progress"
 	EventTaskCompleted = "task:completed" // running → completed
 	EventTaskFailed    = "task:failed"    // running → failed
@@ -78,6 +78,12 @@ const (
 	EventProjectResourceCreated = "project_resource:created"
 	EventProjectResourceDeleted = "project_resource:deleted"
 
+	// Wiki events
+	EventWikiPageCreated   = "wiki_page:created"
+	EventWikiPageUpdated   = "wiki_page:updated"
+	EventWikiPageDeleted   = "wiki_page:deleted"
+	EventWikiPageReordered = "wiki_page:reordered"
+
 	// Label events
 	EventLabelCreated       = "label:created"
 	EventLabelUpdated       = "label:updated"
@@ -103,14 +109,14 @@ const (
 	EventAutopilotRunDone  = "autopilot:run_done"
 
 	// Daemon events
-EventDaemonHeartbeat     = "daemon:heartbeat"
-EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
-EventDaemonRegister      = "daemon:register"
-EventDaemonTaskAvailable = "daemon:task_available"
+	EventDaemonHeartbeat     = "daemon:heartbeat"
+	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
+	EventDaemonRegister      = "daemon:register"
+	EventDaemonTaskAvailable = "daemon:task_available"
 
-// Chat retry progress event (daemon -> server -> clients)
-EventChatRetryProgress = "chat:retry_progress"
+	// Chat retry progress event (daemon -> server -> clients)
+	EventChatRetryProgress = "chat:retry_progress"
 
-// Chat message deleted event
-EventChatMessageDeleted = "chat:message_deleted"
+	// Chat message deleted event
+	EventChatMessageDeleted = "chat:message_deleted"
 )

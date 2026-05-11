@@ -4,6 +4,7 @@ import {
   Navigate,
   Outlet,
   useMatches,
+  useParams,
 } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
@@ -56,6 +57,11 @@ function PageShell() {
       <Outlet />
     </>
   );
+}
+
+function WikiPageRoute() {
+  const { pageId } = useParams();
+  return <WikiPage pageId={pageId} />;
 }
 
 /**
@@ -136,6 +142,7 @@ export const appRoutes: RouteObject[] = [
           },
           { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
           { path: "wiki", element: <WikiPage />, handle: { title: "Wiki" } },
+          { path: "wiki/:pageId", element: <WikiPageRoute />, handle: { title: "Wiki" } },
           {
             path: "skills/:id",
             element: <SkillDetailPage />,

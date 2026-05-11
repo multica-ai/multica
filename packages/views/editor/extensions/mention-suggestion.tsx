@@ -16,7 +16,6 @@ import { getCurrentWsId } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { api } from "@multica/core/api";
 import { isImeComposing } from "@multica/core/utils";
 import type {
@@ -387,11 +386,9 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
     // Read current user identity imperatively — this factory runs outside
     // React render so we can't useAuthStore() as a hook here. The Proxy in
     // packages/core/auth/index.ts forwards `.getState()` to the registered
-    // store. Used to gate personal agents in the @mention list so members
-    // don't see (or auto-complete) agents they couldn't assign anyway.
+    // store. Used to gate personal agents in the @mention list so no user
+    // (including admins) can @mention agents owned by other users.
     const userId = useAuthStore.getState().user?.id ?? null;
-    const myRole =
-      members.find((m) => m.user_id === userId)?.role ?? null;
 
     const q = query.toLowerCase();
 
@@ -413,7 +410,9 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
         (a) =>
           !a.archived_at &&
           a.name.toLowerCase().includes(q) &&
-          canAssignAgentToIssue(a, { userId, role: myRole }).allowed,
+          // Only show the current user's own agents, regardless of role.
+          // Legacy agents (owner_id null) remain visible to everyone.
+          (a.owner_id === null || a.owner_id === userId),
       )
       .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
 

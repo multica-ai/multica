@@ -169,6 +169,9 @@
     "cancel_edit": "取消",
     "copy_action": "复制",
     "copied_toast": "已复制",
+    "retry_action": "重试",
+    "retry_success": "已加入 Agent 重试队列",
+    "retry_failed": "重试 Agent 失败",
     "edit_action": "编辑",
     "update_failed": "更新评论失败",
     "send_failed": "发送评论失败",
@@ -227,7 +230,8 @@
     "status_running": "处理中",
     "status_completed": "已完成",
     "status_failed": "失败",
-    "status_cancelled": "已取消"
+    "status_cancelled": "已取消",
+    "filter_placeholder": "筛选运行记录..."
   },
   "batch": {
     "selected": "已选择 {{count}} 个",

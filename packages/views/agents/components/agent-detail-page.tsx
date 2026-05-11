@@ -106,6 +106,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   };
 
   const handleUpdate = async (id: string, data: Record<string, unknown>) => {
+    if (!canEdit.allowed) return;
     try {
       await api.updateAgent(id, data as UpdateAgentRequest);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
