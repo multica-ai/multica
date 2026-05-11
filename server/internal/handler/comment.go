@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -240,6 +242,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
 	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
+
+	memberCompletionIntent := authorType == "member" && comment.Type == "comment" && isIssueCompletionIntent(comment.Content)
+	if updatedIssue, ok := h.applyAutomaticCommentStatusTransition(r, issue, comment.Type, comment.Content, authorType, authorID); ok {
+		issue = updatedIssue
+	}
+
 	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
 		"comment":             resp,
 		"issue_title":         issue.Title,
@@ -256,11 +264,13 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
 	// Skip when the comment comes from the assigned agent itself to avoid loops.
+	// Skip when a member explicitly marks the issue done in prose; that comment
+	// is a terminal review signal, not new work for the assignee.
 	// Also skip when the comment @mentions others but not the assignee agent —
 	// the user is talking to someone else, not requesting work from the assignee.
 	// Also skip when replying in a member-started thread without mentioning the
 	// assignee — the user is continuing a member-to-member conversation.
-	if authorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue) &&
+	if authorType == "member" && !memberCompletionIntent && h.shouldEnqueueOnComment(r.Context(), issue) &&
 		!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
 		!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
 		// Always use the current comment as the trigger so the agent reads
@@ -275,9 +285,192 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger @mentioned agents: parse agent mentions and enqueue tasks for each.
 	// Pass parentComment so that replies inherit mentions from the thread root.
-	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID)
+	if !memberCompletionIntent {
+		h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID)
+	}
 
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (h *Handler) applyAutomaticCommentStatusTransition(r *http.Request, issue db.Issue, commentType, content, actorType, actorID string) (db.Issue, bool) {
+	if actorType != "member" || commentType != "comment" {
+		return issue, false
+	}
+
+	targetStatus, ok := automaticStatusForMemberComment(issue.Status, content)
+	if !ok || targetStatus == issue.Status {
+		return issue, false
+	}
+
+	updated, err := h.Queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{
+		ID:     issue.ID,
+		Status: targetStatus,
+	})
+	if err != nil {
+		slog.Warn("automatic comment status transition failed",
+			append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID), "target_status", targetStatus)...)
+		return issue, false
+	}
+
+	prefix := h.getIssuePrefix(r.Context(), updated.WorkspaceID)
+	h.publish(protocol.EventIssueUpdated, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{
+		"issue":               issueToResponse(updated, prefix),
+		"assignee_changed":    false,
+		"status_changed":      true,
+		"priority_changed":    false,
+		"due_date_changed":    false,
+		"description_changed": false,
+		"title_changed":       false,
+		"prev_status":         issue.Status,
+		"prev_priority":       issue.Priority,
+		"creator_type":        issue.CreatorType,
+		"creator_id":          uuidToString(issue.CreatorID),
+	})
+
+	return updated, true
+}
+
+func automaticStatusForMemberComment(currentStatus, content string) (string, bool) {
+	if isIssueCompletionIntent(content) {
+		if currentStatus == "cancelled" {
+			return "", false
+		}
+		return "done", true
+	}
+
+	if (currentStatus == "in_review" || currentStatus == "blocked") && !isAcknowledgementOnly(content) {
+		return "in_progress", true
+	}
+
+	return "", false
+}
+
+func isIssueCompletionIntent(content string) bool {
+	normalized := normalizeStatusIntentText(content)
+	if normalized == "" || containsAnyNormalizedPhrase(normalized, issueCompletionNegations) {
+		return false
+	}
+	if _, ok := exactIssueCompletionIntents[normalized]; ok {
+		return true
+	}
+	return containsAnyNormalizedPhrase(normalized, issueCompletionPhrases)
+}
+
+func isAcknowledgementOnly(content string) bool {
+	normalized := normalizeStatusIntentText(content)
+	if normalized == "" {
+		return true
+	}
+	_, ok := acknowledgementOnlyComments[normalized]
+	return ok
+}
+
+func containsAnyNormalizedPhrase(normalized string, phrases []string) bool {
+	padded := " " + normalized + " "
+	for _, phrase := range phrases {
+		if strings.Contains(padded, " "+phrase+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeStatusIntentText(content string) string {
+	var b strings.Builder
+	previousSpace := true
+	for _, r := range strings.ToLower(content) {
+		switch r {
+		case 'ä':
+			r = 'a'
+		case 'ö':
+			r = 'o'
+		case 'ü':
+			r = 'u'
+		case 'ß':
+			b.WriteString("ss")
+			previousSpace = false
+			continue
+		}
+
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			previousSpace = false
+			continue
+		}
+		if !previousSpace {
+			b.WriteByte(' ')
+			previousSpace = true
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+var issueCompletionNegations = []string{
+	"nicht erledigt",
+	"noch nicht erledigt",
+	"nicht fertig",
+	"noch nicht fertig",
+	"nicht abgeschlossen",
+	"noch nicht abgeschlossen",
+	"passt nicht",
+	"noch nicht",
+	"not done",
+	"not finished",
+	"not complete",
+	"not completed",
+	"not resolved",
+	"is not done",
+	"isn t done",
+	"is not finished",
+	"isn t finished",
+}
+
+var exactIssueCompletionIntents = map[string]struct{}{
+	"abgeschlossen": {},
+	"approved":      {},
+	"done":          {},
+	"erledigt":      {},
+	"fertig":        {},
+	"lgtm":          {},
+	"passt":         {},
+	"resolved":      {},
+}
+
+var issueCompletionPhrases = []string{
+	"alles gut",
+	"all done",
+	"aufgabe ist abgeschlossen",
+	"aufgabe ist erledigt",
+	"bitte schliessen",
+	"das ist abgeschlossen",
+	"das ist erledigt",
+	"das passt",
+	"die aufgabe ist abgeschlossen",
+	"die aufgabe ist erledigt",
+	"it is done",
+	"it s done",
+	"ist abgeschlossen",
+	"ist erledigt",
+	"ist fertig",
+	"kann geschlossen werden",
+	"looks good",
+	"task is done",
+	"this is done",
+	"this is finished",
+}
+
+var acknowledgementOnlyComments = map[string]struct{}{
+	"alles klar":  {},
+	"danke":       {},
+	"got it":      {},
+	"ja":          {},
+	"ok":          {},
+	"okay":        {},
+	"sounds good": {},
+	"super":       {},
+	"thank you":   {},
+	"thanks":      {},
+	"verstanden":  {},
 }
 
 // commentMentionsOthersButNotAssignee returns true if the comment @mentions
