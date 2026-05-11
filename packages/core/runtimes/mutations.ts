@@ -30,10 +30,17 @@ export function useUpdateRuntime(wsId: string) {
     onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
       if (vars) {
-        // Usage query keys are not workspace-scoped; invalidate broadly so
-        // any cached usage rows for this runtime get refetched under the
-        // new tz buckets.
-        qc.invalidateQueries({ queryKey: ["runtimes", "usage"] });
+        // Usage query keys are not workspace-scoped; invalidate only this
+        // runtime's daily/by-agent/by-hour usage rows under the new tz buckets.
+        qc.invalidateQueries({
+          queryKey: ["runtimes", "usage", vars.runtimeId],
+        });
+        qc.invalidateQueries({
+          queryKey: ["runtimes", "usage", "by-agent", vars.runtimeId],
+        });
+        qc.invalidateQueries({
+          queryKey: ["runtimes", "usage", "by-hour", vars.runtimeId],
+        });
       }
     },
   });

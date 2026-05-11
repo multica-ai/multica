@@ -324,7 +324,8 @@ ON CONFLICT (bucket_date, workspace_id, runtime_id, provider, model) DO UPDATE
 // Final step of an explicit user timezone edit rebuild. This is intentionally
 // called only for user edits, not by the migration itself: deploys do not
 // backfill history, but a user-driven change must not leave old UTC rows next
-// to newly computed local rows.
+// to newly computed local rows. This scans all history for the edited runtime;
+// timezone edits are owner/admin operations and are expected to be rare.
 func (q *Queries) InsertTaskUsageDailyForRuntime(ctx context.Context, runtimeID pgtype.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, insertTaskUsageDailyForRuntime, runtimeID)
 	if err != nil {
@@ -420,6 +421,18 @@ func (q *Queries) ListAgentRuntimesByOwner(ctx context.Context, arg ListAgentRun
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockTaskUsageDailyRollup = `-- name: LockTaskUsageDailyRollup :exec
+SELECT pg_advisory_xact_lock(4242)
+`
+
+// Serialize explicit timezone rebuilds with rollup_task_usage_daily(), which
+// uses the same advisory key in migration 073. This prevents cron from
+// writing old-timezone buckets while PATCH is deleting/rebuilding rows.
+func (q *Queries) LockTaskUsageDailyRollup(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, lockTaskUsageDailyRollup)
+	return err
 }
 
 const markAgentRuntimeOnline = `-- name: MarkAgentRuntimeOnline :one

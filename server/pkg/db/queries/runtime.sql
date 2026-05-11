@@ -46,6 +46,12 @@ DO UPDATE SET
     updated_at = now()
 RETURNING *, (xmax = 0) AS inserted;
 
+-- name: LockTaskUsageDailyRollup :exec
+-- Serialize explicit timezone rebuilds with rollup_task_usage_daily(), which
+-- uses the same advisory key in migration 073. This prevents cron from
+-- writing old-timezone buckets while PATCH is deleting/rebuilding rows.
+SELECT pg_advisory_xact_lock(4242);
+
 -- name: UpdateAgentRuntimeTimezone :one
 -- Operator-driven override of the runtime's reporting timezone (MUL-1950).
 UPDATE agent_runtime
@@ -69,7 +75,8 @@ WHERE runtime_id = $1;
 -- Final step of an explicit user timezone edit rebuild. This is intentionally
 -- called only for user edits, not by the migration itself: deploys do not
 -- backfill history, but a user-driven change must not leave old UTC rows next
--- to newly computed local rows.
+-- to newly computed local rows. This scans all history for the edited runtime;
+-- timezone edits are owner/admin operations and are expected to be rare.
 INSERT INTO task_usage_daily AS d (
     bucket_date, workspace_id, runtime_id, provider, model,
     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,

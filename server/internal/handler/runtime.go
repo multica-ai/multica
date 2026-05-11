@@ -495,6 +495,11 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		defer tx.Rollback(r.Context())
 
 		qtx := h.Queries.WithTx(tx)
+		if err := qtx.LockTaskUsageDailyRollup(r.Context()); err != nil {
+			slog.Error("LockTaskUsageDailyRollup failed", "error", err, "runtime_id", runtimeID)
+			writeError(w, http.StatusInternalServerError, "failed to update runtime")
+			return
+		}
 		updated, err := qtx.UpdateAgentRuntimeTimezone(r.Context(), db.UpdateAgentRuntimeTimezoneParams{
 			ID:       runtimeUUID,
 			Timezone: tz,

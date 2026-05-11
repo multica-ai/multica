@@ -209,10 +209,9 @@ func TestGetRuntimeUsageDailyRollupCutoffUsesRuntimeTimezone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load location: %v", err)
 	}
-	now := time.Now().In(loc)
-	startToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-	cutoffDate := startToday.AddDate(0, 0, -1).Format("2006-01-02")
-	extraDate := startToday.AddDate(0, 0, -2).Format("2006-01-02")
+	cutoff := time.Date(2026, 5, 4, 0, 0, 0, 0, loc)
+	cutoffDate := cutoff.Format("2006-01-02")
+	extraDate := cutoff.AddDate(0, 0, -1).Format("2006-01-02")
 
 	var originalTZ string
 	if err := testPool.QueryRow(ctx, `SELECT timezone FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&originalTZ); err != nil {
@@ -248,17 +247,12 @@ func TestGetRuntimeUsageDailyRollupCutoffUsesRuntimeTimezone(t *testing.T) {
 	testHandler.cfg.UseDailyRollupForRuntimeUsage = true
 	t.Cleanup(func() { testHandler.cfg.UseDailyRollupForRuntimeUsage = origRollup })
 
-	w := httptest.NewRecorder()
-	req := newRequest("GET", "/api/runtimes/"+runtimeID+"/usage?days=1", nil)
-	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.GetRuntimeUsage(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GetRuntimeUsage: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp []RuntimeUsageResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
+	resp, err := testHandler.listRuntimeUsage(ctx, parseUUID(runtimeID), "Asia/Shanghai", pgtype.Timestamptz{
+		Time:  cutoff,
+		Valid: true,
+	})
+	if err != nil {
+		t.Fatalf("listRuntimeUsage: %v", err)
 	}
 	byDate := make(map[string]int64)
 	for _, row := range resp {

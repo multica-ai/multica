@@ -386,23 +386,37 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 
 // detectLocalTimezone returns an IANA zone name for the daemon host, used as
 // the initial value of agent_runtime.timezone on first registration. The
-// server treats any unparseable value as "UTC", but we still try harder
-// here because (a) we'd rather a real "Asia/Shanghai" than a silent UTC
-// fallback, and (b) time.Local.String() can return "Local" on hosts where
-// /etc/localtime isn't a symlink, which is useless for AT TIME ZONE on
-// the Postgres side.
+// server treats any unparseable value as "UTC", but we still try harder here
+// because we'd rather a real "Asia/Shanghai" than a silent UTC fallback.
+// Short abbreviations like "EST" are intentionally ignored: they lose DST
+// rules and are a poor reporting timezone.
 func detectLocalTimezone() string {
-	if tz := strings.TrimSpace(os.Getenv("TZ")); tz != "" {
-		if _, err := time.LoadLocation(tz); err == nil {
+	if tz, ok := canonicalTimezoneName(os.Getenv("TZ")); ok {
+		return tz
+	}
+	if data, err := os.ReadFile("/etc/timezone"); err == nil {
+		if tz, ok := canonicalTimezoneName(string(data)); ok {
 			return tz
 		}
 	}
-	if name := time.Local.String(); name != "" && name != "Local" {
-		if _, err := time.LoadLocation(name); err == nil {
-			return name
-		}
+	if tz, ok := canonicalTimezoneName(time.Local.String()); ok {
+		return tz
 	}
 	return "UTC"
+}
+
+func canonicalTimezoneName(raw string) (string, bool) {
+	tz := strings.TrimSpace(raw)
+	if tz == "" || tz == "Local" {
+		return "", false
+	}
+	if tz != "UTC" && !strings.Contains(tz, "/") {
+		return "", false
+	}
+	if _, err := time.LoadLocation(tz); err != nil {
+		return "", false
+	}
+	return tz, true
 }
 
 func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion string, repos []RepoData, settings json.RawMessage) *workspaceState {

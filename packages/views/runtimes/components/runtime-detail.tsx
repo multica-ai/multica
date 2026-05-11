@@ -37,6 +37,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
@@ -546,9 +553,8 @@ function DiagnosticsCard({
   );
 }
 
-// Common IANA zones offered as quick picks. The dropdown still accepts any
-// zone via a free-text input — the curated list is just for the 90% case
-// (operator picks from a familiar regional name instead of typing).
+// Common IANA zones offered as quick picks when Intl.supportedValuesOf is not
+// available, and promoted near the top otherwise.
 const COMMON_TIMEZONES = [
   "UTC",
   "America/Los_Angeles",
@@ -580,6 +586,21 @@ function browserTimezone(): string {
   }
 }
 
+type IntlWithSupportedValues = typeof Intl & {
+  supportedValuesOf?: (key: "timeZone") => string[];
+};
+
+function supportedTimezones(): string[] {
+  try {
+    const supported = (Intl as IntlWithSupportedValues).supportedValuesOf?.(
+      "timeZone",
+    );
+    return supported && supported.length > 0 ? supported : COMMON_TIMEZONES;
+  } catch {
+    return COMMON_TIMEZONES;
+  }
+}
+
 function TimezoneReadout({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
   return (
@@ -594,11 +615,10 @@ function TimezoneReadout({ runtime }: { runtime: AgentRuntime }) {
   );
 }
 
-// TimezoneEditor renders the current runtime tz, a dropdown of common zones
-// (plus the runtime's current value if it isn't in the curated list), and
-// commits the change via PATCH /api/runtimes/:id. We deliberately don't
-// gate this behind a separate "edit" mode — the list is small and the
-// change is reversible, so a single change-on-select is the cheapest UX.
+// TimezoneEditor renders the current runtime tz, a dropdown of supported IANA
+// zones (plus the runtime's current value if it is unusual), and commits the
+// change via PATCH /api/runtimes/:id. We deliberately don't gate this behind a
+// separate "edit" mode because the change is reversible.
 function TimezoneEditor({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
@@ -608,35 +628,43 @@ function TimezoneEditor({ runtime }: { runtime: AgentRuntime }) {
   const browserSuffix = t(($) => $.detail.timezone_browser_suffix);
 
   const options = Array.from(
-    new Set([current, browser, ...COMMON_TIMEZONES]),
+    new Set([current, browser, ...COMMON_TIMEZONES, ...supportedTimezones()]),
   ).filter(Boolean);
+  const handleTimezoneChange = (next: string) => {
+    if (next === current) return;
+    updateRuntime.mutate(
+      { runtimeId: runtime.id, patch: { timezone: next } },
+      {
+        onSuccess: () =>
+          toast.success(t(($) => $.detail.timezone_toast_updated, { tz: next })),
+        onError: () =>
+          toast.error(t(($) => $.detail.timezone_toast_failed)),
+      },
+    );
+  };
 
   return (
     <div className="space-y-1.5">
-      <select
+      <Select
         value={current}
         disabled={updateRuntime.isPending}
-        className="block w-full rounded-md border bg-background px-2 py-1.5 text-xs disabled:opacity-50"
-        onChange={(e) => {
-          const next = e.target.value;
-          if (next === current) return;
-          updateRuntime.mutate(
-            { runtimeId: runtime.id, patch: { timezone: next } },
-            {
-              onSuccess: () =>
-                toast.success(t(($) => $.detail.timezone_toast_updated, { tz: next })),
-              onError: () =>
-                toast.error(t(($) => $.detail.timezone_toast_failed)),
-            },
-          );
+        onValueChange={(next) => {
+          if (next) handleTimezoneChange(next);
         }}
       >
-        {options.map((tz) => (
-          <option key={tz} value={tz}>
-            {tz === browser ? `${tz}${browserSuffix}` : tz}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger size="sm" className="w-full rounded-md font-mono text-xs">
+          <SelectValue>
+            {current === browser ? `${current}${browserSuffix}` : current}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent align="start" className="max-h-72">
+          {options.map((tz) => (
+            <SelectItem key={tz} value={tz} className="font-mono text-xs">
+              {tz === browser ? `${tz}${browserSuffix}` : tz}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <p className="text-[11px] leading-snug text-muted-foreground">
         {t(($) => $.detail.timezone_hint)}
       </p>
