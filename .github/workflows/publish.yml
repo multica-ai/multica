@@ -42,21 +42,33 @@ jobs:
       runs-on: ubicloud-standard-4-arm
     secrets: inherit
 
+  bake-build-agentrunner:
+    uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
+    with:
+      environment: prod
+      branch: ${{ github.head_ref || github.ref_name }}
+      bakefile: docker-bake.agentrunner.hcl
+      runs-on: ubicloud-standard-4-arm
+    secrets: inherit
+
   extract-tags:
-    needs: [bake-build-backend, bake-build-web]
+    needs: [bake-build-backend, bake-build-web, bake-build-agentrunner]
     runs-on: ubuntu-latest
     outputs:
       backend_tag: ${{ steps.extract.outputs.backend_tag }}
       web_tag: ${{ steps.extract.outputs.web_tag }}
+      agentrunner_tag: ${{ steps.extract.outputs.agentrunner_tag }}
     steps:
       - name: Extract tags from image_name
         id: extract
         env:
           BACKEND_IMAGE: ${{ needs.bake-build-backend.outputs.image_name }}
           WEB_IMAGE: ${{ needs.bake-build-web.outputs.image_name }}
+          AGENTRUNNER_IMAGE: ${{ needs.bake-build-agentrunner.outputs.image_name }}
         run: |
           echo "backend_tag=${BACKEND_IMAGE##*:}" >> "$GITHUB_OUTPUT"
           echo "web_tag=${WEB_IMAGE##*:}" >> "$GITHUB_OUTPUT"
+          echo "agentrunner_tag=${AGENTRUNNER_IMAGE##*:}" >> "$GITHUB_OUTPUT"
 
   commit-to-gitops-backend:
     needs: [bake-build-backend, bake-build-web, extract-tags]
@@ -79,3 +91,14 @@ jobs:
       app_repo_branch: ${{ github.head_ref || github.ref_name }}
       path_to_kustomization: gitops/environments/tools/kustomization.yaml
       image_yq_matcher: .images[1].newTag
+
+  commit-to-gitops-agentrunner:
+    needs: [bake-build-agentrunner, extract-tags, commit-to-gitops-web]
+    uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
+    secrets: inherit
+    with:
+      gitops_repository: g2crowd/agentfarm
+      image_tag: ${{ needs.extract-tags.outputs.agentrunner_tag }}
+      app_repo_branch: ${{ github.head_ref || github.ref_name }}
+      path_to_kustomization: gitops/environments/tools/kustomization.yaml
+      image_yq_matcher: .images[2].newTag
