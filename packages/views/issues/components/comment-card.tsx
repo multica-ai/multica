@@ -325,6 +325,7 @@ function CommentRow({
               onUploadFile={(file) => uploadWithToast(file, { issueId })}
               debounceMs={100}
               currentIssueId={issueId}
+              attachments={entry.attachments}
             />
           </div>
           <div className="flex items-center justify-between mt-2">
@@ -586,6 +587,7 @@ function CommentCardImpl({
                     onUploadFile={(file) => uploadWithToast(file, { issueId })}
                     debounceMs={100}
                     currentIssueId={issueId}
+                    attachments={entry.attachments}
                   />
                 </div>
                 <div className="flex items-center justify-between mt-2">

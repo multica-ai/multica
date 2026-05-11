@@ -55,7 +55,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -536,6 +536,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Token usage
   const { data: usage } = useQuery(issueUsageOptions(id));
 
+  // Attachments uploaded against this issue. Drives the description
+  // editor's click-time fresh-sign download: NodeViews match
+  // `src`/`href` against this list to resolve an attachment id before
+  // calling `/api/attachments/{id}`.
+  const { data: issueAttachments } = useQuery(issueAttachmentsOptions(id));
+
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
   const { data: parentIssue = null } = useQuery({
@@ -976,6 +982,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
               currentIssueId={id}
+              attachments={issueAttachments}
             />
 
             <div className="flex items-center gap-1 mt-3">
