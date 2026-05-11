@@ -186,15 +186,44 @@ In production, put a reverse proxy in front of both the backend and frontend to 
 
 ### Caddy (Recommended)
 
+**Single-domain layout** — frontend and backend served on the same hostname (this is what `docker-compose.selfhost.yml` defaults to):
+
+```
+multica.example.com {
+    # WebSocket route — must come before the catch-all
+    handle /ws* {
+        reverse_proxy localhost:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Everything else → frontend
+    reverse_proxy localhost:3000
+}
+```
+
+**Separate-domain layout** — frontend and backend on different hostnames:
+
 ```
 app.example.com {
     reverse_proxy localhost:3000
 }
 
 api.example.com {
+    handle /ws* {
+        reverse_proxy localhost:8080 {
+            flush_interval -1
+        }
+    }
+
     reverse_proxy localhost:8080
 }
 ```
+
+Two non-obvious bits inside the `/ws` block are worth calling out — both are common reasons real-time updates "stop working" on a Caddy-fronted self-host:
+
+- **`handle /ws*` (not `/ws`)** — `handle /ws` is an exact-path matcher, so future path variants (`/ws/subscribe`, `/ws/v2`, ...) fall through to the frontend block. The trailing `*` makes it a prefix match.
+- **`flush_interval -1`** — disables response buffering so WebSocket frames are forwarded as soon as they arrive. Without it, frames can sit behind Caddy's default flush window, which looks like delayed comments, missing typing indicators, or "comments only appear after a page refresh."
 
 ### Nginx
 
