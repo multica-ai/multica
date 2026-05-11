@@ -111,3 +111,11 @@ export type {
 } from "./autopilot";
 export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
 export type { AgentDefaults, AgentDefaultsWithUser } from "./agent-defaults";
+export type {
+  WikiPage,
+  WikiPageSummary,
+  ListWikiPagesResponse,
+  CreateWikiPageRequest,
+  UpdateWikiPageRequest,
+  ReorderWikiPagesRequest,
+} from "./wiki";
