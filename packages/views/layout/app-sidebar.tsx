@@ -832,7 +832,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <SidebarMenu className="gap-0 mt-0.5">
                         <SidebarMenuItem>
                           <SidebarMenuButton
-                            className="text-muted-foreground hover:bg-sidebar-accent/70 pl-8 h-7"
+                            className="text-muted-foreground hover:bg-sidebar-accent/70 h-7"
                             onClick={() => useModalStore.getState().open("create-project")}
                           >
                             <Plus className="size-3.5" />
@@ -847,14 +847,17 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             const hasChildren = children.length > 0;
                             const isExpanded = localExpandedProjects[item.id] ?? true;
                             const hasActiveChild = children.some((child) => projectTreeContainsPath(child, pathname, p.projectDetail));
+                            // CEREBRO-PATCH(nested-projects-indent): each nesting level adds 12px margin + 8px padding (v3 mockup).
+                            const nestedStyle = level > 0 ? { marginLeft: level * 12, paddingLeft: level * 8 } : undefined;
                             return (
                               <React.Fragment key={item.id}>
                                 <SidebarMenuItem>
                                   <div
                                     className={cn(
                                       "relative",
-                                      level > 0 && "ml-3 border-l border-sidebar-border/70 pl-2",
+                                      level > 0 && "border-l border-sidebar-border/70",
                                     )}
+                                    style={nestedStyle}
                                   >
                                     <SidebarMenuButton
                                       isActive={isActive}
@@ -862,7 +865,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                                       onClick={handleNavClick}
                                       className={cn(
                                         "h-7 text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground",
-                                        level === 0 && "pl-8",
                                         hasActiveChild && "bg-sidebar-accent/45 text-sidebar-accent-foreground",
                                       )}
                                     >
@@ -888,7 +890,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                                       ) : (
                                         <span className="size-3.5 shrink-0" />
                                       )}
-                                      <ProjectIcon project={item} size="sm" />
+                                      {level === 0 && <ProjectIcon project={item} size="sm" />}
                                       <span className="truncate">{item.title}</span>
                                       {level === 0 && item.issue_count > 0 && (
                                         <span className="ml-auto text-[10px] text-muted-foreground">
