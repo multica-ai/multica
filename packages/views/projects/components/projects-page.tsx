@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Plus, FolderKanban, UserMinus, Check, Pencil } from "lucide-react";
+import { Plus, FolderKanban, UserMinus, Check, Pencil, ArrowUp, ArrowDown, ChevronDown } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { projectListOptions, archivedProjectListOptions } from "@multica/core/projects/queries";
 import { useUpdateProject } from "@multica/core/projects/mutations";
@@ -43,6 +43,16 @@ import {
   useProjectPriorityLabels,
   useFormatRelativeDate,
 } from "./labels";
+import { useProjectViewStore, PROJECT_SORT_OPTIONS, type ProjectSortField } from "@multica/core/projects";
+import { sortProjects } from "../utils/sort";
+
+const SORT_LABEL_KEY: Record<ProjectSortField, "sort_created" | "sort_updated" | "sort_title" | "sort_priority" | "sort_status"> = {
+  created_at: "sort_created",
+  updated_at: "sort_updated",
+  title: "sort_title",
+  priority: "sort_priority",
+  status: "sort_status",
+};
 
 function ProjectRow({ project }: { project: Project }) {
   const { t } = useT("projects");
@@ -329,6 +339,10 @@ function ProjectRow({ project }: { project: Project }) {
 export function ProjectsPage() {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
+  const sortBy = useProjectViewStore((s) => s.sortBy);
+  const sortDirection = useProjectViewStore((s) => s.sortDirection);
+  const setSortBy = useProjectViewStore((s) => s.setSortBy);
+  const setSortDirection = useProjectViewStore((s) => s.setSortDirection);
   // Two parallel cached lists — active (default) and archived. We always
   // load the active list and conditionally swap to the archived list when
   // the user toggles "Show archived." Cached separately so toggling
@@ -339,9 +353,10 @@ export function ProjectsPage() {
     ...archivedProjectListOptions(wsId),
     enabled: showArchived,
   });
-  const projects = showArchived
+  const rawProjects = showArchived
     ? (archivedQuery.data ?? []).filter((p) => !!p.archived_at)
     : activeQuery.data ?? [];
+  const projects = sortProjects(rawProjects, sortBy, sortDirection);
   const isLoading = showArchived ? archivedQuery.isLoading : activeQuery.isLoading;
   const openCreateProject = () => useModalStore.getState().open("create-project");
 
@@ -370,6 +385,36 @@ export function ProjectsPage() {
           >
             {showArchived ? "Show active" : "Show archived"}
           </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button variant="outline" size="sm" className="text-xs gap-1">
+                  {t(($) => $.sort[SORT_LABEL_KEY[sortBy]])}
+                  <ChevronDown className="size-3 text-muted-foreground" />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end" className="w-40">
+              {PROJECT_SORT_OPTIONS.map((opt) => (
+                <DropdownMenuItem key={opt.value} onClick={() => setSortBy(opt.value)}>
+                  {t(($) => $.sort[SORT_LABEL_KEY[opt.value]])}
+                  {opt.value === sortBy && <Check className="ml-auto h-3.5 w-3.5" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            onClick={() => setSortDirection(sortDirection === "asc" ? "desc" : "asc")}
+            title={sortDirection === "asc" ? t(($) => $.sort.ascending_title) : t(($) => $.sort.descending_title)}
+          >
+            {sortDirection === "asc" ? (
+              <ArrowUp className="size-3.5" />
+            ) : (
+              <ArrowDown className="size-3.5" />
+            )}
+          </Button>
           <Button size="sm" variant="outline" onClick={openCreateProject}>
             <Plus className="h-3.5 w-3.5 mr-1" />
             {t(($) => $.page.new_project)}

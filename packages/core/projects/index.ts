@@ -18,3 +18,10 @@ export {
   useCreateProjectResource,
   useDeleteProjectResource,
 } from "./resource-queries";
+export {
+  useProjectViewStore,
+  PROJECT_SORT_OPTIONS,
+  type ProjectSortField,
+  type ProjectSortDirection,
+  type ProjectViewState,
+} from "./view-store";
