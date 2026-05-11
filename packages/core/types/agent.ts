@@ -114,7 +114,13 @@ export interface Agent {
   runtime_config: Record<string, unknown>;
   custom_env: Record<string, string>;
   custom_args: string[];
+  // Per-agent MCP server map (Claude's `{mcpServers: {...}}` shape). May
+  // contain credentials, so the server redacts the value to `null` for
+  // non-owners and sets `mcp_config_redacted` to true so the UI can show a
+  // "configured but hidden" state without leaking contents.
+  mcp_config: Record<string, unknown> | null;
   custom_env_redacted: boolean;
+  mcp_config_redacted: boolean;
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;
@@ -166,6 +172,10 @@ export interface UpdateAgentRequest {
   runtime_config?: Record<string, unknown>;
   custom_env?: Record<string, string>;
   custom_args?: string[];
+  // Pass an object to set, or `null` to clear. The server distinguishes
+  // "field absent" (leave as-is) from "field is JSON null" (explicit clear)
+  // via raw body inspection.
+  mcp_config?: Record<string, unknown> | null;
   visibility?: AgentVisibility;
   status?: AgentStatus;
   max_concurrent_tasks?: number;
