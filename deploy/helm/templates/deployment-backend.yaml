@@ -165,5 +165,9 @@ spec:
               mountPath: /app/data/uploads
       volumes:
         - name: uploads
+          {{- if .Values.backend.storage.enabled }}
           persistentVolumeClaim:
             claimName: {{ include "multica.backend.fullname" . }}-uploads
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

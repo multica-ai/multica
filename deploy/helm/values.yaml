@@ -35,8 +35,10 @@ backend:
       cpu: 1000m
       memory: 1Gi
 
-  # -- Persistent storage used for uploads at /app/data/uploads
+  # -- Persistent storage used for uploads at /app/data/uploads.
+  # Set enabled=false to use an emptyDir instead (data lost on pod restart — test/dev only).
   storage:
+    enabled: true
     size: 5Gi
     # -- Use the cluster default if empty
     storageClass: ""
