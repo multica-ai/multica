@@ -1,7 +1,11 @@
 export { useIssueSelectionStore } from "./selection-store";
 export { useCreateModeStore, type CreateMode } from "./create-mode-store";
 export { useIssueDraftStore } from "./draft-store";
-export { useRecentIssuesStore, type RecentIssueEntry } from "./recent-issues-store";
+export {
+  useRecentIssuesStore,
+  selectRecentIssues,
+  type RecentIssueEntry,
+} from "./recent-issues-store";
 export {
   ViewStoreProvider,
   useViewStore,
