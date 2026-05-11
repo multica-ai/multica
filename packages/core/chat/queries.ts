@@ -43,7 +43,14 @@ export function chatMessagesOptions(sessionId: string) {
     queryKey: chatKeys.messages(sessionId),
     queryFn: () => api.listChatMessages(sessionId),
     enabled: !!sessionId,
-    staleTime: Infinity,
+    // See channelMessagesOptions for why this query overrides the
+    // global staleTime: Infinity / refetchOnWindowFocus: false defaults.
+    // Short version: agent reply events sometimes miss the WS subscriber
+    // (sleeping tab, race between publish and connect) and the cache
+    // gets stuck until manual reload. Letting focus trigger a refetch
+    // when the data is older than 30s recovers without a reload.
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -71,7 +78,12 @@ export function taskMessagesOptions(taskId: string) {
     queryKey: chatKeys.taskMessages(taskId),
     queryFn: () => api.listTaskMessages(taskId),
     enabled: !!taskId,
-    staleTime: Infinity,
+    // Same WS-gap recovery as chatMessagesOptions — task:message events
+    // can be missed during reconnect, leaving the agent timeline
+    // visibly behind reality. 30s staleTime + refocus refetch closes
+    // the gap.
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
   });
 }
 

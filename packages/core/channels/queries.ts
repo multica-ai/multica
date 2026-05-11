@@ -91,7 +91,21 @@ export function channelMessagesOptions(channelId: string, enabled: boolean) {
     // Default page (newest 50). Older pages are an explicit follow-up using
     // useInfiniteQuery if/when the UI needs them.
     queryFn: () => api.listChannelMessages(channelId, { limit: 50 }),
-    staleTime: Infinity,
+    // 30s staleTime + refetchOnWindowFocus together backstop WS gaps.
+    // The primary fresh-data path is still the `channel:message` event
+    // invalidator in use-realtime-sync; this combination just ensures
+    // that a tab returning from sleep (WS reconnected, but missed
+    // events while disconnected) refetches the timeline instead of
+    // sitting on a stale "30 messages ago" cache forever.
+    //
+    // The global query-client default is `staleTime: Infinity` +
+    // `refetchOnWindowFocus: false` because most workspace data is
+    // small + WS-driven. Chat / channel messages are the noisy ones
+    // where missed events show up as visible UX bugs ("the agent
+    // replied but I have to refresh to see it"); they warrant the
+    // per-query override.
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
     enabled: enabled && !!channelId,
   });
 }
