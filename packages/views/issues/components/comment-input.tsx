@@ -1,14 +1,15 @@
 "use client";
 
 import { useRef, useState, useCallback } from "react";
-import { ArrowUp, Loader2, Maximize2, Minimize2 } from "lucide-react";
-import { Button } from "@multica/ui/components/ui/button";
+import { Maximize2, Minimize2 } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
+import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
+import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 import { useT } from "../../i18n";
 
 interface CommentInputProps {
@@ -96,17 +97,12 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           size="sm"
           onSelect={(file) => editorRef.current?.uploadFile(file)}
         />
-        <Button
-          size="icon-sm"
-          disabled={isEmpty || submitting}
+        <SubmitButton
           onClick={handleSubmit}
-        >
-          {submitting ? (
-            <Loader2 className="animate-spin" />
-          ) : (
-            <ArrowUp />
-          )}
-        </Button>
+          disabled={isEmpty}
+          loading={submitting}
+          tooltip={`${t(($) => $.comment.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}
+        />
       </div>
       {isDragOver && <FileDropOverlay />}
     </div>

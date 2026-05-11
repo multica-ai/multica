@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, Loader2, Square } from "lucide-react";
+import { Bot, Clock, Loader2, Square } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import type { TaskMessagePayload } from "@multica/core/types/events";
@@ -213,7 +213,22 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
 
   if (taskStates.size === 0) return null;
 
-  const entries = Array.from(taskStates.values());
+  // Order: running → dispatched → queued. The most-active task takes the
+  // sticky slot; queued tasks sit below so the "is working" banner isn't
+  // pushed off by a freshly-enqueued sibling. ListActiveTasksByIssue's
+  // server-side ORDER BY is created_at DESC, which doesn't reflect lifecycle
+  // priority, so we re-sort on the client.
+  const statusRank: Record<AgentTask["status"], number> = {
+    running: 0,
+    dispatched: 1,
+    queued: 2,
+    completed: 3,
+    failed: 3,
+    cancelled: 3,
+  };
+  const entries = Array.from(taskStates.values()).sort(
+    (a, b) => statusRank[a.task.status] - statusRank[b.task.status],
+  );
   const [firstEntry, ...restEntries] = entries;
   if (!firstEntry) return null;
 
@@ -260,14 +275,18 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
   const [elapsed, setElapsed] = useState("");
   const [cancelling, setCancelling] = useState(false);
 
+  const isQueued = task.status === "queued";
+
   // Elapsed time — ticks every second so users see the agent is alive.
+  // For queued tasks neither started_at nor dispatched_at is set yet, so
+  // anchor on created_at to show the "queued for Ns" wait window.
   useEffect(() => {
-    if (!task.started_at && !task.dispatched_at) return;
-    const startRef = task.started_at ?? task.dispatched_at!;
+    const startRef = task.started_at ?? task.dispatched_at ?? task.created_at;
+    if (!startRef) return;
     setElapsed(formatElapsed(startRef));
     const interval = setInterval(() => setElapsed(formatElapsed(startRef)), 1000);
     return () => clearInterval(interval);
-  }, [task.started_at, task.dispatched_at]);
+  }, [task.started_at, task.dispatched_at, task.created_at]);
 
   const handleCancel = useCallback(async () => {
     if (cancelling) return;
@@ -282,8 +301,10 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
 
   const toolCount = items.filter((i) => i.type === "tool_use").length;
 
+  // Queued tasks render with a non-spinning Clock and dimmer accent so the
+  // banner reads as "waiting" rather than "working" at a glance.
   return (
-    <div className="rounded-lg border border-info/20 bg-info/5">
+    <div className={isQueued ? "rounded-lg border border-border bg-muted/30" : "rounded-lg border border-info/20 bg-info/5"}>
       <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground">
         {task.agent_id ? (
           <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} enableHoverCard showStatusDot />
@@ -293,21 +314,35 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
           </div>
         )}
         <div className="flex items-center gap-1.5 text-xs min-w-0">
-          <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
-          <span className="font-medium text-foreground truncate">{t(($) => $.agent_live.is_working, { name: agentName })}</span>
-          <span className="text-muted-foreground tabular-nums shrink-0">{elapsed}</span>
-          {toolCount > 0 && (
+          {isQueued ? (
+            <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
+          ) : (
+            <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
+          )}
+          <span className="font-medium text-foreground truncate">
+            {isQueued
+              ? t(($) => $.agent_live.is_queued, { name: agentName })
+              : t(($) => $.agent_live.is_working, { name: agentName })}
+          </span>
+          <span className="text-muted-foreground tabular-nums shrink-0">
+            {isQueued
+              ? t(($) => $.agent_live.queued_elapsed_prefix, { elapsed })
+              : elapsed}
+          </span>
+          {!isQueued && toolCount > 0 && (
             <span className="text-muted-foreground shrink-0">{t(($) => $.agent_live.tool_count, { count: toolCount })}</span>
           )}
         </div>
         <div className="ml-auto flex items-center gap-1 shrink-0">
-          <TranscriptButton
-            task={task}
-            agentName={agentName}
-            items={items}
-            isLive
-            title={t(($) => $.agent_live.transcript_button)}
-          />
+          {!isQueued && (
+            <TranscriptButton
+              task={task}
+              agentName={agentName}
+              items={items}
+              isLive
+              title={t(($) => $.agent_live.transcript_button)}
+            />
+          )}
           <button
             onClick={handleCancel}
             disabled={cancelling}

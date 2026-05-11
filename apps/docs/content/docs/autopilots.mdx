@@ -25,10 +25,6 @@ An autopilot has two execution modes. **Start with "create issue" mode.**
 - **Create issue mode** (`create_issue`) — default, **recommended**. Each trigger first creates an issue in the workspace (the title supports interpolation like `{{date}}`), then assigns the issue to the agent through the normal assignment flow. All work lands on the issue board with the same history, comments, and status as a manually assigned issue.
 - **Run-only mode** (`run_only`) — skips issue creation and enqueues a `task` directly. The run is invisible on the board — you can only see it in the autopilot's run history.
 
-<Callout type="warning">
-**Run-only mode is currently unstable.** The CLI labels it "not yet supported end-to-end," and the dispatch path has known issues. New users should stick to create issue mode and wait for run-only mode to ship a stable release before switching.
-</Callout>
-
 ## Run it on a schedule
 
 Every autopilot needs at least one `schedule` trigger. Cron uses the **standard 5-field format** (minute hour day month weekday), with **1-minute** minimum granularity (no seconds). Timezone is IANA-formatted (for example, `Asia/Shanghai`) and determines which timezone the cron expression is interpreted in.

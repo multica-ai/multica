@@ -23,4 +23,7 @@ export interface Comment {
   attachments: import("./attachment").Attachment[];
   created_at: string;
   updated_at: string;
+  resolved_at: string | null;
+  resolved_by_type: CommentAuthorType | null;
+  resolved_by_id: string | null;
 }

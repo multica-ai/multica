@@ -16,6 +16,7 @@ export interface RuntimeDevice {
   device_info: string;
   metadata: Record<string, unknown>;
   owner_id: string | null;
+  timezone: string;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;

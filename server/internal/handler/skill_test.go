@@ -1042,6 +1042,106 @@ func TestFetchFromGitHub_UnresolvableRefFailsLoudly(t *testing.T) {
 	}
 }
 
+// When the GitHub API responds 403 (rate-limited or auth-blocked) on the
+// ref-resolution probe, the import should NOT fail outright. The optimistic
+// single-segment split (ref = first segment, rest = path) is correct for
+// the overwhelming majority of URLs, so we fall back to it and let the raw
+// SKILL.md fetch be the source of truth. This covers the common case of
+// self-hosted servers hitting GitHub's 60-req/hour unauthenticated limit.
+func TestFetchFromGitHub_FallsBackOnAPIBlocked(t *testing.T) {
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			// Simulate rate-limit on every commits probe and on contents.
+			if strings.HasPrefix(r.URL.Path, "/repos/anthropics/skills/commits/") {
+				http.Error(w, "rate limit", http.StatusForbidden)
+				return
+			}
+			if strings.HasPrefix(r.URL.Path, "/repos/anthropics/skills/contents/") {
+				http.Error(w, "rate limit", http.StatusForbidden)
+				return
+			}
+			http.NotFound(w, r)
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/anthropics/skills/main/skills/pptx/SKILL.md":
+				w.Write([]byte("---\nname: pptx\ndescription: PowerPoint skill\n---\nbody"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	result, err := fetchFromGitHub(client, "https://github.com/anthropics/skills/tree/main/skills/pptx")
+	if err != nil {
+		t.Fatalf("fetchFromGitHub: %v", err)
+	}
+	if result.origin["ref"] != "main" {
+		t.Fatalf("origin ref = %v, want main (optimistic fallback)", result.origin["ref"])
+	}
+	if result.origin["path"] != "skills/pptx" {
+		t.Fatalf("origin path = %v, want skills/pptx (optimistic fallback)", result.origin["path"])
+	}
+	if result.name != "pptx" {
+		t.Fatalf("name = %q, want pptx", result.name)
+	}
+}
+
+// GITHUB_TOKEN, when set, must be forwarded as a bearer token on every
+// api.github.com request so self-hosted servers can avoid the 60-req/hour
+// unauthenticated rate limit.
+func TestFetchFromGitHub_SendsAuthHeaderWhenTokenSet(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_test_token_123")
+	var (
+		mu      sync.Mutex
+		authHdr []string
+	)
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Test-Original-Host") == "api.github.com" {
+			mu.Lock()
+			authHdr = append(authHdr, r.Header.Get("Authorization"))
+			mu.Unlock()
+		}
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/skills/commits/main/skills/foo",
+				"/repos/acme/skills/commits/main/skills":
+				http.NotFound(w, r)
+			case "/repos/acme/skills/commits/main":
+				w.Write([]byte("deadbeef"))
+			case "/repos/acme/skills/contents/skills/foo":
+				writeJSON(w, http.StatusOK, []githubContentEntry{})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/skills/main/skills/foo/SKILL.md":
+				w.Write([]byte("---\nname: foo\n---\nbody"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	if _, err := fetchFromGitHub(client, "https://github.com/acme/skills/tree/main/skills/foo"); err != nil {
+		t.Fatalf("fetchFromGitHub: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(authHdr) == 0 {
+		t.Fatal("expected at least one api.github.com request")
+	}
+	for i, h := range authHdr {
+		if h != "Bearer ghp_test_token_123" {
+			t.Fatalf("request %d Authorization = %q, want Bearer ghp_test_token_123", i, h)
+		}
+	}
+}
+
 type rewriteGitHubTransport struct {
 	target *url.URL
 	base   http.RoundTripper

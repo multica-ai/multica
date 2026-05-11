@@ -7,6 +7,7 @@ import { ContentEditor, type ContentEditorRef } from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
+import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 import { useT } from "../../i18n";
 
 const logger = createLogger("chat.ui");
@@ -140,8 +141,10 @@ export function ChatInput({
             // Chat is short-form — the floating formatting toolbar is
             // more distraction than feature here.
             showBubbleMenu={false}
-            // Enter sends; Shift-Enter inserts a hard break.
-            submitOnEnter
+            // Mod+Enter submits. Bare Enter falls through to Tiptap's
+            // default, which continues lists/quotes and breaks paragraphs.
+            // Without this, Enter-as-send would steal the only key that
+            // continues a bullet list, leaving users stuck after one item.
           />
         </div>
         {leftAdornment && (
@@ -156,6 +159,8 @@ export function ChatInput({
             disabled={isEmpty || !!disabled || !!noAgent}
             running={isRunning}
             onStop={onStop}
+            tooltip={`${t(($) => $.input.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}
+            stopTooltip={t(($) => $.input.stop_tooltip)}
           />
         </div>
       </div>

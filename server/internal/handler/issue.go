@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -856,9 +857,15 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 // create task, and returns 202 immediately. The agent translates the prompt
 // into a `multica issue create` invocation in the background; success and
 // failure both surface as inbox notifications to the requester.
+//
+// ProjectID is optional and lets the modal target a specific project so
+// the agent's `multica issue create` invocation passes `--project <uuid>`
+// instead of letting it default. The frontend remembers the user's last
+// pick per workspace, so frequent users skip retyping "in project X".
 type QuickCreateIssueRequest struct {
-	AgentID string `json:"agent_id"`
-	Prompt  string `json:"prompt"`
+	AgentID   string `json:"agent_id"`
+	Prompt    string `json:"prompt"`
+	ProjectID string `json:"project_id,omitempty"`
 }
 
 // QuickCreateIssueResponse echoes the queued task id so the frontend can
@@ -944,7 +951,27 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, prompt)
+	// Optional project_id — validate it belongs to the same workspace before
+	// pinning the task to it. The handler is the trust boundary; the frontend
+	// already only shows projects from the active workspace, but we re-check
+	// here so a forged request can't smuggle a foreign project ID through.
+	var projectUUID pgtype.UUID
+	if strings.TrimSpace(req.ProjectID) != "" {
+		pid, ok := parseUUIDOrBadRequest(w, req.ProjectID, "project_id")
+		if !ok {
+			return
+		}
+		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+			ID:          pid,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			writeError(w, http.StatusBadRequest, "project not found")
+			return
+		}
+		projectUUID = pid
+	}
+
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, prompt, projectUUID)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
@@ -1276,6 +1303,44 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 	h.publish(protocol.EventIssueCreated, workspaceID, creatorType, actualCreatorID, map[string]any{"issue": resp})
+	analyticsActorID := actualCreatorID
+	analyticsAgentID := ""
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" {
+		analyticsAgentID = uuidToString(issue.AssigneeID)
+	}
+	if creatorType == "agent" {
+		analyticsActorID = "agent:" + actualCreatorID
+		if analyticsAgentID == "" {
+			analyticsAgentID = actualCreatorID
+		}
+	}
+	analyticsSource := analytics.SourceManual
+	analyticsTaskID := ""
+	analyticsAutopilotRunID := ""
+	if originType.Valid {
+		switch originType.String {
+		case "quick_create":
+			analyticsSource = analytics.SourceManual
+			analyticsTaskID = uuidToString(originID)
+		case "autopilot":
+			analyticsSource = analytics.SourceAutopilot
+			analyticsAutopilotRunID = uuidToString(originID)
+		default:
+			slog.Warn("analytics: unknown issue origin type",
+				"origin_type", originType.String,
+				"issue_id", uuidToString(issue.ID),
+			)
+		}
+	}
+	h.Analytics.Capture(analytics.IssueCreated(
+		analyticsActorID,
+		workspaceID,
+		uuidToString(issue.ID),
+		analyticsAgentID,
+		analyticsTaskID,
+		analyticsAutopilotRunID,
+		analyticsSource,
+	))
 
 	// Enqueue agent task when an agent-assigned issue is created.
 	if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
@@ -1519,9 +1584,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 // validateAssigneePair verifies the (assignee_type, assignee_id) pair refers
-// to an existing entity in the workspace. For agent assignees it also enforces
-// visibility (private agents are only assignable by their owner or by
-// workspace admins/owners) and rejects archived agents.
+// to an existing entity in the workspace. For agent assignees it also rejects
+// archived agents and runs the private-agent gate via canAccessPrivateAgent
+// — assigning an issue is a task-producing surface, so it must use the same
+// predicate as chat / @-mention / history. Agent callers (X-Agent-ID) bypass
+// the gate so A2A flows can still hand work off to private agents.
 //
 // Returns (statusCode, errorMessage). statusCode == 0 means the pair is valid;
 // callers should treat any non-zero status as a rejection and surface it back
@@ -1559,14 +1626,9 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 		if agent.ArchivedAt.Valid {
 			return http.StatusBadRequest, "cannot assign to archived agent"
 		}
-		if agent.Visibility == "private" {
-			userID := requestUserID(r)
-			if uuidToString(agent.OwnerID) != userID {
-				member, err := h.getWorkspaceMember(ctx, userID, workspaceID)
-				if err != nil || !roleAllowed(member.Role, "owner", "admin") {
-					return http.StatusForbidden, "cannot assign to private agent"
-				}
-			}
+		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+		if !h.canAccessPrivateAgent(ctx, agent, actorType, actorID, workspaceID) {
+			return http.StatusForbidden, "cannot assign to private agent"
 		}
 		return 0, ""
 	default:

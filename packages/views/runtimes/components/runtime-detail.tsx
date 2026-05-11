@@ -14,7 +14,7 @@ import type { AgentRuntime, Agent, MemberWithUser } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useDeleteRuntime } from "@multica/core/runtimes/mutations";
+import { useDeleteRuntime, useUpdateRuntime } from "@multica/core/runtimes/mutations";
 import { deriveRuntimeHealth } from "@multica/core/runtimes";
 import {
   type AgentPresenceDetail,
@@ -37,6 +37,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
@@ -505,8 +512,18 @@ function DiagnosticsCard({
         <span className="text-xs font-semibold">{t(($) => $.detail.diagnostics_title)}</span>
       </div>
       <div className="space-y-3 p-4">
+        <div>
+          <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+            {t(($) => $.detail.diagnostics_timezone)}
+          </div>
+          {canDelete ? (
+            <TimezoneEditor runtime={runtime} />
+          ) : (
+            <TimezoneReadout runtime={runtime} />
+          )}
+        </div>
         {isLocal && (
-          <div>
+          <div className="border-t pt-3">
             <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
               {t(($) => $.detail.diagnostics_cli)}
             </div>
@@ -519,7 +536,7 @@ function DiagnosticsCard({
           </div>
         )}
         {canDelete && (
-          <div className={isLocal ? "border-t pt-3" : ""}>
+          <div className="border-t pt-3">
             <Button
               variant="ghost"
               size="sm"
@@ -532,6 +549,125 @@ function DiagnosticsCard({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Common IANA zones offered as quick picks when Intl.supportedValuesOf is not
+// available, and promoted near the top otherwise.
+const COMMON_TIMEZONES = [
+  "UTC",
+  "America/Los_Angeles",
+  "America/Denver",
+  "America/Chicago",
+  "America/New_York",
+  "America/Sao_Paulo",
+  "Europe/London",
+  "Europe/Berlin",
+  "Europe/Paris",
+  "Europe/Moscow",
+  "Africa/Cairo",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Bangkok",
+  "Asia/Shanghai",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+];
+
+function browserTimezone(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return tz || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+type IntlWithSupportedValues = typeof Intl & {
+  supportedValuesOf?: (key: "timeZone") => string[];
+};
+
+function supportedTimezones(): string[] {
+  try {
+    const supported = (Intl as IntlWithSupportedValues).supportedValuesOf?.(
+      "timeZone",
+    );
+    return supported && supported.length > 0 ? supported : COMMON_TIMEZONES;
+  } catch {
+    return COMMON_TIMEZONES;
+  }
+}
+
+function TimezoneReadout({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  return (
+    <div className="space-y-1.5">
+      <div className="rounded-md border bg-muted/30 px-2 py-1.5 font-mono text-xs">
+        {runtime.timezone || "UTC"}
+      </div>
+      <p className="text-[11px] leading-snug text-muted-foreground">
+        {t(($) => $.detail.timezone_hint)}
+      </p>
+    </div>
+  );
+}
+
+// TimezoneEditor renders the current runtime tz, a dropdown of supported IANA
+// zones (plus the runtime's current value if it is unusual), and commits the
+// change via PATCH /api/runtimes/:id. We deliberately don't gate this behind a
+// separate "edit" mode because the change is reversible.
+function TimezoneEditor({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  const wsId = useWorkspaceId();
+  const updateRuntime = useUpdateRuntime(wsId);
+  const current = runtime.timezone || "UTC";
+  const browser = browserTimezone();
+  const browserSuffix = t(($) => $.detail.timezone_browser_suffix);
+
+  const options = Array.from(
+    new Set([current, browser, ...COMMON_TIMEZONES, ...supportedTimezones()]),
+  ).filter(Boolean);
+  const handleTimezoneChange = (next: string) => {
+    if (next === current) return;
+    updateRuntime.mutate(
+      { runtimeId: runtime.id, patch: { timezone: next } },
+      {
+        onSuccess: () =>
+          toast.success(t(($) => $.detail.timezone_toast_updated, { tz: next })),
+        onError: () =>
+          toast.error(t(($) => $.detail.timezone_toast_failed)),
+      },
+    );
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <Select
+        value={current}
+        disabled={updateRuntime.isPending}
+        onValueChange={(next) => {
+          if (next) handleTimezoneChange(next);
+        }}
+      >
+        <SelectTrigger size="sm" className="w-full rounded-md font-mono text-xs">
+          <SelectValue>
+            {current === browser ? `${current}${browserSuffix}` : current}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent align="start" className="max-h-72">
+          {options.map((tz) => (
+            <SelectItem key={tz} value={tz} className="font-mono text-xs">
+              {tz === browser ? `${tz}${browserSuffix}` : tz}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-[11px] leading-snug text-muted-foreground">
+        {t(($) => $.detail.timezone_hint)}
+      </p>
     </div>
   );
 }

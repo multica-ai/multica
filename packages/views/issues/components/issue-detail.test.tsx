@@ -97,7 +97,11 @@ vi.mock("../../navigation", () => ({
       {children}
     </a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/issues/issue-1", getShareableUrl: undefined }),
+  useNavigation: () => ({
+    push: vi.fn(),
+    pathname: "/issues/issue-1",
+    getShareableUrl: (p: string) => `https://app.multica.com${p}`,
+  }),
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -105,6 +109,10 @@ vi.mock("../../navigation", () => ({
 vi.mock("../../editor", () => ({
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
+  // No-op so comment-card's AttachmentList can render without hitting the
+  // real API singleton; tests that care about download wiring should write
+  // dedicated specs against `use-download-attachment.test.tsx`.
+  useDownloadAttachment: () => vi.fn(),
   ReadonlyContent: ({ content }: { content: string }) => (
     <div data-testid="readonly-content">{content}</div>
   ),
@@ -175,13 +183,7 @@ vi.mock("../../projects/components/project-picker", () => ({
 // Mock api
 const mockApiObj = vi.hoisted(() => ({
   getIssue: vi.fn(),
-  listTimeline: vi.fn().mockResolvedValue({
-    entries: [],
-    next_cursor: null,
-    prev_cursor: null,
-    has_more_before: false,
-    has_more_after: false,
-  }),
+  listTimeline: vi.fn().mockResolvedValue([]),
   listComments: vi.fn().mockResolvedValue([]),
   createComment: vi.fn(),
   updateComment: vi.fn(),
@@ -200,6 +202,7 @@ const mockApiObj = vi.hoisted(() => ({
   listIssueReactions: vi.fn().mockResolvedValue([]),
   addIssueReaction: vi.fn(),
   removeIssueReaction: vi.fn(),
+  listAttachments: vi.fn().mockResolvedValue([]),
   addCommentReaction: vi.fn(),
   removeCommentReaction: vi.fn(),
   listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
@@ -241,11 +244,18 @@ const mockRecordVisit = vi.fn();
 vi.mock("@multica/core/issues/stores", () => ({
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
-      const state = { items: [], recordVisit: mockRecordVisit };
+      const state = { byWorkspace: {}, recordVisit: mockRecordVisit, pruneWorkspaces: vi.fn() };
       return selector ? selector(state) : state;
     },
-    { getState: () => ({ items: [], recordVisit: mockRecordVisit }) },
+    {
+      getState: () => ({
+        byWorkspace: {},
+        recordVisit: mockRecordVisit,
+        pruneWorkspaces: vi.fn(),
+      }),
+    },
   ),
+  selectRecentIssues: () => () => [],
   useCommentCollapseStore: (selector?: any) => {
     const state = {
       collapsedByIssue: {},
@@ -377,6 +387,30 @@ function renderIssueDetail(issueId = "issue-1") {
   );
 }
 
+function renderIssueDetailWithHighlight(
+  highlightCommentId: string,
+  issueId = "issue-1",
+  options: { seedTimeline?: boolean } = {},
+) {
+  const queryClient = createTestQueryClient();
+  if (options.seedTimeline) {
+    // Pre-populate the timeline cache so the first render sees timeline.length>0.
+    // This reproduces the inbox-click race: timeline data is available before
+    // the issue itself has finished loading, so the effect that scrolls to
+    // the comment fires once with `loading=true` (skeleton still rendered,
+    // no comment DOM) and must re-fire when `loading` flips to false.
+    queryClient.setQueryData(["issues", "timeline", issueId], mockTimeline);
+  }
+  const result = render(
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={queryClient}>
+        <IssueDetail issueId={issueId} highlightCommentId={highlightCommentId} />
+      </QueryClientProvider>
+    </I18nProvider>,
+  );
+  return { ...result, queryClient };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -387,18 +421,8 @@ describe("IssueDetail (shared)", () => {
     mockViewport.isMobile = false;
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
-    // Cursor-paginated timeline endpoint returns a TimelinePage. The DESC
-    // order is required because the hook reverses pages → ASC for the UI.
-    const descTimeline = [...mockTimeline].sort((a, b) =>
-      b.created_at.localeCompare(a.created_at),
-    );
-    mockApiObj.listTimeline.mockResolvedValue({
-      entries: descTimeline,
-      next_cursor: null,
-      prev_cursor: null,
-      has_more_before: false,
-      has_more_after: false,
-    });
+    // /timeline returns the entries flat in chronological order (oldest first).
+    mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
@@ -520,6 +544,67 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
+  });
+
+  describe("highlightCommentId scroll-to-comment", () => {
+    let scrollIntoViewSpy: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      scrollIntoViewSpy = vi.fn();
+      Element.prototype.scrollIntoView =
+        scrollIntoViewSpy as unknown as Element["scrollIntoView"];
+    });
+
+    it("scrolls to the highlighted comment after both issue and timeline finish loading", async () => {
+      renderIssueDetailWithHighlight("comment-2");
+
+      // Wait until the comment DOM is rendered.
+      await waitFor(() => {
+        expect(document.getElementById("comment-comment-2")).not.toBeNull();
+      });
+
+      // requestAnimationFrame defers the actual scrollIntoView call.
+      await waitFor(() => {
+        expect(scrollIntoViewSpy).toHaveBeenCalled();
+      });
+
+      const callContext = scrollIntoViewSpy.mock.contexts[0] as HTMLElement;
+      expect(callContext.id).toBe("comment-comment-2");
+    });
+
+    it("still scrolls when the timeline is ready before the issue (regression for inbox click)", async () => {
+      // Reproduces the inbox-click race: timeline data is already in the cache
+      // (resolved first), but the issue is still pending — so the first render
+      // sees timeline.length=2 alongside loading=true (skeleton still showing,
+      // no comment DOM). The scroll effect fires once, fails to find the
+      // element, and must re-fire when `loading` flips to false. Without
+      // `loading` in the dep list, that second fire never happens and the
+      // user lands at the top of the issue.
+      let resolveIssue: (value: Issue) => void = () => {};
+      const issuePromise = new Promise<Issue>((resolve) => {
+        resolveIssue = resolve;
+      });
+      mockApiObj.getIssue.mockReturnValue(issuePromise);
+
+      renderIssueDetailWithHighlight("comment-2", "issue-1", { seedTimeline: true });
+
+      // The skeleton is still showing (issue pending), so even though
+      // timeline.length>0 the comment DOM is not mounted and no scroll
+      // can happen yet.
+      expect(document.getElementById("comment-comment-2")).toBeNull();
+      expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+
+      // Now the issue resolves — comment elements mount, the effect re-runs
+      // because `loading` is part of its deps, and the scroll fires.
+      resolveIssue(mockIssue);
+
+      await waitFor(() => {
+        expect(document.getElementById("comment-comment-2")).not.toBeNull();
+      });
+      await waitFor(() => {
+        expect(scrollIntoViewSpy).toHaveBeenCalled();
+      });
+    });
   });
 
   it("sends empty description when editor is cleared", async () => {

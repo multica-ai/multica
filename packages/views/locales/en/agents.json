@@ -107,6 +107,8 @@
     "back_to_agents_full": "Back to agents",
     "not_found_title": "Agent not found",
     "not_found_default": "This agent may have been archived or deleted.",
+    "no_access_title": "You don't have access to this agent",
+    "no_access_hint": "Only the agent owner or a workspace admin can view this private agent.",
     "try_again": "Try again",
     "archived_banner": "This agent is archived. It cannot be assigned or mentioned.",
     "restore": "Restore",
@@ -259,7 +261,9 @@
       "remove_failed_toast": "Failed to remove skill",
       "add_dialog_title": "Add skill",
       "add_dialog_description": "Select a workspace skill to assign to this agent.",
+      "add_dialog_search_placeholder": "Search skills",
       "add_dialog_empty": "All workspace skills are already assigned.",
+      "add_dialog_no_match": "No skills match your search.",
       "add_dialog_cancel": "Cancel",
       "add_failed_toast": "Failed to add skill"
     },

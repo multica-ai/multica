@@ -3,6 +3,7 @@ import { useQuickCreateStore } from "./quick-create-store";
 
 const RESET_STATE = {
   lastAgentId: null,
+  lastProjectId: null,
   prompt: "",
   keepOpen: false,
 };
@@ -22,5 +23,15 @@ describe("quick create store", () => {
 
     clearPrompt();
     expect(useQuickCreateStore.getState().prompt).toBe("");
+  });
+
+  it("remembers the last project picked so frequent users skip the picker", () => {
+    const { setLastProjectId } = useQuickCreateStore.getState();
+
+    setLastProjectId("proj-1");
+    expect(useQuickCreateStore.getState().lastProjectId).toBe("proj-1");
+
+    setLastProjectId(null);
+    expect(useQuickCreateStore.getState().lastProjectId).toBeNull();
   });
 });

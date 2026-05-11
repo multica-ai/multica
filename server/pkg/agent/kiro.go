@@ -69,13 +69,28 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		cancel()
 		return nil, fmt.Errorf("kiro stdin pipe: %w", err)
 	}
+	// StderrPipe + an explicit copier give us a join point
+	// (`stderrDone`) that fires before the failure-promotion
+	// decision; see the matching comment in hermes.go for why the
+	// io.MultiWriter form races with stopReason=end_turn under load.
 	providerErr := newACPProviderErrorSniffer("kiro")
-	cmd.Stderr = io.MultiWriter(newLogWriter(b.cfg.Logger, "[kiro:stderr] "), providerErr)
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("kiro stderr pipe: %w", err)
+	}
 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start kiro: %w", err)
 	}
+
+	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[kiro:stderr] "), providerErr)
+	stderrDone := make(chan struct{})
+	go func() {
+		defer close(stderrDone)
+		_, _ = io.Copy(stderrSink, stderr)
+	}()
 
 	b.cfg.Logger.Info("kiro acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
@@ -292,17 +307,21 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		cancel()
 
 		<-readerDone
+		// Ensure the stderr copier has drained before consulting the
+		// provider-error sniffer; see hermes.go for the failure mode.
+		<-stderrDone
 
 		outputMu.Lock()
 		finalOutput := output.String()
 		outputMu.Unlock()
 
-		if finalStatus == "completed" && finalOutput == "" {
-			if msg := providerErr.message(); msg != "" {
-				finalStatus = "failed"
-				finalError = msg
-			}
-		}
+		// Promote completed→failed when stderr or the agent text
+		// stream show a terminal upstream-LLM failure (HTTP 4xx /
+		// rate-limit / expired token). See the helper docs for the
+		// full signal set; the key safety property is that transient
+		// per-attempt warnings followed by a successful retry stay
+		// "completed".
+		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
 
 		c.usageMu.Lock()
 		u := c.usage

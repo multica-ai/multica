@@ -19,8 +19,19 @@ import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-st
 import { useBatchUpdateIssues, useBatchDeleteIssues } from "@multica/core/issues/mutations";
 import { StatusPicker, PriorityPicker, AssigneePicker } from "./pickers";
 import { useT } from "../../i18n";
+import { cn } from "@multica/ui/lib/utils";
 
-export function BatchActionToolbar() {
+export function BatchActionToolbar({
+  placement = "fixed-bottom",
+}: {
+  /**
+   * "fixed-bottom" — floats at the bottom of the viewport (default; used by
+   * full-screen issue lists).
+   * "inline" — renders in normal flow so callers can place it adjacent to
+   * the selected rows (used inside scrollable sections like sub-issues).
+   */
+  placement?: "fixed-bottom" | "inline";
+}) {
   const { t } = useT("issues");
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
   const clear = useIssueSelectionStore((s) => s.clear);
@@ -61,7 +72,14 @@ export function BatchActionToolbar() {
 
   return (
     <>
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg">
+      <div
+        className={cn(
+          "z-50 flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg",
+          placement === "fixed-bottom"
+            ? "fixed bottom-6 left-1/2 -translate-x-1/2"
+            : "mb-2 w-fit",
+        )}
+      >
         <div className="flex items-center gap-1.5 pl-1 pr-2 border-r mr-1">
           <span className="text-sm font-medium">{t(($) => $.batch.selected, { count })}</span>
           <button

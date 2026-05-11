@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useRef, useState } from "react";
-import { ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -30,7 +30,7 @@ import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-pick
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
-import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -46,7 +46,14 @@ import { useT } from "../../i18n";
 interface CommentCardProps {
   issueId: string;
   entry: TimelineEntry;
-  allReplies: Map<string, TimelineEntry[]>;
+  /**
+   * Flat list of every nested reply under this thread root, in render order.
+   * Computed once in `issue-detail.tsx`'s `timelineView` and stabilized so
+   * the array reference only changes when *this* thread's replies change —
+   * an unrelated thread receiving a new reply must NOT bust this card's
+   * memo. Passing the full Map here used to do exactly that.
+   */
+  replies: TimelineEntry[];
   currentUserId?: string;
   /**
    * True when the current user is a workspace owner/admin and can therefore
@@ -60,6 +67,14 @@ interface CommentCardProps {
   onEdit: (commentId: string, content: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
+  /** Toggle the resolved state on the thread root. Only invoked for root entries. */
+  onResolveToggle?: (commentId: string, resolved: boolean) => void;
+  /**
+   * When non-null, the thread root is currently rendered as a resolved-but-
+   * expanded card. Pass a "Collapse" affordance into the header so the user
+   * can fold the thread back to the bar; the parent owns the session state.
+   */
+  onCollapseResolved?: () => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
 }
@@ -107,6 +122,7 @@ function DeleteCommentDialog({
 // ---------------------------------------------------------------------------
 
 function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
+  const download = useDownloadAttachment();
   if (!attachments?.length) return null;
   // Skip attachments whose URL is already referenced in the markdown content,
   // and duplicates of the same file (same name/type/size) that are referenced.
@@ -140,15 +156,13 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm">{a.filename}</p>
           </div>
-          {a.download_url && (
-            <button
-              type="button"
-              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              onClick={() => window.open(a.download_url, "_blank", "noopener,noreferrer")}
-            >
-              <Download className="size-3.5" />
-            </button>
-          )}
+          <button
+            type="button"
+            className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            onClick={() => download(a.id)}
+          >
+            <Download className="size-3.5" />
+          </button>
         </div>
       ))}
     </div>
@@ -311,6 +325,7 @@ function CommentRow({
               onUploadFile={(file) => uploadWithToast(file, { issueId })}
               debounceMs={100}
               currentIssueId={issueId}
+              attachments={entry.attachments}
             />
           </div>
           <div className="flex items-center justify-between mt-2">
@@ -328,7 +343,7 @@ function CommentRow({
       ) : (
         <>
           <div className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85">
-            <ReadonlyContent content={entry.content ?? ""} />
+            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
           {!isTemp && (
@@ -354,13 +369,15 @@ function CommentRow({
 function CommentCardImpl({
   issueId,
   entry,
-  allReplies,
+  replies,
   currentUserId,
   canModerate = false,
   onReply,
   onEdit,
   onDelete,
   onToggleReaction,
+  onResolveToggle,
+  onCollapseResolved,
   highlightedCommentId,
 }: CommentCardProps) {
   const { t } = useT("issues");
@@ -416,16 +433,10 @@ function CommentCardImpl({
     }
   };
 
-  // Collect all nested replies recursively into a flat list
-  const allNestedReplies: TimelineEntry[] = [];
-  const collectReplies = (parentId: string) => {
-    const children = allReplies.get(parentId) ?? [];
-    for (const child of children) {
-      allNestedReplies.push(child);
-      collectReplies(child.id);
-    }
-  };
-  collectReplies(entry.id);
+  // The parent precomputes the flat thread (using collectThreadReplies),
+  // memoizes by thread, and stabilizes the array reference, so we render
+  // straight from `replies` instead of re-walking the graph on every render.
+  const allNestedReplies = replies;
 
   const replyCount = allNestedReplies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
@@ -437,6 +448,20 @@ function CommentCardImpl({
 
   return (
     <Card className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isTemp && "opacity-60", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
+      {onCollapseResolved && (
+        <button
+          type="button"
+          onClick={onCollapseResolved}
+          className="flex w-full items-center justify-between border-b border-border/50 px-4 py-2.5 text-left text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+          aria-label={t(($) => $.comment.resolve.collapse)}
+        >
+          <span className="flex items-center gap-2">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            {t(($) => $.comment.resolve.collapse)}
+          </span>
+          <ChevronRight className="h-3.5 w-3.5 -rotate-90" />
+        </button>
+      )}
       <Collapsible open={open} onOpenChange={handleOpenChange}>
         {/* Header — always visible, acts as toggle */}
         <div className="px-4 py-3">
@@ -494,6 +519,24 @@ function CommentCardImpl({
                     <Copy className="h-3.5 w-3.5" />
                     {t(($) => $.comment.copy_action)}
                   </DropdownMenuItem>
+                  {onResolveToggle && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => onResolveToggle(entry.id, !entry.resolved_at)}>
+                        {entry.resolved_at ? (
+                          <>
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            {t(($) => $.comment.resolve.unresolve_action)}
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            {t(($) => $.comment.resolve.resolve_action)}
+                          </>
+                        )}
+                      </DropdownMenuItem>
+                    </>
+                  )}
                   {(canEditEntry || canDeleteEntry) && (
                     <>
                       <DropdownMenuSeparator />
@@ -544,6 +587,7 @@ function CommentCardImpl({
                     onUploadFile={(file) => uploadWithToast(file, { issueId })}
                     debounceMs={100}
                     currentIssueId={issueId}
+                    attachments={entry.attachments}
                   />
                 </div>
                 <div className="flex items-center justify-between mt-2">
@@ -561,7 +605,7 @@ function CommentCardImpl({
             ) : (
               <>
                 <div className="pl-10 text-sm leading-relaxed text-foreground/85">
-                  <ReadonlyContent content={entry.content ?? ""} />
+                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
                 {!isTemp && (

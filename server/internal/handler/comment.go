@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -18,17 +17,20 @@ import (
 )
 
 type CommentResponse struct {
-	ID          string               `json:"id"`
-	IssueID     string               `json:"issue_id"`
-	AuthorType  string               `json:"author_type"`
-	AuthorID    string               `json:"author_id"`
-	Content     string               `json:"content"`
-	Type        string               `json:"type"`
-	ParentID    *string              `json:"parent_id"`
-	CreatedAt   string               `json:"created_at"`
-	UpdatedAt   string               `json:"updated_at"`
-	Reactions   []ReactionResponse   `json:"reactions"`
-	Attachments []AttachmentResponse `json:"attachments"`
+	ID             string               `json:"id"`
+	IssueID        string               `json:"issue_id"`
+	AuthorType     string               `json:"author_type"`
+	AuthorID       string               `json:"author_id"`
+	Content        string               `json:"content"`
+	Type           string               `json:"type"`
+	ParentID       *string              `json:"parent_id"`
+	CreatedAt      string               `json:"created_at"`
+	UpdatedAt      string               `json:"updated_at"`
+	ResolvedAt     *string              `json:"resolved_at"`
+	ResolvedByType *string              `json:"resolved_by_type"`
+	ResolvedByID   *string              `json:"resolved_by_id"`
+	Reactions      []ReactionResponse   `json:"reactions"`
+	Attachments    []AttachmentResponse `json:"attachments"`
 }
 
 func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments []AttachmentResponse) CommentResponse {
@@ -39,19 +41,29 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		attachments = []AttachmentResponse{}
 	}
 	return CommentResponse{
-		ID:          uuidToString(c.ID),
-		IssueID:     uuidToString(c.IssueID),
-		AuthorType:  c.AuthorType,
-		AuthorID:    uuidToString(c.AuthorID),
-		Content:     c.Content,
-		Type:        c.Type,
-		ParentID:    uuidToPtr(c.ParentID),
-		CreatedAt:   timestampToString(c.CreatedAt),
-		UpdatedAt:   timestampToString(c.UpdatedAt),
-		Reactions:   reactions,
-		Attachments: attachments,
+		ID:             uuidToString(c.ID),
+		IssueID:        uuidToString(c.IssueID),
+		AuthorType:     c.AuthorType,
+		AuthorID:       uuidToString(c.AuthorID),
+		Content:        c.Content,
+		Type:           c.Type,
+		ParentID:       uuidToPtr(c.ParentID),
+		CreatedAt:      timestampToString(c.CreatedAt),
+		UpdatedAt:      timestampToString(c.UpdatedAt),
+		ResolvedAt:     timestampToPtr(c.ResolvedAt),
+		ResolvedByType: textToPtr(c.ResolvedByType),
+		ResolvedByID:   uuidToPtr(c.ResolvedByID),
+		Reactions:      reactions,
+		Attachments:    attachments,
 	}
 }
+
+// commentHardCap bounds the comments returned per issue. Sized as a defensive
+// safety net rather than a UX paging window: prod p99 is ~30 comments and
+// the all-time max observed is ~1.1k, so 2000 leaves ~2x headroom while still
+// preventing a runaway response if some user manages to accumulate a wild
+// number of rows on a single issue.
+const commentHardCap = 2000
 
 func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
@@ -60,31 +72,12 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse optional pagination query params.
-	q := r.URL.Query()
-	var limit, offset int32
-	var hasPagination bool
-	if v := q.Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			writeError(w, http.StatusBadRequest, "invalid limit parameter")
-			return
-		}
-		limit = int32(n)
-		hasPagination = true
-	}
-	if v := q.Get("offset"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 0 {
-			writeError(w, http.StatusBadRequest, "invalid offset parameter")
-			return
-		}
-		offset = int32(n)
-		hasPagination = true
-	}
-
+	// Only `since` is honoured — used by the CLI's `--since` agent-polling
+	// flow to fetch incremental comments. The previous limit/offset cursor
+	// was ripped out (#1929): time-based pagination breaks reply threads,
+	// and at the actual data sizes there is no win from paging.
 	var sinceTime pgtype.Timestamptz
-	if v := q.Get("since"); v != "" {
+	if v := r.URL.Query().Get("since"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid since parameter; expected RFC3339 format")
@@ -95,39 +88,18 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 
 	var comments []db.Comment
 	var err error
-
-	// When neither limit nor offset is specified, default to the most recent
-	// 50 comments. The previous behavior returned every comment unbounded,
-	// which let an agent or browser call accidentally pull thousands of rows
-	// (see issue #1968). Callers that want everything must opt in with a
-	// large explicit --limit; a 100-cap on the server side stays in place via
-	// the timeline endpoint, but this endpoint is used by humans + the CLI
-	// where the cap is the documented 50 default.
-	if !hasPagination {
-		limit = 50
-		hasPagination = true
-	}
-	switch {
-	case sinceTime.Valid:
-		if limit == 0 {
-			limit = 50
-		}
-		comments, err = h.Queries.ListCommentsSincePaginated(r.Context(), db.ListCommentsSincePaginatedParams{
+	if sinceTime.Valid {
+		comments, err = h.Queries.ListCommentsSinceForIssue(r.Context(), db.ListCommentsSinceForIssueParams{
 			IssueID:     issue.ID,
 			WorkspaceID: issue.WorkspaceID,
 			CreatedAt:   sinceTime,
-			Limit:       limit,
-			Offset:      offset,
+			Limit:       commentHardCap,
 		})
-	default:
-		if limit == 0 {
-			limit = 50
-		}
-		comments, err = h.Queries.ListCommentsPaginated(r.Context(), db.ListCommentsPaginatedParams{
+	} else {
+		comments, err = h.Queries.ListCommentsForIssue(r.Context(), db.ListCommentsForIssueParams{
 			IssueID:     issue.ID,
 			WorkspaceID: issue.WorkspaceID,
-			Limit:       limit,
-			Offset:      offset,
+			Limit:       commentHardCap,
 		})
 	}
 	if err != nil {
@@ -146,17 +118,6 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	for i, c := range comments {
 		cid := uuidToString(c.ID)
 		resp[i] = commentToResponse(c, grouped[cid], groupedAtt[cid])
-	}
-
-	// Include total count in response header when paginating.
-	if hasPagination {
-		total, countErr := h.Queries.CountComments(r.Context(), db.CountCommentsParams{
-			IssueID:     issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-		})
-		if countErr == nil {
-			w.Header().Set("X-Total-Count", strconv.FormatInt(total, 10))
-		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -286,6 +247,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
 		"issue_status":        issue.Status,
 	})
+
+	// A reply in a resolved thread re-opens it. Done after CreateComment commits
+	// so the reply is visible regardless of the unresolve outcome. Shared with
+	// the agent task path (TaskService.createAgentComment) — both reply paths
+	// must keep the resolved root in sync.
+	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), parentComment, uuidToString(issue.WorkspaceID), authorType, authorID)
 
 	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
 	// Skip when the comment comes from the assigned agent itself to avoid loops.
@@ -459,20 +426,23 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 			continue
 		}
 		agentUUID := parseUUID(m.ID)
-		// Load the agent to check visibility, archive status, and trigger config.
-		agent, err := h.Queries.GetAgent(ctx, agentUUID)
+		// Load the agent scoped to the current issue's workspace. Using the
+		// bare GetAgent here would let a mention resolve to an agent in a
+		// different workspace, and the visibility check below would then be
+		// applied against the wrong workspace's roles (a workspace owner in
+		// THIS workspace would pass the gate for a private agent that lives
+		// in someone else's workspace).
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          agentUUID,
+			WorkspaceID: issue.WorkspaceID,
+		})
 		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 			continue
 		}
-		// Private agents can only be mentioned by the agent owner or workspace admin/owner.
-		if agent.Visibility == "private" && authorType == "member" {
-			isOwner := uuidToString(agent.OwnerID) == authorID
-			if !isOwner {
-				member, err := h.getWorkspaceMember(ctx, authorID, wsID)
-				if err != nil || !roleAllowed(member.Role, "owner", "admin") {
-					continue
-				}
-			}
+		// Private-agent gate (member→private requires allowed_principals;
+		// agent→agent always passes).
+		if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
+			continue
 		}
 		// Dedup: skip if this agent already has a pending task for this issue.
 		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
@@ -629,4 +599,105 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		"issue_id":   uuidToString(comment.IssueID),
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// loadRootCommentForActor resolves a {commentId} URL param to a root comment in
+// the caller's workspace. Returns the comment, the workspace UUID, the actor
+// identity, and ok. Resolve / unresolve handlers share this scaffolding so the
+// "must be a root comment" rule lives in one place.
+func (h *Handler) loadRootCommentForActor(w http.ResponseWriter, r *http.Request) (db.Comment, string, string, string, bool) {
+	commentId := chi.URLParam(r, "commentId")
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return db.Comment{}, "", "", "", false
+	}
+	commentUUID, ok := parseUUIDOrBadRequest(w, commentId, "comment id")
+	if !ok {
+		return db.Comment{}, "", "", "", false
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return db.Comment{}, "", "", "", false
+	}
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return db.Comment{}, "", "", "", false
+	}
+	comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+		ID:          commentUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "comment not found")
+		return db.Comment{}, "", "", "", false
+	}
+	if comment.ParentID.Valid {
+		writeError(w, http.StatusBadRequest, "only root comments can be resolved")
+		return db.Comment{}, "", "", "", false
+	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	return comment, workspaceID, actorType, actorID, true
+}
+
+func (h *Handler) ResolveComment(w http.ResponseWriter, r *http.Request) {
+	comment, workspaceID, actorType, actorID, ok := h.loadRootCommentForActor(w, r)
+	if !ok {
+		return
+	}
+	wasResolved := comment.ResolvedAt.Valid
+
+	actorUUID, err := util.ParseUUID(actorID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid actor id")
+		return
+	}
+	updated, err := h.Queries.ResolveComment(r.Context(), db.ResolveCommentParams{
+		ID:             comment.ID,
+		ResolvedByType: pgtype.Text{String: actorType, Valid: true},
+		ResolvedByID:   actorUUID,
+	})
+	if err != nil {
+		slog.Warn("resolve comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", uuidToString(comment.ID))...)
+		writeError(w, http.StatusInternalServerError, "failed to resolve comment")
+		return
+	}
+
+	grouped := h.groupReactions(r, []pgtype.UUID{updated.ID})
+	groupedAtt := h.groupAttachments(r, []pgtype.UUID{updated.ID})
+	cid := uuidToString(updated.ID)
+	resp := commentToResponse(updated, grouped[cid], groupedAtt[cid])
+
+	// Suppress the event on a re-resolve no-op so consumers do not re-process
+	// an unchanged thread (notifications, log spam).
+	if !wasResolved {
+		slog.Info("comment resolved", append(logger.RequestAttrs(r), "comment_id", cid)...)
+		h.publish(protocol.EventCommentResolved, workspaceID, actorType, actorID, map[string]any{"comment": resp})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) UnresolveComment(w http.ResponseWriter, r *http.Request) {
+	comment, workspaceID, actorType, actorID, ok := h.loadRootCommentForActor(w, r)
+	if !ok {
+		return
+	}
+	wasResolved := comment.ResolvedAt.Valid
+
+	updated, err := h.Queries.UnresolveComment(r.Context(), comment.ID)
+	if err != nil {
+		slog.Warn("unresolve comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", uuidToString(comment.ID))...)
+		writeError(w, http.StatusInternalServerError, "failed to unresolve comment")
+		return
+	}
+
+	grouped := h.groupReactions(r, []pgtype.UUID{updated.ID})
+	groupedAtt := h.groupAttachments(r, []pgtype.UUID{updated.ID})
+	cid := uuidToString(updated.ID)
+	resp := commentToResponse(updated, grouped[cid], groupedAtt[cid])
+
+	if wasResolved {
+		slog.Info("comment unresolved", append(logger.RequestAttrs(r), "comment_id", cid)...)
+		h.publish(protocol.EventCommentUnresolved, workspaceID, actorType, actorID, map[string]any{"comment": resp})
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

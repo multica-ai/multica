@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
-import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, History } from "lucide-react";
+import { Minus, Maximize2, Minimize2, ChevronDown, ChevronRight, Plus, Check, Trash2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import {
@@ -15,6 +15,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
@@ -26,17 +36,19 @@ import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
 import {
   chatSessionsOptions,
-  allChatSessionsOptions,
   chatMessagesOptions,
   pendingChatTaskOptions,
   pendingChatTasksOptions,
   chatKeys,
 } from "@multica/core/chat/queries";
-import { useCreateChatSession, useMarkChatSessionRead } from "@multica/core/chat/mutations";
+import {
+  useCreateChatSession,
+  useDeleteChatSession,
+  useMarkChatSessionRead,
+} from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
-import { ChatSessionHistory } from "./chat-session-history";
 import {
   ContextAnchorButton,
   ContextAnchorCard,
@@ -61,13 +73,13 @@ export function ChatWindow() {
   const setOpen = useChatStore((s) => s.setOpen);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
-  const showHistory = useChatStore((s) => s.showHistory);
-  const setShowHistory = useChatStore((s) => s.setShowHistory);
   const user = useAuthStore((s) => s.user);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  // Single sessions cache. The dropdown groups locally into "active" /
+  // "archived" — eliminating the separate active/all queries that used
+  // to drift during the WS-invalidate window.
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
-  const { data: allSessions = [] } = useQuery(allChatSessionsOptions(wsId));
   const { data: rawMessages, isLoading: messagesLoading } = useQuery(
     chatMessagesOptions(activeSessionId ?? ""),
   );
@@ -90,10 +102,10 @@ export function ChatWindow() {
 
   // Legacy archived sessions (the old soft-archive feature was removed but
   // pre-existing rows with status='archived' may still exist) render as
-  // read-only: history list keeps showing them, but ChatInput is disabled
-  // and the server still rejects POST /messages for them.
+  // read-only: dropdown keeps showing them under "archived", but ChatInput
+  // is disabled and the server still rejects POST /messages for them.
   const currentSession = activeSessionId
-    ? allSessions.find((s) => s.id === activeSessionId)
+    ? sessions.find((s) => s.id === activeSessionId)
     : null;
   const isSessionArchived = currentSession?.status === "archived";
 
@@ -417,24 +429,6 @@ export function ChatWindow() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="text-muted-foreground data-[active=true]:bg-accent"
-                  data-active={showHistory ? "true" : undefined}
-                  onClick={() => setShowHistory(!showHistory)}
-                />
-              }
-            >
-              <History />
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {showHistory ? t(($) => $.window.history_back_tooltip) : t(($) => $.window.history_show_tooltip)}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
                   className="text-muted-foreground"
                   onClick={toggleExpand}
                 />
@@ -464,67 +458,58 @@ export function ChatWindow() {
         </div>
       </div>
 
-      {/* History panel takes over the body when toggled — surfaces the
-       *  per-row delete button. Hidden by default; the input + banners
-       *  are skipped here because the panel has its own affordances. */}
-      {showHistory ? (
-        <ChatSessionHistory />
+      {/* Messages / skeleton / empty state */}
+      {showSkeleton ? (
+        <ChatMessageSkeleton />
+      ) : hasMessages ? (
+        <ChatMessageList
+          messages={messages}
+          pendingTask={pendingTask}
+          availability={availability}
+        />
       ) : (
-        <>
-          {/* Messages / skeleton / empty state */}
-          {showSkeleton ? (
-            <ChatMessageSkeleton />
-          ) : hasMessages ? (
-            <ChatMessageList
-              messages={messages}
-              pendingTask={pendingTask}
-              availability={availability}
-            />
-          ) : (
-            <EmptyState
-              hasSessions={sessions.length > 0}
-              agentName={activeAgent?.name}
-              onPickPrompt={(text) => handleSend(text)}
-            />
-          )}
-
-          {/* Status banner above the input — single mutually-exclusive slot.
-           *  Priority: no-agent > offline / unstable. Agent presence is the
-           *  hard prerequisite (you can't send anything without one), so it
-           *  always wins over a presence hint. ContextAnchorCard stays in
-           *  topSlot because that's per-message context, not session state.
-           *
-           *  We key off `noAgent` (the resolved-empty state) rather than
-           *  `!activeAgent`, so the loading window between mount and the
-           *  first agent-list response stays banner-free. */}
-          {noAgent ? (
-            <NoAgentBanner />
-          ) : (
-            <OfflineBanner agentName={activeAgent?.name} availability={availability} />
-          )}
-
-          {/* Input — disabled for legacy archived sessions; locked out entirely
-           *  when there's no agent (the EmptyState above carries the CTA). */}
-          <ChatInput
-            onSend={handleSend}
-            onStop={handleStop}
-            isRunning={!!pendingTaskId}
-            disabled={isSessionArchived}
-            noAgent={noAgent}
-            agentName={activeAgent?.name}
-            topSlot={<ContextAnchorCard />}
-            leftAdornment={
-              <AgentDropdown
-                agents={availableAgents}
-                activeAgent={activeAgent}
-                userId={user?.id}
-                onSelect={handleSelectAgent}
-              />
-            }
-            rightAdornment={<ContextAnchorButton />}
-          />
-        </>
+        <EmptyState
+          hasSessions={sessions.length > 0}
+          agentName={activeAgent?.name}
+          onPickPrompt={(text) => handleSend(text)}
+        />
       )}
+
+      {/* Status banner above the input — single mutually-exclusive slot.
+       *  Priority: no-agent > offline / unstable. Agent presence is the
+       *  hard prerequisite (you can't send anything without one), so it
+       *  always wins over a presence hint. ContextAnchorCard stays in
+       *  topSlot because that's per-message context, not session state.
+       *
+       *  We key off `noAgent` (the resolved-empty state) rather than
+       *  `!activeAgent`, so the loading window between mount and the
+       *  first agent-list response stays banner-free. */}
+      {noAgent ? (
+        <NoAgentBanner />
+      ) : (
+        <OfflineBanner agentName={activeAgent?.name} availability={availability} />
+      )}
+
+      {/* Input — disabled for legacy archived sessions; locked out entirely
+       *  when there's no agent (the EmptyState above carries the CTA). */}
+      <ChatInput
+        onSend={handleSend}
+        onStop={handleStop}
+        isRunning={!!pendingTaskId}
+        disabled={isSessionArchived}
+        noAgent={noAgent}
+        agentName={activeAgent?.name}
+        topSlot={<ContextAnchorCard />}
+        leftAdornment={
+          <AgentDropdown
+            agents={availableAgents}
+            activeAgent={activeAgent}
+            userId={user?.id}
+            onSelect={handleSelectAgent}
+          />
+        }
+        rightAdornment={<ContextAnchorButton />}
+      />
     </motion.div>
   );
 }
@@ -636,8 +621,9 @@ function AgentMenuItem({
 }
 
 /**
- * Session dropdown: lists ALL sessions across agents. Each row carries the
- * owning agent's avatar so the user can tell them apart. Selecting a
+ * Session dropdown: groups all sessions into "active" and "archived". The
+ * archived branch is collapsed by default and only mounts on demand to
+ * keep the menu compact when the user has many old chats. Selecting a
  * session from a different agent implicitly switches the agent too
  * (sessions are bound 1:1 to an agent). "New chat" lives in the header's
  * ⊕ button, not inside this dropdown.
@@ -659,6 +645,22 @@ function SessionDropdown({
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const title = activeSession?.title?.trim() || t(($) => $.window.untitled);
   const triggerAgent = activeSession ? agentById.get(activeSession.agent_id) ?? null : null;
+
+  const { active, archived } = useMemo(() => {
+    const active: ChatSession[] = [];
+    const archived: ChatSession[] = [];
+    for (const s of sessions) {
+      if (s.status === "archived") archived.push(s);
+      else active.push(s);
+    }
+    return { active, archived };
+  }, [sessions]);
+
+  const [showArchived, setShowArchived] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<ChatSession | null>(null);
+  const deleteSession = useDeleteChatSession();
+  const setActiveSession = useChatStore((s) => s.setActiveSession);
+  const formatTimeAgo = useFormatTimeAgo();
 
   // Aggregate "which sessions have an in-flight task right now". Reuses
   // the same workspace-scoped query the FAB consumes, so toggling the chat
@@ -682,91 +684,212 @@ function SessionDropdown({
     (s) => s.id !== activeSessionId && s.has_unread,
   );
 
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger className="flex items-center gap-1.5 min-w-0 rounded-md px-1.5 py-1 transition-colors hover:bg-accent aria-expanded:bg-accent">
-        {triggerAgent && (
+  const handleConfirmDelete = () => {
+    if (!pendingDelete) return;
+    const sessionId = pendingDelete.id;
+    // Eager local clear when the user is deleting the session they're
+    // currently looking at — otherwise messages / pendingTask queries
+    // keep rendering the now-deleted session until chat:session_deleted
+    // arrives over WS (~50–200ms gap).
+    if (activeSessionId === sessionId) setActiveSession(null);
+    deleteSession.mutate(sessionId, {
+      onSettled: () => setPendingDelete(null),
+    });
+  };
+
+  const renderRow = (session: ChatSession) => {
+    const isCurrent = session.id === activeSessionId;
+    const agent = agentById.get(session.agent_id) ?? null;
+    const isRunning = inFlightSessionIds.has(session.id);
+    return (
+      <DropdownMenuItem
+        key={session.id}
+        onClick={() => onSelectSession(session)}
+        className="group flex min-w-0 items-center gap-2"
+      >
+        {agent ? (
           <ActorAvatar
             actorType="agent"
-            actorId={triggerAgent.id}
+            actorId={agent.id}
             size={24}
             enableHoverCard
             showStatusDot
           />
+        ) : (
+          <span className="size-6 shrink-0" />
         )}
-        <span className="truncate text-sm font-medium">{title}</span>
-        {otherSessionRunning ? (
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm">
+            {session.title?.trim() || t(($) => $.window.untitled)}
+          </div>
+          <div className="truncate text-xs text-muted-foreground/70">
+            {formatTimeAgo(session.updated_at)}
+          </div>
+        </div>
+        {/* Right-edge status pip: in-flight wins over unread because
+         *  "still working" is more actionable than "has reply" — and
+         *  the two rarely coexist in practice (the unread flag fires
+         *  on chat_message write, by which point the task has just
+         *  finished). Same pip shape as unread for visual rhythm,
+         *  amber + pulse to read as activity. */}
+        {isRunning ? (
           <span
-            aria-label={t(($) => $.window.another_running)}
-            title={t(($) => $.window.another_running)}
+            aria-label={t(($) => $.window.running)}
+            title={t(($) => $.window.running)}
             className="size-1.5 shrink-0 rounded-full bg-amber-500 animate-pulse"
           />
-        ) : otherSessionUnread ? (
+        ) : session.has_unread ? (
           <span
-            aria-label={t(($) => $.window.another_unread)}
-            title={t(($) => $.window.another_unread)}
+            aria-label={t(($) => $.window.unread)}
+            title={t(($) => $.window.unread)}
             className="size-1.5 shrink-0 rounded-full bg-brand"
           />
         ) : null}
-        <ChevronDown className="size-3 text-muted-foreground shrink-0" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-80 w-auto min-w-56 max-w-80">
-        {sessions.length === 0 ? (
-          <div className="px-2 py-1.5 text-xs text-muted-foreground">
-            {t(($) => $.window.no_previous)}
-          </div>
-        ) : (
-          sessions.map((session) => {
-            const isCurrent = session.id === activeSessionId;
-            const agent = agentById.get(session.agent_id) ?? null;
-            const isRunning = inFlightSessionIds.has(session.id);
-            return (
-              <DropdownMenuItem
-                key={session.id}
-                onClick={() => onSelectSession(session)}
-                className="flex min-w-0 items-center gap-2"
-              >
-                {agent ? (
-                  <ActorAvatar
-                    actorType="agent"
-                    actorId={agent.id}
-                    size={24}
-                    enableHoverCard
-                    showStatusDot
-                  />
-                ) : (
-                  <span className="size-6 shrink-0" />
-                )}
-                <span className="truncate flex-1 text-sm">
-                  {session.title?.trim() || t(($) => $.window.untitled)}
-                </span>
-                {/* Right-edge status pip: in-flight wins over unread because
-                 *  "still working" is more actionable than "has reply" — and
-                 *  the two rarely coexist in practice (the unread flag fires
-                 *  on chat_message write, by which point the task has just
-                 *  finished). Same pip shape as unread for visual rhythm,
-                 *  amber + pulse to read as activity. */}
-                {isRunning ? (
-                  <span
-                    aria-label={t(($) => $.window.running)}
-                    title={t(($) => $.window.running)}
-                    className="size-1.5 shrink-0 rounded-full bg-amber-500 animate-pulse"
-                  />
-                ) : session.has_unread ? (
-                  <span
-                    aria-label={t(($) => $.window.unread)}
-                    title={t(($) => $.window.unread)}
-                    className="size-1.5 shrink-0 rounded-full bg-brand"
-                  />
-                ) : null}
-                {isCurrent && <Check className="size-3.5 text-muted-foreground shrink-0" />}
-              </DropdownMenuItem>
-            );
-          })
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+        {isCurrent && <Check className="size-3.5 text-muted-foreground shrink-0" />}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            setPendingDelete(session);
+          }}
+          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+          aria-label={t(($) => $.session_history.row_delete_aria)}
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      </DropdownMenuItem>
+    );
+  };
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger className="flex items-center gap-1.5 min-w-0 rounded-md px-1.5 py-1 transition-colors hover:bg-accent aria-expanded:bg-accent">
+          {triggerAgent && (
+            <ActorAvatar
+              actorType="agent"
+              actorId={triggerAgent.id}
+              size={24}
+              enableHoverCard
+              showStatusDot
+            />
+          )}
+          <span className="truncate text-sm font-medium">{title}</span>
+          {otherSessionRunning ? (
+            <span
+              aria-label={t(($) => $.window.another_running)}
+              title={t(($) => $.window.another_running)}
+              className="size-1.5 shrink-0 rounded-full bg-amber-500 animate-pulse"
+            />
+          ) : otherSessionUnread ? (
+            <span
+              aria-label={t(($) => $.window.another_unread)}
+              title={t(($) => $.window.another_unread)}
+              className="size-1.5 shrink-0 rounded-full bg-brand"
+            />
+          ) : null}
+          <ChevronDown className="size-3 text-muted-foreground shrink-0" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="max-h-96 w-auto min-w-64 max-w-80 overflow-y-auto">
+          {sessions.length === 0 ? (
+            <div className="px-2 py-1.5 text-xs text-muted-foreground">
+              {t(($) => $.window.no_previous)}
+            </div>
+          ) : (
+            <>
+              {active.length > 0 && (
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>{t(($) => $.window.active_group)}</DropdownMenuLabel>
+                  {active.map(renderRow)}
+                </DropdownMenuGroup>
+              )}
+              {archived.length > 0 && (
+                <>
+                  {active.length > 0 && <DropdownMenuSeparator />}
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setShowArchived((v) => !v);
+                    }}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                  >
+                    {showArchived ? (
+                      <ChevronDown className="size-3" />
+                    ) : (
+                      <ChevronRight className="size-3" />
+                    )}
+                    <span>
+                      {t(($) => $.window.archived_group, { count: archived.length })}
+                    </span>
+                  </DropdownMenuItem>
+                  {showArchived && (
+                    <DropdownMenuGroup>
+                      {archived.map(renderRow)}
+                    </DropdownMenuGroup>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <AlertDialog
+        open={!!pendingDelete}
+        onOpenChange={(open) => {
+          if (!open && !deleteSession.isPending) setPendingDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t(($) => $.session_history.delete_dialog.title)}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete?.title
+                ? t(($) => $.session_history.delete_dialog.description_with_title, {
+                    title: pendingDelete.title,
+                  })
+                : t(($) => $.session_history.delete_dialog.description_default)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteSession.isPending}>
+              {t(($) => $.session_history.delete_dialog.cancel)}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={deleteSession.isPending}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deleteSession.isPending
+                ? t(($) => $.session_history.delete_dialog.confirming)
+                : t(($) => $.session_history.delete_dialog.confirm)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
+}
+
+function useFormatTimeAgo(): (dateStr: string) => string {
+  const { t } = useT("chat");
+  return (dateStr: string) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return t(($) => $.session_history.time.just_now);
+    if (diffMins < 60) return t(($) => $.session_history.time.minutes, { count: diffMins });
+    if (diffHours < 24) return t(($) => $.session_history.time.hours, { count: diffHours });
+    if (diffDays < 7) return t(($) => $.session_history.time.days, { count: diffDays });
+    return date.toLocaleDateString();
+  };
 }
 
 // Three starter prompts shown on the empty state. Each is keyed into the
