@@ -97,6 +97,34 @@ var agentSkillsSetCmd = &cobra.Command{
 	RunE:  runAgentSkillsSet,
 }
 
+// Agent tag subcommands.
+
+var agentTagCmd = &cobra.Command{
+	Use:   "tag",
+	Short: "Manage agent tag assignments",
+}
+
+var agentTagAddCmd = &cobra.Command{
+	Use:   "add <agent-id> <tag>",
+	Short: "Add a tag to an agent (tag is a name; created if it does not exist)",
+	Args:  exactArgs(2),
+	RunE:  runAgentTagAdd,
+}
+
+var agentTagRemoveCmd = &cobra.Command{
+	Use:   "remove <agent-id> <tag-id>",
+	Short: "Remove a tag from an agent by tag ID",
+	Args:  exactArgs(2),
+	RunE:  runAgentTagRemove,
+}
+
+var agentTagListCmd = &cobra.Command{
+	Use:   "list <agent-id>",
+	Short: "List tags assigned to an agent",
+	Args:  exactArgs(1),
+	RunE:  runAgentTagList,
+}
+
 func init() {
 	agentCmd.AddCommand(agentListCmd)
 	agentCmd.AddCommand(agentGetCmd)
@@ -110,6 +138,14 @@ func init() {
 
 	agentSkillsCmd.AddCommand(agentSkillsListCmd)
 	agentSkillsCmd.AddCommand(agentSkillsSetCmd)
+
+	agentCmd.AddCommand(agentTagCmd)
+	agentTagCmd.AddCommand(agentTagAddCmd)
+	agentTagCmd.AddCommand(agentTagRemoveCmd)
+	agentTagCmd.AddCommand(agentTagListCmd)
+
+	// agent tag list
+	agentTagListCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// agent list
 	agentListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -740,6 +776,78 @@ func runAgentSkillsSet(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Skills updated for agent %s\n", args[0])
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Agent tag subcommands
+// ---------------------------------------------------------------------------
+
+func runAgentTagList(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var tags []map[string]any
+	if err := client.GetJSON(ctx, "/api/agents/"+args[0]+"/tags", &tags); err != nil {
+		return fmt.Errorf("list agent tags: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, tags)
+	}
+
+	headers := []string{"ID", "NAME"}
+	rows := make([][]string, 0, len(tags))
+	for _, t := range tags {
+		rows = append(rows, []string{
+			strVal(t, "id"),
+			strVal(t, "name"),
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runAgentTagAdd(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	body := map[string]any{"tag_name": args[1]}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var result any
+	if err := client.PostJSON(ctx, "/api/agents/"+args[0]+"/tags", body, &result); err != nil {
+		return fmt.Errorf("add tag to agent: %w", err)
+	}
+
+	fmt.Printf("Tag %q added to agent %s\n", args[1], args[0])
+	return nil
+}
+
+func runAgentTagRemove(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := client.DeleteJSON(ctx, "/api/agents/"+args[0]+"/tags/"+args[1]); err != nil {
+		return fmt.Errorf("remove tag from agent: %w", err)
+	}
+
+	fmt.Printf("Tag %s removed from agent %s\n", args[1], args[0])
 	return nil
 }
 

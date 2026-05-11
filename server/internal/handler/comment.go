@@ -479,6 +479,9 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 // Skips self-mentions, agents with on_mention trigger disabled, and private
 // agents mentioned by non-owner members (only the agent owner or workspace
 // admin/owner can mention a private agent).
+// Also handles broadcast mentions (@@ and @@tagname): soft-notifies all
+// eligible workspace agents (or tag-filtered subset) using the same dedup
+// and self-mention guards as direct @agent mentions.
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
 func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
@@ -488,42 +491,79 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		mentions = util.ParseMentions(parentComment.Content)
 	}
 	for _, m := range mentions {
-		if m.Type != "agent" {
-			continue
+		switch m.Type {
+		case "agent":
+			h.enqueueAgentMention(ctx, issue, comment, m.ID, authorType, authorID, wsID)
+		case "broadcast":
+			h.enqueueBroadcastMention(ctx, issue, comment, m.BroadcastTag(), authorType, authorID, wsID)
 		}
-		// Prevent self-trigger: skip if the comment author is this agent.
-		if authorType == "agent" && authorID == m.ID {
-			continue
-		}
-		agentUUID := parseUUID(m.ID)
-		// Load the agent to check visibility, archive status, and trigger config.
-		agent, err := h.Queries.GetAgent(ctx, agentUUID)
-		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
-			continue
-		}
-		// Private agents can only be mentioned by the agent owner or workspace admin/owner.
-		if agent.Visibility == "private" && authorType == "member" {
-			isOwner := uuidToString(agent.OwnerID) == authorID
-			if !isOwner {
-				member, err := h.getWorkspaceMember(ctx, authorID, wsID)
-				if err != nil || !roleAllowed(member.Role, "owner", "admin") {
-					continue
-				}
+	}
+}
+
+// enqueueAgentMention enqueues a task for a single directly mentioned agent,
+// applying visibility, dedup, and self-mention guards.
+func (h *Handler) enqueueAgentMention(ctx context.Context, issue db.Issue, comment db.Comment, agentID, authorType, authorID, wsID string) {
+	// Prevent self-trigger: skip if the comment author is this agent.
+	if authorType == "agent" && authorID == agentID {
+		return
+	}
+	agentUUID := parseUUID(agentID)
+	agent, err := h.Queries.GetAgent(ctx, agentUUID)
+	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		return
+	}
+	// Private agents can only be mentioned by the agent owner or workspace admin/owner.
+	if agent.Visibility == "private" && authorType == "member" {
+		isOwner := uuidToString(agent.OwnerID) == authorID
+		if !isOwner {
+			member, err := h.getWorkspaceMember(ctx, authorID, wsID)
+			if err != nil || !roleAllowed(member.Role, "owner", "admin") {
+				return
 			}
 		}
-		// Dedup: skip if this agent already has a pending task for this issue.
-		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-			IssueID: issue.ID,
-			AgentID: agentUUID,
+	}
+	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+		IssueID: issue.ID,
+		AgentID: agentUUID,
+	})
+	if err != nil || hasPending {
+		return
+	}
+	if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, comment.ID); err != nil {
+		slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", agentID, "error", err)
+	}
+}
+
+// enqueueBroadcastMention resolves a @@ or @@tagname broadcast to the
+// eligible agent list and soft-notifies each one. tagName is empty for @@
+// (all agents) and set for @@tagname (tag-filtered agents).
+// Rate-limited to broadcastMaxAgents agents per broadcast to prevent storms.
+func (h *Handler) enqueueBroadcastMention(ctx context.Context, issue db.Issue, comment db.Comment, tagName, authorType, authorID, wsID string) {
+	const broadcastMaxAgents = 10
+
+	wsUUID := parseUUID(wsID)
+	var agents []db.Agent
+	var err error
+	if tagName == "" {
+		agents, err = h.Queries.ListAgents(ctx, wsUUID)
+	} else {
+		agents, err = h.Queries.ListAgentsByTag(ctx, db.ListAgentsByTagParams{
+			WorkspaceID: wsUUID,
+			TagName:     tagName,
 		})
-		if err != nil || hasPending {
-			continue
+	}
+	if err != nil {
+		slog.Warn("broadcast mention: failed to list agents", "issue_id", uuidToString(issue.ID), "tag", tagName, "error", err)
+		return
+	}
+
+	dispatched := 0
+	for _, a := range agents {
+		if dispatched >= broadcastMaxAgents {
+			break
 		}
-		// Always use the current comment as the trigger so the agent reads the
-		// actual reply that mentioned it, not the thread root.
-		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, comment.ID); err != nil {
-			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", err)
-		}
+		h.enqueueAgentMention(ctx, issue, comment, uuidToString(a.ID), authorType, authorID, wsID)
+		dispatched++
 	}
 }
 

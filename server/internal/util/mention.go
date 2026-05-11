@@ -4,8 +4,8 @@ import "regexp"
 
 // Mention represents a parsed @mention from markdown content.
 type Mention struct {
-	Type string // "member", "agent", "issue", or "all"
-	ID   string // user_id, agent_id, issue_id, or "all"
+	Type string // "member", "agent", "issue", "all", or "broadcast"
+	ID   string // user_id, agent_id, issue_id, "all", or tag name / "all" for broadcast
 }
 
 // MentionRe matches [@Label](mention://type/id) or [Label](mention://issue/id) in markdown.
@@ -13,11 +13,29 @@ type Mention struct {
 // Uses .+? (non-greedy) instead of [^\]]* so labels containing square brackets
 // (e.g. "David[TF]") are matched correctly — the ](mention:// anchor is specific
 // enough to prevent over-matching.
-var MentionRe = regexp.MustCompile(`\[@?(.+?)\]\(mention://(member|agent|issue|all)/([0-9a-fA-F-]+|all)\)`)
+// The broadcast type uses a tag name (lowercase alphanumeric/hyphen/underscore) or "all" as the ID.
+var MentionRe = regexp.MustCompile(`\[@?(.+?)\]\(mention://(member|agent|issue|all|broadcast)/([0-9a-fA-F-]+|all|[a-z][a-z0-9_-]*)\)`)
 
 // IsMentionAll returns true if the mention is an @all mention.
 func (m Mention) IsMentionAll() bool {
 	return m.Type == "all"
+}
+
+// IsBroadcast returns true if the mention is a broadcast (@@) mention.
+func (m Mention) IsBroadcast() bool {
+	return m.Type == "broadcast"
+}
+
+// BroadcastTag returns the tag name for a scoped broadcast mention (@@tagname),
+// or empty string for an unscoped broadcast (@@).
+func (m Mention) BroadcastTag() string {
+	if m.Type != "broadcast" {
+		return ""
+	}
+	if m.ID == "all" {
+		return ""
+	}
+	return m.ID
 }
 
 // ParseMentions extracts deduplicated mentions from markdown content.
@@ -40,6 +58,16 @@ func ParseMentions(content string) []Mention {
 func HasMentionAll(mentions []Mention) bool {
 	for _, m := range mentions {
 		if m.IsMentionAll() {
+			return true
+		}
+	}
+	return false
+}
+
+// HasBroadcastMention returns true if any mention in the slice is a broadcast (@@) mention.
+func HasBroadcastMention(mentions []Mention) bool {
+	for _, m := range mentions {
+		if m.IsBroadcast() {
 			return true
 		}
 	}
