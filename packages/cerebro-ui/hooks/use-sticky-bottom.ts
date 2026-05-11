@@ -40,9 +40,17 @@ export function useStickyBottom(
   options: Options = {},
 ): StickyBottomState {
   const { threshold = 50, initialScroll = true } = options
-  const stickRef = useRef(true)
+  // Default to `initialScroll` for both refs/state: chat-style consumers
+  // (`initialScroll: true`) want the auto-snap to fire on the first content
+  // burst, but consumers that pass `initialScroll: false` (issue pages with a
+  // scroll target) must NOT snap to bottom before they've had a chance to
+  // run their own `scrollIntoView`. JEH-1002: without this, the first
+  // MutationObserver callback after a click-through inbox navigation saw
+  // `stickRef.current = true` (the old default) and yanked the page to the
+  // bottom, beating the highlight scroll.
+  const stickRef = useRef(initialScroll)
   const lockRef = useRef(false)
-  const [isAtBottom, setIsAtBottom] = useState(true)
+  const [isAtBottom, setIsAtBottom] = useState(initialScroll)
   const [hasNewBelow, setHasNewBelow] = useState(false)
 
   // Sync jump on first mount — runs before paint so the user never sees the
@@ -98,7 +106,15 @@ export function useStickyBottom(
     el.addEventListener("scroll", onScroll, { passive: true })
     // Measure once so callers see the real state (e.g. issue pages that
     // render with content below the fold but never scrolled).
-    const initiallyAt = measure()
+    // For non-initialScroll consumers, only believe we're at-bottom if
+    // `scrollTop > 0` — at `scrollTop === 0` we're indistinguishable from
+    // "just mounted, content hasn't loaded yet", and snapping to bottom on
+    // the next mutation would steal a pending highlight scroll. Chat-style
+    // consumers always run `useLayoutEffect` to jump to bottom first, so
+    // `scrollTop` is already positive by the time we measure here.
+    const initiallyAt = initialScroll
+      ? measure()
+      : el.scrollTop > 0 && measure()
     stickRef.current = initiallyAt
     setIsAtBottom(initiallyAt)
 
@@ -107,7 +123,7 @@ export function useStickyBottom(
       ro.disconnect()
       mo.disconnect()
     }
-  }, [ref, threshold])
+  }, [ref, threshold, initialScroll])
 
   const scrollToBottom = useCallback(
     (smooth = true) => {
