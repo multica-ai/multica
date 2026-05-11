@@ -1979,6 +1979,118 @@ func TestBacklogToTodoTriggersAgent(t *testing.T) {
 	testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
 }
 
+func TestBacklogToTodoAgentSelfLoopGuard(t *testing.T) {
+	ctx := context.Background()
+
+	var agentID string
+	err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&agentID)
+	if err != nil {
+		t.Fatalf("failed to find test agent: %v", err)
+	}
+
+	newBacklogIssue := func(t *testing.T, title string) string {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+			"title":         title,
+			"status":        "backlog",
+			"assignee_type": "agent",
+			"assignee_id":   agentID,
+		})
+		req.Header.Set("X-Agent-ID", agentID)
+		testHandler.CreateIssue(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var created IssueResponse
+		if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+			t.Fatalf("decode issue: %v", err)
+		}
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, created.ID)
+		t.Cleanup(func() {
+			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, created.ID)
+			cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+			cleanupReq = withURLParam(cleanupReq, "id", created.ID)
+			testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
+		})
+		return created.ID
+	}
+
+	insertTask := func(t *testing.T, issueID, status string) string {
+		t.Helper()
+		var taskID string
+		err := testPool.QueryRow(ctx,
+			`INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at)
+			 VALUES ($1, $2, $3, $4, 0,
+				CASE WHEN $4 = 'running' THEN now() ELSE NULL END,
+				CASE WHEN $4 = 'completed' THEN now() ELSE NULL END)
+			 RETURNING id`,
+			agentID, testRuntimeID, issueID, status,
+		).Scan(&taskID)
+		if err != nil {
+			t.Fatalf("failed to insert %s task: %v", status, err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		})
+		return taskID
+	}
+
+	countQueued := func(t *testing.T, issueID string) int {
+		t.Helper()
+		var n int
+		err := testPool.QueryRow(ctx,
+			`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND status = 'queued'`,
+			issueID,
+		).Scan(&n)
+		if err != nil {
+			t.Fatalf("count queued tasks: %v", err)
+		}
+		return n
+	}
+
+	tests := []struct {
+		name         string
+		taskStatus   string
+		taskOnOther  bool
+		expectQueued int
+	}{
+		{name: "no task context keeps self-loop suppressed", expectQueued: 0},
+		{name: "running task on different issue enables hand-off", taskStatus: "running", taskOnOther: true, expectQueued: 1},
+		{name: "completed task on different issue does not bypass guard", taskStatus: "completed", taskOnOther: true, expectQueued: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issueID := newBacklogIssue(t, tt.name)
+			req := newRequest("PUT", "/api/issues/"+issueID, map[string]any{"status": "todo"})
+			req = withURLParam(req, "id", issueID)
+			req.Header.Set("X-Agent-ID", agentID)
+
+			if tt.taskStatus != "" {
+				taskIssueID := issueID
+				if tt.taskOnOther {
+					taskIssueID = newBacklogIssue(t, tt.name+" other")
+				}
+				taskID := insertTask(t, taskIssueID, tt.taskStatus)
+				req.Header.Set("X-Task-ID", taskID)
+			}
+
+			w := httptest.NewRecorder()
+			testHandler.UpdateIssue(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+			}
+			if got := countQueued(t, issueID); got != tt.expectQueued {
+				t.Fatalf("queued tasks = %d, want %d", got, tt.expectQueued)
+			}
+		})
+	}
+}
+
 func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/daemon/register", bytes.NewBufferString(`{

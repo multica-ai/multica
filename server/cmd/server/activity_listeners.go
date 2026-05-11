@@ -6,7 +6,6 @@ import (
 	"log/slog"
 
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -25,7 +24,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 		if !ok {
 			return
 		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
+		issue, ok := extractIssueFields(payload["issue"])
 		if !ok {
 			return
 		}
@@ -53,7 +52,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 		if !ok {
 			return
 		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
+		issue, ok := extractIssueFields(payload["issue"])
 		if !ok {
 			return
 		}
