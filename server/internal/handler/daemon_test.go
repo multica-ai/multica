@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -260,6 +261,33 @@ func TestDaemonHeartbeat_EmptyQueueSkipsPopPending(t *testing.T) {
 	}
 	if importSpy.popCalls != 0 {
 		t.Fatalf("expected 0 PopPending calls on empty import queue, got %d", importSpy.popCalls)
+	}
+}
+
+// TestHandleDaemonWSHeartbeat_RuntimeGone_ReturnsNilAckNoError pins that a WS
+// heartbeat for a runtime row that no longer exists (user deleted it via the UI,
+// or the 7-day offline GC reclaimed it) is treated as an expected state, not a
+// server fault: handler returns (nil, nil) so the hub silently drops the ack
+// without spamming Warn logs every 15s for a stuck connection.
+func TestHandleDaemonWSHeartbeat_RuntimeGone_ReturnsNilAckNoError(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	// A well-formed UUID that intentionally does not correspond to any row.
+	missingRuntimeID := "00000000-0000-0000-0000-0000deadbeef"
+
+	ack, err := testHandler.HandleDaemonWSHeartbeat(context.Background(), daemonws.ClientIdentity{
+		DaemonID:    "test-daemon-stale-ws",
+		WorkspaceID: testWorkspaceID,
+		RuntimeIDs:  []string{missingRuntimeID},
+	}, missingRuntimeID)
+
+	if err != nil {
+		t.Fatalf("expected nil error for missing runtime, got %v", err)
+	}
+	if ack != nil {
+		t.Fatalf("expected nil ack for missing runtime, got %+v", ack)
 	}
 }
 

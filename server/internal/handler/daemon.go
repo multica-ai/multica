@@ -707,6 +707,19 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	}
 	rt, err := h.Queries.GetAgentRuntime(ctx, runtimeUUID)
 	if err != nil {
+		// Runtime row no longer exists. User deletes via the UI button and
+		// the 7-day offline GC both reach this branch; both are expected
+		// states, not server faults. Return (nil, nil) so the hub silently
+		// drops the ack — the daemon's HTTP heartbeat will resume after the
+		// WS freshness window expires, hit a 404, and prune the runtime
+		// locally. Logging at Debug keeps a stuck WS+stale-ID daemon from
+		// flooding prod Warn output (one beat per runtime every 15s).
+		if isNotFound(err) {
+			slog.Debug("daemon ws heartbeat: runtime no longer exists; dropping ack",
+				"runtime_id", runtimeID,
+				"daemon_id", identity.DaemonID)
+			return nil, nil
+		}
 		return nil, fmt.Errorf("runtime not found: %w", err)
 	}
 	if identity.WorkspaceID != "" && identity.WorkspaceID != uuidToString(rt.WorkspaceID) {
