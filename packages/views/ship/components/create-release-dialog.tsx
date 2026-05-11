@@ -27,6 +27,7 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import { cn } from "@multica/ui/lib/utils";
 import {
   Select,
   SelectContent,
@@ -434,18 +435,43 @@ export function CreateReleaseDialog({
           <div className="grid gap-1.5">
             <Label>{t(($) => $.releases.create_dialog.prs_label)}</Label>
             <ul className="rounded border bg-muted/30 p-2 text-sm">
-              {selectedPullRequests.map((pr) => (
-                <li
-                  key={pr.id}
-                  className="flex items-center gap-2 py-1 text-muted-foreground"
-                >
-                  <span className="tabular-nums">#{pr.number}</span>
-                  <span className="truncate text-foreground">{pr.title}</span>
-                  <span className="ml-auto text-[11px] uppercase tracking-wide">
-                    {pr.risk_level ?? "medium"}
-                  </span>
-                </li>
-              ))}
+              {selectedPullRequests.map((pr) => {
+                // Match the risk pill styling on the PR card so the
+                // dialog reads as part of the same UI surface. `low`
+                // (and unknown) gets a neutral muted pill so every
+                // row has *some* indicator — bare text drifted off
+                // the right edge and made the list look unfinished.
+                const level = (pr.risk_level ?? "medium").toLowerCase();
+                return (
+                  <li
+                    key={pr.id}
+                    className="flex items-center gap-2 py-1 text-muted-foreground"
+                  >
+                    <span className="tabular-nums">#{pr.number}</span>
+                    <span className="min-w-0 flex-1 truncate text-foreground">
+                      {pr.title}
+                    </span>
+                    <span
+                      className={cn(
+                        "rounded px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide",
+                        level === "critical" &&
+                          "bg-destructive/15 text-destructive",
+                        level === "high" &&
+                          "bg-orange-500/15 text-orange-700 dark:text-orange-400",
+                        level === "medium" &&
+                          "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+                        (level === "low" ||
+                          (level !== "critical" &&
+                            level !== "high" &&
+                            level !== "medium")) &&
+                          "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {pr.risk_level ?? "medium"}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           </div>
 

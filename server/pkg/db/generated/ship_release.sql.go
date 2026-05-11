@@ -1652,7 +1652,8 @@ UPDATE ship_release_pull_request SET
     merge_state = $3,
     merged_sha = COALESCE($4, merged_sha),
     merged_at = COALESCE($5, merged_at),
-    merge_error = COALESCE($6, merge_error)
+    merge_error = COALESCE($6, merge_error),
+    is_active   = CASE WHEN $3 = 'skipped'::pr_merge_state THEN FALSE ELSE is_active END
 WHERE release_id = $1 AND pull_request_id = $2
 RETURNING release_id, pull_request_id, position, merged_sha, merged_at, merge_error, added_at, is_active, merge_state, revert_state, revert_pr_number, revert_pr_url, revert_error
 `
@@ -1669,6 +1670,14 @@ type SetReleasePRMergeStateParams struct {
 // Drives the per-PR merge_state machine: queued → merging → merged
 // (with sha + ts), failed (with error), or skipped. Caller passes the
 // merge_state via the typed string; sqlc maps it through the enum.
+//
+// Skipping a PR also flips is_active=FALSE on its membership row.
+// The partial unique index `(pull_request_id) WHERE is_active=TRUE`
+// otherwise locks the skipped PR to this release forever, blocking
+// it from being added to a new release even though this release
+// shipped without it. Failed PRs keep is_active=TRUE because Resume
+// can retry them; skipped is the terminal "this PR isn't shipping
+// here" state.
 func (q *Queries) SetReleasePRMergeState(ctx context.Context, arg SetReleasePRMergeStateParams) (ShipReleasePullRequest, error) {
 	row := q.db.QueryRow(ctx, setReleasePRMergeState,
 		arg.ReleaseID,

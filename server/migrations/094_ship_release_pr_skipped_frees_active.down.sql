@@ -1,0 +1,5 @@
+-- No-op rollback. The forward migration was a one-shot data heal for
+-- a known-bad pattern; there's no general way to know which freed
+-- rows came from this migration vs. legitimate is_active=FALSE
+-- transitions (a release reaching a terminal stage flips its
+-- membership rows too). Leaving them as-is is correct on rollback.
