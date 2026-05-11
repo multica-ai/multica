@@ -1,0 +1,278 @@
+---
+title: Auto-deploy CD (self-hosted runner pattern)
+description: "A reusable pattern for wiring continuous deployment from GitHub Actions to a self-hosted production host, integrated with Multica's Ship Hub release lifecycle."
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+This runbook describes the **self-hosted runner CD pattern** that powers Multica's own production deployment to a Mac mini. The same pattern works for any project where:
+
+- Your production host is a machine you control (Mac mini, Linux box, on-prem VM) that isn't reachable from public GitHub Actions runners
+- You want push-to-main → automatic deploy without manually SSHing in
+- You want Multica's Ship Hub release lifecycle to advance automatically when the deploy lands
+
+Multica itself uses this pattern. The reference implementation lives in `prellr/multica` at `.github/workflows/deploy-production.yml` + `scripts/install-mac-mini-runner.sh`. Other repos can copy + tweak.
+
+<Callout type="info">
+This is the right pattern when your production host is **behind NAT or otherwise not reachable** from GitHub's hosted runners. If your host has a public IP and you don't mind exposing SSH, you can skip the self-hosted runner and just SSH from a public runner — but most home-lab / small-team setups end up here.
+</Callout>
+
+## Architecture
+
+```
+┌──────────────────┐  push to main   ┌──────────────────────┐
+│  prellr/multica  ├────────────────►│ GitHub Actions API   │
+└──────────────────┘                 └─────────┬────────────┘
+                                               │ dispatches workflow
+                                               ▼
+┌──────────────────────────────────────────────────────────┐
+│ Mac mini (production host)                               │
+│                                                          │
+│  ┌─────────────────┐    runs deploy-production.yml       │
+│  │ self-hosted     │    ─ git pull                       │
+│  │ actions runner  │    ─ docker compose up --build      │
+│  │ (launchd)       │    ─ curl localhost health check    │
+│  └────────┬────────┘    ─ POST deployment_status         │
+│           │                                              │
+│           ▼                                              │
+│  ┌───────────────────────────────┐                       │
+│  │ docker compose                │                       │
+│  │  ├─ postgres                  │                       │
+│  │  ├─ multica-backend           │                       │
+│  │  └─ multica-frontend          │                       │
+│  └───────────────────────────────┘                       │
+└──────────────────────────────────────────────────────────┘
+                                               │
+                                               │ deployment_status webhook
+                                               ▼
+                                     ┌──────────────────────┐
+                                     │  Multica Ship Hub    │
+                                     │  promoting →         │
+                                     │  in_production       │
+                                     └──────────────────────┘
+```
+
+Three loosely-coupled pieces:
+
+1. **A self-hosted GitHub Actions runner** on the production host. Registered to a single repo, runs as a system service, picks up jobs labeled for it.
+2. **A workflow file** in the repo that triggers on `push: main`, runs on the self-hosted runner, does the actual deploy commands, and posts back a GitHub `deployment_status` event.
+3. **Ship Hub's existing receivers** (deploy-workflow poller + `deployment_status` webhook handler) that watch for the deploy to complete and advance the release lifecycle automatically.
+
+## Pre-requisites
+
+| What | Why |
+|---|---|
+| Production host with Docker / your runtime installed | The runner needs to exec the actual deploy commands |
+| Admin access on the host | To install the runner as a system service (launchd / systemd) |
+| Repo admin on the GH repo | To mint a runner registration token + enable Actions on the repo |
+| Branch protection on `main` (strongly recommended) | The self-hosted runner executes whatever's on main; restricting who can push is the trust floor |
+
+## Step 1 — Write the workflow
+
+Drop this in `.github/workflows/deploy-production.yml`. The reference version lives at [`prellr/multica/.github/workflows/deploy-production.yml`](https://github.com/prellr/multica/blob/main/.github/workflows/deploy-production.yml).
+
+```yaml
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Specific commit SHA to deploy (defaults to main HEAD)"
+        required: false
+        type: string
+
+# One deploy at a time. Queue new pushes rather than mid-build killing
+# whatever's in flight — partial-deploy state is worse than stale-then-
+# fresh.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build + restart containers
+    runs-on: [self-hosted, mac-mini-prod]   # ← labels you'll assign to your runner
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.sha || github.ref }}
+          fetch-depth: 1
+
+      - name: Create deployment
+        id: deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: 'production',
+              auto_merge: false,
+              required_contexts: [],
+              production_environment: true,
+            });
+            core.setOutput('deployment_id', data.id);
+
+      - name: Build + restart containers
+        run: |
+          # PATH gymnastics — Docker Desktop's credential helper lives
+          # outside the default non-login shell PATH. Without this,
+          # `docker compose build` fails with
+          # "docker-credential-desktop: executable not found".
+          export PATH="/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:${PATH}"
+          docker compose -f docker-compose.prod.yml up -d --build app
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ || echo 000)
+            [ "$code" = "200" ] && exit 0
+            sleep 2
+          done
+          echo "Health check failed"
+          exit 1
+
+      - name: Mark deployment success
+        if: success() && steps.deployment.outputs.deployment_id
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.deployment_id }},
+              state: 'success',
+              environment: 'production',
+              environment_url: 'https://your-host.example.com',
+            });
+
+      - name: Mark deployment failure
+        if: failure() && steps.deployment.outputs.deployment_id
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.deployment_id }},
+              state: 'failure',
+              environment: 'production',
+            });
+```
+
+### Key decisions inside that file
+
+- **Triggers**: `push: main` for continuous deploy + `workflow_dispatch` for manual / Ship-Hub-driven re-runs. No `pull_request` trigger — that would let any fork PR run code on your production host.
+- **`runs-on`**: a label array. The literal `self-hosted` claims the job; the second label disambiguates if you have multiple self-hosted runners (`mac-mini-prod`, `staging-vm`, etc.).
+- **Concurrency**: `cancel-in-progress: false` queues new pushes instead of killing in-flight builds. A docker-compose-up that's halfway through is worse than running serially.
+- **Health check loop**: containers often report "started" before the app accepts traffic. Poll for a real 200 response before declaring success.
+- **Deployment status hooks**: the success/failure steps post back to GitHub's deployments API. Ship Hub (and GitHub's own deployment timeline) reads this for ~immediate feedback.
+
+## Step 2 — Install the self-hosted runner
+
+The reference installer is at [`prellr/multica/scripts/install-mac-mini-runner.sh`](https://github.com/prellr/multica/blob/main/scripts/install-mac-mini-runner.sh). For other repos:
+
+```bash
+# Adjust to match your repo
+REPO_URL="https://github.com/your-org/your-repo"
+RUNNER_NAME="$(hostname -s)-prod"
+LABELS="self-hosted,mac-mini-prod"   # match runs-on in your workflow
+
+# Get a registration token (one-time, ~1h expiry):
+# https://github.com/your-org/your-repo/settings/actions/runners/new
+TOKEN="..."
+
+# Pinning a version protects you from upstream breakage; bump
+# intentionally.
+RUNNER_VERSION="2.319.1"
+
+mkdir -p ~/actions-runner && cd ~/actions-runner
+curl -fsSL -o runner.tar.gz \
+  "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-osx-arm64-${RUNNER_VERSION}.tar.gz"
+tar xzf runner.tar.gz
+
+./config.sh \
+  --url "${REPO_URL}" \
+  --token "${TOKEN}" \
+  --name "${RUNNER_NAME}" \
+  --labels "${LABELS}" \
+  --work _work \
+  --unattended
+
+./svc.sh install
+./svc.sh start
+```
+
+On macOS, `svc.sh install` writes a launchd plist that auto-starts the runner on boot and when the logged-in user is absent. On Linux, the equivalent is systemd.
+
+Verify it shows up as **Idle** at `https://github.com/your-org/your-repo/settings/actions/runners`.
+
+## Step 3 — Wire into Multica Ship Hub
+
+In the Multica workspace settings → **Ship Hub** section:
+
+- **Production deploy workflow** → enter the filename, e.g. `deploy-production.yml`
+
+That tells Ship Hub's deploy-workflow poller which workflow's runs to watch. When the workflow's `conclusion=success` matches a release's `merged_main_sha`, Ship Hub flips the release from `promoting` → `in_production` within the poll cadence (2 min). The `deployment_status` event from the workflow's success step also reaches Multica's webhook handler for ~immediate transition.
+
+You don't need to wire Ship Hub directly to the runner. The chain is:
+1. Workflow finishes successfully on the runner
+2. GitHub records the workflow_run + the deployment_status event
+3. Ship Hub poller / webhook handler picks it up from GitHub
+4. Release advances
+
+## Trust model
+
+A self-hosted runner executes whatever the workflow says to execute. That means:
+
+- **Anyone who can push to `main`** (or merge a PR to main) can run arbitrary code on your production host. Branch protection requiring PR review is the practical floor.
+- **The runner runs as a specific user**. Pick one that has the privileges the deploy needs (touching Docker, writing to `/var/log`, etc.) and **no more**. Don't run it as root.
+- **Don't trigger workflows on `pull_request` events** if those workflows touch the self-hosted runner. A fork PR can include a workflow change that runs `rm -rf /` on the runner. Multica's reference workflow only triggers on `push: main` and `workflow_dispatch` — neither comes from external PRs.
+- **Secrets**: the runner has access to whatever's in the workflow's `env` and `${{ secrets }}` context. Scope GH secrets to the workflow that needs them, not broadly to the repo.
+
+The runner binary itself receives signed updates from GitHub; that's the one piece of supply-chain trust you have to accept.
+
+## Wiring multiple environments
+
+The pattern extends naturally to staging:
+
+1. Add a second self-hosted runner (different machine, or the same machine with a second labeled install) labeled `staging`.
+2. Add `.github/workflows/deploy-staging.yml` mirroring the production one but with `runs-on: [self-hosted, staging]` and triggers like `push: [staging-branch]` or `workflow_dispatch`.
+3. Set Multica workspace `ship_hub_deploy_workflow_staging` to `deploy-staging.yml`.
+
+For projects with cloud-native staging (Vercel, Fly.io) plus on-prem prod, mix and match: staging via the cloud-provider's webhook (see [Deploy adapters](/docs/integrations/deploy-adapters)), prod via this self-hosted runner pattern.
+
+## Operational notes & gotchas
+
+- **Docker Desktop on macOS adds non-standard PATH entries.** The credential helper `docker-credential-desktop` isn't on the runner's default PATH. Either export `/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin` at the top of each docker-using step, or set it on the runner's `.bashrc` / launchd plist.
+- **`docker compose ... up -d --build` is idempotent.** It rebuilds only changed images and recreates only the containers whose image hash moved. Postgres or other stateful services stay untouched. Single command beats scripting "did anything change."
+- **Health checks beat sleeps.** A blind 30s sleep eventually misses races; a poll loop for a real 200 is both faster on average and louder on failure.
+- **First run after install is slow.** GitHub provisions the workspace + the runner clones the repo for the first time. Steady-state runs are much faster (incremental checkout, Docker layer cache).
+- **The runner reads from a single repo.** If you want a runner to handle multiple repos, either install a separate runner instance per repo, or use a runner group with organization-level setup.
+
+## Teardown
+
+```bash
+cd ~/actions-runner
+./svc.sh stop
+./svc.sh uninstall
+./config.sh remove --token <REMOVAL_TOKEN_FROM_GH>
+cd ~ && rm -rf actions-runner
+```
+
+The removal token comes from the same GH UI page as the registration token, generated separately when an active runner exists.
+
+## See also
+
+- [Deploy adapters](/docs/integrations/deploy-adapters) — Ship Hub's webhook receivers for Vercel, Cloudflare, Fly.io, Render
+- Multica's reference workflow: [`.github/workflows/deploy-production.yml`](https://github.com/prellr/multica/blob/main/.github/workflows/deploy-production.yml)
+- Multica's reference installer: [`scripts/install-mac-mini-runner.sh`](https://github.com/prellr/multica/blob/main/scripts/install-mac-mini-runner.sh)
+- GitHub docs: [About self-hosted runners](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners)

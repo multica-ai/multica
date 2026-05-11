@@ -30,6 +30,7 @@
     "---自部署运维---",
     "environment-variables",
     "auth-setup",
+    "auto-deploy-cd",
     "troubleshooting",
     "---参考---",
     "cli",

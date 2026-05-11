@@ -1,0 +1,275 @@
+---
+title: 自动部署 CD（自托管 runner 模式）
+description: "将 GitHub Actions 持续部署接到自托管生产主机，并与 Multica 发布中心的发布生命周期联动的可复用模式。"
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+本 runbook 介绍 Multica 自身用于把代码部署到 Mac mini 的**自托管 runner CD 模式**。同一个模式适用于以下场景：
+
+- 你的生产主机是自有机器（Mac mini、Linux 机器、本地 VM），GitHub 公共托管 runner 无法访问
+- 你希望「推 main → 自动部署」，而无需手动 SSH
+- 你希望 Multica 发布中心的发布生命周期在部署完成后自动推进
+
+Multica 自身正是这样部署的。参考实现位于 `prellr/multica` 的 `.github/workflows/deploy-production.yml` 与 `scripts/install-mac-mini-runner.sh`。其他仓库可以照搬并按需调整。
+
+<Callout type="info">
+当生产主机**在 NAT 之后或无法被公共 runner 直接访问**时，这是合适的模式。如果主机有公网 IP 且你愿意暴露 SSH，也可以从公共 runner SSH 过去，无需自托管 runner——但大多数家庭实验室 / 小团队最后都会落到这里。
+</Callout>
+
+## 架构
+
+```
+┌──────────────────┐  push to main   ┌──────────────────────┐
+│  prellr/multica  ├────────────────►│ GitHub Actions API   │
+└──────────────────┘                 └─────────┬────────────┘
+                                               │ dispatch workflow
+                                               ▼
+┌──────────────────────────────────────────────────────────┐
+│ Mac mini（生产主机）                                       │
+│                                                          │
+│  ┌─────────────────┐    运行 deploy-production.yml        │
+│  │ self-hosted     │    ─ git pull                       │
+│  │ actions runner  │    ─ docker compose up --build      │
+│  │ （launchd）      │    ─ curl 本地健康检查                │
+│  └────────┬────────┘    ─ POST deployment_status         │
+│           │                                              │
+│           ▼                                              │
+│  ┌───────────────────────────────┐                       │
+│  │ docker compose                │                       │
+│  │  ├─ postgres                  │                       │
+│  │  ├─ multica-backend           │                       │
+│  │  └─ multica-frontend          │                       │
+│  └───────────────────────────────┘                       │
+└──────────────────────────────────────────────────────────┘
+                                               │
+                                               │ deployment_status webhook
+                                               ▼
+                                     ┌──────────────────────┐
+                                     │ Multica 发布中心      │
+                                     │ promoting →          │
+                                     │ in_production        │
+                                     └──────────────────────┘
+```
+
+三块松耦合的组件：
+
+1. **生产主机上的自托管 GitHub Actions runner**。注册到单个仓库，以系统服务方式运行，接收带匹配标签的任务。
+2. **仓库内的 workflow 文件**，在 `push: main` 时触发，在自托管 runner 上跑实际部署命令，并回传 GitHub 的 `deployment_status` 事件。
+3. **发布中心的现有接收器**（部署 workflow 轮询器 + `deployment_status` webhook 处理器），监听部署完成并自动推进发布阶段。
+
+## 前置条件
+
+| 条件 | 原因 |
+|---|---|
+| 生产主机已安装 Docker / 运行时 | runner 需要执行实际部署命令 |
+| 主机上具备管理员权限 | 把 runner 安装为系统服务（launchd / systemd） |
+| GH 仓库管理员权限 | 颁发 runner 注册 token，并开启仓库的 Actions |
+| `main` 分支保护（强烈推荐） | 自托管 runner 会执行 main 上的任何内容；限制谁能 push 是最基本的信任底线 |
+
+## 步骤 1 — 写 workflow
+
+放在 `.github/workflows/deploy-production.yml`。参考版本：[`prellr/multica/.github/workflows/deploy-production.yml`](https://github.com/prellr/multica/blob/main/.github/workflows/deploy-production.yml)。
+
+```yaml
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "指定要部署的 commit SHA（默认是 main HEAD）"
+        required: false
+        type: string
+
+# 每次只跑一个部署。新 push 排队，而不是中途打断正在跑的构建——
+# 半部署状态比「先旧后新」更糟糕。
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 构建 + 重启容器
+    runs-on: [self-hosted, mac-mini-prod]   # ← 与 runner 的标签匹配
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.sha || github.ref }}
+          fetch-depth: 1
+
+      - name: 创建 deployment
+        id: deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: 'production',
+              auto_merge: false,
+              required_contexts: [],
+              production_environment: true,
+            });
+            core.setOutput('deployment_id', data.id);
+
+      - name: 构建 + 重启容器
+        run: |
+          # PATH 调整 — Docker Desktop 的凭据助手不在非登录 shell
+          # 的默认 PATH。否则 `docker compose build` 会报
+          # "docker-credential-desktop: executable not found"。
+          export PATH="/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:${PATH}"
+          docker compose -f docker-compose.prod.yml up -d --build app
+
+      - name: 健康检查
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ || echo 000)
+            [ "$code" = "200" ] && exit 0
+            sleep 2
+          done
+          echo "健康检查失败"
+          exit 1
+
+      - name: 标记 deployment 成功
+        if: success() && steps.deployment.outputs.deployment_id
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.deployment_id }},
+              state: 'success',
+              environment: 'production',
+              environment_url: 'https://your-host.example.com',
+            });
+
+      - name: 标记 deployment 失败
+        if: failure() && steps.deployment.outputs.deployment_id
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.deployment_id }},
+              state: 'failure',
+              environment: 'production',
+            });
+```
+
+### 文件内关键决策
+
+- **触发**：`push: main` 用于持续部署，`workflow_dispatch` 用于人工 / 发布中心驱动的重跑。不接 `pull_request`——那会让 fork PR 在生产主机上跑代码。
+- **`runs-on`**：标签数组。`self-hosted` 表示任务由自托管 runner 接走；第二个标签用来在多 runner（`mac-mini-prod`、`staging-vm` 等）的场景下做区分。
+- **Concurrency**：`cancel-in-progress: false` 让新 push 排队而不是打断已经开跑的构建。
+- **健康检查循环**：容器经常在应用真正接受流量之前就报告「started」。要轮询真正的 200 再宣告成功。
+- **Deployment status 钩子**：成功 / 失败步骤回传到 GitHub 的 deployments API。发布中心（以及 GitHub 自身的部署时间线）读取这些事件做近乎即时的反馈。
+
+## 步骤 2 — 安装自托管 runner
+
+参考安装脚本：[`prellr/multica/scripts/install-mac-mini-runner.sh`](https://github.com/prellr/multica/blob/main/scripts/install-mac-mini-runner.sh)。其他仓库可参考：
+
+```bash
+# 替换为自己的仓库
+REPO_URL="https://github.com/your-org/your-repo"
+RUNNER_NAME="$(hostname -s)-prod"
+LABELS="self-hosted,mac-mini-prod"   # 与 workflow 的 runs-on 匹配
+
+# 拿一个注册 token（一次性，约 1 小时过期）：
+# https://github.com/your-org/your-repo/settings/actions/runners/new
+TOKEN="..."
+
+# 固定版本，避免上游变更打破现状；有意升级时再改。
+RUNNER_VERSION="2.319.1"
+
+mkdir -p ~/actions-runner && cd ~/actions-runner
+curl -fsSL -o runner.tar.gz \
+  "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-osx-arm64-${RUNNER_VERSION}.tar.gz"
+tar xzf runner.tar.gz
+
+./config.sh \
+  --url "${REPO_URL}" \
+  --token "${TOKEN}" \
+  --name "${RUNNER_NAME}" \
+  --labels "${LABELS}" \
+  --work _work \
+  --unattended
+
+./svc.sh install
+./svc.sh start
+```
+
+macOS 上 `svc.sh install` 会写一个 launchd plist，开机自启并在用户登出时继续运行。Linux 上等价的是 systemd。
+
+在 `https://github.com/your-org/your-repo/settings/actions/runners` 查到状态为 **Idle** 即注册成功。
+
+## 步骤 3 — 接入 Multica 发布中心
+
+在 Multica 工作区设置 → **发布中心** 中：
+
+- **生产部署 workflow** → 填文件名，如 `deploy-production.yml`
+
+发布中心的部署 workflow 轮询器据此监听该 workflow 的运行。当某次运行的 `conclusion=success` 且 SHA 与发布的 `merged_main_sha` 匹配时，发布中心在轮询周期内（2 分钟）将发布从 `promoting` 推进到 `in_production`。Workflow 成功步骤发出的 `deployment_status` 事件也会到达 Multica 的 webhook 处理器，做近乎即时的推进。
+
+不需要把发布中心直接连到 runner。链路是：
+1. Workflow 在 runner 上成功完成
+2. GitHub 记录 workflow_run 与 deployment_status 事件
+3. 发布中心轮询器 / webhook 处理器从 GitHub 取到该事件
+4. 发布自动推进
+
+## 信任模型
+
+自托管 runner 执行 workflow 指定的任何内容。这意味着：
+
+- **任何能 push 到 `main`**（或合并 PR 到 main）的人，都能在你的生产主机上跑任意代码。要求 PR 评审的分支保护是务实的底线。
+- **runner 以特定用户身份运行**。挑一个具备部署所需权限的用户（操作 Docker、写入 `/var/log` 等），**仅此而已**。不要用 root 跑 runner。
+- **不要在 `pull_request` 事件上触发涉及自托管 runner 的 workflow**。一个 fork PR 可以包含改 workflow 的提交，从而在 runner 上跑 `rm -rf /`。Multica 的参考 workflow 只在 `push: main` 与 `workflow_dispatch` 上触发——这两类都不来自外部 PR。
+- **Secrets**：runner 能拿到 workflow `env` 与 `${{ secrets }}` 中的一切。把 GH secret 限定到需要它的 workflow，而不是广撒到全仓。
+
+runner 二进制自身由 GitHub 签名更新——这是你必须接受的供应链信任点。
+
+## 接入多个环境
+
+模式可以自然扩展到 staging：
+
+1. 加一个第二个自托管 runner（另一台机器，或同一台机器装第二份带不同标签的 runner），标签为 `staging`。
+2. 加 `.github/workflows/deploy-staging.yml`，结构与生产版镜像，`runs-on: [self-hosted, staging]`，触发条件如 `push: [staging-branch]` 或 `workflow_dispatch`。
+3. 在 Multica 工作区设置 `ship_hub_deploy_workflow_staging` 为 `deploy-staging.yml`。
+
+对于「云原生 staging（Vercel / Fly.io）+ 本地生产」的项目，可以混用：staging 走云厂商 webhook（见[部署适配器](/docs/integrations/deploy-adapters)），生产走本模式。
+
+## 运维注意事项
+
+- **macOS 下 Docker Desktop 加了非标准 PATH。** 凭据助手 `docker-credential-desktop` 不在 runner 默认 PATH。要么在每个用到 docker 的步骤顶部 export `/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin`，要么在 runner 的 `.bashrc` / launchd plist 里设置。
+- **`docker compose ... up -d --build` 是幂等的。** 只重建 image 哈希变了的镜像，只重建 image hash 移动了的容器；Postgres 等有状态服务不受影响。单条命令比脚本判断「是否有变化」更靠谱。
+- **健康检查胜过 sleep。** 盲目 sleep 30s 偶尔会错过竞态；轮询真正的 200 既更快稳健，也在失败时更显眼。
+- **首次运行较慢。** GitHub 要分配 workspace，runner 要首次 clone 仓库。稳态后会快很多（增量 checkout、Docker layer cache）。
+- **runner 只服务一个仓库。** 若想让 runner 服务多仓库，要么每仓装一个 runner 实例，要么使用 runner group + 组织级配置。
+
+## 卸载
+
+```bash
+cd ~/actions-runner
+./svc.sh stop
+./svc.sh uninstall
+./config.sh remove --token <从_GH_获取的_REMOVAL_TOKEN>
+cd ~ && rm -rf actions-runner
+```
+
+Removal token 与注册 token 在同一个 GH 设置页面，但在有活跃 runner 时单独生成。
+
+## 参考
+
+- [部署适配器](/docs/integrations/deploy-adapters)——发布中心对 Vercel、Cloudflare、Fly.io、Render 等的 webhook 接收器
+- Multica 参考 workflow：[`.github/workflows/deploy-production.yml`](https://github.com/prellr/multica/blob/main/.github/workflows/deploy-production.yml)
+- Multica 参考安装脚本：[`scripts/install-mac-mini-runner.sh`](https://github.com/prellr/multica/blob/main/scripts/install-mac-mini-runner.sh)
+- GitHub 官方文档：[关于自托管 runner](https://docs.github.com/zh/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners)

@@ -31,6 +31,7 @@
     "---Self-hosting & ops---",
     "environment-variables",
     "auth-setup",
+    "auto-deploy-cd",
     "troubleshooting",
     "---Reference---",
     "cli",

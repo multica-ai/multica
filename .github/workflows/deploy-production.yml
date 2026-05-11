@@ -1,0 +1,175 @@
+name: Deploy Production
+
+# Self-hosted CD for Multica's Mac mini production host.
+#
+# Triggers:
+#   - push to main: continuous deploy on every merge.
+#   - workflow_dispatch: manual / Ship-Hub-driven re-deploy. Useful for
+#     re-running after a transient docker build failure, or for shipping
+#     a release in flight when "Mark production deployed" was skipped.
+#
+# Trust model:
+#   - Runs ONLY on push to main + manual dispatch. No pull_request
+#     trigger — that would let any fork PR execute arbitrary code on the
+#     Mac mini. Branch protection on main is the user's safety floor:
+#     only merged PRs land here.
+#   - Runs on a self-hosted runner labeled `mac-mini-prod`. The runner
+#     binary itself is the one piece of trust on the host; everything
+#     else flows from "what's currently on main".
+#
+# Wired into Ship Hub:
+#   - Workspace setting `ship_hub_deploy_workflow_production` is set to
+#     `deploy-production.yml` so the deploy-workflow poller watches this
+#     workflow's runs. On `conclusion=success` with a matching SHA, the
+#     poller flips the release stage from `promoting` to `in_production`
+#     within 2 minutes. The deployment-status step below is an optional
+#     accelerator (~immediate) for the same transition.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Specific commit SHA to deploy (defaults to main HEAD)"
+        required: false
+        type: string
+
+# Only one production deploy at a time. New pushes queue, then run with
+# `cancel-in-progress: false` so we don't mid-build kill a deploy that's
+# already touching the container state. Better to deploy stale-then-
+# fresh than to leave the host in a partially-deployed state.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build + restart containers
+    runs-on: [self-hosted, macOS, mac-mini-prod]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      deployments: write
+    env:
+      # Docker Desktop's credential helper lives in this path; the
+      # default shell PATH on a non-login ssh / runner shell omits it
+      # and `docker compose build` then fails with
+      # "docker-credential-desktop: executable not found".
+      DOCKER_PATH_EXTRAS: /usr/local/bin:/Applications/Docker.app/Contents/Resources/bin
+      COMPOSE_PROJECT: multica
+      COMPOSE_FILES: -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # `workflow_dispatch` lets the caller pin a specific SHA;
+          # otherwise we take whatever main is at right now.
+          ref: ${{ github.event.inputs.sha || github.ref }}
+          # Full history isn't needed for the build; shallow checkout
+          # speeds up the runner. If a future step needs `git log`,
+          # bump this.
+          fetch-depth: 1
+
+      # Record the deployment in GitHub so the timeline + Ship Hub get
+      # an immediate signal instead of waiting for the 2-min poller.
+      - name: Create deployment
+        id: deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: 'production',
+              description: 'Mac mini self-hosted deploy',
+              auto_merge: false,
+              required_contexts: [],
+              production_environment: true,
+            });
+            // Some API shapes return an error object on conflict; guard.
+            if (!data?.id) {
+              core.setFailed(`createDeployment did not return an id: ${JSON.stringify(data)}`);
+              return;
+            }
+            core.setOutput('deployment_id', data.id);
+
+      - name: Mark deployment in_progress
+        if: steps.deployment.outputs.deployment_id
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.deployment_id }},
+              state: 'in_progress',
+              description: 'Building images and recreating containers',
+              environment: 'production',
+              auto_inactive: false,
+            });
+
+      - name: Build + restart containers
+        # `up -d --build` is idempotent: rebuilds images that changed,
+        # recreates only containers whose image hash moved, leaves
+        # postgres alone. Single command rather than separate build +
+        # restart because compose handles the "did anything change"
+        # question better than we would scripting it.
+        run: |
+          export PATH="${DOCKER_PATH_EXTRAS}:${PATH}"
+          docker compose ${COMPOSE_FILES} up -d --build frontend backend
+
+      - name: Health check
+        # Frontend serves on host port 3001. We poll for up to ~60s
+        # because Next.js can take 5-15s to actually accept traffic
+        # after the container reports "started". Bail with a clear
+        # error if it never comes up so the deployment fails loud.
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/ || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "Frontend healthy after ${i} attempts (code=${code})"
+              exit 0
+            fi
+            echo "Attempt ${i}: code=${code}, retrying in 2s..."
+            sleep 2
+          done
+          echo "Frontend never returned 200 within 60s; failing deploy."
+          # Dump recent backend + frontend logs so the failed run gives
+          # us something to grep when triaging.
+          export PATH="${DOCKER_PATH_EXTRAS}:${PATH}"
+          docker compose ${COMPOSE_FILES} logs --tail 50 backend frontend || true
+          exit 1
+
+      - name: Mark deployment success
+        if: success() && steps.deployment.outputs.deployment_id
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.deployment_id }},
+              state: 'success',
+              description: 'Containers healthy on multica.wisco.wine',
+              environment: 'production',
+              environment_url: 'https://multica.wisco.wine',
+              log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              auto_inactive: true,
+            });
+
+      - name: Mark deployment failure
+        if: failure() && steps.deployment.outputs.deployment_id
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.deployment_id }},
+              state: 'failure',
+              description: 'Deploy failed — check workflow logs',
+              environment: 'production',
+              log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
