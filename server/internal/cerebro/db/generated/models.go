@@ -503,6 +503,15 @@ type ProjectMember struct {
 	AddedAt     pgtype.Timestamptz `json:"added_at"`
 }
 
+type ProjectNesting struct {
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	ParentProjectID pgtype.UUID        `json:"parent_project_id"`
+	ShowDescendants bool               `json:"show_descendants"`
+	Depth           int16              `json:"depth"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ProjectResource struct {
 	ID           pgtype.UUID        `json:"id"`
 	ProjectID    pgtype.UUID        `json:"project_id"`

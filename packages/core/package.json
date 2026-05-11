@@ -1,5 +1,6 @@
 {
   "_comment": "CEREBRO-PATCH(core-package-cerebro-deps): adds inbox/folders + profile/* exports for cerebro features",
+  "_comment_nested_projects": "CEREBRO-PATCH(nested-projects): exports project nesting hooks",
   "name": "@multica/core",
   "version": "0.0.0",
   "private": true,
@@ -60,6 +61,7 @@
     "./projects": "./projects/index.ts",
     "./projects/queries": "./projects/queries.ts",
     "./projects/mutations": "./projects/mutations.ts",
+    "./projects/nesting": "./projects/nesting.ts",
     "./projects/config": "./projects/config.ts",
     "./labels": "./labels/index.ts",
     "./labels/queries": "./labels/queries.ts",

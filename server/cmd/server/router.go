@@ -540,6 +540,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)
 				r.Get("/by-repo", h.GetProjectByRepo)
+				// CEREBRO-PATCH(project-nesting-routes): fork-specific nested project endpoints.
+				r.Get("/tree", h.ListProjectTree)
 				r.Get("/", h.ListProjects)
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
@@ -555,6 +557,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/resources", h.ListProjectResources)
 					r.Post("/resources", h.CreateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+					r.Put("/parent", h.SetProjectParent)
+					r.Put("/show-descendants", h.SetProjectShowDescendants)
+					r.Get("/rollup-stats", h.GetProjectRollupStats)
 				})
 			})
 

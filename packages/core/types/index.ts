@@ -105,6 +105,10 @@ export type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  // CEREBRO-PATCH(nested-projects): fork-only nested project response types.
+  ProjectTreeItem,
+  ListProjectTreeResponse,
+  ProjectRollupStats,
   ProjectResource,
   ProjectResourceType,
   GithubRepoResourceRef,

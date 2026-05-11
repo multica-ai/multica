@@ -116,6 +116,7 @@ func init() {
 	projectCreateCmd.Flags().String("status", "", "Project status")
 	projectCreateCmd.Flags().String("icon", "", "Project icon (emoji)")
 	projectCreateCmd.Flags().String("lead", "", "Lead name (member or agent)")
+	projectCreateCmd.Flags().String("parent", "", "Parent project ID for nested projects") // CEREBRO-PATCH(nested-projects): CLI support for fork project nesting.
 	projectCreateCmd.Flags().StringArray("repo", nil, "Attach a github_repo resource by URL (may be repeated)")
 	projectCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -318,6 +319,14 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/projects", body, &result); err != nil {
 		return fmt.Errorf("create project: %w", err)
+	}
+	if parentID, _ := cmd.Flags().GetString("parent"); strings.TrimSpace(parentID) != "" {
+		// CEREBRO-PATCH(nested-projects): call fork-only endpoint after canonical project creation.
+		projectID := strVal(result, "id")
+		parentBody := map[string]any{"parent_project_id": strings.TrimSpace(parentID)}
+		if err := client.PutJSON(ctx, "/api/projects/"+projectID+"/parent", parentBody, &result); err != nil {
+			return fmt.Errorf("set project parent: %w", err)
+		}
 	}
 
 	output, _ := cmd.Flags().GetString("output")

@@ -1,4 +1,5 @@
 -- CEREBRO-PATCH(sqlc-issue): cerebro modification of upstream file
+-- CEREBRO-PATCH(nested-projects): project filters can include descendant project IDs.
 -- name: ListIssues :many
 -- Access-filtered list of issues. The access predicate enforces:
 --   * is_admin = TRUE  → no filter (workspace owners/admins always see all)
@@ -38,7 +39,10 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
   AND (sqlc.narg('creator_id')::uuid IS NULL OR i.creator_id = sqlc.narg('creator_id'))
-  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (
+    sqlc.narg('project_ids')::uuid[] IS NULL
+    OR i.project_id = ANY(sqlc.narg('project_ids')::uuid[])
+  )
 ORDER BY i.position ASC, i.created_at DESC
 LIMIT $2 OFFSET $3;
 
@@ -115,7 +119,10 @@ WHERE workspace_id = $1
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
   AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'))
-  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (
+    sqlc.narg('project_ids')::uuid[] IS NULL
+    OR project_id = ANY(sqlc.narg('project_ids')::uuid[])
+  )
 ORDER BY position ASC, created_at DESC;
 
 -- name: CountIssues :one
@@ -127,7 +134,10 @@ WHERE workspace_id = $1
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
   AND (sqlc.narg('creator_id')::uuid IS NULL OR creator_id = sqlc.narg('creator_id'))
-  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'));
+  AND (
+    sqlc.narg('project_ids')::uuid[] IS NULL
+    OR project_id = ANY(sqlc.narg('project_ids')::uuid[])
+  );
 
 -- name: ListChildIssues :many
 SELECT * FROM issue

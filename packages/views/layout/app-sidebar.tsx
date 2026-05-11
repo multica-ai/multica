@@ -86,9 +86,9 @@ import { api, ApiError } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
 import { pinListOptions } from "@multica/core/pins/queries";
-import { projectListOptions } from "@multica/core/projects/queries";
-import { getProjectColor } from "@multica/core/projects/config";
-import type { Project } from "@multica/core/types";
+// CEREBRO-PATCH(nested-projects): sidebar renders project hierarchy from fork nesting hooks.
+import { projectTreeOptions } from "@multica/core/projects/nesting";
+import type { ProjectTreeItem } from "@multica/core/types";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
@@ -115,7 +115,7 @@ const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
 const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
 const EMPTY_NOTIFICATIONS: Awaited<ReturnType<typeof api.listNotifications>> = [];
-const EMPTY_PROJECTS: Project[] = [];
+const EMPTY_PROJECT_TREE: ProjectTreeItem[] = [];
 
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see AppSidebar body).
@@ -379,6 +379,17 @@ function PinSkeleton() {
   );
 }
 
+function filterActiveProjectTree(projects: ProjectTreeItem[]): ProjectTreeItem[] {
+  return projects
+    .filter((p) => p.status !== "completed" && p.status !== "cancelled")
+    .map((p) => ({ ...p, children: filterActiveProjectTree(p.children ?? []) }));
+}
+
+function projectTreeContainsPath(project: ProjectTreeItem, pathname: string, projectHref: (id: string) => string): boolean {
+  if (pathname === projectHref(project.id)) return true;
+  return (project.children ?? []).some((child) => projectTreeContainsPath(child, pathname, projectHref));
+}
+
 interface AppSidebarProps {
   /** Rendered above SidebarHeader (e.g. desktop traffic light spacer) */
   topSlot?: React.ReactNode;
@@ -437,14 +448,26 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   );
   const archiveAllNotifications = useArchiveAllNotifications();
   const hasRuntimeUpdates = useMyRuntimesNeedUpdate(wsId);
-  const { data: projects = EMPTY_PROJECTS } = useQuery({
-    ...projectListOptions(wsId ?? ""),
+  const { data: projectTree = EMPTY_PROJECT_TREE } = useQuery({
+    ...projectTreeOptions(wsId ?? ""),
     enabled: !!wsId,
   });
   const activeProjects = React.useMemo(
-    () => projects.filter((p: Project) => p.status !== "completed" && p.status !== "cancelled"),
-    [projects],
+    () => filterActiveProjectTree(projectTree),
+    [projectTree],
   );
+  const expandedProjectPrefs = (user?.preferences?.project_sidebar_expanded ?? {}) as Record<string, boolean>;
+  const [localExpandedProjects, setLocalExpandedProjects] = useState<Record<string, boolean>>(expandedProjectPrefs);
+  useEffect(() => {
+    setLocalExpandedProjects(expandedProjectPrefs);
+  }, [user?.preferences?.project_sidebar_expanded]);
+  const setProjectExpanded = useCallback((projectId: string, expanded: boolean) => {
+    const next = { ...localExpandedProjects, [projectId]: expanded };
+    setLocalExpandedProjects(next);
+    api.updateMyPreferences({ project_sidebar_expanded: next })
+      .then((updatedUser) => useAuthStore.getState().setUser(updatedUser))
+      .catch(() => setLocalExpandedProjects(localExpandedProjects));
+  }, [localExpandedProjects]);
   const { data: pinnedItemsRaw = EMPTY_PINS } = useQuery({
     ...pinListOptions(wsId ?? "", userId ?? ""),
     enabled: !!wsId && !!userId,
@@ -816,31 +839,70 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             <span>New Project</span>
                           </SidebarMenuButton>
                         </SidebarMenuItem>
-                        {activeProjects.map((project: Project) => {
-                          const href = p.projectDetail(project.id);
-                          const isActive = pathname === href;
-                          return (
-                            <SidebarMenuItem key={project.id}>
-                              <SidebarMenuButton
-                                isActive={isActive}
-                                render={<AppLink href={href} />}
-                                onClick={handleNavClick}
-                                className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground pl-8 h-7"
-                              >
-                                {project.icon ? (
-                                  <span className="text-sm shrink-0">{project.icon}</span>
-                                ) : (
-                                  <span className={cn("size-2 rounded-full shrink-0", getProjectColor(project.color).dot)} />
-                                )}
-                                <span className="truncate">{project.title}</span>
-                                {project.issue_count > 0 && (
-                                  <span className="ml-auto text-[10px] text-muted-foreground">
-                                    {project.done_count}/{project.issue_count}
-                                  </span>
-                                )}
-                              </SidebarMenuButton>
-                            </SidebarMenuItem>
-                          );
+                        {activeProjects.map((project) => {
+                          const renderProject = (item: ProjectTreeItem, level: number): React.ReactNode => {
+                            const href = p.projectDetail(item.id);
+                            const isActive = pathname === href;
+                            const children = item.children ?? [];
+                            const hasChildren = children.length > 0;
+                            const isExpanded = localExpandedProjects[item.id] ?? true;
+                            const hasActiveChild = children.some((child) => projectTreeContainsPath(child, pathname, p.projectDetail));
+                            return (
+                              <React.Fragment key={item.id}>
+                                <SidebarMenuItem>
+                                  <div
+                                    className={cn(
+                                      "relative",
+                                      level > 0 && "ml-3 border-l border-sidebar-border/70 pl-2",
+                                    )}
+                                  >
+                                    <SidebarMenuButton
+                                      isActive={isActive}
+                                      render={<AppLink href={href} />}
+                                      onClick={handleNavClick}
+                                      className={cn(
+                                        "h-7 text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground",
+                                        level === 0 && "pl-8",
+                                        hasActiveChild && "bg-sidebar-accent/45 text-sidebar-accent-foreground",
+                                      )}
+                                    >
+                                      {hasChildren ? (
+                                        <span
+                                          role="button"
+                                          tabIndex={0}
+                                          className="flex size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+                                          onClick={(event) => {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            setProjectExpanded(item.id, !isExpanded);
+                                          }}
+                                          onKeyDown={(event) => {
+                                            if (event.key !== "Enter" && event.key !== " ") return;
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            setProjectExpanded(item.id, !isExpanded);
+                                          }}
+                                        >
+                                          <ChevronRight className={cn("!size-3 transition-transform", isExpanded && "rotate-90")} />
+                                        </span>
+                                      ) : (
+                                        <span className="size-3.5 shrink-0" />
+                                      )}
+                                      <ProjectIcon project={item} size="sm" />
+                                      <span className="truncate">{item.title}</span>
+                                      {level === 0 && item.issue_count > 0 && (
+                                        <span className="ml-auto text-[10px] text-muted-foreground">
+                                          {item.done_count}/{item.issue_count}
+                                        </span>
+                                      )}
+                                    </SidebarMenuButton>
+                                  </div>
+                                </SidebarMenuItem>
+                                {hasChildren && isExpanded && children.map((child) => renderProject(child, level + 1))}
+                              </React.Fragment>
+                            );
+                          };
+                          return renderProject(project, 0);
                         })}
                       </SidebarMenu>
                     </CollapsibleContent>

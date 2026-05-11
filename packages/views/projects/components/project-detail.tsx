@@ -6,9 +6,11 @@ import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, 
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueStatus, ProjectStatus, ProjectPriority } from "@multica/core/types";
+import type { Issue, IssueStatus, ProjectStatus, ProjectPriority, ProjectTreeItem } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
+// CEREBRO-PATCH(nested-projects): project detail exposes parent and descendant settings.
+import { projectTreeOptions, useSetProjectParent, useSetProjectShowDescendants } from "@multica/core/projects/nesting";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
@@ -60,6 +62,8 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
+// CEREBRO-PATCH(nested-projects): toggle direct-only versus descendant-inclusive project scope.
+import { Switch } from "@multica/ui/components/ui/switch";
 import { PageHeader } from "../../layout/page-header";
 import {
   AlertDialog,
@@ -95,6 +99,10 @@ function PropRow({
       </div>
     </div>
   );
+}
+
+function flattenProjectTree(projects: ProjectTreeItem[]): ProjectTreeItem[] {
+  return projects.flatMap((project) => [project, ...flattenProjectTree(project.children ?? [])]);
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +254,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const workspace = useCurrentWorkspace();
   const workspaceName = workspace?.name;
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
+  const { data: projectTree = [] } = useQuery(projectTreeOptions(wsId));
+  const flatProjectTree = useMemo(() => flattenProjectTree(projectTree), [projectTree]);
+  const nestingProject = flatProjectTree.find((p) => p.id === projectId);
+  const parentOptions = flatProjectTree.filter((p) => p.id !== projectId && p.depth < 2);
+  const setProjectParent = useSetProjectParent(wsId);
+  const setProjectShowDescendants = useSetProjectShowDescendants(wsId);
   const projectScope = `project:${projectId}`;
   const projectFilter = useMemo<MyIssuesFilter>(
     () => ({ project_id: projectId }),
@@ -543,6 +557,51 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               }}
               onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
             />
+          </PropRow>
+          <PropRow label="Parent">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <button type="button" className="inline-flex min-w-0 items-center gap-1.5 text-xs hover:text-foreground transition-colors">
+                    <span className="truncate">
+                      {nestingProject?.parent_project_id
+                        ? flatProjectTree.find((p) => p.id === nestingProject.parent_project_id)?.title ?? "Parent project"
+                        : "None"}
+                    </span>
+                  </button>
+                }
+              />
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuItem onClick={() => setProjectParent.mutate({ id: projectId, parentProjectId: null })}>
+                  <span className="text-muted-foreground">None</span>
+                  {!nestingProject?.parent_project_id && <Check className="ml-auto h-3.5 w-3.5" />}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {parentOptions.map((option) => (
+                  <DropdownMenuItem
+                    key={option.id}
+                    onClick={() => setProjectParent.mutate({ id: projectId, parentProjectId: option.id })}
+                    className="gap-2"
+                  >
+                    <span className="truncate" style={{ paddingLeft: option.depth * 12 }}>{option.title}</span>
+                    {nestingProject?.parent_project_id === option.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </PropRow>
+          <PropRow label="Sub-projects">
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={nestingProject?.show_descendants ?? true}
+                onCheckedChange={(checked) =>
+                  setProjectShowDescendants.mutate({ id: projectId, showDescendants: checked })
+                }
+              />
+              <span className="text-xs text-muted-foreground">
+                {nestingProject?.show_descendants ?? true ? "Included" : "Direct only"}
+              </span>
+            </div>
           </PropRow>
         </div>}
       </div>

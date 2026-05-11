@@ -65,6 +65,24 @@ export interface ListProjectsResponse {
   total: number;
 }
 
+// CEREBRO-PATCH(nested-projects): fork-only project nesting API models.
+export interface ProjectTreeItem extends Project {
+  parent_project_id: string | null;
+  show_descendants: boolean;
+  depth: number;
+  children?: ProjectTreeItem[];
+}
+
+export interface ListProjectTreeResponse {
+  projects: ProjectTreeItem[];
+  total: number;
+}
+
+export interface ProjectRollupStats {
+  issue_count: number;
+  done_count: number;
+}
+
 // ProjectResource is a typed pointer from a project to an external resource.
 // The resource_ref shape depends on resource_type (e.g. github_repo carries
 // { url, default_branch_hint? }). New types add a case in

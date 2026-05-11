@@ -82,6 +82,10 @@ import type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  // CEREBRO-PATCH(nested-projects): project tree response types for fork endpoints.
+  ListProjectTreeResponse,
+  ProjectTreeItem,
+  ProjectRollupStats,
   ProjectResource,
   CreateProjectResourceRequest,
   ListProjectResourcesResponse,
@@ -1510,6 +1514,11 @@ export class ApiClient {
     return this.fetch(`/api/projects/${id}`);
   }
 
+  // CEREBRO-PATCH(nested-projects): fork-only nested project endpoints.
+  async getProjectTree(): Promise<ListProjectTreeResponse> {
+    return this.fetch("/api/projects/tree");
+  }
+
   async createProject(data: CreateProjectRequest): Promise<Project> {
     return this.fetch("/api/projects", {
       method: "POST",
@@ -1522,6 +1531,30 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  }
+
+  async setProjectParent(
+    id: string,
+    parentProjectId: string | null,
+  ): Promise<ProjectTreeItem> {
+    return this.fetch(`/api/projects/${id}/parent`, {
+      method: "PUT",
+      body: JSON.stringify({ parent_project_id: parentProjectId }),
+    });
+  }
+
+  async setProjectShowDescendants(
+    id: string,
+    showDescendants: boolean,
+  ): Promise<ProjectTreeItem> {
+    return this.fetch(`/api/projects/${id}/show-descendants`, {
+      method: "PUT",
+      body: JSON.stringify({ show_descendants: showDescendants }),
+    });
+  }
+
+  async getProjectRollupStats(id: string): Promise<ProjectRollupStats> {
+    return this.fetch(`/api/projects/${id}/rollup-stats`);
   }
 
   async deleteProject(id: string): Promise<void> {
