@@ -110,6 +110,32 @@ jobs:
               auto_inactive: false,
             });
 
+      - name: Stop orphaned containers from prior builds
+        # `docker compose up` only manages containers under its OWN
+        # project name (here: `multica`, set via `name:` in
+        # docker-compose.selfhost.yml). Containers left over from a
+        # prior local build that didn't use the same project name
+        # still hold the host ports we're about to bind, and the up
+        # command fails with "Bind for 0.0.0.0:PORT failed: port is
+        # already allocated".
+        #
+        # Sweep any leftover containers whose name starts with
+        # `multica-` (from a no-project-name compose) OR matches
+        # known service names. Idempotent — silently no-ops on a
+        # clean host. Force-rm because we'll recreate them in the
+        # next step.
+        run: |
+          export PATH="${DOCKER_PATH_EXTRAS}:${PATH}"
+          set -e
+          # Tear down anything still labeled with this project first.
+          docker compose ${COMPOSE_FILES} down --remove-orphans || true
+          # Then catch loose containers from outside the project name
+          # (old `docker compose up` runs that didn't use `name:`).
+          for n in $(docker ps -aq --filter "name=multica-"); do
+            echo "Removing orphan container $n"
+            docker rm -f "$n" || true
+          done
+
       - name: Build + restart containers
         # `up -d --build` is idempotent: rebuilds images that changed,
         # recreates only containers whose image hash moved, leaves
@@ -121,13 +147,21 @@ jobs:
           docker compose ${COMPOSE_FILES} up -d --build frontend backend
 
       - name: Health check
-        # Frontend serves on host port 3001. We poll for up to ~60s
-        # because Next.js can take 5-15s to actually accept traffic
-        # after the container reports "started". Bail with a clear
-        # error if it never comes up so the deployment fails loud.
+        # Hit the frontend INSIDE the docker network rather than via
+        # the host port mapping. The host port is whatever the operator
+        # set in `.env` (FRONTEND_PORT) plus whatever else lives on
+        # the box; we shouldn't couple the deploy gate to that. The
+        # in-network port is always 3000 (HOSTNAME=0.0.0.0 PORT=3000
+        # set by the frontend Dockerfile).
+        #
+        # We poll for up to ~60s because Next.js can take 5-15s to
+        # actually accept traffic after the container reports started.
         run: |
+          export PATH="${DOCKER_PATH_EXTRAS}:${PATH}"
           for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/ || echo 000)
+            code=$(docker compose ${COMPOSE_FILES} exec -T frontend \
+                     sh -c 'wget -qO- -S http://localhost:3000/ 2>&1 | grep -m1 "HTTP/" | awk "{print \$2}"' \
+                   2>/dev/null | tr -d "\r" || echo 000)
             if [ "$code" = "200" ]; then
               echo "Frontend healthy after ${i} attempts (code=${code})"
               exit 0
@@ -138,7 +172,6 @@ jobs:
           echo "Frontend never returned 200 within 60s; failing deploy."
           # Dump recent backend + frontend logs so the failed run gives
           # us something to grep when triaging.
-          export PATH="${DOCKER_PATH_EXTRAS}:${PATH}"
           docker compose ${COMPOSE_FILES} logs --tail 50 backend frontend || true
           exit 1
 
