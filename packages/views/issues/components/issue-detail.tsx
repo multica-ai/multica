@@ -89,6 +89,7 @@ import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
 import { useT } from "../../i18n";
+import { Component, type ReactNode } from "react";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -205,6 +206,41 @@ interface IssueDetailProps {
   layoutId?: string;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
   highlightCommentId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// TimelineErrorBoundary — catches render crashes in the timeline section
+// ---------------------------------------------------------------------------
+
+type TimelineErrorBoundaryProps = {
+  children: ReactNode;
+  fallback?: ReactNode;
+};
+
+type TimelineErrorBoundaryState = {
+  hasError: boolean;
+};
+
+class TimelineErrorBoundary extends Component<TimelineErrorBoundaryProps, TimelineErrorBoundaryState> {
+  constructor(props: TimelineErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(): TimelineErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback ?? (
+        <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-center text-sm text-muted-foreground">
+          Failed to load comments. Please refresh the page.
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1095,6 +1131,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <div className="h-px flex-1 bg-border" />
               </div>
             )}
+            <TimelineErrorBoundary>
             <div className="mt-4 flex flex-col gap-3">
               {timelineView.groups.map((group) => {
                 if (group.type === "comment") {
@@ -1167,6 +1204,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 );
               })}
             </div>
+            </TimelineErrorBoundary>
             {(hasMoreNewer || !isAtLatest) && (
               <div className="mt-4 flex items-center justify-center gap-4">
                 {hasMoreNewer && (
