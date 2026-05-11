@@ -26,7 +26,7 @@
  * only keeps narrow deterministic exits for editor-owned slices, code block
  * context, structured plain text, and large payloads.
  */
-import { Extension } from "@tiptap/core";
+import { Extension, type JSONContent } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Slice } from "@tiptap/pm/model";
 
@@ -77,6 +77,19 @@ function classifyPaste({
   return "markdown";
 }
 
+function ensureEditableListItems(node: JSONContent): JSONContent {
+  const content = node.content?.map(ensureEditableListItems);
+
+  if (node.type === "listItem" && (!content || content.length === 0)) {
+    return {
+      ...node,
+      content: [{ type: "paragraph" }],
+    };
+  }
+
+  return content ? { ...node, content } : node;
+}
+
 export function createMarkdownPasteExtension() {
   return Extension.create({
     name: "markdownPaste",
@@ -110,7 +123,7 @@ export function createMarkdownPasteExtension() {
 
               // Everything else (VS Code, text editors, .md files, terminals,
               // web pages): parse text/plain as Markdown.
-              const json = editor.markdown.parse(text);
+              const json = ensureEditableListItems(editor.markdown.parse(text));
               const node = editor.schema.nodeFromJSON(json);
               const slice = Slice.maxOpen(node.content);
               const tr = view.state.tr.replaceSelection(slice);
