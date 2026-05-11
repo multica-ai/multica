@@ -447,8 +447,12 @@ function CommentCardImpl({
   };
 
   // Collect all nested replies recursively into a flat list
+  // (with cycle detection to prevent stack overflow from circular parent_id)
   const allNestedReplies: TimelineEntry[] = [];
+  const visited = new Set<string>();
   const collectReplies = (parentId: string) => {
+    if (visited.has(parentId)) return;
+    visited.add(parentId);
     const children = allReplies.get(parentId) ?? [];
     for (const child of children) {
       allNestedReplies.push(child);
