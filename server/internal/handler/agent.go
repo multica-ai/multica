@@ -316,12 +316,15 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	// CEREBRO-PATCH(list-agents-group-filter): JEH-1009 narrow non-admin viewers to
 	// the agents granted via their group memberships. Admins (no filter) and
 	// nil-seam paths short-circuit; members with no group grant get an empty slice.
-	visibleAgents, hasFilter, _ := h.cerebroVisibleAgentIDSet(r.Context(), r, workspaceID)
+	// CEREBRO-PATCH(list-agents-owner-exempt): JEH-1057 — owner exemption
+	// gated on create_agent capability so visibility ≤ create rights.
+	visibleAgents, hasFilter, ownerExempt, _ := h.cerebroVisibleAgentIDSet(r.Context(), r, workspaceID)
 	// All agents (including private) are visible to workspace members.
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
 		if hasFilter {
-			if _, ok := visibleAgents[uuidToString(a.ID)]; !ok {
+			_, allowedByGroup := visibleAgents[uuidToString(a.ID)]
+			if !allowedByGroup && !ownerExempt(a.OwnerID) {
 				continue
 			}
 		}

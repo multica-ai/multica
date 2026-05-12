@@ -450,11 +450,14 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 
 	// CEREBRO-PATCH(list-runtimes-group-filter): JEH-1009 narrow non-admin viewers
 	// to the runtimes granted via their group memberships.
-	visibleRuntimes, hasFilter, _ := h.cerebroVisibleRuntimeIDSet(r.Context(), r, workspaceID)
+	// CEREBRO-PATCH(list-runtimes-owner-exempt): JEH-1056 — owner exemption
+	// gated on create_runtime capability so visibility ≤ create rights.
+	visibleRuntimes, hasFilter, ownerExempt, _ := h.cerebroVisibleRuntimeIDSet(r.Context(), r, workspaceID)
 	resp := make([]AgentRuntimeResponse, 0, len(runtimes))
 	for _, rt := range runtimes {
 		if hasFilter {
-			if _, ok := visibleRuntimes[uuidToString(rt.ID)]; !ok {
+			_, allowedByGroup := visibleRuntimes[uuidToString(rt.ID)]
+			if !allowedByGroup && !ownerExempt(rt.OwnerID) {
 				continue
 			}
 		}

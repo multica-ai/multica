@@ -187,11 +187,11 @@ func TestCerebroAgentAccessAsValidatorError_NilInvokerPasses(t *testing.T) {
 }
 
 func TestCerebroVisibleAgentIDSet_NilInvokerNoFilter(t *testing.T) {
-	// No seam → hasFilter=false, ok=true. ListAgents/ListAgentRuntimes then
-	// skips the filter loop and returns the upstream-visible set unchanged.
+	// No seam → hasFilter=false, ok=true, ownerExempt=nil. ListAgents skips
+	// the filter loop and returns the upstream-visible set unchanged.
 	h := &Handler{}
 	r := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
-	set, hasFilter, ok := h.cerebroVisibleAgentIDSet(context.Background(), r, "00000000-0000-0000-0000-000000000000")
+	set, hasFilter, exempt, ok := h.cerebroVisibleAgentIDSet(context.Background(), r, "00000000-0000-0000-0000-000000000000")
 	if !ok {
 		t.Fatalf("nil invoker: expected ok=true")
 	}
@@ -201,14 +201,71 @@ func TestCerebroVisibleAgentIDSet_NilInvokerNoFilter(t *testing.T) {
 	if set != nil {
 		t.Fatalf("nil invoker: expected nil set, got %v", set)
 	}
+	if exempt != nil {
+		t.Fatalf("nil invoker: expected nil ownerExempt, got non-nil")
+	}
 }
 
 func TestCerebroVisibleRuntimeIDSet_NilInvokerNoFilter(t *testing.T) {
 	h := &Handler{}
 	r := httptest.NewRequest(http.MethodGet, "/api/runtimes", nil)
-	_, hasFilter, ok := h.cerebroVisibleRuntimeIDSet(context.Background(), r, "00000000-0000-0000-0000-000000000000")
+	_, hasFilter, exempt, ok := h.cerebroVisibleRuntimeIDSet(context.Background(), r, "00000000-0000-0000-0000-000000000000")
 	if !ok || hasFilter {
 		t.Fatalf("nil invoker: expected ok=true hasFilter=false, got ok=%v hasFilter=%v", ok, hasFilter)
+	}
+	if exempt != nil {
+		t.Fatalf("nil invoker: expected nil ownerExempt")
+	}
+}
+
+// CEREBRO-PATCH(group-permissions-cerebro-test-owner-exempt): JEH-1056 / JEH-1057 —
+// decision table coverage for ownerExemptFn so visibility ≤ create rights stays
+// pinned across refactors.
+//
+// JEH-1056 / JEH-1057 — owner-exemption decision table. Bind the rule "see
+// your own row iff you have the create capability" against the four input
+// combinations so the cerebro list-filter can't silently regress to either
+// "always show owner's rows" (security) or "never show owner's rows"
+// (the bug being fixed here).
+func TestOwnerExemptFn_TruthTable(t *testing.T) {
+	viewer := pgtype.UUID{Bytes: [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}, Valid: true}
+	other := pgtype.UUID{Bytes: [16]byte{9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9}, Valid: true}
+	unset := pgtype.UUID{} // OwnerID column null in DB.
+
+	cases := []struct {
+		name      string
+		canCreate bool
+		owner     pgtype.UUID
+		want      bool
+	}{
+		{"owns and can create — admitted", true, viewer, true},
+		{"owns but cannot create — denied (no ghost-rows after capability revoke)", false, viewer, false},
+		{"does not own but can create — denied (group allowlist is the only path)", true, other, false},
+		{"does not own and cannot create — denied", false, other, false},
+		{"owner column unset — never admitted (no NULL == NULL match)", true, unset, false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := ownerExemptFn(viewer, tc.canCreate)(tc.owner)
+			if got != tc.want {
+				t.Fatalf("canCreate=%v owner=%v: got %v, want %v", tc.canCreate, tc.owner, got, tc.want)
+			}
+		})
+	}
+}
+
+// Defence in depth: when the viewer's own UserID column is unset (should not
+// happen post-requireUserID, but the closure is constructed early), the
+// exemption must fail closed — otherwise a NULL == NULL match would admit
+// every owner-less runtime/agent to the unauthenticated viewer.
+func TestOwnerExemptFn_InvalidViewerUserIDFailsClosed(t *testing.T) {
+	exempt := ownerExemptFn(pgtype.UUID{}, true)
+	if exempt(pgtype.UUID{Bytes: [16]byte{1}, Valid: true}) {
+		t.Fatalf("invalid viewer.UserID with canCreate=true must NOT admit any owner")
+	}
+	if exempt(pgtype.UUID{}) {
+		t.Fatalf("invalid viewer.UserID must NOT admit owner=null either")
 	}
 }
 

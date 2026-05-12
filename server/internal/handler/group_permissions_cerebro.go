@@ -293,66 +293,103 @@ func (h *Handler) cerebroBuildViewer(ctx context.Context, r *http.Request, works
 	return viewer, true
 }
 
-// cerebroVisibleAgentIDSet returns (set, hasFilter, ok). hasFilter=false means
-// the viewer is an admin (or the seam is not wired) — caller skips filtering.
-// hasFilter=true returns the explicit allowlist (possibly empty: viewer has no
-// group grant → no agents visible).
+// cerebroVisibleAgentIDSet returns (set, hasFilter, ownerExempt, ok).
+// hasFilter=false means the viewer is an admin (or the seam is not wired) —
+// caller skips filtering. hasFilter=true returns the explicit allowlist
+// (possibly empty: viewer has no group grant → no agents visible).
+//
+// ownerExempt(ownerID) tells the list caller whether a single row should be
+// admitted by virtue of ownership: true iff the row is owned by the viewer
+// AND the viewer holds the create_agent capability (JEH-1057). The flag
+// binds the owner-exemption to capability so a member without create-rights
+// also loses sight of agents they once owned. Returns false when hasFilter
+// is false — callers don't use it in that branch.
 //
 // ok=false signals a DB-level failure or that the request lacks a resolvable
 // workspace member; caller should leave the list untouched and rely on the
 // upstream access path. Conservative: if the lookup fails, don't widen access,
 // but also don't blank the page — the user sees the upstream-filtered list.
-func (h *Handler) cerebroVisibleAgentIDSet(ctx context.Context, r *http.Request, workspaceID string) (set map[string]struct{}, hasFilter bool, ok bool) {
+func (h *Handler) cerebroVisibleAgentIDSet(ctx context.Context, r *http.Request, workspaceID string) (set map[string]struct{}, hasFilter bool, ownerExempt func(ownerID pgtype.UUID) bool, ok bool) {
 	if h.GroupPermissions == nil {
-		return nil, false, true
+		return nil, false, nil, true
 	}
 	viewer, viewerOk := h.cerebroBuildViewer(ctx, r, workspaceID)
 	if !viewerOk {
-		return nil, false, false
+		return nil, false, nil, false
 	}
 	if viewer.IsAdmin {
-		return nil, false, true
+		return nil, false, nil, true
 	}
 	wsUUID, perr := util.ParseUUID(workspaceID)
 	if perr != nil {
-		return nil, false, false
+		return nil, false, nil, false
 	}
 	ids, err := h.GroupPermissions.VisibleAgentIDs(ctx, viewer, wsUUID)
 	if err != nil {
-		return nil, false, false
+		return nil, false, nil, false
+	}
+	canCreate, err := h.GroupPermissions.CanCreateAgent(ctx, viewer, wsUUID)
+	if err != nil {
+		return nil, false, nil, false
 	}
 	out := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		out[uuidToString(id)] = struct{}{}
 	}
-	return out, true, true
+	exempt := ownerExemptFn(viewer.UserID, canCreate)
+	return out, true, exempt, true
 }
 
-// cerebroVisibleRuntimeIDSet mirrors cerebroVisibleAgentIDSet for runtimes.
-func (h *Handler) cerebroVisibleRuntimeIDSet(ctx context.Context, r *http.Request, workspaceID string) (set map[string]struct{}, hasFilter bool, ok bool) {
+// cerebroVisibleRuntimeIDSet mirrors cerebroVisibleAgentIDSet for runtimes —
+// same ownerExempt contract, but gated on the create_runtime capability
+// (JEH-1056).
+func (h *Handler) cerebroVisibleRuntimeIDSet(ctx context.Context, r *http.Request, workspaceID string) (set map[string]struct{}, hasFilter bool, ownerExempt func(ownerID pgtype.UUID) bool, ok bool) {
 	if h.GroupPermissions == nil {
-		return nil, false, true
+		return nil, false, nil, true
 	}
 	viewer, viewerOk := h.cerebroBuildViewer(ctx, r, workspaceID)
 	if !viewerOk {
-		return nil, false, false
+		return nil, false, nil, false
 	}
 	if viewer.IsAdmin {
-		return nil, false, true
+		return nil, false, nil, true
 	}
 	wsUUID, perr := util.ParseUUID(workspaceID)
 	if perr != nil {
-		return nil, false, false
+		return nil, false, nil, false
 	}
 	ids, err := h.GroupPermissions.VisibleRuntimeIDs(ctx, viewer, wsUUID)
 	if err != nil {
-		return nil, false, false
+		return nil, false, nil, false
+	}
+	canCreate, err := h.GroupPermissions.CanCreateRuntime(ctx, viewer, wsUUID)
+	if err != nil {
+		return nil, false, nil, false
 	}
 	out := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		out[uuidToString(id)] = struct{}{}
 	}
-	return out, true, true
+	exempt := ownerExemptFn(viewer.UserID, canCreate)
+	return out, true, exempt, true
+}
+
+// CEREBRO-PATCH(group-permissions-cerebro-owner-exempt): JEH-1056 / JEH-1057 — closure
+// shared by the runtime and agent visible-set helpers. Returns true iff the row's
+// owner equals the viewer AND the viewer holds the matching create capability.
+//
+// ownerExemptFn returns a closure that admits rows owned by viewerUserID iff
+// canCreate is true. A non-Valid owner column (no owner set) never matches.
+// Pulled out so the agent and runtime helpers stay byte-for-byte parallel and
+// the test can exercise the four-cell truth table (own/not-own × can/cannot)
+// directly.
+func ownerExemptFn(viewerUserID pgtype.UUID, canCreate bool) func(ownerID pgtype.UUID) bool {
+	if !canCreate || !viewerUserID.Valid {
+		return func(pgtype.UUID) bool { return false }
+	}
+	return func(ownerID pgtype.UUID) bool {
+		return ownerID.Valid && ownerID.Bytes == viewerUserID.Bytes
+	}
 }
 
 // cerebroVisibleProjectIDsForViewer returns the project IDs the viewer has
