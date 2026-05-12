@@ -931,7 +931,7 @@ func TestInjectRuntimeConfigQoder(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
-	if err := InjectRuntimeConfig(dir, "qoder", ctx); err != nil {
+	if _, err := InjectRuntimeConfig(dir, "qoder", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
