@@ -48,7 +48,7 @@ export function MoveScopeMenu({ artifact }: { artifact: Artifact }) {
         <DropdownMenuLabel>Move to…</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          onSelect={() => moveTo({})}
+          onClick={() => moveTo({})}
           disabled={
             artifact.project_id === null && artifact.issue_id === null
           }
@@ -65,7 +65,7 @@ export function MoveScopeMenu({ artifact }: { artifact: Artifact }) {
           return (
             <DropdownMenuItem
               key={p.id}
-              onSelect={() => moveTo({ project_id: p.id })}
+              onClick={() => moveTo({ project_id: p.id })}
               disabled={isCurrent}
             >
               <Folder className="mr-2 size-4" />

@@ -405,16 +405,16 @@ function FolderTreeItem({
               <MoreHorizontal className="size-3.5" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => onRename(node)}>
+              <DropdownMenuItem onClick={() => onRename(node)}>
                 <Pencil className="mr-2 size-3.5" /> Rename
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => onNewSubfolder(node.id)}>
+              <DropdownMenuItem onClick={() => onNewSubfolder(node.id)}>
                 <FolderPlus className="mr-2 size-3.5" /> New subfolder
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-destructive"
-                onSelect={() => onDelete(node)}
+                onClick={() => onDelete(node)}
               >
                 <Trash2 className="mr-2 size-3.5" /> Delete folder
               </DropdownMenuItem>
@@ -422,16 +422,16 @@ function FolderTreeItem({
           </DropdownMenu>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuItem onSelect={() => onRename(node)}>
+          <ContextMenuItem onClick={() => onRename(node)}>
             <Pencil className="mr-2 size-3.5" /> Rename
           </ContextMenuItem>
-          <ContextMenuItem onSelect={() => onNewSubfolder(node.id)}>
+          <ContextMenuItem onClick={() => onNewSubfolder(node.id)}>
             <FolderPlus className="mr-2 size-3.5" /> New subfolder
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
             className="text-destructive"
-            onSelect={() => onDelete(node)}
+            onClick={() => onDelete(node)}
           >
             <Trash2 className="mr-2 size-3.5" /> Delete folder
           </ContextMenuItem>
@@ -950,13 +950,13 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                 </span>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
-                <DropdownMenuItem onSelect={() => setAuthorFilter("all")}>
+                <DropdownMenuItem onClick={() => setAuthorFilter("all")}>
                   Anyone
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setAuthorFilter("member")}>
+                <DropdownMenuItem onClick={() => setAuthorFilter("member")}>
                   Members only
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setAuthorFilter("agent")}>
+                <DropdownMenuItem onClick={() => setAuthorFilter("agent")}>
                   Agents only
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -992,14 +992,14 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                 <ArrowLeftRight className="mr-1 size-4" /> Move to
               </DropdownMenuTrigger>
               <DropdownMenuContent>
-                <DropdownMenuItem onSelect={() => handleBatchMove(null)}>
+                <DropdownMenuItem onClick={() => handleBatchMove(null)}>
                   All documents (root)
                 </DropdownMenuItem>
                 {folders.length > 0 && <DropdownMenuSeparator />}
                 {folders.map((f) => (
                   <DropdownMenuItem
                     key={f.id}
-                    onSelect={() => handleBatchMove(f.id)}
+                    onClick={() => handleBatchMove(f.id)}
                   >
                     <FolderIcon className="mr-2 size-3.5" />
                     {f.name}
@@ -1146,7 +1146,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
-                            onSelect={() => {
+                            onClick={() => {
                               setRenameTarget(f);
                               setRenameDraft(f.name);
                             }}
@@ -1156,7 +1156,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
                             className="text-destructive"
-                            onSelect={() => setDeleteFolderTarget(f)}
+                            onClick={() => setDeleteFolderTarget(f)}
                           >
                             <Trash2 className="mr-2 size-3.5" /> Delete folder
                           </DropdownMenuItem>
@@ -1166,7 +1166,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                   </ContextMenuTrigger>
                   <ContextMenuContent>
                     <ContextMenuItem
-                      onSelect={() => {
+                      onClick={() => {
                         setRenameTarget(f);
                         setRenameDraft(f.name);
                       }}
@@ -1176,7 +1176,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                     <ContextMenuSeparator />
                     <ContextMenuItem
                       className="text-destructive"
-                      onSelect={() => setDeleteFolderTarget(f)}
+                      onClick={() => setDeleteFolderTarget(f)}
                     >
                       <Trash2 className="mr-2 size-3.5" /> Delete folder
                     </ContextMenuItem>
@@ -1255,7 +1255,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
-                            onSelect={() => {
+                            onClick={() => {
                               setRenameArtifactTarget(a);
                               setRenameArtifactDraft(a.title);
                             }}
@@ -1263,7 +1263,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                             <Pencil className="mr-2 size-3.5" /> Rename
                           </DropdownMenuItem>
                           <DropdownMenuItem
-                            onSelect={() =>
+                            onClick={() =>
                               router.push(wsPaths.documentEdit(a.id))
                             }
                           >
@@ -1276,7 +1276,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                             </DropdownMenuSubTrigger>
                             <DropdownMenuSubContent>
                               <DropdownMenuItem
-                                onSelect={() => handleMoveArtifact(a.id, null)}
+                                onClick={() => handleMoveArtifact(a.id, null)}
                               >
                                 All documents (root)
                               </DropdownMenuItem>
@@ -1284,7 +1284,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                               {folders.map((f) => (
                                 <DropdownMenuItem
                                   key={f.id}
-                                  onSelect={() =>
+                                  onClick={() =>
                                     handleMoveArtifact(a.id, f.id)
                                   }
                                 >
@@ -1297,7 +1297,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
                             className="text-destructive"
-                            onSelect={() => setDeleteArtifactTarget(a)}
+                            onClick={() => setDeleteArtifactTarget(a)}
                           >
                             <Trash2 className="mr-2 size-3.5" /> Delete
                           </DropdownMenuItem>
@@ -1307,7 +1307,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                   </ContextMenuTrigger>
                   <ContextMenuContent>
                     <ContextMenuItem
-                      onSelect={() => {
+                      onClick={() => {
                         setRenameArtifactTarget(a);
                         setRenameArtifactDraft(a.title);
                       }}
@@ -1315,7 +1315,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                       <Pencil className="mr-2 size-3.5" /> Rename
                     </ContextMenuItem>
                     <ContextMenuItem
-                      onSelect={() =>
+                      onClick={() =>
                         router.push(wsPaths.documentEdit(a.id))
                       }
                     >
@@ -1327,7 +1327,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                       </ContextMenuSubTrigger>
                       <ContextMenuSubContent>
                         <ContextMenuItem
-                          onSelect={() => handleMoveArtifact(a.id, null)}
+                          onClick={() => handleMoveArtifact(a.id, null)}
                         >
                           All documents (root)
                         </ContextMenuItem>
@@ -1335,7 +1335,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                         {folders.map((f) => (
                           <ContextMenuItem
                             key={f.id}
-                            onSelect={() => handleMoveArtifact(a.id, f.id)}
+                            onClick={() => handleMoveArtifact(a.id, f.id)}
                           >
                             <FolderIcon className="mr-2 size-3.5" />
                             {f.name}
@@ -1346,7 +1346,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                     <ContextMenuSeparator />
                     <ContextMenuItem
                       className="text-destructive"
-                      onSelect={() => setDeleteArtifactTarget(a)}
+                      onClick={() => setDeleteArtifactTarget(a)}
                     >
                       <Trash2 className="mr-2 size-3.5" /> Delete
                     </ContextMenuItem>

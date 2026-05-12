@@ -22,6 +22,7 @@ const deleteArtifactMutateAsync = vi.hoisted(() =>
 const updateArtifactMutateAsync = vi.hoisted(() =>
   vi.fn().mockResolvedValue(undefined),
 );
+const navigationPush = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/cerebro-artifacts/core/mutations", () => ({
   useCreateArtifactFolder: () => ({
@@ -76,7 +77,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 
 vi.mock("@multica/views/navigation", () => ({
   useNavigation: () => ({
-    push: vi.fn(),
+    push: navigationPush,
     openInNewTab: vi.fn(),
   }),
   AppLink: ({ children }: { children: React.ReactNode }) => children,
@@ -283,5 +284,55 @@ describe("FileManagerPage drag-and-drop", () => {
     const ghost = dataTransfer.setDragImage.mock.calls[0]![0] as HTMLElement;
     expect(ghost.getAttribute("data-drag-ghost")).toBe("folder");
     expect(ghost.textContent).toContain("Reports");
+  });
+});
+
+// Regression for JEH-1060: the row kebab on a document row exposed Rename /
+// Edit body / Move to / Delete via `onSelect`, which is a Radix prop —
+// Base UI's Menu.Item fires on `onClick`, so every action was silently
+// dropped. These tests pin the wiring so we can't reintroduce that bug.
+describe("FileManagerPage artifact row menu actions", () => {
+  beforeEach(() => {
+    deleteArtifactMutateAsync.mockReset().mockResolvedValue(undefined);
+    updateArtifactMutateAsync.mockReset().mockResolvedValue(undefined);
+    moveArtifactMutate.mockReset();
+    navigationPush.mockReset();
+  });
+
+  function openArtifactKebab(title: string) {
+    const kebab = screen.getByLabelText(`Actions for ${title}`);
+    fireEvent.click(kebab);
+  }
+
+  it("Rename action opens the rename dialog", () => {
+    renderPage();
+    openArtifactKebab("Daily sales report");
+
+    const rename = screen.getAllByText("Rename")[0]!;
+    fireEvent.click(rename);
+
+    expect(screen.getByText("Rename document")).toBeTruthy();
+    const input = screen.getByDisplayValue("Daily sales report");
+    expect(input).toBeTruthy();
+  });
+
+  it("Edit body action navigates to the document edit page", () => {
+    renderPage();
+    openArtifactKebab("Daily sales report");
+
+    const editBody = screen.getByText("Edit body");
+    fireEvent.click(editBody);
+
+    expect(navigationPush).toHaveBeenCalledWith("/ws/documents/art-1/edit");
+  });
+
+  it("Delete action opens the delete confirmation dialog", () => {
+    renderPage();
+    openArtifactKebab("Daily sales report");
+
+    const del = screen.getByText("Delete");
+    fireEvent.click(del);
+
+    expect(screen.getByText("Delete document?")).toBeTruthy();
   });
 });
