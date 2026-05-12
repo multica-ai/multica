@@ -11,7 +11,6 @@ export type IssueStatus =
   | "testing"
   | "coderabbit"
   | "resolving"
-  | "in_review"
   | "staged"
   | "done"
   | "blocked"

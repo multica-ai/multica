@@ -41,7 +41,6 @@ export const OPEN_STATUSES = new Set([
   "backlog",
   "todo",
   "in_progress",
-  "in_review",
   "ready_for_dev",
   // Plus the BMAD lifecycle statuses, which are all "active":
   "draft",
