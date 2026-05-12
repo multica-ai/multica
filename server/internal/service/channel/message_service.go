@@ -71,7 +71,7 @@ func (s *MessageService) Get(ctx context.Context, id pgtype.UUID) (db.ChannelMes
 //
 // The Limit field is clamped to [1, MaxPageLimit]; 0 falls back to the
 // default. BeforeCreatedAt nil returns the newest page.
-func (s *MessageService) List(ctx context.Context, p ListMessagesParams) ([]db.ChannelMessage, error) {
+func (s *MessageService) List(ctx context.Context, p ListMessagesParams) ([]db.ChannelMessage, bool, error) {
 	limit := p.Limit
 	if limit <= 0 {
 		limit = DefaultPageLimit
@@ -79,23 +79,37 @@ func (s *MessageService) List(ctx context.Context, p ListMessagesParams) ([]db.C
 	if limit > MaxPageLimit {
 		limit = MaxPageLimit
 	}
+	fetchLimit := limit + 1
 	before := pgtype.Timestamptz{}
 	if p.BeforeCreatedAt != nil {
 		before = *p.BeforeCreatedAt
 	}
 
+	var (
+		rows []db.ChannelMessage
+		err  error
+	)
 	if p.IncludeThreaded {
-		return s.Queries.ListChannelMessagesIncludingThreads(ctx, db.ListChannelMessagesIncludingThreadsParams{
+		rows, err = s.Queries.ListChannelMessagesIncludingThreads(ctx, db.ListChannelMessagesIncludingThreadsParams{
 			ChannelID:       p.ChannelID,
 			BeforeCreatedAt: before,
-			Limit:           limit,
+			Limit:           fetchLimit,
+		})
+	} else {
+		rows, err = s.Queries.ListChannelMessages(ctx, db.ListChannelMessagesParams{
+			ChannelID:       p.ChannelID,
+			BeforeCreatedAt: before,
+			Limit:           fetchLimit,
 		})
 	}
-	return s.Queries.ListChannelMessages(ctx, db.ListChannelMessagesParams{
-		ChannelID:       p.ChannelID,
-		BeforeCreatedAt: before,
-		Limit:           limit,
-	})
+	if err != nil {
+		return nil, false, err
+	}
+	hasMore := int32(len(rows)) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	return rows, hasMore, nil
 }
 
 // UpdateContent edits the body of an existing message. Phase 5 contract:
@@ -175,8 +189,8 @@ func (s *MessageService) Delete(ctx context.Context, messageID pgtype.UUID, acto
 		reason = DeletedByAdmin
 	}
 	if err := s.Queries.SoftDeleteChannelMessage(ctx, db.SoftDeleteChannelMessageParams{
-		ID:              messageID,
-		DeletionReason:  pgtype.Text{String: reason, Valid: true},
+		ID:             messageID,
+		DeletionReason: pgtype.Text{String: reason, Valid: true},
 	}); err != nil {
 		return db.ChannelMessage{}, err
 	}

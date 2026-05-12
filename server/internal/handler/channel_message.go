@@ -3,8 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -306,7 +306,7 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 		params.IncludeThreaded = true
 	}
 
-	msgs, err := h.ChannelMessageService.List(r.Context(), params)
+	msgs, hasMore, err := h.ChannelMessageService.List(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list messages")
 		return
@@ -338,13 +338,21 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		out[i] = resp
 	}
-	writeJSON(w, http.StatusOK, out)
+	var nextCursor string
+	if hasMore && len(out) > 0 {
+		nextCursor = out[len(out)-1].CreatedAt
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"messages":    out,
+		"has_more":    hasMore,
+		"next_cursor": nextCursor,
+	})
 }
 
 // CreateChannelMessageRequest is the JSON body for POST /api/channels/{channelId}/messages.
 type CreateChannelMessageRequest struct {
-	Content         string   `json:"content"`
-	ParentMessageID *string  `json:"parent_message_id"`
+	Content         string  `json:"content"`
+	ParentMessageID *string `json:"parent_message_id"`
 	// Phase 5b — attachment ids the client uploaded via /api/upload-file
 	// before submitting the message. Stored in
 	// channel_message.metadata.attachments JSONB array. The handler
@@ -929,10 +937,10 @@ func (h *Handler) DispatchThreadIssueTask(w http.ResponseWriter, r *http.Request
 	// fails the dispatch with a clean 400/404 instead of surfacing as an
 	// inbox failure twenty seconds later when the agent runs.
 	var (
-		projectUUID    pgtype.UUID
-		projectTitle   string
+		projectUUID     pgtype.UUID
+		projectTitle    string
 		parentIssueUUID pgtype.UUID
-		parentIssueKey string
+		parentIssueKey  string
 	)
 	if req.ProjectID != "" {
 		pid, ok := parseUUIDOrBadRequest(w, req.ProjectID, "project_id")

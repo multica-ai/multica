@@ -33,7 +33,11 @@ var channelHistoryCmd = &cobra.Command{
 The mention-triggered agent context already includes the most recent
 window of messages. Use this command only when you need to go further
 back — pass the oldest 'created_at' you've already seen as --before
-to fetch the next page.`,
+to fetch the next page.
+
+JSON output includes "messages", "has_more", and "next_cursor". When
+"has_more" is true, pass "next_cursor" directly to --before to fetch
+older messages.`,
 	Args: exactArgs(1),
 	RunE: runChannelHistory,
 }
@@ -129,5 +133,10 @@ func runChannelHistory(cmd *cobra.Command, args []string) error {
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
+	if hasMore, _ := result["has_more"].(bool); hasMore {
+		if nextCursor, _ := result["next_cursor"].(string); nextCursor != "" {
+			fmt.Fprintf(os.Stderr, "\n(more messages available - re-run with --before %s to fetch older)\n", nextCursor)
+		}
+	}
 	return nil
 }

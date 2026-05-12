@@ -48,6 +48,21 @@ func decodeChannel(t *testing.T, w *httptest.ResponseRecorder) ChannelResponse {
 	return resp
 }
 
+type channelMessageListResponse struct {
+	Messages   []ChannelMessageResponse `json:"messages"`
+	HasMore    bool                     `json:"has_more"`
+	NextCursor string                   `json:"next_cursor"`
+}
+
+func decodeChannelMessageList(t *testing.T, w *httptest.ResponseRecorder) channelMessageListResponse {
+	t.Helper()
+	var resp channelMessageListResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode channel message list response: %v", err)
+	}
+	return resp
+}
+
 // TestChannels_Disabled404 — every Channels endpoint must 404 when the
 // workspace flag is off. This is the spec's "invisible feature" guarantee.
 func TestChannels_Disabled404(t *testing.T) {
@@ -579,10 +594,10 @@ func TestCompleteChannelMentionTask_PostsReply(t *testing.T) {
 
 	// Verify the agent's reply landed as a channel_message.
 	var (
-		count       int
-		authorType  string
-		authorID    string
-		content     string
+		count      int
+		authorType string
+		authorID   string
+		content    string
 	)
 	if err := testPool.QueryRow(ctx, `
 		SELECT count(*) FROM channel_message
@@ -810,8 +825,7 @@ func TestChannelMessage_AttachmentIDsStoredAndHydrated(t *testing.T) {
 	req = newRequest("GET", "/api/channels/"+ch.ID+"/messages", nil)
 	req = withURLParam(req, "channelId", ch.ID)
 	testHandler.ListChannelMessages(w, req)
-	var listed []ChannelMessageResponse
-	json.NewDecoder(w.Body).Decode(&listed)
+	listed := decodeChannelMessageList(t, w).Messages
 	var hit *ChannelMessageResponse
 	for i := range listed {
 		if listed[i].ID == created.ID {
@@ -964,8 +978,7 @@ func TestDeleteChannelMessage_ByAuthor(t *testing.T) {
 	req = newRequest("GET", "/api/channels/"+ch.ID+"/messages", nil)
 	req = withURLParam(req, "channelId", ch.ID)
 	testHandler.ListChannelMessages(w, req)
-	var listed []ChannelMessageResponse
-	json.NewDecoder(w.Body).Decode(&listed)
+	listed := decodeChannelMessageList(t, w).Messages
 	for _, m := range listed {
 		if m.ID == msg.ID {
 			t.Fatalf("soft-deleted message leaked into top-level list: %+v", m)
@@ -1049,6 +1062,58 @@ func postChannelMessage(t *testing.T, channelID, content string) ChannelMessageR
 	return msg
 }
 
+func TestListChannelMessages_HasMoreAndCursor(t *testing.T) {
+	enableChannels(t)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/channels", map[string]any{
+		"name": "page-test", "display_name": "PageTest", "visibility": "public",
+	})
+	testHandler.CreateChannel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create channel: %d %s", w.Code, w.Body.String())
+	}
+	ch := decodeChannel(t, w)
+
+	for i := 0; i < 6; i++ {
+		postChannelMessage(t, ch.ID, "message "+string(rune('a'+i)))
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/channels/"+ch.ID+"/messages?limit=5", nil)
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.ListChannelMessages(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("first page: %d %s", w.Code, w.Body.String())
+	}
+	first := decodeChannelMessageList(t, w)
+	if len(first.Messages) != 5 {
+		t.Fatalf("first page len = %d, want 5", len(first.Messages))
+	}
+	if !first.HasMore {
+		t.Fatalf("first page has_more = false, want true")
+	}
+	if first.NextCursor == "" {
+		t.Fatalf("first page next_cursor is empty")
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/channels/"+ch.ID+"/messages?limit=5&before="+first.NextCursor, nil)
+	req = withURLParam(req, "channelId", ch.ID)
+	testHandler.ListChannelMessages(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("second page: %d %s", w.Code, w.Body.String())
+	}
+	second := decodeChannelMessageList(t, w)
+	if len(second.Messages) != 1 {
+		t.Fatalf("second page len = %d, want 1", len(second.Messages))
+	}
+	if second.HasMore {
+		t.Fatalf("second page has_more = true, want false")
+	}
+}
+
 func TestThreads_RepliesNestUnderParent(t *testing.T) {
 	enableChannels(t)
 
@@ -1085,8 +1150,7 @@ func TestThreads_RepliesNestUnderParent(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("list messages: %d", w.Code)
 	}
-	var listed []ChannelMessageResponse
-	json.NewDecoder(w.Body).Decode(&listed)
+	listed := decodeChannelMessageList(t, w).Messages
 	var found *ChannelMessageResponse
 	for i := range listed {
 		if listed[i].ID == parent.ID {
@@ -1148,7 +1212,7 @@ func TestThreads_ReplyWSEventCarriesParentMessageID(t *testing.T) {
 	parent := postChannelMessage(t, ch.ID, "parent")
 
 	// Subscribe and capture the published reply event.
-	var capturedParent atomic.Value // string
+	var capturedParent atomic.Value  // string
 	var capturedReplyID atomic.Value // string
 	testHandler.Bus.Subscribe(protocol.EventChannelMessage, func(e events.Event) {
 		payload, ok := e.Payload.(map[string]any)
@@ -1241,8 +1305,7 @@ func TestReactions_AddRemoveAndCount(t *testing.T) {
 	req = newRequest("GET", "/api/channels/"+ch.ID+"/messages", nil)
 	req = withURLParam(req, "channelId", ch.ID)
 	testHandler.ListChannelMessages(w, req)
-	var listed []ChannelMessageResponse
-	json.NewDecoder(w.Body).Decode(&listed)
+	listed := decodeChannelMessageList(t, w).Messages
 	var target *ChannelMessageResponse
 	for i := range listed {
 		if listed[i].ID == msg.ID {
@@ -1272,7 +1335,7 @@ func TestReactions_AddRemoveAndCount(t *testing.T) {
 	req = newRequest("GET", "/api/channels/"+ch.ID+"/messages", nil)
 	req = withURLParam(req, "channelId", ch.ID)
 	testHandler.ListChannelMessages(w, req)
-	json.NewDecoder(w.Body).Decode(&listed)
+	listed = decodeChannelMessageList(t, w).Messages
 	for _, m := range listed {
 		if m.ID == msg.ID && len(m.Reactions) != 0 {
 			t.Fatalf("expected 0 reactions after remove, got %d", len(m.Reactions))
@@ -1418,16 +1481,16 @@ func TestDispatchThreadIssueTask_Success(t *testing.T) {
 
 	// Verify the row in agent_task_queue carries the expected context shape.
 	var (
-		ctxType         string
-		ctxAgentID      string
-		ctxParentMsgID  string
-		ctxChannelID    string
-		ctxInstruction  string
-		taskAgentID     string
-		taskRuntimeID   sql.NullString
-		taskIssueID     sql.NullString
-		taskPriority    int32
-		taskStatus      string
+		ctxType        string
+		ctxAgentID     string
+		ctxParentMsgID string
+		ctxChannelID   string
+		ctxInstruction string
+		taskAgentID    string
+		taskRuntimeID  sql.NullString
+		taskIssueID    sql.NullString
+		taskPriority   int32
+		taskStatus     string
 	)
 	if err := testPool.QueryRow(ctx, `
 		SELECT
