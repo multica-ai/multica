@@ -109,6 +109,17 @@ type ChatSessionUpdatedPayload struct {
 // identical semantics.
 type DaemonHeartbeatRequestPayload struct {
 	RuntimeID string `json:"runtime_id"`
+	// CEREBRO-PATCH(heartbeat-account): JEH-997 piggybacks the runtime's
+	// detected login identity on the heartbeat so the server can upsert
+	// cerebro_account + link agent_runtime.current_account_id idempotently.
+	Account *DaemonHeartbeatAccount `json:"account,omitempty"`
+}
+
+// DaemonHeartbeatAccount carries the runtime's detected login identity.
+// CEREBRO-PATCH(heartbeat-account-type): JEH-997 cerebro-only payload type.
+type DaemonHeartbeatAccount struct {
+	Provider      string `json:"provider"`
+	LoginIdentity string `json:"login_identity"`
 }
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.

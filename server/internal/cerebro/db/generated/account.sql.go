@@ -100,3 +100,31 @@ func (q *Queries) ListCerebroAccounts(ctx context.Context, workspaceID pgtype.UU
 	}
 	return items, nil
 }
+
+const upsertCerebroAccount = `-- name: UpsertCerebroAccount :one
+INSERT INTO cerebro_account (workspace_id, provider, login_identity)
+VALUES ($1, $2, $3)
+ON CONFLICT (workspace_id, provider, login_identity)
+DO UPDATE SET updated_at = now()
+RETURNING id, workspace_id, provider, login_identity, created_at, updated_at
+`
+
+type UpsertCerebroAccountParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	Provider      string      `json:"provider"`
+	LoginIdentity string      `json:"login_identity"`
+}
+
+func (q *Queries) UpsertCerebroAccount(ctx context.Context, arg UpsertCerebroAccountParams) (CerebroAccount, error) {
+	row := q.db.QueryRow(ctx, upsertCerebroAccount, arg.WorkspaceID, arg.Provider, arg.LoginIdentity)
+	var i CerebroAccount
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Provider,
+		&i.LoginIdentity,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

@@ -143,7 +143,7 @@ func (q *Queries) ListResumableTasksForRuntime(ctx context.Context, runtimeID pg
 }
 
 const listRuntimesDueForUnpause = `-- name: ListRuntimesDueForUnpause :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, paused_at, unpause_at, pause_reason FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, paused_at, unpause_at, pause_reason, current_account_id FROM agent_runtime
 WHERE paused_at IS NOT NULL
   AND unpause_at IS NOT NULL
   AND unpause_at <= now()
@@ -179,6 +179,7 @@ func (q *Queries) ListRuntimesDueForUnpause(ctx context.Context) ([]AgentRuntime
 			&i.PausedAt,
 			&i.UnpauseAt,
 			&i.PauseReason,
+			&i.CurrentAccountID,
 		); err != nil {
 			return nil, err
 		}
@@ -198,7 +199,7 @@ SET paused_at    = COALESCE(paused_at, now()),
     pause_reason = $3,
     updated_at   = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, paused_at, unpause_at, pause_reason
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, paused_at, unpause_at, pause_reason, current_account_id
 `
 
 type PauseAgentRuntimeParams struct {
@@ -236,6 +237,7 @@ func (q *Queries) PauseAgentRuntime(ctx context.Context, arg PauseAgentRuntimePa
 		&i.PausedAt,
 		&i.UnpauseAt,
 		&i.PauseReason,
+		&i.CurrentAccountID,
 	)
 	return i, err
 }
@@ -309,7 +311,7 @@ SET paused_at    = NULL,
     pause_reason = NULL,
     updated_at   = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, paused_at, unpause_at, pause_reason
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, paused_at, unpause_at, pause_reason, current_account_id
 `
 
 // Clears all pause fields. Idempotent on already-unpaused runtimes.
@@ -335,6 +337,7 @@ func (q *Queries) UnpauseAgentRuntime(ctx context.Context, id pgtype.UUID) (Agen
 		&i.PausedAt,
 		&i.UnpauseAt,
 		&i.PauseReason,
+		&i.CurrentAccountID,
 	)
 	return i, err
 }

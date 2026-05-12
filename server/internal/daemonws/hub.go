@@ -66,10 +66,14 @@ func (c *client) markSeen(eventID string) bool {
 }
 
 // HeartbeatHandler processes a daemon:heartbeat frame. It must verify that
-// runtimeID is one of identity.RuntimeIDs (the connection's authenticated
-// scope) and return the ack payload to send back. Returning an error skips
-// the ack and is logged at debug level.
-type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string) (*protocol.DaemonHeartbeatAckPayload, error)
+// payload.RuntimeID is one of identity.RuntimeIDs (the connection's
+// authenticated scope) and return the ack payload to send back. Returning
+// an error skips the ack and is logged at debug level.
+//
+// CEREBRO-PATCH(ws-heartbeat-handler-payload): JEH-997 takes the full
+// decoded payload (was: runtimeID string) so the cerebro account hook can
+// read payload.Account without a second decode pass.
+type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, payload protocol.DaemonHeartbeatRequestPayload) (*protocol.DaemonHeartbeatAckPayload, error)
 
 // Hub keeps daemon WebSocket connections indexed by runtime ID. Messages are
 // best-effort wakeup hints; the daemon still uses HTTP claim for correctness.
@@ -389,7 +393,7 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 	// that keeps the HTTP heartbeat from putting a per-call timeout on
 	// PopPending. The natural bound is the read pump's lifetime (the conn
 	// closes if the daemon goes away) plus Redis's own server-side limits.
-	ack, err := handler(context.Background(), c.identity, payload.RuntimeID)
+	ack, err := handler(context.Background(), c.identity, payload)
 	if err != nil {
 		slog.Warn("daemon websocket heartbeat handler failed",
 			"error", err,

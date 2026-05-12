@@ -77,6 +77,38 @@ func (s *Service) Create(ctx context.Context, workspaceID, actorID pgtype.UUID, 
 	return a, nil
 }
 
+// Upsert creates a cerebro_account row for (workspace_id, provider,
+// login_identity) if one does not already exist, otherwise bumps updated_at
+// and returns the existing row. Intended for the daemon-driven registration
+// path where the same identity is reported on every heartbeat — callers do
+// not need to distinguish "created" from "already existed". When a fresh
+// row is inserted EventAccountCreated is published; the bumped-updated_at
+// case is silent to avoid heartbeat-spam on the event bus.
+func (s *Service) Upsert(ctx context.Context, workspaceID pgtype.UUID, provider, loginIdentity string) (cerebrodb.CerebroAccount, bool, error) {
+	provider = strings.TrimSpace(provider)
+	loginIdentity = strings.TrimSpace(loginIdentity)
+	if provider == "" {
+		return cerebrodb.CerebroAccount{}, false, ErrInvalidProvider
+	}
+	if loginIdentity == "" {
+		return cerebrodb.CerebroAccount{}, false, ErrInvalidLoginIdentity
+	}
+
+	a, err := s.Cerebro.UpsertCerebroAccount(ctx, cerebrodb.UpsertCerebroAccountParams{
+		WorkspaceID:   workspaceID,
+		Provider:      provider,
+		LoginIdentity: loginIdentity,
+	})
+	if err != nil {
+		return cerebrodb.CerebroAccount{}, false, err
+	}
+	created := a.CreatedAt.Valid && a.UpdatedAt.Valid && a.CreatedAt.Time.Equal(a.UpdatedAt.Time)
+	if created {
+		s.publish(EventAccountCreated, workspaceID, pgtype.UUID{}, map[string]any{"account": accountResponseFromModel(a)})
+	}
+	return a, created, nil
+}
+
 func (s *Service) Delete(ctx context.Context, workspaceID, actorID, accountID pgtype.UUID) (cerebrodb.CerebroAccount, error) {
 	a, err := s.Get(ctx, workspaceID, accountID)
 	if err != nil {

@@ -205,6 +205,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(router-auto-pause-on-failure): wire cerebro auto-pause
 	// hook into TaskService so FailTask can pause on provider-error signals.
 	h.TaskService.AutoPause = runtimePauseSvc
+	// CEREBRO-PATCH(router-runtime-account): JEH-997 mount daemon-driven account
+	// registration so RecordRuntimeAccount in runtime_account_cerebro.go can
+	// delegate to the cerebro service via the RuntimeAccountInvoker seam.
+	h.RuntimeAccount = cerebroruntime.NewAccountService(cerebroQueries, cerebroAccountHandler.Service, bus)
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
 

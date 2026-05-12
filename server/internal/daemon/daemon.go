@@ -85,6 +85,12 @@ type Daemon struct {
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
 
+	// CEREBRO-PATCH(daemon-account-identity-cache): per-runtime identity-
+	// probe cache (JEH-997). Lives on the daemon so the heartbeat path
+	// can attach Account to outgoing payloads without re-reading the
+	// auth-state file every beat.
+	accountIdentities *accountIdentityCache
+
 	// bgSyncs tracks background goroutines started by registerTaskRepos so
 	// callers (notably tests using t.TempDir-backed cache roots) can wait for
 	// them to drain before tearing the daemon down. Without this the bg
@@ -111,6 +117,8 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		agentVersions:  make(map[string]string),
 		wsHBLastAck:    make(map[string]time.Time),
 		activeEnvRoots: make(map[string]int),
+		// CEREBRO-PATCH(daemon-account-identity-cache-init): JEH-997 identity-probe cache.
+		accountIdentities: newAccountIdentityCache(),
 	}
 }
 
@@ -694,6 +702,14 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			}
 		}
 
+		// CEREBRO-PATCH(daemon-account-prime-on-register): JEH-997 warm the
+		// identity-probe cache so the very first heartbeat (which fires
+		// almost immediately after register) already carries the runtime's
+		// detected login identity instead of a nil Account field.
+		for _, rt := range resp.Runtimes {
+			d.refreshHeartbeatAccount(rt.ID)
+		}
+
 		d.logger.Info("watching workspace", "workspace_id", id, "name", name, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos))
 		registered++
 	}
@@ -813,7 +829,12 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 	if d.wsHeartbeatRecentlyAcked(rid) {
 		return
 	}
-	resp, err := d.client.SendHeartbeat(ctx, rid)
+	// CEREBRO-PATCH(daemon-heartbeat-account-refresh): JEH-997 re-probe the
+	// runtime's login identity right before the beat so a fresh login
+	// propagates within one tick instead of one daemon restart. Probe is
+	// cheap (one fstat + one JSON parse) and the result is cached.
+	d.refreshHeartbeatAccount(rid)
+	resp, err := d.client.SendHeartbeat(ctx, rid, d.heartbeatAccountFor(rid))
 	if err != nil {
 		if ctx.Err() == nil {
 			d.logger.Warn("heartbeat failed", "runtime_id", rid, "error", err)

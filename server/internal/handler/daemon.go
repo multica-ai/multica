@@ -614,6 +614,10 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 
 type DaemonHeartbeatRequest struct {
 	RuntimeID string `json:"runtime_id"`
+	// CEREBRO-PATCH(heartbeat-account-request): JEH-997 mirrors the
+	// Account field on protocol.DaemonHeartbeatRequestPayload so HTTP
+	// and WS heartbeat carry the same shape.
+	Account *protocol.DaemonHeartbeatAccount `json:"account,omitempty"`
 }
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
@@ -742,6 +746,11 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	outcome = "ok"
+	// CEREBRO-PATCH(heartbeat-account-http): JEH-997 daemon piggybacks the
+	// runtime's detected login identity on the heartbeat; recordHeartbeatAccount
+	// upserts cerebro_account + links agent_runtime.current_account_id. Best-
+	// effort; failures are logged but never block the heartbeat ack.
+	h.recordHeartbeatAccount(r.Context(), rt, req.Account)
 	// Preserve the existing HTTP response shape: the runtime_id field is new
 	// in the WS path and would be redundant noise on the HTTP path where the
 	// caller already knows which runtime it asked about.
@@ -782,8 +791,8 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // Workspace authorization is re-checked on every heartbeat instead of trusted
 // from the upgrade-time check because runtime ownership can change (e.g. a
 // runtime is reassigned to another workspace mid-connection).
-func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string) (*protocol.DaemonHeartbeatAckPayload, error) {
-	runtimeUUID, err := util.ParseUUID(runtimeID)
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, payload protocol.DaemonHeartbeatRequestPayload) (*protocol.DaemonHeartbeatAckPayload, error) {
+	runtimeUUID, err := util.ParseUUID(payload.RuntimeID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid runtime_id: %w", err)
 	}
@@ -795,6 +804,10 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 		return nil, fmt.Errorf("runtime not in connection workspace")
 	}
 	ack, _, err := h.processHeartbeat(ctx, rt)
+	// CEREBRO-PATCH(heartbeat-account-ws): JEH-997 mirror the HTTP-side
+	// account hook on the WS path so daemons that stay on WS still get
+	// their login identity registered.
+	h.recordHeartbeatAccount(ctx, rt, payload.Account)
 	return ack, err
 }
 

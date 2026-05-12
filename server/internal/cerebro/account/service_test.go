@@ -167,6 +167,54 @@ func TestServiceCRUD_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestServiceUpsert_FirstCallCreates_SecondReuses pins the JEH-997 daemon
+// flow: the first report inserts a fresh cerebro_account row (created=true);
+// subsequent reports with the same identity reuse it (created=false). This
+// is what makes the heartbeat-driven account-registration path cheap to
+// retry without flooding the bus with account:created events.
+func TestServiceUpsert_FirstCallCreates_SecondReuses(t *testing.T) {
+	svc, cleanup := newAccountTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	created1, isNew1, err := svc.Upsert(ctx, accountTestWorkspaceID, "claude", " sara@firtal.dk ")
+	if err != nil {
+		t.Fatalf("first Upsert failed: %v", err)
+	}
+	if !isNew1 {
+		t.Fatalf("first Upsert: expected created=true, got false")
+	}
+	if created1.LoginIdentity != "sara@firtal.dk" {
+		t.Fatalf("first Upsert: identity not trimmed, got %q", created1.LoginIdentity)
+	}
+
+	created2, isNew2, err := svc.Upsert(ctx, accountTestWorkspaceID, "claude", "sara@firtal.dk")
+	if err != nil {
+		t.Fatalf("second Upsert failed: %v", err)
+	}
+	if isNew2 {
+		t.Fatalf("second Upsert: expected created=false, got true")
+	}
+	if created1.ID != created2.ID {
+		t.Fatalf("second Upsert returned a different row: %v vs %v", created1.ID, created2.ID)
+	}
+}
+
+func TestServiceUpsert_RejectsBlankFields(t *testing.T) {
+	svc, cleanup := newAccountTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	if _, _, err := svc.Upsert(ctx, accountTestWorkspaceID, "  ", "x"); !errors.Is(err, ErrInvalidProvider) {
+		t.Fatalf("expected ErrInvalidProvider, got %v", err)
+	}
+	if _, _, err := svc.Upsert(ctx, accountTestWorkspaceID, "claude", "  "); !errors.Is(err, ErrInvalidLoginIdentity) {
+		t.Fatalf("expected ErrInvalidLoginIdentity, got %v", err)
+	}
+}
+
 func TestServiceGet_OtherWorkspace(t *testing.T) {
 	svc, cleanup := newAccountTestService(t)
 	defer cleanup()

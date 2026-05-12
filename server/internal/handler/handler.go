@@ -96,7 +96,10 @@ type Handler struct {
 	RuntimePause RuntimePauseInvoker
 	// CEREBRO-PATCH(handler-group-permissions): cerebro group-permission gate.
 	GroupPermissions GroupPermissionsInvoker
-	cfg              Config
+	// CEREBRO-PATCH(handler-runtime-account): cerebro daemon-driven account
+	// registration service. Wired by the router after construction.
+	RuntimeAccount RuntimeAccountInvoker
+	cfg            Config
 }
 
 // RuntimePauseInvoker is the upstream-side seam that the cerebro runtime

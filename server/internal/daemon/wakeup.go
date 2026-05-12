@@ -203,9 +203,15 @@ func (d *Daemon) sendWSHeartbeats(ctx context.Context, runtimeIDs []string, writ
 		if ctx.Err() != nil {
 			return
 		}
+		// CEREBRO-PATCH(daemon-ws-heartbeat-account): JEH-997 re-probe +
+		// attach the runtime's detected login identity so the server can
+		// upsert cerebro_account + link agent_runtime.current_account_id
+		// on the same beat (mirrors the HTTP heartbeat path).
+		d.refreshHeartbeatAccount(rid)
+		hb := protocol.DaemonHeartbeatRequestPayload{RuntimeID: rid, Account: d.heartbeatAccountFor(rid)}
 		frame, err := json.Marshal(protocol.Message{
 			Type:    protocol.EventDaemonHeartbeat,
-			Payload: marshalRaw(protocol.DaemonHeartbeatRequestPayload{RuntimeID: rid}),
+			Payload: marshalRaw(hb),
 		})
 		if err != nil {
 			d.logger.Debug("ws heartbeat marshal failed", "error", err, "runtime_id", rid)

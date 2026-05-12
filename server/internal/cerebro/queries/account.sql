@@ -14,6 +14,13 @@ INSERT INTO cerebro_account (workspace_id, provider, login_identity)
 VALUES ($1, $2, $3)
 RETURNING id, workspace_id, provider, login_identity, created_at, updated_at;
 
+-- name: UpsertCerebroAccount :one
+INSERT INTO cerebro_account (workspace_id, provider, login_identity)
+VALUES ($1, $2, $3)
+ON CONFLICT (workspace_id, provider, login_identity)
+DO UPDATE SET updated_at = now()
+RETURNING id, workspace_id, provider, login_identity, created_at, updated_at;
+
 -- name: DeleteCerebroAccount :exec
 DELETE FROM cerebro_account
 WHERE id = $1;

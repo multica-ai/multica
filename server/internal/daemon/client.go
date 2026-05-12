@@ -268,11 +268,14 @@ type (
 	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
 )
 
-func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
+func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, account *protocol.DaemonHeartbeatAccount) (*HeartbeatResponse, error) {
+	// CEREBRO-PATCH(daemon-client-heartbeat-account): JEH-997 piggybacks the
+	// runtime's detected login identity on the heartbeat body. Pass account
+	// = nil when the daemon could not derive an identity yet — the server
+	// then skips its account-registration hook entirely.
+	body := protocol.DaemonHeartbeatRequestPayload{RuntimeID: runtimeID, Account: account}
 	var resp HeartbeatResponse
-	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]string{
-		"runtime_id": runtimeID,
-	}, &resp); err != nil {
+	if err := c.postJSON(ctx, "/api/daemon/heartbeat", body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
