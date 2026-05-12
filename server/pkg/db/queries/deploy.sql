@@ -10,6 +10,19 @@ SELECT * FROM deploy_environment
 WHERE workspace_id = $1
 ORDER BY project_id, kind ASC;
 
+-- name: ProjectHasStagingEnv :one
+-- Returns TRUE when the project has at least one deploy_environment
+-- row with kind='staging'. Used by the release stage flow to decide
+-- whether merging → in_staging (project has staging) or
+-- merging → promoting (project ships direct-to-prod). Existence-
+-- based: the staging env may or may not have a deploy_workflow_filename
+-- configured; if the row exists at all, the release goes through
+-- staging stages.
+SELECT EXISTS (
+    SELECT 1 FROM deploy_environment
+    WHERE project_id = $1 AND kind = 'staging'
+)::bool AS has_staging;
+
 -- name: GetDeployEnvironment :one
 SELECT * FROM deploy_environment WHERE id = $1;
 

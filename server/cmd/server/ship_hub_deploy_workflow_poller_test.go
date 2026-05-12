@@ -143,6 +143,20 @@ func seedPollerFixture(t *testing.T, repoURL string, stagingWf, prodWf string) p
 	}
 }
 
+// seedPollerEnv creates a deploy_environment row of the given kind for
+// the fixture's project. Used by tests that need the poller to find a
+// pre-existing env (since the auto-create-on-first-deploy behavior was
+// removed — see TestDeployWorkflowPoller_NoEnvSkipsDeployRecord).
+func seedPollerEnv(t *testing.T, fix pollerFixture, kind string, name string) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO deploy_environment (workspace_id, project_id, kind, name, target_branch)
+		VALUES ($1, $2, $3, $4, 'main')`,
+		uuidPgToString(fix.WorkspaceID), uuidPgToString(fix.ProjectID), kind, name); err != nil {
+		t.Fatalf("seed env %s: %v", kind, err)
+	}
+}
+
 // seedReleaseInStaging — minimal release row in stage='in_staging' with
 // the supplied merged_main_sha. Returns the release UUID for assertions.
 func seedPollerReleaseInStaging(t *testing.T, fix pollerFixture, sha string) pgtype.UUID {
@@ -296,6 +310,7 @@ func TestDeployWorkflowPoller_StagingMatch(t *testing.T) {
 	}
 	const sha = "abcdef1234567890abcdef1234567890abcdef12"
 	fix := seedPollerFixture(t, "https://github.com/owner/repo", "staging.yml", "")
+	seedPollerEnv(t, fix, "staging", "Staging")
 	releaseID := seedPollerReleaseInStaging(t, fix, sha)
 
 	srv := fakeGitHubServer(t, []gh.WorkflowRun{
@@ -329,6 +344,7 @@ func TestDeployWorkflowPoller_ProductionMatch(t *testing.T) {
 	}
 	const sha = "fedcba0987654321fedcba0987654321fedcba09"
 	fix := seedPollerFixture(t, "https://github.com/owner/repo", "", "production.yml")
+	seedPollerEnv(t, fix, "production", "Production")
 	releaseID := seedPollerReleaseInPromoting(t, fix, sha)
 
 	srv := fakeGitHubServer(t, []gh.WorkflowRun{
@@ -423,6 +439,7 @@ func TestDeployWorkflowPoller_IdempotentOnAlreadyLinked(t *testing.T) {
 	}
 	const sha = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 	fix := seedPollerFixture(t, "https://github.com/owner/repo", "staging.yml", "")
+	seedPollerEnv(t, fix, "staging", "Staging")
 	releaseID := seedPollerReleaseInStaging(t, fix, sha)
 
 	srv := fakeGitHubServer(t, []gh.WorkflowRun{
@@ -447,5 +464,62 @@ func TestDeployWorkflowPoller_IdempotentOnAlreadyLinked(t *testing.T) {
 	secondDeployID := readReleaseStagingDeployID(t, releaseID)
 	if secondDeployID != firstDeployID {
 		t.Errorf("expected idempotent link; got %q -> %q", firstDeployID, secondDeployID)
+	}
+}
+
+// TestDeployWorkflowPoller_NoEnvSkipsDeployRecord verifies that when a
+// project has no deploy_environment of the polled kind, the poller no
+// longer auto-creates one. Pre-fix, the poller would materialize a
+// `Staging` / `Production` env on first sight of any successful
+// workflow run — which produced phantom staging envs that caused
+// direct-to-prod releases to park in `in_staging` forever (the
+// PR #46 release-page outage).
+//
+// Post-fix: poll completes with no env created and no deploy recorded.
+// The operator must explicitly create the env via Settings → Deploy
+// Environments before the poller will record anything.
+func TestDeployWorkflowPoller_NoEnvSkipsDeployRecord(t *testing.T) {
+	if !pollerMigrationApplied(t) {
+		t.Skip("phase 7d follow-up migration not applied")
+	}
+	// Seed workspace + project but NO deploy_environment row of any
+	// kind. seedPollerFixture inserts the project; nothing else creates
+	// envs for this fresh project before the test runs.
+	fix := seedPollerFixture(t, "https://github.com/owner/repo", "", "production.yml")
+
+	srv := fakeGitHubServer(t, []gh.WorkflowRun{
+		{
+			ID:         808,
+			HeadSHA:    "abcdef00abcdef00abcdef00abcdef00abcdef00",
+			HeadBranch: "main",
+			Status:     "completed",
+			Conclusion: "success",
+			HTMLURL:    "https://github.com/owner/repo/actions/runs/808",
+		},
+	})
+	defer srv.Close()
+
+	drivePollerWithFakeGitHub(t, fix, srv, "", "production.yml")
+
+	// Confirm: no deploy_environment row was created for this project.
+	var envCount int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM deploy_environment WHERE project_id = $1`,
+		uuidPgToString(fix.ProjectID)).Scan(&envCount); err != nil {
+		t.Fatalf("count envs: %v", err)
+	}
+	if envCount != 0 {
+		t.Fatalf("expected no envs auto-created post-fix, got %d", envCount)
+	}
+
+	// And no deploy row got recorded either.
+	var deployCount int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM deploy WHERE workspace_id = $1`,
+		uuidPgToString(fix.WorkspaceID)).Scan(&deployCount); err != nil {
+		t.Fatalf("count deploys: %v", err)
+	}
+	if deployCount != 0 {
+		t.Fatalf("expected no deploy recorded without env, got %d", deployCount)
 	}
 }
