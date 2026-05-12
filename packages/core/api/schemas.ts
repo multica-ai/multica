@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Attachment, ListIssuesResponse, TimelineEntry } from "../types";
+import type { Attachment, ListIssuesResponse, MarketplaceSearchResult, TimelineEntry } from "../types";
 
 // ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
@@ -70,6 +70,24 @@ export const EMPTY_ATTACHMENT: Attachment = {
   content_type: "",
   size_bytes: 0,
   created_at: "",
+};
+
+const MarketplaceSkillSchema = z.object({
+  name: z.string(),
+  slug: z.string(),
+  description: z.string().default(""),
+  source_url: z.string(),
+  source: z.literal("clawhub"),
+}).loose();
+
+export const MarketplaceSearchResultSchema = z.object({
+  skills: z.array(MarketplaceSkillSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_MARKETPLACE_SEARCH_RESULT: MarketplaceSearchResult = {
+  skills: [],
+  total: 0,
 };
 
 // All object schemas use `.loose()` so unknown server-side fields pass

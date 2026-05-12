@@ -27,6 +27,7 @@ import type {
   User,
   Skill,
   SkillSummary,
+  MarketplaceSearchResult,
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
@@ -168,9 +169,11 @@ import {
   ChildIssuesResponseSchema,
   CommentsListSchema,
   EMPTY_ATTACHMENT,
+  EMPTY_MARKETPLACE_SEARCH_RESULT,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_TIMELINE_ENTRIES,
   ListIssuesResponseSchema,
+  MarketplaceSearchResultSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
   ListShipProjectsResponseSchema,
@@ -1167,6 +1170,15 @@ export class ApiClient {
     return this.fetch("/api/skills/import", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  async searchMarketplace(params: { q: string; limit?: number }): Promise<MarketplaceSearchResult> {
+    const qs = new URLSearchParams({ q: params.q });
+    if (params.limit) qs.set("limit", String(params.limit));
+    const raw = await this.fetch<unknown>(`/api/skills/marketplace?${qs}`);
+    return parseWithFallback(raw, MarketplaceSearchResultSchema, EMPTY_MARKETPLACE_SEARCH_RESULT, {
+      endpoint: "GET /api/skills/marketplace",
     });
   }
 

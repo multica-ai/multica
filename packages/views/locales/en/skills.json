@@ -162,6 +162,10 @@
       "runtime": {
         "title": "Copy from runtime",
         "desc": "Scan a local runtime and promote one of its on-disk skills into this workspace."
+      },
+      "marketplace": {
+        "title": "Browse Marketplace",
+        "desc": "Search and import skills from the community marketplace."
       }
     },
     "method_card": {
@@ -170,7 +174,9 @@
       "url_title": "Import from URL",
       "url_desc": "Pull a published skill from ClawHub or Skills.sh.",
       "runtime_title": "Copy from runtime",
-      "runtime_desc": "Promote a skill already installed on your local runtime."
+      "runtime_desc": "Promote a skill already installed on your local runtime.",
+      "marketplace_title": "Browse Marketplace",
+      "marketplace_desc": "Search ClawHub for community-published skills and import with one click."
     },
     "manual": {
       "name_label": "Name",
@@ -197,6 +203,16 @@
       "fallback_error": "Import failed",
       "cancel": "Cancel",
       "toast_imported": "Skill imported"
+    },
+    "marketplace": {
+      "search_placeholder": "Search skills…",
+      "importing": "Importing…",
+      "import": "Import",
+      "empty_query": "Type a query above to search the marketplace.",
+      "no_results": "No skills found for \"{{query}}\".",
+      "error": "Couldn't reach the marketplace.",
+      "source_badge": "ClawHub",
+      "toast_imported": "Skill imported from marketplace."
     }
   },
   "runtime_import": {

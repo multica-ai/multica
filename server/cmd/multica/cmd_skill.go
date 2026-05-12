@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -58,6 +59,13 @@ var skillImportCmd = &cobra.Command{
 	RunE:  runSkillImport,
 }
 
+var skillSearchCmd = &cobra.Command{
+	Use:   "search <query>",
+	Short: "Search the skills marketplace",
+	Args:  exactArgs(1),
+	RunE:  runSkillSearch,
+}
+
 // Skill file subcommands.
 
 var skillFilesCmd = &cobra.Command{
@@ -93,6 +101,7 @@ func init() {
 	skillCmd.AddCommand(skillUpdateCmd)
 	skillCmd.AddCommand(skillDeleteCmd)
 	skillCmd.AddCommand(skillImportCmd)
+	skillCmd.AddCommand(skillSearchCmd)
 	skillCmd.AddCommand(skillFilesCmd)
 
 	skillFilesCmd.AddCommand(skillFilesListCmd)
@@ -125,6 +134,10 @@ func init() {
 	// skill import
 	skillImportCmd.Flags().String("url", "", "URL to import from (required)")
 	skillImportCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// skill search
+	skillSearchCmd.Flags().Int("limit", 20, "Max results to return")
+	skillSearchCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// skill files list
 	skillFilesListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -355,6 +368,46 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 	}
 
 	fmt.Printf("Skill imported: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
+	return nil
+}
+
+func runSkillSearch(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	limit, _ := cmd.Flags().GetInt("limit")
+	query := url.Values{}
+	query.Set("q", args[0])
+	query.Set("limit", fmt.Sprintf("%d", limit))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	defer cancel()
+
+	var result struct {
+		Skills []map[string]any `json:"skills"`
+		Total  int              `json:"total"`
+	}
+	if err := client.GetJSON(ctx, "/api/skills/marketplace?"+query.Encode(), &result); err != nil {
+		return fmt.Errorf("search skills marketplace: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result.Skills)
+	}
+
+	headers := []string{"NAME", "DESCRIPTION", "SOURCE_URL"}
+	rows := make([][]string, 0, len(result.Skills))
+	for _, s := range result.Skills {
+		rows = append(rows, []string{
+			strVal(s, "name"),
+			strVal(s, "description"),
+			strVal(s, "source_url"),
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
 }
 
