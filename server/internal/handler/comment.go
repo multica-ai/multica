@@ -730,6 +730,31 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// findTriggerFromRecentTask looks up the most recent task for the given agent
+// on the issue and returns its trigger_comment_id (and the corresponding
+// comment, if it exists). This recovers the original trigger context for system
+// comments that have no parent_id chain — e.g. failure notifications.
+func (h *Handler) findTriggerFromRecentTask(ctx context.Context, issueID, agentID pgtype.UUID) (pgtype.UUID, *db.Comment) {
+	tasks, err := h.Queries.ListTasksByIssue(ctx, issueID)
+	if err != nil {
+		return pgtype.UUID{}, nil
+	}
+	for _, t := range tasks {
+		if uuidToString(t.AgentID) != uuidToString(agentID) {
+			continue
+		}
+		if !t.TriggerCommentID.Valid {
+			continue
+		}
+		tc, err := h.Queries.GetComment(ctx, t.TriggerCommentID)
+		if err != nil {
+			return t.TriggerCommentID, nil
+		}
+		return t.TriggerCommentID, &tc
+	}
+	return pgtype.UUID{}, nil
+}
+
 // findAncestorMemberComment walks parent_id chain from start until it finds a member-authored comment.
 func (h *Handler) findAncestorMemberComment(ctx context.Context, start db.Comment) (*db.Comment, error) {
 	seen := map[string]struct{}{}
@@ -810,6 +835,18 @@ func (h *Handler) RetryAgentComment(w http.ResponseWriter, r *http.Request) {
 	triggerID := pgtype.UUID{}
 	if triggerMember != nil {
 		triggerID = triggerMember.ID
+	}
+
+	// Fallback: system comments from failed tasks have no parent_id chain.
+	// Recover the original trigger_comment_id from the most recent task for
+	// this agent on the issue.
+	if !triggerID.Valid {
+		if tid, tc := h.findTriggerFromRecentTask(r.Context(), comment.IssueID, comment.AuthorID); tid.Valid {
+			triggerID = tid
+			if triggerMember == nil && tc != nil {
+				triggerMember = tc
+			}
+		}
 	}
 
 	isAdmin := roleAllowed(member.Role, "owner", "admin")
