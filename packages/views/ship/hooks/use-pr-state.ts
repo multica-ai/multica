@@ -61,6 +61,16 @@ function isPRDeployedTo(
   return prShas(pr).includes(env.current_sha);
 }
 
+/** Parse env.current_deployed_at into a ms timestamp, defaulting to 0
+ *  (epoch) on missing/invalid so the `prodAt > mergedAt` comparisons in
+ *  the time-based fallback never accidentally consider a missing
+ *  deploy as "newer than any merge". */
+function parseDeployedAt(iso: string | null | undefined): number {
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
 /**
  * Derive the Kanban column for a PR.
  *
@@ -137,11 +147,36 @@ export function deriveShipKanbanColumn(
   const releaseCol = releaseStageToColumn(pr.active_release?.stage);
   if (releaseCol) return releaseCol;
 
+  // Time-based deploy fallback — the only reliable signal for
+  // squash-merged PRs that aren't part of a Ship Hub release. If
+  // env.current_deployed_at is AFTER pr.pr_merged_at, the PR's merge
+  // commit was on main when the env deployed, so it shipped. Works
+  // because squash-merges land on main as a new commit whose timestamp
+  // is >= pr.pr_merged_at; the env's deploy of main captures that
+  // commit. Doesn't need any sha matching.
+  //
+  // Age check runs FIRST so old PRs land in "done" regardless of
+  // recent redeploys that happened to include their code — the
+  // Kanban is for in-flight work, not "what's live right now". A
+  // PR merged 30 days ago that gets redeployed today is still
+  // historically "done" from a flow-of-work standpoint.
   if (pr.pr_merged_at) {
     const mergedAt = new Date(pr.pr_merged_at).getTime();
     if (Number.isFinite(mergedAt)) {
       const ageMs = now.getTime() - mergedAt;
       if (ageMs >= SEVEN_DAYS_MS) return "done";
+
+      // Recent merge: a deploy that's NEWER than the merge timestamp
+      // includes this PR. Promote out of pre-staging accordingly.
+      const prodAt = parseDeployedAt(snapshot.production?.current_deployed_at);
+      if (prodAt > mergedAt) {
+        if (now.getTime() - prodAt < ONE_DAY_MS) return "in_production";
+        return "done";
+      }
+      const stagingAt = parseDeployedAt(snapshot.staging?.current_deployed_at);
+      if (stagingAt > mergedAt) {
+        return "in_staging";
+      }
       // Recent merge that's not yet on staging → "Merged · Pre-Staging".
       return "merged_pre_staging";
     }

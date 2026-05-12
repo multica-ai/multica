@@ -381,10 +381,16 @@ describe("bucketPullRequests — 8-column", () => {
       review_decision: "APPROVED",
       ci_status: "success",
     });
+    // Merged AFTER the production env's last deploy → the time-based
+    // fallback (deployedAt > mergedAt → "deployed") doesn't apply,
+    // so this PR stays in pre-staging where the test expects it.
+    // Pre-fix the fixture's pr_merged_at was 2026-05-08 (before the
+    // env's 2026-05-09 deploy) which silently relied on the absence
+    // of the fallback.
     const mergedRecent = makePR({
       id: "merged",
       state: "merged",
-      pr_merged_at: "2026-05-08T00:00:00Z",
+      pr_merged_at: "2026-05-09T11:30:00Z",
       head_sha: "merged-sha",
     });
     const inStaging = makePR({
