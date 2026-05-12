@@ -758,6 +758,7 @@ func discoverCopilotModels(ctx context.Context, executablePath string) ([]Model,
 		}
 	}
 	return models, nil
+}
 // discoverKiloCodeModels spins up a throwaway `kilo acp` process and
 // drives the same minimal ACP handshake as Kimi/Hermes. Kilo's ACP
 // implementation advertises models via the standard
@@ -772,7 +773,6 @@ func discoverKiloCodeModels(ctx context.Context, executablePath string) ([]Model
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-kilocode-discovery-",
 	})
- (Add Kilo Code adapter)
 }
 
 // acpDiscoveryProvider configures how discoverACPModels launches an

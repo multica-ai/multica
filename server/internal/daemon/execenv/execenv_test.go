@@ -1243,7 +1243,7 @@ func TestWriteContextFilesKiloCodeNativeSkills(t *testing.T) {
 		},
 	}
 
-	if err := writeContextFiles(dir, "kilocode", ctx); err != nil {
+	if err := writeContextFiles(dir, "kilocode", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
@@ -1338,14 +1338,10 @@ func TestInjectRuntimeConfigKiro(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 // TestInjectRuntimeConfigAntigravity pins that AGENTS.md for Antigravity
 // advertises native skill discovery (rather than the .agent_context fallback)
 // — the CLI inherits Gemini CLI's workspace skill layout at .agents/skills/.
 func TestInjectRuntimeConfigAntigravity(t *testing.T) {
-=======
-func TestInjectRuntimeConfigKiloCode(t *testing.T) {
->>>>>>> 32ba2b4b3 (Add Kilo Code adapter)
 	t.Parallel()
 	dir := t.TempDir()
 
@@ -1354,11 +1350,7 @@ func TestInjectRuntimeConfigKiloCode(t *testing.T) {
 		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
 	}
 
-<<<<<<< HEAD
 	if _, err := InjectRuntimeConfig(dir, "antigravity", ctx); err != nil {
-=======
-	if err := InjectRuntimeConfig(dir, "kilocode", ctx); err != nil {
->>>>>>> 32ba2b4b3 (Add Kilo Code adapter)
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -1375,7 +1367,6 @@ func TestInjectRuntimeConfigKiloCode(t *testing.T) {
 		t.Error("AGENTS.md missing skill name")
 	}
 	if !strings.Contains(s, "discovered automatically") {
-<<<<<<< HEAD
 		t.Error("AGENTS.md for Antigravity should advertise native skill discovery")
 	}
 	if strings.Contains(s, ".agent_context/skills/") {
@@ -1412,13 +1403,40 @@ func TestWriteContextFilesAntigravityNativeSkills(t *testing.T) {
 	// .agents/skills/, not .agent_context/skills/.
 	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
 		t.Error(".agent_context/skills/ MUST NOT be written for antigravity — its scanner does not read that path")
-=======
+	}
+}
+
+func TestInjectRuntimeConfigKiloCode(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if _, err := InjectRuntimeConfig(dir, "kilocode", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
+	}
+	if !strings.Contains(s, "Coding") {
+		t.Error("AGENTS.md missing skill name")
+	}
+	if !strings.Contains(s, "discovered automatically") {
 		t.Error("AGENTS.md missing native skill discovery hint")
 	}
 
 	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
 		t.Error("expected CLAUDE.md to NOT exist for KiloCode provider")
->>>>>>> 32ba2b4b3 (Add Kilo Code adapter)
 	}
 }
 
