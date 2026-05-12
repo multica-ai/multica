@@ -31,6 +31,11 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { AvatarGroup } from "@multica/ui/components/ui/avatar";
 import { Input } from "@multica/ui/components/ui/input";
+import { cn } from "@multica/ui/lib/utils";
+// CEREBRO-PATCH(channels-thread-fullscreen-mobile): JEH-1045 — detect narrow
+// viewport so the ThreadSidePanel can take over the full pane and the message
+// column collapses out of the way.
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useChannelDisplay } from "./use-channel-display";
 import { ParticipantsPanel } from "./participants-panel";
 // CEREBRO-PATCH(channel-detail-listeners): JEH-699 — listeners popover.
@@ -131,6 +136,16 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
 
   const [participantsOpen, setParticipantsOpen] = useState(false);
 
+  // CEREBRO-PATCH(channels-thread-fullscreen-mobile): JEH-1045 — on a narrow
+  // viewport the side-by-side message + thread layout squeezes both columns
+  // unreadably (see screenshot on the issue). When a thread is open and the
+  // viewport is mobile-wide, hide the message column and let the thread panel
+  // render full-screen with a Slack-style back-header.
+  const isMobile = useIsMobile();
+  const threadOpen = !!activeThreadEntry;
+  const threadFullScreen = isMobile && threadOpen;
+  const threadBackLabel = display.isChannel ? `#${display.title}` : display.title;
+
   const archiveInbox = useArchiveInbox();
   // CEREBRO-PATCH(channel-detail-archive): JEH-851 — channels/DMs archive
   // via per-user `cerebro_channel_archived` row, then any open inbox
@@ -156,7 +171,19 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
-      <header className="flex shrink-0 flex-col gap-1 border-b px-4 py-3">
+      {/* CEREBRO-PATCH(channels-thread-fullscreen-mobile): JEH-1045 — hide the
+          channel chrome (title, pin/archive, participants) while a thread is
+          open on a narrow viewport. The thread panel's own back-header
+          ("← #channel") replaces it, matching Slack's mobile thread view —
+          two stacked headers would just compete for the same vertical space.
+          CSS-hidden (not unmounted) so inline-rename in-flight state is
+          preserved across the round-trip. */}
+      <header
+        className={cn(
+          "flex shrink-0 flex-col gap-1 border-b px-4 py-3",
+          threadFullScreen && "hidden",
+        )}
+      >
         <div className="flex items-center gap-2">
           <ChannelHeaderIcon channel={channel} />
           <ChannelTitle channel={channel} display={display} />
@@ -236,7 +263,19 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
           message column without floating over it. The panel returns null
           when closed, so the message column reclaims the full width. */}
       <div className="flex flex-1 min-h-0">
-        <div className="flex flex-1 min-h-0 flex-col">
+        {/* CEREBRO-PATCH(channels-thread-fullscreen-mobile): JEH-1045 — hide
+            the message column when the thread takes over on narrow viewports.
+            CSS-hidden (not unmounted) so `CommentInput`'s Tiptap draft +
+            upload map survive the thread round-trip; otherwise typing a
+            channel reply, opening a thread, and tapping ← back would wipe
+            the draft. `display: none` removes the column from flex layout
+            so the thread panel reclaims the full width. */}
+        <div
+          className={cn(
+            "flex flex-1 min-h-0 flex-col",
+            threadFullScreen && "hidden",
+          )}
+        >
           <div className="flex-1 min-h-0 overflow-y-auto">
             {topLevel.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
@@ -277,6 +316,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
           parentEntry={activeThreadEntry}
           repliesByParent={repliesByParent}
           open={!!activeThreadEntry}
+          fullScreen={threadFullScreen}
+          backLabel={threadBackLabel}
           onClose={() => setActiveThreadId(null)}
           onSubmit={submitReply}
           onEdit={editComment}

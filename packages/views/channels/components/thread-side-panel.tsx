@@ -5,7 +5,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { ArrowUp, Copy, Loader2, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, Copy, Loader2, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -54,6 +54,14 @@ interface ThreadSidePanelProps {
   parentEntry: TimelineEntry | null;
   repliesByParent: Map<string, TimelineEntry[]>;
   open: boolean;
+  /** CEREBRO-PATCH(channels-thread-fullscreen-mobile): JEH-1045 — when true,
+   *  render full-width with a Slack-style "← back" header instead of the
+   *  docked 420px side-panel. ChannelDetail flips this on narrow viewports. */
+  fullScreen?: boolean;
+  /** CEREBRO-PATCH(channels-thread-fullscreen-mobile): JEH-1045 — label shown
+   *  next to the back arrow when `fullScreen` is true (e.g. "#growth" or a
+   *  DM peer name). Ignored in side-panel mode. */
+  backLabel?: string;
   onClose: () => void;
   onSubmit: (parentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onEdit: (commentId: string, content: string) => Promise<void>;
@@ -67,6 +75,8 @@ export function ThreadSidePanel({
   parentEntry,
   repliesByParent,
   open,
+  fullScreen = false,
+  backLabel,
   onClose,
   onSubmit,
   onEdit,
@@ -81,33 +91,60 @@ export function ThreadSidePanel({
 
   if (!open || !parentEntry) return null;
 
+  const replyCountLabel =
+    flatReplies.length === 0
+      ? "No replies yet"
+      : flatReplies.length === 1
+        ? "1 reply"
+        : `${flatReplies.length} replies`;
+
   return (
     <aside
       role="complementary"
       aria-label="Thread"
-      className="flex h-full w-full max-w-[420px] shrink-0 flex-col border-l bg-background"
+      className={cn(
+        "flex h-full flex-col bg-background",
+        // CEREBRO-PATCH(channels-thread-fullscreen-mobile): JEH-1045 — narrow
+        // viewport takes the whole pane (the message column unmounts in
+        // ChannelDetail); desktop keeps the 420px right dock with a left
+        // border separating it from the messages.
+        fullScreen
+          ? "w-full"
+          : "w-full max-w-[420px] shrink-0 border-l",
+      )}
     >
-      <header className="flex shrink-0 items-center justify-between border-b px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold">Thread</h2>
-          <p className="text-[11px] text-muted-foreground">
-            {flatReplies.length === 0
-              ? "No replies yet"
-              : flatReplies.length === 1
-                ? "1 reply"
-                : `${flatReplies.length} replies`}
-          </p>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="text-muted-foreground"
-          onClick={onClose}
-          aria-label="Close thread"
-        >
-          <X className="size-4" />
-        </Button>
-      </header>
+      {fullScreen ? (
+        <header className="flex shrink-0 items-center gap-2 border-b px-2 py-3">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Back to conversation"
+            className="flex min-w-0 items-center gap-1.5 rounded px-2 py-1 text-sm font-medium text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+          >
+            <ArrowLeft className="size-4 shrink-0" />
+            <span className="truncate">{backLabel || "Back"}</span>
+          </button>
+          <div className="ml-auto pr-2 text-[11px] text-muted-foreground tabular-nums">
+            Thread · {replyCountLabel}
+          </div>
+        </header>
+      ) : (
+        <header className="flex shrink-0 items-center justify-between border-b px-4 py-3">
+          <div>
+            <h2 className="text-sm font-semibold">Thread</h2>
+            <p className="text-[11px] text-muted-foreground">{replyCountLabel}</p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground"
+            onClick={onClose}
+            aria-label="Close thread"
+          >
+            <X className="size-4" />
+          </Button>
+        </header>
+      )}
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <ThreadEntry
