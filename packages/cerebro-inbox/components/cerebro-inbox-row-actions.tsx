@@ -114,7 +114,30 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
         onToggleRead={handleToggleRead}
         onToggleMute={handleToggleMute}
         unread={!item.read}
-        renderDrawerMenu={() => menuItems}
+        renderDrawerMenu={(close) => (
+          // The long-press drawer is NOT a Menu.Root — Base UI's
+          // `DropdownMenuItem` (Menu.Item) silently no-ops onClick when
+          // rendered outside a menu context, which caused mute / mark-unread
+          // to feel "dead" when triggered from the drawer. Render plain
+          // buttons here instead and close the drawer on selection.
+          <DrawerActionList
+            item={item}
+            muted={muted}
+            strings={strings}
+            onToggleRead={() => {
+              close();
+              handleToggleRead();
+            }}
+            onToggleMute={() => {
+              close();
+              handleToggleMute();
+            }}
+            onArchive={() => {
+              close();
+              onArchive();
+            }}
+          />
+        )}
       />
     );
   }
@@ -238,7 +261,7 @@ interface MobileProps {
   onArchive: () => void;
   onToggleRead: () => void;
   onToggleMute: () => void;
-  renderDrawerMenu: () => ReactNode;
+  renderDrawerMenu: (close: () => void) => ReactNode;
   strings: ReturnType<typeof useCerebroInboxStrings>;
 }
 
@@ -517,7 +540,9 @@ function MobileRowActions({
           <DrawerHeader>
             <DrawerTitle>{strings.drawer_title}</DrawerTitle>
           </DrawerHeader>
-          <div className="px-4 pb-6">{renderDrawerMenu()}</div>
+          <div className="px-4 pb-6">
+            {renderDrawerMenu(() => setDrawerOpen(false))}
+          </div>
         </DrawerContent>
       </Drawer>
     </>
@@ -565,6 +590,67 @@ function MenuItems({
         {strings.archive_label}
       </DropdownMenuItem>
     </>
+  );
+}
+
+/**
+ * Drawer-friendly variant of MenuItems. Uses plain buttons instead of
+ * DropdownMenuItem (which is Base UI Menu.Item — silently no-ops outside a
+ * menu context, which is why mute / mark-unread "did nothing" when the
+ * long-press drawer was the entry point).
+ */
+function DrawerActionList({
+  item,
+  muted,
+  strings,
+  onToggleRead,
+  onToggleMute,
+  onArchive,
+}: {
+  item: InboxItem;
+  muted: boolean;
+  strings: ReturnType<typeof useCerebroInboxStrings>;
+  onToggleRead: () => void;
+  onToggleMute: () => void;
+  onArchive: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <DrawerActionButton onClick={onToggleRead}>
+        {item.read ? (
+          <MailWarning className="size-5" />
+        ) : (
+          <MailOpen className="size-5" />
+        )}
+        <span>{item.read ? strings.mark_unread : strings.mark_read}</span>
+      </DrawerActionButton>
+      <DrawerActionButton onClick={onToggleMute}>
+        {muted ? <BellRing className="size-5" /> : <BellOff className="size-5" />}
+        <span>{muted ? strings.unmute : strings.mute}</span>
+      </DrawerActionButton>
+      <DrawerActionButton onClick={onArchive}>
+        <Archive className="size-5" />
+        <span>{strings.archive_label}</span>
+      </DrawerActionButton>
+    </div>
+  );
+}
+
+function DrawerActionButton({
+  onClick,
+  children,
+}: {
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-3 rounded-md px-3 py-3 text-left text-base hover:bg-accent active:bg-accent"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -787,9 +873,13 @@ function SwipeArchiveOnly({
           <span className="text-xs font-medium">{strings.swipe_archive}</span>
         </div>
       )}
-      <SimpleArchiveButton onArchive={onArchive} />
     </>
   );
+  // No SimpleArchiveButton here — `CerebroSwipeArchive` already takes the
+  // desktop fallback path (`!isMobile`) before reaching this component.
+  // Rendering it again from the mobile path was redundant and added a
+  // nested clickable that could confuse iOS Safari's tap-target heuristic
+  // on rows whose parent shell is a <button>.
 }
 
 function SimpleArchiveButton({ onArchive }: { onArchive: () => void }) {
