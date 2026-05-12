@@ -346,7 +346,12 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 
 	var agents []db.Agent
 	var err error
-	if r.URL.Query().Get("include_archived") == "true" {
+	if tagName := r.URL.Query().Get("tag"); tagName != "" {
+		agents, err = h.Queries.ListAgentsByTag(r.Context(), db.ListAgentsByTagParams{
+			WorkspaceID: parseUUID(workspaceID),
+			TagName:     tagName,
+		})
+	} else if r.URL.Query().Get("include_archived") == "true" {
 		agents, err = h.Queries.ListAllAgents(r.Context(), parseUUID(workspaceID))
 	} else {
 		agents, err = h.Queries.ListAgents(r.Context(), parseUUID(workspaceID))
@@ -1269,7 +1274,11 @@ func (h *Handler) AddTagToAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.canManageAgent(w, r, agent) {
+
+	// Allow agents to tag themselves (X-Agent-ID == agent being tagged).
+	requestingAgentID := r.Header.Get("X-Agent-ID")
+	isSelfTag := requestingAgentID != "" && requestingAgentID == uuidToString(agent.ID)
+	if !isSelfTag && !h.canManageAgent(w, r, agent) {
 		return
 	}
 	var req AddTagToAgentRequest

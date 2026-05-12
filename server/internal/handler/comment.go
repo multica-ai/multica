@@ -522,8 +522,8 @@ func (h *Handler) enqueueAgentMention(ctx context.Context, issue db.Issue, comme
 	}
 }
 
-// enqueueBroadcastMention resolves a @@ or @@tagname broadcast to the
-// eligible agent list and soft-notifies each one. tagName is empty for @@
+// enqueueBroadcastMention resolves a @@ or @@tagname broadcast to the eligible
+// agent list and publishes a single soft-notify event. tagName is empty for @@
 // (all agents) and set for @@tagname (tag-filtered agents).
 // Rate-limited to broadcastMaxAgents agents per broadcast to prevent storms.
 func (h *Handler) enqueueBroadcastMention(ctx context.Context, issue db.Issue, comment db.Comment, tagName, authorType, authorID, wsID string) {
@@ -545,14 +545,27 @@ func (h *Handler) enqueueBroadcastMention(ctx context.Context, issue db.Issue, c
 		return
 	}
 
-	dispatched := 0
+	agentIDs := make([]string, 0, min(len(agents), broadcastMaxAgents))
 	for _, a := range agents {
-		if dispatched >= broadcastMaxAgents {
+		if len(agentIDs) >= broadcastMaxAgents {
 			break
 		}
-		h.enqueueAgentMention(ctx, issue, comment, uuidToString(a.ID), authorType, authorID, wsID)
-		dispatched++
+		agentID := uuidToString(a.ID)
+		if agentID == authorID {
+			continue
+		}
+		if !h.canAccessPrivateAgent(ctx, a, authorType, authorID, wsID) {
+			continue
+		}
+		agentIDs = append(agentIDs, agentID)
 	}
+
+	h.publish(protocol.EventCommentBroadcast, wsID, authorType, authorID, map[string]any{
+		"comment_id": uuidToString(comment.ID),
+		"issue_id":   uuidToString(issue.ID),
+		"tag":        tagName,
+		"agent_ids":  agentIDs,
+	})
 }
 
 func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -341,6 +342,124 @@ func TestListAgents_FiltersPrivateForPlainMember(t *testing.T) {
 	}
 	if listContainsAgent(t, w.Body.Bytes(), agentID) {
 		t.Fatalf("ListAgents as plain member leaked private agent %s", agentID)
+	}
+}
+
+func TestListAgents_TagFilter(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := handlerTestRuntimeID(t)
+	tagName := "tag-filter-" + uuid.New().String()
+	var taggedAgentID, untaggedAgentID, tagID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args
+		)
+		VALUES ($1, 'tagged-filter-agent', '', 'cloud', '{}'::jsonb,
+		        $2, 'workspace', 1, $3, '', '{}'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, runtimeID, testUserID).Scan(&taggedAgentID); err != nil {
+		t.Fatalf("create tagged agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, taggedAgentID)
+	})
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args
+		)
+		VALUES ($1, 'untagged-filter-agent', '', 'cloud', '{}'::jsonb,
+		        $2, 'workspace', 1, $3, '', '{}'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, runtimeID, testUserID).Scan(&untaggedAgentID); err != nil {
+		t.Fatalf("create untagged agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, untaggedAgentID)
+	})
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_tag (workspace_id, name)
+		VALUES ($1, $2)
+		RETURNING id
+	`, testWorkspaceID, tagName).Scan(&tagID); err != nil {
+		t.Fatalf("create agent tag: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_tag WHERE id = $1`, tagID)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_to_tag (agent_id, tag_id)
+		VALUES ($1, $2)
+	`, taggedAgentID, tagID); err != nil {
+		t.Fatalf("tag agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.ListAgents(w, newRequest("GET", "/api/agents?tag="+tagName, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListAgents with tag filter: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !listContainsAgent(t, w.Body.Bytes(), taggedAgentID) {
+		t.Fatalf("ListAgents with tag filter did not include tagged agent %s", taggedAgentID)
+	}
+	if listContainsAgent(t, w.Body.Bytes(), untaggedAgentID) {
+		t.Fatalf("ListAgents with tag filter included untagged agent %s", untaggedAgentID)
+	}
+}
+
+func TestAddTagToAgent_AllowsSelfTag(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	tagName := "self-tag-" + uuid.New().String()
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args
+		)
+		VALUES ($1, 'self-tag-agent', '', 'cloud', '{}'::jsonb,
+		        $2, 'workspace', 1, NULL, '', '{}'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, handlerTestRuntimeID(t)).Scan(&agentID); err != nil {
+		t.Fatalf("create self-tag agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents/"+agentID+"/tags", map[string]any{"tag_name": tagName})
+	req.Header.Set("X-Agent-ID", agentID)
+	req = withURLParam(req, "id", agentID)
+	testHandler.AddTagToAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("AddTagToAgent self-tag: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var got bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM agent_to_tag att
+			JOIN agent_tag t ON t.id = att.tag_id
+			WHERE att.agent_id = $1 AND t.workspace_id = $2 AND t.name = $3
+		)
+	`, agentID, testWorkspaceID, tagName).Scan(&got); err != nil {
+		t.Fatalf("check self tag: %v", err)
+	}
+	if !got {
+		t.Fatalf("self-tag relation was not created")
 	}
 }
 
