@@ -15,6 +15,7 @@ import {
 } from "@multica/ui/components/ui/sheet";
 import { ChannelMessageList } from "../../channels/components/channel-message-list";
 import { ChannelComposer } from "../../channels/components/channel-composer";
+import { ShipConciergeSetupDialog } from "./ship-concierge-setup-dialog";
 
 /**
  * ROA-178 Ship Concierge — a slide-in drawer on the Ship page that
@@ -111,11 +112,13 @@ export function ShipConciergePanel() {
 
 /**
  * Empty state — no channel in the workspace has an ambient_listener
- * configured yet. Shows the operator how to wire one. Intentionally
- * verbose: this is the first thing a workspace owner sees when they
- * click the Concierge button on day 1.
+ * configured yet. The button opens a setup dialog that handles the
+ * three-step wiring (create channel, add agent member, designate
+ * ambient listener) atomically. No copy-paste curl required.
  */
 function ConciergeEmptyState() {
+  const [setupOpen, setSetupOpen] = useState(false);
+
   return (
     <div className="flex flex-1 flex-col items-start gap-4 overflow-y-auto p-5 text-sm">
       <div className="flex flex-col gap-1">
@@ -131,24 +134,21 @@ function ConciergeEmptyState() {
         </p>
       </div>
 
-      <div className="flex flex-col gap-2 rounded-md border bg-muted/40 p-3 text-xs">
-        <p className="font-medium text-foreground">Setup (one-time, per workspace):</p>
-        <ol className="ml-4 list-decimal space-y-1 text-muted-foreground">
-          <li>Create a channel (e.g. <code>#ship-concierge</code>) via the channels page.</li>
-          <li>Add the Claude agent as a channel member.</li>
-          <li>
-            Designate Claude as the ambient listener:
-            <pre className="mt-1 overflow-x-auto rounded bg-background p-2 text-[10px]">
-{`PATCH /api/channels/<channel-id>/ambient_listener
-{ "agent_id": "<claude-agent-uuid>" }`}
-            </pre>
-          </li>
-        </ol>
-      </div>
+      <Button
+        size="sm"
+        onClick={() => setSetupOpen(true)}
+        data-testid="ship-concierge-setup-open"
+      >
+        <Bot className="size-3.5" />
+        Set up Concierge
+      </Button>
 
       <p className="text-xs text-muted-foreground">
-        Once configured, this drawer shows the channel automatically.
+        Picks a workspace agent + creates the channel + wires the
+        ambient-listener designation in one go.
       </p>
+
+      <ShipConciergeSetupDialog open={setupOpen} onOpenChange={setSetupOpen} />
     </div>
   );
 }

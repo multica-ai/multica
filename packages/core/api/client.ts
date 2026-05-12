@@ -1304,6 +1304,22 @@ export class ApiClient {
     await this.fetch(`/api/channels/${id}`, { method: "DELETE" });
   }
 
+  /**
+   * ROA-178 — designate (or clear) a channel's ambient listener agent.
+   * Pass `agent_id: null` (or omit) to clear; pass a UUID to make the
+   * channel a Ship Concierge surface (every member-authored message
+   * dispatches a task to that agent without requiring an @-mention).
+   */
+  async setChannelAmbientListener(
+    channelId: string,
+    agentId: string | null,
+  ): Promise<Channel> {
+    return this.fetch(`/api/channels/${channelId}/ambient_listener`, {
+      method: "PATCH",
+      body: JSON.stringify({ agent_id: agentId }),
+    });
+  }
+
   async listChannelMembers(channelId: string): Promise<ChannelMembership[]> {
     return this.fetch(`/api/channels/${channelId}/members`);
   }
