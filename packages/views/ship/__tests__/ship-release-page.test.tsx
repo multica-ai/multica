@@ -21,6 +21,15 @@ import { ShipReleasePage } from "../components/ship-release-page";
 
 let detailFixture: ReleaseDetailResponse;
 
+// Default to a project that HAS both envs (staging + production) so the
+// 7-stage progress bar renders for the existing tests. Per-test
+// overrides via `deployEnvsFixture = [{ kind: "production" }]` exercise
+// the direct-to-prod / staging-skipped path.
+let deployEnvsFixture: Array<{ kind: string }> = [
+  { kind: "staging" },
+  { kind: "production" },
+];
+
 // Phase 7b — the merge train mutations are added to the mock so the
 // release page renders the new buttons without exploding. Each
 // returns a stable object whose mutateAsync the tests can reach
@@ -127,6 +136,15 @@ vi.mock("@multica/core/ship", () => ({
   useOpenReleaseChannel: () => ({
     mutateAsync: vi.fn().mockResolvedValue({ name: "release-2026-05-10" }),
     isPending: false,
+  }),
+  // Stage progress bar pulls the project's deploy envs to decide
+  // whether the in_staging / verifying chips render. Reads through
+  // the module-scope deployEnvsFixture so individual tests can swap
+  // it before render to exercise the no-staging path.
+  useDeployEnvironments: () => ({
+    data: { environments: deployEnvsFixture },
+    isLoading: false,
+    isError: false,
   }),
 }));
 
@@ -291,6 +309,38 @@ describe("ShipReleasePage", () => {
     };
     render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
     expect(screen.queryByTestId("release-cancel-button")).not.toBeInTheDocument();
+  });
+
+  it("hides in_staging + verifying chips when the project has no staging env", () => {
+    deployEnvsFixture = [{ kind: "production" }];
+    detailFixture = {
+      release: makeRelease({ stage: "promoting" }),
+      pull_requests: [makeReleasePR()],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+
+    const bar = screen.getByTestId("release-stage-progress");
+    // The chip text comes from i18n; for resilience we assert on the
+    // chip COUNT (5 vs 7) plus the absence of staging-related labels.
+    const chips = bar.querySelectorAll("li");
+    expect(chips.length).toBe(5);
+    // Cleanup so subsequent tests see the default fixture.
+    deployEnvsFixture = [{ kind: "staging" }, { kind: "production" }];
+  });
+
+  it("renders all 7 stage chips when project has staging + production envs", () => {
+    deployEnvsFixture = [{ kind: "staging" }, { kind: "production" }];
+    detailFixture = {
+      release: makeRelease({ stage: "assembling" }),
+      pull_requests: [makeReleasePR()],
+      events: [],
+    };
+    render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    const chips = screen
+      .getByTestId("release-stage-progress")
+      .querySelectorAll("li");
+    expect(chips.length).toBe(7);
   });
 
   it("renders the terminal banner instead of the progress bar for cancelled releases", () => {

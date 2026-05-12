@@ -60,6 +60,7 @@ import {
   useMarkReleaseDone,
   useOpenReleaseChannel,
   useReleaseHealth,
+  useDeployEnvironments,
 } from "@multica/core/ship";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -107,6 +108,53 @@ const STAGE_PROGRESS: Array<{ key: string; iconBg: string }> = [
   { key: "done", iconBg: "bg-emerald-500/40" },
 ];
 
+// Staging-only stages — hidden from the progress bar when the project
+// has no `kind='staging'` deploy environment. The backend skips these
+// stages in the flow (see completeMergeTrain in release_merge.go) so
+// they're never reachable for those projects; rendering them as
+// permanently-pending chips just clutters the bar and confuses users.
+const STAGING_ONLY_STAGES = new Set(["in_staging", "verifying"]);
+
+/**
+ * Map a backend mutation error to user-friendly text.
+ *
+ * The Ship Hub backend rejects out-of-order stage transitions with
+ * messages like:
+ *
+ *   release: stage does not allow this transition: stage=in_production, want verifying
+ *
+ * Those leak two backend invariants (the stage names + the wire format
+ * of the precondition check) into a user-facing toast, which is at
+ * best confusing and at worst alarming for someone whose only "crime"
+ * was clicking Promote on a dialog they opened a second too late. The
+ * usual cause is a stale UI: the page hasn't yet caught up to a
+ * background auto-advance.
+ *
+ * This helper recognizes the stage-mismatch pattern and returns a
+ * friendlier message. Everything else falls through to the raw error
+ * string so we don't accidentally swallow real problems.
+ */
+function friendlyMutationError(err: unknown): string {
+  const raw = friendlyMutationError(err);
+  // Pattern: "stage does not allow this transition: stage=<from>, want <to>"
+  const m = raw.match(
+    /stage does not allow this transition: stage=([\w_]+), want ([\w_]+)/,
+  );
+  if (m) {
+    const [, from] = m;
+    if (from === "in_production" || from === "done") {
+      return "This release is already live in production — refresh the page to see the latest state.";
+    }
+    if (from === "cancelled" || from === "rolled_back") {
+      return "This release has been closed (cancelled or rolled back) and can't be advanced further.";
+    }
+    // Generic: a stale UI tried to apply an action that the backend
+    // can no longer accept from the current stage.
+    return "This action is no longer valid for the release's current stage — refresh to see the latest state.";
+  }
+  return raw;
+}
+
 interface ShipReleasePageProps {
   releaseId: string;
 }
@@ -134,6 +182,23 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
     if (!pid) return null;
     return (projectsQuery.data ?? []).find((p) => p.id === pid) ?? null;
   }, [projectsQuery.data, data?.release.project_id]);
+  // Project's deploy envs drive the "show staging stages?" decision in
+  // the progress bar. The backend skips in_staging/verifying entirely
+  // when no staging env exists, so rendering those chips as forever-
+  // pending is just noise. The hook reads from the projects cache and
+  // is cheap (workspace-scoped, refetch on focus only).
+  //
+  // While the envs query is loading, default to TRUE so we don't
+  // briefly hide chips that should be visible and then flicker them
+  // back in.
+  const projectId = data?.release.project_id ?? "";
+  const deployEnvsQuery = useDeployEnvironments(projectId);
+  const hasStaging = useMemo(() => {
+    if (!projectId) return true;
+    if (deployEnvsQuery.isLoading) return true;
+    const envs = deployEnvsQuery.data?.environments ?? [];
+    return envs.some((env) => env.kind === "staging");
+  }, [projectId, deployEnvsQuery.isLoading, deployEnvsQuery.data]);
   const cancelMutation = useCancelRelease(releaseId);
   const removePR = useRemovePullRequestFromRelease(releaseId);
   const startMerge = useStartMergeTrain(releaseId);
@@ -384,7 +449,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                         await startMerge.mutateAsync({});
                         toast.success(t(($) => $.releases.merge.started_toast));
                       } catch (err) {
-                        toast.error(err instanceof Error ? err.message : String(err));
+                        toast.error(friendlyMutationError(err));
                       }
                     }}
                     disabled={!canStartMerge || startMerge.isPending}
@@ -444,7 +509,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                         await resumeMerge.mutateAsync({});
                         toast.success(t(($) => $.releases.merge.resumed_toast));
                       } catch (err) {
-                        toast.error(err instanceof Error ? err.message : String(err));
+                        toast.error(friendlyMutationError(err));
                       }
                     }}
                     disabled={resumeMerge.isPending}
@@ -485,7 +550,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                         toast.success(t(($) => $.releases.staging.run_smoke_button)),
                       )
                       .catch((err: unknown) =>
-                        toast.error(err instanceof Error ? err.message : String(err)),
+                        toast.error(friendlyMutationError(err)),
                       );
                   }}
                   runSmokePending={runSmoke.isPending}
@@ -502,7 +567,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                       )
                       .catch((err: unknown) =>
                         toast.error(
-                          err instanceof Error ? err.message : String(err),
+                          friendlyMutationError(err),
                         ),
                       );
                   }}
@@ -546,7 +611,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                           )
                           .catch((err: unknown) =>
                             toast.error(
-                              err instanceof Error ? err.message : String(err),
+                              friendlyMutationError(err),
                             ),
                           );
                       }}
@@ -581,7 +646,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                           toast.success(t(($) => $.releases.production.mark_done_toast)),
                         )
                         .catch((err: unknown) =>
-                          toast.error(err instanceof Error ? err.message : String(err)),
+                          toast.error(friendlyMutationError(err)),
                         );
                     }}
                     disabled={markDone.isPending}
@@ -673,6 +738,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
             <StageProgressBar
               currentStage={release.stage}
               merging={isMerging ? { merged: mergedCount, total: totalPRs } : null}
+              hasStaging={hasStaging}
             />
           )}
 
@@ -892,7 +958,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                             await resumeMerge.mutateAsync({});
                             toast.success(t(($) => $.releases.merge.resumed_toast));
                           } catch (err) {
-                            toast.error(err instanceof Error ? err.message : String(err));
+                            toast.error(friendlyMutationError(err));
                           }
                         }}
                         data-testid="release-pr-retry-button"
@@ -912,7 +978,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                             await removePR.mutateAsync(pr.id);
                           } catch (err) {
                             toast.error(
-                              err instanceof Error ? err.message : String(err),
+                              friendlyMutationError(err),
                             );
                           }
                         }}
@@ -1031,7 +1097,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                   toast.success(t(($) => $.releases.event.cancelled));
                   setCancelOpen(false);
                 } catch (err) {
-                  toast.error(err instanceof Error ? err.message : String(err));
+                  toast.error(friendlyMutationError(err));
                 }
               }}
             >
@@ -1074,7 +1140,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                   toast.success(t(($) => $.releases.merge.aborted_toast));
                   setAbortOpen(false);
                 } catch (err) {
-                  toast.error(err instanceof Error ? err.message : String(err));
+                  toast.error(friendlyMutationError(err));
                 }
               }}
             >
@@ -1095,7 +1161,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
             toast.success(t(($) => $.releases.merge.resumed_toast));
             setResumeOpen(false);
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : String(err));
+            toast.error(friendlyMutationError(err));
           }
         }}
         submitting={resumeMerge.isPending}
@@ -1137,7 +1203,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                   setVerifyOpen(false);
                   setVerifyNote("");
                 } catch (err) {
-                  toast.error(err instanceof Error ? err.message : String(err));
+                  toast.error(friendlyMutationError(err));
                 }
               }}
               disabled={markVerified.isPending}
@@ -1189,7 +1255,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                   setSmokePassOpen(false);
                   setSmokePassNote("");
                 } catch (err) {
-                  toast.error(err instanceof Error ? err.message : String(err));
+                  toast.error(friendlyMutationError(err));
                 }
               }}
               disabled={markSmokePass.isPending}
@@ -1244,7 +1310,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                   setUnverifyOpen(false);
                   setUnverifyReason("");
                 } catch (err) {
-                  toast.error(err instanceof Error ? err.message : String(err));
+                  toast.error(friendlyMutationError(err));
                 }
               }}
             >
@@ -1349,7 +1415,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
                   setPromoteRollbackPlan("");
                   setPromoteAck(false);
                 } catch (err) {
-                  toast.error(err instanceof Error ? err.message : String(err));
+                  toast.error(friendlyMutationError(err));
                 }
               }}
             >
@@ -1381,7 +1447,7 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
             setRollbackOpen(false);
             setRollbackReason("");
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : String(err));
+            toast.error(friendlyMutationError(err));
           }
         }}
         submitting={rollback.isPending}
@@ -1911,18 +1977,36 @@ function MergeStatePill({ pr }: { pr: ReleasePullRequest }) {
 function StageProgressBar({
   currentStage,
   merging,
+  hasStaging,
 }: {
   currentStage: string;
   merging: { merged: number; total: number } | null;
+  // True when the project has a `kind='staging'` deploy environment.
+  // When false, the in_staging + verifying stages are filtered out of
+  // the bar to match the backend flow that skips them for direct-to-
+  // prod projects. Defaults to TRUE so any caller that hasn't been
+  // updated to pass this prop preserves the old behavior (show all
+  // 7 stages) — safer regression default.
+  hasStaging?: boolean;
 }) {
   const { t } = useT("ship");
-  const currentIdx = STAGE_PROGRESS.findIndex((s) => s.key === currentStage);
+  const visibleStages =
+    hasStaging === false
+      ? STAGE_PROGRESS.filter((s) => !STAGING_ONLY_STAGES.has(s.key))
+      : STAGE_PROGRESS;
+  const currentIdx = visibleStages.findIndex((s) => s.key === currentStage);
   return (
     <ol
-      className="grid grid-cols-7 gap-1 text-[11px]"
+      className={cn(
+        "grid gap-1 text-[11px]",
+        // Grid columns adapt to the visible count so the chips
+        // re-flow evenly when staging stages are hidden.
+        visibleStages.length === 7 && "grid-cols-7",
+        visibleStages.length === 5 && "grid-cols-5",
+      )}
       data-testid="release-stage-progress"
     >
-      {STAGE_PROGRESS.map((s, i) => {
+      {visibleStages.map((s, i) => {
         const reached = currentIdx >= 0 && i <= currentIdx;
         const isMergingStep = s.key === "merging" && merging !== null;
         return (
@@ -2632,7 +2716,7 @@ function OpenReleaseChannelButton({ releaseId }: { releaseId: string }) {
         navigation.push(`/${slug}/channels/${name}`);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
+      toast.error(friendlyMutationError(err));
     }
   };
 

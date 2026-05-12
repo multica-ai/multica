@@ -474,6 +474,27 @@ func (q *Queries) ListRecentDeploysByEnvironment(ctx context.Context, arg ListRe
 	return items, nil
 }
 
+const projectHasStagingEnv = `-- name: ProjectHasStagingEnv :one
+SELECT EXISTS (
+    SELECT 1 FROM deploy_environment
+    WHERE project_id = $1 AND kind = 'staging'
+)::bool AS has_staging
+`
+
+// Returns TRUE when the project has at least one deploy_environment
+// row with kind='staging'. Used by the release stage flow to decide
+// whether merging → in_staging (project has staging) or
+// merging → promoting (project ships direct-to-prod). Existence-
+// based: the staging env may or may not have a deploy_workflow_filename
+// configured; if the row exists at all, the release goes through
+// staging stages.
+func (q *Queries) ProjectHasStagingEnv(ctx context.Context, projectID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, projectHasStagingEnv, projectID)
+	var has_staging bool
+	err := row.Scan(&has_staging)
+	return has_staging, err
+}
+
 const updateDeployEnvironment = `-- name: UpdateDeployEnvironment :one
 UPDATE deploy_environment SET
     name                     = COALESCE($2, name),

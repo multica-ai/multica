@@ -406,22 +406,30 @@ func recordRunAsDeployIfNew(
 			break
 		}
 	}
-	if envID.Valid {
-		// Dedup: have we already recorded a deploy with this exact
-		// (env, sha)? Poller runs every 2 minutes; without this guard
-		// we'd insert a duplicate row on every tick.
-		existing, err := queries.GetDeployByEnvAndSHA(ctx, db.GetDeployByEnvAndSHAParams{
-			EnvironmentID: envID,
-			Sha:           run.HeadSHA,
-		})
-		if err == nil {
-			return existing, true
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("ship hub deploy poller: dedup lookup failed",
-				"env_id", envID, "sha", run.HeadSHA, "error", err)
-			return db.Deploy{}, false
-		}
+	if !envID.Valid {
+		// No env of this kind for the project. Phantom-env defense:
+		// the poller used to auto-create one here, which produced
+		// stuck-in-staging releases on direct-to-prod projects.
+		// Skip silently — the operator can create the env explicitly
+		// in Settings → Deploy Environments when they're ready.
+		slog.Debug("ship hub deploy poller: no env of kind, skipping",
+			"project_id", projectID, "kind", envKind, "sha", run.HeadSHA)
+		return db.Deploy{}, false
+	}
+	// Dedup: have we already recorded a deploy with this exact
+	// (env, sha)? Poller runs every 2 minutes; without this guard
+	// we'd insert a duplicate row on every tick.
+	existing, err := queries.GetDeployByEnvAndSHA(ctx, db.GetDeployByEnvAndSHAParams{
+		EnvironmentID: envID,
+		Sha:           run.HeadSHA,
+	})
+	if err == nil {
+		return existing, true
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("ship hub deploy poller: dedup lookup failed",
+			"env_id", envID, "sha", run.HeadSHA, "error", err)
+		return db.Deploy{}, false
 	}
 	return upsertSyntheticDeploy(ctx, queries, workspaceID, projectID, envKind, run)
 }
@@ -601,26 +609,27 @@ func upsertSyntheticDeploy(
 		}
 	}
 	if env == nil {
-		// First-deploy case — create a minimal env so the deploy row
-		// has a parent. Same shape as the MarkReleaseStagingDeployed
-		// handler's create path.
-		name := "Staging"
-		if envKind == db.DeployEnvironmentKindProduction {
-			name = "Production"
-		}
-		created, err := queries.UpsertDeployEnvironment(ctx, db.UpsertDeployEnvironmentParams{
-			WorkspaceID:  workspaceID,
-			ProjectID:    projectID,
-			Kind:         envKind,
-			Name:         name,
-			TargetBranch: "main",
-		})
-		if err != nil {
-			slog.Warn("ship hub deploy poller: create deploy env failed",
-				"project_id", projectID, "kind", envKind, "error", err)
-			return db.Deploy{}, false
-		}
-		env = &created
+		// Pre-fix: the poller auto-created a deploy_environment row
+		// here ("Staging" / "Production") on first sight of a
+		// successful workflow run. That produced phantom envs: a
+		// project that ships direct-to-prod would still get a
+		// `kind='staging'` row materialized as soon as any workflow
+		// run was observed, and the release flow would then park
+		// every release in `in_staging` forever (see #46's release
+		// page for the exact symptom).
+		//
+		// Post-fix: the poller is read-only with respect to env
+		// creation. If no env of the right kind exists, we skip the
+		// deploy recording silently. The operator must explicitly
+		// create envs via the Settings → Deploy Environments UI or
+		// via the user-initiated "Mark deploy as landed" path (which
+		// is intentionally explicit — see MarkReleaseStagingDeployed
+		// in the handler package). Workflow runs against a project
+		// with no configured env simply don't produce deploy rows
+		// until an env is created.
+		slog.Debug("ship hub deploy poller: no env of kind, skipping deploy record",
+			"project_id", projectID, "kind", envKind, "sha", run.HeadSHA)
+		return db.Deploy{}, false
 	}
 
 	now := pgtype.Timestamptz{Time: time.Now(), Valid: true}

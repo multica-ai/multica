@@ -728,6 +728,13 @@ func (s *Service) failPRAndPause(
 // completeMergeTrain transitions stage merging → in_staging when every
 // queued PR has been consumed (merged or skipped). Phase 7c picks up
 // staging deploy from there.
+//
+// Projects without a staging deploy environment skip the staging
+// stages entirely: merging → promoting → in_production. This avoids
+// parking releases in `in_staging` forever waiting for a staging
+// deploy that will never come (a real ROA-216-class outage —
+// see #46's release page for the symptom). The presence check is
+// existence-based on a deploy_environment row with kind='staging'.
 func (s *Service) completeMergeTrain(
 	ctx context.Context,
 	releaseID pgtype.UUID,
@@ -735,13 +742,69 @@ func (s *Service) completeMergeTrain(
 	deps *MergeTrainDeps,
 ) error {
 	now := s.now()
-	updated, err := s.Q.UpdateReleaseStage(ctx, db.UpdateReleaseStageParams{
-		ID:       releaseID,
-		Stage:    db.ReleaseStageInStaging,
-		MergedAt: pgtype.Timestamptz{Time: now, Valid: true},
-	})
+
+	// Read the project's staging-env presence to pick the next stage.
+	// We need the release row first to discover project_id; fetched
+	// here rather than threaded through the caller because every code
+	// path into completeMergeTrain has the release id but not always
+	// the project id.
+	release, err := s.Q.GetRelease(ctx, releaseID)
 	if err != nil {
-		return fmt.Errorf("update stage to in_staging: %w", err)
+		return fmt.Errorf("fetch release for staging-env check: %w", err)
+	}
+	hasStaging, err := s.Q.ProjectHasStagingEnv(ctx, release.ProjectID)
+	if err != nil {
+		// Defensive: if the lookup fails, default to the old behavior
+		// (transition to in_staging). Better to be stuck in staging
+		// than to skip QA gates on a project that actually has them.
+		slog.Warn("ship: project staging-env check failed; defaulting to in_staging",
+			"release_id", uuidString(releaseID),
+			"project_id", uuidString(release.ProjectID),
+			"error", err)
+		hasStaging = true
+	}
+
+	nextStage := db.ReleaseStageInStaging
+	if !hasStaging {
+		// No staging env → skip merging → in_staging → verifying and
+		// land at `promoting`. We stamp staged_at AND a synthetic
+		// qa_verified_at so the timeline view doesn't show a gap and
+		// so PromoteRelease's `qa_verified_at IS NOT NULL` precondition
+		// (when present) still holds.
+		nextStage = db.ReleaseStagePromoting
+	}
+
+	updateParams := db.UpdateReleaseStageParams{
+		ID:       releaseID,
+		Stage:    nextStage,
+		MergedAt: pgtype.Timestamptz{Time: now, Valid: true},
+	}
+	if !hasStaging {
+		// Backfill the staged_at timestamp so the timeline reads
+		// "merged → staged → promoting" rather than "merged → ???".
+		// staged_at is COALESCE'd in the SQL — if a real staging deploy
+		// later somehow gets recorded against this release, it
+		// preserves this synthetic value.
+		updateParams.StagedAt = pgtype.Timestamptz{Time: now, Valid: true}
+	}
+	updated, err := s.Q.UpdateReleaseStage(ctx, updateParams)
+	if err != nil {
+		return fmt.Errorf("update stage to %s: %w", nextStage, err)
+	}
+
+	// Projects without staging additionally need qa_verified_at stamped
+	// because PromoteRelease (and any future auto-promote) treats a
+	// missing verification as the in_staging → verifying gate. We use
+	// the same `now` so the timeline is coherent.
+	if !hasStaging {
+		if _, err := s.Q.SetReleaseQAVerified(ctx, db.SetReleaseQAVerifiedParams{
+			ID:           releaseID,
+			QaVerifiedAt: pgtype.Timestamptz{Time: now, Valid: true},
+			QaVerifiedBy: actor,
+		}); err != nil {
+			slog.Warn("ship: stamp synthetic qa_verified failed",
+				"release_id", uuidString(releaseID), "error", err)
+		}
 	}
 	// Phase 7c — stamp the merged_main_sha. The LAST merged PR's
 	// merge sha is the commit the project's CI/CD will deploy to
