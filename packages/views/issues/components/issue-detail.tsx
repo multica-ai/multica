@@ -21,6 +21,7 @@ import {
   Plus,
   Tag,
   Users,
+  X,
 } from "lucide-react";
 import { PageHeader } from "../../layout/page-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -1153,6 +1154,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     setAutoOpenProp(null);
   }, [autoOpenProp]);
 
+  const handleRemoveParent = useCallback(() => {
+    if (!issue) return;
+    handleUpdateField({ parent_issue_id: null });
+    toast.success(t(($) => $.detail.remove_parent_toast_success));
+  }, [issue, handleUpdateField, t]);
+
   const handleToggleSidebar = useCallback(() => {
     if (isMobile) {
       setMobileSidebarOpen((open) => !open);
@@ -1362,14 +1369,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${parentIssueOpen ? "rotate-90" : ""}`} />
           </button>
           {parentIssueOpen && <div className="pl-2">
-            <AppLink
-              href={paths.issueDetail(parentIssue.id)}
-              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
-            >
-              <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
-              <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
-              <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
-            </AppLink>
+            <div className="group/parent-link flex items-center gap-1 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors">
+              <AppLink
+                href={paths.issueDetail(parentIssue.id)}
+                className="group/parent-link-inner flex min-w-0 flex-1 items-center gap-1.5"
+              >
+                <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
+                <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
+                <span className="truncate group-hover/parent-link-inner:text-foreground">{parentIssue.title}</span>
+              </AppLink>
+              <button
+                type="button"
+                onClick={handleRemoveParent}
+                aria-label={t(($) => $.detail.remove_parent_aria)}
+                className="shrink-0 inline-flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover/parent-link:opacity-100 focus-visible:opacity-100 hover:bg-accent hover:text-foreground transition-opacity cursor-pointer"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>}
         </div>
       )}
