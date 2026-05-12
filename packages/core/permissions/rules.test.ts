@@ -12,6 +12,7 @@ import {
   canEditSkill,
   canManageMembers,
   canUpdateWorkspaceSettings,
+  isAgentSelectable,
 } from "./rules";
 
 const ALICE = "user-alice";
@@ -142,6 +143,36 @@ describe("canEditAgent", () => {
   });
 });
 
+describe("isAgentSelectable", () => {
+  it("workspace-visibility agent is selectable by anyone", () => {
+    const a = makeAgent({ visibility: "workspace", owner_id: ALICE });
+    expect(isAgentSelectable(a, BOB)).toBe(true);
+  });
+  it("private agent is selectable by owner", () => {
+    const a = makeAgent({ visibility: "private", owner_id: ALICE });
+    expect(isAgentSelectable(a, ALICE)).toBe(true);
+  });
+  it("private agent is NOT selectable by non-owner (even admin context)", () => {
+    const a = makeAgent({ visibility: "private", owner_id: ALICE });
+    expect(isAgentSelectable(a, BOB)).toBe(false);
+  });
+  it("archived agent is never selectable", () => {
+    const a = makeAgent({
+      visibility: "workspace",
+      archived_at: "2026-04-02T00:00:00Z",
+    });
+    expect(isAgentSelectable(a, ALICE)).toBe(false);
+  });
+  it("legacy agent (owner_id null) is selectable by anyone", () => {
+    const a = makeAgent({ visibility: "private", owner_id: null });
+    expect(isAgentSelectable(a, BOB)).toBe(true);
+  });
+  it("null userId cannot select private agents", () => {
+    const a = makeAgent({ visibility: "private", owner_id: ALICE });
+    expect(isAgentSelectable(a, null)).toBe(false);
+  });
+});
+
 describe("canAssignAgentToIssue", () => {
   it("allows any member to assign workspace-visibility agents", () => {
     const a = makeAgent({ visibility: "workspace", owner_id: ALICE });
@@ -161,11 +192,17 @@ describe("canAssignAgentToIssue", () => {
       canAssignAgentToIssue(a, { userId: ALICE, role: "member" }).allowed,
     ).toBe(true);
   });
-  it("allows workspace admin to assign someone else's private agent", () => {
+  it("denies workspace admin from assigning someone else's private agent", () => {
     const a = makeAgent({ visibility: "private", owner_id: ALICE });
-    expect(
-      canAssignAgentToIssue(a, { userId: BOB, role: "admin" }).allowed,
-    ).toBe(true);
+    const d = canAssignAgentToIssue(a, { userId: BOB, role: "admin" });
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("private_visibility");
+  });
+  it("denies workspace owner from assigning someone else's private agent", () => {
+    const a = makeAgent({ visibility: "private", owner_id: ALICE });
+    const d = canAssignAgentToIssue(a, { userId: BOB, role: "owner" });
+    expect(d.allowed).toBe(false);
+    expect(d.reason).toBe("private_visibility");
   });
   it("denies a plain member from assigning someone else's private agent", () => {
     const a = makeAgent({ visibility: "private", owner_id: ALICE });

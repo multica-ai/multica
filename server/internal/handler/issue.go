@@ -1596,10 +1596,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 // validateAssigneePair verifies the (assignee_type, assignee_id) pair refers
 // to an existing entity in the workspace. For agent assignees it also rejects
-// archived agents and runs the private-agent gate via canAccessPrivateAgent
-// — assigning an issue is a task-producing surface, so it must use the same
-// predicate as chat / @-mention / history. Agent callers (X-Agent-ID) bypass
-// the gate so A2A flows can still hand work off to private agents.
+// archived agents and enforces uniform visibility (OPE-531): private agents
+// are only assignable by their owner — admin/owner roles do NOT bypass this
+// gate. Agent callers (A2A via X-Agent-ID) are exempt so inter-agent
+// delegation still works.
 //
 // Returns (statusCode, errorMessage). statusCode == 0 means the pair is valid;
 // callers should treat any non-zero status as a rejection and surface it back
@@ -1637,9 +1637,15 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 		if agent.ArchivedAt.Valid {
 			return http.StatusBadRequest, "cannot assign to archived agent"
 		}
-		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-		if !h.canAccessPrivateAgent(ctx, agent, actorType, actorID, workspaceID) {
-			return http.StatusForbidden, "cannot assign to private agent"
+		// Uniform selection policy (OPE-531): private agents are only
+		// assignable by their owner — no admin/owner bypass. Agent callers
+		// (A2A) are exempt so inter-agent delegation still works.
+		actorType, _ := h.resolveActor(r, requestUserID(r), workspaceID)
+		if agent.Visibility == "private" && actorType != "agent" {
+			userID := requestUserID(r)
+			if uuidToString(agent.OwnerID) != userID {
+				return http.StatusForbidden, "cannot assign to private agent"
+			}
 		}
 		return 0, ""
 	default:
