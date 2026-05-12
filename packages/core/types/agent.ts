@@ -21,6 +21,15 @@ export interface RuntimeDevice {
   // MULTICA_ENABLE_SANDBOX env var; true/false = explicit on/off override.
   sandbox_enabled: boolean | null;
   last_seen_at: string | null;
+  // CEREBRO-PATCH(runtime-pause-fields): pause fields surfaced by the
+  // cerebro pause/auto-pause feature (server side: 9016_cerebro_runtime_pause
+  // + handler/runtime.go runtime-pause-response). Declared here (rather than
+  // only in cerebro-types/augment.ts) because deriveRuntimeHealth lives in
+  // this package and needs visibility on `paused_at`. Optional to match the
+  // wire contract — older clients won't include them.
+  paused_at?: string | null;
+  unpause_at?: string | null;
+  pause_reason?: string | null;
   created_at: string;
   updated_at: string;
 }

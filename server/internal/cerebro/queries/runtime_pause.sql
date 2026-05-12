@@ -25,6 +25,15 @@ SET paused_at    = NULL,
 WHERE id = $1
 RETURNING *;
 
+-- name: GetAgentRuntimePauseSnapshot :one
+-- Reads the current pause fields for a runtime. Used by UnpauseRuntime to
+-- capture paused_at *before* clearing it, so the resume-task selection can
+-- key on the original pause-start timestamp (the resume window is anchored
+-- on when the pause began, not when it ends).
+SELECT id, paused_at, unpause_at, pause_reason
+FROM agent_runtime
+WHERE id = $1;
+
 -- name: ListRuntimesDueForUnpause :many
 -- Used by the unpause sweeper to find runtimes whose scheduled unpause_at has
 -- passed. Backed by idx_agent_runtime_unpause_due (partial on paused rows).
@@ -49,28 +58,45 @@ WHERE runtime_id = $1
 RETURNING *;
 
 -- name: ListResumableTasksForRuntime :many
--- Called on unpause: returns every leaf task on this runtime that the unpause
--- path should resume — both 'runtime_paused' (interrupted by the pause) and
--- retry-exhausted leaves whose original failure looked like a transient
--- provider error (rate_limit / runtime_offline / runtime_recovery / timeout).
--- "Leaf" means no descendant retry already exists, which prevents resuming a
--- chain that has already been continued via auto-retry while paused.
+-- Called on unpause. Returns leaf tasks on this runtime that the unpause
+-- path should resume. Two categories:
 --
--- Bounded by the 24h window so an unpause weeks after the failure doesn't
--- silently rerun tasks the user has long since moved past. The window is
--- deliberately generous — a rate-limit pause typically resolves in hours, not
--- days, but a pause that was forgotten and manually unpaused next morning
--- should still pick up yesterday's interrupted work.
+--   1. failure_reason='runtime_paused' — tasks the pause itself interrupted
+--      (suspended via SuspendActiveTasksForRuntime when pause kicked in).
+--      Returned unconditionally; the leaf-only filter excludes pause episodes
+--      that have already been resumed (descendant retry exists).
+--
+--   2. Transient-error tasks ('rate_limit','runtime_offline','runtime_recovery',
+--      'timeout') that failed in the 10 minutes immediately before paused_at.
+--      These are the tasks whose failures triggered the pause — typically 1-3
+--      tasks that hit the provider rate-limit or expired token before
+--      SuspendActiveTasks could suspend the rest. Older transient failures
+--      are by definition unrelated to *this* pause episode and must not be
+--      resumed by it.
+--
+-- $2 is the pause-start timestamp (captured by Go via
+-- GetAgentRuntimePauseSnapshot before UnpauseAgentRuntime clears it). If
+-- $2 IS NULL the caller could not determine when the pause started — fall
+-- back to category 1 only, which keeps idempotent unpause-of-unpaused safe.
+--
+-- "Leaf" means no descendant retry already exists, preventing duplicate
+-- resumption from manual reruns, autopilot ticks, or prior unpauses.
 SELECT t.* FROM agent_task_queue t
 WHERE t.runtime_id = $1
   AND t.status = 'failed'
-  AND t.completed_at >= now() - INTERVAL '24 hours'
-  AND t.failure_reason IN (
-        'runtime_paused',
-        'rate_limit',
-        'runtime_offline',
-        'runtime_recovery',
-        'timeout'
+  AND (
+        t.failure_reason = 'runtime_paused'
+        OR (
+              sqlc.narg('paused_at')::timestamptz IS NOT NULL
+              AND t.failure_reason IN (
+                    'rate_limit',
+                    'runtime_offline',
+                    'runtime_recovery',
+                    'timeout'
+                  )
+              AND t.completed_at >= sqlc.narg('paused_at')::timestamptz - INTERVAL '10 minutes'
+              AND t.completed_at <  sqlc.narg('paused_at')::timestamptz
+            )
       )
   AND NOT EXISTS (
         SELECT 1 FROM agent_task_queue d WHERE d.parent_task_id = t.id

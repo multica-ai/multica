@@ -22,8 +22,10 @@
     "label_created": "Recently created"
   },
   "availability": {
+    "_comment": "CEREBRO-PATCH(i18n-availability-paused): paused label for cerebro pause availability state",
     "all": "All",
     "online": "Online",
+    "paused": "Paused",
     "unstable": "Unstable",
     "offline": "Offline"
   },

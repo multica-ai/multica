@@ -109,12 +109,33 @@ func (s *Service) PauseRuntime(ctx context.Context, runtimeID pgtype.UUID, opts 
 
 // UnpauseRuntime clears pause state and resumes any work that was suspended
 // by the pause. Resumption keys on failure_reason='runtime_paused' (set by
-// PauseRuntime) plus other transient-error leaves within a 24h window.
+// PauseRuntime) plus the 1-3 transient-error tasks that triggered the
+// pause (failed in the 10 minutes immediately before paused_at).
+//
+// Older transient failures on the same runtime are deliberately excluded —
+// they belong to earlier, already-resolved pause episodes (or were never
+// pause-related at all) and re-queueing them would surface as the "pause
+// resumed 20+ tasks I didn't expect" bug.
 //
 // Idempotent — calling on a runtime that isn't paused is a cheap no-op
-// (the SQL UPDATE just sets already-NULL columns to NULL, no resume
-// candidates qualify).
+// (paused_at is NULL → category-2 transient branch is skipped, and any
+// category-1 'runtime_paused' leaves still hanging around from a prior
+// crashed unpause are picked up — which is the desired recovery behaviour).
 func (s *Service) UnpauseRuntime(ctx context.Context, runtimeID pgtype.UUID) (handler.RuntimePauseState, error) {
+	// Snapshot paused_at *before* clearing it — the resume-task selection
+	// keys on when the pause started, not when it ended. Skipped on
+	// not-found / errors: ListResumableTasksForRuntime handles a NULL
+	// snapshot by falling back to category-1 only.
+	pausedAt := pgtype.Timestamptz{}
+	if snap, err := s.Cerebro.GetAgentRuntimePauseSnapshot(ctx, runtimeID); err == nil {
+		pausedAt = snap.PausedAt
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("unpause runtime: failed to snapshot paused_at",
+			"runtime_id", util.UUIDToString(runtimeID),
+			"error", err,
+		)
+	}
+
 	rt, err := s.Cerebro.UnpauseAgentRuntime(ctx, runtimeID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -123,7 +144,10 @@ func (s *Service) UnpauseRuntime(ctx context.Context, runtimeID pgtype.UUID) (ha
 		return handler.RuntimePauseState{}, fmt.Errorf("unpause runtime: %w", err)
 	}
 
-	resumable, err := s.Cerebro.ListResumableTasksForRuntime(ctx, runtimeID)
+	resumable, err := s.Cerebro.ListResumableTasksForRuntime(ctx, cerebrodb.ListResumableTasksForRuntimeParams{
+		RuntimeID: runtimeID,
+		PausedAt:  pausedAt,
+	})
 	if err != nil {
 		slog.Warn("unpause runtime: failed to list resumable tasks",
 			"runtime_id", util.UUIDToString(runtimeID),

@@ -19,6 +19,9 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
     owner_id: null,
     last_seen_at: new Date(FIXED_NOW - 10_000).toISOString(),
     sandbox_enabled: null,
+    paused_at: null,
+    unpause_at: null,
+    pause_reason: null,
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",
     ...overrides,
@@ -100,5 +103,33 @@ describe("deriveRuntimeHealth", () => {
         FIXED_NOW,
       ),
     ).toBe("offline");
+  });
+
+  it("returns paused when paused_at is set (even if status is online)", () => {
+    expect(
+      deriveRuntimeHealth(
+        makeRuntime({
+          status: "online",
+          paused_at: new Date(FIXED_NOW - 60_000).toISOString(),
+          unpause_at: new Date(FIXED_NOW + 5 * 60_000).toISOString(),
+          pause_reason: "auto",
+        }),
+        FIXED_NOW,
+      ),
+    ).toBe("paused");
+  });
+
+  it("returns paused when paused_at is set even if heartbeat is stale", () => {
+    expect(
+      deriveRuntimeHealth(
+        makeRuntime({
+          status: "offline",
+          last_seen_at: new Date(FIXED_NOW - 30 * 60_000).toISOString(),
+          paused_at: new Date(FIXED_NOW - 60_000).toISOString(),
+          pause_reason: "manual",
+        }),
+        FIXED_NOW,
+      ),
+    ).toBe("paused");
   });
 });

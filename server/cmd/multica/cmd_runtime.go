@@ -96,12 +96,37 @@ func runRuntimeList(cmd *cobra.Command, _ []string) error {
 			strVal(rt, "name"),
 			strVal(rt, "runtime_mode"),
 			strVal(rt, "provider"),
-			strVal(rt, "status"),
+			// CEREBRO-PATCH(runtime-cli-paused-status): when a runtime is
+			// paused (manual or auto), surface "paused" + reason + unpause
+			// time in the STATUS column so humans and agents reading the
+			// list immediately see that work is gated. Falls through to
+			// the raw status field when the runtime isn't paused.
+			runtimeStatusDisplay(rt),
 			strVal(rt, "last_seen_at"),
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+// runtimeStatusDisplay formats the STATUS column for the runtime list. If
+// the runtime is paused, we render "paused (auto until 14:23)" or
+// "paused (manual)" so the CLI matches the UI's pause-state surfacing.
+func runtimeStatusDisplay(rt map[string]any) string {
+	if pausedAt := strVal(rt, "paused_at"); pausedAt != "" {
+		reason := strVal(rt, "pause_reason")
+		if reason == "" {
+			reason = "paused"
+		}
+		if unpauseAt := strVal(rt, "unpause_at"); unpauseAt != "" {
+			if t, err := time.Parse(time.RFC3339, unpauseAt); err == nil {
+				return fmt.Sprintf("paused (%s until %s)", reason, t.Local().Format("15:04"))
+			}
+			return fmt.Sprintf("paused (%s until %s)", reason, unpauseAt)
+		}
+		return fmt.Sprintf("paused (%s)", reason)
+	}
+	return strVal(rt, "status")
 }
 
 func runRuntimeUsage(cmd *cobra.Command, args []string) error {

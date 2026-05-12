@@ -32,6 +32,11 @@
       "label": "在线",
       "description": "最近 45 秒内收到心跳。可以派发 task。"
     },
+    "_comment_paused": "CEREBRO-PATCH(i18n-runtime-health-paused): paused label/description for cerebro pause health state",
+    "paused": {
+      "label": "已暂停",
+      "description": "Runtime 已暂停 — 在恢复之前不会领取或执行 task。"
+    },
     "recently_lost": {
       "label": "最近失联",
       "description": "失联不到 5 分钟——通常是短暂的网络抖动。"

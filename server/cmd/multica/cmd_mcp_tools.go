@@ -958,4 +958,39 @@ CAPTURE the returned new work_session_id and pass it to subsequent ` + "`report_
 		}
 		return mcp.TextResult(fmt.Sprintf("Forked session %s → new work_session_id %s on issue %s%s. Pass the new work_session_id to every subsequent report_activity / complete_work call.", wsID, newID, issueID, ambientNote)), nil
 	})
+
+	// -----------------------------------------------------------------------
+	// list_runtimes (CEREBRO-PATCH(mcp-list-runtimes))
+	//
+	// Exposes runtime health + pause state to agents so they can tell when a
+	// runtime is paused (manual or auto via rate-limit / monthly-cap) and
+	// shouldn't be assigned work. Without this, an agent that wants to route
+	// a task by checking runtime availability has to fall back to "claim
+	// returned empty queue" — which is indistinguishable from "no work" and
+	// hides the actual gate.
+	// -----------------------------------------------------------------------
+	srv.RegisterTool(mcp.Tool{
+		Name: "list_runtimes",
+		Description: `List runtimes in the current workspace with health and pause state. Use this BEFORE routing or suggesting work to a specific runtime/agent so you can detect paused runtimes and route around them.
+
+Each runtime in the result includes:
+- id, name, runtime_mode (local/cloud), provider, status (online/offline)
+- last_seen_at — when the daemon last heartbeated
+- paused_at — non-null if the runtime is paused; null otherwise
+- unpause_at — scheduled auto-unpause time (null = pause is open-ended / manual)
+- pause_reason — "auto" (rate-limit/quota detected) or "manual" (operator-paused)
+
+A runtime with paused_at != null will silently refuse all task dispatches until unpaused. Treat it as unavailable for assignment.`,
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		var result any
+		_, err := client.GetJSONWithHeaders(ctx, "/api/runtimes", &result)
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return jsonText(result)
+	})
 }

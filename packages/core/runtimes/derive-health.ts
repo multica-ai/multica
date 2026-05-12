@@ -1,7 +1,9 @@
+// CEREBRO-PATCH(runtime-health-paused-derive): cerebro modification of upstream file
 // Pure derivation of a runtime's user-facing "health" state from the raw
-// server fields (status + last_seen_at). Splitting the offline state into
-// time-bucketed flavors lets the UI distinguish "just lost — likely
-// transient" from "long gone — needs attention" with no schema change.
+// server fields (status + last_seen_at + cerebro pause fields). Splitting
+// the offline state into time-bucketed flavors lets the UI distinguish
+// "just lost — likely transient" from "long gone — needs attention" with
+// no schema change.
 
 import type { AgentRuntime } from "../types";
 import type { RuntimeHealth } from "./types";
@@ -13,6 +15,12 @@ const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const ABOUT_TO_GC_THRESHOLD_MS = 6 * 24 * 3600 * 1000; // 6 days
 
 export function deriveRuntimeHealth(runtime: AgentRuntime, now: number): RuntimeHealth {
+  // CEREBRO-PATCH(runtime-health-paused-derive): pause takes precedence over
+  // heartbeat-derived state. A paused runtime is typically still online (its
+  // daemon keeps heartbeating); the user-visible truth is "pause is the
+  // gating signal", so we surface it first.
+  if (runtime.paused_at) return "paused";
+
   if (runtime.status === "online") return "online";
 
   // No last_seen timestamp ever recorded — treat as long-offline. This is

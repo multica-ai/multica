@@ -27,8 +27,14 @@
 // during the runtime sweeper's grace window (offline < 5 min); it decays
 // into `offline` with no new server data, hence the 30s presence tick on
 // the consuming hooks.
+// CEREBRO-PATCH(agent-availability-paused): "paused" is a cerebro-only
+// availability state — surfaces the runtime pause feature on agent
+// presence dots so users (and agents reading the agent list) know that
+// work won't move until the runtime is resumed. NOT folded into "offline"
+// because pause is intentional / time-bounded; offline is involuntary.
 export type AgentAvailability =
   | "online" // 🟢 runtime online and reachable
+  | "paused" // ◐ runtime paused (manual or auto) — work gated until resumed
   | "unstable" // 🟡 runtime recently_lost (< 5 min) — transient
   | "offline"; // ⚫ runtime long offline / missing / never registered
 

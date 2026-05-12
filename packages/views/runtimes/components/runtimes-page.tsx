@@ -23,11 +23,14 @@ import { RuntimeList } from "./runtime-list";
 import { useT } from "../../i18n";
 
 type RuntimeFilter = "mine" | "all";
-type HealthFilter = "all" | "online" | "recently_lost" | "offline" | "about_to_gc";
+// CEREBRO-PATCH(runtime-page-paused-filter): include "paused" so the health
+// filter pills and counts surface the cerebro pause state.
+type HealthFilter = "all" | "online" | "paused" | "recently_lost" | "offline" | "about_to_gc";
 
 const HEALTH_ORDER: HealthFilter[] = [
   "all",
   "online",
+  "paused",
   "recently_lost",
   "offline",
   "about_to_gc",
@@ -36,6 +39,7 @@ const HEALTH_ORDER: HealthFilter[] = [
 // Dot tokens stay in code — labels/descriptions flow through useT.
 const HEALTH_DOT: Record<Exclude<HealthFilter, "all">, string> = {
   online: "bg-success",
+  paused: "bg-brand",
   recently_lost: "bg-warning",
   offline: "bg-muted-foreground/40",
   about_to_gc: "bg-destructive",
@@ -102,6 +106,7 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
   const healthCounts = useMemo(() => {
     const counts: Record<Exclude<HealthFilter, "all">, number> = {
       online: 0,
+      paused: 0,
       recently_lost: 0,
       offline: 0,
       about_to_gc: 0,

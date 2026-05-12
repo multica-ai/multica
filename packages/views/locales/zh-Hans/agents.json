@@ -22,8 +22,10 @@
     "label_created": "最近创建"
   },
   "availability": {
+    "_comment": "CEREBRO-PATCH(i18n-availability-paused): paused label for cerebro pause availability state",
     "all": "全部",
     "online": "在线",
+    "paused": "已暂停",
     "unstable": "不稳定",
     "offline": "离线"
   },

@@ -210,8 +210,12 @@ export function AgentsPage() {
   // reflect "if I clicked this chip, this many agents would match"
   // rather than collapsing to 0 for the unselected chips.
   const availabilityCounts = useMemo(() => {
+    // CEREBRO-PATCH(agent-availability-paused-count): include paused in
+    // the availability counts so the filter chip badge reflects the new
+    // cerebro pause availability state.
     const counts: Record<AgentAvailability, number> = {
       online: 0,
+      paused: 0,
       unstable: 0,
       offline: 0,
     };

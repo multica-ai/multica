@@ -263,6 +263,25 @@ function HealthCell({
   const labelOf = useHealthLabel();
   const health = deriveRuntimeHealth(runtime, now);
   const lastSeen = formatLastSeen(runtime.last_seen_at);
+  // CEREBRO-PATCH(runtime-list-paused-cell): when paused, show pause reason
+  // + auto-unpause time so humans can tell why work has stopped without
+  // opening the detail page.
+  if (health === "paused") {
+    const reason = runtime.pause_reason === "auto" ? "auto" : "manual";
+    const until = runtime.unpause_at ? formatLastSeen(runtime.unpause_at) : null;
+    return (
+      <div className="flex min-w-0 items-center gap-1.5">
+        <HealthIcon health={health} />
+        <span className="block min-w-0 truncate text-sm">
+          {labelOf(health)}
+          <span className="text-muted-foreground">
+            {" · "}{reason}
+            {until && ` · until ${until}`}
+          </span>
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="flex min-w-0 items-center gap-1.5">
       <HealthIcon health={health} />

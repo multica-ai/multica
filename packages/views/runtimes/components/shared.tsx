@@ -1,4 +1,7 @@
-import { Cloud, Monitor, Wifi, WifiHigh, WifiOff } from "lucide-react";
+// CEREBRO-PATCH(runtime-health-paused-visual): adds PauseCircle icon and
+// "paused" entries to the visual / icon / label maps so the cerebro pause
+// feature surfaces uniformly through HealthDot / HealthIcon / HealthBadge.
+import { Cloud, Monitor, PauseCircle, Wifi, WifiHigh, WifiOff } from "lucide-react";
 import { Badge } from "@multica/ui/components/ui/badge";
 import type { RuntimeHealth } from "@multica/core/runtimes";
 import { ProviderLogo } from "./provider-logo";
@@ -29,8 +32,11 @@ export function ProviderChip({ provider }: { provider: string }) {
 // colours — keeps the palette small and consistent with Skills.
 // Maps each derived 4-state runtime health to a semantic colour class.
 // Labels flow through useT — see useHealthLabel below.
+// Paused uses the brand tone (not warning) because it's an intentional
+// state, not an anomaly — visually distinct from amber 'recently_lost'.
 const HEALTH_VISUAL: Record<RuntimeHealth, { dot: string; tone: string }> = {
   online: { dot: "bg-success", tone: "bg-success/10 text-success" },
+  paused: { dot: "bg-brand", tone: "bg-brand/10 text-brand" },
   recently_lost: { dot: "bg-warning", tone: "bg-warning/10 text-warning" },
   offline: { dot: "bg-muted-foreground/40", tone: "bg-muted text-muted-foreground" },
   about_to_gc: { dot: "bg-destructive", tone: "bg-destructive/10 text-destructive" },
@@ -71,6 +77,7 @@ const HEALTH_ICON: Record<
   { Icon: typeof Wifi; tone: string }
 > = {
   online: { Icon: Wifi, tone: "text-success" },
+  paused: { Icon: PauseCircle, tone: "text-brand" },
   recently_lost: { Icon: WifiHigh, tone: "text-warning" },
   offline: { Icon: WifiOff, tone: "text-muted-foreground" },
   about_to_gc: { Icon: WifiOff, tone: "text-destructive" },
@@ -95,6 +102,7 @@ export function HealthIcon({
 // `useHealthLabel` hook below instead.
 const HEALTH_LABEL_EN: Record<RuntimeHealth, string> = {
   online: "Online",
+  paused: "Paused",
   recently_lost: "Recently lost",
   offline: "Offline",
   about_to_gc: "About to GC",

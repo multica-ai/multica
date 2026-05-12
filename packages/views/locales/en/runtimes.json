@@ -32,6 +32,11 @@
       "label": "Online",
       "description": "Heartbeat received in the last 45s. Ready to dispatch tasks."
     },
+    "_comment_paused": "CEREBRO-PATCH(i18n-runtime-health-paused): paused label/description for cerebro pause health state",
+    "paused": {
+      "label": "Paused",
+      "description": "Runtime is paused — won't claim or run tasks until resumed."
+    },
     "recently_lost": {
       "label": "Recently lost",
       "description": "Lost contact under 5 minutes ago — often a brief network blip."

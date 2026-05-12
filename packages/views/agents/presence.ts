@@ -1,9 +1,13 @@
+// CEREBRO-PATCH(agent-availability-paused-visual): adds PauseCircle icon
+// and a "paused" entry to availabilityConfig/availabilityOrder so the
+// cerebro pause state surfaces on agent presence dots and filters.
 import {
   AlertCircle,
   CircleDot,
   CircleSlash,
   Clock,
   Loader2,
+  PauseCircle,
   PlugZap,
   type LucideIcon,
 } from "lucide-react";
@@ -50,6 +54,14 @@ export const availabilityConfig: Record<AgentAvailability, AvailabilityVisual> =
     textClass: "text-success",
     icon: CircleDot,
   },
+  // Paused uses brand tone — intentional state, not anomaly. Distinct from
+  // amber 'unstable' (transient signal) and grey 'offline' (long-gone).
+  paused: {
+    label: "Paused",
+    dotClass: "bg-brand",
+    textClass: "text-brand",
+    icon: PauseCircle,
+  },
   unstable: {
     label: "Unstable",
     dotClass: "bg-warning",
@@ -68,6 +80,7 @@ export const availabilityConfig: Record<AgentAvailability, AvailabilityVisual> =
 // progression rather than alphabetical.
 export const availabilityOrder: AgentAvailability[] = [
   "online",
+  "paused",
   "unstable",
   "offline",
 ];

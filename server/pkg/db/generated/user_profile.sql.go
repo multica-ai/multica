@@ -26,6 +26,8 @@ WHERE user_id = $1
 `
 
 // CEREBRO-PATCH(sqlc-user-profile): cerebro modification of upstream file
+// CEREBRO-PATCH(sqlc-user-profile-v2): JEH-1031 — query reflects 4 scope
+// ratings + custom_prompt + prompt_mode columns.
 func (q *Queries) GetUserProfile(ctx context.Context, userID pgtype.UUID) (UserProfile, error) {
 	row := q.db.QueryRow(ctx, getUserProfile, userID)
 	var i UserProfile

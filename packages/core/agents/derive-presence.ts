@@ -23,6 +23,11 @@ import type {
 // `about_to_gc` into `offline` — both mean "long unreachable" from the
 // user's standpoint; the GC-warning copy belongs to the runtime card, not
 // the agent dot.
+//
+// CEREBRO-PATCH(agent-availability-paused-derive): pause surfaces as its
+// own availability state (not folded into offline). Pause is intentional
+// and time-bounded; offline is involuntary. Surfacing distinctly lets
+// humans and agents reading the agent list see that work is gated.
 export function deriveAgentAvailability(
   runtime: AgentRuntime | null,
   now: number,
@@ -30,6 +35,7 @@ export function deriveAgentAvailability(
   if (!runtime) return "offline";
   const health = deriveRuntimeHealth(runtime, now);
   if (health === "online") return "online";
+  if (health === "paused") return "paused";
   if (health === "recently_lost") return "unstable";
   return "offline"; // offline | about_to_gc collapse here
 }
