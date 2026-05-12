@@ -81,6 +81,13 @@
       ]
     },
     {
+      "label": "Cerebro routes",
+      "description": "CEREBRO-PATCH(cerebro-reserved-slugs): JEH-900 cerebro-only top-level routes that live alongside the upstream workspace segments. Kept in their own group so the upstream-zone diff stays clean against multica-ai/multica.",
+      "slugs": [
+        "tasks"
+      ]
+    },
+    {
       "label": "API / integration prefixes",
       "description": "`api` above already covers `/api/*`; these guard against future top-level API alias routes (e.g. `/v1`, `/graphql`) and against accidental workspace slugs that read like API identifiers.",
       "slugs": [

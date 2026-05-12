@@ -20,7 +20,8 @@ export type CerebroFlagKey =
   | "cerebro_voice_summary_enabled"
   | "cerebro_autopilot_scopes"
   | "cerebro_groups_enabled"
-  | "cerebro_runtime_pause";
+  | "cerebro_runtime_pause"
+  | "cerebro_tasks";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -45,6 +46,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_autopilot_scopes: true,
   cerebro_groups_enabled: true,
   cerebro_runtime_pause: true,
+  cerebro_tasks: false,
 };
 
 export interface CerebroFlagDefinition {
@@ -141,5 +143,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Runtime pause / resume",
     description:
       "Pause and resume agent runtimes manually or automatically. When a provider returns 429, the runtime auto-pauses until the rate-limit window resets, then resumes interrupted work on its own.",
+  },
+  {
+    key: "cerebro_tasks",
+    label: "Tasks page",
+    description:
+      "Enable the cross-agent tasks page at /:workspace/tasks (full task list with filters and pagination).",
   },
 ];

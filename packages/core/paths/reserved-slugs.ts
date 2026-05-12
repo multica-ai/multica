@@ -88,6 +88,12 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "workspaces",
   "teams",
 
+  // Cerebro routes
+  // CEREBRO-PATCH(cerebro-reserved-slugs): JEH-900 cerebro-only top-level routes
+  // that live alongside the upstream workspace segments. Kept in their own group
+  // so the upstream-zone diff stays clean against multica-ai/multica.
+  "tasks",
+
   // API / integration prefixes
   // `api` above already covers `/api/*`; these guard against future top-level
   // API alias routes (e.g. `/v1`, `/graphql`) and against accidental workspace

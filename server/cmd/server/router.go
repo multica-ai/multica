@@ -33,6 +33,8 @@ import (
 	cerebroreferences "github.com/multica-ai/multica/server/internal/cerebro/references"
 	// CEREBRO-PATCH(router-runtime-pause): cerebro runtime pause/unpause service.
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
+	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler import
+	cerebrotasks "github.com/multica-ai/multica/server/internal/cerebro/tasks"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -197,6 +199,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(router-runtime-pause): mount cerebro pause/unpause service so
 	// PauseRuntime / UnpauseRuntime in runtime_pause_cerebro.go can delegate to it.
 	h.RuntimePause = cerebroruntime.New(cerebroQueries, h.TaskService, bus)
+	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
+	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
 
 	r := chi.NewRouter()
 
@@ -820,6 +824,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Patch("/{refId}", cerebroReferencesHandler.Update)
 				r.Delete("/{refId}", cerebroReferencesHandler.Delete)
 			})
+			// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 cross-agent tasks list endpoint
+			r.Get("/api/cerebro/tasks", cerebroTasksHandler.List)
 		})
 	})
 

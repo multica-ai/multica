@@ -525,6 +525,26 @@ export class ApiClient {
     return this.fetch<T>(`/api/cerebro/dashboard?${params.toString()}`);
   }
 
+  // CEREBRO-PATCH(cerebro-tasks-client): JEH-900 cross-agent tasks list endpoint
+  async getCerebroTasks<T = unknown>(filter: {
+    agent_id?: string | null;
+    status?: string | null;
+    type?: "issue" | "chat" | null;
+    since?: string | null;
+    limit?: number;
+    offset?: number;
+  }): Promise<T> {
+    const params = new URLSearchParams();
+    if (filter.agent_id) params.set("agent_id", filter.agent_id);
+    if (filter.status) params.set("status", filter.status);
+    if (filter.type) params.set("type", filter.type);
+    if (filter.since) params.set("since", filter.since);
+    if (filter.limit !== undefined) params.set("limit", String(filter.limit));
+    if (filter.offset !== undefined) params.set("offset", String(filter.offset));
+    const qs = params.toString();
+    return this.fetch<T>(qs ? `/api/cerebro/tasks?${qs}` : `/api/cerebro/tasks`);
+  }
+
   // Web Push (per-device subscriptions). The server returns enabled=false
   // when VAPID keys aren't configured — callers should hide the subscribe UI
   // in that case.
