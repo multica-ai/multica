@@ -631,10 +631,31 @@ func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UU
 	return nil
 }
 
+// CancelTasksForIssueAndAgent cancels active tasks (queued+dispatched+running)
+// for a single (issue, agent) pair, reconciles the agent's status, and
+// broadcasts task:cancelled events. Used to clean up an outgoing captain's
+// pending task when the captain field is reassigned or cleared, without
+// disturbing tasks owned by other agents on the same issue (e.g. the
+// assignee or a parallel @-mention task).
+//
+// Returns the cancelled rows so callers can report counts.
+func (s *TaskService) CancelTasksForIssueAndAgent(ctx context.Context, issueID, agentID pgtype.UUID) ([]db.AgentTaskQueue, error) {
+	cancelled, err := s.Queries.CancelAgentTasksByIssueAndAgent(ctx, db.CancelAgentTasksByIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range cancelled {
+		s.captureTaskCancelled(ctx, t)
+		s.ReconcileAgentStatus(ctx, t.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
+	}
+	return cancelled, nil
+}
+
 // CancelTasksForAgent cancels every active task belonging to an agent
-// (queued + dispatched + running), reconciles the agent's status, and
-// broadcasts task:cancelled events. Used by the agent-level "Cancel all
-// tasks" action — same shape as CancelTasksForIssue but scoped on agent_id.
 //
 // Returns the cancelled rows so callers can report counts / log them.
 func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UUID) ([]db.AgentTaskQueue, error) {

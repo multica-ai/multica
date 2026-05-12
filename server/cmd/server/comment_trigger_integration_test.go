@@ -837,9 +837,128 @@ func TestCaptainAssign_SelfSetDoesNotEnqueue(t *testing.T) {
 		"captain_type": "agent",
 		"captain_id":   captainID,
 	}, captainID)
+	if resp.StatusCode != 200 {
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("self-set captain: expected 200, got %d: %s", resp.StatusCode, b)
+	}
 	resp.Body.Close()
 
 	if n := countPendingTasks(t, issueID); n != 0 {
 		t.Errorf("expected 0 pending tasks (captain self-assign must not loop), got %d", n)
+	}
+}
+
+// TestCaptainAssign_ReplaceCancelsOldCaptainTask verifies that when the
+// captain is replaced from A to B, A's still-active task on this issue is
+// cancelled while the new captain B gets a fresh task. Without this, A
+// would later claim its now-stale task without the captain prelude and
+// keep acting as if it were still captain.
+func TestCaptainAssign_ReplaceCancelsOldCaptainTask(t *testing.T) {
+	captainA := getAgentID(t)
+	captainB := createNamedAgent(t, "Captain Replacement Target")
+
+	issueID := createIssue(t, "Captain replace cancels old captain task")
+	t.Cleanup(func() {
+		clearTasks(t, issueID)
+		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
+		resp.Body.Close()
+	})
+
+	// Set captain to A → enqueues A.
+	resp := authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
+		"captain_type": "agent",
+		"captain_id":   captainA,
+	})
+	resp.Body.Close()
+
+	var aTasks int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued','dispatched')`,
+		issueID, captainA).Scan(&aTasks); err != nil {
+		t.Fatalf("count A tasks: %v", err)
+	}
+	if aTasks != 1 {
+		t.Fatalf("expected 1 active task for captain A after first set, got %d", aTasks)
+	}
+
+	// Replace captain with B.
+	resp = authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
+		"captain_type": "agent",
+		"captain_id":   captainB,
+	})
+	resp.Body.Close()
+
+	// A's old task must be cancelled (no longer queued/dispatched).
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued','dispatched')`,
+		issueID, captainA).Scan(&aTasks); err != nil {
+		t.Fatalf("recount A tasks: %v", err)
+	}
+	if aTasks != 0 {
+		t.Errorf("expected 0 active tasks for displaced captain A, got %d", aTasks)
+	}
+
+	// B must have exactly one active task.
+	var bTasks int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued','dispatched')`,
+		issueID, captainB).Scan(&bTasks); err != nil {
+		t.Fatalf("count B tasks: %v", err)
+	}
+	if bTasks != 1 {
+		t.Errorf("expected 1 active task for new captain B, got %d", bTasks)
+	}
+}
+
+// TestCaptainAssign_ClearCancelsCaptainTask verifies that clearing the
+// captain (captain_type=null, captain_id=null) cancels the previous
+// captain's pending task and does not enqueue any replacement.
+func TestCaptainAssign_ClearCancelsCaptainTask(t *testing.T) {
+	captainA := getAgentID(t)
+	issueID := createIssue(t, "Captain clear cancels old captain task")
+	t.Cleanup(func() {
+		clearTasks(t, issueID)
+		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
+		resp.Body.Close()
+	})
+
+	// Set captain to A → enqueues A.
+	resp := authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
+		"captain_type": "agent",
+		"captain_id":   captainA,
+	})
+	resp.Body.Close()
+
+	var aTasks int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued','dispatched')`,
+		issueID, captainA).Scan(&aTasks); err != nil {
+		t.Fatalf("count A tasks: %v", err)
+	}
+	if aTasks != 1 {
+		t.Fatalf("expected 1 active task for captain A after set, got %d", aTasks)
+	}
+
+	// Clear captain.
+	resp = authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
+		"captain_type": nil,
+		"captain_id":   nil,
+	})
+	resp.Body.Close()
+
+	// A's task must be cancelled.
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued','dispatched')`,
+		issueID, captainA).Scan(&aTasks); err != nil {
+		t.Fatalf("recount A tasks: %v", err)
+	}
+	if aTasks != 0 {
+		t.Errorf("expected 0 active tasks after clearing captain, got %d", aTasks)
+	}
+
+	// And no other active task should have been created.
+	if n := countPendingTasks(t, issueID); n != 0 {
+		t.Errorf("expected 0 pending tasks after clearing captain, got %d", n)
 	}
 }

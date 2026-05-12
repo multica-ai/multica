@@ -1642,8 +1642,24 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Trigger the captain when it's set (or replaced) — analogous to
 	// triggering an agent assignee on assignment. The captain's job is to
 	// route the issue, so it should run as soon as it's appointed, not
-	// only on the next comment.
+	// only on the next comment. When the captain changes from A to B (or
+	// is cleared), cancel A's still-active task on this issue first so
+	// the displaced agent doesn't keep running with stale captain context.
+	// Scoped cancel — leave the assignee or any @-mention tasks alone.
 	if captainChanged {
+		if prevIssue.CaptainID.Valid {
+			prevSameAsNew := issue.CaptainID.Valid &&
+				uuidToString(prevIssue.CaptainID) == uuidToString(issue.CaptainID)
+			if !prevSameAsNew {
+				if _, err := h.TaskService.CancelTasksForIssueAndAgent(r.Context(), issue.ID, prevIssue.CaptainID); err != nil {
+					slog.Warn("cancel previous captain tasks failed",
+						"issue_id", uuidToString(issue.ID),
+						"prev_captain_id", uuidToString(prevIssue.CaptainID),
+						"error", err,
+					)
+				}
+			}
+		}
 		h.tryEnqueueCaptainOnAssign(r.Context(), issue, actorType, actorID)
 	}
 
