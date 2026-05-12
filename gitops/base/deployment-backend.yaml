@@ -109,11 +109,17 @@ spec:
                 secretKeyRef:
                   name: agentfarm-redis-connection
                   key: primary_endpoint_address
+                  optional: true
             - name: REDIS_PORT
               valueFrom:
                 secretKeyRef:
                   name: agentfarm-redis-connection
                   key: port
+                  optional: true
+            # When agentfarm-redis-connection doesn't exist (ElastiCache still
+            # provisioning), REDIS_HOST/REDIS_PORT are absent and $(VAR) stays
+            # literal; redis.ParseURL fails and the server falls back to
+            # in-memory hub. Reloader restarts pods once the secret appears.
             - name: REDIS_URL
               value: "redis://$(REDIS_HOST):$(REDIS_PORT)"
             - name: PREVIEW_GENERATOR_URL
