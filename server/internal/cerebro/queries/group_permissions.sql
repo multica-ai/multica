@@ -156,3 +156,47 @@ FROM cerebro_group g
 JOIN cerebro_group_member gm ON gm.group_id = g.id
 WHERE g.workspace_id = $1
   AND gm.user_id     = $2;
+
+-- ListCerebroAgentIDsForUser, ListCerebroRuntimeIDsForUser and
+-- ListCerebroProjectIDsForUser return the resource IDs the viewer is granted
+-- access to via any group membership in the workspace. PR 4 of JEH-1006 uses
+-- these to filter the corresponding list endpoints — admin override is layered
+-- on top in Go, so the SQL stays simple.
+--
+-- Each query joins through cerebro_group to enforce workspace scope (a group
+-- is workspace-bound, so a grant from outside the workspace cannot leak in).
+
+-- name: ListCerebroAgentIDsForUser :many
+SELECT DISTINCT aa.agent_id
+FROM cerebro_group_agent_access aa
+JOIN cerebro_group g          ON g.id        = aa.group_id
+JOIN cerebro_group_member gm  ON gm.group_id = aa.group_id
+WHERE g.workspace_id = $1
+  AND gm.user_id     = $2;
+
+-- name: ListCerebroRuntimeIDsForUser :many
+SELECT DISTINCT ra.runtime_id
+FROM cerebro_group_runtime_access ra
+JOIN cerebro_group g          ON g.id        = ra.group_id
+JOIN cerebro_group_member gm  ON gm.group_id = ra.group_id
+WHERE g.workspace_id = $1
+  AND gm.user_id     = $2;
+
+-- name: ListCerebroProjectIDsForUser :many
+SELECT DISTINCT pgm.project_id
+FROM cerebro_project_group_member pgm
+JOIN cerebro_group g          ON g.id        = pgm.group_id
+JOIN cerebro_group_member gm  ON gm.group_id = pgm.group_id
+WHERE g.workspace_id = $1
+  AND gm.user_id     = $2;
+
+-- ListCerebroUserIDsForProject — the inverse of ListCerebroProjectIDsForUser:
+-- returns every member with group-level access to the project. Used by the WS
+-- audience builder so realtime events also reach group-only viewers (otherwise
+-- a member would only see updates on a refresh).
+
+-- name: ListCerebroUserIDsForProject :many
+SELECT DISTINCT gm.user_id
+FROM cerebro_project_group_member pgm
+JOIN cerebro_group_member gm ON gm.group_id = pgm.group_id
+WHERE pgm.project_id = $1;

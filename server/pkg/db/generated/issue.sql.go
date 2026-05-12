@@ -549,6 +549,8 @@ WHERE i.workspace_id = $1
           SELECT 1 FROM project_member pm
           WHERE pm.project_id = p.id AND pm.user_id = $5::uuid
         )
+        -- CEREBRO-PATCH(list-issues-group-access): JEH-1009 cascade project-group access into issue visibility.
+        OR EXISTS (SELECT 1 FROM cerebro_project_group_member pgm JOIN cerebro_group_member gm ON gm.group_id = pgm.group_id WHERE pgm.project_id = p.id AND gm.user_id = $5::uuid)
       )
     )
   )

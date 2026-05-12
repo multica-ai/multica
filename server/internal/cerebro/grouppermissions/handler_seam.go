@@ -49,6 +49,37 @@ func (a *HandlerSeam) CanUseRuntime(ctx context.Context, viewer handler.GroupPer
 	return a.Service.CanUseRuntime(ctx, toServiceViewer(viewer), runtimeID)
 }
 
+// CanUseAgent checks the agent allowlist for the resolved viewer.
+func (a *HandlerSeam) CanUseAgent(ctx context.Context, viewer handler.GroupPermissionsViewer, agentID pgtype.UUID) (bool, error) {
+	return a.Service.CanUseAgent(ctx, toServiceViewer(viewer), agentID)
+}
+
+// CanSeeProjectViaGroup checks whether one of the viewer's groups grants
+// access to the project. Admin override is handled inside the service.
+func (a *HandlerSeam) CanSeeProjectViaGroup(ctx context.Context, viewer handler.GroupPermissionsViewer, projectID pgtype.UUID) (bool, error) {
+	return a.Service.CanSeeProjectViaGroup(ctx, toServiceViewer(viewer), projectID)
+}
+
+// VisibleAgentIDs forwards to the service. Returns nil for admins ("no filter").
+func (a *HandlerSeam) VisibleAgentIDs(ctx context.Context, viewer handler.GroupPermissionsViewer, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	return a.Service.VisibleAgentIDs(ctx, toServiceViewer(viewer), workspaceID)
+}
+
+// VisibleRuntimeIDs forwards to the service.
+func (a *HandlerSeam) VisibleRuntimeIDs(ctx context.Context, viewer handler.GroupPermissionsViewer, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	return a.Service.VisibleRuntimeIDs(ctx, toServiceViewer(viewer), workspaceID)
+}
+
+// VisibleProjectIDs forwards to the service.
+func (a *HandlerSeam) VisibleProjectIDs(ctx context.Context, viewer handler.GroupPermissionsViewer, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	return a.Service.VisibleProjectIDs(ctx, toServiceViewer(viewer), workspaceID)
+}
+
+// ProjectAudienceUserIDs forwards to the service.
+func (a *HandlerSeam) ProjectAudienceUserIDs(ctx context.Context, projectID pgtype.UUID) ([]pgtype.UUID, error) {
+	return a.Service.ProjectAudienceUserIDs(ctx, projectID)
+}
+
 func toServiceViewer(v handler.GroupPermissionsViewer) Viewer {
 	return Viewer{
 		UserID:   v.UserID,

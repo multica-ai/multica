@@ -77,6 +77,8 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 // CEREBRO-PATCH(project-detail-access): RestrictedLock + ProjectAccessTab from cerebro-access after Phase 6 relocation
 import { RestrictedLock, ProjectAccessTab } from "@multica/cerebro-access/views";
+// CEREBRO-PATCH(project-detail-group-access): JEH-1009 group-access section in Access tab.
+import { ProjectGroupAccessSection } from "@multica/cerebro-groups/views";
 import { useT } from "../../i18n";
 import { useProjectStatusLabels, useProjectPriorityLabels } from "./labels";
 
@@ -779,6 +781,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </TabsContent>
               <TabsContent value="access" className="flex-1 overflow-auto">
                 <ProjectAccessTab project={project} />
+                {/* CEREBRO-PATCH(project-detail-group-access): JEH-1009 group-access list under the Access tab. */}
+                <div className="px-6 pb-6"><ProjectGroupAccessSection projectId={project.id} /></div>
               </TabsContent>
             </Tabs>
           </div>

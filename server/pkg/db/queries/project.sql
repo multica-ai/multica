@@ -47,6 +47,8 @@ RETURNING *;
 --   * project.access = 'workspace'         → visible to every member
 --   * project.access = 'restricted' AND
 --     (workspace admin/owner OR explicit project_member row)
+-- CEREBRO-PATCH(list-projects-group-access): JEH-1009 add OR-clause so non-admin
+-- members also see projects granted via any of their cerebro_group memberships.
 SELECT p.* FROM project p
 WHERE p.workspace_id = $1
   AND (
@@ -56,6 +58,7 @@ WHERE p.workspace_id = $1
       SELECT 1 FROM project_member pm
       WHERE pm.project_id = p.id AND pm.user_id = sqlc.arg('user_id')::uuid
     )
+    OR EXISTS (SELECT 1 FROM cerebro_project_group_member pgm JOIN cerebro_group_member gm ON gm.group_id = pgm.group_id WHERE pgm.project_id = p.id AND gm.user_id = sqlc.arg('user_id')::uuid)
   )
   AND (sqlc.narg('status')::text IS NULL OR p.status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR p.priority = sqlc.narg('priority'))

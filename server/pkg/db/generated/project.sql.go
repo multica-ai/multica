@@ -271,6 +271,7 @@ WHERE p.workspace_id = $1
       SELECT 1 FROM project_member pm
       WHERE pm.project_id = p.id AND pm.user_id = $3::uuid
     )
+    OR EXISTS (SELECT 1 FROM cerebro_project_group_member pgm JOIN cerebro_group_member gm ON gm.group_id = pgm.group_id WHERE pgm.project_id = p.id AND gm.user_id = $3::uuid)
   )
   AND ($4::text IS NULL OR p.status = $4)
   AND ($5::text IS NULL OR p.priority = $5)
@@ -289,6 +290,9 @@ type ListProjectsAccessibleToUserParams struct {
 //   - project.access = 'workspace'         → visible to every member
 //   - project.access = 'restricted' AND
 //     (workspace admin/owner OR explicit project_member row)
+//
+// CEREBRO-PATCH(list-projects-group-access): JEH-1009 add OR-clause so non-admin
+// members also see projects granted via any of their cerebro_group memberships.
 func (q *Queries) ListProjectsAccessibleToUser(ctx context.Context, arg ListProjectsAccessibleToUserParams) ([]Project, error) {
 	rows, err := q.db.Query(ctx, listProjectsAccessibleToUser,
 		arg.WorkspaceID,

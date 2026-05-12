@@ -223,6 +223,49 @@ func (q *Queries) IsCerebroDefaultGroup(ctx context.Context, groupID pgtype.UUID
 	return is_default, err
 }
 
+const listCerebroAgentIDsForUser = `-- name: ListCerebroAgentIDsForUser :many
+
+SELECT DISTINCT aa.agent_id
+FROM cerebro_group_agent_access aa
+JOIN cerebro_group g          ON g.id        = aa.group_id
+JOIN cerebro_group_member gm  ON gm.group_id = aa.group_id
+WHERE g.workspace_id = $1
+  AND gm.user_id     = $2
+`
+
+type ListCerebroAgentIDsForUserParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// ListCerebroAgentIDsForUser, ListCerebroRuntimeIDsForUser and
+// ListCerebroProjectIDsForUser return the resource IDs the viewer is granted
+// access to via any group membership in the workspace. PR 4 of JEH-1006 uses
+// these to filter the corresponding list endpoints — admin override is layered
+// on top in Go, so the SQL stays simple.
+//
+// Each query joins through cerebro_group to enforce workspace scope (a group
+// is workspace-bound, so a grant from outside the workspace cannot leak in).
+func (q *Queries) ListCerebroAgentIDsForUser(ctx context.Context, arg ListCerebroAgentIDsForUserParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listCerebroAgentIDsForUser, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var agent_id pgtype.UUID
+		if err := rows.Scan(&agent_id); err != nil {
+			return nil, err
+		}
+		items = append(items, agent_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCerebroGroupAgents = `-- name: ListCerebroGroupAgents :many
 
 SELECT group_id, agent_id, granted_by, granted_at
@@ -389,6 +432,106 @@ func (q *Queries) ListCerebroProjectGroups(ctx context.Context, projectID pgtype
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCerebroProjectIDsForUser = `-- name: ListCerebroProjectIDsForUser :many
+SELECT DISTINCT pgm.project_id
+FROM cerebro_project_group_member pgm
+JOIN cerebro_group g          ON g.id        = pgm.group_id
+JOIN cerebro_group_member gm  ON gm.group_id = pgm.group_id
+WHERE g.workspace_id = $1
+  AND gm.user_id     = $2
+`
+
+type ListCerebroProjectIDsForUserParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) ListCerebroProjectIDsForUser(ctx context.Context, arg ListCerebroProjectIDsForUserParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listCerebroProjectIDsForUser, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var project_id pgtype.UUID
+		if err := rows.Scan(&project_id); err != nil {
+			return nil, err
+		}
+		items = append(items, project_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCerebroRuntimeIDsForUser = `-- name: ListCerebroRuntimeIDsForUser :many
+SELECT DISTINCT ra.runtime_id
+FROM cerebro_group_runtime_access ra
+JOIN cerebro_group g          ON g.id        = ra.group_id
+JOIN cerebro_group_member gm  ON gm.group_id = ra.group_id
+WHERE g.workspace_id = $1
+  AND gm.user_id     = $2
+`
+
+type ListCerebroRuntimeIDsForUserParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) ListCerebroRuntimeIDsForUser(ctx context.Context, arg ListCerebroRuntimeIDsForUserParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listCerebroRuntimeIDsForUser, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var runtime_id pgtype.UUID
+		if err := rows.Scan(&runtime_id); err != nil {
+			return nil, err
+		}
+		items = append(items, runtime_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCerebroUserIDsForProject = `-- name: ListCerebroUserIDsForProject :many
+
+SELECT DISTINCT gm.user_id
+FROM cerebro_project_group_member pgm
+JOIN cerebro_group_member gm ON gm.group_id = pgm.group_id
+WHERE pgm.project_id = $1
+`
+
+// ListCerebroUserIDsForProject — the inverse of ListCerebroProjectIDsForUser:
+// returns every member with group-level access to the project. Used by the WS
+// audience builder so realtime events also reach group-only viewers (otherwise
+// a member would only see updates on a refresh).
+func (q *Queries) ListCerebroUserIDsForProject(ctx context.Context, projectID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listCerebroUserIDsForProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var user_id pgtype.UUID
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

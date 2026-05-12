@@ -362,6 +362,95 @@ func (s *Service) CanSeeProjectViaGroup(ctx context.Context, viewer Viewer, proj
 	})
 }
 
+// VisibleAgentIDs returns the set of agent IDs the viewer is granted access to
+// via any group membership in the workspace. Returns (nil, nil) when no
+// filtering should be applied — either because the viewer is an admin (sees
+// everything) or because the user ID is invalid (caller already denied access
+// upstream; returning nil here keeps the contract simple — no filter).
+//
+// The empty slice (vs nil) is the "no grants" case: the viewer is a non-admin
+// member with zero accessible resources. Callers must distinguish nil
+// ("no filter") from []{} ("explicit empty allowlist") so an admin sees every
+// agent while a non-admin member with no group grant sees none.
+func (s *Service) VisibleAgentIDs(ctx context.Context, viewer Viewer, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	if viewer.IsAdmin {
+		return nil, nil
+	}
+	if !viewer.UserID.Valid {
+		return nil, nil
+	}
+	ids, err := s.Cerebro.ListCerebroAgentIDsForUser(ctx, cerebrodb.ListCerebroAgentIDsForUserParams{
+		WorkspaceID: workspaceID,
+		UserID:      viewer.UserID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if ids == nil {
+		return []pgtype.UUID{}, nil
+	}
+	return ids, nil
+}
+
+// VisibleRuntimeIDs mirrors VisibleAgentIDs for the runtime allowlist.
+func (s *Service) VisibleRuntimeIDs(ctx context.Context, viewer Viewer, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	if viewer.IsAdmin {
+		return nil, nil
+	}
+	if !viewer.UserID.Valid {
+		return nil, nil
+	}
+	ids, err := s.Cerebro.ListCerebroRuntimeIDsForUser(ctx, cerebrodb.ListCerebroRuntimeIDsForUserParams{
+		WorkspaceID: workspaceID,
+		UserID:      viewer.UserID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if ids == nil {
+		return []pgtype.UUID{}, nil
+	}
+	return ids, nil
+}
+
+// VisibleProjectIDs returns the project IDs the viewer has group-level access
+// to. Callers OR these IDs with the existing project_member + workspace-access
+// results to compute the final ListProjects payload.
+func (s *Service) VisibleProjectIDs(ctx context.Context, viewer Viewer, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	if viewer.IsAdmin {
+		return nil, nil
+	}
+	if !viewer.UserID.Valid {
+		return nil, nil
+	}
+	ids, err := s.Cerebro.ListCerebroProjectIDsForUser(ctx, cerebrodb.ListCerebroProjectIDsForUserParams{
+		WorkspaceID: workspaceID,
+		UserID:      viewer.UserID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if ids == nil {
+		return []pgtype.UUID{}, nil
+	}
+	return ids, nil
+}
+
+// ProjectAudienceUserIDs returns every user with group-level access to the
+// project. Used by the WS audience builder so realtime events reach group-
+// only viewers (otherwise a non-admin non-member with group access would
+// only see changes after a manual refresh).
+func (s *Service) ProjectAudienceUserIDs(ctx context.Context, projectID pgtype.UUID) ([]pgtype.UUID, error) {
+	ids, err := s.Cerebro.ListCerebroUserIDsForProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if ids == nil {
+		return []pgtype.UUID{}, nil
+	}
+	return ids, nil
+}
+
 func (s *Service) publish(eventType string, workspaceID, actorID pgtype.UUID, payload map[string]any) {
 	if s.Bus == nil {
 		return

@@ -73,6 +73,10 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "cannot start chat with private agent")
 		return
 	}
+	// CEREBRO-PATCH(create-chat-session-agent-allowlist): JEH-1009 enforce allowlist.
+	if !h.cerebroRequireAgentAccess(w, r, workspaceID, agent.ID) {
+		return
+	}
 
 	session, err := h.Queries.CreateChatSession(r.Context(), db.CreateChatSessionParams{
 		WorkspaceID: workspaceUUID,

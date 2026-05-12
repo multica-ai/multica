@@ -410,3 +410,85 @@ func TestSetCapability_RejectsUnknown(t *testing.T) {
 		t.Fatalf("expected ErrUnknownCapability, got %v", err)
 	}
 }
+
+// JEH-1009 PR 4 — VisibleAgentIDs / VisibleRuntimeIDs / VisibleProjectIDs +
+// the inverse ProjectAudienceUserIDs are how ListAgents / ListAgentRuntimes /
+// audienceForRestrictedProject pick which rows a non-admin viewer sees.
+
+func TestVisibleAgentIDs_RoundTrip(t *testing.T) {
+	svc := newGPTestService(t)
+	ctx := context.Background()
+	viewer := Viewer{UserID: gpTestUserID}
+
+	ids, err := svc.VisibleAgentIDs(ctx, viewer, gpTestWorkspaceID)
+	if err != nil {
+		t.Fatalf("VisibleAgentIDs failed: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("VisibleAgentIDs before grant: expected empty, got %v", ids)
+	}
+
+	if _, err := svc.AddAgent(ctx, gpTestWorkspaceID, gpTestUserID, gpTestGroupID, gpTestAgentID); err != nil {
+		t.Fatalf("AddAgent failed: %v", err)
+	}
+	defer svc.RemoveAgent(ctx, gpTestWorkspaceID, gpTestUserID, gpTestGroupID, gpTestAgentID)
+
+	ids, err = svc.VisibleAgentIDs(ctx, viewer, gpTestWorkspaceID)
+	if err != nil {
+		t.Fatalf("VisibleAgentIDs after grant: %v", err)
+	}
+	if len(ids) != 1 || ids[0].Bytes != gpTestAgentID.Bytes {
+		t.Fatalf("VisibleAgentIDs after grant: expected [%v], got %v", gpTestAgentID, ids)
+	}
+
+	// Admin override → nil (no filter).
+	if got, err := svc.VisibleAgentIDs(ctx, Viewer{UserID: gpTestUserID, IsAdmin: true}, gpTestWorkspaceID); err != nil || got != nil {
+		t.Fatalf("VisibleAgentIDs(admin) should return (nil, nil), got %v / %v", got, err)
+	}
+}
+
+func TestVisibleRuntimeIDs_RoundTrip(t *testing.T) {
+	svc := newGPTestService(t)
+	ctx := context.Background()
+	viewer := Viewer{UserID: gpTestUserID}
+
+	if _, err := svc.AddRuntime(ctx, gpTestWorkspaceID, gpTestUserID, gpTestGroupID, gpTestRuntimeID); err != nil {
+		t.Fatalf("AddRuntime failed: %v", err)
+	}
+	defer svc.RemoveRuntime(ctx, gpTestWorkspaceID, gpTestUserID, gpTestGroupID, gpTestRuntimeID)
+
+	ids, err := svc.VisibleRuntimeIDs(ctx, viewer, gpTestWorkspaceID)
+	if err != nil {
+		t.Fatalf("VisibleRuntimeIDs failed: %v", err)
+	}
+	if len(ids) != 1 || ids[0].Bytes != gpTestRuntimeID.Bytes {
+		t.Fatalf("VisibleRuntimeIDs: expected [%v], got %v", gpTestRuntimeID, ids)
+	}
+}
+
+func TestVisibleProjectIDsAndAudience(t *testing.T) {
+	svc := newGPTestService(t)
+	ctx := context.Background()
+	viewer := Viewer{UserID: gpTestUserID}
+
+	if _, err := svc.AddProjectGroup(ctx, gpTestWorkspaceID, gpTestUserID, gpTestProjectID, gpTestGroupID); err != nil {
+		t.Fatalf("AddProjectGroup failed: %v", err)
+	}
+	defer svc.RemoveProjectGroup(ctx, gpTestWorkspaceID, gpTestUserID, gpTestProjectID, gpTestGroupID)
+
+	ids, err := svc.VisibleProjectIDs(ctx, viewer, gpTestWorkspaceID)
+	if err != nil {
+		t.Fatalf("VisibleProjectIDs failed: %v", err)
+	}
+	if len(ids) != 1 || ids[0].Bytes != gpTestProjectID.Bytes {
+		t.Fatalf("VisibleProjectIDs: expected [%v], got %v", gpTestProjectID, ids)
+	}
+
+	users, err := svc.ProjectAudienceUserIDs(ctx, gpTestProjectID)
+	if err != nil {
+		t.Fatalf("ProjectAudienceUserIDs failed: %v", err)
+	}
+	if len(users) != 1 || users[0].Bytes != gpTestUserID.Bytes {
+		t.Fatalf("ProjectAudienceUserIDs: expected [%v], got %v", gpTestUserID, users)
+	}
+}

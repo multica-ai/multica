@@ -1686,6 +1686,10 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 				}
 			}
 		}
+		// CEREBRO-PATCH(validate-assignee-agent-group): JEH-1009 agent allowlist gate.
+		if status, msg := h.cerebroAgentAccessAsValidatorError(ctx, r, workspaceID, agent.ID); status != 0 {
+			return status, msg
+		}
 		return 0, ""
 	default:
 		return http.StatusBadRequest, "assignee_type must be 'member' or 'agent'"
@@ -1695,6 +1699,7 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 // CEREBRO-PATCH(can-assign-agent): canAssignAgent checks whether the
 // requesting user is allowed to assign issues to the given agent. Private
 // agents can only be assigned by their owner or workspace admins/owners.
+// JEH-1009 layers the group-allowlist check on top via cerebroAgentAccessAsValidatorError.
 func (h *Handler) canAssignAgent(ctx context.Context, r *http.Request, agentID, workspaceID string) (bool, string) {
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 		ID:          parseUUID(agentID),
@@ -1706,10 +1711,14 @@ func (h *Handler) canAssignAgent(ctx context.Context, r *http.Request, agentID, 
 	if agent.ArchivedAt.Valid {
 		return false, "cannot assign to archived agent"
 	}
-	if h.canAccessPrivateAgent(ctx, agent, requestUserID(r), workspaceID) {
-		return true, ""
+	if !h.canAccessPrivateAgent(ctx, agent, requestUserID(r), workspaceID) {
+		return false, "cannot assign to private agent"
 	}
-	return false, "cannot assign to private agent"
+	// CEREBRO-PATCH(can-assign-agent-group): JEH-1009 agent allowlist gate.
+	if _, msg := h.cerebroAgentAccessAsValidatorError(ctx, r, workspaceID, agent.ID); msg != "" {
+		return false, msg
+	}
+	return true, ""
 }
 
 // canAccessPrivateAgent reports whether userID is allowed to interact with the

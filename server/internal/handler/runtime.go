@@ -448,9 +448,17 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]AgentRuntimeResponse, len(runtimes))
-	for i, rt := range runtimes {
-		resp[i] = runtimeToResponse(rt)
+	// CEREBRO-PATCH(list-runtimes-group-filter): JEH-1009 narrow non-admin viewers
+	// to the runtimes granted via their group memberships.
+	visibleRuntimes, hasFilter, _ := h.cerebroVisibleRuntimeIDSet(r.Context(), r, workspaceID)
+	resp := make([]AgentRuntimeResponse, 0, len(runtimes))
+	for _, rt := range runtimes {
+		if hasFilter {
+			if _, ok := visibleRuntimes[uuidToString(rt.ID)]; !ok {
+				continue
+			}
+		}
+		resp = append(resp, runtimeToResponse(rt))
 	}
 
 	writeJSON(w, http.StatusOK, resp)

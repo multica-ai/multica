@@ -4,6 +4,11 @@
 // full DB-backed grouppermissions Service answers the can-do questions; this
 // file pins the handler-side decision tree against a mock invoker so the
 // behaviour stays predictable across refactors.
+//
+// CEREBRO-PATCH(group-permissions-cerebro-test-pr4): JEH-1009 PR 4 — extends
+// the stub invoker with CanUseAgent / CanSeeProjectViaGroup / VisibleXxxIDs
+// and adds nil-invoker fail-open coverage for the new agent-allowlist and
+// list-filter helpers.
 package handler
 
 import (
@@ -17,10 +22,16 @@ import (
 )
 
 type stubGroupPermissions struct {
-	resolve func(ctx context.Context, ws, user pgtype.UUID) ([]pgtype.UUID, error)
-	canRT   func(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) (bool, error)
-	canAG   func(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) (bool, error)
-	canUseR func(ctx context.Context, viewer GroupPermissionsViewer, rt pgtype.UUID) (bool, error)
+	resolve     func(ctx context.Context, ws, user pgtype.UUID) ([]pgtype.UUID, error)
+	canRT       func(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) (bool, error)
+	canAG       func(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) (bool, error)
+	canUseR     func(ctx context.Context, viewer GroupPermissionsViewer, rt pgtype.UUID) (bool, error)
+	canUseA     func(ctx context.Context, viewer GroupPermissionsViewer, ag pgtype.UUID) (bool, error)
+	canSeeProj  func(ctx context.Context, viewer GroupPermissionsViewer, pr pgtype.UUID) (bool, error)
+	visAgents   func(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) ([]pgtype.UUID, error)
+	visRuntimes func(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) ([]pgtype.UUID, error)
+	visProjects func(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) ([]pgtype.UUID, error)
+	audUsers    func(ctx context.Context, pr pgtype.UUID) ([]pgtype.UUID, error)
 }
 
 func (s *stubGroupPermissions) ResolveGroupIDs(ctx context.Context, ws, user pgtype.UUID) ([]pgtype.UUID, error) {
@@ -49,6 +60,48 @@ func (s *stubGroupPermissions) CanUseRuntime(ctx context.Context, viewer GroupPe
 		return false, nil
 	}
 	return s.canUseR(ctx, viewer, rt)
+}
+
+func (s *stubGroupPermissions) CanUseAgent(ctx context.Context, viewer GroupPermissionsViewer, ag pgtype.UUID) (bool, error) {
+	if s.canUseA == nil {
+		return false, nil
+	}
+	return s.canUseA(ctx, viewer, ag)
+}
+
+func (s *stubGroupPermissions) CanSeeProjectViaGroup(ctx context.Context, viewer GroupPermissionsViewer, pr pgtype.UUID) (bool, error) {
+	if s.canSeeProj == nil {
+		return false, nil
+	}
+	return s.canSeeProj(ctx, viewer, pr)
+}
+
+func (s *stubGroupPermissions) VisibleAgentIDs(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) ([]pgtype.UUID, error) {
+	if s.visAgents == nil {
+		return nil, nil
+	}
+	return s.visAgents(ctx, viewer, ws)
+}
+
+func (s *stubGroupPermissions) VisibleRuntimeIDs(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) ([]pgtype.UUID, error) {
+	if s.visRuntimes == nil {
+		return nil, nil
+	}
+	return s.visRuntimes(ctx, viewer, ws)
+}
+
+func (s *stubGroupPermissions) VisibleProjectIDs(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) ([]pgtype.UUID, error) {
+	if s.visProjects == nil {
+		return nil, nil
+	}
+	return s.visProjects(ctx, viewer, ws)
+}
+
+func (s *stubGroupPermissions) ProjectAudienceUserIDs(ctx context.Context, pr pgtype.UUID) ([]pgtype.UUID, error) {
+	if s.audUsers == nil {
+		return nil, nil
+	}
+	return s.audUsers(ctx, pr)
 }
 
 func TestCerebroRequireCapability_NilInvokerPasses(t *testing.T) {
@@ -90,4 +143,82 @@ func makeAuthedRequest(userID, workspaceID string) *http.Request {
 	r.Header.Set("X-User-ID", userID)
 	r.Header.Set("X-Workspace-ID", workspaceID)
 	return r
+}
+
+// JEH-1009 PR 4 — pin the decision tree for the new agent-allowlist gate. The
+// runtime-allowlist gate already covers admin / nil-invoker / member-grant /
+// member-deny in PR 3's tests; the agent gate must match that shape so the
+// trigger path can't drift away from the runtime path silently.
+
+func TestCerebroRequireAgentAccess_NilInvokerPasses(t *testing.T) {
+	h := &Handler{}
+	r := httptest.NewRequest(http.MethodPost, "/api/chat/sessions", nil)
+	w := httptest.NewRecorder()
+	if !h.cerebroRequireAgentAccess(w, r, "00000000-0000-0000-0000-000000000000", pgtype.UUID{}) {
+		t.Fatalf("nil GroupPermissions: gate must pass, body=%q", w.Body.String())
+	}
+}
+
+func TestCerebroCanUseAgent_NilInvokerReturnsTrue(t *testing.T) {
+	// The non-writing companion used by canAssignAgent / validateAssigneePair
+	// must mirror cerebroRequireAgentAccess and fail open on nil-invoker so
+	// upstream-only test fixtures continue to work.
+	h := &Handler{}
+	r := httptest.NewRequest(http.MethodPost, "/api/issues", nil)
+	allowed, err := h.cerebroCanUseAgent(context.Background(), r, "00000000-0000-0000-0000-000000000000", pgtype.UUID{})
+	if err != nil {
+		t.Fatalf("nil invoker should not error, got %v", err)
+	}
+	if !allowed {
+		t.Fatalf("nil invoker should return true (fail-open)")
+	}
+}
+
+func TestCerebroAgentAccessAsValidatorError_NilInvokerPasses(t *testing.T) {
+	// validatorError must report status=0 (no rejection) when there is no
+	// seam — otherwise existing upstream tests that drive validateAssigneePair
+	// without a cerebro service would fail closed.
+	h := &Handler{}
+	r := httptest.NewRequest(http.MethodPost, "/api/issues", nil)
+	status, msg := h.cerebroAgentAccessAsValidatorError(context.Background(), r, "00000000-0000-0000-0000-000000000000", pgtype.UUID{})
+	if status != 0 {
+		t.Fatalf("nil-invoker validatorError: expected status 0, got %d (%q)", status, msg)
+	}
+}
+
+func TestCerebroVisibleAgentIDSet_NilInvokerNoFilter(t *testing.T) {
+	// No seam → hasFilter=false, ok=true. ListAgents/ListAgentRuntimes then
+	// skips the filter loop and returns the upstream-visible set unchanged.
+	h := &Handler{}
+	r := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+	set, hasFilter, ok := h.cerebroVisibleAgentIDSet(context.Background(), r, "00000000-0000-0000-0000-000000000000")
+	if !ok {
+		t.Fatalf("nil invoker: expected ok=true")
+	}
+	if hasFilter {
+		t.Fatalf("nil invoker: expected hasFilter=false")
+	}
+	if set != nil {
+		t.Fatalf("nil invoker: expected nil set, got %v", set)
+	}
+}
+
+func TestCerebroVisibleRuntimeIDSet_NilInvokerNoFilter(t *testing.T) {
+	h := &Handler{}
+	r := httptest.NewRequest(http.MethodGet, "/api/runtimes", nil)
+	_, hasFilter, ok := h.cerebroVisibleRuntimeIDSet(context.Background(), r, "00000000-0000-0000-0000-000000000000")
+	if !ok || hasFilter {
+		t.Fatalf("nil invoker: expected ok=true hasFilter=false, got ok=%v hasFilter=%v", ok, hasFilter)
+	}
+}
+
+func TestCerebroCanSeeProjectViaGroup_NilInvokerReturnsFalse(t *testing.T) {
+	// The helper layered into canAccessProject: when no seam is wired, it
+	// returns false so the existing access decision (admin / workspace /
+	// project_member) is the sole authority — fail-closed on this branch
+	// only widens access via the seam when it exists, never narrows it.
+	h := &Handler{}
+	if h.cerebroCanSeeProjectViaGroup(context.Background(), pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}) {
+		t.Fatalf("nil invoker: cerebroCanSeeProjectViaGroup must return false")
+	}
 }

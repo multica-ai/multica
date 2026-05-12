@@ -48,7 +48,11 @@ func (h *Handler) canAccessProject(ctx context.Context, member db.Member, projec
 	if err != nil {
 		return false
 	}
-	return ok
+	if ok {
+		return true
+	}
+	// CEREBRO-PATCH(can-access-project-group): JEH-1009 OR-in cerebro_group access.
+	return h.cerebroCanSeeProjectViaGroup(ctx, member.UserID, project.WorkspaceID, project.ID)
 }
 
 // canAccessProjectByID is a convenience wrapper for handlers that have a
@@ -122,6 +126,10 @@ func (h *Handler) audienceForIssue(ctx context.Context, issue db.Issue) []string
 }
 
 // audienceForRestrictedProject returns project_members ∪ workspace admins.
+//
+// CEREBRO-PATCH(audience-restricted-group): JEH-1009 also fan out to members
+// whose cerebro_groups grant them access; otherwise group-only viewers would
+// only see updates on a manual refresh.
 func (h *Handler) audienceForRestrictedProject(ctx context.Context, project db.Project) []string {
 	adminUUIDs, _ := h.Queries.ListWorkspaceAdminUserIDs(ctx, project.WorkspaceID)
 	members, _ := h.Queries.ListProjectMembers(ctx, project.ID)
@@ -133,6 +141,15 @@ func (h *Handler) audienceForRestrictedProject(ctx context.Context, project db.P
 		uid := uuidToString(m.UserID)
 		if !containsString(out, uid) {
 			out = append(out, uid)
+		}
+	}
+	if h.GroupPermissions != nil {
+		groupUsers, _ := h.GroupPermissions.ProjectAudienceUserIDs(ctx, project.ID)
+		for _, u := range groupUsers {
+			uid := uuidToString(u)
+			if !containsString(out, uid) {
+				out = append(out, uid)
+			}
 		}
 	}
 	return out
