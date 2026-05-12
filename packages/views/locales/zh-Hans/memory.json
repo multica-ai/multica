@@ -6,7 +6,8 @@
     "filter_all": "全部",
     "empty_search": "没有匹配的条目",
     "empty_default": "还没有记忆条目",
-    "create_first": "创建第一个条目"
+    "create_first": "创建第一个条目",
+    "stale_badge": "已过期"
   },
   "detail": {
     "back": "记忆",

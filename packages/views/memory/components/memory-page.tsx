@@ -60,6 +60,7 @@ function isStale(artifact: MemoryArtifact): boolean {
 function MemoryRow({ artifact }: { artifact: MemoryArtifact }) {
   const wsPaths = useWorkspacePaths();
   const { getActorName } = useActorName();
+  const { t } = useT("memory");
   const authorName = getActorName(artifact.author_type, artifact.author_id);
 
   return (
@@ -100,7 +101,7 @@ function MemoryRow({ artifact }: { artifact: MemoryArtifact }) {
 
       {isStale(artifact) && (
         <span className="hidden md:inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
-          Stale
+          {t(($) => $.page.stale_badge)}
         </span>
       )}
 

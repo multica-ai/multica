@@ -6,7 +6,8 @@
     "filter_all": "All",
     "empty_search": "No artifacts match your search",
     "empty_default": "No memory artifacts yet",
-    "create_first": "Create your first artifact"
+    "create_first": "Create your first artifact",
+    "stale_badge": "Stale"
   },
   "detail": {
     "back": "Memory",
