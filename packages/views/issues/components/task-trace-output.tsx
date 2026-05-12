@@ -1043,9 +1043,8 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
   }, [lines, showRaw]);
 
   const workItems = useMemo(() => buildWorkItems(visibleLines, showRaw), [visibleLines, showRaw]);
-  const runMode = taskRunMode(task);
   const planPhase = useMemo(() => latestPlanPhase(lines), [lines]);
-  const planBadge = runMode === "plan"
+  const planBadge = planPhase
     ? planPhase === "executing" || planPhase === "rejected" || planPhase === "expired" || planPhase === "cancelled"
       ? planPhase
       : "plan"
@@ -1147,11 +1146,6 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
       </CollapsibleContent>
     </Collapsible>
   );
-}
-
-function taskRunMode(task: AgentTask): string {
-  const value = task.context?.run_mode;
-  return typeof value === "string" ? value : "normal";
 }
 
 function latestPlanPhase(lines: TaskTraceLine[]): string {

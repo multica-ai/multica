@@ -164,6 +164,26 @@ func TestBuildPromptPlanMode(t *testing.T) {
 	}
 }
 
+func TestBuildPromptWithRunModeNormalIgnoresPlanContext(t *testing.T) {
+	t.Parallel()
+
+	task := Task{
+		IssueID:               "issue-id",
+		TriggerCommentID:      "comment-id",
+		TriggerCommentContent: "先给方案",
+		Context:               []byte(`{"run_mode":"plan"}`),
+		Agent:                 &AgentData{Name: "Test"},
+	}
+	prompt := BuildPromptWithRunMode(task, "normal")
+
+	if strings.Contains(prompt, "Run mode: PLAN ONLY.") {
+		t.Fatalf("normal effective run should not include plan-only prompt\n---\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Start by running `multica issue get") {
+		t.Fatalf("normal effective run should keep regular task instructions\n---\n%s", prompt)
+	}
+}
+
 func TestResolveAuthUsesExplicitConfigPath(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 

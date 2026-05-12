@@ -42,7 +42,6 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
 
   const task = activeTasks[0] ?? recentTask;
   const isLive = activeTasks.length > 0;
-  const runMode = taskRunMode(task);
   const [paused, setPaused] = useState(false);
 
   const refreshPaused = useCallback(() => {
@@ -82,11 +81,6 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
         <span>Agent stream</span>
         {task && (
           <div className="ml-auto flex items-center gap-1">
-            {runMode === "plan" && (
-              <span className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info">
-                plan
-              </span>
-            )}
             <span className={cn(
               "rounded px-1.5 py-0.5 text-[11px]",
               paused ? "bg-indigo-500/10 text-indigo-500" : isLive ? "bg-success/10 text-success" : "bg-muted text-muted-foreground",
@@ -109,11 +103,6 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
       </div>
     </div>
   );
-}
-
-function taskRunMode(task: AgentTask | null): string {
-  const value = task?.context?.run_mode;
-  return typeof value === "string" ? value : "normal";
 }
 
 function sortRecentTasks(tasks: AgentTask[]): AgentTask[] {

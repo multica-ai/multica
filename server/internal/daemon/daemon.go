@@ -1016,6 +1016,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		}
 	}
 
+	requestedRunMode := protocol.ResolveTaskRunMode(task.Context)
+	effectiveRunMode := requestedRunMode
+	if requestedRunMode == protocol.TaskRunModePlan && provider != "claude" {
+		effectiveRunMode = protocol.TaskRunModeNormal
+	}
+	visibleLanguage := detectVisibleLanguage(task)
+
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
 	if err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
@@ -1024,7 +1031,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	// the same (agent, issue) pair. The work_dir path is stored in DB on
 	// task completion and passed back via PriorWorkDir on the next claim.
 
-	prompt := BuildPrompt(task)
+	prompt := BuildPromptWithRunMode(task, effectiveRunMode)
 
 	taskStart := time.Now()
 	traceRunID := newTraceRunID(taskStart)
@@ -1118,8 +1125,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		CustomArgs:      customArgs,
 		McpConfig:       mcpConfig,
 	}
-	runMode := protocol.ResolveTaskRunMode(task.Context)
-	visibleLanguage := detectVisibleLanguage(task)
 	// Resolve approval policy from agent runtime_config and inject callback.
 	// Default is "auto" — nil callback preserves existing auto-approve behaviour.
 	{
@@ -1128,14 +1133,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			rtCfg = task.Agent.RuntimeConfig
 		}
 		policy := protocol.ResolveApprovalPolicy(rtCfg)
-		if provider == "claude" && runMode == protocol.TaskRunModePlan {
+		if provider == "claude" && effectiveRunMode == protocol.TaskRunModePlan {
 			execOpts.OnApproval = BuildPlanAwareApprovalCallback(policy, task.ID, provider, d.client)
 		} else {
 			execOpts.OnApproval = BuildApprovalCallback(policy, task.ID, provider, d.client)
 		}
 		traceEnabled := protocol.ResolveTraceEnabled(rtCfg)
 		if traceEnabled {
-			if provider == "claude" && runMode == protocol.TaskRunModePlan && policy == protocol.ApprovalPolicyAuto {
+			if provider == "claude" && effectiveRunMode == protocol.TaskRunModePlan && policy == protocol.ApprovalPolicyAuto {
 				execOpts.OnApproval = WithApprovalTraceFilter(execOpts.OnApproval, d.traceStore, task.ID, traceRunID, provider, func(req agent.ApprovalRequest) bool {
 					return req.Type == protocol.InteractionPlanApproval
 				})
@@ -1146,7 +1151,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		}
 		if provider == "claude" {
 			execOpts.ClaudePermissionMode = protocol.ResolveClaudePermissionMode(rtCfg)
-			if runMode == protocol.TaskRunModePlan {
+			if effectiveRunMode == protocol.TaskRunModePlan {
 				execOpts.ClaudePermissionMode = "plan"
 				execOpts.ClaudeUseSDKBridge = true
 			}
@@ -1156,7 +1161,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			taskLog.Info("approval policy active", "policy", policy)
 		}
 	}
-	if execOpts.TraceCallback != nil && runMode == protocol.TaskRunModePlan {
+	if execOpts.TraceCallback != nil && requestedRunMode == protocol.TaskRunModePlan && effectiveRunMode != protocol.TaskRunModePlan {
+		emitDaemonDisplayTrace(execOpts.TraceCallback, "status", "Plan mode unavailable", localizedPlanUnsupportedMessage(visibleLanguage, provider), map[string]any{
+			"requested_run_mode": requestedRunMode,
+			"effective_run_mode": effectiveRunMode,
+			"provider":           provider,
+		})
+	}
+	if execOpts.TraceCallback != nil && effectiveRunMode == protocol.TaskRunModePlan {
 		emitDaemonDisplayTrace(execOpts.TraceCallback, "plan_stage", "Plan mode", localizedPlanDraftingMessage(visibleLanguage), map[string]any{
 			"stage": "planning",
 		})

@@ -12,7 +12,10 @@ import (
 // Keep this minimal — detailed instructions live in CLAUDE.md / AGENTS.md
 // injected by execenv.InjectRuntimeConfig.
 func BuildPrompt(task Task) string {
-	runMode := protocol.ResolveTaskRunMode(task.Context)
+	return BuildPromptWithRunMode(task, protocol.ResolveTaskRunMode(task.Context))
+}
+
+func BuildPromptWithRunMode(task Task, runMode string) string {
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
