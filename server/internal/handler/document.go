@@ -245,6 +245,13 @@ func (h *Handler) ListDocuments(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pathPrefix := r.URL.Query().Get("path-prefix")
+	// Escape SQL LIKE wildcards (% _ \) in the user-supplied prefix — paths
+	// legitimately contain underscores, but `_` is a single-char wildcard in
+	// LIKE and would otherwise match `team1a` when the user typed `team_a`.
+	// The query uses default ESCAPE so '\' is the escape char.
+	if pathPrefix != "" {
+		pathPrefix = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(pathPrefix)
+	}
 	var tagsFilter []string
 	if t := r.URL.Query().Get("tag"); t != "" {
 		tagsFilter = strings.Split(t, ",")
@@ -596,10 +603,15 @@ func (h *Handler) RenameDocument(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "new_path is required")
 		return
 	}
+	cleanPath := sanitizeNullBytes(req.NewPath)
+	if !service.IsValidDocumentPath(cleanPath) {
+		writeError(w, http.StatusBadRequest, service.ErrInvalidPath.Error())
+		return
+	}
 
 	err := h.Queries.RenameWorkspaceDocument(r.Context(), db.RenameWorkspaceDocumentParams{
 		ID:   doc.ID,
-		Path: sanitizeNullBytes(req.NewPath),
+		Path: cleanPath,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -828,17 +840,17 @@ func (h *Handler) RestoreDocument(w http.ResponseWriter, r *http.Request) {
 // --- Issue-Document link handlers ---
 
 func (h *Handler) LinkIssueDocument(w http.ResponseWriter, r *http.Request) {
-	workspaceID := h.resolveWorkspaceID(r)
-	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspace_id is required")
-		return
-	}
-
-	issueID := chi.URLParam(r, "issueId")
-	issueUUID, ok := parseUUIDOrBadRequest(w, issueID, "issue id")
+	// loadIssueForUser is the authoritative gate: it enforces workspace
+	// membership and that the issue belongs to the current workspace. Without
+	// it an attacker can POST a link from a workspace-A issue UUID to a
+	// workspace-B document UUID, then GET to exfiltrate that document's
+	// content via the JOIN in ListLinkedDocumentsForIssue.
+	issueIDParam := chi.URLParam(r, "issueId")
+	issue, ok := h.loadIssueForUser(w, r, issueIDParam)
 	if !ok {
 		return
 	}
+	workspaceID := uuidToString(issue.WorkspaceID)
 
 	var req LinkDocumentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -854,18 +866,16 @@ func (h *Handler) LinkIssueDocument(w http.ResponseWriter, r *http.Request) {
 
 	var docUUID pgtype.UUID
 	if req.DocumentID != nil {
-		var ok bool
-		docUUID, ok = parseUUIDOrBadRequest(w, *req.DocumentID, "document_id")
-		if !ok {
+		// Reuse loadDocumentForWorkspace to verify the doc belongs to the
+		// same workspace as the issue — same defense as the path branch.
+		doc, docOK := h.loadDocumentForWorkspace(w, r, *req.DocumentID, workspaceID)
+		if !docOK {
 			return
 		}
+		docUUID = doc.ID
 	} else if req.Path != nil {
-		wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
-		if !ok {
-			return
-		}
 		doc, err := h.Queries.GetWorkspaceDocumentByPath(r.Context(), db.GetWorkspaceDocumentByPathParams{
-			WorkspaceID: wsUUID,
+			WorkspaceID: issue.WorkspaceID,
 			Path:        *req.Path,
 		})
 		if err != nil {
@@ -879,7 +889,7 @@ func (h *Handler) LinkIssueDocument(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := h.Queries.LinkIssueDocument(r.Context(), db.LinkIssueDocumentParams{
-		IssueID:    issueUUID,
+		IssueID:    issue.ID,
 		DocumentID: docUUID,
 		LinkType:   req.LinkType,
 	})
@@ -892,21 +902,22 @@ func (h *Handler) LinkIssueDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UnlinkIssueDocument(w http.ResponseWriter, r *http.Request) {
-	issueID := chi.URLParam(r, "issueId")
-	issueUUID, ok := parseUUIDOrBadRequest(w, issueID, "issue id")
+	issueIDParam := chi.URLParam(r, "issueId")
+	issue, ok := h.loadIssueForUser(w, r, issueIDParam)
 	if !ok {
 		return
 	}
+	workspaceID := uuidToString(issue.WorkspaceID)
 
 	docID := chi.URLParam(r, "documentId")
-	docUUID, ok := parseUUIDOrBadRequest(w, docID, "document id")
+	doc, ok := h.loadDocumentForWorkspace(w, r, docID, workspaceID)
 	if !ok {
 		return
 	}
 
 	err := h.Queries.UnlinkIssueDocument(r.Context(), db.UnlinkIssueDocumentParams{
-		IssueID:    issueUUID,
-		DocumentID: docUUID,
+		IssueID:    issue.ID,
+		DocumentID: doc.ID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to unlink document")
@@ -917,13 +928,13 @@ func (h *Handler) UnlinkIssueDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListIssueDocumentLinks(w http.ResponseWriter, r *http.Request) {
-	issueID := chi.URLParam(r, "issueId")
-	issueUUID, ok := parseUUIDOrBadRequest(w, issueID, "issue id")
+	issueIDParam := chi.URLParam(r, "issueId")
+	issue, ok := h.loadIssueForUser(w, r, issueIDParam)
 	if !ok {
 		return
 	}
 
-	docs, err := h.Queries.ListLinkedDocumentsForIssue(r.Context(), issueUUID)
+	docs, err := h.Queries.ListLinkedDocumentsForIssue(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list linked documents")
 		return

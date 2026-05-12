@@ -25,6 +25,13 @@ func isValidPath(path string) bool {
 	return pathRegex.MatchString(path)
 }
 
+// IsValidDocumentPath is the exported boundary check for handler callers
+// that need to validate a path before reaching the service layer (e.g.
+// rename, which doesn't currently route through Put).
+func IsValidDocumentPath(path string) bool {
+	return isValidPath(path)
+}
+
 // DocumentPayload holds the mutable fields for a document upsert.
 type DocumentPayload struct {
 	Title            *string
