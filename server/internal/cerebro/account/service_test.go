@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -232,5 +233,103 @@ func TestServiceGet_OtherWorkspace(t *testing.T) {
 	}
 	if _, err := svc.Get(ctx, other, created.ID); !errors.Is(err, ErrAccountNotFound) {
 		t.Fatalf("expected ErrAccountNotFound for cross-workspace lookup, got %v", err)
+	}
+}
+
+func TestServiceUpdateUsage_PatchSemantics(t *testing.T) {
+	svc, cleanup := newAccountTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	created, err := svc.Create(ctx, accountTestWorkspaceID, accountTestUserID, "claude", "usage@firtal.dk")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// 1. Out-of-range usage rejected.
+	bad := float32(150)
+	if _, err := svc.UpdateUsage(ctx, accountTestWorkspaceID, accountTestUserID, created.ID, "daemon", UsageUpdate{
+		UsageWindowPct: &NullableFloat32{Value: &bad},
+	}); !errors.Is(err, ErrInvalidUsagePct) {
+		t.Fatalf("expected ErrInvalidUsagePct, got %v", err)
+	}
+
+	// 2. Patch only usage_window_pct → throttled_until stays nil.
+	pct := float32(42.5)
+	a, err := svc.UpdateUsage(ctx, accountTestWorkspaceID, accountTestUserID, created.ID, "daemon", UsageUpdate{
+		UsageWindowPct: &NullableFloat32{Value: &pct},
+	})
+	if err != nil {
+		t.Fatalf("UpdateUsage failed: %v", err)
+	}
+	if !a.UsageWindowPct.Valid || a.UsageWindowPct.Float32 != pct {
+		t.Fatalf("usage_window_pct: got %+v want %v", a.UsageWindowPct, pct)
+	}
+	if a.ThrottledUntil.Valid {
+		t.Fatalf("throttled_until should be unset, got %+v", a.ThrottledUntil)
+	}
+
+	// 3. Patch only throttled_until → usage_window_pct preserved.
+	ts := pgtype.Timestamptz{Time: time.Now().Add(5 * time.Minute).UTC(), Valid: true}
+	a, err = svc.UpdateUsage(ctx, accountTestWorkspaceID, accountTestUserID, created.ID, "daemon", UsageUpdate{
+		ThrottledUntil: &NullableTime{Value: &ts},
+	})
+	if err != nil {
+		t.Fatalf("UpdateUsage(throttled) failed: %v", err)
+	}
+	if !a.ThrottledUntil.Valid {
+		t.Fatalf("throttled_until should be set after patch")
+	}
+	if !a.UsageWindowPct.Valid || a.UsageWindowPct.Float32 != pct {
+		t.Fatalf("usage_window_pct should be preserved across patch, got %+v", a.UsageWindowPct)
+	}
+
+	// 4. Explicit clear with non-nil outer + nil inner.
+	a, err = svc.UpdateUsage(ctx, accountTestWorkspaceID, accountTestUserID, created.ID, "daemon", UsageUpdate{
+		ThrottledUntil: &NullableTime{Value: nil},
+	})
+	if err != nil {
+		t.Fatalf("UpdateUsage(clear) failed: %v", err)
+	}
+	if a.ThrottledUntil.Valid {
+		t.Fatalf("throttled_until should be cleared, got %+v", a.ThrottledUntil)
+	}
+}
+
+func TestServiceUpdateControls_PatchSemantics(t *testing.T) {
+	svc, cleanup := newAccountTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	created, err := svc.Create(ctx, accountTestWorkspaceID, accountTestUserID, "claude", "controls@firtal.dk")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	if created.ExtraSpendOn || created.PausedManual {
+		t.Fatalf("expected default-false controls, got extra=%v paused=%v",
+			created.ExtraSpendOn, created.PausedManual)
+	}
+
+	yes := true
+	a, err := svc.UpdateControls(ctx, accountTestWorkspaceID, accountTestUserID, created.ID, ControlsUpdate{
+		ExtraSpendOn: &yes,
+	})
+	if err != nil {
+		t.Fatalf("UpdateControls failed: %v", err)
+	}
+	if !a.ExtraSpendOn || a.PausedManual {
+		t.Fatalf("expected extra=true paused=false, got extra=%v paused=%v",
+			a.ExtraSpendOn, a.PausedManual)
+	}
+
+	a, err = svc.UpdateControls(ctx, accountTestWorkspaceID, accountTestUserID, created.ID, ControlsUpdate{
+		PausedManual: &yes,
+	})
+	if err != nil {
+		t.Fatalf("UpdateControls(pause) failed: %v", err)
+	}
+	if !a.ExtraSpendOn || !a.PausedManual {
+		t.Fatalf("expected both true after second patch, got extra=%v paused=%v",
+			a.ExtraSpendOn, a.PausedManual)
 	}
 }

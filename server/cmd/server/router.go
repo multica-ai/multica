@@ -340,6 +340,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 		r.Post("/runtimes/{runtimeId}/recover-orphans", h.RecoverOrphanedTasks)
 		r.Post("/tasks/{taskId}/session", h.PinTaskSession)
+
+		// CEREBRO-PATCH(cerebro-account-routes): JEH-998 daemon-only usage telemetry endpoint.
+		r.Post("/accounts/{id}/usage", cerebroAccountHandler.UpdateUsage)
 	})
 
 	// === Task-scoped allowlist ===
@@ -459,11 +462,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(cerebro-groups-routes): workspace group CRUD entrypoint.
 					r.Get("/groups", cerebroGroupsHandler.List)
 					r.Post("/groups", cerebroGroupsHandler.Create)
-					// CEREBRO-PATCH(cerebro-account-routes): workspace accounts CRUD.
+					// CEREBRO-PATCH(cerebro-account-routes): workspace accounts CRUD + JEH-998 controls patch.
 					r.Get("/accounts", cerebroAccountHandler.List)
 					r.Post("/accounts", cerebroAccountHandler.Create)
 					r.Get("/accounts/{id}", cerebroAccountHandler.Get)
 					r.Delete("/accounts/{id}", cerebroAccountHandler.Delete)
+					r.Patch("/accounts/{id}/controls", cerebroAccountHandler.UpdateControls)
 					// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196 credential registry routes (CRUD + reveal + rotate + bindings + audit).
 					cerebroCredentialsHandler.Mount(r)
 				})

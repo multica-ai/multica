@@ -228,12 +228,16 @@ type BudgetState struct {
 }
 
 type CerebroAccount struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Provider      string             `json:"provider"`
-	LoginIdentity string             `json:"login_identity"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Provider       string             `json:"provider"`
+	LoginIdentity  string             `json:"login_identity"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	UsageWindowPct pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntil pgtype.Timestamptz `json:"throttled_until"`
+	ExtraSpendOn   bool               `json:"extra_spend_on"`
+	PausedManual   bool               `json:"paused_manual"`
 }
 
 type CerebroChannelAgentSetting struct {

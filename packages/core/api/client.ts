@@ -203,12 +203,16 @@ export interface ImportStarterContentResponse {
   welcome_issue_id: string | null;
 }
 
-// CEREBRO-PATCH(cerebro-account-client): JEH-921 workspace account types. JEH-881 adds availability fields.
+// CEREBRO-PATCH(cerebro-account-client): JEH-921 workspace account types. JEH-881 adds availability fields. JEH-998 adds usage fields.
 export interface CerebroAccount {
   id: string;
   workspace_id: string;
   provider: string;
   login_identity: string;
+  usage_window_pct: number | null;
+  throttled_until: string | null;
+  extra_spend_on: boolean;
+  paused_manual: boolean;
   created_at: string;
   updated_at: string;
   // CEREBRO-PATCH(cerebro-account-availability): JEH-881 runtime availability fields.
@@ -220,6 +224,10 @@ export interface CerebroAccount {
 export interface CreateCerebroAccountRequest {
   provider: string;
   login_identity: string;
+}
+export interface UpdateCerebroAccountControlsRequest {
+  extra_spend_on?: boolean;
+  paused_manual?: boolean;
 }
 
 export class ApiError extends Error {
@@ -515,6 +523,18 @@ export class ApiClient {
   async deleteCerebroAccount(wsId: string, id: string): Promise<void> {
     await this.fetch(`/api/workspaces/${wsId}/accounts/${id}`, {
       method: "DELETE",
+    });
+  }
+
+  // CEREBRO-PATCH(cerebro-account-client): JEH-998 UI-driven control toggles.
+  async updateCerebroAccountControls(
+    wsId: string,
+    id: string,
+    body: UpdateCerebroAccountControlsRequest,
+  ): Promise<CerebroAccount> {
+    return this.fetch(`/api/workspaces/${wsId}/accounts/${id}/controls`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
     });
   }
 

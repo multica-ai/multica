@@ -1,33 +1,110 @@
 package account
 
 import (
+	"github.com/jackc/pgx/v5/pgtype"
+
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-type accountResponse struct {
-	ID                    string  `json:"id"`
-	WorkspaceID           string  `json:"workspace_id"`
-	Provider              string  `json:"provider"`
-	LoginIdentity         string  `json:"login_identity"`
-	CreatedAt             string  `json:"created_at"`
-	UpdatedAt             string  `json:"updated_at"`
-	RuntimeCount          int32   `json:"runtime_count"`
-	AvailableRuntimeCount int32   `json:"available_runtime_count"`
-	NearestUnpauseAt      *string `json:"nearest_unpause_at"`
-	Status                string  `json:"status"`
+// Account is the package-internal representation of a workspace account.
+// sqlc emits a distinct row type per query (CreateCerebroAccountRow,
+// GetCerebroAccountRow, ListCerebroAccountsRow, ...). They all carry the
+// same column set, so we normalize to a single type at the service
+// boundary instead of plumbing five row types through the handler.
+type Account struct {
+	ID             pgtype.UUID
+	WorkspaceID    pgtype.UUID
+	Provider       string
+	LoginIdentity  string
+	UsageWindowPct pgtype.Float4
+	ThrottledUntil pgtype.Timestamptz
+	ExtraSpendOn   bool
+	PausedManual   bool
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
 }
 
-func accountResponseFromModel(a cerebrodb.CerebroAccount) accountResponse {
-	return accountResponse{
+func accountFromList(r cerebrodb.ListCerebroAccountsRow) Account {
+	return Account{
+		ID: r.ID, WorkspaceID: r.WorkspaceID, Provider: r.Provider, LoginIdentity: r.LoginIdentity,
+		UsageWindowPct: r.UsageWindowPct, ThrottledUntil: r.ThrottledUntil,
+		ExtraSpendOn: r.ExtraSpendOn, PausedManual: r.PausedManual,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+func accountFromGet(r cerebrodb.GetCerebroAccountRow) Account {
+	return Account{
+		ID: r.ID, WorkspaceID: r.WorkspaceID, Provider: r.Provider, LoginIdentity: r.LoginIdentity,
+		UsageWindowPct: r.UsageWindowPct, ThrottledUntil: r.ThrottledUntil,
+		ExtraSpendOn: r.ExtraSpendOn, PausedManual: r.PausedManual,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+func accountFromCreate(r cerebrodb.CreateCerebroAccountRow) Account {
+	return Account{
+		ID: r.ID, WorkspaceID: r.WorkspaceID, Provider: r.Provider, LoginIdentity: r.LoginIdentity,
+		UsageWindowPct: r.UsageWindowPct, ThrottledUntil: r.ThrottledUntil,
+		ExtraSpendOn: r.ExtraSpendOn, PausedManual: r.PausedManual,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+func accountFromUpdateUsage(r cerebrodb.UpdateCerebroAccountUsageRow) Account {
+	return Account{
+		ID: r.ID, WorkspaceID: r.WorkspaceID, Provider: r.Provider, LoginIdentity: r.LoginIdentity,
+		UsageWindowPct: r.UsageWindowPct, ThrottledUntil: r.ThrottledUntil,
+		ExtraSpendOn: r.ExtraSpendOn, PausedManual: r.PausedManual,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+func accountFromUpdateControls(r cerebrodb.UpdateCerebroAccountControlsRow) Account {
+	return Account{
+		ID: r.ID, WorkspaceID: r.WorkspaceID, Provider: r.Provider, LoginIdentity: r.LoginIdentity,
+		UsageWindowPct: r.UsageWindowPct, ThrottledUntil: r.ThrottledUntil,
+		ExtraSpendOn: r.ExtraSpendOn, PausedManual: r.PausedManual,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+type accountResponse struct {
+	ID                    string   `json:"id"`
+	WorkspaceID           string   `json:"workspace_id"`
+	Provider              string   `json:"provider"`
+	LoginIdentity         string   `json:"login_identity"`
+	UsageWindowPct        *float32 `json:"usage_window_pct"`
+	ThrottledUntil        *string  `json:"throttled_until"`
+	ExtraSpendOn          bool     `json:"extra_spend_on"`
+	PausedManual          bool     `json:"paused_manual"`
+	CreatedAt             string   `json:"created_at"`
+	UpdatedAt             string   `json:"updated_at"`
+	RuntimeCount          int32    `json:"runtime_count"`
+	AvailableRuntimeCount int32    `json:"available_runtime_count"`
+	NearestUnpauseAt      *string  `json:"nearest_unpause_at"`
+	Status                string   `json:"status"`
+}
+
+func accountResponseFromModel(a Account) accountResponse {
+	resp := accountResponse{
 		ID:            util.UUIDToString(a.ID),
 		WorkspaceID:   util.UUIDToString(a.WorkspaceID),
 		Provider:      a.Provider,
 		LoginIdentity: a.LoginIdentity,
+		ExtraSpendOn:  a.ExtraSpendOn,
+		PausedManual:  a.PausedManual,
 		CreatedAt:     util.TimestampToString(a.CreatedAt),
 		UpdatedAt:     util.TimestampToString(a.UpdatedAt),
 		Status:        "no_runtime",
 	}
+	if a.UsageWindowPct.Valid {
+		v := a.UsageWindowPct.Float32
+		resp.UsageWindowPct = &v
+	}
+	resp.ThrottledUntil = util.TimestampToPtr(a.ThrottledUntil)
+	return resp
 }
 
 func accountResponseFromAvailabilityRow(r cerebrodb.ListCerebroAccountsWithAvailabilityRow) accountResponse {

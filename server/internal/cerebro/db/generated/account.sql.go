@@ -14,7 +14,9 @@ import (
 const createCerebroAccount = `-- name: CreateCerebroAccount :one
 INSERT INTO cerebro_account (workspace_id, provider, login_identity)
 VALUES ($1, $2, $3)
-RETURNING id, workspace_id, provider, login_identity, created_at, updated_at
+RETURNING id, workspace_id, provider, login_identity,
+          usage_window_pct, throttled_until, extra_spend_on, paused_manual,
+          created_at, updated_at
 `
 
 type CreateCerebroAccountParams struct {
@@ -23,14 +25,31 @@ type CreateCerebroAccountParams struct {
 	LoginIdentity string      `json:"login_identity"`
 }
 
-func (q *Queries) CreateCerebroAccount(ctx context.Context, arg CreateCerebroAccountParams) (CerebroAccount, error) {
+type CreateCerebroAccountRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Provider       string             `json:"provider"`
+	LoginIdentity  string             `json:"login_identity"`
+	UsageWindowPct pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntil pgtype.Timestamptz `json:"throttled_until"`
+	ExtraSpendOn   bool               `json:"extra_spend_on"`
+	PausedManual   bool               `json:"paused_manual"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) CreateCerebroAccount(ctx context.Context, arg CreateCerebroAccountParams) (CreateCerebroAccountRow, error) {
 	row := q.db.QueryRow(ctx, createCerebroAccount, arg.WorkspaceID, arg.Provider, arg.LoginIdentity)
-	var i CerebroAccount
+	var i CreateCerebroAccountRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
 		&i.Provider,
 		&i.LoginIdentity,
+		&i.UsageWindowPct,
+		&i.ThrottledUntil,
+		&i.ExtraSpendOn,
+		&i.PausedManual,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -48,19 +67,38 @@ func (q *Queries) DeleteCerebroAccount(ctx context.Context, id pgtype.UUID) erro
 }
 
 const getCerebroAccount = `-- name: GetCerebroAccount :one
-SELECT id, workspace_id, provider, login_identity, created_at, updated_at
+SELECT id, workspace_id, provider, login_identity,
+       usage_window_pct, throttled_until, extra_spend_on, paused_manual,
+       created_at, updated_at
 FROM cerebro_account
 WHERE id = $1
 `
 
-func (q *Queries) GetCerebroAccount(ctx context.Context, id pgtype.UUID) (CerebroAccount, error) {
+type GetCerebroAccountRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Provider       string             `json:"provider"`
+	LoginIdentity  string             `json:"login_identity"`
+	UsageWindowPct pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntil pgtype.Timestamptz `json:"throttled_until"`
+	ExtraSpendOn   bool               `json:"extra_spend_on"`
+	PausedManual   bool               `json:"paused_manual"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetCerebroAccount(ctx context.Context, id pgtype.UUID) (GetCerebroAccountRow, error) {
 	row := q.db.QueryRow(ctx, getCerebroAccount, id)
-	var i CerebroAccount
+	var i GetCerebroAccountRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
 		&i.Provider,
 		&i.LoginIdentity,
+		&i.UsageWindowPct,
+		&i.ThrottledUntil,
+		&i.ExtraSpendOn,
+		&i.PausedManual,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -68,26 +106,45 @@ func (q *Queries) GetCerebroAccount(ctx context.Context, id pgtype.UUID) (Cerebr
 }
 
 const listCerebroAccounts = `-- name: ListCerebroAccounts :many
-SELECT id, workspace_id, provider, login_identity, created_at, updated_at
+SELECT id, workspace_id, provider, login_identity,
+       usage_window_pct, throttled_until, extra_spend_on, paused_manual,
+       created_at, updated_at
 FROM cerebro_account
 WHERE workspace_id = $1
 ORDER BY provider ASC, lower(login_identity) ASC, created_at ASC
 `
 
-func (q *Queries) ListCerebroAccounts(ctx context.Context, workspaceID pgtype.UUID) ([]CerebroAccount, error) {
+type ListCerebroAccountsRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Provider       string             `json:"provider"`
+	LoginIdentity  string             `json:"login_identity"`
+	UsageWindowPct pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntil pgtype.Timestamptz `json:"throttled_until"`
+	ExtraSpendOn   bool               `json:"extra_spend_on"`
+	PausedManual   bool               `json:"paused_manual"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListCerebroAccounts(ctx context.Context, workspaceID pgtype.UUID) ([]ListCerebroAccountsRow, error) {
 	rows, err := q.db.Query(ctx, listCerebroAccounts, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CerebroAccount{}
+	items := []ListCerebroAccountsRow{}
 	for rows.Next() {
-		var i CerebroAccount
+		var i ListCerebroAccountsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
 			&i.Provider,
 			&i.LoginIdentity,
+			&i.UsageWindowPct,
+			&i.ThrottledUntil,
+			&i.ExtraSpendOn,
+			&i.PausedManual,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -188,6 +245,130 @@ func (q *Queries) UpsertCerebroAccount(ctx context.Context, arg UpsertCerebroAcc
 		&i.WorkspaceID,
 		&i.Provider,
 		&i.LoginIdentity,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateCerebroAccountControls = `-- name: UpdateCerebroAccountControls :one
+UPDATE cerebro_account
+SET extra_spend_on = CASE WHEN $2::boolean
+                          THEN $3::boolean
+                          ELSE extra_spend_on END,
+    paused_manual  = CASE WHEN $4::boolean
+                          THEN $5::boolean
+                          ELSE paused_manual END,
+    updated_at     = now()
+WHERE id = $1
+RETURNING id, workspace_id, provider, login_identity,
+          usage_window_pct, throttled_until, extra_spend_on, paused_manual,
+          created_at, updated_at
+`
+
+type UpdateCerebroAccountControlsParams struct {
+	ID              pgtype.UUID `json:"id"`
+	ExtraSpendOnSet bool        `json:"extra_spend_on_set"`
+	ExtraSpendOn    bool        `json:"extra_spend_on"`
+	PausedManualSet bool        `json:"paused_manual_set"`
+	PausedManual    bool        `json:"paused_manual"`
+}
+
+type UpdateCerebroAccountControlsRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Provider       string             `json:"provider"`
+	LoginIdentity  string             `json:"login_identity"`
+	UsageWindowPct pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntil pgtype.Timestamptz `json:"throttled_until"`
+	ExtraSpendOn   bool               `json:"extra_spend_on"`
+	PausedManual   bool               `json:"paused_manual"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+// UI-driven control toggles. Same partial-update pattern as usage above.
+func (q *Queries) UpdateCerebroAccountControls(ctx context.Context, arg UpdateCerebroAccountControlsParams) (UpdateCerebroAccountControlsRow, error) {
+	row := q.db.QueryRow(ctx, updateCerebroAccountControls,
+		arg.ID,
+		arg.ExtraSpendOnSet,
+		arg.ExtraSpendOn,
+		arg.PausedManualSet,
+		arg.PausedManual,
+	)
+	var i UpdateCerebroAccountControlsRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Provider,
+		&i.LoginIdentity,
+		&i.UsageWindowPct,
+		&i.ThrottledUntil,
+		&i.ExtraSpendOn,
+		&i.PausedManual,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateCerebroAccountUsage = `-- name: UpdateCerebroAccountUsage :one
+UPDATE cerebro_account
+SET usage_window_pct = CASE WHEN $2::boolean
+                            THEN $3::real
+                            ELSE usage_window_pct END,
+    throttled_until  = CASE WHEN $4::boolean
+                            THEN $5::timestamptz
+                            ELSE throttled_until END,
+    updated_at       = now()
+WHERE id = $1
+RETURNING id, workspace_id, provider, login_identity,
+          usage_window_pct, throttled_until, extra_spend_on, paused_manual,
+          created_at, updated_at
+`
+
+type UpdateCerebroAccountUsageParams struct {
+	ID                pgtype.UUID        `json:"id"`
+	UsageWindowPctSet bool               `json:"usage_window_pct_set"`
+	UsageWindowPct    pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntilSet bool               `json:"throttled_until_set"`
+	ThrottledUntil    pgtype.Timestamptz `json:"throttled_until"`
+}
+
+type UpdateCerebroAccountUsageRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Provider       string             `json:"provider"`
+	LoginIdentity  string             `json:"login_identity"`
+	UsageWindowPct pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntil pgtype.Timestamptz `json:"throttled_until"`
+	ExtraSpendOn   bool               `json:"extra_spend_on"`
+	PausedManual   bool               `json:"paused_manual"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Daemon-driven usage telemetry. Each field is updated only when the
+// matching $..._set flag is true so the daemon can patch a single signal
+// (e.g. just throttled_until on a 429) without clobbering the other.
+func (q *Queries) UpdateCerebroAccountUsage(ctx context.Context, arg UpdateCerebroAccountUsageParams) (UpdateCerebroAccountUsageRow, error) {
+	row := q.db.QueryRow(ctx, updateCerebroAccountUsage,
+		arg.ID,
+		arg.UsageWindowPctSet,
+		arg.UsageWindowPct,
+		arg.ThrottledUntilSet,
+		arg.ThrottledUntil,
+	)
+	var i UpdateCerebroAccountUsageRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Provider,
+		&i.LoginIdentity,
+		&i.UsageWindowPct,
+		&i.ThrottledUntil,
+		&i.ExtraSpendOn,
+		&i.PausedManual,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
