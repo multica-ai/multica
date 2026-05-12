@@ -597,6 +597,11 @@ func (s *Service) processDeployment(ctx context.Context, ev WebhookEvent) (Webho
 		Ref:           payload.Deployment.Ref,
 		Sha:           payload.Deployment.SHA,
 		Status:        db.DeployStatusPending,
+		// Provenance: deployment_created webhook from GitHub. The
+		// payload itself is the evidence; we don't have a URL handy
+		// for this event class (payloads carry an id but no canonical
+		// public URL), so provenance_ref stays null.
+		Provenance: db.DeployProvenanceWebhook,
 	})
 	if err != nil {
 		return WebhookOutcome{}, fmt.Errorf("insert deploy: %w", err)
@@ -645,6 +650,7 @@ func (s *Service) processDeploymentStatus(ctx context.Context, ev WebhookEvent) 
 				Ref:           payload.Deployment.Ref,
 				Sha:           payload.Deployment.SHA,
 				Status:        db.DeployStatusPending,
+				Provenance:    db.DeployProvenanceWebhook,
 			})
 			if err != nil {
 				return WebhookOutcome{}, fmt.Errorf("synth deploy row: %w", err)
@@ -676,11 +682,10 @@ func (s *Service) processDeploymentStatus(ctx context.Context, ev WebhookEvent) 
 		return WebhookOutcome{}, fmt.Errorf("update deploy status: %w", err)
 	}
 	if newStatus == db.DeployStatusSucceeded {
-		_, _ = s.Q.UpdateDeployEnvironmentCurrent(ctx, db.UpdateDeployEnvironmentCurrentParams{
-			ID:                env.ID,
-			CurrentSha:        pgtype.Text{String: updated.Sha, Valid: true},
-			CurrentDeployedAt: now,
-		})
+		// Single-writer path: recompute env.current_sha from the deploy
+		// table. Never rolls backwards in time even if a stale webhook
+		// arrives out of order.
+		_, _ = s.Q.RecomputeEnvCurrentFromDeploys(ctx, env.ID)
 		// Phase 5 — production deploy storytelling. Best-effort; a
 		// failed runbook write logs and continues.
 		s.emitRunbookFromOutcome(ctx, ev.WorkspaceID, env, updated)

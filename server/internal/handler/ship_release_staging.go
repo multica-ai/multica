@@ -452,18 +452,19 @@ func (h *Handler) MarkReleaseStagingDeployed(w http.ResponseWriter, r *http.Requ
 		TriggeredBy:   requestedBy,
 		StartedAt:     now,
 		CompletedAt:   now,
+		// Evidence-bound: user clicked Mark deploy as landed. Same
+		// shape as MarkProductionDeployed — manual_assertion with an
+		// optional note for the audit trail.
+		Provenance:    db.DeployProvenanceManualAssertion,
+		ProvenanceRef: pgtype.Text{},
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to record deploy")
 		return
 	}
-	// Bump the env's current_sha so the deploy strip reflects what
-	// just landed.
-	_, _ = h.Queries.UpdateDeployEnvironmentCurrent(r.Context(), db.UpdateDeployEnvironmentCurrentParams{
-		ID:                stagingEnv.ID,
-		CurrentSha:        pgtype.Text{String: deploy.Sha, Valid: true},
-		CurrentDeployedAt: deploy.TriggeredAt,
-	})
+	// Recompute env.current_sha from the deploy table (single-writer
+	// path). Never rolls backwards in time.
+	_, _ = h.Queries.RecomputeEnvCurrentFromDeploys(r.Context(), stagingEnv.ID)
 
 	// Reuse the webhook-path linkage so smoke triggers / stage
 	// transitions / channel posts all fire consistently.

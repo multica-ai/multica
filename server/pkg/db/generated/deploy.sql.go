@@ -74,7 +74,7 @@ func (q *Queries) DeleteDeployEnvironment(ctx context.Context, id pgtype.UUID) e
 }
 
 const getDeploy = `-- name: GetDeploy :one
-SELECT id, workspace_id, environment_id, ref, sha, status, triggered_by, triggered_at, started_at, completed_at, log_url, error_message, created_at FROM deploy WHERE id = $1
+SELECT id, workspace_id, environment_id, ref, sha, status, triggered_by, triggered_at, started_at, completed_at, log_url, error_message, created_at, provenance, provenance_ref FROM deploy WHERE id = $1
 `
 
 func (q *Queries) GetDeploy(ctx context.Context, id pgtype.UUID) (Deploy, error) {
@@ -94,12 +94,14 @@ func (q *Queries) GetDeploy(ctx context.Context, id pgtype.UUID) (Deploy, error)
 		&i.LogUrl,
 		&i.ErrorMessage,
 		&i.CreatedAt,
+		&i.Provenance,
+		&i.ProvenanceRef,
 	)
 	return i, err
 }
 
 const getDeployByEnvAndSHA = `-- name: GetDeployByEnvAndSHA :one
-SELECT id, workspace_id, environment_id, ref, sha, status, triggered_by, triggered_at, started_at, completed_at, log_url, error_message, created_at FROM deploy
+SELECT id, workspace_id, environment_id, ref, sha, status, triggered_by, triggered_at, started_at, completed_at, log_url, error_message, created_at, provenance, provenance_ref FROM deploy
 WHERE environment_id = $1 AND sha = $2
 ORDER BY triggered_at DESC
 LIMIT 1
@@ -129,6 +131,8 @@ func (q *Queries) GetDeployByEnvAndSHA(ctx context.Context, arg GetDeployByEnvAn
 		&i.LogUrl,
 		&i.ErrorMessage,
 		&i.CreatedAt,
+		&i.Provenance,
+		&i.ProvenanceRef,
 	)
 	return i, err
 }
@@ -241,10 +245,11 @@ func (q *Queries) GetDeployEnvironmentInWorkspace(ctx context.Context, arg GetDe
 const insertDeploy = `-- name: InsertDeploy :one
 INSERT INTO deploy (
     workspace_id, environment_id, ref, sha, status, triggered_by,
-    started_at, completed_at, log_url, error_message
+    started_at, completed_at, log_url, error_message,
+    provenance, provenance_ref
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
-) RETURNING id, workspace_id, environment_id, ref, sha, status, triggered_by, triggered_at, started_at, completed_at, log_url, error_message, created_at
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+) RETURNING id, workspace_id, environment_id, ref, sha, status, triggered_by, triggered_at, started_at, completed_at, log_url, error_message, created_at, provenance, provenance_ref
 `
 
 type InsertDeployParams struct {
@@ -258,6 +263,8 @@ type InsertDeployParams struct {
 	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
 	LogUrl        pgtype.Text        `json:"log_url"`
 	ErrorMessage  pgtype.Text        `json:"error_message"`
+	Provenance    DeployProvenance   `json:"provenance"`
+	ProvenanceRef pgtype.Text        `json:"provenance_ref"`
 }
 
 func (q *Queries) InsertDeploy(ctx context.Context, arg InsertDeployParams) (Deploy, error) {
@@ -272,6 +279,8 @@ func (q *Queries) InsertDeploy(ctx context.Context, arg InsertDeployParams) (Dep
 		arg.CompletedAt,
 		arg.LogUrl,
 		arg.ErrorMessage,
+		arg.Provenance,
+		arg.ProvenanceRef,
 	)
 	var i Deploy
 	err := row.Scan(
@@ -288,6 +297,8 @@ func (q *Queries) InsertDeploy(ctx context.Context, arg InsertDeployParams) (Dep
 		&i.LogUrl,
 		&i.ErrorMessage,
 		&i.CreatedAt,
+		&i.Provenance,
+		&i.ProvenanceRef,
 	)
 	return i, err
 }
@@ -379,7 +390,7 @@ func (q *Queries) ListDeployEnvironmentsByWorkspace(ctx context.Context, workspa
 }
 
 const listDeploysByEnvironmentBefore = `-- name: ListDeploysByEnvironmentBefore :many
-SELECT id, workspace_id, environment_id, ref, sha, status, triggered_by, triggered_at, started_at, completed_at, log_url, error_message, created_at FROM deploy
+SELECT id, workspace_id, environment_id, ref, sha, status, triggered_by, triggered_at, started_at, completed_at, log_url, error_message, created_at, provenance, provenance_ref FROM deploy
 WHERE environment_id = $1
   AND triggered_at <= $2::timestamptz
 ORDER BY triggered_at DESC
@@ -417,6 +428,8 @@ func (q *Queries) ListDeploysByEnvironmentBefore(ctx context.Context, arg ListDe
 			&i.LogUrl,
 			&i.ErrorMessage,
 			&i.CreatedAt,
+			&i.Provenance,
+			&i.ProvenanceRef,
 		); err != nil {
 			return nil, err
 		}
@@ -429,7 +442,7 @@ func (q *Queries) ListDeploysByEnvironmentBefore(ctx context.Context, arg ListDe
 }
 
 const listRecentDeploysByEnvironment = `-- name: ListRecentDeploysByEnvironment :many
-SELECT id, workspace_id, environment_id, ref, sha, status, triggered_by, triggered_at, started_at, completed_at, log_url, error_message, created_at FROM deploy
+SELECT id, workspace_id, environment_id, ref, sha, status, triggered_by, triggered_at, started_at, completed_at, log_url, error_message, created_at, provenance, provenance_ref FROM deploy
 WHERE environment_id = $1
 ORDER BY triggered_at DESC
 LIMIT $2
@@ -463,6 +476,8 @@ func (q *Queries) ListRecentDeploysByEnvironment(ctx context.Context, arg ListRe
 			&i.LogUrl,
 			&i.ErrorMessage,
 			&i.CreatedAt,
+			&i.Provenance,
+			&i.ProvenanceRef,
 		); err != nil {
 			return nil, err
 		}
@@ -493,6 +508,62 @@ func (q *Queries) ProjectHasStagingEnv(ctx context.Context, projectID pgtype.UUI
 	var has_staging bool
 	err := row.Scan(&has_staging)
 	return has_staging, err
+}
+
+const recomputeEnvCurrentFromDeploys = `-- name: RecomputeEnvCurrentFromDeploys :one
+UPDATE deploy_environment de SET
+    current_sha = (
+        SELECT sha FROM deploy
+        WHERE environment_id = de.id AND status = 'succeeded'
+        ORDER BY triggered_at DESC LIMIT 1
+    ),
+    current_deployed_at = (
+        SELECT triggered_at FROM deploy
+        WHERE environment_id = de.id AND status = 'succeeded'
+        ORDER BY triggered_at DESC LIMIT 1
+    ),
+    updated_at = now()
+WHERE de.id = $1
+RETURNING id, workspace_id, project_id, kind, name, target_branch, target_url, current_sha, current_deployed_at, auto_promote, created_at, updated_at, adapter_kind, deploy_workflow_filename, auto_deploy
+`
+
+// Single-writer view of env.current_sha + current_deployed_at.
+//
+// After the evidence-bound deploys migration (096), this query is the
+// ONLY path that should update those two columns. Picks the most
+// recent succeeded deploy for the env (by triggered_at DESC) and
+// writes its sha + timestamp into the env row.
+//
+// Why a separate query rather than a trigger: callers want the
+// returned env row for response payloads + WS event publishing.
+// Triggers can't return values to the application layer, so a query
+// is the cleaner pattern.
+//
+// If no succeeded deploy exists, current_sha + current_deployed_at
+// are nulled out — accurate "we don't know what's running" state.
+// That's intentional: silently keeping a stale value lies to the
+// operator. A null is a true signal to investigate.
+func (q *Queries) RecomputeEnvCurrentFromDeploys(ctx context.Context, id pgtype.UUID) (DeployEnvironment, error) {
+	row := q.db.QueryRow(ctx, recomputeEnvCurrentFromDeploys, id)
+	var i DeployEnvironment
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.Kind,
+		&i.Name,
+		&i.TargetBranch,
+		&i.TargetUrl,
+		&i.CurrentSha,
+		&i.CurrentDeployedAt,
+		&i.AutoPromote,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AdapterKind,
+		&i.DeployWorkflowFilename,
+		&i.AutoDeploy,
+	)
+	return i, err
 }
 
 const updateDeployEnvironment = `-- name: UpdateDeployEnvironment :one
@@ -603,7 +674,7 @@ UPDATE deploy SET
     log_url       = COALESCE($5, log_url),
     error_message = COALESCE($6, error_message)
 WHERE id = $1
-RETURNING id, workspace_id, environment_id, ref, sha, status, triggered_by, triggered_at, started_at, completed_at, log_url, error_message, created_at
+RETURNING id, workspace_id, environment_id, ref, sha, status, triggered_by, triggered_at, started_at, completed_at, log_url, error_message, created_at, provenance, provenance_ref
 `
 
 type UpdateDeployStatusParams struct {
@@ -642,6 +713,8 @@ func (q *Queries) UpdateDeployStatus(ctx context.Context, arg UpdateDeployStatus
 		&i.LogUrl,
 		&i.ErrorMessage,
 		&i.CreatedAt,
+		&i.Provenance,
+		&i.ProvenanceRef,
 	)
 	return i, err
 }

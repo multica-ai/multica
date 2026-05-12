@@ -53,6 +53,50 @@ func (ns NullDeployEnvironmentKind) Value() (driver.Value, error) {
 	return string(ns.DeployEnvironmentKind), nil
 }
 
+type DeployProvenance string
+
+const (
+	DeployProvenanceWorkflowRun     DeployProvenance = "workflow_run"
+	DeployProvenanceManualAssertion DeployProvenance = "manual_assertion"
+	DeployProvenanceWebhook         DeployProvenance = "webhook"
+	DeployProvenanceLegacy          DeployProvenance = "legacy"
+)
+
+func (e *DeployProvenance) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DeployProvenance(s)
+	case string:
+		*e = DeployProvenance(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DeployProvenance: %T", src)
+	}
+	return nil
+}
+
+type NullDeployProvenance struct {
+	DeployProvenance DeployProvenance `json:"deploy_provenance"`
+	Valid            bool             `json:"valid"` // Valid is true if DeployProvenance is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDeployProvenance) Scan(value interface{}) error {
+	if value == nil {
+		ns.DeployProvenance, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DeployProvenance.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDeployProvenance) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DeployProvenance), nil
+}
+
 type DeployStatus string
 
 const (
@@ -668,6 +712,8 @@ type Deploy struct {
 	LogUrl        pgtype.Text        `json:"log_url"`
 	ErrorMessage  pgtype.Text        `json:"error_message"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	Provenance    DeployProvenance   `json:"provenance"`
+	ProvenanceRef pgtype.Text        `json:"provenance_ref"`
 }
 
 type DeployAdapterConfig struct {

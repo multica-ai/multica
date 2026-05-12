@@ -677,18 +677,20 @@ func upsertSyntheticDeploy(
 		StartedAt:     now,
 		CompletedAt:   now,
 		LogUrl:        pgtype.Text{String: run.HTMLURL, Valid: run.HTMLURL != ""},
+		// Evidence-bound: poller saw this via GitHub Actions API,
+		// so the provenance is workflow_run and the ref is the
+		// run's html_url (same as log_url).
+		Provenance:    db.DeployProvenanceWorkflowRun,
+		ProvenanceRef: pgtype.Text{String: run.HTMLURL, Valid: run.HTMLURL != ""},
 	})
 	if err != nil {
 		slog.Warn("ship hub deploy poller: insert deploy failed",
 			"project_id", projectID, "kind", envKind, "error", err)
 		return db.Deploy{}, false
 	}
-	// Best-effort env current_sha bump — same as the manual path.
-	_, _ = queries.UpdateDeployEnvironmentCurrent(ctx, db.UpdateDeployEnvironmentCurrentParams{
-		ID:                env.ID,
-		CurrentSha:        pgtype.Text{String: deploy.Sha, Valid: true},
-		CurrentDeployedAt: deploy.TriggeredAt,
-	})
+	// Recompute env.current_sha from the deploy table. The latest
+	// succeeded deploy by triggered_at wins; never rolls backwards.
+	_, _ = queries.RecomputeEnvCurrentFromDeploys(ctx, env.ID)
 	return deploy, true
 }
 

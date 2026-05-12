@@ -190,12 +190,13 @@ func (h *Handler) PollDeployEnvironment(w http.ResponseWriter, r *http.Request) 
 			StartedAt:     pgtype.Timestamptz{Time: state.DeployedAt, Valid: !state.DeployedAt.IsZero()},
 			CompletedAt:   pgtype.Timestamptz{Time: state.DeployedAt, Valid: !state.DeployedAt.IsZero()},
 			LogUrl:        pgtype.Text{String: state.LogURL, Valid: state.LogURL != ""},
+			// Adapter learned the SHA via a provider API call. Same
+			// shape as the workflow_run path; adapter calls happen
+			// over the wire, not over a manual click.
+			Provenance:    db.DeployProvenanceWorkflowRun,
+			ProvenanceRef: pgtype.Text{String: state.LogURL, Valid: state.LogURL != ""},
 		})
-		_, _ = h.Queries.UpdateDeployEnvironmentCurrent(r.Context(), db.UpdateDeployEnvironmentCurrentParams{
-			ID:                env.ID,
-			CurrentSha:        pgtype.Text{String: state.CurrentSHA, Valid: true},
-			CurrentDeployedAt: pgtype.Timestamptz{Time: state.DeployedAt, Valid: !state.DeployedAt.IsZero()},
-		})
+		_, _ = h.Queries.RecomputeEnvCurrentFromDeploys(r.Context(), env.ID)
 	}
 	h.publish(protocol.EventDeployCompleted, uuidToString(wsID), "system", "", map[string]any{
 		"environment_id": uuidToString(env.ID),
@@ -260,6 +261,10 @@ func (h *Handler) RollbackDeployEnvironment(w http.ResponseWriter, r *http.Reque
 		TriggeredBy:   creator,
 		StartedAt:     pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		CompletedAt:   pgtype.Timestamptz{},
+		// User-initiated rollback dispatch — manual_assertion with a
+		// canned ref noting the target SHA.
+		Provenance:    db.DeployProvenanceManualAssertion,
+		ProvenanceRef: pgtype.Text{String: "rollback to " + strings.TrimSpace(req.TargetSHA), Valid: true},
 	})
 	h.publish(protocol.EventDeployStarted, uuidToString(wsID), "member", userID, map[string]any{
 		"environment_id": uuidToString(env.ID),
@@ -442,6 +447,10 @@ func (h *Handler) applyDeployEvent(ctx context.Context, env db.DeployEnvironment
 		CompletedAt:   completedAt,
 		LogUrl:        pgtype.Text{String: event.LogURL, Valid: event.LogURL != ""},
 		ErrorMessage:  pgtype.Text{String: event.ErrorMsg, Valid: event.ErrorMsg != ""},
+		// Provenance: webhook from a deploy adapter (GitHub deployments,
+		// Vercel, Netlify, etc.). The webhook payload is the evidence.
+		Provenance:    db.DeployProvenanceWebhook,
+		ProvenanceRef: pgtype.Text{String: event.LogURL, Valid: event.LogURL != ""},
 	})
 	if err != nil {
 		slog.Warn("ship deploy adapter: insert deploy failed",
@@ -449,12 +458,8 @@ func (h *Handler) applyDeployEvent(ctx context.Context, env db.DeployEnvironment
 		return
 	}
 	if status == db.DeployStatusSucceeded && event.SHA != "" {
-		if _, err := h.Queries.UpdateDeployEnvironmentCurrent(ctx, db.UpdateDeployEnvironmentCurrentParams{
-			ID:                env.ID,
-			CurrentSha:        pgtype.Text{String: event.SHA, Valid: true},
-			CurrentDeployedAt: pgtype.Timestamptz{Time: occurred, Valid: true},
-		}); err != nil {
-			slog.Warn("ship deploy adapter: update current sha failed",
+		if _, err := h.Queries.RecomputeEnvCurrentFromDeploys(ctx, env.ID); err != nil {
+			slog.Warn("ship deploy adapter: recompute current sha failed",
 				"environment_id", env.ID, "error", err)
 		}
 	}

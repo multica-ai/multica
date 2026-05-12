@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -383,6 +384,7 @@ func TestDeployWorkflowPoller_ProductionTimeBasedFallback(t *testing.T) {
 	const releaseSHA = "aaaa1111bbbb2222cccc3333dddd4444eeee5555"
 	const deploySHA = "9999ffff8888eeee7777dddd6666cccc5555bbbb"
 	fix := seedPollerFixture(t, "https://github.com/owner/repo", "", "production.yml")
+	seedPollerEnv(t, fix, "production", "Production")
 	releaseID := seedPollerReleaseInPromoting(t, fix, releaseSHA)
 
 	// Workflow run's head_sha differs from the release's
@@ -423,6 +425,7 @@ func TestDeployWorkflowPoller_ProductionFallbackRespectsTime(t *testing.T) {
 	const releaseSHA = "1234567812345678123456781234567812345678"
 	const oldDeploySHA = "fedcba98fedcba98fedcba98fedcba98fedcba98"
 	fix := seedPollerFixture(t, "https://github.com/owner/repo", "", "production.yml")
+	seedPollerEnv(t, fix, "production", "Production")
 	releaseID := seedPollerReleaseInPromoting(t, fix, releaseSHA)
 
 	// Run finished a decade ago, well before the release's merged_at.
@@ -602,4 +605,104 @@ func TestDeployWorkflowPoller_NoEnvSkipsDeployRecord(t *testing.T) {
 	if deployCount != 0 {
 		t.Fatalf("expected no deploy recorded without env, got %d", deployCount)
 	}
+}
+
+// TestEnvCurrentSHANeverRollsBackwards locks down the evidence-bound
+// deploys invariant: a manual_assertion (or webhook, or anything) for
+// an OLDER successful deploy must not overwrite env.current_sha set by
+// a NEWER successful deploy.
+//
+// This is the 2026-05-12 corruption mode I caused by clicking
+// `mark_production_deployed` for PR #38's release after PR #47 had
+// already shipped. Pre-fix, the click overwrote env.current_sha with
+// PR #38's stale SHA, leaving the Ship Hub answer out of sync with
+// what was actually running. Post-fix, the recompute path picks
+// "latest succeeded by triggered_at DESC" and ignores older inserts.
+func TestEnvCurrentSHANeverRollsBackwards(t *testing.T) {
+	if !pollerMigrationApplied(t) {
+		t.Skip("phase 7d follow-up migration not applied")
+	}
+	ctx := context.Background()
+	queries := db.New(testPool)
+
+	fix := seedPollerFixture(t, "https://github.com/owner/repo", "", "production.yml")
+	seedPollerEnv(t, fix, "production", "Production")
+
+	envs, err := queries.ListDeployEnvironmentsByProject(ctx, fix.ProjectID)
+	if err != nil || len(envs) == 0 {
+		t.Fatalf("list envs: %v", err)
+	}
+	envID := envs[0].ID
+
+	// Insert NEWER deploy first (workflow_run, triggered_at = far-future).
+	newerTime := pgtype.Timestamptz{Time: timeMustParse(t, "2099-01-01T00:00:00Z"), Valid: true}
+	if _, err := queries.InsertDeploy(ctx, db.InsertDeployParams{
+		WorkspaceID:   fix.WorkspaceID,
+		EnvironmentID: envID,
+		Ref:           "main",
+		Sha:           "newer_sha_workflow_run",
+		Status:        db.DeployStatusSucceeded,
+		StartedAt:     newerTime,
+		CompletedAt:   newerTime,
+		Provenance:    db.DeployProvenanceWorkflowRun,
+		ProvenanceRef: pgtype.Text{String: "https://example/run", Valid: true},
+	}); err != nil {
+		t.Fatalf("insert newer deploy: %v", err)
+	}
+	// Force the timestamp explicitly because triggered_at defaults to
+	// NOW() in the column default; we want a far-future date for the
+	// "newer" entry.
+	if _, err := testPool.Exec(ctx,
+		`UPDATE deploy SET triggered_at = $2 WHERE sha = $1`,
+		"newer_sha_workflow_run", newerTime.Time); err != nil {
+		t.Fatalf("backdate newer deploy: %v", err)
+	}
+	if _, err := queries.RecomputeEnvCurrentFromDeploys(ctx, envID); err != nil {
+		t.Fatalf("recompute (newer): %v", err)
+	}
+
+	// Now insert an OLDER manual_assertion (the corruption shape).
+	olderTime := pgtype.Timestamptz{Time: timeMustParse(t, "2024-01-01T00:00:00Z"), Valid: true}
+	if _, err := queries.InsertDeploy(ctx, db.InsertDeployParams{
+		WorkspaceID:   fix.WorkspaceID,
+		EnvironmentID: envID,
+		Ref:           "main",
+		Sha:           "older_sha_manual",
+		Status:        db.DeployStatusSucceeded,
+		StartedAt:     olderTime,
+		CompletedAt:   olderTime,
+		Provenance:    db.DeployProvenanceManualAssertion,
+		ProvenanceRef: pgtype.Text{String: "manual click for stale release", Valid: true},
+	}); err != nil {
+		t.Fatalf("insert older deploy: %v", err)
+	}
+	if _, err := testPool.Exec(ctx,
+		`UPDATE deploy SET triggered_at = $2 WHERE sha = $1`,
+		"older_sha_manual", olderTime.Time); err != nil {
+		t.Fatalf("backdate older deploy: %v", err)
+	}
+	if _, err := queries.RecomputeEnvCurrentFromDeploys(ctx, envID); err != nil {
+		t.Fatalf("recompute (after older insert): %v", err)
+	}
+
+	// Assert: env.current_sha STILL points at the newer deploy.
+	envAfter, err := queries.GetDeployEnvironment(ctx, envID)
+	if err != nil {
+		t.Fatalf("read env: %v", err)
+	}
+	if envAfter.CurrentSha.String != "newer_sha_workflow_run" {
+		t.Fatalf("env rolled backwards: current_sha = %q, want %q",
+			envAfter.CurrentSha.String, "newer_sha_workflow_run")
+	}
+}
+
+// timeMustParse is a small helper for RFC3339-only test fixtures so
+// the per-test boilerplate stays focused on intent.
+func timeMustParse(t *testing.T, s string) time.Time {
+	t.Helper()
+	v, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t.Fatalf("parse time %q: %v", s, err)
+	}
+	return v
 }

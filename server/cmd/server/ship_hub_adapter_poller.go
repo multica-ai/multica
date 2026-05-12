@@ -126,17 +126,21 @@ func runShipHubAdapterPollOnce(ctx context.Context, queries *db.Queries, pollabl
 			StartedAt:     pgtype.Timestamptz{Time: state.DeployedAt, Valid: !state.DeployedAt.IsZero()},
 			CompletedAt:   pgtype.Timestamptz{Time: state.DeployedAt, Valid: !state.DeployedAt.IsZero()},
 			LogUrl:        pgtype.Text{String: state.LogURL, Valid: state.LogURL != ""},
+			// Provenance: adapter pollers (Vercel/Netlify/etc.) learn
+			// about deploys through provider APIs, not GitHub workflow
+			// runs, but the structural shape is the same — we observed
+			// a real deploy event via a verifiable third-party API.
+			// Bucketed as workflow_run for now; if we ever need to
+			// distinguish, a separate `adapter` value can be added.
+			Provenance:    db.DeployProvenanceWorkflowRun,
+			ProvenanceRef: pgtype.Text{String: state.LogURL, Valid: state.LogURL != ""},
 		}); err != nil {
 			slog.Warn("ship hub adapter poller: insert deploy failed",
 				"environment_id", env.ID, "error", err)
 			continue
 		}
-		if _, err := queries.UpdateDeployEnvironmentCurrent(ctx, db.UpdateDeployEnvironmentCurrentParams{
-			ID:                env.ID,
-			CurrentSha:        pgtype.Text{String: state.CurrentSHA, Valid: true},
-			CurrentDeployedAt: pgtype.Timestamptz{Time: state.DeployedAt, Valid: !state.DeployedAt.IsZero()},
-		}); err != nil {
-			slog.Warn("ship hub adapter poller: update current sha failed",
+		if _, err := queries.RecomputeEnvCurrentFromDeploys(ctx, env.ID); err != nil {
+			slog.Warn("ship hub adapter poller: recompute current sha failed",
 				"environment_id", env.ID, "error", err)
 		}
 	}

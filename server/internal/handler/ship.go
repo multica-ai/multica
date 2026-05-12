@@ -657,20 +657,27 @@ func (h *Handler) LogDeploy(w http.ResponseWriter, r *http.Request) {
 		CompletedAt:   completedAt,
 		LogUrl:        ptrToText(req.LogURL),
 		ErrorMessage:  ptrToText(req.ErrorMessage),
+		// log_deploy endpoint is the public-API write path that users
+		// or external CI call to record "this deploy happened." The
+		// log_url is provenance if present; otherwise this is a manual
+		// assertion through the API.
+		Provenance: func() db.DeployProvenance {
+			if req.LogURL != nil && *req.LogURL != "" {
+				return db.DeployProvenanceWorkflowRun
+			}
+			return db.DeployProvenanceManualAssertion
+		}(),
+		ProvenanceRef: ptrToText(req.LogURL),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to log deploy")
 		return
 	}
 
-	// On success, bump the parent environment's current_sha so the "what's
-	// running" answer becomes a single column read for subsequent loads.
+	// On success, recompute env.current_sha from the deploy table.
+	// Single-writer path; never rolls backwards in time.
 	if status == db.DeployStatusSucceeded {
-		_, _ = h.Queries.UpdateDeployEnvironmentCurrent(r.Context(), db.UpdateDeployEnvironmentCurrentParams{
-			ID:                env.ID,
-			CurrentSha:        pgtype.Text{String: deploy.Sha, Valid: true},
-			CurrentDeployedAt: deploy.TriggeredAt,
-		})
+		_, _ = h.Queries.RecomputeEnvCurrentFromDeploys(r.Context(), env.ID)
 		// Phase 5 — production deploy storytelling. The manual logging
 		// path is the most common way users record "we just shipped"
 		// today, so we run the same hook the webhook path runs.

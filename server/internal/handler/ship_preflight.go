@@ -317,6 +317,13 @@ func (h *Handler) PromoteDeployPreflight(w http.ResponseWriter, r *http.Request)
 		Sha:           row.TargetSha,
 		Status:        db.DeployStatusPending,
 		TriggeredBy:   userUUID,
+		// Preflight-promoted deploy: user has clicked through the gate
+		// and dispatched the deploy. The actual provenance (the workflow
+		// run that gets triggered) will be recorded by the poller when
+		// it observes the run completion. For this pending row, the
+		// manual_assertion shape is the truthful one — a human caused
+		// it, no observed run exists yet.
+		Provenance: db.DeployProvenanceManualAssertion,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create deploy: "+err.Error())

@@ -125,6 +125,21 @@ func (h *Handler) PromoteRelease(w http.ResponseWriter, r *http.Request) {
 //
 // Idempotent: if the release already has a production_deploy_id, returns
 // 409 Conflict — the user should refresh first.
+// MarkReleaseProductionDeployedRequest carries the optional assertion
+// note that callers can include to explain WHY they're declaring a
+// production deploy without an observed workflow run. The note is
+// stored on the inserted deploy row as `provenance_ref` for audit.
+type MarkReleaseProductionDeployedRequest struct {
+	// AssertionNote: free-form text explaining how this deploy was
+	// performed (e.g. "manual SSH + docker compose up after CI was
+	// stuck"). When set, the resulting deploy row records
+	// provenance='manual_assertion' with this note as the ref.
+	// When unset, the deploy row records provenance='manual_assertion'
+	// with no ref — discouraged, preserved for backward compatibility
+	// with clients that don't know the new field.
+	AssertionNote *string `json:"assertion_note"`
+}
+
 func (h *Handler) MarkReleaseProductionDeployed(w http.ResponseWriter, r *http.Request) {
 	// loadReleaseAndProject returns (release, workspace, project, wsID, ok)
 	// — the destructure ordering bit me in Phase 7c (commit 1e424aa7),
@@ -138,6 +153,17 @@ func (h *Handler) MarkReleaseProductionDeployed(w http.ResponseWriter, r *http.R
 	}
 	userID, _ := requireUserID(w, r)
 	requestedBy, _ := h.parseUserUUIDOrZero(userID)
+
+	// Parse optional assertion note from body. We tolerate empty/missing
+	// body since older clients won't include one.
+	var req MarkReleaseProductionDeployedRequest
+	if r.ContentLength > 0 {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	var assertionRef pgtype.Text
+	if req.AssertionNote != nil && *req.AssertionNote != "" {
+		assertionRef = pgtype.Text{String: *req.AssertionNote, Valid: true}
+	}
 
 	// Allowed entry stages: promoting (the user clicked Promote and
 	// is now manually confirming the deploy) or verifying (auto-promote
@@ -194,16 +220,23 @@ func (h *Handler) MarkReleaseProductionDeployed(w http.ResponseWriter, r *http.R
 		TriggeredBy:   requestedBy,
 		StartedAt:     now,
 		CompletedAt:   now,
+		// Evidence-bound: user clicked Mark production deployed.
+		// Provenance is manual_assertion; the optional note (if any)
+		// is recorded so the audit log carries the WHY.
+		Provenance:    db.DeployProvenanceManualAssertion,
+		ProvenanceRef: assertionRef,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to record deploy")
 		return
 	}
-	_, _ = h.Queries.UpdateDeployEnvironmentCurrent(r.Context(), db.UpdateDeployEnvironmentCurrentParams{
-		ID:                prodEnv.ID,
-		CurrentSha:        pgtype.Text{String: deploy.Sha, Valid: true},
-		CurrentDeployedAt: deploy.TriggeredAt,
-	})
+	// Recompute env.current_sha from the deploy table. Crucially this
+	// will NOT roll the env backwards in time — if a newer succeeded
+	// deploy already exists (e.g. an actual workflow run for a
+	// descendant commit), env.current_sha keeps pointing at that.
+	// Closes the 2026-05-12 corruption mode where a manual assertion
+	// for an older release overwrote env with a stale SHA.
+	_, _ = h.Queries.RecomputeEnvCurrentFromDeploys(r.Context(), prodEnv.ID)
 
 	// Reuse the webhook-path linkage so the channel post / WS event /
 	// stage transition flow matches the auto-linked path exactly.

@@ -107,10 +107,43 @@ SELECT * FROM deploy WHERE id = $1;
 -- name: InsertDeploy :one
 INSERT INTO deploy (
     workspace_id, environment_id, ref, sha, status, triggered_by,
-    started_at, completed_at, log_url, error_message
+    started_at, completed_at, log_url, error_message,
+    provenance, provenance_ref
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 ) RETURNING *;
+
+-- name: RecomputeEnvCurrentFromDeploys :one
+-- Single-writer view of env.current_sha + current_deployed_at.
+--
+-- After the evidence-bound deploys migration (096), this query is the
+-- ONLY path that should update those two columns. Picks the most
+-- recent succeeded deploy for the env (by triggered_at DESC) and
+-- writes its sha + timestamp into the env row.
+--
+-- Why a separate query rather than a trigger: callers want the
+-- returned env row for response payloads + WS event publishing.
+-- Triggers can't return values to the application layer, so a query
+-- is the cleaner pattern.
+--
+-- If no succeeded deploy exists, current_sha + current_deployed_at
+-- are nulled out — accurate "we don't know what's running" state.
+-- That's intentional: silently keeping a stale value lies to the
+-- operator. A null is a true signal to investigate.
+UPDATE deploy_environment de SET
+    current_sha = (
+        SELECT sha FROM deploy
+        WHERE environment_id = de.id AND status = 'succeeded'
+        ORDER BY triggered_at DESC LIMIT 1
+    ),
+    current_deployed_at = (
+        SELECT triggered_at FROM deploy
+        WHERE environment_id = de.id AND status = 'succeeded'
+        ORDER BY triggered_at DESC LIMIT 1
+    ),
+    updated_at = now()
+WHERE de.id = $1
+RETURNING *;
 
 -- name: GetDeployEnvironmentByRepoAndName :one
 -- Webhook-driven deploy ingestion needs to resolve "which env does this

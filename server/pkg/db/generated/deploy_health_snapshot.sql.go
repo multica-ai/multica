@@ -197,7 +197,7 @@ func (q *Queries) ListRecentInboxOpensSinceForWorkspace(ctx context.Context, arg
 }
 
 const listRecentSucceededDeploys = `-- name: ListRecentSucceededDeploys :many
-SELECT d.id, d.workspace_id, d.environment_id, d.ref, d.sha, d.status, d.triggered_by, d.triggered_at, d.started_at, d.completed_at, d.log_url, d.error_message, d.created_at
+SELECT d.id, d.workspace_id, d.environment_id, d.ref, d.sha, d.status, d.triggered_by, d.triggered_at, d.started_at, d.completed_at, d.log_url, d.error_message, d.created_at, d.provenance, d.provenance_ref
 FROM deploy d
 WHERE d.status = 'succeeded'
   AND d.completed_at IS NOT NULL
@@ -232,6 +232,8 @@ func (q *Queries) ListRecentSucceededDeploys(ctx context.Context) ([]Deploy, err
 			&i.LogUrl,
 			&i.ErrorMessage,
 			&i.CreatedAt,
+			&i.Provenance,
+			&i.ProvenanceRef,
 		); err != nil {
 			return nil, err
 		}
