@@ -37,6 +37,9 @@ import type { AnyExtension } from "@tiptap/core";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { BaseMentionExtension } from "./mention-extension";
 import { createMentionSuggestion } from "./mention-suggestion";
+// CEREBRO-PATCH(skill-mention-register): register the cerebro `/skill` trigger
+// extension alongside BaseMentionExtension. Feature-flagged inside the extension.
+import { createSkillMentionExtension } from "@multica/cerebro-skill-mention";
 import { CodeBlockView } from "./code-block-view";
 import { createMarkdownPasteExtension } from "./markdown-paste";
 import { createMarkdownCopyExtension } from "./markdown-copy";
@@ -137,6 +140,9 @@ export function createEditorExtensions(
               ? { suggestion: createMentionSuggestion(options.queryClient) }
               : {}),
           }),
+          ...(options.queryClient
+            ? [createSkillMentionExtension(options.queryClient)]
+            : []),
         ]),
     Typography,
     Placeholder.configure({ placeholder: placeholderText }),

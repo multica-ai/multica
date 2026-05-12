@@ -37,6 +37,8 @@ import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import type { Attachment } from "@multica/core/types";
 import { isViewableAttachment } from "@multica/cerebro-attachments/core/viewable";
+// CEREBRO-PATCH(skill-mention-readonly): render `mention://skill/<id>` links as SkillMentionChip.
+import { SkillMentionChip } from "@multica/cerebro-skill-mention";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
@@ -154,7 +156,18 @@ function ReadonlyLink({
   const slug = useWorkspaceSlug();
 
   if (isMentionHref(href)) {
-    const match = href.match(/^mention:\/\/(member|agent|issue|all)\/(.+)$/);
+    // CEREBRO-PATCH(skill-mention-readonly-route): `skill` joins the mention regex
+    // and routes to SkillMentionChip; member/agent/all keep their plain @-text render.
+    const match = href.match(/^mention:\/\/(member|agent|issue|all|skill)\/(.+)$/);
+    if (match?.[1] === "skill" && match[2]) {
+      const label =
+        typeof children === "string"
+          ? children
+          : Array.isArray(children)
+            ? children.join("")
+            : undefined;
+      return <SkillMentionChip skillId={match[2]} fallbackLabel={label} />;
+    }
     if (match?.[1] === "issue" && match[2]) {
       const label =
         typeof children === "string"

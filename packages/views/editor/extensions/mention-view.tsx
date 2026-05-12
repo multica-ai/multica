@@ -17,11 +17,21 @@
 import { NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { useWorkspacePaths } from "@multica/core/paths";
+// CEREBRO-PATCH(skill-mention-view): render `mention://skill/<id>` nodes as a SkillMentionChip.
+import { SkillMentionChip } from "@multica/cerebro-skill-mention";
 import { useNavigation } from "../../navigation";
 import { IssueChip } from "../../issues/components/issue-chip";
 
 export function MentionView({ node }: NodeViewProps) {
   const { type, id, label } = node.attrs;
+
+  if (type === "skill") {
+    return (
+      <NodeViewWrapper as="span" className="inline">
+        <SkillMentionChip skillId={id} fallbackLabel={label} />
+      </NodeViewWrapper>
+    );
+  }
 
   if (type === "issue") {
     return (

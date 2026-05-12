@@ -3,13 +3,18 @@ import { mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import { MentionView } from "./mention-view";
 
+// CEREBRO-PATCH(skill-mention-prefix): the `skill` mention type renders bare
+// (like `issue`) so the chip displays a skill name without an `@`. Member /
+// agent / all keep the `@` prefix.
+const NO_AT_PREFIX_TYPES = new Set(["issue", "skill"]);
+
 export const BaseMentionExtension = Mention.extend({
   addNodeView() {
     return ReactNodeViewRenderer(MentionView);
   },
   renderHTML({ node, HTMLAttributes }) {
     const type = node.attrs.type ?? "member";
-    const prefix = type === "issue" ? "" : "@";
+    const prefix = NO_AT_PREFIX_TYPES.has(type) ? "" : "@";
     return [
       "span",
       mergeAttributes(
@@ -66,7 +71,7 @@ export const BaseMentionExtension = Mention.extend({
   },
   renderMarkdown: (node: any) => {
     const { id, label, type = "member" } = node.attrs || {};
-    const prefix = type === "issue" ? "" : "@";
+    const prefix = NO_AT_PREFIX_TYPES.has(type) ? "" : "@";
     // Escape square brackets in the label so the markdown link syntax
     // is not broken when the name contains [ or ] (e.g. "David[TF]").
     const safeLabel = (label ?? id).replace(/\[/g, "\\[").replace(/\]/g, "\\]");
