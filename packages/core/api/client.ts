@@ -1325,7 +1325,36 @@ export class ApiClient {
     if (params?.limit) search.set("limit", String(params.limit));
     if (params?.includeThreaded) search.set("include_threaded", "true");
     const qs = search.toString();
-    return this.fetch(`/api/channels/${channelId}/messages${qs ? `?${qs}` : ""}`);
+    const raw = await this.fetch<unknown>(
+      `/api/channels/${channelId}/messages${qs ? `?${qs}` : ""}`,
+    );
+    // Response-shape compatibility: PR #43 (ROA-155) changed the
+    // server's response from a raw `ChannelMessage[]` to
+    // `{ messages, has_more, next_cursor }`. Older server builds and
+    // pre-#43 desktop clients still emit/expect the array. Per
+    // CLAUDE.md "API Response Compatibility", parse defensively for
+    // both shapes so the channels page doesn't white-screen when the
+    // backend rolls out a new shape ahead of the client.
+    //
+    // Pagination metadata (has_more / next_cursor) is intentionally
+    // dropped at this seam — older callers don't expose it and we
+    // haven't wired a "load older messages" UI yet. When that work
+    // lands we can expose a sibling method or change this signature.
+    if (Array.isArray(raw)) {
+      return raw as ChannelMessage[];
+    }
+    if (raw && typeof raw === "object" && Array.isArray((raw as { messages?: unknown }).messages)) {
+      return (raw as { messages: ChannelMessage[] }).messages;
+    }
+    // Unknown shape — return an empty list rather than throwing. The
+    // channels page renders an "empty state" panel for this, which
+    // is far less alarming than the ErrorBoundary "Something went
+    // wrong" path that pre-this-fix users hit on mobile Safari.
+    console.warn(
+      "listChannelMessages: unexpected response shape; returning empty list",
+      raw,
+    );
+    return [];
   }
 
   async sendChannelMessage(channelId: string, data: CreateChannelMessageRequest): Promise<ChannelMessage> {

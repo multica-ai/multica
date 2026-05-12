@@ -199,4 +199,69 @@ describe("ApiClient", () => {
       expect(att.download_url).toBe("");
     });
   });
+
+  describe("listChannelMessages", () => {
+    // Regression for PR #43 (ROA-155): server changed the response shape
+    // from `ChannelMessage[]` to `{ messages, has_more, next_cursor }`
+    // and the desktop/web client wasn't updated. Pre-fix, the channel
+    // page white-screened on mobile Safari with "This page couldn't
+    // load" because the consumer code called `.map(...)` on what was
+    // now an object. The fix in client.ts tolerates both shapes.
+
+    it("parses the new wrapped response shape", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              messages: [{ id: "m1" }, { id: "m2" }],
+              has_more: false,
+              next_cursor: "",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const msgs = await client.listChannelMessages("c-1");
+      expect(msgs).toHaveLength(2);
+      expect(msgs[0]?.id).toBe("m1");
+    });
+
+    it("still parses the legacy raw-array response shape", async () => {
+      // Older server builds (and any future revert) emit a raw array.
+      // Older desktop clients on older servers must keep working.
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify([{ id: "m1" }, { id: "m2" }]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const msgs = await client.listChannelMessages("c-1");
+      expect(msgs).toHaveLength(2);
+      expect(msgs[0]?.id).toBe("m1");
+    });
+
+    it("returns [] for an unknown response shape rather than throwing", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({ unexpected: "shape" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const msgs = await client.listChannelMessages("c-1");
+      expect(msgs).toEqual([]);
+    });
+  });
 });
