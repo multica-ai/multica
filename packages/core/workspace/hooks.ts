@@ -22,6 +22,7 @@ export function useActorName() {
   const getActorName = (type: string, id: string) => {
     if (type === "member") return getMemberName(id);
     if (type === "agent") return getAgentName(id);
+    if (type === "system") return "Multica";
     return "System";
   };
 

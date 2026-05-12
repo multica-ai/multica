@@ -20,7 +20,7 @@ Turn coding agents into real teammates — assign tasks, track progress, compoun
 [![CI](https://github.com/furtherref/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/furtherref/multica/actions/workflows/ci.yml)
 [![GitHub stars](https://img.shields.io/github/stars/furtherref/multica?style=flat)](https://github.com/furtherref/multica/stargazers)
 
-[Website](https://multica.ai) · [Cloud](https://multica.ai/app) · [X](https://x.com/MulticaAI) · [Self-Hosting](SELF_HOSTING.md) · [Contributing](CONTRIBUTING.md)
+[Website](https://multica.ai) · [Cloud](https://multica.ai) · [X](https://x.com/MulticaAI) · [Self-Hosting](SELF_HOSTING.md) · [Contributing](CONTRIBUTING.md)
 
 **English | [简体中文](README.zh-CN.md)**
 

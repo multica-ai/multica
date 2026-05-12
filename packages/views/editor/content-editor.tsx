@@ -211,7 +211,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           },
         },
         attributes: {
-          class: cn("rich-text-editor text-sm outline-none", className),
+          class: cn("flex-1 rich-text-editor text-sm outline-none", className),
         },
       },
     });
@@ -272,10 +272,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       <AttachmentDownloadProvider attachments={attachments}>
         <div
           ref={wrapperRef}
-          className="relative flex min-h-full flex-col"
+          className="relative flex flex-1 min-h-full flex-col"
           onMouseDown={handleContainerMouseDown}
         >
-          <EditorContent className="flex-1 min-h-full" editor={editor} />
+          <EditorContent className="flex flex-1 flex-col" editor={editor} />
           {showBubbleMenu && (
             <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
           )}

@@ -166,6 +166,7 @@ type AgentTaskResponse struct {
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
 	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks
+	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `multica attachment download <id>` per entry
 	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
 	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
 	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context
@@ -174,6 +175,18 @@ type AgentTaskResponse struct {
 	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
 	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	Kind                    string                `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+}
+
+// ChatAttachmentMeta is the structured attachment metadata embedded in
+// claim responses for chat tasks. The agent uses these to run
+// `multica attachment download <id>` rather than guessing from the
+// markdown URL (which is signed and 30-min expiring on private CDN).
+// The mirror struct on the daemon side lives in internal/daemon/types.go
+// and uses the same JSON field names.
+type ChatAttachmentMeta struct {
+	ID          string `json:"id"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -458,6 +471,15 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	if !canUseRuntimeForAgent(member, runtime) {
+		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
+		return
+	}
+
 	// Probe workspace agent count BEFORE the insert so the funnel has a
 	// clean "first agent ever in this workspace" signal — Step 4 of
 	// onboarding always lands in this branch. A non-fatal read: if the
@@ -671,6 +693,17 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid runtime_id")
+			return
+		}
+		// Same gate as CreateAgent — prevents UpdateAgent from being used to
+		// re-bind an agent onto someone else's private runtime, which would
+		// otherwise be a quiet end-run around the CreateAgent check.
+		member, ok := h.workspaceMember(w, r, uuidToString(agent.WorkspaceID))
+		if !ok {
+			return
+		}
+		if !canUseRuntimeForAgent(member, runtime) {
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can move agents onto it")
 			return
 		}
 		params.RuntimeID = runtime.ID

@@ -59,6 +59,16 @@ SET timezone = @timezone, updated_at = now()
 WHERE id = @id
 RETURNING *;
 
+-- name: UpdateAgentRuntimeVisibility :one
+-- Toggles a runtime between 'private' (only owner can bind agents) and
+-- 'public' (any workspace member can). Default for new rows is 'private'
+-- (see migration 083). Gated at the handler layer to owner / workspace
+-- admin only.
+UPDATE agent_runtime
+SET visibility = @visibility, updated_at = now()
+WHERE id = @id
+RETURNING *;
+
 -- name: DeleteTaskUsageDailyForRuntime :execrows
 -- First step of an explicit user timezone edit rebuild. Delete old materialized
 -- rows before re-inserting under the runtime's new timezone.

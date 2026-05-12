@@ -167,6 +167,8 @@ describe("CommentCard attachments", () => {
           content_type: "text/markdown",
           size_bytes: 128,
           created_at: "2026-05-07T08:00:00Z",
+          chat_session_id: null,
+          chat_message_id: null,
         },
       ],
     } satisfies TimelineEntry;

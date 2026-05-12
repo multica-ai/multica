@@ -55,6 +55,8 @@ export const AttachmentResponseSchema = z.object({
   url: z.string(),
   download_url: z.string(),
   filename: z.string(),
+  chat_session_id: z.string().nullable().optional(),
+  chat_message_id: z.string().nullable().optional(),
 }).loose();
 
 export const EMPTY_ATTACHMENT: Attachment = {
@@ -62,6 +64,8 @@ export const EMPTY_ATTACHMENT: Attachment = {
   workspace_id: "",
   issue_id: null,
   comment_id: null,
+  chat_session_id: null,
+  chat_message_id: null,
   uploader_type: "",
   uploader_id: "",
   filename: "",
