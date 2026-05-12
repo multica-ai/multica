@@ -18,6 +18,7 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { Eye, MoreHorizontal } from "lucide-react";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { MyIssuesFilter } from "@multica/core/issues/queries";
 import {
@@ -36,6 +37,10 @@ import { BoardCardContent } from "./board-card";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
+import { StatusHeading } from "./status-heading";
+import { AppLink } from "../../navigation";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { IssueActionsContextMenu } from "../actions";
 
 const COLUMN_IDS = new Set<string>(ALL_STATUSES);
 
@@ -125,6 +130,7 @@ export function BoardView({
 }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
+  const isMobile = useIsMobile();
   const myIssuesOpts = myIssuesScope
     ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
     : undefined;
@@ -275,6 +281,30 @@ export function BoardView({
     [issues, visibleStatuses, sortBy, sortDirection, onMoveIssue],
   );
 
+  if (isMobile) {
+    return (
+      <div className="flex flex-1 min-h-0 flex-col gap-2 overflow-y-auto p-3">
+        {visibleStatuses.map((status) => (
+          <MobileBoardColumn
+            key={status}
+            status={status}
+            issueIds={columns[status] ?? []}
+            issueMap={issueMapRef.current}
+            childProgressMap={childProgressMap}
+            myIssuesOpts={myIssuesOpts}
+          />
+        ))}
+        {hiddenStatuses.length > 0 && (
+          <HiddenColumnsPanel
+            hiddenStatuses={hiddenStatuses}
+            myIssuesOpts={myIssuesOpts}
+            isMobile
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <DndContext
       sensors={sensors}
@@ -312,6 +342,73 @@ export function BoardView({
         ) : null}
       </DragOverlay>
     </DndContext>
+  );
+}
+
+function MobileBoardColumn({
+  status,
+  issueIds,
+  issueMap,
+  childProgressMap,
+  myIssuesOpts,
+}: {
+  status: IssueStatus;
+  issueIds: string[];
+  issueMap: Map<string, Issue>;
+  childProgressMap?: Map<string, ChildProgress>;
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+}) {
+  const { t } = useT("issues");
+  const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
+    status,
+    myIssuesOpts,
+  );
+  const issues = issueIds.flatMap((id) => {
+    const issue = issueMap.get(id);
+    return issue ? [issue] : [];
+  });
+
+  return (
+    <details open={issueIds.length > 0} className="rounded-lg border bg-muted/20">
+      <summary className="cursor-pointer list-none px-3 py-2 [&::-webkit-details-marker]:hidden">
+        <StatusHeading status={status} count={total} />
+      </summary>
+      <div className="space-y-2 p-2 pt-0">
+        {issues.length === 0 ? (
+          <p className="py-4 text-center text-xs text-muted-foreground">
+            {t(($) => $.board.empty_column)}
+          </p>
+        ) : (
+          issues.map((issue) => (
+            <MobileBoardCard
+              key={issue.id}
+              issue={issue}
+              childProgress={childProgressMap?.get(issue.id)}
+            />
+          ))
+        )}
+        {hasMore ? (
+          <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+function MobileBoardCard({
+  issue,
+  childProgress,
+}: {
+  issue: Issue;
+  childProgress?: ChildProgress;
+}) {
+  const p = useWorkspacePaths();
+  return (
+    <IssueActionsContextMenu issue={issue}>
+      <AppLink href={p.issueDetail(issue.id)} className="block">
+        <BoardCardContent issue={issue} editable childProgress={childProgress} />
+      </AppLink>
+    </IssueActionsContextMenu>
   );
 }
 
@@ -354,13 +451,15 @@ function PaginatedBoardColumn({
 function HiddenColumnsPanel({
   hiddenStatuses,
   myIssuesOpts,
+  isMobile = false,
 }: {
   hiddenStatuses: IssueStatus[];
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  isMobile?: boolean;
 }) {
   const { t } = useT("issues");
   return (
-    <div className="flex w-[240px] shrink-0 flex-col">
+    <div className={isMobile ? "flex flex-col rounded-lg border bg-muted/20 p-2" : "flex w-[240px] shrink-0 flex-col"}>
       <div className="mb-2 flex items-center gap-2 px-1">
         <span className="text-sm font-medium text-muted-foreground">
           {t(($) => $.board.hidden_columns_label)}

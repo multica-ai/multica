@@ -20,6 +20,7 @@ import {
   UserPen,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -455,6 +456,7 @@ function LabelSubContent({
 
 export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
   const { t } = useT("issues");
+  const isMobile = useIsMobile();
   const scope = useIssuesScopeStore((s) => s.scope);
   const setScope = useIssuesScopeStore((s) => s.setScope);
 
@@ -515,9 +517,9 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
   };
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between px-4">
+    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-2 sm:px-4">
       {/* Left: scope buttons */}
-      <div className="flex items-center gap-1">
+      <div className="flex min-w-0 items-center gap-1">
         {SCOPE_VALUES.map((s) => (
           <Tooltip key={s}>
             <TooltipTrigger
@@ -526,9 +528,10 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                   variant="outline"
                   size="sm"
                   className={
-                    scope === s
+                    (isMobile ? "px-2 text-xs " : "") +
+                    (scope === s
                       ? "bg-accent text-accent-foreground hover:bg-accent/80"
-                      : "text-muted-foreground"
+                      : "text-muted-foreground")
                   }
                   onClick={() => setScope(s)}
                 >
@@ -542,7 +545,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
       </div>
 
       {/* Right: filter + display + view toggle */}
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         {/* Filter */}
         <DropdownMenu>
           <Tooltip>
@@ -550,8 +553,13 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
               render={
                 <TooltipTrigger
                   render={
-                    <Button variant="outline" size="icon-sm" className="relative text-muted-foreground">
+                    <Button
+                      variant="outline"
+                      size={isMobile ? "sm" : "icon-sm"}
+                      className="relative text-muted-foreground"
+                    >
                       <Filter className="size-4" />
+                      {isMobile && <span>{t(($) => $.filters.button)}</span>}
                       {hasActiveFilters && (
                         <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />
                       )}
@@ -735,6 +743,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
         </DropdownMenu>
 
         {/* Display settings */}
+        {!isMobile && (
         <Popover>
           <Tooltip>
             <PopoverTrigger
@@ -819,6 +828,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
             </div>
           </PopoverContent>
         </Popover>
+        )}
 
         {/* View toggle */}
         <DropdownMenu>

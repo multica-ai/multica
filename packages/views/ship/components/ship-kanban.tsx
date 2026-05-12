@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { AlertTriangle } from "lucide-react";
 import { useDeployEnvironments, useRecentDeploys } from "@multica/core/ship";
 import type { PullRequest } from "@multica/core/types";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useT } from "../../i18n";
 import {
   bucketPullRequests,
@@ -124,6 +125,7 @@ function useDeploySnapshot(projectId: string): ShipDeploySnapshot {
 
 export function ShipKanban({ pullRequests, isLoading, projectId }: ShipKanbanProps) {
   const { t } = useT("ship");
+  const isMobile = useIsMobile();
   const snapshot = useDeploySnapshot(projectId);
   const buckets = useMemo(
     () => bucketPullRequests(pullRequests, snapshot),
@@ -157,23 +159,20 @@ export function ShipKanban({ pullRequests, isLoading, projectId }: ShipKanbanPro
         </div>
       )}
 
-      {/* 8-column board. On narrow screens the row scrolls horizontally so
-          every column stays at a usable width — overflow-x-auto + a fixed
-          min-width per column. The grid would otherwise collapse columns
-          to 1/8th of viewport, making 0-column projects unreadable. The
-          `pb-2` reserves space for the macOS scrollbar so it doesn't
-          overlap card content. */}
-      <div className="overflow-x-auto pb-2">
-        <div className="flex gap-3 min-w-max">
+      {isMobile ? (
+        <div className="space-y-2">
           {COLUMNS.map((col) => (
-            <div
+            <details
               key={col}
-              className="flex w-64 shrink-0 flex-col rounded-md border bg-muted/20"
+              open={buckets[col].length > 0}
+              className="group rounded-md border bg-muted/20"
             >
-              <ColumnHeader column={col} count={buckets[col].length} />
+              <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <ColumnHeader column={col} count={buckets[col].length} />
+              </summary>
               <div className="flex flex-col gap-2 p-2 pt-0">
                 {buckets[col].length === 0 ? (
-                  <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+                  <div className="px-2 py-3 text-center text-xs text-muted-foreground">
                     {isLoading ? "" : t(($) => $.kanban.empty_column)}
                   </div>
                 ) : (
@@ -182,10 +181,34 @@ export function ShipKanban({ pullRequests, isLoading, projectId }: ShipKanbanPro
                   ))
                 )}
               </div>
-            </div>
+            </details>
           ))}
         </div>
-      </div>
+      ) : (
+        <div className="overflow-x-auto pb-2">
+          <div className="flex gap-3 min-w-max">
+            {COLUMNS.map((col) => (
+              <div
+                key={col}
+                className="flex w-64 shrink-0 flex-col rounded-md border bg-muted/20"
+              >
+                <ColumnHeader column={col} count={buckets[col].length} />
+                <div className="flex flex-col gap-2 p-2 pt-0">
+                  {buckets[col].length === 0 ? (
+                    <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+                      {isLoading ? "" : t(($) => $.kanban.empty_column)}
+                    </div>
+                  ) : (
+                    buckets[col].map((pr) => (
+                      <ShipPRCard key={pr.id} pr={pr} stagingEnv={snapshot.staging} />
+                    ))
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -444,6 +444,8 @@ export function SearchCommand() {
     [push, setOpen],
   );
 
+  if (!open) return null;
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent

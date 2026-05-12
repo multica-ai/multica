@@ -3,8 +3,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
-import { Minus, Maximize2, Minimize2, ChevronDown, ChevronRight, Plus, Check, Trash2 } from "lucide-react";
+import { Minus, Maximize2, Minimize2, ChevronDown, ChevronRight, Plus, Check, Trash2, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -66,6 +67,7 @@ const apiLogger = createLogger("chat.api");
 
 export function ChatWindow() {
   const { t } = useT("chat");
+  const isMobile = useIsMobile();
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -364,13 +366,15 @@ export function ChatWindow() {
   // a real message, or a pending task whose timeline will stream in.
   const hasMessages = messages.length > 0 || !!pendingTaskId;
 
-  const isVisible = isOpen && (isExpanded || boundsReady);
+  const isVisible = isOpen && (isMobile || isExpanded || boundsReady);
 
-  const containerClass = isExpanded
+  const containerClass = isMobile
+    ? "absolute inset-0 z-50 flex flex-col bg-sidebar overflow-hidden"
+    : isExpanded
     ? "absolute inset-3 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden"
     : "absolute bottom-2 right-2 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden";
   const containerStyle: React.CSSProperties = {
-    ...(!isExpanded ? { width: renderWidth, height: renderHeight } : {}),
+    ...(!isMobile && !isExpanded ? { width: renderWidth, height: renderHeight } : {}),
     transformOrigin: "bottom right",
     pointerEvents: isOpen ? "auto" : "none",
   };
@@ -394,7 +398,7 @@ export function ChatWindow() {
         scale: { type: "spring", duration: 0.2, bounce: 0 },
       }}
     >
-      {!isExpanded && <ChatResizeHandles onDragStart={startDrag} />}
+      {!isMobile && !isExpanded && <ChatResizeHandles onDragStart={startDrag} />}
       {/* Header — ⊕ new + session dropdown | window tools */}
       <div className="flex items-center justify-between border-b px-4 py-2.5 gap-2">
         <div className="flex items-center gap-1 min-w-0">
@@ -423,38 +427,58 @@ export function ChatWindow() {
           />
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground"
-                  onClick={toggleExpand}
-                />
-              }
-            >
-              {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {isExpanded || isAtMax ? t(($) => $.window.restore_tooltip) : t(($) => $.window.expand_tooltip)}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground"
-                  onClick={handleMinimize}
-                />
-              }
-            >
-              <Minus />
-            </TooltipTrigger>
-            <TooltipContent side="top">{t(($) => $.window.minimize_tooltip)}</TooltipContent>
-          </Tooltip>
+          {isMobile ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={handleMinimize}
+                  />
+                }
+              >
+                <X />
+              </TooltipTrigger>
+              <TooltipContent side="top">{t(($) => $.window.minimize_tooltip)}</TooltipContent>
+            </Tooltip>
+          ) : (
+            <>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground"
+                      onClick={toggleExpand}
+                    />
+                  }
+                >
+                  {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {isExpanded || isAtMax ? t(($) => $.window.restore_tooltip) : t(($) => $.window.expand_tooltip)}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground"
+                      onClick={handleMinimize}
+                    />
+                  }
+                >
+                  <Minus />
+                </TooltipTrigger>
+                <TooltipContent side="top">{t(($) => $.window.minimize_tooltip)}</TooltipContent>
+              </Tooltip>
+            </>
+          )}
         </div>
       </div>
 

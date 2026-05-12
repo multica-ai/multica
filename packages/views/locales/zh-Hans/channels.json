@@ -4,6 +4,7 @@
     "disabled_description": "工作区管理员可在「设置」中启用频道。启用后，你可以在频道里和成员、智能体一起聊天，与 issue 看板相互配合。",
     "loading_channel": "正在加载频道…",
     "channel_not_found": "未找到该频道。",
+    "back": "返回",
     "welcome_title": "欢迎使用频道",
     "welcome_description": "从左侧选择一个频道，或点击 + 创建新频道。"
   },

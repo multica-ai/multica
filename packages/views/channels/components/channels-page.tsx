@@ -3,13 +3,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useDefaultLayout } from "react-resizable-panels";
+import { ArrowLeft } from "lucide-react";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@multica/ui/components/ui/resizable";
+import { Button } from "@multica/ui/components/ui/button";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import { paths, useCurrentWorkspace, useRequiredWorkspaceSlug } from "@multica/core/paths";
 import {
   channelDetailOptions,
   channelMessagesOptions,
@@ -24,6 +27,8 @@ import { ChannelCreateDialog } from "./channel-create-dialog";
 import { NewDMDialog } from "./new-dm-dialog";
 import { ThreadPanel } from "./thread-panel";
 import { useT } from "../../i18n";
+import { PageHeader } from "../../layout/page-header";
+import { useNavigation } from "../../navigation";
 
 interface ChannelsPageProps {
   /** When non-null, the right pane shows that channel. When null, an empty
@@ -57,6 +62,9 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
   const { t } = useT("channels");
   const wsId = useWorkspaceId();
   const workspace = useCurrentWorkspace();
+  const slug = useRequiredWorkspaceSlug();
+  const navigation = useNavigation();
+  const isMobile = useIsMobile();
   const enabled = !!workspace?.channels_enabled;
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [dmDialogOpen, setDmDialogOpen] = useState(false);
@@ -133,6 +141,90 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
     );
   }
 
+  const dialogs = (
+    <>
+      <ChannelCreateDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
+      <NewDMDialog open={dmDialogOpen} onOpenChange={setDmDialogOpen} />
+    </>
+  );
+
+  if (isMobile) {
+    if (!activeChannelId) {
+      return (
+        <div className="flex h-full min-h-0 flex-col">
+          <PageHeader className="justify-between">
+            <h1 className="text-sm font-semibold">{t(($) => $.list.section_title)}</h1>
+          </PageHeader>
+          <div className="min-h-0 flex-1 [&_aside]:h-full [&_aside]:w-full [&_aside]:border-r-0">
+            <ChannelList
+              activeChannelId={activeChannelId}
+              onCreateChannel={() => setCreateDialogOpen(true)}
+              onCreateDM={() => setDmDialogOpen(true)}
+              enabled={enabled}
+            />
+          </div>
+          {dialogs}
+        </div>
+      );
+    }
+
+    if (channelLoading) {
+      return (
+        <div className="flex h-full min-h-0 flex-col">
+          <MobileBackHeader onBack={() => navigation.push(paths.workspace(slug).channels())} />
+          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+            {t(($) => $.page.loading_channel)}
+          </div>
+          {dialogs}
+        </div>
+      );
+    }
+
+    if (!channel) {
+      return (
+        <div className="flex h-full min-h-0 flex-col">
+          <MobileBackHeader onBack={() => navigation.push(paths.workspace(slug).channels())} />
+          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+            {t(($) => $.page.channel_not_found)}
+          </div>
+          {dialogs}
+        </div>
+      );
+    }
+
+    if (threadParentId) {
+      return (
+        <div className="flex h-full min-h-0 flex-col">
+          <MobileBackHeader onBack={() => setThreadParentId(null)} />
+          <ThreadPanel
+            channelId={channel.id}
+            parentMessageId={threadParentId}
+            onClose={() => setThreadParentId(null)}
+            enabled={enabled}
+          />
+          {dialogs}
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <MobileBackHeader onBack={() => navigation.push(paths.workspace(slug).channels())} />
+        <ChannelHeader channel={channel} enabled={enabled} />
+        <div className="flex min-h-0 flex-1 flex-col">
+          <ChannelMessageList
+            channelId={channel.id}
+            enabled={enabled}
+            onOpenThread={setThreadParentId}
+            initialUnreadCursor={initialUnreadCursor}
+          />
+          <ChannelComposer channel={channel} />
+        </div>
+        {dialogs}
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full">
       <ChannelList
@@ -202,8 +294,24 @@ export function ChannelsPage({ activeChannelId }: ChannelsPageProps) {
           </>
         )}
       </main>
-      <ChannelCreateDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
-      <NewDMDialog open={dmDialogOpen} onOpenChange={setDmDialogOpen} />
+      {dialogs}
+    </div>
+  );
+}
+
+function MobileBackHeader({ onBack }: { onBack: () => void }) {
+  const { t } = useT("channels");
+  return (
+    <div className="flex h-12 shrink-0 items-center border-b px-2">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onBack}
+        className="gap-1.5 text-muted-foreground"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        {t(($) => $.page.back)}
+      </Button>
     </div>
   );
 }

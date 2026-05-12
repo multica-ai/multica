@@ -32,6 +32,7 @@
   },
   "filters": {
     "tooltip": "Filter",
+    "button": "Filters",
     "placeholder": "Filter...",
     "no_results": "No results",
     "no_labels": "No labels yet",

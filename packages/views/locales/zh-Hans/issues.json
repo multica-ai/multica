@@ -32,6 +32,7 @@
   },
   "filters": {
     "tooltip": "筛选",
+    "button": "筛选",
     "placeholder": "筛选...",
     "no_results": "无结果",
     "no_labels": "还没有标签",

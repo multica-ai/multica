@@ -4,6 +4,7 @@
     "disabled_description": "A workspace admin can turn on Channels from Settings. Once enabled, you'll be able to chat with teammates and agents in dedicated channels alongside the issue board.",
     "loading_channel": "Loading channel…",
     "channel_not_found": "Channel not found.",
+    "back": "Back",
     "welcome_title": "Welcome to Channels",
     "welcome_description": "Pick a channel from the left, or create a new one with the + button."
   },
