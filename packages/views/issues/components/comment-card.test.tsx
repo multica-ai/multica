@@ -267,7 +267,7 @@ describe("CommentCard", () => {
     expect(mockToastSuccess).toHaveBeenCalledWith("Agent run queued");
   });
 
-  it("does not show retry for a non-system agent comment", () => {
+  it("shows retry for any agent comment (not just system)", async () => {
     const agentComment: TimelineEntry = {
       ...entry,
       id: "agent-comment-1",
@@ -282,10 +282,20 @@ describe("CommentCard", () => {
       agents: [{ id: "agent-1", owner_id: "user-1" }],
     });
 
+    await userEvent.click(screen.getByText("Retry"));
+
+    await waitFor(() => {
+      expect(mockRetryAgentComment).toHaveBeenCalledWith("agent-comment-1");
+    });
+  });
+
+  it("does not show retry for a member comment", () => {
+    renderCommentCard();
+
     expect(screen.queryByText("Retry")).toBeNull();
   });
 
-  it("shows retry for a system reply when the current user authored the trigger comment", () => {
+  it("shows retry for an agent reply when the current user authored the trigger comment", () => {
     const memberThreadRoot: TimelineEntry = {
       ...entry,
       id: "member-root-1",
@@ -294,20 +304,20 @@ describe("CommentCard", () => {
       comment_type: "comment",
       parent_id: null,
     };
-    const systemReply: TimelineEntry = {
+    const agentReply: TimelineEntry = {
       ...entry,
-      id: "agent-system-reply-1",
+      id: "agent-reply-1",
       actor_type: "agent",
       actor_id: "agent-2",
-      comment_type: "system",
+      comment_type: "comment",
       parent_id: "member-root-1",
     };
 
     renderCommentCard({
-      cardEntry: memberThreadRoot,
+      cardEntry: agentReply,
       commentById: new Map([
         [memberThreadRoot.id, memberThreadRoot],
-        [systemReply.id, systemReply],
+        [agentReply.id, agentReply],
       ]),
       agents: [{ id: "agent-2", owner_id: "someone-else" }],
     });

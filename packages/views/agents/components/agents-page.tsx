@@ -25,7 +25,6 @@ import {
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
   agentListOptions,
@@ -185,20 +184,11 @@ export function AgentsPage() {
     [agents, view],
   );
 
-  // Layer 1b — visibility. Personal (visibility=private) agents owned by
-  // someone else are hidden from regular members; workspace owners/admins
-  // still see everything. Mirrors the assign-to-issue gate so the list
-  // only ever shows agents the user could actually act on. Backend keeps
-  // returning all agents, so admin tools (and the API itself) are
-  // unaffected — this is a UI-only filter.
-  const visibleInView = useMemo(() => {
-    return inView.filter((a) =>
-      canAssignAgentToIssue(a, {
-        userId: currentUser?.id ?? null,
-        role: myRole,
-      }).allowed,
-    );
-  }, [inView, currentUser?.id, myRole]);
+  // Layer 1b — all agents (including private) are visible to every
+  // workspace member so they can browse, inspect, and Duplicate.
+  // Edit / assign restrictions are enforced separately by canEditAgent
+  // and canAssignAgentToIssue at the point of action.
+  const visibleInView = inView;
 
   // Layer 1c — ownership scope. Counts shown on the segment are
   // computed against the visibleInView set so the numbers always reflect

@@ -24,6 +24,7 @@ import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 import { useAuthStore } from "@multica/core/auth";
+import { toast } from "sonner";
 
 interface CommentInputProps {
   issueId: string;
@@ -145,7 +146,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     () => (userId ? makeDraftKey(issueId, userId) : null),
     [issueId, userId],
   );
-  const { uploadWithToast } = useFileUpload(api);
+  const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });

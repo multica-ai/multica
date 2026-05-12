@@ -415,6 +415,12 @@ class TimelineErrorBoundary extends Component<TimelineErrorBoundaryProps, Timeli
 
 export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
   const { t } = useT("issues");
+  // `issueId` is the raw route param — may be a UUID *or* a human-readable
+  // identifier (e.g. "OPE-460") when the URL has been canonicalized.  We keep
+  // it around only for the initial detail query (the API accepts both formats)
+  // and for URL-related operations.  `resolvedId` (derived below after the
+  // issue loads) is the canonical UUID and must be used for everything that
+  // touches WebSocket event payloads, React Query cache keys, or mutations.
   const id = issueId;
   const router = useNavigation();
   const linkedCommentId = router.searchParams.get("comment")?.trim() || null;
@@ -436,7 +442,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     currentUserRole === "owner" || currentUserRole === "admin";
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
-  const { uploadWithToast } = useFileUpload(api);
+  const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: layoutId,
   });
@@ -511,7 +517,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { data: issue = null, isLoading: issueLoading } = useQuery({
     ...issueDetailOptions(wsId, id),
     initialData: () => {
-      const cached = allIssues.find((i) => i.id === id);
+      const cached = allIssues.find((i) => i.id === id || i.identifier === id);
       return cached?.description != null ? cached : undefined;
     },
   });
@@ -548,12 +554,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
   }, [issue, issueLoading, onDelete]);
 
-  // Custom hooks — encapsulate timeline, reactions, subscribers
+  // Custom hooks — encapsulate timeline, reactions, subscribers.
+  //
+  // Resolved UUID: once the detail query loads, `issue.id` is the canonical
+  // UUID returned by the server.  We use it for all WS-aware hooks and query
+  // keys so that event payload comparisons (`comment.issue_id !== issueId`)
+  // always compare UUIDs.  Before the query resolves we fall back to the raw
+  // route param — the API accepts both formats, so the initial fetch works;
+  // WS events arriving before the issue loads are an acceptable edge case
+  // (the refetch-on-mount will pick them up).
+  const resolvedId = issue?.id ?? id;
   const {
     timeline, loading: timelineLoading,
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
-  } = useIssueTimeline(id, user?.id, requestedCommentId);
+  } = useIssueTimeline(resolvedId, user?.id, requestedCommentId);
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
@@ -694,14 +709,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const {
     reactions: issueReactions,
     toggleReaction: handleToggleIssueReaction,
-  } = useIssueReactions(id, user?.id);
+  } = useIssueReactions(resolvedId, user?.id);
 
   const {
     subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
-  } = useIssueSubscribers(id, user?.id);
+  } = useIssueSubscribers(resolvedId, user?.id);
 
   // Token usage
-  const { data: usage } = useQuery(issueUsageOptions(id));
+  const { data: usage } = useQuery(issueUsageOptions(resolvedId));
 
   // Attachments uploaded against this issue. Drives the description
   // editor's click-time fresh-sign download: NodeViews match
@@ -717,7 +732,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     initialData: () => allIssues.find((i) => i.id === parentIssueId),
   });
   const { data: childIssues = [] } = useQuery({
-    ...childIssuesOptions(wsId, id),
+    ...childIssuesOptions(wsId, resolvedId),
     enabled: !!issue,
   });
   // Parent's children — used to render the "x/y" progress next to the
@@ -922,7 +937,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const handleClearHistory = async () => {
     try {
       const result = await clearHistoryMutation.mutateAsync({
-        issueId: id,
+        issueId: resolvedId,
         clearComments: true,
         clearTasks: true,
       });
@@ -1079,7 +1094,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {/* Execution log — active runs + collapsed past runs. Self-contained;
           owns its own collapse state and WS subscriptions. Hides itself
           when there are no runs to show. */}
-      <ExecutionLogSection issueId={id} onHighlightComment={handleHighlightComment} />
+      <ExecutionLogSection issueId={resolvedId} onHighlightComment={handleHighlightComment} />
 
       {/* Token usage */}
       {usage && usage.task_count > 0 && (
@@ -1289,7 +1304,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               onUpdate={(md) => handleUpdateField({ description: md })}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
-              currentIssueId={id}
+              currentIssueId={resolvedId}
               attachments={issueAttachments}
             />
 
@@ -1490,7 +1505,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 The execution log itself (per-task timeline + past runs)
                 lives in the right panel via ExecutionLogSection — this
                 card is just a header-style "agent is working" anchor. */}
-            <AgentLiveCard key={id} issueId={id} />
+            <AgentLiveCard key={resolvedId} issueId={resolvedId} />
 
             {/* Timeline entries — virtualized via react-virtuoso to keep
                 first-paint cost O(viewport) instead of O(N). On a 500-comment
@@ -1513,7 +1528,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <TimelineErrorBoundary>
               <div className="mt-4">
                 <Virtuoso
-                  key={`${wsId}:${id}`}
+                  key={`${wsId}:${resolvedId}`}
                   ref={virtuosoRef}
                   customScrollParent={scrollContainerEl}
                   data={items}
@@ -1555,9 +1570,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       return (
                         <div className="pb-3" data-comment-id={item.id}>
                           <CommentCard
-                            issueId={id}
+                            issueId={resolvedId}
                             entry={item.entry}
                             replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
+                            commentById={timelineView.commentById}
+                            agents={agents}
+                            issueOpen={issue.status !== "done" && issue.status !== "cancelled"}
                             currentUserId={user?.id}
                             canModerate={canModerateComments}
                             onReply={submitReply}
@@ -1632,12 +1650,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
             {/* Bottom comment input — no avatar, full width */}
             <div className="mt-4">
-              {/* key={id}: web's /issues/[id] route doesn't remount on
+              {/* key={resolvedId}: web's /issues/[id] route doesn't remount on
                   issueId change, so without an explicit key the editor
                   keeps the previous issue's in-memory content and the
                   next keystroke would flush it into the new issue's
                   draft key. */}
-              <CommentInput key={id} issueId={id} onSubmit={submitComment} />
+              <CommentInput key={resolvedId} issueId={resolvedId} onSubmit={submitComment} />
             </div>
           </div>
         </div>

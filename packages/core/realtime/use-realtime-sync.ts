@@ -337,15 +337,10 @@ export function useRealtimeSync(
     // so stale data isn't served on next mount (staleTime: Infinity, set on
     // the QueryClient default, relies on this).
     //
-    // `refetchType: "none"` is the load-bearing detail: without it, an
-    // active IssueDetail observer would refetch the entire timeline on
-    // every comment / activity / reaction event. The refetch replaces
-    // every entry's reference and busts React.memo on every CommentCard
-    // subtree (visible during AI streaming as a flash across all sibling
-    // threads, MUL-1941). Inactive observers don't refetch either way;
-    // when IssueDetail mounts later, the stale flag triggers the refetch
-    // through `refetchOnMount`. Active observers stay fresh via the
-    // granular setQueryData handlers in `useIssueTimeline`.
+    // Activity / reaction events use `refetchType: "none"` to avoid refetching
+    // the entire timeline on high-frequency events. Active observers stay fresh
+    // via the granular setQueryData handlers in `useIssueTimeline`. Inactive
+    // observers get the stale flag and refetch through `refetchOnMount`.
     const invalidateTimeline = (issueId: string) => {
       qc.invalidateQueries({
         queryKey: issueKeys.timeline(issueId),
@@ -353,19 +348,31 @@ export function useRealtimeSync(
       });
     };
 
+    // Comment CRUD events use a refetch-enabled variant so active observers
+    // always see the change. The granular setQueryData handlers provide instant
+    // updates; this refetch is a safety net that ensures correctness even if the
+    // granular handler fails (e.g. due to effect timing). React Query's
+    // structural sharing prevents unnecessary re-renders when the cache already
+    // contains the correct data.
+    const refetchTimeline = (issueId: string) => {
+      qc.invalidateQueries({
+        queryKey: issueKeys.timeline(issueId),
+      });
+    };
+
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment } = p as CommentCreatedPayload;
-      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      if (comment?.issue_id) refetchTimeline(comment.issue_id);
     });
 
     const unsubCommentUpdated = ws.on("comment:updated", (p) => {
       const { comment } = p as CommentUpdatedPayload;
-      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      if (comment?.issue_id) refetchTimeline(comment.issue_id);
     });
 
     const unsubCommentDeleted = ws.on("comment:deleted", (p) => {
       const { issue_id } = p as CommentDeletedPayload;
-      if (issue_id) invalidateTimeline(issue_id);
+      if (issue_id) refetchTimeline(issue_id);
     });
 
     const unsubCommentResolved = ws.on("comment:resolved", (p) => {
@@ -640,7 +647,18 @@ export function useRealtimeSync(
     //      forever in the second-tab scenario.
     const unsubTaskCancelled = ws.on("task:cancelled", (p) => {
       const payload = p as TaskCancelledPayload;
-      if (!payload.chat_session_id) return;
+      const wsId = getCurrentWsId();
+      if (!payload.chat_session_id) {
+        // Issue task: invalidate agent presence and task caches
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
+          qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
+          qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
+          qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
+          qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+        }
+        return;
+      }
       chatWsLogger.info("task:cancelled (global, chat)", {
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
@@ -651,7 +669,19 @@ export function useRealtimeSync(
 
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
       const payload = p as TaskCompletedPayload;
-      if (!payload.chat_session_id) return; // issue tasks handled elsewhere
+      const wsId = getCurrentWsId();
+      if (!payload.chat_session_id) {
+        // Issue task: invalidate agent presence, task lists, and activity caches
+        // so the execution log, agent cards, and activity charts refresh.
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
+          qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
+          qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
+          qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
+          qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+        }
+        return;
+      }
       chatWsLogger.info("task:completed (global, chat)", {
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
@@ -664,7 +694,18 @@ export function useRealtimeSync(
 
     const unsubTaskFailed = ws.on("task:failed", (p) => {
       const payload = p as TaskFailedPayload;
-      if (!payload.chat_session_id) return;
+      const wsId = getCurrentWsId();
+      if (!payload.chat_session_id) {
+        // Issue task: same invalidation as task:completed
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
+          qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
+          qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
+          qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
+          qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+        }
+        return;
+      }
       chatWsLogger.warn("task:failed (global, chat)", {
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
