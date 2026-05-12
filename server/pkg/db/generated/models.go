@@ -69,6 +69,9 @@ type AgentRuntime struct {
 	OwnerID        pgtype.UUID        `json:"owner_id"`
 	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
 	SandboxEnabled pgtype.Bool        `json:"sandbox_enabled"`
+	PausedAt       pgtype.Timestamptz `json:"paused_at"`
+	UnpauseAt      pgtype.Timestamptz `json:"unpause_at"`
+	PauseReason    pgtype.Text        `json:"pause_reason"`
 }
 
 type AgentSkill struct {

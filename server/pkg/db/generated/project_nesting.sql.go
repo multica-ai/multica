@@ -17,7 +17,7 @@ SELECT project_id, parent_project_id, show_descendants, depth, created_at, updat
 WHERE project_id = $1
 `
 
-// Fork-specific: nested projects companion queries.
+// CEREBRO-PATCH(nested-projects): fork-specific nested projects companion queries.
 // Kept in a dedicated file so upstream-merges don't conflict on the canonical project.sql.
 func (q *Queries) GetProjectNesting(ctx context.Context, projectID pgtype.UUID) (ProjectNesting, error) {
 	row := q.db.QueryRow(ctx, getProjectNesting, projectID)

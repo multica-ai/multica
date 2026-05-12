@@ -1104,6 +1104,16 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	runtimeWorkspaceID := uuidToString(runtime.WorkspaceID)
 	authMs = time.Since(start).Milliseconds()
 
+	// CEREBRO-PATCH(daemon-pause-claim-gate): paused runtimes return no claimable
+	// task without touching Postgres. Pause is purely an orchestration concept —
+	// the daemon is unchanged and just sees an empty queue until the auto-unpause
+	// sweeper or a manual unpause clears the flag.
+	if runtime.PausedAt.Valid {
+		writeJSON(w, http.StatusOK, map[string]any{"task": nil})
+		outcome = "paused"
+		return
+	}
+
 	// CEREBRO-PATCH(budget-preclaim): peek at queued tasks for this runtime
 	// and cancel any that exceed the workspace or agent budget cap. The
 	// actual claim below then picks the next still-allowed task. The

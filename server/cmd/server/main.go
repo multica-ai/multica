@@ -331,6 +331,8 @@ func main() {
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
+	// CEREBRO-PATCH(main-runtime-pause-sweeper): cerebro auto-unpause sweeper.
+	go cerebroruntime.New(cerebrodb.New(pool), taskSvc, bus).RunUnpauseSweeper(sweepCtx)
 	if gatewayCfg, err := cerebroruntime.LoadFirtalGatewayRuntimeConfig(); err != nil {
 		slog.Error("invalid firtal gateway server runtime config", "error", err)
 		os.Exit(1)

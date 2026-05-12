@@ -10,6 +10,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -91,7 +92,36 @@ type Handler struct {
 	// listen-mode) service. Set by the router after construction so the upstream
 	// handler.New signature stays unchanged.
 	ChannelListen ChannelListenInvoker
-	cfg           Config
+	// CEREBRO-PATCH(handler-runtime-pause): cerebro runtime pause/unpause service.
+	RuntimePause RuntimePauseInvoker
+	cfg          Config
+}
+
+// RuntimePauseInvoker is the upstream-side seam that the cerebro runtime
+// pause service plugs into. Methods on *Handler in runtime_pause_cerebro.go
+// type-assert this to call the concrete service without importing the
+// cerebro package directly (which would create an import cycle).
+//
+// CEREBRO-PATCH(handler-runtime-pause-iface): seam for cerebro runtime pause.
+type RuntimePauseInvoker interface {
+	PauseRuntime(ctx context.Context, runtimeID pgtype.UUID, opts RuntimePauseOptions) (RuntimePauseState, error)
+	UnpauseRuntime(ctx context.Context, runtimeID pgtype.UUID) (RuntimePauseState, error)
+}
+
+// RuntimePauseOptions mirrors cerebroruntime.PauseOptions on the upstream
+// side of the seam so callers don't need to import the cerebro package.
+type RuntimePauseOptions struct {
+	UnpauseAt time.Time
+	Reason    string
+}
+
+// RuntimePauseState is the subset of the post-pause/unpause runtime row
+// that the HTTP handler needs to render the API response.
+type RuntimePauseState struct {
+	WorkspaceID pgtype.UUID
+	PausedAt    pgtype.Timestamptz
+	UnpauseAt   pgtype.Timestamptz
+	PauseReason pgtype.Text
 }
 
 // ChannelListenInvoker is the upstream-side seam that the cerebro

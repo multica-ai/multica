@@ -600,6 +600,7 @@ type ListIssuesRow struct {
 }
 
 // CEREBRO-PATCH(sqlc-issue): cerebro modification of upstream file
+// CEREBRO-PATCH(nested-projects): project filters can include descendant project IDs.
 // Access-filtered list of issues. The access predicate enforces:
 //   - is_admin = TRUE  → no filter (workspace owners/admins always see all)
 //   - standalone issue + is_private = FALSE → visible

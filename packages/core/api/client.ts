@@ -817,6 +817,16 @@ export class ApiClient {
     await this.fetch(`/api/runtimes/${runtimeId}`, { method: "DELETE" });
   }
 
+  // CEREBRO-PATCH(api-client-runtime-pause): cerebro pause/unpause endpoints.
+  async pauseRuntime(runtimeId: string, body: { unpause_at?: string; reason?: string } = {}): Promise<AgentRuntime> {
+    return this.fetch(`/api/runtimes/${runtimeId}/pause`, { method: "POST", body: JSON.stringify(body) });
+  }
+
+  // CEREBRO-PATCH(api-client-runtime-pause): cerebro pause/unpause endpoints.
+  async unpauseRuntime(runtimeId: string): Promise<AgentRuntime> {
+    return this.fetch(`/api/runtimes/${runtimeId}/unpause`, { method: "POST" });
+  }
+
   async updateRuntimeSandbox(
     runtimeId: string,
     sandboxEnabled: boolean | null,

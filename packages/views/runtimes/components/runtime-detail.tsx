@@ -24,6 +24,8 @@ import { memberListOptions, agentListOptions } from "@multica/core/workspace/que
 // CEREBRO-PATCH(runtime-detail-sandbox-mutation): keep useUpdateRuntimeSandbox import
 import { useDeleteRuntime, useUpdateRuntimeSandbox } from "@multica/core/runtimes/mutations";
 import { deriveRuntimeHealth } from "@multica/core/runtimes";
+// CEREBRO-PATCH(runtime-detail-pause): pause/resume controls live in cerebro-runtime.
+import { PauseRuntimeButton, PauseBanner } from "@multica/cerebro-runtime/views";
 import {
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
@@ -181,6 +183,8 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               {t(($) => $.detail.read_only)}
             </span>
           )}
+          {/* CEREBRO-PATCH(runtime-detail-pause): pause/resume button next to delete. */}
+          {canDelete && <PauseRuntimeButton runtime={runtime} workspaceId={wsId} compact />}
           {canDelete && (
             <Tooltip>
               <TooltipTrigger
@@ -210,6 +214,8 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="grid grid-cols-1 gap-4 p-6 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-w-0 space-y-5">
+            {/* CEREBRO-PATCH(runtime-detail-pause): pause-state banner above HeroCard. */}
+            <PauseBanner runtime={runtime} />
             <HeroCard
               runtime={runtime}
               health={health}

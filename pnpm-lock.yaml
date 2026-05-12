@@ -1153,6 +1153,9 @@ importers:
 
   packages/cerebro-runtime:
     dependencies:
+      '@multica/cerebro-types':
+        specifier: workspace:*
+        version: link:../cerebro-types
       '@multica/core':
         specifier: workspace:*
         version: link:../core

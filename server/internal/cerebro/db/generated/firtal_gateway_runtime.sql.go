@@ -76,7 +76,7 @@ func (q *Queries) ClaimFirtalGatewayChatTask(ctx context.Context, runtimeID pgty
 }
 
 const listFirtalGatewayRuntimes = `-- name: ListFirtalGatewayRuntimes :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, paused_at, unpause_at, pause_reason FROM agent_runtime
 WHERE provider = $1
   AND daemon_id = $2
   AND status = 'online'
@@ -113,6 +113,9 @@ func (q *Queries) ListFirtalGatewayRuntimes(ctx context.Context, arg ListFirtalG
 			&i.OwnerID,
 			&i.LegacyDaemonID,
 			&i.SandboxEnabled,
+			&i.PausedAt,
+			&i.UnpauseAt,
+			&i.PauseReason,
 		); err != nil {
 			return nil, err
 		}

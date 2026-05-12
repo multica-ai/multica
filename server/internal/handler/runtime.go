@@ -35,8 +35,12 @@ type AgentRuntimeResponse struct {
 	// true/false = force on/off for this runtime regardless of env.
 	SandboxEnabled *bool   `json:"sandbox_enabled"`
 	LastSeenAt     *string `json:"last_seen_at"`
-	CreatedAt      string  `json:"created_at"`
-	UpdatedAt      string  `json:"updated_at"`
+	// CEREBRO-PATCH(runtime-pause-response): pause state for the cerebro runtime-pause feature.
+	PausedAt    *string `json:"paused_at"`
+	UnpauseAt   *string `json:"unpause_at"`
+	PauseReason *string `json:"pause_reason"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -62,8 +66,12 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		OwnerID:        uuidToPtr(rt.OwnerID),
 		SandboxEnabled: boolToPtr(rt.SandboxEnabled),
 		LastSeenAt:     timestampToPtr(rt.LastSeenAt),
-		CreatedAt:      timestampToString(rt.CreatedAt),
-		UpdatedAt:      timestampToString(rt.UpdatedAt),
+		// CEREBRO-PATCH(runtime-pause-response): expose pause state on the runtime API response.
+		PausedAt:    timestampToPtr(rt.PausedAt),
+		UnpauseAt:   timestampToPtr(rt.UnpauseAt),
+		PauseReason: textToPtr(rt.PauseReason),
+		CreatedAt:   timestampToString(rt.CreatedAt),
+		UpdatedAt:   timestampToString(rt.UpdatedAt),
 	}
 }
 

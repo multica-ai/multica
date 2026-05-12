@@ -19,7 +19,8 @@ export type CerebroFlagKey =
   | "cerebro_voice_output_enabled"
   | "cerebro_voice_summary_enabled"
   | "cerebro_autopilot_scopes"
-  | "cerebro_groups_enabled";
+  | "cerebro_groups_enabled"
+  | "cerebro_runtime_pause";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -43,6 +44,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_voice_summary_enabled: false,
   cerebro_autopilot_scopes: true,
   cerebro_groups_enabled: true,
+  cerebro_runtime_pause: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -133,5 +135,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Groups",
     description:
       "Enable workspace groups: named collections of members used by Cerebro features such as scoped resources.",
+  },
+  {
+    key: "cerebro_runtime_pause",
+    label: "Runtime pause / resume",
+    description:
+      "Pause and resume agent runtimes manually or automatically. When a provider returns 429, the runtime auto-pauses until the rate-limit window resets, then resumes interrupted work on its own.",
   },
 ];

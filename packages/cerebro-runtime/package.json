@@ -13,6 +13,7 @@
     "./views/docs": "./views/docs/index.ts"
   },
   "dependencies": {
+    "@multica/cerebro-types": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",

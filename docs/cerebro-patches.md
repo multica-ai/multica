@@ -35,6 +35,15 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 
 | Patch name | File(s) | `+` lines | Rationale |
 |---|---|---|---|
+| `runtime-pause-cerebro` | server/internal/handler/runtime_pause_cerebro.go | 158 | Net-new fork file: HTTP handlers for cerebro pause/unpause. Delegates to cerebroruntime.Service via the RuntimePauseInvoker seam (JEH-848). |
+| `runtime-detail-pause` | packages/views/runtimes/components/runtime-detail.tsx | 4 | Mount PauseRuntimeButton in topbar and PauseBanner above HeroCard from cerebro-runtime. |
+| `api-client-runtime-pause` | packages/core/api/client.ts | 8 | pauseRuntime / unpauseRuntime methods so cerebro-runtime mutations can call them through the central client. |
+| `runtime-pause-response` | server/internal/handler/runtime.go | 6 | Surface paused_at / unpause_at / pause_reason on AgentRuntimeResponse so the UI can render pause state. |
+| `handler-runtime-pause` | server/internal/handler/handler.go | 2 | RuntimePause field on Handler; assigned by router so runtime_pause_cerebro.go can delegate. |
+| `handler-runtime-pause-iface` | server/internal/handler/handler.go | 22 | RuntimePauseInvoker / RuntimePauseOptions / RuntimePauseState seam — lets the upstream Handler call into the cerebro pause service without an import cycle. |
+| `router-runtime-pause` | server/cmd/server/router.go | 6 | Mount cerebroruntime.New on h.RuntimePause and wire POST /pause and POST /unpause. |
+| `main-runtime-pause-sweeper` | server/cmd/server/main.go | 2 | Goroutine for the auto-unpause sweeper (30s tick, runs alongside the upstream runtime sweeper). |
+| `daemon-pause-claim-gate` | server/internal/handler/daemon.go | 9 | Paused runtimes return no claimable task without touching Postgres. Pure orchestration gate — daemon stays unchanged. |
 | `api-client-401-warn` | packages/core/api/client.ts | 1 | Log 401 as warn (like 404) — expected pre-login state, keeps Next.js dev overlay quiet |
 | `auth-init-401-info` | packages/core/platform/auth-initializer.tsx | 5 | No-active-session (401) is expected pre-login state — log as info, not error |
 | `docs-panel-mdx-shims` | apps/web/app/[workspaceSlug]/(dashboard)/settings/docs-panel.tsx<br>apps/web/app/[workspaceSlug]/(dashboard)/settings/cerebro-mdx-shims.tsx | 2 (panel) + 79 (shim file) | MDX components (`NumberedCard`, `Step`, ...) used in cerebro docs MDX but missing after upstream's docs rewrite (commit 8c2e0841) |

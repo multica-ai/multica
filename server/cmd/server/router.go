@@ -29,6 +29,8 @@ import (
 	cerebronotifications "github.com/multica-ai/multica/server/internal/cerebro/notifications"
 	// CEREBRO-PATCH(references-routes): JEH-837 issue references handler import.
 	cerebroreferences "github.com/multica-ai/multica/server/internal/cerebro/references"
+	// CEREBRO-PATCH(router-runtime-pause): cerebro runtime pause/unpause service.
+	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -188,6 +190,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroAccountHandler := cerebroaccount.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(references-routes): JEH-837 issue references handler instance.
 	cerebroReferencesHandler := cerebroreferences.New(cerebroQueries, queries, bus)
+	// CEREBRO-PATCH(router-runtime-pause): mount cerebro pause/unpause service so
+	// PauseRuntime / UnpauseRuntime in runtime_pause_cerebro.go can delegate to it.
+	h.RuntimePause = cerebroruntime.New(cerebroQueries, h.TaskService, bus)
 
 	r := chi.NewRouter()
 
@@ -671,6 +676,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/update/{updateId}", h.GetUpdate)
 					// CEREBRO-PATCH(runtime-sandbox): cerebro daemon sandbox toggle endpoint.
 					r.Patch("/sandbox", h.UpdateAgentRuntimeSandbox)
+					// CEREBRO-PATCH(router-runtime-pause): cerebro pause/unpause endpoints.
+					r.Post("/pause", h.PauseRuntime)
+					r.Post("/unpause", h.UnpauseRuntime)
 					r.Post("/models", h.InitiateListModels)
 					r.Get("/models/{requestId}", h.GetModelListRequest)
 					r.Post("/local-skills", h.InitiateListLocalSkills)
