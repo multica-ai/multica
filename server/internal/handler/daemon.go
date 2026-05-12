@@ -30,6 +30,24 @@ import (
 // Daemon workspace ownership helpers
 // ---------------------------------------------------------------------------
 
+// DaemonWorkspaceAccessFromURL returns middleware that gates a daemon route
+// group on workspace ownership using requireDaemonWorkspaceAccess against
+// whatever workspaceID has already been resolved by an upstream middleware
+// (typically workspaceIDFromURLParam). Without this gate the daemon document
+// routes would accept any X-Workspace-ID header value, letting a daemon token
+// or PAT reach foreign workspaces — see #docs-cross-tenant-leak.
+func (h *Handler) DaemonWorkspaceAccessFromURL() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			workspaceID := h.resolveWorkspaceID(r)
+			if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // requireDaemonWorkspaceAccess verifies the caller has access to the given workspace.
 // For daemon tokens (mdt_), compares the token's workspace ID directly.
 // For PAT/JWT fallback, verifies user membership in the workspace.

@@ -298,10 +298,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/session", h.PinTaskSession)
 
 		// Document endpoints for daemon/agent access.
-		// workspaceIDFromURL copies the chi URL param into X-Workspace-ID
+		// workspaceIDFromURLParam copies the chi URL param into X-Workspace-ID
 		// so h.resolveWorkspaceID(r) can find it via the standard header path.
+		// DaemonWorkspaceAccessFromURL then enforces that the caller (daemon
+		// token OR PAT/JWT) actually owns the workspace they named — without
+		// this gate the route accepts ANY workspace UUID in the URL, allowing
+		// a PAT for workspace A to read/write documents in workspace B.
 		r.Route("/workspaces/{workspaceId}/documents", func(r chi.Router) {
 			r.Use(workspaceIDFromURLParam("workspaceId"))
+			r.Use(h.DaemonWorkspaceAccessFromURL())
 			r.Get("/", h.ListDocuments)
 			r.Get("/index", h.ListDocumentIndex)
 			r.Get("/tree", h.ListDocumentTree)

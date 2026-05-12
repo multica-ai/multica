@@ -840,17 +840,25 @@ func (h *Handler) RestoreDocument(w http.ResponseWriter, r *http.Request) {
 // --- Issue-Document link handlers ---
 
 func (h *Handler) LinkIssueDocument(w http.ResponseWriter, r *http.Request) {
-	// loadIssueForUser is the authoritative gate: it enforces workspace
-	// membership and that the issue belongs to the current workspace. Without
-	// it an attacker can POST a link from a workspace-A issue UUID to a
-	// workspace-B document UUID, then GET to exfiltrate that document's
-	// content via the JOIN in ListLinkedDocumentsForIssue.
+	// loadIssueForUser checks that the issue belongs to the workspace named
+	// in X-Workspace-ID and that the caller has a valid user identity, but
+	// it does NOT verify workspace membership — on the protected /api/*
+	// group RequireWorkspaceMember does that upstream, but the /api/daemon/*
+	// group has no equivalent middleware. requireDaemonWorkspaceAccess is the
+	// fallback that handles both cases: it compares against the daemon
+	// token's workspace OR falls back to a PAT/JWT membership check.
+	// Without it, a PAT for workspace A can hit this route with an issue
+	// UUID and X-Workspace-ID for workspace B and exfiltrate its linked
+	// documents via the unfiltered JOIN in ListLinkedDocumentsForIssue.
 	issueIDParam := chi.URLParam(r, "issueId")
 	issue, ok := h.loadIssueForUser(w, r, issueIDParam)
 	if !ok {
 		return
 	}
 	workspaceID := uuidToString(issue.WorkspaceID)
+	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
+		return
+	}
 
 	var req LinkDocumentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -908,6 +916,10 @@ func (h *Handler) UnlinkIssueDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := uuidToString(issue.WorkspaceID)
+	// See LinkIssueDocument for why this gate is necessary on /api/daemon/*.
+	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
+		return
+	}
 
 	docID := chi.URLParam(r, "documentId")
 	doc, ok := h.loadDocumentForWorkspace(w, r, docID, workspaceID)
@@ -931,6 +943,10 @@ func (h *Handler) ListIssueDocumentLinks(w http.ResponseWriter, r *http.Request)
 	issueIDParam := chi.URLParam(r, "issueId")
 	issue, ok := h.loadIssueForUser(w, r, issueIDParam)
 	if !ok {
+		return
+	}
+	// See LinkIssueDocument for why this gate is necessary on /api/daemon/*.
+	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(issue.WorkspaceID)) {
 		return
 	}
 
