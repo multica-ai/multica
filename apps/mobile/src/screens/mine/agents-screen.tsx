@@ -30,7 +30,8 @@ import type {
   CreateAgentRequest,
   MemberWithUser,
   RuntimeDevice,
-  Skill,
+  AgentSkillSummary,
+  SkillSummary,
   UpdateAgentRequest,
 } from "@multica/core/types";
 import {
@@ -837,7 +838,7 @@ function SkillRow({
   readOnly,
   onRemove,
 }: {
-  skill: Skill;
+  skill: AgentSkillSummary;
   readOnly: boolean;
   onRemove: () => void;
 }) {
@@ -1303,7 +1304,7 @@ function SkillPickerModal({
   onSelect: (skillId: string) => void;
   open: boolean;
   saving: boolean;
-  skills: Skill[];
+  skills: SkillSummary[];
 }) {
   const { t } = useTranslation();
   return (

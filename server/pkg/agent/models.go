@@ -638,7 +638,6 @@ func discoverCopilotModels(ctx context.Context, executablePath string) ([]Model,
 	}
 	return models, nil
 }
-}
 
 // acpDiscoveryProvider configures how discoverACPModels launches an
 // ACP-speaking agent CLI. The shared helper drives every CLI in

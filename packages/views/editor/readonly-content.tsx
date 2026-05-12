@@ -99,7 +99,27 @@ function urlTransform(url: string): string {
 // ---------------------------------------------------------------------------
 
 function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
-  return <IssueMentionCard issueId={issueId} fallbackLabel={label} />;
+  const { push, openInNewTab } = useNavigation();
+  const p = useWorkspacePaths();
+  const path = p.issueDetail(issueId);
+  return (
+    <span
+      className="inline align-middle"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.metaKey || e.ctrlKey || e.shiftKey) {
+          if (openInNewTab) {
+            openInNewTab(path, label);
+          }
+          return;
+        }
+        push(path);
+      }}
+    >
+      <IssueMentionCard issueId={issueId} fallbackLabel={label} />
+    </span>
+  );
 }
 
 // Named component so it can call useWorkspaceSlug() — arrow function inlined
@@ -367,24 +387,6 @@ interface ReadonlyContentProps {
   attachments?: Attachment[];
 }
 
-function formatStandaloneJson(content: string): string {
-  const trimmed = content.trim();
-  if (!trimmed) return content;
-
-  const looksLikeJsonEnvelope =
-    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
-    (trimmed.startsWith("[") && trimmed.endsWith("]"));
-  if (!looksLikeJsonEnvelope) return content;
-
-  try {
-    const parsed = JSON.parse(trimmed) as unknown;
-    if (!parsed || typeof parsed !== "object") return content;
-    return `\`\`\`json\n${JSON.stringify(parsed, null, 2)}\n\`\`\``;
-  } catch {
-    return content;
-  }
-}
-
 // Memoized so a long timeline of comments (Inbox + IssueDetail) does not
 // re-run the full react-markdown + rehype-* + lowlight pipeline on every
 // parent re-render. Props are `content`/`className`/`attachments`, all
@@ -395,10 +397,7 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   className,
   attachments,
 }: ReadonlyContentProps) {
-  const processed = useMemo(
-    () => preprocessMarkdown(formatStandaloneJson(content)),
-    [content],
-  );
+  const processed = useMemo(() => preprocessMarkdown(content), [content]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
   const download = useDownloadAttachment();
@@ -417,10 +416,7 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   );
 
   return (
-    <div
-      ref={wrapperRef}
-      className={cn("rich-text-editor readonly min-w-0 text-sm", className)}
-    >
+    <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}

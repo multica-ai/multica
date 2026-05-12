@@ -24,6 +24,7 @@ import { cn } from "@multica/ui/lib/utils";
 
 export function BatchActionToolbar({
   placement = "fixed-bottom",
+  issues,
 }: {
   /**
    * "fixed-bottom" — floats at the bottom of the viewport (default; used by
@@ -32,6 +33,7 @@ export function BatchActionToolbar({
    * the selected rows (used inside scrollable sections like sub-issues).
    */
   placement?: "fixed-bottom" | "inline";
+  issues?: Issue[];
 }) {
   const { t } = useT("issues");
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
@@ -45,7 +47,7 @@ export function BatchActionToolbar({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const batchUpdate = useBatchUpdateIssues();
   const batchDelete = useBatchDeleteIssues();
-  const loading = batchUpdate.isPending || batchDelete.isPending;
+   const loading = batchUpdate.isPending || batchDelete.isPending;
 
   // Can batch-delete only if the user owns all selected issues or is not provided issue data.
   const canBatchDelete = (() => {
