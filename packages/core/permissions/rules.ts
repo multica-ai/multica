@@ -25,6 +25,26 @@ const isAdminLike = (role: MemberRole | null) =>
 // ---- Agents ----------------------------------------------------------------
 
 /**
+ * Whether an agent should appear in selection surfaces (dropdowns, @mention,
+ * chat picker, assignee filter). Workspace-visibility agents are always
+ * selectable; private agents are selectable only by their owner.
+ *
+ * Admin/owner roles do NOT bypass this gate — selection surfaces treat all
+ * members identically per the uniform agent-selection policy (OPE-531).
+ *
+ * Legacy agents (owner_id null) are treated as workspace-visible.
+ */
+export function isAgentSelectable(
+  agent: Agent,
+  userId: string | null,
+): boolean {
+  if (agent.archived_at) return false;
+  if (agent.visibility === "workspace") return true;
+  if (agent.owner_id === null) return true;
+  return agent.owner_id === userId;
+}
+
+/**
  * Update / archive / restore agent fields. The backend gates archive and
  * restore identically to edit (`server/internal/handler/agent.go:519-535`),
  * so callers can use `canEditAgent` for all three.
@@ -43,8 +63,8 @@ export function canEditAgent(agent: Agent, ctx: PermissionContext): Decision {
 
 /**
  * Assign an agent to an issue. Workspace-visibility agents are assignable by
- * any workspace member; private agents are restricted to their owner plus
- * workspace admins/owners. Mirrors `issue.go:1471-1490`.
+ * any workspace member; private agents are restricted to their owner only.
+ * Admin/owner roles no longer bypass this gate (OPE-531).
  */
 export function canAssignAgentToIssue(
   agent: Agent,
@@ -59,12 +79,11 @@ export function canAssignAgentToIssue(
     }
     return ALLOW;
   }
-  // visibility === "private"
-  if (isAdminLike(ctx.role)) return ALLOW;
+  // visibility === "private" — only the owner can assign
   if (agent.owner_id !== null && agent.owner_id === ctx.userId) return ALLOW;
   return deny(
     "private_visibility",
-    "Personal agent — only the owner and workspace admins can assign work.",
+    "Personal agent — only the owner can assign work to this agent.",
   );
 }
 

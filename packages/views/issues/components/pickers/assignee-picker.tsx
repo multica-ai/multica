@@ -5,7 +5,7 @@ import { Lock, UserMinus } from "lucide-react";
 import type { Agent, IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
-import { canAssignAgentToIssue } from "@multica/core/permissions";
+import { canAssignAgentToIssue, isAgentSelectable } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
@@ -86,7 +86,7 @@ export function AssigneePicker({
     .filter((m) => m.name.toLowerCase().includes(query))
     .sort((a, b) => getFreq("member", b.user_id) - getFreq("member", a.user_id));
   const filteredAgents = agents
-    .filter((a) => !a.archived_at && a.name.toLowerCase().includes(query))
+    .filter((a) => isAgentSelectable(a, user?.id ?? null) && a.name.toLowerCase().includes(query))
     .sort((a, b) => getFreq("agent", b.id) - getFreq("agent", a.id));
 
   const isSelected = (type: string, id: string) =>

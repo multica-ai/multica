@@ -18,6 +18,7 @@ import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import { isImeComposing } from "@multica/core/utils";
+import { isAgentSelectable } from "@multica/core/permissions";
 import type {
   Issue,
   ListIssuesCache,
@@ -408,14 +409,8 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
     const agentItems: MentionItem[] = agents
       .filter(
         (a) =>
-          !a.archived_at &&
           a.name.toLowerCase().includes(q) &&
-          // Workspace agents are shared — always visible to all members.
-          // Private agents are restricted to their owner only.
-          // Legacy agents (owner_id null) remain visible to everyone.
-          (a.visibility === "workspace" ||
-            a.owner_id === null ||
-            a.owner_id === userId),
+          isAgentSelectable(a, userId),
       )
       .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
 

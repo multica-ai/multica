@@ -1595,9 +1595,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 // validateAssigneePair verifies the (assignee_type, assignee_id) pair refers
-// to an existing entity in the workspace. For agent assignees it also enforces
-// visibility (private agents are only assignable by their owner or by
-// workspace admins/owners) and rejects archived agents.
+// to an existing entity in the workspace. For agent assignees it also rejects
+// archived agents and enforces uniform visibility: private agents are only
+// assignable by their owner — admin/owner roles do NOT bypass this gate
+// (OPE-531).
 //
 // Returns (statusCode, errorMessage). statusCode == 0 means the pair is valid;
 // callers should treat any non-zero status as a rejection and surface it back
@@ -1635,13 +1636,12 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 		if agent.ArchivedAt.Valid {
 			return http.StatusBadRequest, "cannot assign to archived agent"
 		}
+		// Uniform selection policy: private agents are only assignable by
+		// their owner. No admin/owner bypass (OPE-531).
 		if agent.Visibility == "private" {
 			userID := requestUserID(r)
 			if uuidToString(agent.OwnerID) != userID {
-				member, err := h.getWorkspaceMember(ctx, userID, workspaceID)
-				if err != nil || !roleAllowed(member.Role, "owner", "admin") {
-					return http.StatusForbidden, "cannot assign to private agent"
-				}
+				return http.StatusForbidden, "cannot assign to private agent"
 			}
 		}
 		return 0, ""
