@@ -44,6 +44,9 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `router-runtime-pause` | server/cmd/server/router.go | 6 | Mount cerebroruntime.New on h.RuntimePause and wire POST /pause and POST /unpause. |
 | `main-runtime-pause-sweeper` | server/cmd/server/main.go | 2 | Goroutine for the auto-unpause sweeper (30s tick, runs alongside the upstream runtime sweeper). |
 | `daemon-pause-claim-gate` | server/internal/handler/daemon.go | 9 | Paused runtimes return no claimable task without touching Postgres. Pure orchestration gate — daemon stays unchanged. |
+| `auto-pause-invoker` | server/internal/service/task.go | 8 | JEH-1035 — `AutoPauseInvoker` seam + `AutoPause` field on `TaskService`. The concrete invoker lives in `server/internal/cerebro/runtime/auto_pause.go`; the interface keeps the upstream package import-cycle-free. |
+| `auto-pause-on-failure` | server/internal/service/task.go | 5 | JEH-1035 — `FailTask` calls `AutoPause.MaybeAutoPauseOnFailure` after the auto-retry decision so a runtime-side rate-limit / monthly-cap / expired-token signal pauses the runtime instead of burning through max_attempts. |
+| `router-auto-pause-on-failure` | server/cmd/server/router.go | 3 | JEH-1035 — wires the cerebro pause Service into `h.TaskService.AutoPause` immediately after `h.RuntimePause` is constructed. |
 | `api-client-401-warn` | packages/core/api/client.ts | 1 | Log 401 as warn (like 404) — expected pre-login state, keeps Next.js dev overlay quiet |
 | `auth-init-401-info` | packages/core/platform/auth-initializer.tsx | 5 | No-active-session (401) is expected pre-login state — log as info, not error |
 | `docs-panel-mdx-shims` | apps/web/app/[workspaceSlug]/(dashboard)/settings/docs-panel.tsx<br>apps/web/app/[workspaceSlug]/(dashboard)/settings/cerebro-mdx-shims.tsx | 2 (panel) + 79 (shim file) | MDX components (`NumberedCard`, `Step`, ...) used in cerebro docs MDX but missing after upstream's docs rewrite (commit 8c2e0841) |

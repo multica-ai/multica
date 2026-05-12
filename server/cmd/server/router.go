@@ -200,7 +200,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroReferencesHandler := cerebroreferences.New(cerebroQueries, queries, bus)
 	// CEREBRO-PATCH(router-runtime-pause): mount cerebro pause/unpause service so
 	// PauseRuntime / UnpauseRuntime in runtime_pause_cerebro.go can delegate to it.
-	h.RuntimePause = cerebroruntime.New(cerebroQueries, h.TaskService, bus)
+	runtimePauseSvc := cerebroruntime.New(cerebroQueries, h.TaskService, bus)
+	h.RuntimePause = runtimePauseSvc
+	// CEREBRO-PATCH(router-auto-pause-on-failure): wire cerebro auto-pause
+	// hook into TaskService so FailTask can pause on provider-error signals.
+	h.TaskService.AutoPause = runtimePauseSvc
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
 

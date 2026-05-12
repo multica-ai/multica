@@ -51,6 +51,9 @@ type TaskService struct {
 	// inbox, AgentLiveCard and the Tasks list. Best-effort — see the
 	// agent_title package for the LLM-or-heuristic fallback chain.
 	TitleBuilder *agent_title.Builder
+	// CEREBRO-PATCH(auto-pause-invoker): cerebro auto-pause seam called
+	// from FailTask. Set from router.go; nil-safe.
+	AutoPause AutoPauseInvoker
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
@@ -59,6 +62,14 @@ type TaskService struct {
 
 type TaskWakeupNotifier interface {
 	NotifyTaskAvailable(runtimeID, taskID string)
+}
+
+// CEREBRO-PATCH(auto-pause-invoker): cerebro auto-pause invoker seam.
+// The concrete implementation lives in cerebro/runtime/auto_pause.go;
+// the upstream service package only sees this interface to avoid an
+// import cycle (cerebro/runtime → service → would loop back here).
+type AutoPauseInvoker interface {
+	MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTaskQueue) bool
 }
 
 // triggerSummaryMaxLen caps the snapshot length so the row stays cheap to
@@ -1302,6 +1313,13 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// runtime_recovery). The helper itself enforces attempt < max_attempts
 	// and only triggers for issue/chat tasks.
 	retried, _ := s.MaybeRetryFailedTask(ctx, task)
+
+	// CEREBRO-PATCH(auto-pause-on-failure): pause runtime when error
+	// signals rate-limit / monthly-cap / expired auth — see
+	// cerebro/runtime/auto_pause.go for the full trade-off explanation.
+	if s.AutoPause != nil {
+		s.AutoPause.MaybeAutoPauseOnFailure(ctx, task)
+	}
 
 	// Skip the per-failure system comment when we'll immediately retry —
 	// the new task will surface its own status to the user, and we don't

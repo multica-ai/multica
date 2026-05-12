@@ -135,6 +135,49 @@ func TestParseRateLimitReset(t *testing.T) {
 			want:   now.Add(30 * time.Second),
 			wantOK: true,
 		},
+		{
+			// Anthropic monthly-cap signal — the literal string that took
+			// out Sara and Rasp on 2026-05-11. No reset time parseable, so
+			// falls back to 5-minute backoff. Sweeper will re-pause every
+			// 5min until the actual cap window clears.
+			name:   "anthropic monthly usage limit",
+			input:  "You've hit your org's monthly usage limit",
+			want:   now.Add(DefaultRateLimitBackoff),
+			wantOK: true,
+		},
+		{
+			// Token-expired error — Saras nuværende fejlmønster (chat
+			// view, 2026-05-12 08:48). No reset time parseable, 5-minute
+			// fallback gives the platform time to refresh the token.
+			name:   "401 invalid authentication credentials",
+			input:  "Failed to authenticate. API Error: 401 Invalid authentication credentials",
+			want:   now.Add(DefaultRateLimitBackoff),
+			wantOK: true,
+		},
+		{
+			// OpenAI quota-exhausted signal.
+			name:   "openai insufficient_quota",
+			input:  `{"error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}`,
+			want:   now.Add(DefaultRateLimitBackoff),
+			wantOK: true,
+		},
+		{
+			// Generic provider phrasing.
+			name:   "out of tokens generic",
+			input:  "Provider says: out of tokens for this organization",
+			want:   now.Add(DefaultRateLimitBackoff),
+			wantOK: true,
+		},
+		{
+			// 401 without "Invalid authentication" must NOT match — a 401
+			// from a normal API call (wrong workspace, revoked invite) is
+			// not a pause-worthy condition, only an expired provider
+			// token is. The detector requires the full phrase.
+			name:   "bare 401 without invalid-authentication phrase",
+			input:  "GET /api/foo returned 401 Unauthorized",
+			want:   time.Time{},
+			wantOK: false,
+		},
 	}
 
 	for _, tc := range cases {

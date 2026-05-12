@@ -18,18 +18,29 @@ import (
 // leave the runtime paused indefinitely.
 const DefaultRateLimitBackoff = 5 * time.Minute
 
-// rateLimitDetectorRe matches phrases that confidently indicate a rate-limit
-// response. Used only as a fallback when no explicit reset time was found —
-// the precise parsers (epoch / ISO / wall-clock / relative) take priority,
-// so a hint-bearing error like "Rate limited. Try again in 30s" still gets
-// the exact 30s value rather than the 5-minute default.
+// rateLimitDetectorRe matches phrases that confidently indicate the agent
+// cannot work right now. Used only as a fallback when no explicit reset time
+// was found — the precise parsers (epoch / ISO / wall-clock / relative) take
+// priority, so a hint-bearing error like "Rate limited. Try again in 30s"
+// still gets the exact 30s value rather than the 5-minute default.
 //
 // Conservative on purpose: a false positive auto-pauses the runtime for 5
-// minutes which is annoying. We require an unambiguous signal — the literal
-// phrase "rate limit(ed/ing)" / "ratelimit" / "limiting requests", or HTTP
-// 429, or "quota exceeded".
+// minutes which is annoying. We require an unambiguous signal — a literal
+// rate-limit phrase, HTTP 429, or one of the broader "provider says stop"
+// signals below:
+//
+//   - "monthly usage limit" / "org's monthly usage" — Anthropic's org cap.
+//   - "out of tokens"                              — generic phrasing.
+//   - "401 invalid authentication"                  — token expired/revoked.
+//   - "insufficient_quota"                         — OpenAI quota exhaustion.
+//
+// None of these carry a parseable reset time, so they hit the 5-minute
+// fallback. For the actual month-cap case that means the sweeper will
+// re-pause every 5 min until the cap clears — acceptable fail-safe.
 var rateLimitDetectorRe = regexp.MustCompile(
-	`rate[ -]?limit(?:ed|ing)?|ratelimit|limiting requests|\b429\b|quota exceeded`,
+	`rate[ -]?limit(?:ed|ing)?|ratelimit|limiting requests|\b429\b|` +
+		`quota exceeded|insufficient_quota|monthly usage limit|` +
+		`org's monthly usage|out of tokens|401 invalid authentication`,
 )
 
 // ParseRateLimitReset extracts a runtime-unpause timestamp from a free-form
