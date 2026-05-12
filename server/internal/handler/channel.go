@@ -33,6 +33,11 @@ type ChannelResponse struct {
 	// other endpoints leave them zero/null since they're cheap there.
 	UnreadCount       int64   `json:"unread_count"`
 	LastReadMessageID *string `json:"last_read_message_id"`
+	// Ambient listener (ROA-178): when set, every member-authored
+	// message in this channel triggers a task for that agent without
+	// requiring @-mention. Used to designate a Ship Concierge channel.
+	// NULL for ordinary channels.
+	AmbientListenerAgentID *string `json:"ambient_listener_agent_id"`
 }
 
 func channelToResponse(c db.Channel) ChannelResponse {
@@ -52,6 +57,10 @@ func channelToResponse(c db.Channel) ChannelResponse {
 	if c.RetentionDays.Valid {
 		v := c.RetentionDays.Int32
 		resp.RetentionDays = &v
+	}
+	if c.AmbientListenerAgentID.Valid {
+		s := uuidToString(c.AmbientListenerAgentID)
+		resp.AmbientListenerAgentID = &s
 	}
 	if c.ArchivedAt.Valid {
 		s := timestampToString(c.ArchivedAt)
@@ -390,6 +399,103 @@ func (h *Handler) ArchiveChannel(w http.ResponseWriter, r *http.Request) {
 		"channel_id": uuidToString(channelUUID),
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// SetAmbientListenerRequest is the JSON body for
+// PATCH /api/channels/{channelId}/ambient_listener. ROA-178
+// Ship Concierge — designates an agent as the ambient listener for
+// the channel; passing null clears the designation.
+type SetAmbientListenerRequest struct {
+	// AgentID is the agent UUID to designate. Pass null in the JSON
+	// (or omit) to clear the designation.
+	AgentID *string `json:"agent_id"`
+}
+
+// SetChannelAmbientListener handles
+// PATCH /api/channels/{channelId}/ambient_listener.
+//
+// When set, every member-authored message in the channel triggers a
+// task for that agent without requiring @-mention — generalizes the
+// DM auto-trigger pattern to a public/shared channel. ROA-178
+// Ship Concierge is the primary motivating use case (Claude listens
+// to the Ship channel and responds to deploy/release queries).
+//
+// Validation:
+//   - Caller must be a workspace member with channel access.
+//   - The target agent (if AgentID is non-nil) must exist in this
+//     workspace and not be archived. Membership in the channel is
+//     NOT required here — the column on `channel` is the
+//     authoritative designation; the agent gets dispatched even
+//     if it's not in the channel's membership list. (Downstream
+//     reachability checks in SelectAgentsForMention still apply.)
+func (h *Handler) SetChannelAmbientListener(w http.ResponseWriter, r *http.Request) {
+	wsID, _, ok := h.requireChannelsEnabled(w, r)
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	channelUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "channelId"), "channel id")
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(wsID))
+	actorUUID, ok := parseUUIDOrBadRequest(w, actorID, "actor id")
+	if !ok {
+		return
+	}
+	ch, ok := h.requireChannelAccess(w, r, channelUUID, wsID, channel.Actor{Type: actorType, ID: actorUUID})
+	if !ok {
+		return
+	}
+
+	var req SetAmbientListenerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	var agentUUID pgtype.UUID
+	if req.AgentID != nil && *req.AgentID != "" {
+		parsedAgent, ok := parseUUIDOrBadRequest(w, *req.AgentID, "agent_id")
+		if !ok {
+			return
+		}
+		// Validate the agent exists in this workspace + isn't archived.
+		// Cheap one-row lookup; failing now is a 400 vs an opaque
+		// internal error later when the dispatch path tries to enqueue.
+		agent, err := h.Queries.GetAgent(r.Context(), parsedAgent)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "agent not found")
+			return
+		}
+		if uuidToString(agent.WorkspaceID) != uuidToString(wsID) {
+			writeError(w, http.StatusBadRequest, "agent does not belong to this workspace")
+			return
+		}
+		if agent.ArchivedAt.Valid {
+			writeError(w, http.StatusBadRequest, "agent is archived")
+			return
+		}
+		agentUUID = parsedAgent
+	}
+
+	updated, err := h.Queries.SetChannelAmbientListener(r.Context(), db.SetChannelAmbientListenerParams{
+		ID:                     ch.ID,
+		AmbientListenerAgentID: agentUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set ambient listener")
+		return
+	}
+
+	resp := channelToResponse(updated)
+	h.publish(protocol.EventChannelUpdated, uuidToString(wsID), actorType, actorID, map[string]any{
+		"channel": resp,
+	})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // AddMemberRequest is the JSON body for POST /api/channels/{channelId}/members.

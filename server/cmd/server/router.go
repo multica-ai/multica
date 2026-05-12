@@ -550,6 +550,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetChannel)
 					r.Patch("/", h.UpdateChannel)
 					r.Delete("/", h.ArchiveChannel)
+					r.Patch("/ambient_listener", h.SetChannelAmbientListener)
 					r.Post("/read", h.MarkChannelRead)
 					r.Get("/members", h.ListChannelMembers)
 					r.Post("/members", h.AddChannelMember)

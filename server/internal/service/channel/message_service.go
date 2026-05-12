@@ -226,8 +226,16 @@ type SelectAgentsForMentionParams struct {
 	// implicitly even without an @mention — the whole conversation is
 	// addressed at the agent participant(s).
 	ChannelKind string
-	Content     string
-	Author      Actor
+	// AmbientListenerAgentID, when valid, designates one specific agent
+	// as the channel's ambient listener. Every member-authored message
+	// triggers a task for that agent without requiring an @mention.
+	// Generalizes the DM auto-trigger pattern to public/shared channels
+	// (ROA-178 Ship Concierge: Claude listens to the whole team's Ship
+	// chatter and responds). Agent-authored messages do NOT re-trigger
+	// (same loop guard as DM).
+	AmbientListenerAgentID pgtype.UUID
+	Content                string
+	Author                 Actor
 	// DedupWindowSeconds is how recent a pending task counts as a
 	// "duplicate"; passed through to the SQL query. The handler reads
 	// this from CHANNEL_AGENT_DEDUP_WINDOW_SECONDS env (default 30).
@@ -279,7 +287,11 @@ func (s *MessageService) SelectAgentsForMention(ctx context.Context, p SelectAge
 	// member-authored messages: agent-authored messages auto-triggering
 	// other agents in a DM would create endless ping-pong loops.
 	autoTriggerDM := p.ChannelKind == KindDM && p.Author.Type == ActorMember
-	if len(mentions) == 0 && !autoTriggerDM {
+	// Ambient listener: a designated agent on a public channel that
+	// responds to every member message. Same guard as DM — member-
+	// authored only, no agent-loop. ROA-178 Ship Concierge.
+	autoTriggerAmbient := p.AmbientListenerAgentID.Valid && p.Author.Type == ActorMember
+	if len(mentions) == 0 && !autoTriggerDM && !autoTriggerAmbient {
 		return nil, nil
 	}
 
@@ -407,6 +419,44 @@ func (s *MessageService) SelectAgentsForMention(ctx context.Context, p SelectAge
 				AgentID: m.MemberID,
 				Agent:   agent,
 			})
+		}
+	}
+
+	// Ambient-listener fanout. Mirrors the DM-auto path but for a single
+	// designated agent on a public channel (ROA-178 Ship Concierge).
+	// Doesn't require channel membership lookup — the column on `channel`
+	// is the authoritative designation. Same reachability + dedup checks.
+	if autoTriggerAmbient {
+		agentIDStr := uuidString(p.AmbientListenerAgentID)
+		if _, dup := added[agentIDStr]; !dup {
+			agent, err := s.Queries.GetAgent(ctx, p.AmbientListenerAgentID)
+			if err != nil || agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+				slog.Info("SelectAgentsForMention: ambient skip unreachable agent",
+					"agent_id", agentIDStr,
+					"err", err,
+					"archived", agent.ArchivedAt.Valid,
+					"has_runtime", agent.RuntimeID.Valid,
+				)
+			} else {
+				hasPending, err := s.Queries.HasPendingChannelMentionForAgent(ctx, db.HasPendingChannelMentionForAgentParams{
+					AgentID:       p.AmbientListenerAgentID,
+					ChannelID:     uuidString(p.ChannelID),
+					WindowSeconds: p.DedupWindowSeconds,
+				})
+				if err != nil {
+					return nil, fmt.Errorf("check dedup (ambient): %w", err)
+				}
+				if hasPending {
+					slog.Info("SelectAgentsForMention: ambient skip dedup-window pending", "agent_id", agentIDStr)
+				} else {
+					slog.Info("SelectAgentsForMention: ambient candidate selected", "agent_id", agentIDStr)
+					added[agentIDStr] = struct{}{}
+					candidates = append(candidates, MentionTriggerCandidate{
+						AgentID: p.AmbientListenerAgentID,
+						Agent:   agent,
+					})
+				}
+			}
 		}
 	}
 

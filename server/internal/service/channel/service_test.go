@@ -1100,6 +1100,71 @@ func TestSelectAgentsForMention_MemberMentionsIgnored(t *testing.T) {
 	}
 }
 
+// TestSelectAgentsForMention_AmbientListenerTriggers verifies the
+// ROA-178 Ship Concierge ambient listener: with the channel marked
+// `ambient_listener_agent_id = X`, every member-authored message
+// dispatches to X without an @mention. Mirrors the DM-auto path but
+// targets a single designated agent on a public channel.
+func TestSelectAgentsForMention_AmbientListenerTriggers(t *testing.T) {
+	t.Cleanup(func() { wipeChannels(t) })
+	ctx := context.Background()
+
+	ch, _ := testService.Create(ctx, CreateChannelParams{
+		WorkspaceID: testWorkspaceID, Name: "concierge", DisplayName: "Ship Concierge",
+		Kind: KindChannel, Visibility: VisibilityPublic, CreatedBy: memberActor(),
+	})
+
+	// Member posts a plain message — no @mention. With the ambient
+	// listener set, the agent should still be dispatched.
+	cands, err := testMessageSvc.SelectAgentsForMention(ctx, SelectAgentsForMentionParams{
+		ChannelID:              ch.ID,
+		ChannelKind:            KindChannel,
+		AmbientListenerAgentID: testAgentID,
+		Content:                "what's the status of the latest release?",
+		Author:                 memberActor(),
+		DedupWindowSeconds:     30,
+		MentionParser:          useUtilParser,
+	})
+	if err != nil {
+		t.Fatalf("SelectAgentsForMention: %v", err)
+	}
+	if len(cands) != 1 {
+		t.Fatalf("expected 1 ambient candidate, got %d", len(cands))
+	}
+	if cands[0].AgentID.Bytes != testAgentID.Bytes {
+		t.Fatalf("unexpected candidate id")
+	}
+}
+
+// TestSelectAgentsForMention_AmbientSkipsAgentAuthored verifies the
+// loop guard: an agent's OWN message in an ambient-listener channel
+// should not re-trigger that agent. Mirrors the DM-auto guard.
+func TestSelectAgentsForMention_AmbientSkipsAgentAuthored(t *testing.T) {
+	t.Cleanup(func() { wipeChannels(t) })
+	ctx := context.Background()
+
+	ch, _ := testService.Create(ctx, CreateChannelParams{
+		WorkspaceID: testWorkspaceID, Name: "concierge2", DisplayName: "Ship Concierge",
+		Kind: KindChannel, Visibility: VisibilityPublic, CreatedBy: memberActor(),
+	})
+
+	cands, err := testMessageSvc.SelectAgentsForMention(ctx, SelectAgentsForMentionParams{
+		ChannelID:              ch.ID,
+		ChannelKind:            KindChannel,
+		AmbientListenerAgentID: testAgentID,
+		Content:                "I checked the release, it's healthy.",
+		Author:                 agentActor(), // ← agent posting its own follow-up
+		DedupWindowSeconds:     30,
+		MentionParser:          useUtilParser,
+	})
+	if err != nil {
+		t.Fatalf("SelectAgentsForMention: %v", err)
+	}
+	if len(cands) != 0 {
+		t.Fatalf("ambient loop guard failed; agent-authored should not re-trigger, got %d", len(cands))
+	}
+}
+
 func TestDMName_DeterministicAndOrderIndependent(t *testing.T) {
 	a := Actor{Type: ActorMember, ID: pgtype.UUID{Bytes: [16]byte{1, 2, 3, 4}, Valid: true}}
 	b := Actor{Type: ActorAgent, ID: pgtype.UUID{Bytes: [16]byte{9, 9, 9, 9}, Valid: true}}

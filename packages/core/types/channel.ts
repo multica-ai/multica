@@ -30,6 +30,14 @@ export interface Channel {
    * the badge + first-unread anchor); 0 / null on detail/get endpoints. */
   unread_count: number;
   last_read_message_id: string | null;
+  /**
+   * ROA-178 Ship Concierge: when set, every member-authored message in
+   * this channel triggers a task for that agent without requiring an
+   * @-mention. NULL for ordinary channels. The Ship page filters the
+   * channels list by this field to find the workspace's Concierge
+   * channel and embed it inline.
+   */
+  ambient_listener_agent_id: string | null;
 }
 
 export interface ChannelMembership {

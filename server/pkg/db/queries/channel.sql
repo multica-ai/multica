@@ -59,6 +59,24 @@ RETURNING *;
 UPDATE channel SET archived_at = now(), updated_at = now()
 WHERE id = $1;
 
+-- name: SetChannelAmbientListener :one
+-- ROA-178 Ship Concierge — designate (or clear) the ambient-listener
+-- agent for this channel. When non-null, every member-authored message
+-- triggers a task for that agent without requiring @-mention (see
+-- SelectAgentsForMention in service/channel/message_service.go).
+--
+-- Passing NULL clears the designation, returning the channel to
+-- ordinary @-mention behavior. The caller is responsible for ensuring
+-- the agent is a member of the channel (otherwise the dispatch path
+-- will still trigger, but @-mention-style validation downstream may
+-- refuse to enqueue). Membership check + agent existence check live
+-- in the handler so this query stays surgical.
+UPDATE channel
+SET ambient_listener_agent_id = sqlc.narg('ambient_listener_agent_id'),
+    updated_at = now()
+WHERE id = sqlc.arg('id')
+RETURNING *;
+
 -- name: AddChannelMember :one
 -- ON CONFLICT DO NOTHING returns no row when the member already exists; the
 -- caller treats "already a member" as a success.

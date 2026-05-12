@@ -572,20 +572,21 @@ type AutopilotTrigger struct {
 }
 
 type Channel struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Name          string             `json:"name"`
-	DisplayName   string             `json:"display_name"`
-	Description   string             `json:"description"`
-	Kind          string             `json:"kind"`
-	Visibility    string             `json:"visibility"`
-	CreatedByType string             `json:"created_by_type"`
-	CreatedByID   pgtype.UUID        `json:"created_by_id"`
-	RetentionDays pgtype.Int4        `json:"retention_days"`
-	Metadata      []byte             `json:"metadata"`
-	ArchivedAt    pgtype.Timestamptz `json:"archived_at"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID                     pgtype.UUID        `json:"id"`
+	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
+	Name                   string             `json:"name"`
+	DisplayName            string             `json:"display_name"`
+	Description            string             `json:"description"`
+	Kind                   string             `json:"kind"`
+	Visibility             string             `json:"visibility"`
+	CreatedByType          string             `json:"created_by_type"`
+	CreatedByID            pgtype.UUID        `json:"created_by_id"`
+	RetentionDays          pgtype.Int4        `json:"retention_days"`
+	Metadata               []byte             `json:"metadata"`
+	ArchivedAt             pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	AmbientListenerAgentID pgtype.UUID        `json:"ambient_listener_agent_id"`
 }
 
 type ChannelMembership struct {

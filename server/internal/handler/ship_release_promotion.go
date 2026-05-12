@@ -39,19 +39,43 @@ import (
 
 // ----- request shapes -------------------------------------------------------
 
+// ConfirmationContext captures the channel + message that confirmed
+// an irreversible release action (promote / rollback). The ROA-178
+// Ship Concierge flow posts a confirmation prompt in its channel,
+// waits for the user's explicit "confirm" reply, then calls the
+// promote/rollback endpoint with this context attached. The IDs land
+// in the release event payload so the audit log records *who said
+// confirm, when, and in which channel* — not just "an agent invoked
+// promote."
+//
+// Optional on the wire. The web UI's promote / rollback buttons
+// don't populate this (the click itself IS the confirmation surface
+// for the human path). Agent-mediated paths through the Concierge
+// MCP tools are expected to populate it.
+type ConfirmationContext struct {
+	ChannelID string `json:"channel_id,omitempty"`
+	MessageID string `json:"message_id,omitempty"`
+	// Verbatim text the user typed to confirm. Recorded for the
+	// audit log so "confirm" / "yes go" / "do it" / 👍 are all
+	// preserved as the actual approval string.
+	ConfirmText string `json:"confirm_text,omitempty"`
+}
+
 // PromoteReleaseRequest is the body for POST .../promote. RollbackPlan
 // is captured at click time so it lands on the audit row alongside
 // the stage transition (currently informational; Phase 5's
 // deploy_preflight rollback_plan column is the durable home for it).
 type PromoteReleaseRequest struct {
-	RollbackPlan string `json:"rollback_plan"`
+	RollbackPlan        string               `json:"rollback_plan"`
+	ConfirmationContext *ConfirmationContext `json:"confirmation_context,omitempty"`
 }
 
 // RollbackReleaseRequest is the body for POST .../rollback. Reason is
 // REQUIRED on the wire — the channel post echoes it and the audit log
 // requires an actor + reason.
 type RollbackReleaseRequest struct {
-	Reason string `json:"reason"`
+	Reason              string               `json:"reason"`
+	ConfirmationContext *ConfirmationContext `json:"confirmation_context,omitempty"`
 }
 
 // ----- handlers -------------------------------------------------------------
@@ -105,6 +129,18 @@ func (h *Handler) PromoteRelease(w http.ResponseWriter, r *http.Request) {
 			ActorUserID: requestedBy,
 			Payload:     mustJSON(map[string]any{"rollback_plan": req.RollbackPlan}),
 		})
+	}
+
+	// ROA-178 Ship Concierge — when the request carries a
+	// confirmation_context (channel + message + verbatim text the
+	// human typed), persist it on the audit log so the release
+	// timeline records *who said yes, in which channel*. The Concierge
+	// flow is the primary populator; the UI button click path
+	// intentionally leaves this blank since the click itself is the
+	// approval surface.
+	if req.ConfirmationContext != nil && req.ConfirmationContext.MessageID != "" {
+		recordConfirmationAudit(r.Context(), h.Queries, rel.ID, "promote",
+			req.ConfirmationContext, requestedBy)
 	}
 
 	count, _ := h.Queries.CountActiveReleasePullRequests(r.Context(), updated.ID)
@@ -312,12 +348,54 @@ func (h *Handler) RollbackRelease(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// ROA-178 Ship Concierge confirmation audit. Same shape as Promote.
+	if req.ConfirmationContext != nil && req.ConfirmationContext.MessageID != "" {
+		recordConfirmationAudit(r.Context(), h.Queries, rel.ID, "rollback",
+			req.ConfirmationContext, requestedBy)
+	}
+
 	count, _ := h.Queries.CountActiveReleasePullRequests(r.Context(), updated.ID)
 	h.publish(protocol.EventReleaseUpdated, uuidToString(wsID), "member", userID, map[string]any{
 		"release_id": uuidToString(updated.ID),
 		"stage":      string(updated.Stage),
 	})
 	writeJSON(w, http.StatusOK, releaseToResponse(updated, int(count)))
+}
+
+// recordConfirmationAudit writes an `agent_confirmation_recorded`
+// event to the release timeline. The audit row preserves the channel,
+// message id, and verbatim confirmation text so a future operator can
+// answer "who approved this and what did they actually say?" without
+// having to chase the channel history (which may be retention-purged).
+//
+// Best-effort: a DB failure is logged but doesn't fail the parent
+// promote/rollback action — the action already completed by the time
+// this runs, and rolling back the action to "audit failed" would be
+// worse UX.
+func recordConfirmationAudit(
+	ctx context.Context,
+	q *db.Queries,
+	releaseID pgtype.UUID,
+	action string,
+	cc *ConfirmationContext,
+	requestedBy pgtype.UUID,
+) {
+	if _, err := q.InsertReleaseEvent(ctx, db.InsertReleaseEventParams{
+		ReleaseID:   releaseID,
+		EventType:   "agent_confirmation_recorded",
+		ActorUserID: requestedBy,
+		Payload: mustJSON(map[string]any{
+			"action":       action,
+			"channel_id":   cc.ChannelID,
+			"message_id":   cc.MessageID,
+			"confirm_text": cc.ConfirmText,
+		}),
+	}); err != nil {
+		slog.Warn("ship: confirmation audit insert failed",
+			"release_id", uuidToString(releaseID),
+			"action", action,
+			"error", err)
+	}
 }
 
 // MarkReleaseDone — POST /api/releases/{id}/mark_done. Fast-forward

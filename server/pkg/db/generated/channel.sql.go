@@ -79,7 +79,7 @@ INSERT INTO channel (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, '{}'::jsonb)
 )
-RETURNING id, workspace_id, name, display_name, description, kind, visibility, created_by_type, created_by_id, retention_days, metadata, archived_at, created_at, updated_at
+RETURNING id, workspace_id, name, display_name, description, kind, visibility, created_by_type, created_by_id, retention_days, metadata, archived_at, created_at, updated_at, ambient_listener_agent_id
 `
 
 type CreateChannelParams struct {
@@ -124,6 +124,7 @@ func (q *Queries) CreateChannel(ctx context.Context, arg CreateChannelParams) (C
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AmbientListenerAgentID,
 	)
 	return i, err
 }
@@ -184,7 +185,7 @@ func (q *Queries) CreateChannelMentionTask(ctx context.Context, arg CreateChanne
 }
 
 const getChannel = `-- name: GetChannel :one
-SELECT id, workspace_id, name, display_name, description, kind, visibility, created_by_type, created_by_id, retention_days, metadata, archived_at, created_at, updated_at FROM channel
+SELECT id, workspace_id, name, display_name, description, kind, visibility, created_by_type, created_by_id, retention_days, metadata, archived_at, created_at, updated_at, ambient_listener_agent_id FROM channel
 WHERE id = $1
 `
 
@@ -206,12 +207,13 @@ func (q *Queries) GetChannel(ctx context.Context, id pgtype.UUID) (Channel, erro
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AmbientListenerAgentID,
 	)
 	return i, err
 }
 
 const getChannelByName = `-- name: GetChannelByName :one
-SELECT id, workspace_id, name, display_name, description, kind, visibility, created_by_type, created_by_id, retention_days, metadata, archived_at, created_at, updated_at FROM channel
+SELECT id, workspace_id, name, display_name, description, kind, visibility, created_by_type, created_by_id, retention_days, metadata, archived_at, created_at, updated_at, ambient_listener_agent_id FROM channel
 WHERE workspace_id = $1 AND kind = $2 AND name = $3
 `
 
@@ -240,12 +242,13 @@ func (q *Queries) GetChannelByName(ctx context.Context, arg GetChannelByNamePara
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AmbientListenerAgentID,
 	)
 	return i, err
 }
 
 const getChannelInWorkspace = `-- name: GetChannelInWorkspace :one
-SELECT id, workspace_id, name, display_name, description, kind, visibility, created_by_type, created_by_id, retention_days, metadata, archived_at, created_at, updated_at FROM channel
+SELECT id, workspace_id, name, display_name, description, kind, visibility, created_by_type, created_by_id, retention_days, metadata, archived_at, created_at, updated_at, ambient_listener_agent_id FROM channel
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -272,6 +275,7 @@ func (q *Queries) GetChannelInWorkspace(ctx context.Context, arg GetChannelInWor
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AmbientListenerAgentID,
 	)
 	return i, err
 }
@@ -478,7 +482,7 @@ func (q *Queries) ListChannelUnreadCountsForActor(ctx context.Context, arg ListC
 }
 
 const listChannelsForActor = `-- name: ListChannelsForActor :many
-SELECT c.id, c.workspace_id, c.name, c.display_name, c.description, c.kind, c.visibility, c.created_by_type, c.created_by_id, c.retention_days, c.metadata, c.archived_at, c.created_at, c.updated_at FROM channel c
+SELECT c.id, c.workspace_id, c.name, c.display_name, c.description, c.kind, c.visibility, c.created_by_type, c.created_by_id, c.retention_days, c.metadata, c.archived_at, c.created_at, c.updated_at, c.ambient_listener_agent_id FROM channel c
 WHERE c.workspace_id = $1
   AND c.archived_at IS NULL
   AND (
@@ -530,6 +534,7 @@ func (q *Queries) ListChannelsForActor(ctx context.Context, arg ListChannelsForA
 			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AmbientListenerAgentID,
 		); err != nil {
 			return nil, err
 		}
@@ -629,6 +634,53 @@ func (q *Queries) RemoveChannelMember(ctx context.Context, arg RemoveChannelMemb
 	return err
 }
 
+const setChannelAmbientListener = `-- name: SetChannelAmbientListener :one
+UPDATE channel
+SET ambient_listener_agent_id = $1,
+    updated_at = now()
+WHERE id = $2
+RETURNING id, workspace_id, name, display_name, description, kind, visibility, created_by_type, created_by_id, retention_days, metadata, archived_at, created_at, updated_at, ambient_listener_agent_id
+`
+
+type SetChannelAmbientListenerParams struct {
+	AmbientListenerAgentID pgtype.UUID `json:"ambient_listener_agent_id"`
+	ID                     pgtype.UUID `json:"id"`
+}
+
+// ROA-178 Ship Concierge — designate (or clear) the ambient-listener
+// agent for this channel. When non-null, every member-authored message
+// triggers a task for that agent without requiring @-mention (see
+// SelectAgentsForMention in service/channel/message_service.go).
+//
+// Passing NULL clears the designation, returning the channel to
+// ordinary @-mention behavior. The caller is responsible for ensuring
+// the agent is a member of the channel (otherwise the dispatch path
+// will still trigger, but @-mention-style validation downstream may
+// refuse to enqueue). Membership check + agent existence check live
+// in the handler so this query stays surgical.
+func (q *Queries) SetChannelAmbientListener(ctx context.Context, arg SetChannelAmbientListenerParams) (Channel, error) {
+	row := q.db.QueryRow(ctx, setChannelAmbientListener, arg.AmbientListenerAgentID, arg.ID)
+	var i Channel
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.DisplayName,
+		&i.Description,
+		&i.Kind,
+		&i.Visibility,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.RetentionDays,
+		&i.Metadata,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AmbientListenerAgentID,
+	)
+	return i, err
+}
+
 const updateChannel = `-- name: UpdateChannel :one
 UPDATE channel
 SET display_name = COALESCE($1, display_name),
@@ -641,7 +693,7 @@ SET display_name = COALESCE($1, display_name),
     metadata = COALESCE($6, metadata),
     updated_at = now()
 WHERE id = $7
-RETURNING id, workspace_id, name, display_name, description, kind, visibility, created_by_type, created_by_id, retention_days, metadata, archived_at, created_at, updated_at
+RETURNING id, workspace_id, name, display_name, description, kind, visibility, created_by_type, created_by_id, retention_days, metadata, archived_at, created_at, updated_at, ambient_listener_agent_id
 `
 
 type UpdateChannelParams struct {
@@ -680,6 +732,7 @@ func (q *Queries) UpdateChannel(ctx context.Context, arg UpdateChannelParams) (C
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AmbientListenerAgentID,
 	)
 	return i, err
 }

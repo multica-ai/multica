@@ -620,11 +620,12 @@ func channelAgentDedupWindow() float64 {
 // few hundred ms later than the message lands — fine for a chat surface.
 func (h *Handler) triggerMentionedAgentTasks(ctx context.Context, workspaceID pgtype.UUID, ch db.Channel, msg db.ChannelMessage, author channel.Actor) {
 	candidates, err := h.ChannelMessageService.SelectAgentsForMention(ctx, channel.SelectAgentsForMentionParams{
-		ChannelID:          ch.ID,
-		ChannelKind:        ch.Kind,
-		Content:            msg.Content,
-		Author:             author,
-		DedupWindowSeconds: channelAgentDedupWindow(),
+		ChannelID:              ch.ID,
+		ChannelKind:            ch.Kind,
+		AmbientListenerAgentID: ch.AmbientListenerAgentID,
+		Content:                msg.Content,
+		Author:                 author,
+		DedupWindowSeconds:     channelAgentDedupWindow(),
 		MentionParser: func(content string) []channel.ParsedMention {
 			parsed := util.ParseMentions(content)
 			out := make([]channel.ParsedMention, len(parsed))

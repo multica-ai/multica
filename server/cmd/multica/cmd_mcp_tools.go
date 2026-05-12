@@ -123,6 +123,36 @@ func requireString(req mcp.CallToolRequest, name string) (string, *mcp.CallToolR
 	return v, nil
 }
 
+// buildConfirmationContext reads the optional `confirmation_*` args
+// from a tool call (set by the Ship Concierge ROA-178 flow) and
+// shapes them into the API's confirmation_context payload. Returns
+// nil when no fields are set so the caller can omit the field entirely
+// rather than send a blank object that confuses the audit log.
+//
+// The three fields are independent — any combination is acceptable;
+// the audit log records whatever is provided. The most useful call
+// includes all three (channel_id + message_id + confirm_text) for a
+// complete "who, where, and what they said" record.
+func buildConfirmationContext(req mcp.CallToolRequest) map[string]any {
+	channelID := argString(req, "confirmation_channel_id")
+	messageID := argString(req, "confirmation_message_id")
+	confirmText := argString(req, "confirmation_text")
+	if channelID == "" && messageID == "" && confirmText == "" {
+		return nil
+	}
+	out := map[string]any{}
+	if channelID != "" {
+		out["channel_id"] = channelID
+	}
+	if messageID != "" {
+		out["message_id"] = messageID
+	}
+	if confirmText != "" {
+		out["confirm_text"] = confirmText
+	}
+	return out
+}
+
 // queryString builds a URL query suffix from a list of key/value pairs.
 // Empty values are skipped so the resulting query is compact. Returns
 // the empty string when no params are set so callers can append it
@@ -1740,9 +1770,17 @@ func registerShipHubReleaseWriteTools(srv *server.MCPServer, c *cli.APIClient) {
 	srv.AddTool(
 		mcp.NewTool(
 			"multica_ship_promote_release",
-			mcp.WithDescription("Promote a verified release to production. The release flips to 'promoting' and the user's CI/CD takes over; multica_ship_mark_production_deployed is the manual escape hatch when no deployment_status webhook fires. rollback_plan is captured at click time for the audit trail."),
+			mcp.WithDescription("Promote a verified release to production. The release flips to 'promoting' and the user's CI/CD takes over; multica_ship_mark_production_deployed is the manual escape hatch when no deployment_status webhook fires.\n\n"+
+				"**Confirmation protocol (ROA-178 Ship Concierge)** — when calling this from a chat context (e.g. the Ship Concierge channel), you MUST follow the two-step pattern:\n\n"+
+				"  1. Post a confirmation message to the channel: \"I'm about to promote release <title> (<id>) to production. Reply 'confirm' to proceed.\" Then STOP and wait.\n"+
+				"  2. After the user replies with 'confirm' (or equivalent affirmation), call this tool with the `confirmation_context` populated: channel_id of the channel, message_id of the user's confirming reply, and confirm_text set to the verbatim text they typed.\n\n"+
+				"The tool accepts the call with or without confirmation_context (so direct human-button-click invocations still work), but for agent-mediated calls the context is the audit record of WHO confirmed and WHEN.\n\n"+
+				"`rollback_plan` is captured at click time for the audit trail."),
 			mcp.WithString("release_id", mcp.Required()),
 			mcp.WithString("rollback_plan", mcp.Description("Free-text rollback procedure recorded with the promote action.")),
+			mcp.WithString("confirmation_channel_id", mcp.Description("The channel where the user confirmed this promotion. Set together with confirmation_message_id + confirmation_text when calling from the Ship Concierge (ROA-178).")),
+			mcp.WithString("confirmation_message_id", mcp.Description("The id of the user's confirming reply message in confirmation_channel_id.")),
+			mcp.WithString("confirmation_text", mcp.Description("The verbatim text the user typed to confirm (e.g. 'confirm', 'yes go', 'do it').")),
 		),
 		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
 			releaseID, errResult := requireString(req, "release_id")
@@ -1750,6 +1788,9 @@ func registerShipHubReleaseWriteTools(srv *server.MCPServer, c *cli.APIClient) {
 				return errResult, nil
 			}
 			body := map[string]any{"rollback_plan": argString(req, "rollback_plan")}
+			if cc := buildConfirmationContext(req); cc != nil {
+				body["confirmation_context"] = cc
+			}
 			var out json.RawMessage
 			if err := c.PostJSON(ctx, "/api/releases/"+url.PathEscape(releaseID)+"/promote", body, &out); err != nil {
 				return nil, err
@@ -1780,9 +1821,16 @@ func registerShipHubReleaseWriteTools(srv *server.MCPServer, c *cli.APIClient) {
 	srv.AddTool(
 		mcp.NewTool(
 			"multica_ship_rollback_release",
-			mcp.WithDescription("Mark a release as rolled back. Use after an incident — reason is REQUIRED and is echoed in the release channel + audit log. Does not itself revert any code; that's a separate manual operation."),
+			mcp.WithDescription("Mark a release as rolled back. Use after an incident — reason is REQUIRED and is echoed in the release channel + audit log. Does not itself revert any code; that's a separate manual operation.\n\n"+
+				"**Confirmation protocol (ROA-178 Ship Concierge)** — when calling this from a chat context, you MUST follow the two-step pattern:\n\n"+
+				"  1. Post a confirmation message to the channel: \"I'm about to mark release <title> (<id>) as rolled back: <reason>. Reply 'confirm' to proceed.\" Then STOP and wait.\n"+
+				"  2. After the user replies 'confirm' (or equivalent affirmation), call this tool with the `confirmation_context` populated (channel_id + message_id + confirm_text).\n\n"+
+				"The audit log records the channel + message id + verbatim confirm text so the timeline can answer \"who said yes, in which channel, with what words.\""),
 			mcp.WithString("release_id", mcp.Required()),
 			mcp.WithString("reason", mcp.Required()),
+			mcp.WithString("confirmation_channel_id", mcp.Description("Channel where the user confirmed this rollback (ROA-178).")),
+			mcp.WithString("confirmation_message_id", mcp.Description("Message id of the user's confirming reply.")),
+			mcp.WithString("confirmation_text", mcp.Description("Verbatim text the user typed to confirm.")),
 		),
 		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
 			releaseID, errResult := requireString(req, "release_id")
@@ -1794,6 +1842,9 @@ func registerShipHubReleaseWriteTools(srv *server.MCPServer, c *cli.APIClient) {
 				return errResult, nil
 			}
 			body := map[string]any{"reason": reason}
+			if cc := buildConfirmationContext(req); cc != nil {
+				body["confirmation_context"] = cc
+			}
 			var out json.RawMessage
 			if err := c.PostJSON(ctx, "/api/releases/"+url.PathEscape(releaseID)+"/rollback", body, &out); err != nil {
 				return nil, err

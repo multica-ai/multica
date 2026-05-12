@@ -312,6 +312,85 @@ func TestRollbackRelease_HTTP_RequiresReason(t *testing.T) {
 	}
 }
 
+// TestPromoteRelease_RecordsConfirmationAudit — ROA-178 Ship Concierge.
+// When the promote request carries a confirmation_context (channel +
+// message + verbatim confirm text), the release timeline gets an
+// `agent_confirmation_recorded` event with the payload preserved.
+func TestPromoteRelease_RecordsConfirmationAudit(t *testing.T) {
+	enablePromotionTest(t)
+	projectID := createShipProject(t, "https://github.com/multica-ai/promote-confirm-audit")
+	releaseID := seedReleaseVerifying(t, projectID, "main-sha-7d-iiii", "low")
+
+	body := strings.NewReader(`{
+		"rollback_plan": "revert PR #999 and redeploy",
+		"confirmation_context": {
+			"channel_id": "11111111-1111-1111-1111-111111111111",
+			"message_id": "22222222-2222-2222-2222-222222222222",
+			"confirm_text": "yes, go"
+		}
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/releases/"+releaseID+"/promote", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "id", releaseID)
+	w := httptest.NewRecorder()
+	testHandler.PromoteRelease(w, req)
+	if w.Code != http.StatusOK && w.Code != http.StatusAccepted {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	// Look for the agent_confirmation_recorded event on the release timeline.
+	var count int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM ship_release_event
+		WHERE release_id = $1
+		  AND event_type = 'agent_confirmation_recorded'
+		  AND payload->>'action' = 'promote'
+		  AND payload->>'channel_id' = '11111111-1111-1111-1111-111111111111'
+		  AND payload->>'message_id' = '22222222-2222-2222-2222-222222222222'
+		  AND payload->>'confirm_text' = 'yes, go'
+	`, releaseID).Scan(&count); err != nil {
+		t.Fatalf("query confirmation audit: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly 1 agent_confirmation_recorded event, got %d", count)
+	}
+}
+
+// TestPromoteRelease_NoConfirmationStillWorks — direct UI button click
+// (no confirmation_context payload) still completes the promote
+// without an audit event. The Concierge audit is OPT-IN; the legacy
+// path is unchanged.
+func TestPromoteRelease_NoConfirmationStillWorks(t *testing.T) {
+	enablePromotionTest(t)
+	projectID := createShipProject(t, "https://github.com/multica-ai/promote-no-confirm")
+	releaseID := seedReleaseVerifying(t, projectID, "main-sha-7d-jjjj", "low")
+
+	body := strings.NewReader(`{"rollback_plan": ""}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/releases/"+releaseID+"/promote", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req = withURLParam(req, "id", releaseID)
+	w := httptest.NewRecorder()
+	testHandler.PromoteRelease(w, req)
+	if w.Code != http.StatusOK && w.Code != http.StatusAccepted {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM ship_release_event
+		WHERE release_id = $1 AND event_type = 'agent_confirmation_recorded'
+	`, releaseID).Scan(&count); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected NO agent_confirmation_recorded events without context, got %d", count)
+	}
+}
+
 // TestMarkReleaseProductionDeployed_LinksDeploy — the manual escape
 // hatch creates a deploy row + invokes the linkage path. End state:
 // release is in_production with the synthesized production deploy
@@ -336,7 +415,7 @@ func TestMarkReleaseProductionDeployed_LinksDeploy(t *testing.T) {
 	req = withURLParam(req, "id", releaseID)
 	w := httptest.NewRecorder()
 	testHandler.MarkReleaseProductionDeployed(w, req)
-	if w.Code != http.StatusOK {
+	if w.Code != http.StatusOK && w.Code != http.StatusAccepted {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
 	if got := readReleaseStage(t, releaseID); got != "in_production" {
