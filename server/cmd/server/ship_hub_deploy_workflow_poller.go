@@ -373,7 +373,7 @@ func pollEnvironmentForRelease(
 		if !ok {
 			continue
 		}
-		linkDeployToReleaseIfAny(ctx, queries, bus, ws, project, client, run, deploy, envKind)
+		linkDeployToReleaseIfAny(ctx, queries, bus, ws, project, client, owner, repo, run, deploy, envKind)
 	}
 }
 
@@ -469,6 +469,7 @@ func linkDeployToReleaseIfAny(
 	ws db.Workspace,
 	project db.Project,
 	client *gh.Client,
+	owner, repo string,
 	run gh.WorkflowRun,
 	deploy db.Deploy,
 	envKind db.DeployEnvironmentKind,
@@ -487,29 +488,80 @@ func linkDeployToReleaseIfAny(
 			ProductionMainSha: pgtype.Text{String: run.HeadSHA, Valid: true},
 		})
 		if errors.Is(lookupErr, pgx.ErrNoRows) {
-			// Time-based fallback. The deploy ran successfully but no
-			// release's merged_main_sha / production_main_sha matches
-			// run.head_sha — almost always because the prod workflow
-			// fired on a SHA descended from the release's tip rather
-			// than the tip itself (squash merge, manual
-			// workflow_dispatch on a later commit, etc.). Look for the
-			// oldest stuck-in-promoting release in this project whose
-			// merged_at predates the deploy and link it.
+			// Ancestry-aware fallback. The deploy ran successfully but
+			// no release's merged_main_sha / production_main_sha
+			// matches run.head_sha — almost always because the prod
+			// workflow fired on a commit descended from the release's
+			// tip rather than the tip itself (squash merge, manual
+			// workflow_dispatch on a later commit, etc.). Find the
+			// oldest stuck-in-promoting release that predates the
+			// deploy, then VERIFY via GitHub Compare API that the
+			// release's tip is actually an ancestor of the deploy's
+			// SHA before linking. Pre-this-change the link was
+			// time-based only (PR #41) — correct most of the time
+			// but wrong when someone manually dispatches a deploy
+			// for a stale branch that doesn't include the release's
+			// commits.
+			//
+			// If the ancestry call errors (token expired, network),
+			// we fall through to the same time-based link as before
+			// — better than leaving the release stuck forever, even
+			// if it occasionally over-links. The slog warning makes
+			// the heuristic-mode visible in logs.
 			if deployTime, ok := workflowRunDeployTime(run); ok {
-				release, lookupErr = queries.FindStuckPromotingReleaseForProject(ctx,
+				candidate, candidateErr := queries.FindStuckPromotingReleaseForProject(ctx,
 					db.FindStuckPromotingReleaseForProjectParams{
 						WorkspaceID: ws.ID,
 						ProjectID:   project.ID,
 						MergedAt:    pgtype.Timestamptz{Time: deployTime, Valid: true},
 					})
-				if lookupErr == nil {
-					slog.Info("ship hub deploy poller: time-based fallback matched stuck promoting release",
-						"workspace_id", ws.ID,
-						"project_id", project.ID,
-						"release_id", release.ID,
-						"deploy_sha", run.HeadSHA,
-						"release_merged_main_sha", release.MergedMainSha.String,
-						"deploy_time", deployTime)
+				if candidateErr == nil && candidate.MergedMainSha.Valid {
+					isAncestor, ancestryErr := client.IsAncestor(ctx, owner, repo,
+						candidate.MergedMainSha.String, run.HeadSHA)
+					switch {
+					case ancestryErr != nil:
+						slog.Warn("ship hub deploy poller: ancestry check failed; falling back to time-based link",
+							"workspace_id", ws.ID,
+							"project_id", project.ID,
+							"release_merged_main_sha", candidate.MergedMainSha.String,
+							"deploy_sha", run.HeadSHA,
+							"error", ancestryErr)
+						release, lookupErr = candidate, nil
+						slog.Info("ship hub deploy poller: time-based fallback (ancestry unknown) matched stuck promoting release",
+							"workspace_id", ws.ID,
+							"project_id", project.ID,
+							"release_id", release.ID,
+							"deploy_sha", run.HeadSHA,
+							"deploy_time", deployTime)
+					case isAncestor:
+						release, lookupErr = candidate, nil
+						slog.Info("ship hub deploy poller: ancestry-verified fallback matched stuck promoting release",
+							"workspace_id", ws.ID,
+							"project_id", project.ID,
+							"release_id", release.ID,
+							"deploy_sha", run.HeadSHA,
+							"release_merged_main_sha", release.MergedMainSha.String,
+							"deploy_time", deployTime)
+					default:
+						// Stuck release exists and is older than the
+						// deploy, BUT its tip is not in the deploy's
+						// history (status: behind or diverged). Don't
+						// link — the deploy doesn't actually carry
+						// this release's work, and linking would lie
+						// to the operator.
+						slog.Info("ship hub deploy poller: ancestry check rejected fallback (release tip not in deploy)",
+							"workspace_id", ws.ID,
+							"project_id", project.ID,
+							"release_id", candidate.ID,
+							"deploy_sha", run.HeadSHA,
+							"release_merged_main_sha", candidate.MergedMainSha.String)
+						// Keep lookupErr = pgx.ErrNoRows so the
+						// outer block below silently skips, same as
+						// any unrelated workflow run.
+					}
+				} else if candidateErr != nil && !errors.Is(candidateErr, pgx.ErrNoRows) {
+					slog.Warn("ship hub deploy poller: find stuck promoting release failed",
+						"workspace_id", ws.ID, "project_id", project.ID, "error", candidateErr)
 				}
 			}
 		}

@@ -621,6 +621,81 @@ func (c *Client) ListWorkflowRuns(ctx context.Context, owner, repo, workflowFile
 	return wrapper.WorkflowRuns, nil
 }
 
+// CompareCommitsResult is the subset of GitHub's compare-commits
+// response that Ship Hub cares about. `Status` is one of "ahead",
+// "behind", "identical", or "diverged" — only the first two are
+// useful for ancestor checks. `AheadBy` is the number of commits
+// `head` is ahead of `base`; for our use case ("is base an ancestor
+// of head") we look for `status` in {"ahead", "identical"} (i.e.
+// head includes everything in base).
+//
+// The response includes much more (commit list, files, etc.); we
+// decode only the fields needed to bound the JSON cost. See
+// https://docs.github.com/en/rest/commits/commits#compare-two-commits
+type CompareCommitsResult struct {
+	Status   string `json:"status"`
+	AheadBy  int    `json:"ahead_by"`
+	BehindBy int    `json:"behind_by"`
+}
+
+// CompareCommits asks GitHub whether `head` is a descendant of `base`
+// (or identical). Returns the comparison result so the caller can
+// decide what to do with each Status.
+//
+// Used by the deploy linker to verify that a deploy's head_sha
+// includes a stuck release's `merged_main_sha` in its git history
+// before linking them. Pre-this-method, the deploy linker fell back
+// to a time-based heuristic (PR #41) — "the deploy fired after the
+// merge, so probably contains it." That's correct most of the time
+// but not always (someone can deploy a stale branch from a manual
+// workflow_dispatch). Asking git directly is the durable answer.
+//
+// Path uses `{base}...{head}` (three dots — the three-dot form
+// computes the diff *between* the two commits at the merge-base,
+// which is what GitHub's API requires). The two-dot variant exists
+// in git semantics but isn't what compare/{a}...{b} REST endpoint
+// reflects.
+//
+// Rate-limit cost: 1 call per check. The poller should call this
+// only after the strict SHA match misses + a candidate stuck
+// release exists — keeps the budget bounded to "at most one extra
+// API call per stuck release per poll tick."
+func (c *Client) CompareCommits(ctx context.Context, owner, repo, base, head string) (*CompareCommitsResult, error) {
+	base = strings.TrimSpace(base)
+	head = strings.TrimSpace(head)
+	if base == "" || head == "" {
+		return nil, errors.New("github: compare requires non-empty base and head")
+	}
+	path := fmt.Sprintf("/repos/%s/%s/compare/%s...%s",
+		url.PathEscape(owner), url.PathEscape(repo),
+		url.PathEscape(base), url.PathEscape(head))
+	var res CompareCommitsResult
+	if err := c.do(ctx, "GET", path, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+// IsAncestor returns true when `head` includes `base` in its git
+// history (status="ahead" or "identical"). False otherwise — including
+// the diverged + behind cases, which mean the release's commits are
+// NOT actually deployed.
+//
+// Wraps CompareCommits with the canonical interpretation for the
+// "is this deploy carrying that release's work?" question. Errors
+// bubble through unchanged so the caller can choose to log + fall
+// back rather than assert.
+func (c *Client) IsAncestor(ctx context.Context, owner, repo, base, head string) (bool, error) {
+	if base == head {
+		return true, nil
+	}
+	res, err := c.CompareCommits(ctx, owner, repo, base, head)
+	if err != nil {
+		return false, err
+	}
+	return res.Status == "ahead" || res.Status == "identical", nil
+}
+
 // DispatchWorkflow triggers a workflow_dispatch event on the named
 // workflow file. ref is the branch or tag name (NOT a SHA — GitHub
 // requires a ref label here). Returns nil on the standard 204 No Content

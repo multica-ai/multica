@@ -46,18 +46,40 @@ func pollerMigrationApplied(t *testing.T) bool {
 // /actions/workflows/{file}/runs endpoint with the supplied runs and
 // 200 OK. Any other path returns 404 so a wrong call shows up in the
 // test failure rather than silently succeeding.
+//
+// As of the ancestry-aware linker (project 3), the server also
+// answers /repos/{owner}/{repo}/compare/{base}...{head} — defaulting
+// to status="ahead" so the ancestry-verified fallback path links
+// candidate releases. Tests that exercise the "ancestry rejects
+// link" branch use fakeGitHubServerWithCompare instead.
 func fakeGitHubServer(t *testing.T, runs []gh.WorkflowRun) *httptest.Server {
 	t.Helper()
+	return fakeGitHubServerWithCompare(t, runs, "ahead")
+}
+
+// fakeGitHubServerWithCompare adds explicit control over the
+// /compare/ endpoint's returned `status` so tests can validate the
+// linker's branch behavior (ahead → link; behind/diverged → skip).
+func fakeGitHubServerWithCompare(t *testing.T, runs []gh.WorkflowRun, compareStatus string) *httptest.Server {
+	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "GET" || !strings.Contains(r.URL.Path, "/actions/workflows/") || !strings.HasSuffix(r.URL.Path, "/runs") {
+		switch {
+		case r.Method == "GET" && strings.Contains(r.URL.Path, "/actions/workflows/") && strings.HasSuffix(r.URL.Path, "/runs"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"total_count":   len(runs),
+				"workflow_runs": runs,
+			})
+		case r.Method == "GET" && strings.Contains(r.URL.Path, "/compare/"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":    compareStatus,
+				"ahead_by":  0,
+				"behind_by": 0,
+			})
+		default:
 			http.NotFound(w, r)
-			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"total_count":   len(runs),
-			"workflow_runs": runs,
-		})
 	}))
 }
 
@@ -705,4 +727,88 @@ func timeMustParse(t *testing.T, s string) time.Time {
 		t.Fatalf("parse time %q: %v", s, err)
 	}
 	return v
+}
+
+// TestDeployWorkflowPoller_AncestryRejectsLink verifies the
+// ancestry-aware fallback REFUSES to link a stuck promoting release
+// when the release's merged_main_sha is NOT an ancestor of the
+// deploy's head_sha. Pre-this-change (PR #41 time-based fallback),
+// the link would have fired anyway based purely on "deploy is newer
+// than release.merged_at" — which is wrong when someone deploys a
+// stale branch via workflow_dispatch that doesn't include the
+// release's commits.
+//
+// Compare API status="diverged" → IsAncestor returns false → linker
+// keeps lookupErr=ErrNoRows → release stays in promoting.
+func TestDeployWorkflowPoller_AncestryRejectsLink(t *testing.T) {
+	if !pollerMigrationApplied(t) {
+		t.Skip("phase 7d follow-up migration not applied")
+	}
+	const releaseSHA = "1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa"
+	const deploySHA = "2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb"
+	fix := seedPollerFixture(t, "https://github.com/owner/repo", "", "production.yml")
+	seedPollerEnv(t, fix, "production", "Production")
+	releaseID := seedPollerReleaseInPromoting(t, fix, releaseSHA)
+
+	// Workflow run finished AFTER the release merged_at (so the
+	// time-based path would have linked) but the Compare API returns
+	// status="diverged" — release SHA is not in the deploy's history.
+	srv := fakeGitHubServerWithCompare(t, []gh.WorkflowRun{
+		{
+			ID:         909,
+			HeadSHA:    deploySHA,
+			HeadBranch: "main",
+			Status:     "completed",
+			Conclusion: "success",
+			UpdatedAt:  "2099-01-01T00:00:00Z",
+			HTMLURL:    "https://github.com/owner/repo/actions/runs/909",
+		},
+	}, "diverged")
+	defer srv.Close()
+
+	drivePollerWithFakeGitHub(t, fix, srv, "", "production.yml")
+
+	if got := readReleaseProductionDeployID(t, releaseID); got != "" {
+		t.Fatalf("expected production_deploy_id unset (ancestry rejected), got %q", got)
+	}
+	if stage := readReleaseStage(t, releaseID); stage != "promoting" {
+		t.Errorf("expected stage=promoting unchanged, got %q", stage)
+	}
+}
+
+// TestDeployWorkflowPoller_AncestryConfirmsLink — the positive path:
+// Compare API says ahead → linker links the stuck release. This is
+// the common ROA-130 case: prod deploys for a descendant commit and
+// the release's tip is in its ancestry.
+func TestDeployWorkflowPoller_AncestryConfirmsLink(t *testing.T) {
+	if !pollerMigrationApplied(t) {
+		t.Skip("phase 7d follow-up migration not applied")
+	}
+	const releaseSHA = "3333cccc3333cccc3333cccc3333cccc3333cccc"
+	const deploySHA = "4444dddd4444dddd4444dddd4444dddd4444dddd"
+	fix := seedPollerFixture(t, "https://github.com/owner/repo", "", "production.yml")
+	seedPollerEnv(t, fix, "production", "Production")
+	releaseID := seedPollerReleaseInPromoting(t, fix, releaseSHA)
+
+	srv := fakeGitHubServerWithCompare(t, []gh.WorkflowRun{
+		{
+			ID:         910,
+			HeadSHA:    deploySHA,
+			HeadBranch: "main",
+			Status:     "completed",
+			Conclusion: "success",
+			UpdatedAt:  "2099-01-01T00:00:00Z",
+			HTMLURL:    "https://github.com/owner/repo/actions/runs/910",
+		},
+	}, "ahead")
+	defer srv.Close()
+
+	drivePollerWithFakeGitHub(t, fix, srv, "", "production.yml")
+
+	if got := readReleaseProductionDeployID(t, releaseID); got == "" {
+		t.Fatal("expected production_deploy_id set via ancestry-confirmed fallback")
+	}
+	if stage := readReleaseStage(t, releaseID); stage != "in_production" {
+		t.Errorf("expected stage=in_production after ancestry-confirmed link, got %q", stage)
+	}
 }
