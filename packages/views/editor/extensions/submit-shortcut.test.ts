@@ -52,10 +52,10 @@ describe("createSubmitExtension", () => {
   });
 
   describe("submitOnEnter=true (chat-style mode)", () => {
-    it("registers both Mod-Enter and bare Enter", () => {
+    it("registers bare Enter only — Mod-Enter and Shift-Enter fall through to hardBreak for a newline", () => {
       const ext = createSubmitExtension(() => true, { submitOnEnter: true });
       const shortcuts = getShortcuts(ext, idleEditor);
-      expect(Object.keys(shortcuts).sort()).toEqual(["Enter", "Mod-Enter"]);
+      expect(Object.keys(shortcuts).sort()).toEqual(["Enter"]);
     });
 
     it("Enter calls onSubmit and forwards its return value", () => {

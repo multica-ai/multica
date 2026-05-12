@@ -5,8 +5,10 @@ import { Extension } from "@tiptap/core";
  * when there's no submit handler wired up. That lets us fall through to the
  * default Enter behaviour — inserting a newline — when appropriate.
  *
- * `submitOnEnter` — when true, bare Enter also submits (chat-style). When
- * false, only Mod-Enter submits and bare Enter keeps its default (newline).
+ * `submitOnEnter` — when true, bare Enter submits (chat-style) and
+ * Mod-Enter / Shift-Enter fall through to Tiptap's hardBreak for a newline.
+ * When false, only Mod-Enter submits and bare Enter keeps its default
+ * (newline).
  */
 export function createSubmitExtension(
   onSubmit: () => boolean,
@@ -15,9 +17,11 @@ export function createSubmitExtension(
   return Extension.create({
     name: "submitShortcut",
     addKeyboardShortcuts() {
-      const shortcuts: Record<string, () => boolean> = {
-        "Mod-Enter": () => onSubmit(),
-      };
+      const shortcuts: Record<string, () => boolean> = {};
+      // CEREBRO-PATCH(submit-shortcut-chat-mode-newline): JEH-1025 — in
+      // chat-style mode, Mod-Enter (Cmd/Ctrl+Enter) must NOT submit; it
+      // falls through to hardBreak so it inserts a newline alongside
+      // Shift+Enter. Matches the Composer preference copy.
       if (submitOnEnter) {
         shortcuts.Enter = () => {
           const editor = this.editor;
@@ -29,6 +33,8 @@ export function createSubmitExtension(
           if (editor.isActive("codeBlock")) return false;
           return onSubmit();
         };
+      } else {
+        shortcuts["Mod-Enter"] = () => onSubmit();
       }
       return shortcuts;
     },
