@@ -13,6 +13,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
+	ghintegration "github.com/multica-ai/multica/server/internal/integrations/github"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -266,7 +267,17 @@ func main() {
 	go runRuntimeSweeper(sweepCtx, queries, taskSvc, bus)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runDBStatsLogger(sweepCtx, pool)
-	go runCRSettleSweeper(sweepCtx, queries, bus)
+	go runCRSettleSweeper(sweepCtx, queries, pool, bus)
+	var ghAuth *ghintegration.AppAuth
+	if os.Getenv("GITHUB_APP_ID") != "" && os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH") != "" {
+		if auth, err := ghintegration.NewAppAuthFromEnv(); err != nil {
+			slog.Warn("cr-post-comment-settle auth init failed", "error", err)
+		} else {
+			ghAuth = auth
+		}
+	}
+	go runCRPostCommentSettleSweeper(sweepCtx, queries, pool, bus, ghAuth)
+	go runCRSilenceSweeper(sweepCtx, queries, pool, bus)
 
 	// Graceful shutdown
 	go func() {
