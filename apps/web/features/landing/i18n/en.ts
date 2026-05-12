@@ -287,7 +287,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.2.31",
         date: "2026-05-12",
-        title: "GitHub Linking, Chat Attachments & Safer Issue Navigation",
+        title: "GitHub Integration, Chat Attachments & Safer Issue Navigation",
         changes: [],
         features: [
           "Connect GitHub so linked pull requests appear on Multica issues, sync their status, and close the Multica issue automatically when the PR closes",

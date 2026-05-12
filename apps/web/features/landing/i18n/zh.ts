@@ -287,7 +287,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.2.31",
         date: "2026-05-12",
-        title: "GitHub 关联、聊天附件与 Issue 定位优化",
+        title: "GitHub 集成、聊天附件与 Issue 定位优化",
         changes: [],
         features: [
           "接入 GitHub 后，关联的 Pull Request 会显示在 Multica Issue 中，状态会同步到 Multica，关闭 PR 后会自动关闭对应 Issue",
