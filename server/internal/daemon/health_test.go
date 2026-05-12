@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -136,7 +138,7 @@ func TestShutdownHandlerRejectsNonPost(t *testing.T) {
 }
 
 func TestTraceHandlerReturnsLatestRun(t *testing.T) {
-	t.Parallel()
+	t.Setenv("FRONTEND_ORIGIN", "http://localhost:3000")
 
 	store := newTraceStoreForTest(t)
 	defer store.Close()
@@ -153,13 +155,14 @@ func TestTraceHandlerReturnsLatestRun(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/traces/tasks/task-trace-http?tail=20", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
 	d.traceHandler().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "*" {
-		t.Fatalf("expected CORS header, got %q", got)
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
+		t.Fatalf("expected scoped CORS header, got %q", got)
 	}
 	var resp traceResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -170,6 +173,52 @@ func TestTraceHandlerReturnsLatestRun(t *testing.T) {
 	}
 	if len(resp.Lines) != 1 || resp.Lines[0].Content != "new" {
 		t.Fatalf("unexpected lines: %+v", resp.Lines)
+	}
+}
+
+func TestTraceHandlerBlocksUnknownOriginCORSHeader(t *testing.T) {
+	t.Parallel()
+
+	store := newTraceStoreForTest(t)
+	defer store.Close()
+	d := &Daemon{traceStore: store, logger: slog.Default()}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/traces/tasks/task-trace-http?tail=20", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	d.traceHandler().ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("unexpected CORS header for unknown origin: %q", got)
+	}
+}
+
+func TestTraceHandlerAllowsConfiguredAppOrigin(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte("{\n  \"app_url\": \"http://127.0.0.1:13003\"\n}\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	store := newTraceStoreForTest(t)
+	defer store.Close()
+	d := &Daemon{
+		cfg:        Config{ConfigPath: configPath},
+		traceStore: store,
+		logger:     slog.Default(),
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodOptions, "/traces/tasks/task-options", nil)
+	req.Header.Set("Origin", "http://127.0.0.1:13003")
+	d.traceHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://127.0.0.1:13003" {
+		t.Fatalf("expected configured app origin, got %q", got)
 	}
 }
 

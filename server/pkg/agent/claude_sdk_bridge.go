@@ -609,45 +609,39 @@ func writeClaudeSDKBridgeScript() (string, func(), error) {
 
 func resolveClaudeSDKRequireRoot(cwd string) string {
 	if v := os.Getenv("MULTICA_NODE_REQUIRE_ROOT"); v != "" {
-		return v
+		if root := findClaudeSDKRoot(v); root != "" {
+			return root
+		}
 	}
-	if root := findPackageRootFromCaller(); root != "" {
+	if root := findClaudeSDKRootFromCaller(); root != "" {
 		return root
 	}
-	if cwd != "" {
-		if root := findPackageRoot(cwd); root != "" {
+	if exe, err := os.Executable(); err == nil {
+		if root := findClaudeSDKRoot(filepath.Dir(exe)); root != "" {
 			return root
 		}
 	}
 	if wd, err := os.Getwd(); err == nil {
-		return findPackageRoot(wd)
+		if root := findClaudeSDKRoot(wd); root != "" {
+			return root
+		}
 	}
+	_ = cwd
 	return ""
 }
 
-func findPackageRootFromCaller() string {
+func findClaudeSDKRootFromCaller() string {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		return ""
 	}
-	dir := filepath.Dir(file)
-	for i := 0; i < 8; i++ {
-		if fileExists(filepath.Join(dir, "package.json")) && fileExists(filepath.Join(dir, "pnpm-workspace.yaml")) {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return ""
+	return findClaudeSDKRoot(filepath.Dir(file))
 }
 
-func findPackageRoot(start string) string {
+func findClaudeSDKRoot(start string) string {
 	dir := start
-	for i := 0; i < 8; i++ {
-		if fileExists(filepath.Join(dir, "package.json")) {
+	for i := 0; i < 12; i++ {
+		if hasClaudeSDKAvailable(dir) {
 			return dir
 		}
 		parent := filepath.Dir(dir)
@@ -662,6 +656,15 @@ func findPackageRoot(start string) string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func hasClaudeSDKAvailable(root string) bool {
+	if root == "" {
+		return false
+	}
+	return hasClaudeSDKDependency(root) ||
+		fileExists(filepath.Join(root, "node_modules", "@anthropic-ai", "claude-agent-sdk", "package.json")) ||
+		fileExists(filepath.Join(root, "node_modules", "@anthropic-ai", "claude-code", "package.json"))
 }
 
 func hasClaudeSDKDependency(root string) bool {

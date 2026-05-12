@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/daemon/trace"
 )
@@ -123,11 +125,12 @@ func (d *Daemon) shutdownHandler() http.HandlerFunc {
 
 func (d *Daemon) traceHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Allow-Private-Network", "true")
+		d.applyTraceCORS(w, r)
 		if r.Method == http.MethodOptions {
+			if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" && !d.isAllowedTraceOrigin(origin) {
+				http.Error(w, "origin not allowed", http.StatusForbidden)
+				return
+			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -208,6 +211,81 @@ func (d *Daemon) traceHandler() http.HandlerFunc {
 			Lines:  lines,
 		})
 	}
+}
+
+var defaultTraceOrigins = []string{
+	"http://localhost:3000",
+	"http://localhost:5173",
+	"http://localhost:5174",
+}
+
+func (d *Daemon) applyTraceCORS(w http.ResponseWriter, r *http.Request) {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" || !d.isAllowedTraceOrigin(origin) {
+		return
+	}
+	w.Header().Set("Access-Control-Allow-Origin", origin)
+	w.Header().Set("Vary", "Origin")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
+
+func (d *Daemon) isAllowedTraceOrigin(origin string) bool {
+	origin = normalizeOrigin(origin)
+	if origin == "" {
+		return false
+	}
+	for _, allowed := range d.traceAllowedOrigins() {
+		if origin == normalizeOrigin(allowed) {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *Daemon) traceAllowedOrigins() []string {
+	for _, raw := range []string{
+		strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS")),
+		strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN")),
+		strings.TrimSpace(os.Getenv("MULTICA_APP_URL")),
+	} {
+		if origins := splitOrigins(raw); len(origins) > 0 {
+			return origins
+		}
+	}
+	cfg, err := cli.LoadCLIConfigForInstance(d.cfg.Profile, d.cfg.ConfigPath)
+	if err == nil {
+		if origins := splitOrigins(strings.TrimSpace(cfg.AppURL)); len(origins) > 0 {
+			return origins
+		}
+	}
+	return append([]string(nil), defaultTraceOrigins...)
+}
+
+func splitOrigins(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	origins := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if origin := normalizeOrigin(part); origin != "" {
+			origins = append(origins, origin)
+		}
+	}
+	return origins
+}
+
+func normalizeOrigin(raw string) string {
+	raw = strings.TrimSpace(strings.TrimRight(raw, "/"))
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }
 
 func (d *Daemon) streamTrace(w http.ResponseWriter, r *http.Request, taskID string) {

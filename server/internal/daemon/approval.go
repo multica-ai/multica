@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -60,7 +62,69 @@ func approvalSimilarKey(req agent.ApprovalRequest) string {
 	if t == "" {
 		t = "approval"
 	}
-	return t
+	title := strings.TrimSpace(req.Title)
+	signature := approvalTargetSignature(req)
+	if signature == "" {
+		signature = normalizedApprovalText(req.Detail)
+	}
+	if signature == "" {
+		signature = normalizedApprovalText(title)
+	}
+	if signature == "" {
+		return t
+	}
+	return t + "|" + signature
+}
+
+func approvalTargetSignature(req agent.ApprovalRequest) string {
+	switch strings.TrimSpace(req.Type) {
+	case "command_approval":
+		if command := normalizedApprovalText(req.Detail); command != "" {
+			return "command:" + command
+		}
+	case "file_change_approval":
+		if path := approvalPathFromDetail(req.Detail); path != "" {
+			return "path:" + path
+		}
+		if title := strings.TrimPrefix(strings.TrimSpace(req.Title), "Write: "); title != strings.TrimSpace(req.Title) {
+			return "path:" + filepath.Clean(title)
+		}
+	case "permission_request":
+		if detail := strings.TrimSpace(req.Detail); strings.HasPrefix(detail, "{") {
+			var payload map[string]any
+			if json.Unmarshal([]byte(detail), &payload) == nil {
+				if command, _ := payload["command"].(string); normalizedApprovalText(command) != "" {
+					return "command:" + normalizedApprovalText(command)
+				}
+				for _, key := range []string{"path", "file_path", "notebook_path", "blocked_path"} {
+					if value, _ := payload[key].(string); strings.TrimSpace(value) != "" {
+						return "path:" + filepath.Clean(value)
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func approvalPathFromDetail(detail string) string {
+	if strings.TrimSpace(detail) == "" {
+		return ""
+	}
+	var payload map[string]any
+	if json.Unmarshal([]byte(detail), &payload) != nil {
+		return ""
+	}
+	for _, key := range []string{"path", "file_path", "notebook_path"} {
+		if value, _ := payload[key].(string); strings.TrimSpace(value) != "" {
+			return filepath.Clean(value)
+		}
+	}
+	return ""
+}
+
+func normalizedApprovalText(value string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 }
 
 // promptViaServer reports an interaction to the server, then polls until
