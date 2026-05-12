@@ -1,11 +1,15 @@
 "use client";
 
 // CEREBRO-PATCH(reply-input-cerebro): cerebro modification of upstream file
-// CEREBRO-PATCH(reply-input-pin): JEH-1065 — opt-in pin toggle that pins this
-// reply input to the bottom of the viewport via inline `position: fixed`. The
-// editor stays in the same React tree slot on every render — only the wrapper
-// style differs — so a Tiptap draft / caret / pending upload survives the
-// pin toggle. Auto-unpins on submit and scrolls back to the originating thread.
+// CEREBRO-PATCH(reply-input-pin): JEH-1065 — opt-in pin toggle. While pinned,
+// the input behaves as `position: sticky` from the bottom — it stays in its
+// natural slot inside the thread until the viewport bottom would scroll past
+// it, then it floats with `position: fixed` matching the anchor's width.
+// Visual styling stays identical to the unpinned input (no banner, no
+// ring/shadow) so the user only sees the green pin icon as state indicator.
+// The editor stays in the same React tree slot on every render so a Tiptap
+// draft / caret / pending upload survives the pin toggle. Auto-unpins on
+// submit and scrolls back to the originating thread.
 
 import { useCallback, useId, useRef, useState } from "react";
 import { ArrowUp, Loader2, Maximize2, Minimize2 } from "lucide-react";
@@ -63,7 +67,8 @@ function ReplyInput({
   const reactId = useId();
   const pinKey = `reply:${issueId}:${reactId}`;
   const { enabled: pinEnabled, isPinned, togglePin, unpin } = useInputPin(pinKey, true);
-  const floatRect = useFloatPosition(anchorRef, isPinned);
+  const floatRect = useFloatPosition(anchorRef, isPinned, { mode: "sticky-bottom" });
+  const isFloating = floatRect !== null;
 
   const handleUpload = useCallback(async (file: File) => {
     const result = await uploadWithToast(file, { issueId });
@@ -100,9 +105,11 @@ function ReplyInput({
 
   const avatarSize = size === "sm" ? 22 : 28;
 
-  // Inline `position: fixed` while pinned. The wrapper stays in the same React
-  // tree slot, so the editor below it never remounts when toggling pin.
-  const floatStyle = isPinned && floatRect
+  // Sticky-bottom: stay in normal flow until the viewport scrolls past the
+  // anchor; then float with `position: fixed` matching the anchor's width and
+  // height. Styling is unchanged so the field looks identical to its
+  // not-pinned self — the only state cue is the green pin icon.
+  const floatStyle = floatRect
     ? ({
         position: "fixed" as const,
         bottom: 16,
@@ -114,18 +121,11 @@ function ReplyInput({
 
   return (
     <div ref={anchorRef}>
-      {isPinned && (
-        <div className="flex items-center justify-between gap-2 rounded-md border border-dashed border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-xs text-muted-foreground">
-          <span className="truncate">{t(($) => $.reply.pinned_placeholder)}</span>
-          <PinButton
-            isPinned
-            onToggle={togglePin}
-            pinLabel={t(($) => $.reply.pin_tooltip)}
-            unpinLabel={t(($) => $.reply.unpin_tooltip)}
-            className="shrink-0"
-          />
-        </div>
-      )}
+      {/* While the input is floating its natural slot is empty; reserve the
+          same height with a hidden spacer so the thread layout does not jump
+          (which would also break the sticky measurement and trigger a flicker
+          loop). */}
+      {isFloating && <div aria-hidden style={{ height: floatRect.height }} />}
       <div style={floatStyle}>
         <div className="group/editor flex items-start gap-2.5">
           <ActorAvatar
@@ -138,14 +138,13 @@ function ReplyInput({
             {...dropZoneProps}
             className={cn(
               "relative min-w-0 flex-1 flex flex-col rounded-md bg-card",
-              isPinned && "ring-1 ring-emerald-500/40 shadow-lg",
               isExpanded
                 ? "h-[60vh]"
                 : size === "sm" ? "max-h-40" : "max-h-56",
               (!isEmpty || isExpanded) && "pb-7",
             )}
           >
-            <div className="flex-1 min-h-0 overflow-y-auto pr-14">
+            <div className="flex-1 min-h-0 overflow-y-auto pr-14 pl-8 sm:pl-0">
               <div ref={measureRef}>
                 <ContentEditor
                   ref={editorRef}
@@ -159,9 +158,17 @@ function ReplyInput({
                 />
               </div>
             </div>
-            {/* CEREBRO-PATCH(file-upload-button-api): wide mobile gap separates
-                paperclip from the send button on touch screens, with the new
-                onAttach/onEmbed FileUploadButton API. */}
+            {/* CEREBRO-PATCH(reply-input-mobile-paperclip): JEH-1065 — on
+                mobile, mirror CommentInput by moving the paperclip to the left
+                side, so pin + expand + send aren't cramped together on touch
+                screens. Desktop keeps the original right-aligned grouping. */}
+            <div className="absolute bottom-0 left-0 flex items-center sm:hidden">
+              <FileUploadButton
+                size="sm"
+                onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
+                onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
+              />
+            </div>
             <div className="absolute bottom-0 right-0 flex items-center gap-4 sm:gap-1">
               {pinEnabled && (
                 <PinButton
@@ -188,11 +195,13 @@ function ReplyInput({
                 />
                 <TooltipContent side="top">{isExpanded ? t(($) => $.reply.collapse_tooltip) : t(($) => $.reply.expand_tooltip)}</TooltipContent>
               </Tooltip>
-              <FileUploadButton
-                size="sm"
-                onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
-                onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
-              />
+              <div className="hidden sm:inline-flex">
+                <FileUploadButton
+                  size="sm"
+                  onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
+                  onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
+                />
+              </div>
               <button
                 type="button"
                 disabled={isEmpty || submitting}
