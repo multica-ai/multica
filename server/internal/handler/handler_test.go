@@ -1457,6 +1457,92 @@ func TestRetryAgentComment_UsesRetryRequesterAsTriggerActor(t *testing.T) {
 	}
 }
 
+// TestRetryAgentComment_SystemCommentFallbackToTask verifies that retrying a
+// system comment (no parent_id) recovers the trigger_comment_id from the most
+// recent task for the same agent+issue.
+func TestRetryAgentComment_SystemCommentFallbackToTask(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	// Issue with NO assignee — forces the non-assignee branch.
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_id, creator_type,
+			number, position
+		)
+		VALUES ($1, 'retry fallback issue', 'in_progress', 'medium', $2, 'member', 92002, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	// Member comment that originally triggered the agent.
+	var memberCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'member', $3, '@agent do something', 'comment')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&memberCommentID); err != nil {
+		t.Fatalf("setup: create member comment: %v", err)
+	}
+
+	// Simulate a previous failed task with the trigger_comment_id set.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), $2, 'failed', 0, $3)
+	`, agentID, issueID, memberCommentID); err != nil {
+		t.Fatalf("setup: create failed task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+
+	// System comment from the failed task — no parent_id.
+	var systemCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'agent', $3, 'copilot exited with code 1', 'system')
+		RETURNING id
+	`, issueID, testWorkspaceID, agentID).Scan(&systemCommentID); err != nil {
+		t.Fatalf("setup: create system comment: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/comments/"+systemCommentID+"/retry", nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req = withURLParam(req, "commentId", systemCommentID)
+
+	testHandler.RetryAgentComment(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("RetryAgentComment: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify the new task uses the original trigger comment.
+	var gotTriggerCommentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT trigger_comment_id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID).Scan(&gotTriggerCommentID); err != nil {
+		t.Fatalf("read queued retry task: %v", err)
+	}
+	if gotTriggerCommentID != memberCommentID {
+		t.Fatalf("expected trigger_comment_id %q, got %q", memberCommentID, gotTriggerCommentID)
+	}
+}
+
 func TestTriggerAutopilot_UsesManualRequesterAsTriggerActor(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
