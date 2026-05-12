@@ -11,6 +11,21 @@ const mockUpdateGroup = vi.hoisted(() => vi.fn());
 const mockListGroupMembers = vi.hoisted(() => vi.fn().mockResolvedValue([]));
 const mockAddGroupMember = vi.hoisted(() => vi.fn());
 const mockRemoveGroupMember = vi.hoisted(() => vi.fn());
+const mockListGroupCapabilities = vi.hoisted(() =>
+  vi.fn().mockResolvedValue([]),
+);
+const mockSetGroupCapability = vi.hoisted(() => vi.fn());
+const mockRemoveGroupCapability = vi.hoisted(() => vi.fn());
+const mockListGroupRuntimes = vi.hoisted(() =>
+  vi.fn().mockResolvedValue([]),
+);
+const mockAddGroupRuntime = vi.hoisted(() => vi.fn());
+const mockRemoveGroupRuntime = vi.hoisted(() => vi.fn());
+const mockListGroupAgents = vi.hoisted(() => vi.fn().mockResolvedValue([]));
+const mockAddGroupAgent = vi.hoisted(() => vi.fn());
+const mockRemoveGroupAgent = vi.hoisted(() => vi.fn());
+const mockListRuntimes = vi.hoisted(() => vi.fn().mockResolvedValue([]));
+const mockListAgents = vi.hoisted(() => vi.fn().mockResolvedValue([]));
 
 vi.mock("@multica/core/api", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/api")>(
@@ -26,6 +41,17 @@ vi.mock("@multica/core/api", async () => {
       listCerebroGroupMembers: mockListGroupMembers,
       addCerebroGroupMember: mockAddGroupMember,
       removeCerebroGroupMember: mockRemoveGroupMember,
+      listCerebroGroupCapabilities: mockListGroupCapabilities,
+      setCerebroGroupCapability: mockSetGroupCapability,
+      removeCerebroGroupCapability: mockRemoveGroupCapability,
+      listCerebroGroupRuntimes: mockListGroupRuntimes,
+      addCerebroGroupRuntime: mockAddGroupRuntime,
+      removeCerebroGroupRuntime: mockRemoveGroupRuntime,
+      listCerebroGroupAgents: mockListGroupAgents,
+      addCerebroGroupAgent: mockAddGroupAgent,
+      removeCerebroGroupAgent: mockRemoveGroupAgent,
+      listRuntimes: mockListRuntimes,
+      listAgents: mockListAgents,
     },
   };
 });
@@ -77,6 +103,17 @@ vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({
     queryKey: ["memberList"],
     queryFn: () => Promise.resolve(memberList),
+  }),
+  agentListOptions: () => ({
+    queryKey: ["agentList"],
+    queryFn: () => Promise.resolve([]),
+  }),
+}));
+
+vi.mock("@multica/core/runtimes/queries", () => ({
+  runtimeListOptions: () => ({
+    queryKey: ["runtimeList"],
+    queryFn: () => Promise.resolve([]),
   }),
 }));
 
@@ -131,7 +168,7 @@ describe("GroupsTab", () => {
     expect(screen.getByTestId("create-group-form")).toBeInTheDocument();
   });
 
-  it("renders existing groups with member counts and a permissions placeholder", async () => {
+  it("renders existing groups with member counts and the permissions section", async () => {
     mockUseFeatureFlag.mockReturnValue(true);
     mockListGroups.mockResolvedValueOnce([
       {
@@ -155,6 +192,10 @@ describe("GroupsTab", () => {
         user_avatar_url: null,
       },
     ]);
+    // Permissions queries return empty by default for this render-only check.
+    mockListGroupCapabilities.mockResolvedValue([]);
+    mockListGroupRuntimes.mockResolvedValue([]);
+    mockListGroupAgents.mockResolvedValue([]);
     renderTab();
 
     await waitFor(() =>
@@ -164,8 +205,11 @@ describe("GroupsTab", () => {
     await waitFor(() =>
       expect(screen.getByText("Anne Larsen")).toBeInTheDocument(),
     );
-    // Permissions placeholder is present for PR 2-3
-    expect(screen.getByTestId("permissions-placeholder")).toBeInTheDocument();
+    // JEH-1009 permissions UI replaces the PR 1 placeholder.
+    expect(screen.getByTestId("permissions-section")).toBeInTheDocument();
+    expect(screen.getByTestId("capability-section")).toBeInTheDocument();
+    expect(screen.getByTestId("runtime-allowlist")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-allowlist")).toBeInTheDocument();
   });
 
   it("creates a new group via the inline form", async () => {

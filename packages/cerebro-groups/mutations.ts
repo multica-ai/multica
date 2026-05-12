@@ -78,3 +78,108 @@ export function useRemoveCerebroGroupMember(groupId: string) {
     },
   });
 }
+
+// JEH-1009 — permission-row mutations. The server publishes
+// group:capability_changed / group:runtime_changed / group:agent_changed
+// after each mutation; the cerebro-realtime registration in
+// `realtime.ts` will route those to query invalidations.
+
+export function useSetCerebroGroupCapability(groupId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (capability: string) =>
+      api.setCerebroGroupCapability(groupId, capability),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: groupKeys.capabilities(wsId, groupId) });
+    },
+  });
+}
+
+export function useRemoveCerebroGroupCapability(groupId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (capability: string) =>
+      api.removeCerebroGroupCapability(groupId, capability),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: groupKeys.capabilities(wsId, groupId) });
+    },
+  });
+}
+
+export function useAddCerebroGroupRuntime(groupId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (runtimeId: string) =>
+      api.addCerebroGroupRuntime(groupId, runtimeId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: groupKeys.runtimes(wsId, groupId) });
+    },
+  });
+}
+
+export function useRemoveCerebroGroupRuntime(groupId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (runtimeId: string) =>
+      api.removeCerebroGroupRuntime(groupId, runtimeId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: groupKeys.runtimes(wsId, groupId) });
+    },
+  });
+}
+
+export function useAddCerebroGroupAgent(groupId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (agentId: string) =>
+      api.addCerebroGroupAgent(groupId, agentId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: groupKeys.agents(wsId, groupId) });
+    },
+  });
+}
+
+export function useRemoveCerebroGroupAgent(groupId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (agentId: string) =>
+      api.removeCerebroGroupAgent(groupId, agentId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: groupKeys.agents(wsId, groupId) });
+    },
+  });
+}
+
+export function useAddCerebroProjectGroup(projectId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (groupId: string) =>
+      api.addCerebroProjectGroup(projectId, groupId),
+    onSettled: () => {
+      qc.invalidateQueries({
+        queryKey: groupKeys.projectGroups(wsId, projectId),
+      });
+    },
+  });
+}
+
+export function useRemoveCerebroProjectGroup(projectId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (groupId: string) =>
+      api.removeCerebroProjectGroup(projectId, groupId),
+    onSettled: () => {
+      qc.invalidateQueries({
+        queryKey: groupKeys.projectGroups(wsId, projectId),
+      });
+    },
+  });
+}

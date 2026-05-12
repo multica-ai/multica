@@ -1,14 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, Trash2, UserPlus, Users, Lock } from "lucide-react";
+import { Plus, Trash2, UserPlus, Users, Cpu, Bot } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions } from "@multica/core/workspace/queries";
+import {
+  agentListOptions,
+  memberListOptions,
+} from "@multica/core/workspace/queries";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
   AlertDialog,
@@ -43,10 +48,19 @@ import {
   useUpdateCerebroGroup,
   useAddCerebroGroupMember,
   useRemoveCerebroGroupMember,
+  useSetCerebroGroupCapability,
+  useRemoveCerebroGroupCapability,
+  useAddCerebroGroupRuntime,
+  useRemoveCerebroGroupRuntime,
+  useAddCerebroGroupAgent,
+  useRemoveCerebroGroupAgent,
 } from "../mutations";
 import {
   groupListOptions,
   groupMembersOptions,
+  groupCapabilitiesOptions,
+  groupRuntimesOptions,
+  groupAgentsOptions,
 } from "../queries";
 import type { CerebroGroup } from "../types";
 
@@ -274,7 +288,7 @@ function GroupCard({ group, isAdmin }: { group: CerebroGroup; isAdmin: boolean }
 
       <MembersSection groupId={group.id} isAdmin={isAdmin} />
 
-      <PermissionsPlaceholder />
+      <PermissionsSection groupId={group.id} isAdmin={isAdmin} />
 
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
@@ -465,20 +479,385 @@ function MembersSection({ groupId, isAdmin }: { groupId: string; isAdmin: boolea
   );
 }
 
-function PermissionsPlaceholder() {
-  // PR 2-3 (JEH-1008 + JEH-1009) replace this with capability toggles +
-  // runtime / agent allowlists + project access controls. Kept inline so the
-  // UI shape is visible from PR 1 onwards.
+function PermissionsSection({
+  groupId,
+  isAdmin,
+}: {
+  groupId: string;
+  isAdmin: boolean;
+}) {
   return (
     <div
-      className="p-4 text-xs text-muted-foreground flex items-start gap-2"
-      data-testid="permissions-placeholder"
+      className="p-4 space-y-5 text-sm"
+      data-testid="permissions-section"
     >
-      <Lock className="size-4 shrink-0 mt-0.5" />
-      <span>
-        Permissions for runtimes, agents, and projects land in the next
-        update. Until then, group membership has no enforcement effect.
-      </span>
+      <CapabilitySection groupId={groupId} isAdmin={isAdmin} />
+      <RuntimeAllowlistSection groupId={groupId} isAdmin={isAdmin} />
+      <AgentAllowlistSection groupId={groupId} isAdmin={isAdmin} />
+    </div>
+  );
+}
+
+function CapabilitySection({
+  groupId,
+  isAdmin,
+}: {
+  groupId: string;
+  isAdmin: boolean;
+}) {
+  const wsId = useWorkspaceId();
+  const { data: rows = [] } = useQuery(
+    groupCapabilitiesOptions(wsId, groupId),
+  );
+  const grant = useSetCerebroGroupCapability(groupId);
+  const revoke = useRemoveCerebroGroupCapability(groupId);
+
+  const has = (cap: string) => rows.some((r) => r.capability === cap);
+
+  const onToggle = async (cap: string, next: boolean) => {
+    try {
+      if (next) {
+        await grant.mutateAsync(cap);
+      } else {
+        await revoke.mutateAsync(cap);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update capability");
+    }
+  };
+
+  return (
+    <div data-testid="capability-section" className="space-y-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Capabilities
+      </div>
+      <CapabilityRow
+        label="Create runtimes"
+        description="Members of this group may register new agent runtimes."
+        checked={has("create_runtime")}
+        disabled={!isAdmin || grant.isPending || revoke.isPending}
+        onChange={(next) => onToggle("create_runtime", next)}
+      />
+      <CapabilityRow
+        label="Create agents"
+        description="Members of this group may create new agents."
+        checked={has("create_agent")}
+        disabled={!isAdmin || grant.isPending || revoke.isPending}
+        onChange={(next) => onToggle("create_agent", next)}
+      />
+    </div>
+  );
+}
+
+function CapabilityRow({
+  label,
+  description,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm">{label}</div>
+        <div className="text-xs text-muted-foreground">{description}</div>
+      </div>
+      <Switch
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onChange}
+        aria-label={label}
+      />
+    </div>
+  );
+}
+
+function RuntimeAllowlistSection({
+  groupId,
+  isAdmin,
+}: {
+  groupId: string;
+  isAdmin: boolean;
+}) {
+  const wsId = useWorkspaceId();
+  const { data: rows = [] } = useQuery(groupRuntimesOptions(wsId, groupId));
+  const { data: allRuntimes = [] } = useQuery(runtimeListOptions(wsId));
+  const add = useAddCerebroGroupRuntime(groupId);
+  const remove = useRemoveCerebroGroupRuntime(groupId);
+
+  const allowed = useMemo(
+    () => new Set(rows.map((r) => r.runtime_id)),
+    [rows],
+  );
+  const candidates = useMemo(
+    () => allRuntimes.filter((rt) => !allowed.has(rt.id)),
+    [allRuntimes, allowed],
+  );
+  const allowedRuntimes = useMemo(
+    () => allRuntimes.filter((rt) => allowed.has(rt.id)),
+    [allRuntimes, allowed],
+  );
+
+  return (
+    <AllowlistSection
+      title="Runtimes"
+      icon={<Cpu className="size-4 text-muted-foreground" />}
+      data-testid="runtime-allowlist"
+      items={allowedRuntimes.map((rt) => ({
+        id: rt.id,
+        primary: rt.name || rt.provider || "Runtime",
+        secondary: rt.provider,
+      }))}
+      candidates={candidates.map((rt) => ({
+        id: rt.id,
+        primary: rt.name || rt.provider || "Runtime",
+        secondary: rt.provider,
+      }))}
+      emptyHint="No runtimes added. Admins can grant access from the picker below."
+      pickerLabel="Add runtime"
+      pickerEmpty="Every workspace runtime is already in the allowlist."
+      isAdmin={isAdmin}
+      onAdd={async (id) => {
+        try {
+          await add.mutateAsync(id);
+        } catch (e) {
+          toast.error(
+            e instanceof Error ? e.message : "Failed to add runtime",
+          );
+        }
+      }}
+      onRemove={async (id) => {
+        try {
+          await remove.mutateAsync(id);
+        } catch (e) {
+          toast.error(
+            e instanceof Error ? e.message : "Failed to remove runtime",
+          );
+        }
+      }}
+      adding={add.isPending}
+      removing={remove.isPending}
+    />
+  );
+}
+
+function AgentAllowlistSection({
+  groupId,
+  isAdmin,
+}: {
+  groupId: string;
+  isAdmin: boolean;
+}) {
+  const wsId = useWorkspaceId();
+  const { data: rows = [] } = useQuery(groupAgentsOptions(wsId, groupId));
+  const { data: allAgents = [] } = useQuery(agentListOptions(wsId));
+  const add = useAddCerebroGroupAgent(groupId);
+  const remove = useRemoveCerebroGroupAgent(groupId);
+
+  const allowed = useMemo(
+    () => new Set(rows.map((r) => r.agent_id)),
+    [rows],
+  );
+  const liveAgents = useMemo(
+    () => allAgents.filter((a) => !a.archived_at),
+    [allAgents],
+  );
+  const candidates = useMemo(
+    () => liveAgents.filter((a) => !allowed.has(a.id)),
+    [liveAgents, allowed],
+  );
+  const allowedAgents = useMemo(
+    () => liveAgents.filter((a) => allowed.has(a.id)),
+    [liveAgents, allowed],
+  );
+
+  return (
+    <AllowlistSection
+      title="Agents"
+      icon={<Bot className="size-4 text-muted-foreground" />}
+      data-testid="agent-allowlist"
+      items={allowedAgents.map((a) => ({
+        id: a.id,
+        primary: a.name,
+        secondary: a.description ?? null,
+      }))}
+      candidates={candidates.map((a) => ({
+        id: a.id,
+        primary: a.name,
+        secondary: a.description ?? null,
+      }))}
+      emptyHint="No agents added. Admins can grant access from the picker below."
+      pickerLabel="Add agent"
+      pickerEmpty="Every active workspace agent is already in the allowlist."
+      isAdmin={isAdmin}
+      onAdd={async (id) => {
+        try {
+          await add.mutateAsync(id);
+        } catch (e) {
+          toast.error(
+            e instanceof Error ? e.message : "Failed to add agent",
+          );
+        }
+      }}
+      onRemove={async (id) => {
+        try {
+          await remove.mutateAsync(id);
+        } catch (e) {
+          toast.error(
+            e instanceof Error ? e.message : "Failed to remove agent",
+          );
+        }
+      }}
+      adding={add.isPending}
+      removing={remove.isPending}
+    />
+  );
+}
+
+// Shared list + picker shell used by runtime + agent allowlists. Keeps the
+// two sections visually identical so admins build one mental model.
+function AllowlistSection({
+  title,
+  icon,
+  items,
+  candidates,
+  emptyHint,
+  pickerLabel,
+  pickerEmpty,
+  isAdmin,
+  onAdd,
+  onRemove,
+  adding,
+  removing,
+  "data-testid": testId,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  items: Array<{ id: string; primary: string; secondary: string | null }>;
+  candidates: Array<{ id: string; primary: string; secondary: string | null }>;
+  emptyHint: string;
+  pickerLabel: string;
+  pickerEmpty: string;
+  isAdmin: boolean;
+  onAdd: (id: string) => void;
+  onRemove: (id: string) => void;
+  adding: boolean;
+  removing: boolean;
+  "data-testid"?: string;
+}) {
+  const [search, setSearch] = useState("");
+  const [showPicker, setShowPicker] = useState(false);
+
+  const filteredCandidates = useMemo(
+    () =>
+      candidates.filter((c) => {
+        if (search === "") return true;
+        const q = search.toLowerCase();
+        return (
+          c.primary.toLowerCase().includes(q) ||
+          (c.secondary?.toLowerCase().includes(q) ?? false)
+        );
+      }),
+    [candidates, search],
+  );
+
+  return (
+    <div className="space-y-2" data-testid={testId}>
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+          {icon}
+          {title} ({items.length})
+        </div>
+        {isAdmin && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowPicker((s) => !s)}
+          >
+            <Plus className="size-4 mr-1.5" />
+            {pickerLabel}
+          </Button>
+        )}
+      </div>
+
+      {items.length === 0 ? (
+        <div className="text-xs text-muted-foreground py-1">{emptyHint}</div>
+      ) : (
+        <ul className="divide-y divide-border/50 rounded-md border border-border/50">
+          {items.map((it) => (
+            <li
+              key={it.id}
+              className="flex items-center gap-3 px-3 py-2 text-sm"
+            >
+              <span className="flex-1 min-w-0">
+                <span className="block truncate">{it.primary}</span>
+                {it.secondary && (
+                  <span className="block text-xs text-muted-foreground truncate">
+                    {it.secondary}
+                  </span>
+                )}
+              </span>
+              {isAdmin && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onRemove(it.id)}
+                  disabled={removing}
+                >
+                  Remove
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {showPicker && isAdmin && (
+        <div className="mt-1 rounded-md border border-border bg-muted/30 p-3 space-y-2">
+          <Input
+            placeholder={`Search ${title.toLowerCase()}…`}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label={`Search ${title.toLowerCase()}`}
+          />
+          <ul className="max-h-60 overflow-auto divide-y divide-border/50">
+            {filteredCandidates.length === 0 && (
+              <li className="text-xs text-muted-foreground py-2 px-1">
+                {candidates.length === 0 ? pickerEmpty : "No matches."}
+              </li>
+            )}
+            {filteredCandidates.map((c) => (
+              <li
+                key={c.id}
+                className="flex items-center gap-3 px-1 py-2 text-sm"
+              >
+                <span className="flex-1 min-w-0">
+                  <span className="block truncate">{c.primary}</span>
+                  {c.secondary && (
+                    <span className="block text-xs text-muted-foreground truncate">
+                      {c.secondary}
+                    </span>
+                  )}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onAdd(c.id)}
+                  disabled={adding}
+                >
+                  Add
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

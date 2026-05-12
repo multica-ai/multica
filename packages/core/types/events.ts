@@ -84,6 +84,11 @@ export type WSEventType =
   | "group:deleted"
   | "group:member_added"
   | "group:member_removed"
+  // CEREBRO-PATCH(cerebro-group-permission-events): JEH-1009 — group permission rows.
+  | "group:capability_changed"
+  | "group:runtime_changed"
+  | "group:agent_changed"
+  | "project:group_access_changed"
   // Connection liveness — emitted periodically by the server so the client can
   // detect a half-open or system-suspended (iOS PWA background) socket.
   | "server:ping";

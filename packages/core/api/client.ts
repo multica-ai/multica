@@ -570,6 +570,106 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(cerebro-group-permissions-client): JEH-1009 wrappers for
+  // capability / runtime-allowlist / agent-allowlist / project-group-access
+  // endpoints. Server routes are registered in router.go under
+  // `cerebro-group-permissions-routes` (JEH-1008).
+  async listCerebroGroupCapabilities<T = unknown>(groupId: string): Promise<T> {
+    return this.fetch<T>(`/api/groups/${groupId}/capabilities`);
+  }
+
+  async setCerebroGroupCapability<T = unknown>(
+    groupId: string,
+    capability: string,
+  ): Promise<T> {
+    return this.fetch<T>(`/api/groups/${groupId}/capabilities`, {
+      method: "POST",
+      body: JSON.stringify({ capability }),
+    });
+  }
+
+  async removeCerebroGroupCapability(
+    groupId: string,
+    capability: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/groups/${groupId}/capabilities/${capability}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async listCerebroGroupRuntimes<T = unknown>(groupId: string): Promise<T> {
+    return this.fetch<T>(`/api/groups/${groupId}/runtimes`);
+  }
+
+  async addCerebroGroupRuntime<T = unknown>(
+    groupId: string,
+    runtimeId: string,
+  ): Promise<T> {
+    return this.fetch<T>(`/api/groups/${groupId}/runtimes`, {
+      method: "POST",
+      body: JSON.stringify({ runtime_id: runtimeId }),
+    });
+  }
+
+  async removeCerebroGroupRuntime(
+    groupId: string,
+    runtimeId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/groups/${groupId}/runtimes/${runtimeId}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async listCerebroGroupAgents<T = unknown>(groupId: string): Promise<T> {
+    return this.fetch<T>(`/api/groups/${groupId}/agents`);
+  }
+
+  async addCerebroGroupAgent<T = unknown>(
+    groupId: string,
+    agentId: string,
+  ): Promise<T> {
+    return this.fetch<T>(`/api/groups/${groupId}/agents`, {
+      method: "POST",
+      body: JSON.stringify({ agent_id: agentId }),
+    });
+  }
+
+  async removeCerebroGroupAgent(
+    groupId: string,
+    agentId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/groups/${groupId}/agents/${agentId}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async listCerebroProjectGroups<T = unknown>(projectId: string): Promise<T> {
+    return this.fetch<T>(`/api/projects/${projectId}/group-access`);
+  }
+
+  async addCerebroProjectGroup<T = unknown>(
+    projectId: string,
+    groupId: string,
+  ): Promise<T> {
+    return this.fetch<T>(`/api/projects/${projectId}/group-access`, {
+      method: "POST",
+      body: JSON.stringify({ group_id: groupId }),
+    });
+  }
+
+  async removeCerebroProjectGroup(
+    projectId: string,
+    groupId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/projects/${projectId}/group-access/${groupId}`,
+      { method: "DELETE" },
+    );
+  }
+
   // CEREBRO-PATCH(cerebro-dashboard-client): JEH-684 dashboard overview endpoint
   async getCerebroDashboardOverview<T = unknown>(
     range: "24h" | "7d" | "30d",

@@ -46,6 +46,10 @@ func (h *Handler) CreateRuntimeSetupToken(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "workspace context required")
 		return
 	}
+	// CEREBRO-PATCH(create-runtime-capability-gate): JEH-1009 require create_runtime
+	if !h.cerebroRequireCapability(w, r, workspaceID, "create_runtime") {
+		return
+	}
 
 	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
 	if err != nil {

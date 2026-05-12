@@ -415,6 +415,10 @@ func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMe
 func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
+	// CEREBRO-PATCH(create-agent-capability-gate): JEH-1009 require create_agent
+	if !h.cerebroRequireCapability(w, r, workspaceID, "create_agent") {
+		return
+	}
 	var req CreateAgentRequest
 	rawFields, err := decodeJSONBodyWithRawFields(r.Body, &req)
 	if err != nil {
@@ -448,6 +452,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 
 	runtimeUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
 	if !ok {
+		return
+	}
+	// CEREBRO-PATCH(create-agent-runtime-allowlist): JEH-1009 require runtime allowlist
+	if !h.cerebroRequireRuntimeAccess(w, r, workspaceID, runtimeUUID) {
 		return
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")

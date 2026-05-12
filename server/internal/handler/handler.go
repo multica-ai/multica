@@ -94,7 +94,9 @@ type Handler struct {
 	ChannelListen ChannelListenInvoker
 	// CEREBRO-PATCH(handler-runtime-pause): cerebro runtime pause/unpause service.
 	RuntimePause RuntimePauseInvoker
-	cfg          Config
+	// CEREBRO-PATCH(handler-group-permissions): cerebro group-permission gate.
+	GroupPermissions GroupPermissionsInvoker
+	cfg              Config
 }
 
 // RuntimePauseInvoker is the upstream-side seam that the cerebro runtime

@@ -67,7 +67,6 @@ const sourceSerif = Source_Serif_4({
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  interactiveWidget: "resizes-content",
   // Cover the entire device viewport including notch / home indicator on iOS
   // so installed-PWA pages can opt into safe-area-inset-* via CSS.
   viewportFit: "cover",
