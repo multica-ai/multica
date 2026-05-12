@@ -46,6 +46,20 @@ func TestProvenanceFromRequest(t *testing.T) {
 			wantTaskNil:   true,
 		},
 		{
+			// Daemon-token clients can SET X-User-ID on outgoing requests
+			// (the daemon-token branch of DaemonAuth does not overwrite it
+			// the way the PAT/JWT branches do). ProvenanceFromRequest must
+			// ignore that value to prevent author/audit forgery — recording
+			// the spoofed UUID as the AuthorID would let a daemon token
+			// attribute an agent-driven edit to any user it names.
+			name:          "daemon token IGNORES client-supplied X-User-ID",
+			authPath:      DaemonAuthPathDaemonToken,
+			userIDHeader:  userID.String(),
+			wantType:      "agent_foreground",
+			wantAuthorNil: true,
+			wantTaskNil:   true,
+		},
+		{
 			name:          "PAT token",
 			authPath:      DaemonAuthPathPAT,
 			userIDHeader:  userID.String(),

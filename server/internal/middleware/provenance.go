@@ -41,10 +41,16 @@ func ProvenanceFromRequest(r *http.Request) Provenance {
 
 	// Author ID: for human tokens it's the user ID set by Auth middleware;
 	// for daemon tokens we don't have a direct user ID — leave nil (the
-	// daemon is acting on behalf of the agent, not a user).
-	if userID := r.Header.Get("X-User-ID"); userID != "" {
-		if uid, err := uuid.Parse(userID); err == nil {
-			p.AuthorID = &uid
+	// daemon is acting on behalf of the agent, not a user). The daemon-token
+	// branch of DaemonAuth does NOT overwrite client-supplied X-User-ID
+	// (unlike the PAT/JWT branches), so we must gate on authPath here.
+	// Without this filter, anyone holding a daemon token could spoof an
+	// arbitrary user UUID in the provenance / revision history audit trail.
+	if authPath != DaemonAuthPathDaemonToken {
+		if userID := r.Header.Get("X-User-ID"); userID != "" {
+			if uid, err := uuid.Parse(userID); err == nil {
+				p.AuthorID = &uid
+			}
 		}
 	}
 
