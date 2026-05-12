@@ -18,6 +18,13 @@ declare module "@multica/core/types/agent" {
     unpause_at?: string | null;
     /** Short slug for telemetry/UI: 'rate_limit', 'manual', 'maintenance', ... */
     pause_reason?: string | null;
+    /**
+     * JEH-999: the cerebro_account the daemon currently authenticates as.
+     * Populated by JEH-997 daemon heartbeat; older daemons (and the upstream
+     * API contract) omit it. RuntimeAccountsCard treats null/missing as
+     * "konto ukendt — daemon har ikke rapporteret endnu".
+     */
+    current_account_id?: string | null;
   }
 }
 

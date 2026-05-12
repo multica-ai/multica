@@ -5,6 +5,9 @@ export type {
   ImportStarterContentResponse,
   ImportStarterIssuePayload,
   ImportStarterWelcomeIssueTemplate,
+  // CEREBRO-PATCH(cerebro-account-client): re-export account types (JEH-921 / JEH-999)
+  CerebroAccount,
+  CreateCerebroAccountRequest,
 } from "./client";
 export { parseWithFallback, setSchemaLogger } from "./schema";
 export type { ParseOptions } from "./schema";

@@ -14,6 +14,8 @@ import {
   Bell,
   Sparkles,
   BookText,
+  // CEREBRO-PATCH(settings-page-accounts-icon): Konti tab icon (JEH-999)
+  KeyRound,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -33,6 +35,8 @@ import { AgentProfileTab } from "@multica/cerebro-profile/views";
 import { GroupsTab } from "@multica/cerebro-groups/views";
 // CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 feature flag gate
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+// CEREBRO-PATCH(settings-page-accounts-import): cerebro Konti tab (JEH-999)
+import { AccountsSettingsTab } from "@multica/cerebro-runtime/views";
 import { useT } from "../../i18n";
 import {
   CerebroMobileTabNav,
@@ -48,6 +52,8 @@ const ACCOUNT_TAB_ICONS = {
 } as const;
 // CEREBRO-PATCH(settings-page-agent-profile-key): cerebro Agent Profile tab value
 const AGENT_PROFILE_TAB_VALUE = "agent-profile";
+// CEREBRO-PATCH(settings-page-accounts-key): cerebro Konti tab value (JEH-999)
+const ACCOUNTS_TAB_VALUE = "accounts";
 
 const WORKSPACE_TAB_KEYS = ["general", "repositories", "labs", "members"] as const;
 const WORKSPACE_TAB_VALUES = {
@@ -108,6 +114,8 @@ export function SettingsPage({
         ...Object.values(WORKSPACE_TAB_VALUES),
         // CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 valid tab
         ...(groupsEnabled ? [GROUPS_TAB_VALUE] : []),
+        // CEREBRO-PATCH(settings-page-accounts-valid): include cerebro Konti tab (JEH-999)
+        ACCOUNTS_TAB_VALUE,
         // CEREBRO-PATCH(settings-page-documentation): documentation tab is valid
         ...(documentationContent ? ["documentation"] : []),
         ...(extraAccountTabs?.map((tab) => tab.value) ?? []),
@@ -162,6 +170,8 @@ export function SettingsPage({
         icon: Users,
       });
     }
+    // CEREBRO-PATCH(settings-page-accounts-mobile): cerebro Konti tab in workspace group (JEH-999)
+    workspaceItems.push({ value: ACCOUNTS_TAB_VALUE, label: "Konti", icon: KeyRound });
     const groups: CerebroMobileTabNavGroup[] = [
       {
         label: t(($) => $.page.my_account),
@@ -250,6 +260,11 @@ export function SettingsPage({
               Groups
             </TabsTrigger>
           )}
+          {/* CEREBRO-PATCH(settings-page-accounts-trigger): cerebro Konti tab trigger (JEH-999) */}
+          <TabsTrigger value={ACCOUNTS_TAB_VALUE}>
+            <KeyRound className="h-4 w-4" />
+            Konti
+          </TabsTrigger>
 
           {/* CEREBRO-PATCH(settings-page-documentation): Resources group with Documentation tab */}
           {documentationContent && (
@@ -287,6 +302,8 @@ export function SettingsPage({
             {groupsEnabled && (
               <TabsContent value={GROUPS_TAB_VALUE}><GroupsTab /></TabsContent>
             )}
+            {/* CEREBRO-PATCH(settings-page-accounts-content): cerebro Konti tab content (JEH-999) */}
+            <TabsContent value={ACCOUNTS_TAB_VALUE}><AccountsSettingsTab /></TabsContent>
             {extraAccountTabs?.map((tab) => (
               <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
             ))}
