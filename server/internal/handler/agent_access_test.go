@@ -117,10 +117,165 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 	return agentID, ownerID, memberID
 }
 
+func envRedactionTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
+	t.Helper()
+
+	ctx := context.Background()
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Env Agent Owner', 'env-agent-owner@multica.test')
+		RETURNING id
+	`).Scan(&ownerID); err != nil {
+		t.Fatalf("create env owner user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM "user" WHERE email = 'env-agent-owner@multica.test'`)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, testWorkspaceID, ownerID); err != nil {
+		t.Fatalf("add env owner as member: %v", err)
+	}
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Env Plain Member', 'env-plain-member@multica.test')
+		RETURNING id
+	`).Scan(&memberID); err != nil {
+		t.Fatalf("create env plain member user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM "user" WHERE email = 'env-plain-member@multica.test'`)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+	`, testWorkspaceID, memberID); err != nil {
+		t.Fatalf("add env plain member: %v", err)
+	}
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config
+		)
+		VALUES ($1, 'env-redaction-test-agent', '', 'cloud', '{}'::jsonb,
+		        $2, 'workspace', 1, $3, '',
+		        '{"ANTHROPIC_API_KEY":"sk-ant-test-1234","APP_NAME":"visible-value"}'::jsonb,
+		        '[]'::jsonb,
+		        '{"servers":{"test":{"env":{"TOKEN":"secret"}}}}'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, handlerTestRuntimeID(t), ownerID).Scan(&agentID); err != nil {
+		t.Fatalf("create env redaction agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	return agentID, ownerID, memberID
+}
+
 func newRequestAs(userID, method, path string, body any) *http.Request {
 	req := newRequest(method, path, body)
 	req.Header.Set("X-User-ID", userID)
 	return req
+}
+
+func newRequestAsWorkspaceMember(t *testing.T, userID, method, path string, body any) *http.Request {
+	t.Helper()
+
+	req := newRequestAs(userID, method, path, body)
+	member, err := testHandler.getWorkspaceMember(req.Context(), userID, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("load workspace member: %v", err)
+	}
+	return req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, member))
+}
+
+func findAgentResponse(t *testing.T, body []byte, agentID string) AgentResponse {
+	t.Helper()
+
+	var resp []AgentResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode ListAgents response: %v", err)
+	}
+	for _, a := range resp {
+		if a.ID == agentID {
+			return a
+		}
+	}
+	t.Fatalf("ListAgents response did not include agent %s", agentID)
+	return AgentResponse{}
+}
+
+func TestIsCredentialKey(t *testing.T) {
+	cases := []struct {
+		key  string
+		want bool
+	}{
+		{"ANTHROPIC_API_KEY", true},
+		{"GH_TOKEN", true},
+		{"DB_SECRET", true},
+		{"AWS_ACCESS_KEY", true},
+		{"GITHUB_PAT", true},
+		{"AUTHORIZATION", true},
+		{"authorization", true},
+		{"APP_NAME", false},
+		{"PORT", false},
+		{"TIMEOUT_SECONDS", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			if got := isCredentialKey(tc.key); got != tc.want {
+				t.Fatalf("isCredentialKey(%q) = %v; want %v", tc.key, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRedactEnv_Format(t *testing.T) {
+	resp := AgentResponse{
+		CustomEnv: map[string]string{
+			"ANTHROPIC_API_KEY": "sk-ant-test-1234",
+		},
+	}
+
+	redactEnv(&resp)
+
+	if got := resp.CustomEnv["ANTHROPIC_API_KEY"]; got != "***16B" {
+		t.Fatalf("redactEnv mask = %q; want ***16B", got)
+	}
+	if !resp.CustomEnvRedacted {
+		t.Fatal("redactEnv did not set CustomEnvRedacted")
+	}
+}
+
+func TestRedactCredentialKeys_InRevealMode(t *testing.T) {
+	resp := AgentResponse{
+		CustomEnv: map[string]string{
+			"ANTHROPIC_API_KEY": "sk-ant-test-1234",
+			"APP_NAME":          "visible-value",
+		},
+	}
+
+	redactCredentialKeys(&resp)
+
+	if got := resp.CustomEnv["ANTHROPIC_API_KEY"]; got != "***16B" {
+		t.Fatalf("credential key mask = %q; want ***16B", got)
+	}
+	if got := resp.CustomEnv["APP_NAME"]; got != "visible-value" {
+		t.Fatalf("non-credential key = %q; want visible-value", got)
+	}
+	if !resp.CustomEnvRedacted {
+		t.Fatal("redactCredentialKeys did not set CustomEnvRedacted")
+	}
 }
 
 // TestGetAgent_PrivateAgentForbidsPlainMember verifies the private-agent
@@ -186,6 +341,186 @@ func TestListAgents_FiltersPrivateForPlainMember(t *testing.T) {
 	}
 	if listContainsAgent(t, w.Body.Bytes(), agentID) {
 		t.Fatalf("ListAgents as plain member leaked private agent %s", agentID)
+	}
+}
+
+func TestListAgents_EnvRedactedForNonOwner(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID, _, memberID := envRedactionTestFixture(t)
+
+	w := httptest.NewRecorder()
+	req := newRequestAsWorkspaceMember(t, memberID, "GET", "/api/agents", nil)
+	testHandler.ListAgents(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListAgents as non-owner: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	resp := findAgentResponse(t, w.Body.Bytes(), agentID)
+	if got := resp.CustomEnv["ANTHROPIC_API_KEY"]; got != "***16B" {
+		t.Fatalf("ANTHROPIC_API_KEY = %q; want ***16B", got)
+	}
+	if got := resp.CustomEnv["APP_NAME"]; got != "***13B" {
+		t.Fatalf("APP_NAME = %q; want ***13B", got)
+	}
+	if !resp.CustomEnvRedacted {
+		t.Fatal("CustomEnvRedacted = false; want true")
+	}
+	if !resp.McpConfigRedacted {
+		t.Fatal("McpConfigRedacted = false; want true")
+	}
+}
+
+func TestListAgents_OwnerWithoutReveal_StillRedacted(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID, ownerID, _ := envRedactionTestFixture(t)
+
+	w := httptest.NewRecorder()
+	req := newRequestAsWorkspaceMember(t, ownerID, "GET", "/api/agents", nil)
+	testHandler.ListAgents(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListAgents as owner: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	resp := findAgentResponse(t, w.Body.Bytes(), agentID)
+	if got := resp.CustomEnv["ANTHROPIC_API_KEY"]; got != "***16B" {
+		t.Fatalf("ANTHROPIC_API_KEY = %q; want ***16B", got)
+	}
+	if got := resp.CustomEnv["APP_NAME"]; got != "***13B" {
+		t.Fatalf("APP_NAME = %q; want ***13B", got)
+	}
+	if !resp.CustomEnvRedacted {
+		t.Fatal("CustomEnvRedacted = false; want true")
+	}
+}
+
+func TestListAgents_OwnerWithReveal_CredentialKeysStillMasked(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID, ownerID, _ := envRedactionTestFixture(t)
+
+	w := httptest.NewRecorder()
+	req := newRequestAsWorkspaceMember(t, ownerID, "GET", "/api/agents?reveal=1", nil)
+	testHandler.ListAgents(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListAgents as owner with reveal: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	resp := findAgentResponse(t, w.Body.Bytes(), agentID)
+	if got := resp.CustomEnv["ANTHROPIC_API_KEY"]; got != "***16B" {
+		t.Fatalf("ANTHROPIC_API_KEY = %q; want ***16B", got)
+	}
+	if got := resp.CustomEnv["APP_NAME"]; got != "visible-value" {
+		t.Fatalf("APP_NAME = %q; want visible-value", got)
+	}
+	if !resp.CustomEnvRedacted {
+		t.Fatal("CustomEnvRedacted = false; want true")
+	}
+	if resp.McpConfigRedacted {
+		t.Fatal("McpConfigRedacted = true; want false in reveal mode")
+	}
+}
+
+func TestGetAgent_EnvRedactedForNonOwner(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID, _, memberID := envRedactionTestFixture(t)
+
+	w := httptest.NewRecorder()
+	req := newRequestAsWorkspaceMember(t, memberID, "GET", "/api/agents/"+agentID, nil)
+	req = withURLParam(req, "id", agentID)
+	testHandler.GetAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetAgent as non-owner: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode GetAgent response: %v", err)
+	}
+	if got := resp.CustomEnv["ANTHROPIC_API_KEY"]; got != "***16B" {
+		t.Fatalf("ANTHROPIC_API_KEY = %q; want ***16B", got)
+	}
+	if got := resp.CustomEnv["APP_NAME"]; got != "***13B" {
+		t.Fatalf("APP_NAME = %q; want ***13B", got)
+	}
+	if !resp.CustomEnvRedacted {
+		t.Fatal("CustomEnvRedacted = false; want true")
+	}
+	if !resp.McpConfigRedacted {
+		t.Fatal("McpConfigRedacted = false; want true")
+	}
+}
+
+func TestGetAgent_OwnerWithoutReveal_StillRedacted(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID, ownerID, _ := envRedactionTestFixture(t)
+
+	w := httptest.NewRecorder()
+	req := newRequestAsWorkspaceMember(t, ownerID, "GET", "/api/agents/"+agentID, nil)
+	req = withURLParam(req, "id", agentID)
+	testHandler.GetAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetAgent as owner: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode GetAgent response: %v", err)
+	}
+	if got := resp.CustomEnv["ANTHROPIC_API_KEY"]; got != "***16B" {
+		t.Fatalf("ANTHROPIC_API_KEY = %q; want ***16B", got)
+	}
+	if got := resp.CustomEnv["APP_NAME"]; got != "***13B" {
+		t.Fatalf("APP_NAME = %q; want ***13B", got)
+	}
+	if !resp.CustomEnvRedacted {
+		t.Fatal("CustomEnvRedacted = false; want true")
+	}
+}
+
+func TestGetAgent_OwnerWithReveal_CredentialKeysStillMasked(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID, ownerID, _ := envRedactionTestFixture(t)
+
+	w := httptest.NewRecorder()
+	req := newRequestAsWorkspaceMember(t, ownerID, "GET", "/api/agents/"+agentID+"?reveal=1", nil)
+	req = withURLParam(req, "id", agentID)
+	testHandler.GetAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetAgent as owner with reveal: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode GetAgent response: %v", err)
+	}
+	if got := resp.CustomEnv["ANTHROPIC_API_KEY"]; got != "***16B" {
+		t.Fatalf("ANTHROPIC_API_KEY = %q; want ***16B", got)
+	}
+	if got := resp.CustomEnv["APP_NAME"]; got != "visible-value" {
+		t.Fatalf("APP_NAME = %q; want visible-value", got)
+	}
+	if !resp.CustomEnvRedacted {
+		t.Fatal("CustomEnvRedacted = false; want true")
+	}
+	if resp.McpConfigRedacted {
+		t.Fatal("McpConfigRedacted = true; want false in reveal mode")
 	}
 }
 

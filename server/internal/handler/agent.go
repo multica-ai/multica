@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -386,10 +387,12 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
 		}
-		// Redact sensitive fields for users who are not the agent owner or workspace owner/admin.
-		if !canViewAgentEnv(a, userID, member.Role) {
+		reveal := canViewAgentEnv(a, userID, member.Role) && r.URL.Query().Get("reveal") == "1"
+		if !reveal {
 			redactEnv(&resp)
 			redactMcpConfig(&resp)
+		} else {
+			redactCredentialKeys(&resp)
 		}
 		visible = append(visible, resp)
 	}
@@ -437,9 +440,12 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	// Redact sensitive fields for users who are not the agent owner or workspace owner/admin.
 	userID := requestUserID(r)
 	if member, ok := ctxMember(r.Context()); ok {
-		if !canViewAgentEnv(agent, userID, member.Role) {
+		reveal := canViewAgentEnv(agent, userID, member.Role) && r.URL.Query().Get("reveal") == "1"
+		if !reveal {
 			redactEnv(&resp)
 			redactMcpConfig(&resp)
+		} else {
+			redactCredentialKeys(&resp)
 		}
 	}
 
@@ -658,16 +664,47 @@ func canViewAgentEnv(agent db.Agent, userID string, memberRole string) bool {
 	return uuidToString(agent.OwnerID) == userID
 }
 
-// redactEnv masks custom_env values in the response when the caller is not
-// authorised to view them. Keys are preserved so members can see which
-// variables are configured; values are replaced with "****".
+// redactEnv masks custom_env values in the response. Keys are preserved so
+// members can see which variables are configured; values reveal byte length.
 func redactEnv(resp *AgentResponse) {
 	masked := make(map[string]string, len(resp.CustomEnv))
-	for k := range resp.CustomEnv {
-		masked[k] = "****"
+	for k, v := range resp.CustomEnv {
+		masked[k] = fmt.Sprintf("***%dB", len(v))
 	}
 	resp.CustomEnv = masked
 	resp.CustomEnvRedacted = true
+}
+
+// credentialKeySuffixes are well-known env var suffixes that indicate a
+// secret credential. Keys matching these patterns are always masked, even
+// when the caller has owner/admin access and uses ?reveal=1.
+var credentialKeySuffixes = []string{
+	"_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_PAT",
+}
+
+func isCredentialKey(k string) bool {
+	upper := strings.ToUpper(k)
+	if upper == "AUTHORIZATION" {
+		return true
+	}
+	for _, suffix := range credentialKeySuffixes {
+		if strings.HasSuffix(upper, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// redactCredentialKeys masks values whose key name matches a well-known
+// credential pattern. Called even when the viewer is the agent owner with
+// ?reveal=1; credential values must never appear in an API response.
+func redactCredentialKeys(resp *AgentResponse) {
+	for k, v := range resp.CustomEnv {
+		if isCredentialKey(k) {
+			resp.CustomEnv[k] = fmt.Sprintf("***%dB", len(v))
+			resp.CustomEnvRedacted = true
+		}
+	}
 }
 
 // redactMcpConfig removes the mcp_config value from the response when the caller is not

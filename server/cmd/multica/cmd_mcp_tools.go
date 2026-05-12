@@ -472,7 +472,7 @@ func registerAgentTools(srv *server.MCPServer, c *cli.APIClient) {
 	srv.AddTool(
 		mcp.NewTool(
 			"multica_agent_get",
-			mcp.WithDescription("Fetch full details for one agent (instructions, skills, runtime, custom env). Use to verify an agent is reachable before assigning to it."),
+			mcp.WithDescription("Fetch details for one agent (name, instructions, skills, runtime). Use to verify an agent is reachable before assigning to it."),
 			mcp.WithString("id", mcp.Required()),
 		),
 		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
