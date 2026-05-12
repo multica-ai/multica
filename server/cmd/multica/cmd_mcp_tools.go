@@ -34,6 +34,7 @@ func RegisterAllMCPTools(srv *server.MCPServer, c *cli.APIClient) {
 	registerIssueTools(srv, c)
 	registerAgentTools(srv, c)
 	registerChannelTools(srv, c)
+	registerMentionTools(srv, c)
 	registerProjectTools(srv, c)
 	registerMemoryTools(srv, c)
 	registerLabelTools(srv, c)
@@ -408,6 +409,7 @@ func registerIssueTools(srv *server.MCPServer, c *cli.APIClient) {
 			mcp.WithString("issue_id", mcp.Required()),
 			mcp.WithString("content", mcp.Required()),
 			mcp.WithString("parent_comment_id", mcp.Description("Reply to an existing comment instead of starting a new thread.")),
+			mcp.WithArray("mentions", mcp.Description("Optional. Array of {label, type, id?} objects. Server resolves names to UUIDs and splices canonical mention links into the stored content, triggering the target agent/member.")),
 		),
 		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
 			issueID, errResult := requireString(req, "issue_id")
@@ -422,6 +424,7 @@ func registerIssueTools(srv *server.MCPServer, c *cli.APIClient) {
 				"content":   content,
 				"parent_id": nullableString(argString(req, "parent_comment_id")),
 			}
+			setIfPresent(body, "mentions", argRaw(req, "mentions"))
 			var out json.RawMessage
 			if err := c.PostJSON(ctx, "/api/issues/"+url.PathEscape(issueID)+"/comments", body, &out); err != nil {
 				return nil, err
@@ -615,6 +618,7 @@ func registerChannelTools(srv *server.MCPServer, c *cli.APIClient) {
 			mcp.WithString("channel_id", mcp.Required()),
 			mcp.WithString("content", mcp.Required()),
 			mcp.WithString("parent_message_id", mcp.Description("Reply in a thread instead of the main timeline.")),
+			mcp.WithArray("mentions", mcp.Description("Optional. Array of {label, type, id?} objects. Server resolves names to UUIDs and splices canonical mention links into the stored content, triggering the target agent/member.")),
 		),
 		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
 			channelID, errResult := requireString(req, "channel_id")
@@ -629,6 +633,7 @@ func registerChannelTools(srv *server.MCPServer, c *cli.APIClient) {
 				"content":           content,
 				"parent_message_id": nullableString(argString(req, "parent_message_id")),
 			}
+			setIfPresent(body, "mentions", argRaw(req, "mentions"))
 			var out json.RawMessage
 			if err := c.PostJSON(ctx, "/api/channels/"+url.PathEscape(channelID)+"/messages", body, &out); err != nil {
 				return nil, err
@@ -675,6 +680,39 @@ func registerChannelTools(srv *server.MCPServer, c *cli.APIClient) {
 			body := map[string]any{"message_id": messageID}
 			var out json.RawMessage
 			if err := c.PostJSON(ctx, "/api/channels/"+url.PathEscape(channelID)+"/read", body, &out); err != nil {
+				return nil, err
+			}
+			return out, nil
+		}),
+	)
+}
+
+// ---------------------------------------------------------------------------
+// Mentions
+// ---------------------------------------------------------------------------
+
+func registerMentionTools(srv *server.MCPServer, c *cli.APIClient) {
+	srv.AddTool(
+		mcp.NewTool(
+			"multica_mention_resolve",
+			mcp.WithDescription("Resolve a member or agent name to a canonical mention link. Use before posting when you know the display name but not the UUID. On ambiguous match, returns error + candidates list."),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Display name to resolve.")),
+			mcp.WithString("type", mcp.Required(), mcp.Description("'agent' or 'member'")),
+		),
+		toolHandler(func(ctx context.Context, req mcp.CallToolRequest) (any, error) {
+			name, errResult := requireString(req, "name")
+			if errResult != nil {
+				return errResult, nil
+			}
+			mentionType, errResult := requireString(req, "type")
+			if errResult != nil {
+				return errResult, nil
+			}
+			var out json.RawMessage
+			if err := c.GetJSON(ctx, "/api/mention-resolve"+queryString(
+				[2]string{"name", name},
+				[2]string{"type", mentionType},
+			), &out); err != nil {
 				return nil, err
 			}
 			return out, nil

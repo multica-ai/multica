@@ -358,7 +358,8 @@ type CreateChannelMessageRequest struct {
 	// channel_message.metadata.attachments JSONB array. The handler
 	// validates each id exists, lives in the same workspace, and was
 	// uploaded by the same actor before stamping it.
-	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	AttachmentIDs []string       `json:"attachment_ids,omitempty"`
+	Mentions      []MentionInput `json:"mentions,omitempty"`
 }
 
 // CreateChannelMessage handles POST /api/channels/{channelId}/messages.
@@ -411,6 +412,18 @@ func (h *Handler) CreateChannelMessage(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+	}
+
+	if len(req.Mentions) > 0 {
+		links, resolveErr := h.ResolveMentionInputs(r.Context(), wsID, req.Mentions)
+		if resolveErr != nil {
+			if writeMentionResolveError(w, resolveErr) {
+				return
+			}
+			writeError(w, http.StatusBadRequest, resolveErr.Error())
+			return
+		}
+		req.Content = spliceCanonicalMentions(req.Content, links)
 	}
 
 	params := channel.CreateMessageParams{

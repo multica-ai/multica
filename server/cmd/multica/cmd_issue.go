@@ -312,6 +312,7 @@ func init() {
 	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID (reply to a specific comment)")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
+	issueCommentAddCmd.Flags().StringArray("mention", nil, "Mention a member or agent by name, formatted as 'Name:agent' or 'Name:member'. May be repeated.")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue search
@@ -1004,6 +1005,23 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 	if len(attachmentIDs) > 0 {
 		body["attachment_ids"] = attachmentIDs
+	}
+	mentionStrs, _ := cmd.Flags().GetStringArray("mention")
+	mentions := make([]map[string]string, 0, len(mentionStrs))
+	for _, ms := range mentionStrs {
+		parts := strings.SplitN(ms, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("--mention must be formatted as 'Name:agent' or 'Name:member'")
+		}
+		label := strings.TrimSpace(parts[0])
+		mentionType := strings.TrimSpace(strings.ToLower(parts[1]))
+		if label == "" || (mentionType != "agent" && mentionType != "member") {
+			return fmt.Errorf("--mention must be formatted as 'Name:agent' or 'Name:member'")
+		}
+		mentions = append(mentions, map[string]string{"label": label, "type": mentionType})
+	}
+	if len(mentions) > 0 {
+		body["mentions"] = mentions
 	}
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues/"+issueID+"/comments", body, &result); err != nil {

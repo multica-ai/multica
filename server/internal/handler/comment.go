@@ -124,10 +124,11 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateCommentRequest struct {
-	Content       string   `json:"content"`
-	Type          string   `json:"type"`
-	ParentID      *string  `json:"parent_id"`
-	AttachmentIDs []string `json:"attachment_ids"`
+	Content       string         `json:"content"`
+	Type          string         `json:"type"`
+	ParentID      *string        `json:"parent_id"`
+	AttachmentIDs []string       `json:"attachment_ids"`
+	Mentions      []MentionInput `json:"mentions,omitempty"`
 }
 
 func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
@@ -209,6 +210,18 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
 	req.Content = mention.ExpandIssueIdentifiers(r.Context(), h.Queries, issue.WorkspaceID, req.Content)
+
+	if len(req.Mentions) > 0 {
+		links, resolveErr := h.ResolveMentionInputs(r.Context(), issue.WorkspaceID, req.Mentions)
+		if resolveErr != nil {
+			if writeMentionResolveError(w, resolveErr) {
+				return
+			}
+			writeError(w, http.StatusBadRequest, resolveErr.Error())
+			return
+		}
+		req.Content = spliceCanonicalMentions(req.Content, links)
+	}
 
 	// NOTE: Comment content is stored as Markdown source. XSS is handled at the
 	// rendering layer (rehype-sanitize) and at the editor layer
