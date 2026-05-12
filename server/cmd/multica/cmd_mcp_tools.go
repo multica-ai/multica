@@ -373,34 +373,40 @@ WRITING GUIDELINES:
 	// -----------------------------------------------------------------------
 	// add_attachment
 	// -----------------------------------------------------------------------
+	// CEREBRO-PATCH(mcp-add-attachment-chat): JEH-1083 — accept chat_message_id
+	// so chat-task agents can attach screenshots/logs/files to their reply,
+	// then reference them inline with markdown (`![filename](url)`). The
+	// UploadAttachmentTo helper carries the field to /api/upload-file.
 	srv.RegisterTool(mcp.Tool{
 		Name: "add_attachment",
-		Description: `Attach a local file to an issue or comment. Reads the file from your machine and uploads it to the workspace. Use for screenshots, logs, diagrams, design files, or any artifact that helps document the work.
+		Description: `Attach a local file to an issue, comment, or chat reply. Reads the file from your machine and uploads it to the workspace. Use for screenshots, logs, diagrams, design files, or any artifact that helps document the work.
 
 USAGE:
-- To attach to the issue itself, pass only issue_id.
-- To attach to a specific comment, pass both issue_id and comment_id.
+- To attach to an issue, pass issue_id (and comment_id to attach to a specific comment instead of the issue body).
+- To attach to your reply in a chat session, pass chat_message_id. When running as a chat task, the platform exposes your assistant chat_message UUID as the MULTICA_CHAT_MESSAGE_ID environment variable — use that value. After upload, reference the file inline with markdown ` + "`![filename](url)`" + ` so the chat window renders it.
 - The path may be absolute or relative to the current working directory.
 - Max file size is 100 MB.`,
 		InputSchema: map[string]any{
 			"type":     "object",
-			"required": []string{"issue_id", "path"},
+			"required": []string{"path"},
 			"properties": map[string]any{
-				"issue_id":   map[string]any{"type": "string", "description": "Issue to attach the file to"},
-				"path":       map[string]any{"type": "string", "description": "Local file path (absolute or relative to cwd)"},
-				"comment_id": map[string]any{"type": "string", "description": "Optional: attach to this comment instead of the issue body"},
+				"issue_id":        map[string]any{"type": "string", "description": "Issue to attach the file to (omit when attaching to a chat reply)"},
+				"path":            map[string]any{"type": "string", "description": "Local file path (absolute or relative to cwd)"},
+				"comment_id":      map[string]any{"type": "string", "description": "Optional: attach to this comment instead of the issue body"},
+				"chat_message_id": map[string]any{"type": "string", "description": "Chat reply to attach the file to. Use $MULTICA_CHAT_MESSAGE_ID when running as a chat task."},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
-		issueID, err := requireString(args, "issue_id")
-		if err != nil {
-			return mcp.ErrorResult(err.Error()), nil
-		}
 		path, err := requireString(args, "path")
 		if err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}
+		issueID := optString(args, "issue_id")
 		commentID := optString(args, "comment_id")
+		chatMessageID := optString(args, "chat_message_id")
+		if issueID == "" && chatMessageID == "" {
+			return mcp.ErrorResult("either issue_id or chat_message_id must be set"), nil
+		}
 
 		if !filepath.IsAbs(path) {
 			if abs, err := filepath.Abs(path); err == nil {
@@ -424,7 +430,11 @@ USAGE:
 			return mcp.ErrorResult(fmt.Sprintf("read file: %v", err)), nil
 		}
 
-		result, err := client.UploadAttachment(ctx, data, filepath.Base(path), issueID, commentID)
+		result, err := client.UploadAttachmentTo(ctx, data, filepath.Base(path), cli.AttachmentTarget{
+			IssueID:       issueID,
+			CommentID:     commentID,
+			ChatMessageID: chatMessageID,
+		})
 		if err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}

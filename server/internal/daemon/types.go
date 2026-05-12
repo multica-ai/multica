@@ -57,6 +57,8 @@ type Task struct {
 	TriggerAuthorType     string                `json:"trigger_author_type,omitempty"`     // "agent" or "member" — author kind for the triggering comment
 	TriggerAuthorName     string                `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
 	ChatSessionID         string                `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
+	// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — pre-created assistant chat_message UUID exposed to the agent as MULTICA_CHAT_MESSAGE_ID so the MCP add_attachment tool can link files to the in-flight chat reply.
+	ChatMessageID string `json:"chat_message_id,omitempty"`
 	// CEREBRO-PATCH(daemon-task-chat-messages): cerebro accumulates a list of
 	// user messages newer than the last assistant reply (oldest first) so the
 	// daemon can build a prompt covering bursts; ChatMessage stays for

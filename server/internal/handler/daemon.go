@@ -1412,6 +1412,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.ChatMessage = resp.ChatMessages[n-1]
 				}
 			}
+			// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — pre-create the
+			// assistant chat_message row up-front so the agent can attach files
+			// to it mid-turn (the MCP add_attachment tool reads its UUID from
+			// MULTICA_CHAT_MESSAGE_ID). The complete/cancel/fail paths update
+			// this row in place instead of inserting a new one, so we still end
+			// up with exactly one assistant row per task.
+			resp.ChatMessageID = h.ensureAssistantChatMessageForTask(r.Context(), task.ID, cs.ID)
 		}
 	}
 

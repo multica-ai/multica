@@ -1877,6 +1877,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.AutopilotID != "" {
 		agentEnv["MULTICA_AUTOPILOT_ID"] = task.AutopilotID
 	}
+	// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — surface the
+	// pre-created assistant chat_message UUID so the MCP add_attachment
+	// tool can target this turn's chat reply without an extra round-trip.
+	if task.ChatMessageID != "" {
+		agentEnv["MULTICA_CHAT_MESSAGE_ID"] = task.ChatMessageID
+	}
 	// Quick-create marker — when set, the multica CLI's `issue create`
 	// command stamps the new issue with origin_type=quick_create +
 	// origin_id=<task_id> so the completion handler can find it

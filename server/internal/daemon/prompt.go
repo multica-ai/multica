@@ -155,6 +155,11 @@ func buildChatPrompt(task Task) string {
 		}
 		fmt.Fprintf(&b, "User message:\n%s\n", msg)
 	}
+	// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — tell the chat agent
+	// how to attach files (screenshots, exports, logs) to its reply.
+	if task.ChatMessageID != "" {
+		b.WriteString("\nTo include a file in your reply (screenshot, log, exported document), call the `add_attachment` MCP tool with `chat_message_id=$MULTICA_CHAT_MESSAGE_ID`. The response includes a public URL — reference it inline with markdown like `![filename](url)` so it renders in the chat window.\n")
+	}
 	return b.String()
 }
 

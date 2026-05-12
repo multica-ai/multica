@@ -761,13 +761,14 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 			if err != nil {
 				return fmt.Errorf("build cancelled chat content: %w", err)
 			}
-			if _, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+			// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — upsert the pre-created assistant row from the claim path instead of inserting a duplicate.
+			if err := upsertAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
 				ChatSessionID: t.ChatSessionID,
 				Role:          "assistant",
 				Content:       content,
 				TaskID:        taskID,
 			}); err != nil {
-				return fmt.Errorf("create cancelled chat message: %w", err)
+				return fmt.Errorf("upsert cancelled chat message: %w", err)
 			}
 			// Treat the cancel as the response to every user message the
 			// task had already bundled (i.e. created before the task
@@ -834,6 +835,30 @@ func buildCancelledChatContent(ctx context.Context, q *db.Queries, taskID pgtype
 	}
 	sb.WriteString(cancelledByUserMarker)
 	return sb.String(), nil
+}
+
+// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — upsert the assistant
+// chat_message for a chat task. The claim path pre-creates an empty stub
+// (so the agent can attach files mid-turn via MULTICA_CHAT_MESSAGE_ID);
+// complete/cancel/fail call this helper to set the final content on the
+// same row. Falls back to INSERT for tasks that bypassed the claim path
+// (direct-SQL test fixtures, legacy daemons that pre-date the patch).
+func upsertAssistantChatMessage(ctx context.Context, q *db.Queries, params db.CreateChatMessageParams) error {
+	if !params.TaskID.Valid {
+		_, err := q.CreateChatMessage(ctx, params)
+		return err
+	}
+	if existing, err := q.GetAssistantChatMessageByTaskID(ctx, params.TaskID); err == nil {
+		_, err := q.UpdateAssistantChatMessageContent(ctx, db.UpdateAssistantChatMessageContentParams{
+			ID:            existing.ID,
+			Content:       params.Content,
+			FailureReason: params.FailureReason,
+			ElapsedMs:     params.ElapsedMs,
+		})
+		return err
+	}
+	_, err := q.CreateChatMessage(ctx, params)
+	return err
 }
 
 // ClaimTask atomically claims the next queued task for an agent,
@@ -1114,14 +1139,15 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 				// breaks. Same contract as the issue-comment fallback below — see
 				// util.UnescapeBackslashEscapes.
 				body := util.UnescapeBackslashEscapes(payload.Output)
-				if _, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+				// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — upsert the pre-created assistant row from the claim path instead of inserting a duplicate.
+				if err := upsertAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
 					ChatSessionID: t.ChatSessionID,
 					Role:          "assistant",
 					Content:       redact.Text(body),
 					TaskID:        t.ID,
 					ElapsedMs:     computeChatElapsedMs(t),
 				}); err != nil {
-					return fmt.Errorf("create assistant chat message: %w", err)
+					return fmt.Errorf("upsert assistant chat message: %w", err)
 				}
 				if err := qtx.MarkUserMessagesRespondedBefore(ctx, db.MarkUserMessagesRespondedBeforeParams{
 					ChatSessionID: t.ChatSessionID,
@@ -1335,7 +1361,8 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// pending (the new attempt will write its own outcome) — same guard as
 	// the issue path above.
 	if task.ChatSessionID.Valid && retried == nil {
-		if _, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — upsert the pre-created assistant row from the claim path instead of inserting a duplicate.
+		if err := upsertAssistantChatMessage(ctx, s.Queries, db.CreateChatMessageParams{
 			ChatSessionID: task.ChatSessionID,
 			Role:          "assistant",
 			Content:       redact.Text(errMsg),
