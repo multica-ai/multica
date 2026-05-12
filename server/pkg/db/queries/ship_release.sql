@@ -487,6 +487,47 @@ WHERE workspace_id = $1
 ORDER BY updated_at DESC
 LIMIT 1;
 
+-- name: FindStuckPromotingReleaseForProject :one
+-- Time-based fallback for the deploy poller: when a successful
+-- production workflow run doesn't have an exact SHA match against
+-- any release's merged_main_sha / production_main_sha, find the
+-- oldest stuck-in-promoting release for the same project whose
+-- merged_at predates the deploy. Mirrors the Kanban time-based
+-- deploy fallback (packages/views/ship/hooks/use-pr-state.ts) which
+-- handles the same squash-merge / merge-train SHA-mismatch problem
+-- for direct PR rows.
+--
+-- Why this exists: a release's merged_main_sha is the SHA of the
+-- merge commit at the tip of the merge train. The production deploy
+-- workflow is typically triggered for a LATER commit on main (a
+-- manual workflow_dispatch, or a subsequent push). The strict SHA
+-- match in FindReleaseByProductionMainSHA never fires for that
+-- deploy even though git ancestry says ROA-130's commits ARE
+-- running in prod. This fallback unsticks the release the same way
+-- the user would by clicking "Mark production deployed".
+--
+-- Constraints:
+--   * Same workspace + same project as the deploy.
+--   * stage = 'promoting' — verifying still expects QA, and
+--     in_production has already cleared this fence. Only "stuck
+--     waiting for prod CI to be detected" gets unstuck here.
+--   * production_deploy_id IS NULL — never overwrite a real link.
+--   * merged_at < $3 — never link a deploy that finished BEFORE
+--     the release merged. Prevents a stale deploy from re-linking
+--     a fresh release.
+--   * ORDER BY merged_at ASC — the oldest stranded release wins.
+--     If two releases are stuck in promoting, the next poller tick
+--     will pick up the second after a subsequent deploy lands.
+SELECT * FROM ship_release
+WHERE workspace_id = $1
+  AND project_id = $2
+  AND stage = 'promoting'
+  AND production_deploy_id IS NULL
+  AND merged_at IS NOT NULL
+  AND merged_at < $3
+ORDER BY merged_at ASC
+LIMIT 1;
+
 -- name: ListReleasesPastMonitoringWindow :many
 -- The release finalizer goroutine reads this every 15 minutes. Returns
 -- in_production releases whose promoted_at is older than the supplied

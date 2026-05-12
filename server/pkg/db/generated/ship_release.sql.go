@@ -385,6 +385,96 @@ func (q *Queries) FindReleaseBySmokeRunID(ctx context.Context, arg FindReleaseBy
 	return i, err
 }
 
+const findStuckPromotingReleaseForProject = `-- name: FindStuckPromotingReleaseForProject :one
+SELECT id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method, smoke_run_id, smoke_run_url, smoke_status, smoke_completed_at, qa_verified_at, qa_verified_by, merged_main_sha, promoted_by, production_main_sha, rolled_back_by, rolled_back_completed_at FROM ship_release
+WHERE workspace_id = $1
+  AND project_id = $2
+  AND stage = 'promoting'
+  AND production_deploy_id IS NULL
+  AND merged_at IS NOT NULL
+  AND merged_at < $3
+ORDER BY merged_at ASC
+LIMIT 1
+`
+
+type FindStuckPromotingReleaseForProjectParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	MergedAt    pgtype.Timestamptz `json:"merged_at"`
+}
+
+// Time-based fallback for the deploy poller: when a successful
+// production workflow run doesn't have an exact SHA match against
+// any release's merged_main_sha / production_main_sha, find the
+// oldest stuck-in-promoting release for the same project whose
+// merged_at predates the deploy. Mirrors the Kanban time-based
+// deploy fallback (packages/views/ship/hooks/use-pr-state.ts) which
+// handles the same squash-merge / merge-train SHA-mismatch problem
+// for direct PR rows.
+//
+// Why this exists: a release's merged_main_sha is the SHA of the
+// merge commit at the tip of the merge train. The production deploy
+// workflow is typically triggered for a LATER commit on main (a
+// manual workflow_dispatch, or a subsequent push). The strict SHA
+// match in FindReleaseByProductionMainSHA never fires for that
+// deploy even though git ancestry says ROA-130's commits ARE
+// running in prod. This fallback unsticks the release the same way
+// the user would by clicking "Mark production deployed".
+//
+// Constraints:
+//   - Same workspace + same project as the deploy.
+//   - stage = 'promoting' — verifying still expects QA, and
+//     in_production has already cleared this fence. Only "stuck
+//     waiting for prod CI to be detected" gets unstuck here.
+//   - production_deploy_id IS NULL — never overwrite a real link.
+//   - merged_at < $3 — never link a deploy that finished BEFORE
+//     the release merged. Prevents a stale deploy from re-linking
+//     a fresh release.
+//   - ORDER BY merged_at ASC — the oldest stranded release wins.
+//     If two releases are stuck in promoting, the next poller tick
+//     will pick up the second after a subsequent deploy lands.
+func (q *Queries) FindStuckPromotingReleaseForProject(ctx context.Context, arg FindStuckPromotingReleaseForProjectParams) (ShipRelease, error) {
+	row := q.db.QueryRow(ctx, findStuckPromotingReleaseForProject, arg.WorkspaceID, arg.ProjectID, arg.MergedAt)
+	var i ShipRelease
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.Title,
+		&i.Description,
+		&i.Stage,
+		&i.RiskLevel,
+		&i.ChannelID,
+		&i.IssueID,
+		&i.ApproverID,
+		&i.SecondApproverID,
+		&i.StagingDeployID,
+		&i.ProductionDeployID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MergedAt,
+		&i.StagedAt,
+		&i.PromotedAt,
+		&i.DoneAt,
+		&i.RollbackReason,
+		&i.MergePaused,
+		&i.MergeMethod,
+		&i.SmokeRunID,
+		&i.SmokeRunUrl,
+		&i.SmokeStatus,
+		&i.SmokeCompletedAt,
+		&i.QaVerifiedAt,
+		&i.QaVerifiedBy,
+		&i.MergedMainSha,
+		&i.PromotedBy,
+		&i.ProductionMainSha,
+		&i.RolledBackBy,
+		&i.RolledBackCompletedAt,
+	)
+	return i, err
+}
+
 const getActiveReleaseForPullRequest = `-- name: GetActiveReleaseForPullRequest :one
 SELECT r.id, r.workspace_id, r.project_id, r.title, r.description, r.stage, r.risk_level, r.channel_id, r.issue_id, r.approver_id, r.second_approver_id, r.staging_deploy_id, r.production_deploy_id, r.created_by, r.created_at, r.updated_at, r.merged_at, r.staged_at, r.promoted_at, r.done_at, r.rollback_reason, r.merge_paused, r.merge_method, r.smoke_run_id, r.smoke_run_url, r.smoke_status, r.smoke_completed_at, r.qa_verified_at, r.qa_verified_by, r.merged_main_sha, r.promoted_by, r.production_main_sha, r.rolled_back_by, r.rolled_back_completed_at
 FROM ship_release_pull_request rpr

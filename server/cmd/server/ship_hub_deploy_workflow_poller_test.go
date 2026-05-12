@@ -353,6 +353,86 @@ func TestDeployWorkflowPoller_ProductionMatch(t *testing.T) {
 	}
 }
 
+// TestDeployWorkflowPoller_ProductionTimeBasedFallback verifies the
+// fallback path that unsticks a promoting release when the prod
+// deploy fires on a SHA that doesn't equal the release's
+// merged_main_sha. This is the ROA-130 case from 2026-05-11: the
+// merge train produced commit X, but production was deployed for a
+// later commit Y that includes X in its ancestry. Strict SHA matching
+// can't see that — the time-based fallback can.
+func TestDeployWorkflowPoller_ProductionTimeBasedFallback(t *testing.T) {
+	if !pollerMigrationApplied(t) {
+		t.Skip("phase 7d follow-up migration not applied")
+	}
+	const releaseSHA = "aaaa1111bbbb2222cccc3333dddd4444eeee5555"
+	const deploySHA = "9999ffff8888eeee7777dddd6666cccc5555bbbb"
+	fix := seedPollerFixture(t, "https://github.com/owner/repo", "", "production.yml")
+	releaseID := seedPollerReleaseInPromoting(t, fix, releaseSHA)
+
+	// Workflow run's head_sha differs from the release's
+	// merged_main_sha. UpdatedAt is well AFTER NOW(), so the
+	// merged_at < deploy_time constraint passes (seedPollerReleaseInPromoting
+	// stamps merged_at = NOW()).
+	srv := fakeGitHubServer(t, []gh.WorkflowRun{
+		{
+			ID:         606,
+			HeadSHA:    deploySHA,
+			HeadBranch: "main",
+			Status:     "completed",
+			Conclusion: "success",
+			UpdatedAt:  "2099-01-01T00:00:00Z",
+			HTMLURL:    "https://github.com/owner/repo/actions/runs/606",
+		},
+	})
+	defer srv.Close()
+
+	drivePollerWithFakeGitHub(t, fix, srv, "", "production.yml")
+
+	if got := readReleaseProductionDeployID(t, releaseID); got == "" {
+		t.Fatal("expected production_deploy_id to be set via time-based fallback")
+	}
+	if stage := readReleaseStage(t, releaseID); stage != "in_production" {
+		t.Errorf("expected stage=in_production after time-based fallback link, got %q", stage)
+	}
+}
+
+// TestDeployWorkflowPoller_ProductionFallbackRespectsTime verifies the
+// fallback DOES NOT link a deploy whose time predates the release's
+// merged_at. A stale prod deploy from before the merge must not get
+// re-linked to a fresh stuck release.
+func TestDeployWorkflowPoller_ProductionFallbackRespectsTime(t *testing.T) {
+	if !pollerMigrationApplied(t) {
+		t.Skip("phase 7d follow-up migration not applied")
+	}
+	const releaseSHA = "1234567812345678123456781234567812345678"
+	const oldDeploySHA = "fedcba98fedcba98fedcba98fedcba98fedcba98"
+	fix := seedPollerFixture(t, "https://github.com/owner/repo", "", "production.yml")
+	releaseID := seedPollerReleaseInPromoting(t, fix, releaseSHA)
+
+	// Run finished a decade ago, well before the release's merged_at.
+	srv := fakeGitHubServer(t, []gh.WorkflowRun{
+		{
+			ID:         707,
+			HeadSHA:    oldDeploySHA,
+			HeadBranch: "main",
+			Status:     "completed",
+			Conclusion: "success",
+			UpdatedAt:  "2015-01-01T00:00:00Z",
+			HTMLURL:    "https://github.com/owner/repo/actions/runs/707",
+		},
+	})
+	defer srv.Close()
+
+	drivePollerWithFakeGitHub(t, fix, srv, "", "production.yml")
+
+	if got := readReleaseProductionDeployID(t, releaseID); got != "" {
+		t.Fatalf("expected production_deploy_id to remain unset for pre-merge deploy, got %q", got)
+	}
+	if stage := readReleaseStage(t, releaseID); stage != "promoting" {
+		t.Errorf("expected stage=promoting unchanged, got %q", stage)
+	}
+}
+
 // TestDeployWorkflowPoller_NoMatchOnFailedRun verifies a workflow run
 // with conclusion!=success is ignored even when the head_sha matches
 // — defensive: a green-light pipeline that runs through a failure
