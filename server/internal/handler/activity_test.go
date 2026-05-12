@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -388,5 +389,147 @@ func TestCommentWithParentID_AppearsInTimeline(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected to find reply with parent_id in timeline")
+	}
+}
+
+// TestCreateComment_FixerReplyBypassesTriggerGuard verifies that fixer_reply
+// rows are NOT subject to the resumed-session-drift parent_id guard. They have
+// their own (stricter) invariant validated separately in CreateComment (parent
+// must be type=cr_review_comment with a non-null review_thread_id). Rosa runs
+// from inside a comment-triggered task and MUST be able to thread fixer_reply
+// under the CR review comment, not under the task's trigger.
+//
+// Repro is the live failure on Story 1.6 (issue 55250d67): member posted
+// "Proceed", which spawned a comment-triggered retry for Rosa. Every
+// fixer_reply Rosa tried to post returned 409 from the resume-drift guard,
+// because the trigger comment is not a cr_review_comment.
+func TestCreateComment_FixerReplyBypassesTriggerGuard(t *testing.T) {
+	ctx := context.Background()
+
+	// Reuse the fixture agent + runtime.
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("find test agent: %v", err)
+	}
+
+	// Create the issue Rosa will post on.
+	w := httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "fixer_reply guard exemption test",
+	})
+	testHandler.CreateIssue(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	var triggerCommentID, crCommentID, reviewThreadID, taskID string
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue_review_thread WHERE id = $1`, reviewThreadID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	postComment := func(t *testing.T, body map[string]any, headers map[string]string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := newRequest("POST", "/api/issues/"+issueID+"/comments", body)
+		r = withURLParam(r, "id", issueID)
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		testHandler.CreateComment(w, r)
+		return w
+	}
+
+	// Seed: a "Proceed" comment from a member — this will be the task trigger.
+	w = postComment(t, map[string]any{"content": "Proceed"}, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create trigger comment: %d: %s", w.Code, w.Body.String())
+	}
+	var triggerComment CommentResponse
+	json.NewDecoder(w.Body).Decode(&triggerComment)
+	triggerCommentID = triggerComment.ID
+
+	// Seed: an issue_review_thread row (FK target for comment.review_thread_id).
+	// review_thread_id is uuid REFERENCES issue_review_thread(id), so we have
+	// to land a real thread row before we can mint the cr_review_comment.
+	// gh_comment_id is UNIQUE — use the unix-nano clock so concurrent test
+	// runs don't collide.
+	if err := testPool.QueryRow(ctx,
+		`INSERT INTO issue_review_thread
+		   (workspace_id, issue_id, pr_repo, pr_number, gh_comment_id,
+		    file_path, severity, title, body, url, author_login, state)
+		 VALUES ($1, $2, 'test/repo', 1, $3,
+		     'README.md', 'issue', 'fixer-reply test', 'body',
+		     'https://example.invalid', 'coderabbit', 'unresolved')
+		 RETURNING id`,
+		testWorkspaceID, issueID, time.Now().UnixNano(),
+	).Scan(&reviewThreadID); err != nil {
+		t.Fatalf("insert issue_review_thread: %v", err)
+	}
+
+	// Seed: a CR review comment Rosa will reply to. The CreateComment handler
+	// refuses cr_review_comment writes (only the GitHub webhook may insert
+	// those rows), so we insert directly via SQL — mirroring how the live
+	// webhook lands them.
+	if err := testPool.QueryRow(ctx,
+		`INSERT INTO comment
+		   (issue_id, workspace_id, author_type, content, type, review_thread_id)
+		 VALUES ($1, $2, 'system', '**Major** finding', 'cr_review_comment', $3)
+		 RETURNING id`,
+		issueID, testWorkspaceID, reviewThreadID,
+	).Scan(&crCommentID); err != nil {
+		t.Fatalf("insert cr_review_comment: %v", err)
+	}
+
+	// Seed: a comment-triggered task pointing at the "Proceed" comment.
+	if err := testPool.QueryRow(ctx,
+		`INSERT INTO agent_task_queue
+		   (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id)
+		 VALUES ($1, $2, $3, 'running', 0, $4)
+		 RETURNING id`,
+		agentID, runtimeID, issueID, triggerCommentID,
+	).Scan(&taskID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	agentHeaders := map[string]string{"X-Agent-ID": agentID, "X-Task-ID": taskID}
+
+	// Case 1: fixer_reply under the cr_review_comment (NOT the trigger) must
+	// succeed — this is the case the patch enables.
+	w = postComment(t,
+		map[string]any{
+			"content":   "applied patch — verbatim text for GitHub",
+			"type":      "fixer_reply",
+			"parent_id": crCommentID,
+		},
+		agentHeaders,
+	)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for fixer_reply under cr_review_comment, got %d: %s",
+			w.Code, w.Body.String())
+	}
+
+	// Case 2 (regression guard): a PLAIN type=comment from the same task with
+	// the wrong parent must STILL return 409. The patch only exempts
+	// fixer_reply; the resume-drift guard for plain comments is unchanged.
+	w = postComment(t,
+		map[string]any{"content": "drifted plain comment", "parent_id": crCommentID},
+		agentHeaders,
+	)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for plain comment with wrong parent, got %d: %s",
+			w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), triggerCommentID) {
+		t.Fatalf("expected 409 body to reference trigger comment id %s, got %s",
+			triggerCommentID, w.Body.String())
 	}
 }

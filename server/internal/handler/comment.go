@@ -291,7 +291,15 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// request, so an agent legitimately commenting on a different issue must
 	// not be blocked by its current task's trigger. Assignment-triggered
 	// tasks (no TriggerCommentID) are also unaffected.
-	if authorType == "agent" {
+	//
+	// EXCEPTION: fixer_reply rows have their own, stricter parent invariants
+	// validated above (parent must be type=cr_review_comment with a non-null
+	// review_thread_id). Rosa is emitted from inside a comment-triggered task
+	// and MUST thread fixer_reply under the CR review comment, not under the
+	// task's trigger. A stale Claude-session --parent could never collide
+	// with a cr_review_comment UUID, so the resume-drift risk does not apply
+	// here. Restrict the guard to type='comment' only.
+	if authorType == "agent" && req.Type == "comment" {
 		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
 			task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskIDHeader))
 			if err == nil && task.TriggerCommentID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
