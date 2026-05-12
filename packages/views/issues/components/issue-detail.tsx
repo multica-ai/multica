@@ -50,6 +50,7 @@ import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory } from "./agent-live-card";
 import { CRFindingsStrip } from "./cr-findings-strip";
+import { CRActivityPanel } from "../cr-activity/cr-activity-panel";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -565,6 +566,7 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [phaseStateOpen, setPhaseStateOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
+  const [crActivityOpen, setCRActivityOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -841,6 +843,18 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
           onToggle={() => setPhaseStateOpen(!phaseStateOpen)}
         />
       )}
+
+      {/* CodeRabbit activity */}
+      <div>
+        <button
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${crActivityOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setCRActivityOpen(!crActivityOpen)}
+        >
+          CR Activity
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${crActivityOpen ? "rotate-90" : ""}`} />
+        </button>
+        {crActivityOpen && <CRActivityPanel issueId={issue.id} issueStatus={issue.status} />}
+      </div>
 
       {/* Parent issue */}
       {parentIssue && (
@@ -1485,7 +1499,6 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
     </ResizablePanelGroup>
   );
 }
-
 
 
 
