@@ -90,11 +90,12 @@ type Daemon struct {
 	runtimeGoneInflight   map[string]struct{}  // runtime_id -> currently recovering
 	reregisterNextAttempt map[string]time.Time // workspace_id -> earliest time the next re-register attempt may run
 
-	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
-	rootCtx       context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
-	restartBinary string             // non-empty after a successful update; path to the new binary
-	updating      atomic.Bool        // prevents concurrent update attempts
-	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
+	cancelFunc      context.CancelFunc // set by Run(); called by triggerRestart
+	rootCtx         context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
+	restartBinary   string             // non-empty after a successful update; path to the new binary
+	updating        atomic.Bool        // prevents concurrent update attempts
+	activeTasks     atomic.Int64       // number of tasks currently in handleTask; exposed via /health
+	lastHeartbeatAt atomic.Int64       // UnixNano of last successful heartbeat (HTTP or WS); 0 = none yet
 
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
@@ -452,9 +453,11 @@ func (d *Daemon) recordWSHeartbeatAck(runtimeID string) {
 	if runtimeID == "" {
 		return
 	}
+	now := time.Now()
 	d.wsHBMu.Lock()
-	d.wsHBLastAck[runtimeID] = time.Now()
+	d.wsHBLastAck[runtimeID] = now
 	d.wsHBMu.Unlock()
+	d.lastHeartbeatAt.Store(now.UnixNano())
 }
 
 // wsHeartbeatRecentlyAcked reports whether the runtime received a WS
@@ -527,6 +530,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	taskWakeups := make(chan struct{}, 1)
 	go d.taskWakeupLoop(ctx, taskWakeups)
 	go d.heartbeatLoop(ctx)
+	go d.watchdogLoop(ctx)
 	go d.gcLoop(ctx)
 	go d.serveHealth(ctx, healthLn, time.Now())
 	return d.pollLoop(ctx, taskWakeups)
@@ -1144,6 +1148,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 		go d.handleRuntimeGone(rid)
 		return
 	}
+	d.lastHeartbeatAt.Store(time.Now().UnixNano())
 	d.handleHeartbeatActions(ctx, rid, resp)
 }
 
