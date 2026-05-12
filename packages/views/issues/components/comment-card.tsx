@@ -663,7 +663,7 @@ function CommentCardImpl({
 
           {/* Replies */}
           {allNestedReplies.map((reply) => (
-            <div key={reply.id} data-comment-id={reply.id} className={cn("border-t border-border/50 px-4 transition-colors duration-700", highlightedCommentId === reply.id && "bg-brand/5")}>
+            <div key={reply.id} id={`comment-${reply.id}`} className={cn("border-t border-border/50 px-4 transition-colors duration-700", highlightedCommentId === reply.id && "bg-brand/5")}>
               <CommentRow
                 issueId={issueId}
                 entry={reply}

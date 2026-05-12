@@ -287,14 +287,14 @@ vi.mock("@multica/core/issues/stores", () => ({
 
 // Mock react-virtuoso: jsdom has no real layout, so the real Virtuoso would
 // compute a 0-height viewport and render nothing. The mock renders every item
-// inline, which matches how the unvirtualized .map used to behave and keeps
-// existing assertions (`getByText('Started working on this')` etc.) working.
+// inline so id="comment-..." nodes are always present in the DOM — this
+// matches the production cold-path where `initialItemCount` force-mounts
+// items[0..targetIdx], giving the native scrollIntoView a real target.
 //
-// scrollToIndexSpy: the deep-link logic now uses Virtuoso's own
-// scrollToIndex API instead of native el.scrollIntoView (native diverges
-// from Virtuoso's internal scrollTop model, petyosi #1083). The mock
-// exposes a spy so we can assert deep-link landing in tests.
-const scrollToIndexSpy = vi.hoisted(() => vi.fn());
+// scrollIntoViewSpy: we spy on Element.prototype.scrollIntoView (jsdom no-ops
+// it by default) so tests can assert the deep-link effect dispatched a
+// native scroll on the target node.
+const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("react-virtuoso", () => ({
   Virtuoso: forwardRef(function MockVirtuoso(
@@ -302,9 +302,10 @@ vi.mock("react-virtuoso", () => ({
     ref: any,
   ) {
     useImperativeHandle(ref, () => ({
-      scrollToIndex: scrollToIndexSpy,
-      // Real Virtuoso exposes more, but the deep-link path only needs
-      // scrollToIndex. Other call sites would fail loudly if added later.
+      // Real Virtuoso ref methods are not exercised by tests in this file
+      // since the cold-path uses native scrollIntoView on the DOM node.
+      scrollIntoView: vi.fn(),
+      scrollToIndex: vi.fn(),
     }));
     return (
       <div data-testid="virtuoso-mock">
@@ -315,6 +316,17 @@ vi.mock("react-virtuoso", () => ({
     );
   }),
 }));
+
+// jsdom's HTMLElement.prototype.scrollIntoView is a no-op stub; replace it
+// with a spy so the deep-link effect's call can be observed.
+beforeEach(() => {
+  scrollIntoViewSpy.mockClear();
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    writable: true,
+    value: scrollIntoViewSpy,
+  });
+});
 
 // Mock modals
 vi.mock("@multica/core/modals", () => ({
@@ -597,30 +609,26 @@ describe("IssueDetail (shared)", () => {
   });
 
   describe("highlightCommentId scroll-to-comment", () => {
-    beforeEach(() => {
-      scrollToIndexSpy.mockClear();
-    });
-
     it("scrolls to the highlighted comment after both issue and timeline finish loading", async () => {
       renderIssueDetailWithHighlight("comment-2");
 
-      // Wait for the comment row to mount under the virtuoso mock.
+      // Wait for the comment row to mount. With initialItemCount in
+      // production, items[0..targetIdx] are force-mounted on first commit;
+      // the mock unconditionally inline-renders every item, so this just
+      // waits for the regular render pass.
       await waitFor(() => {
         expect(
-          document.querySelector('[data-comment-id="comment-2"]'),
+          document.getElementById("comment-comment-2"),
         ).not.toBeNull();
       });
 
-      // The deep-link effect calls virtuosoRef.scrollToIndex with the
-      // target's index. comment-2 is items[1] in the flat timeline
-      // (items[0] = comment-1, items[1] = comment-2). The effect calls
-      // scrollToIndex twice (once on enter, once after the settle
-      // timeout); we only need to see at least one call land.
+      // The deep-link useLayoutEffect calls native scrollIntoView on the
+      // target node ({block: 'center'}).
       await waitFor(() => {
-        expect(scrollToIndexSpy).toHaveBeenCalled();
+        expect(scrollIntoViewSpy).toHaveBeenCalled();
       });
-      expect(scrollToIndexSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ index: 1, align: "center" }),
+      expect(scrollIntoViewSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ block: "center" }),
       );
     });
 
@@ -628,9 +636,8 @@ describe("IssueDetail (shared)", () => {
       // Reproduces the inbox-click race: timeline data is in the cache
       // before the issue resolves. While loading is true, IssueDetail
       // renders the loading skeleton (Virtuoso never mounts), so no
-      // scrollToIndex can fire. After the issue resolves, Virtuoso
-      // mounts, the bootstrapRef capture path or the warm-path effect
-      // fires scrollToIndex with the target index.
+      // scroll can fire. After the issue resolves, Virtuoso mounts and
+      // the useLayoutEffect dispatches the native scroll.
       let resolveIssue: (value: Issue) => void = () => {};
       const issuePromise = new Promise<Issue>((resolve) => {
         resolveIssue = resolve;
@@ -640,20 +647,77 @@ describe("IssueDetail (shared)", () => {
       renderIssueDetailWithHighlight("comment-2", "issue-1", { seedTimeline: true });
 
       expect(
-        document.querySelector('[data-comment-id="comment-2"]'),
+        document.getElementById("comment-comment-2"),
       ).toBeNull();
-      expect(scrollToIndexSpy).not.toHaveBeenCalled();
+      expect(scrollIntoViewSpy).not.toHaveBeenCalled();
 
       resolveIssue(mockIssue);
 
       await waitFor(() => {
         expect(
-          document.querySelector('[data-comment-id="comment-2"]'),
+          document.getElementById("comment-comment-2"),
         ).not.toBeNull();
       });
       await waitFor(() => {
-        expect(scrollToIndexSpy).toHaveBeenCalledWith(
-          expect.objectContaining({ index: 1, align: "center" }),
+        expect(scrollIntoViewSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ block: "center" }),
+        );
+      });
+    });
+
+    it("auto-expands a folded resolved thread when deep-link target is a reply inside it", async () => {
+      // Seed a timeline where comment-3 is resolved (so it renders as a
+      // resolved-bar by default) and has a reply, reply-1, whose id is the
+      // deep-link target. The reply is not in the flat items array — only
+      // the resolved-bar root is. The effect must detect this, expand the
+      // thread, then on re-run scroll to the reply's id="comment-reply-1" node.
+      const timelineWithResolvedThread: TimelineEntry[] = [
+        ...mockTimeline,
+        {
+          type: "comment",
+          id: "comment-3",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Resolved root",
+          parent_id: null,
+          created_at: "2026-01-18T00:00:00Z",
+          updated_at: "2026-01-18T00:00:00Z",
+          comment_type: "comment",
+          resolved_at: "2026-01-19T00:00:00Z",
+        } as TimelineEntry,
+        {
+          type: "comment",
+          id: "reply-1",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Reply inside resolved thread",
+          parent_id: "comment-3",
+          created_at: "2026-01-18T01:00:00Z",
+          updated_at: "2026-01-18T01:00:00Z",
+          comment_type: "comment",
+        } as TimelineEntry,
+      ];
+      mockApiObj.listTimeline.mockResolvedValue(timelineWithResolvedThread);
+
+      const queryClient = createTestQueryClient();
+      render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId="issue-1" highlightCommentId="reply-1" />
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+
+      // After expansion, the reply must appear in the DOM (inside the now
+      // -unfolded CommentCard) and the deep-link effect must scroll to it.
+      await waitFor(() => {
+        expect(
+          document.getElementById("comment-reply-1"),
+        ).not.toBeNull();
+      });
+      await waitFor(() => {
+        expect(scrollIntoViewSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ block: "center" }),
         );
       });
     });

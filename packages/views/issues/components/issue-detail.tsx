@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
+import { Virtuoso } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -399,7 +399,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Virtuoso prop would never receive the element. Callback ref + state fixes
   // that: setState triggers the re-render that hands Virtuoso the element.
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
   // Per-session: which resolved threads the user has temporarily expanded.
@@ -668,83 +667,44 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   const loading = issueLoading;
 
-  // First-paint deep-link bootstrap. Captured exactly once, on the first
-  // render where items[] is populated. Why a ref rather than a lazy
-  // useState initializer: IssueDetail mounts long before timeline data
-  // resolves (items.length is 0), so a lazy useState would freeze in
-  // the "no bootstrap" state forever. The ref follows React's documented
-  // "avoid recreating ref contents" idiom (the Video example in the
-  // useRef docs): write synchronously in render, gated by a one-shot
-  // flag so the value can't be overwritten on later renders.
+  // Deep-link landing. Semantically equivalent to navigating to
+  // `#comment-${id}`: find the element with that id, scrollIntoView it.
+  // When `highlightCommentId` is set the timeline below renders flat (no
+  // virtualization), so every comment id is in the DOM by the time this
+  // effect runs after commit.
   //
-  // Passed to <Virtuoso initialTopMostItemIndex>: the only position
-  // anchor that runs *before* first paint, dodging the post-mount
-  // scrollToIndex race (Virtuoso #883). Subsequent deep-links inside
-  // the same mount (user clicks a second inbox notification on the
-  // same issue) go through scrollToIndex in the effect below — the
-  // bootstrap value is only consumed on cold start.
-  const bootstrapRef = useRef<{
-    resolved: boolean;
-    value?: { index: number; align: "center" };
-  }>({ resolved: false });
-  if (!bootstrapRef.current.resolved && items.length > 0) {
-    bootstrapRef.current = {
-      resolved: true,
-      value:
-        highlightCommentId && targetIdx >= 0
-          ? { index: targetIdx, align: "center" }
-          : undefined,
-    };
-  }
-  const initialBootstrap = bootstrapRef.current.value;
-
-  // Deep-link landing. Virtualization makes "land precisely" not a
-  // single operation but a convergence: Virtuoso first uses estimated
-  // spacer heights to scroll to the target, mounts viewport items, the
-  // ResizeObserver fires real measurements, spacer heights update, and
-  // scrollTop is corrected. Markdown render and lowlight code highlight
-  // can reflow items again later in the same frame, triggering another
-  // round of correction. Trying to outsmart this with a single
-  // perfectly-timed scroll is what made the previous two attempts both
-  // complex and unreliable.
+  // For a reply inside a folded resolved thread, the reply is not in items
+  // (only the resolved-bar root is). Auto-expand the thread first; the
+  // effect re-runs once items re-flatten.
   //
-  // This effect cooperates with Virtuoso's correction loop instead of
-  // fighting it: schedule three scrollToIndex calls — immediate, 120ms
-  // (after the first measurement pass), 500ms (after markdown/lowlight
-  // settle). Each call uses whatever spacer heights are current, so
-  // the convergence narrows on each pass. Visually this is a single
-  // instant scroll with at most a few pixels of late re-centering —
-  // not a re-jump, because each pass starts from the previous result.
-  //
-  // virtuosoRef.scrollToIndex (not native el.scrollIntoView) keeps
-  // Virtuoso's internal scrollTop model consistent (petyosi #1083).
+  // `scrollContainerEl` is in deps because the component early-returns a
+  // loading skeleton while the issue query is pending. The scroll-container
+  // ref populates only on the post-loading render, so it's the signal that
+  // the timeline (and the deep-link target id) has actually rendered.
   useEffect(() => {
-    if (!highlightCommentId || items.length === 0 || targetIdx < 0) return;
-    if (!scrollContainerEl) return;
+    if (!highlightCommentId || items.length === 0) return;
     if (didHighlightRef.current === highlightCommentId) return;
 
+    const rootId = replyToRoot.get(highlightCommentId);
+    if (
+      rootId &&
+      rootId !== highlightCommentId &&
+      items[targetIdx]?.kind === "resolved-bar"
+    ) {
+      toggleResolvedExpand(rootId, true);
+      return;
+    }
+
+    const el = document.getElementById(`comment-${highlightCommentId}`);
+    if (!el) return;
+
     didHighlightRef.current = highlightCommentId;
-
-    const land = () =>
-      virtuosoRef.current?.scrollToIndex({
-        index: targetIdx,
-        align: "center",
-        behavior: "auto",
-      });
-
-    land();
-    const t1 = window.setTimeout(land, 120);
-    const t2 = window.setTimeout(land, 500);
+    el.scrollIntoView({ block: "center" });
 
     setHighlightedId(highlightCommentId);
     const fade = window.setTimeout(() => setHighlightedId(null), 2500);
-
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(fade);
-    };
-  }, [highlightCommentId, items.length, targetIdx, scrollContainerEl]);
+    return () => clearTimeout(fade);
+  }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, toggleResolvedExpand]);
 
   // Cmd-F / Ctrl-F on a virtualized timeline only searches what's mounted in
   // the viewport — off-screen comments are invisible to browser find-in-page.
@@ -979,6 +939,97 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     </div>
   );
 
+  // Shared row renderer for both timeline render modes (flat / virtualized).
+  // The wrapper `id="comment-..."` is the deep-link target — equivalent to
+  // a native `<a href="#comment-...">` anchor.
+  const renderItem = (_i: number, item: TimelineItem): React.ReactElement => {
+    if (item.kind === "resolved-bar") {
+      return (
+        <div className="pb-3" id={`comment-${item.id}`}>
+          <ResolvedThreadBar
+            entry={item.entry}
+            replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
+            onExpand={() => toggleResolvedExpand(item.id, true)}
+          />
+        </div>
+      );
+    }
+    if (item.kind === "comment") {
+      const isResolved = !!item.entry.resolved_at;
+      return (
+        <div className="pb-3" id={`comment-${item.id}`}>
+          <CommentCard
+            issueId={id}
+            entry={item.entry}
+            replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
+            currentUserId={user?.id}
+            canModerate={canModerateComments}
+            onReply={submitReply}
+            onEdit={editComment}
+            onDelete={deleteComment}
+            onToggleReaction={handleToggleReaction}
+            onResolveToggle={handleResolveToggle}
+            onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
+            highlightedCommentId={highlightedId}
+          />
+        </div>
+      );
+    }
+    // activity-group
+    return (
+      <div className="pb-3 px-4 flex flex-col gap-3">
+        {item.entries.map((entry) => {
+          const details = (entry.details ?? {}) as Record<string, string>;
+          const isStatusChange = entry.action === "status_changed";
+          const isPriorityChange = entry.action === "priority_changed";
+          const isDueDateChange = entry.action === "due_date_changed";
+
+          let leadIcon: React.ReactNode;
+          if (isStatusChange && details.to) {
+            leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
+          } else if (isPriorityChange && details.to) {
+            leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
+          } else if (isDueDateChange) {
+            leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
+          } else {
+            leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
+          }
+
+          return (
+            <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
+              <div className="mr-2 flex w-4 shrink-0 justify-center">
+                {leadIcon}
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-1">
+                <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
+                <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+                {(entry.coalesced_count ?? 1) > 1 &&
+                  entry.action !== "task_completed" &&
+                  entry.action !== "task_failed" && (
+                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                      {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
+                    </span>
+                  )}
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span className="ml-auto shrink-0 cursor-default">
+                        {timeAgo(entry.created_at)}
+                      </span>
+                    }
+                  />
+                  <TooltipContent side="top">
+                    {new Date(entry.created_at).toLocaleString()}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   const detailContent = (
     <div className="flex h-full min-w-0 flex-1 flex-col">
         <PageHeader className="gap-2 bg-background text-sm">
@@ -1092,16 +1143,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>
         </PageHeader>
 
-        {/* Content — scrollable. `overflow-anchor: none` disables the
-            browser's built-in scroll-anchoring so that late layout shifts
-            inside the virtualized timeline (Virtuoso resizing list items
-            above the viewport, images inside comments resolving their
-            natural size, etc.) don't silently nudge scrollTop and undo
-            the deep-link scroll we just performed. */}
         <div
           ref={setScrollContainerEl}
           className="relative flex-1 overflow-y-auto"
-          style={{ overflowAnchor: "none" }}
         >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
           <TitleEditor
@@ -1364,137 +1408,55 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 miscomputes total-height on first paint. */}
             {timelineLoading && timelineView.groups.length === 0 ? (
               <TimelineSkeleton />
-            ) : !scrollContainerEl ? (
-              // Show skeleton (not blank) while the callback ref populates,
-              // so the gap between IssueDetail mount and Virtuoso mount feels
-              // continuous with the loading state instead of flashing empty.
-              <TimelineSkeleton />
             ) : (
-              <div className="mt-4">
-                <Virtuoso
-                  key={`${wsId}:${id}`}
-                  ref={virtuosoRef}
-                  customScrollParent={scrollContainerEl}
-                  data={items}
-                  increaseViewportBy={{ top: 800, bottom: 800 }}
-                  computeItemKey={(_i, item) => `${item.kind}:${item.id}`}
-                  skipAnimationFrameInResizeObserver
-                  // First-paint anchor for inbox deep-link. Only ever
-                  // populated on initial mount (see `initialBootstrap` /
-                  // `bootstrapRef` above); subsequent re-renders pass the
-                  // same value, so Virtuoso #458 (this prop acting as a
-                  // persistent anchor that resets scrollTop on height
-                  // changes) doesn't fire. Warm-path deep-links — user
-                  // clicks a second inbox notification on the same issue
-                  // — go through scrollToIndex in the effect above.
-                  //
-                  // Spread-on-defined: passing `initialTopMostItemIndex
-                  // ={undefined}` triggers a runtime crash inside
-                  // react-virtuoso ("Cannot read properties of undefined
-                  // (reading 'index')") because the library accesses
-                  // `.index` on the prop without a null guard. Omitting
-                  // the prop entirely takes the library's default path.
-                  {...(initialBootstrap && { initialTopMostItemIndex: initialBootstrap })}
-                  // followOutput intentionally NOT set. Virtuoso treats it as
-                  // a sticky "is at bottom" flag and resets scrollTop to
-                  // maxScrollTop on every ResizeObserver / height-change tick
-                  // — this is what was yanking the user back to scrollTop=299
-                  // whenever they tried to scroll up after a deep-link
-                  // landed on the last item. Issue-detail is document-shaped
-                  // (not a chat), so auto-follow on new comments is not
-                  // critical; users can scroll to bottom themselves.
-                  itemContent={(_i, item) => {
-                    if (item.kind === "resolved-bar") {
-                      return (
-                        // data-comment-id retained for any external code
-                        // (tests, debugging, future deep-link variants)
-                        // that wants to find a comment node directly.
-                        <div className="pb-3" data-comment-id={item.id}>
-                          <ResolvedThreadBar
-                            entry={item.entry}
-                            replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
-                            onExpand={() => toggleResolvedExpand(item.id, true)}
-                          />
-                        </div>
-                      );
-                    }
-                    if (item.kind === "comment") {
-                      const isResolved = !!item.entry.resolved_at;
-                      return (
-                        <div className="pb-3" data-comment-id={item.id}>
-                          <CommentCard
-                            issueId={id}
-                            entry={item.entry}
-                            replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
-                            currentUserId={user?.id}
-                            canModerate={canModerateComments}
-                            onReply={submitReply}
-                            onEdit={editComment}
-                            onDelete={deleteComment}
-                            onToggleReaction={handleToggleReaction}
-                            onResolveToggle={handleResolveToggle}
-                            onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
-                            highlightedCommentId={highlightedId}
-                          />
-                        </div>
-                      );
-                    }
-                    // activity-group
-                    return (
-                      <div className="pb-3 px-4 flex flex-col gap-3">
-                        {item.entries.map((entry) => {
-                          const details = (entry.details ?? {}) as Record<string, string>;
-                          const isStatusChange = entry.action === "status_changed";
-                          const isPriorityChange = entry.action === "priority_changed";
-                          const isDueDateChange = entry.action === "due_date_changed";
-
-                          let leadIcon: React.ReactNode;
-                          if (isStatusChange && details.to) {
-                            leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
-                          } else if (isPriorityChange && details.to) {
-                            leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
-                          } else if (isDueDateChange) {
-                            leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
-                          } else {
-                            leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
-                          }
-
-                          return (
-                            <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
-                              <div className="mr-2 flex w-4 shrink-0 justify-center">
-                                {leadIcon}
-                              </div>
-                              <div className="flex min-w-0 flex-1 items-center gap-1">
-                                <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
-                                <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
-                                {(entry.coalesced_count ?? 1) > 1 &&
-                                  entry.action !== "task_completed" &&
-                                  entry.action !== "task_failed" && (
-                                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
-                                      {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
-                                    </span>
-                                  )}
-                                <Tooltip>
-                                  <TooltipTrigger
-                                    render={
-                                      <span className="ml-auto shrink-0 cursor-default">
-                                        {timeAgo(entry.created_at)}
-                                      </span>
-                                    }
-                                  />
-                                  <TooltipContent side="top">
-                                    {new Date(entry.created_at).toLocaleString()}
-                                  </TooltipContent>
-                                </Tooltip>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  }}
-                />
-              </div>
+              // Two render modes:
+              //   - `highlightCommentId` set (came from inbox deep-link) →
+              //     render flat. Every comment mounts, every height is real,
+              //     the target id is in the DOM the instant the useEffect
+              //     above runs `scrollIntoView`. No virtualization estimate
+              //     errors, no spacer reflow drift. Pays cold-mount cost
+              //     proportional to items.length (markdown + lowlight per
+              //     comment), which is acceptable in the deep-link case —
+              //     the user has explicit intent to land on a specific item.
+              //   - otherwise → Virtuoso. Browsing mode, virtualization
+              //     wins on first-paint perf for long timelines.
+              //
+              // The split is deliberate: virtualization and "land precisely
+              // on a target" have fundamentally opposed contracts (estimated
+              // heights vs real heights). Trying to satisfy both in one
+              // path is what produced the bug history this PR closes.
+              !highlightCommentId ? (
+                !scrollContainerEl ? (
+                  // Skeleton while the callback ref populates so the gap
+                  // between IssueDetail mount and Virtuoso mount doesn't
+                  // flash empty.
+                  <TimelineSkeleton />
+                ) : (
+                  <div className="mt-4">
+                    <Virtuoso
+                      key={`${wsId}:${id}`}
+                      customScrollParent={scrollContainerEl}
+                      data={items}
+                      increaseViewportBy={{ top: 800, bottom: 800 }}
+                      computeItemKey={(_i, item) => `${item.kind}:${item.id}`}
+                      skipAnimationFrameInResizeObserver
+                      // followOutput intentionally NOT set. Virtuoso treats
+                      // it as a sticky "is at bottom" flag and resets
+                      // scrollTop to maxScrollTop on every height-change
+                      // tick — issue-detail is document-shaped, not chat.
+                      itemContent={renderItem}
+                    />
+                  </div>
+                )
+              ) : (
+                <div className="mt-4">
+                  {items.map((item, i) => (
+                    <Fragment key={`${item.kind}:${item.id}`}>
+                      {renderItem(i, item)}
+                    </Fragment>
+                  ))}
+                </div>
+              )
             )}
 
             {/* Bottom comment input — no avatar, full width */}
