@@ -161,3 +161,122 @@ func TestDiscoverFirtalGatewayModels(t *testing.T) {
 		t.Fatalf("expected first discovered model to become default when gateway default is absent")
 	}
 }
+
+// CEREBRO-PATCH(agent-firtal-gateway-tests): exhaustive failure-mode coverage so we don't fall back to a stale static list.
+func TestDiscoverFirtalGatewayModelsFailureModes(t *testing.T) {
+	urlKeys := []string{
+		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
+		"FIRTAL_AE_GATEWAY_URL",
+		"FIRTAL_DATA_REGISTRY_URL",
+	}
+	keyKeys := []string{
+		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY",
+		"FIRTAL_AE_GATEWAY_KEY",
+		"FIRTAL_DATA_REGISTRY_API_KEY",
+	}
+	clearAll := func(t *testing.T) {
+		for _, k := range urlKeys {
+			t.Setenv(k, "")
+		}
+		for _, k := range keyKeys {
+			t.Setenv(k, "")
+		}
+	}
+
+	t.Run("missing URL", func(t *testing.T) {
+		clearAll(t)
+		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+
+		models, err := discoverFirtalGatewayModels(context.Background())
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL") {
+			t.Fatalf("error = %q", err)
+		}
+		if len(models) != 0 {
+			t.Fatalf("models = %#v, expected empty list", models)
+		}
+	})
+
+	t.Run("missing key", func(t *testing.T) {
+		clearAll(t)
+		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", "https://example.invalid")
+
+		models, err := discoverFirtalGatewayModels(context.Background())
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY") {
+			t.Fatalf("error = %q", err)
+		}
+		if len(models) != 0 {
+			t.Fatalf("models = %#v, expected empty list", models)
+		}
+	})
+
+	t.Run("HTTP 5xx", func(t *testing.T) {
+		clearAll(t)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error": "boom"}`))
+		}))
+		t.Cleanup(srv.Close)
+		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", srv.URL)
+		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+
+		models, err := discoverFirtalGatewayModels(context.Background())
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "HTTP 500") {
+			t.Fatalf("error = %q", err)
+		}
+		if len(models) != 0 {
+			t.Fatalf("models = %#v, expected empty list", models)
+		}
+	})
+
+	t.Run("malformed JSON", func(t *testing.T) {
+		clearAll(t)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`not json`))
+		}))
+		t.Cleanup(srv.Close)
+		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", srv.URL)
+		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+
+		models, err := discoverFirtalGatewayModels(context.Background())
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "parse gateway models response") {
+			t.Fatalf("error = %q", err)
+		}
+		if len(models) != 0 {
+			t.Fatalf("models = %#v, expected empty list", models)
+		}
+	})
+
+	t.Run("transport failure", func(t *testing.T) {
+		clearAll(t)
+		// Point at a server we close immediately so Do() returns a connection error.
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		baseURL := srv.URL
+		srv.Close()
+		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL", baseURL)
+		t.Setenv("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY", "rk_test")
+
+		models, err := discoverFirtalGatewayModels(context.Background())
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "call gateway models") {
+			t.Fatalf("error = %q", err)
+		}
+		if len(models) != 0 {
+			t.Fatalf("models = %#v, expected empty list", models)
+		}
+	})
+}

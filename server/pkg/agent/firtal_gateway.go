@@ -297,16 +297,18 @@ func truncateForError(s string, limit int) string {
 	return s[:limit] + "..."
 }
 
-func firtalGatewayStaticModels() []Model {
-	return []Model{
-		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
-		{ID: "claude-opus-4-7", Label: "Claude Opus 4.7", Provider: "anthropic"},
-		{ID: "claude-haiku-4-5-20251001", Label: "Claude Haiku 4.5", Provider: "anthropic"},
-		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai"},
-		{ID: "gpt-5.5-mini", Label: "GPT-5.5 mini", Provider: "openai"},
-	}
-}
-
+// CEREBRO-PATCH(agent-firtal-gateway-runtime): JEH-757 drop static fallback
+// model list — the managed gateway is the single source of truth for which
+// models are reachable.
+//
+// discoverFirtalGatewayModels fetches the live model catalog from the
+// Data Registry AI Gateway. The gateway is the single source of truth
+// for which models are reachable — when discovery cannot answer (URL
+// or API key not configured, transport error, non-2xx response, parse
+// failure), we return an empty list and the underlying error so the
+// caller can decide whether to surface it. We deliberately do not ship
+// a hard-coded fallback list, because a parallel static catalog drifts
+// from the gateway's reality and silently masks misconfiguration.
 func discoverFirtalGatewayModels(ctx context.Context) ([]Model, error) {
 	baseURL := strings.TrimRight(firstEnv(nil,
 		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
@@ -318,8 +320,11 @@ func discoverFirtalGatewayModels(ctx context.Context) ([]Model, error) {
 		"FIRTAL_AE_GATEWAY_KEY",
 		"FIRTAL_DATA_REGISTRY_API_KEY",
 	)
-	if baseURL == "" || apiKey == "" {
-		return firtalGatewayStaticModels(), nil
+	if baseURL == "" {
+		return []Model{}, fmt.Errorf("FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL is required")
+	}
+	if apiKey == "" {
+		return []Model{}, fmt.Errorf("FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY is required")
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -327,26 +332,27 @@ func discoverFirtalGatewayModels(ctx context.Context) ([]Model, error) {
 
 	req, err := http.NewRequestWithContext(runCtx, http.MethodGet, baseURL+"/api/ai/proxy/v1/models", nil)
 	if err != nil {
-		return firtalGatewayStaticModels(), nil
+		return []Model{}, fmt.Errorf("build gateway models request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return firtalGatewayStaticModels(), nil
+		return []Model{}, fmt.Errorf("call gateway models: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return firtalGatewayStaticModels(), nil
-	}
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return firtalGatewayStaticModels(), nil
+		return []Model{}, fmt.Errorf("read gateway models response: %w", err)
 	}
+	if resp.StatusCode >= 400 {
+		return []Model{}, fmt.Errorf("gateway models returned HTTP %d: %s", resp.StatusCode, truncateForError(string(respBody), 2048))
+	}
+
 	var parsed firtalGatewayModelsResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return firtalGatewayStaticModels(), nil
+		return []Model{}, fmt.Errorf("parse gateway models response: %w", err)
 	}
 
 	models := make([]Model, 0, len(parsed.Data))

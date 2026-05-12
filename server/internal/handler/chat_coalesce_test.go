@@ -5,6 +5,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -436,6 +437,87 @@ func TestGetPendingChatTask_PrefersDispatchedOverQueued(t *testing.T) {
 	if got := uuidToString(pending.ID); got != dispatchedID {
 		t.Fatalf("expected dispatched task %s to win, got %s (status=%s)",
 			dispatchedID, got, pending.Status)
+	}
+}
+
+// CEREBRO-PATCH(handler-chat-coalesce-firtal-gateway): JEH-757 SQL-level
+// chat-history cap regression test for the managed gateway claim path.
+//
+// TestClaimTask_CapsChatHistoryAtThirty guards the SQL-level cap on the
+// claim path: even when a chat session has accumulated hundreds of
+// messages, only the most recent 30 must reach resp.ChatHistory. The
+// previous Go-level slice meant we still pulled every row out of
+// chat_message and paid for the bytes; this regression guards against a
+// future caller switching back to ListChatMessages by accident.
+func TestClaimTask_CapsChatHistoryAtThirty(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	sessionID := createChatSessionForCoalesceTest(t)
+	ctx := context.Background()
+
+	const totalMessages = 100
+	for i := 0; i < totalMessages; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		insertChatMessage(t, sessionID, role, fmt.Sprintf("msg-%03d", i))
+	}
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT a.id, a.runtime_id FROM chat_session cs JOIN agent a ON a.id = cs.agent_id WHERE cs.id = $1`,
+		sessionID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("lookup agent/runtime: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
+		VALUES ($1, $2, NULL, 'queued', 0, $3)
+		RETURNING id
+	`, agentID, runtimeID, sessionID).Scan(&taskID); err != nil {
+		t.Fatalf("queue chat task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
+		testWorkspaceID, "test-daemon-claim-cap")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ChatHistory []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"chat_history"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatal("expected task in response")
+	}
+	if len(resp.Task.ChatHistory) != 30 {
+		t.Fatalf("ChatHistory length: expected 30, got %d", len(resp.Task.ChatHistory))
+	}
+	// The 30 surviving entries must be the most recent 30 messages
+	// (msg-070 through msg-099) in chronological order.
+	for i, entry := range resp.Task.ChatHistory {
+		want := fmt.Sprintf("msg-%03d", totalMessages-30+i)
+		if entry.Content != want {
+			t.Fatalf("ChatHistory[%d].Content = %q, want %q", i, entry.Content, want)
+		}
 	}
 }
 

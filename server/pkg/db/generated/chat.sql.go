@@ -579,6 +579,49 @@ func (q *Queries) ListPendingChatTasksByCreator(ctx context.Context, arg ListPen
 	return items, nil
 }
 
+const listRecentChatMessages = `-- name: ListRecentChatMessages :many
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, responded_at FROM chat_message
+WHERE chat_session_id = $1
+ORDER BY created_at DESC
+LIMIT $2
+`
+
+type ListRecentChatMessagesParams struct {
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	Limit         int32       `json:"limit"`
+}
+
+// CEREBRO-PATCH(sqlc-chat-list-recent): cap claim-path chat history at SQL level so long-lived sessions don't pull megabytes per claim.
+func (q *Queries) ListRecentChatMessages(ctx context.Context, arg ListRecentChatMessagesParams) ([]ChatMessage, error) {
+	rows, err := q.db.Query(ctx, listRecentChatMessages, arg.ChatSessionID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChatMessage{}
+	for rows.Next() {
+		var i ChatMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChatSessionID,
+			&i.Role,
+			&i.Content,
+			&i.TaskID,
+			&i.CreatedAt,
+			&i.FailureReason,
+			&i.ElapsedMs,
+			&i.RespondedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnrespondedUserMessages = `-- name: ListUnrespondedUserMessages :many
 SELECT cm.id, cm.chat_session_id, cm.role, cm.content, cm.task_id, cm.created_at, cm.failure_reason, cm.elapsed_ms, cm.responded_at FROM chat_message cm
 WHERE cm.chat_session_id = $1

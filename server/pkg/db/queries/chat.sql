@@ -100,6 +100,13 @@ SELECT * FROM chat_message
 WHERE chat_session_id = $1
 ORDER BY created_at ASC;
 
+-- CEREBRO-PATCH(sqlc-chat-list-recent): cap claim-path chat history at SQL level so long-lived sessions don't pull megabytes per claim.
+-- name: ListRecentChatMessages :many
+SELECT * FROM chat_message
+WHERE chat_session_id = $1
+ORDER BY created_at DESC
+LIMIT $2;
+
 -- name: ListUnrespondedUserMessages :many
 -- Returns every user message in the session that has not yet been answered
 -- by an assistant turn, in chronological order. The daemon claim path

@@ -379,6 +379,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `sqlc-cerebro-package` | server/sqlc.yaml | 0 | Adds cerebro sqlc package config |
 | `sqlc-chat` | server/pkg/db/queries/chat.sql | 41 | Cerebro sqlc query additions |
 | `sqlc-chat-update-status` | server/pkg/db/queries/chat.sql | 1 | JEH-799 — UpdateChatSessionStatus query for the chat-session header archive/restore action |
+| `sqlc-chat-list-recent` | server/pkg/db/queries/chat.sql | 6 | JEH-757 — ListRecentChatMessages caps claim-path chat history at the SQL layer for long-lived sessions |
+| `daemon-handler-chat-history-cap` | server/internal/handler/daemon.go | 7 | JEH-757 — claim path uses ListRecentChatMessages(limit=30) and reverses to chronological order |
 | `sqlc-inbox` | server/pkg/db/queries/inbox.sql | 30 | Cerebro sqlc query additions |
 | `sqlc-inbox-folder` | server/pkg/db/queries/inbox_folder.sql | 175 | Cerebro sqlc query additions |
 | `sqlc-issue` | server/pkg/db/queries/issue.sql | 40 | Cerebro sqlc query additions |

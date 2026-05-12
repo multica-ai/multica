@@ -1341,10 +1341,16 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.PriorWorkDir = prior.WorkDir.String
 				}
 			}
-			if history, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil {
-				const chatHistoryLimit = 30
-				if len(history) > chatHistoryLimit {
-					history = history[len(history)-chatHistoryLimit:]
+			// CEREBRO-PATCH(daemon-handler-chat-history-cap): cap chat history at the SQL layer so long-lived
+			// sessions don't pull megabytes per claim. Query orders newest-first; we reverse to keep the
+			// downstream loop's chronological order intact.
+			const chatHistoryLimit = 30
+			if history, err := h.Queries.ListRecentChatMessages(r.Context(), db.ListRecentChatMessagesParams{
+				ChatSessionID: cs.ID,
+				Limit:         chatHistoryLimit,
+			}); err == nil {
+				for i, j := 0, len(history)-1; i < j; i, j = i+1, j-1 {
+					history[i], history[j] = history[j], history[i]
 				}
 				for _, m := range history {
 					role := strings.TrimSpace(m.Role)
