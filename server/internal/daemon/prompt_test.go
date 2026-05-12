@@ -62,7 +62,7 @@ func threadIssueTask(history []ChannelHistoryMessage) Task {
 // tell the agent to call `multica issue create` and must NOT inherit
 // the channel-mention prompt's "Do not call multica issue" guardrail.
 func TestBuildThreadIssuePrompt_AllowsIssueCommands(t *testing.T) {
-	out := BuildPrompt(threadIssueTask(nil))
+	out := BuildPrompt(threadIssueTask(nil), "")
 
 	if !strings.Contains(out, "multica issue create") {
 		t.Errorf("thread-issue prompt must tell the agent to call `multica issue create`. got:\n%s", out)
@@ -106,7 +106,7 @@ func TestBuildThreadIssuePrompt_EmbedsThreadHistory(t *testing.T) {
 			Content:    "could be a race in the redis fixture",
 		},
 	}
-	out := BuildPrompt(threadIssueTask(history))
+	out := BuildPrompt(threadIssueTask(history), "")
 
 	if !strings.Contains(out, "flaky test in the auth suite") {
 		t.Errorf("prompt missing parent message content. got:\n%s", out)
@@ -137,7 +137,7 @@ func TestBuildThreadIssuePrompt_ParentIssueAndProject(t *testing.T) {
 	task.ThreadIssueParentIssueKey = "MUL-99"
 	task.ThreadIssueInstruction = "Capture every concrete bug as its own issue."
 
-	out := BuildPrompt(task)
+	out := BuildPrompt(task, "")
 
 	if !strings.Contains(out, "Q3 Reliability") {
 		t.Errorf("prompt missing project title. got:\n%s", out)
@@ -153,5 +153,41 @@ func TestBuildThreadIssuePrompt_ParentIssueAndProject(t *testing.T) {
 	}
 	if !strings.Contains(out, "Capture every concrete bug") {
 		t.Errorf("prompt missing requester instruction. got:\n%s", out)
+	}
+}
+
+// TestBuildQuickCreatePromptProjectPinning verifies that when the user
+// pins a project in the quick-create modal, the prompt instructs the agent
+// to pass `--project <uuid>` exactly. Without this, the agent would re-read
+// the workspace default and silently drop the user's selection — the same
+// "I have to retype 'in project X' every time" failure mode the modal
+// addition was meant to fix.
+func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
+	const projectID = "11111111-2222-3333-4444-555555555555"
+	out := buildQuickCreatePrompt(Task{
+		QuickCreatePrompt: "fix the login button color",
+		ProjectID:         projectID,
+		ProjectTitle:      "Web App",
+	})
+	mustContain := []string{
+		"--project \"" + projectID + "\"",
+		"Web App",
+		"modal selection is authoritative",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(out, s) {
+			t.Errorf("buildQuickCreatePrompt with project missing %q\n--- output ---\n%s", s, out)
+		}
+	}
+
+	// Without a project, the prompt must keep the legacy "omit" instruction
+	// so the agent doesn't accidentally start passing --project on plain
+	// quick-create runs.
+	plain := buildQuickCreatePrompt(Task{QuickCreatePrompt: "fix the login button color"})
+	if !strings.Contains(plain, "**project**: omit") {
+		t.Errorf("buildQuickCreatePrompt without project must keep the omit instruction, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "--project") {
+		t.Errorf("buildQuickCreatePrompt without project must NOT mention --project, got:\n%s", plain)
 	}
 }

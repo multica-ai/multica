@@ -31,7 +31,7 @@ func (q *Queries) CountComments(ctx context.Context, arg CountCommentsParams) (i
 const createComment = `-- name: CreateComment :one
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id
 `
 
 type CreateCommentParams struct {
@@ -66,6 +66,9 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 		&i.UpdatedAt,
 		&i.ParentID,
 		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
 	)
 	return i, err
 }
@@ -80,7 +83,7 @@ func (q *Queries) DeleteComment(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getComment = `-- name: GetComment :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM comment
 WHERE id = $1
 `
 
@@ -98,12 +101,15 @@ func (q *Queries) GetComment(ctx context.Context, id pgtype.UUID) (Comment, erro
 		&i.UpdatedAt,
 		&i.ParentID,
 		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
 	)
 	return i, err
 }
 
 const getCommentInWorkspace = `-- name: GetCommentInWorkspace :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM comment
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -126,6 +132,9 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 		&i.UpdatedAt,
 		&i.ParentID,
 		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
 	)
 	return i, err
 }
@@ -173,134 +182,24 @@ func (q *Queries) HasAgentRepliedInThread(ctx context.Context, arg HasAgentRepli
 	return has_replied, err
 }
 
-const listCommentsAfter = `-- name: ListCommentsAfter :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
+const listCommentsForIssue = `-- name: ListCommentsForIssue :many
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM comment
 WHERE issue_id = $1 AND workspace_id = $2
-  AND (created_at, id) > ($3::timestamptz, $4::uuid)
 ORDER BY created_at ASC, id ASC
-LIMIT $5
-`
-
-type ListCommentsAfterParams struct {
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Column3     pgtype.Timestamptz `json:"column_3"`
-	Column4     pgtype.UUID        `json:"column_4"`
-	Limit       int32              `json:"limit"`
-}
-
-// Keyset pagination: comments newer than ($3, $4) tuple. Returns ASC because
-// "newer" pagination naturally walks forward in time; the merge layer
-// normalizes to the response order.
-func (q *Queries) ListCommentsAfter(ctx context.Context, arg ListCommentsAfterParams) ([]Comment, error) {
-	rows, err := q.db.Query(ctx, listCommentsAfter,
-		arg.IssueID,
-		arg.WorkspaceID,
-		arg.Column3,
-		arg.Column4,
-		arg.Limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Comment{}
-	for rows.Next() {
-		var i Comment
-		if err := rows.Scan(
-			&i.ID,
-			&i.IssueID,
-			&i.AuthorType,
-			&i.AuthorID,
-			&i.Content,
-			&i.Type,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.ParentID,
-			&i.WorkspaceID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listCommentsBefore = `-- name: ListCommentsBefore :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
-  AND (created_at, id) < ($3::timestamptz, $4::uuid)
-ORDER BY created_at DESC, id DESC
-LIMIT $5
-`
-
-type ListCommentsBeforeParams struct {
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Column3     pgtype.Timestamptz `json:"column_3"`
-	Column4     pgtype.UUID        `json:"column_4"`
-	Limit       int32              `json:"limit"`
-}
-
-// Keyset pagination: comments older than ($3, $4) tuple. Returns DESC so the
-// caller can stitch pages without re-sorting.
-func (q *Queries) ListCommentsBefore(ctx context.Context, arg ListCommentsBeforeParams) ([]Comment, error) {
-	rows, err := q.db.Query(ctx, listCommentsBefore,
-		arg.IssueID,
-		arg.WorkspaceID,
-		arg.Column3,
-		arg.Column4,
-		arg.Limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Comment{}
-	for rows.Next() {
-		var i Comment
-		if err := rows.Scan(
-			&i.ID,
-			&i.IssueID,
-			&i.AuthorType,
-			&i.AuthorID,
-			&i.Content,
-			&i.Type,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.ParentID,
-			&i.WorkspaceID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listCommentsLatest = `-- name: ListCommentsLatest :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
-ORDER BY created_at DESC, id DESC
 LIMIT $3
 `
 
-type ListCommentsLatestParams struct {
+type ListCommentsForIssueParams struct {
 	IssueID     pgtype.UUID `json:"issue_id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Limit       int32       `json:"limit"`
 }
 
-// Top N comments for an issue, newest first. Backs the default cursor
-// pagination entry point (no cursor → return the most recent page).
-func (q *Queries) ListCommentsLatest(ctx context.Context, arg ListCommentsLatestParams) ([]Comment, error) {
-	rows, err := q.db.Query(ctx, listCommentsLatest, arg.IssueID, arg.WorkspaceID, arg.Limit)
+// All comments for an issue in chronological order, capped at $3 (DB safety
+// net). Issue p99 is ~30 comments, max ever observed in prod is ~1.1k, so
+// the handler-side cap of 2000 is purely defensive.
+func (q *Queries) ListCommentsForIssue(ctx context.Context, arg ListCommentsForIssueParams) ([]Comment, error) {
+	rows, err := q.db.Query(ctx, listCommentsForIssue, arg.IssueID, arg.WorkspaceID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -319,6 +218,9 @@ func (q *Queries) ListCommentsLatest(ctx context.Context, arg ListCommentsLatest
 			&i.UpdatedAt,
 			&i.ParentID,
 			&i.WorkspaceID,
+			&i.ResolvedAt,
+			&i.ResolvedByType,
+			&i.ResolvedByID,
 		); err != nil {
 			return nil, err
 		}
@@ -330,121 +232,28 @@ func (q *Queries) ListCommentsLatest(ctx context.Context, arg ListCommentsLatest
 	return items, nil
 }
 
-const listCommentsPaginated = `-- name: ListCommentsPaginated :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
-ORDER BY created_at ASC
-LIMIT $3 OFFSET $4
-`
-
-type ListCommentsPaginatedParams struct {
-	IssueID     pgtype.UUID `json:"issue_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Limit       int32       `json:"limit"`
-	Offset      int32       `json:"offset"`
-}
-
-func (q *Queries) ListCommentsPaginated(ctx context.Context, arg ListCommentsPaginatedParams) ([]Comment, error) {
-	rows, err := q.db.Query(ctx, listCommentsPaginated,
-		arg.IssueID,
-		arg.WorkspaceID,
-		arg.Limit,
-		arg.Offset,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Comment{}
-	for rows.Next() {
-		var i Comment
-		if err := rows.Scan(
-			&i.ID,
-			&i.IssueID,
-			&i.AuthorType,
-			&i.AuthorID,
-			&i.Content,
-			&i.Type,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.ParentID,
-			&i.WorkspaceID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listCommentsSince = `-- name: ListCommentsSince :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
+const listCommentsSinceForIssue = `-- name: ListCommentsSinceForIssue :many
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM comment
 WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
-ORDER BY created_at ASC
+ORDER BY created_at ASC, id ASC
+LIMIT $4
 `
 
-type ListCommentsSinceParams struct {
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
-func (q *Queries) ListCommentsSince(ctx context.Context, arg ListCommentsSinceParams) ([]Comment, error) {
-	rows, err := q.db.Query(ctx, listCommentsSince, arg.IssueID, arg.WorkspaceID, arg.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Comment{}
-	for rows.Next() {
-		var i Comment
-		if err := rows.Scan(
-			&i.ID,
-			&i.IssueID,
-			&i.AuthorType,
-			&i.AuthorID,
-			&i.Content,
-			&i.Type,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.ParentID,
-			&i.WorkspaceID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listCommentsSincePaginated = `-- name: ListCommentsSincePaginated :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
-ORDER BY created_at ASC
-LIMIT $4 OFFSET $5
-`
-
-type ListCommentsSincePaginatedParams struct {
+type ListCommentsSinceForIssueParams struct {
 	IssueID     pgtype.UUID        `json:"issue_id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	Limit       int32              `json:"limit"`
-	Offset      int32              `json:"offset"`
 }
 
-func (q *Queries) ListCommentsSincePaginated(ctx context.Context, arg ListCommentsSincePaginatedParams) ([]Comment, error) {
-	rows, err := q.db.Query(ctx, listCommentsSincePaginated,
+// Comments created strictly after $3 in chronological order, capped at $4.
+// Powers the CLI's `--since` agent-polling flow.
+func (q *Queries) ListCommentsSinceForIssue(ctx context.Context, arg ListCommentsSinceForIssueParams) ([]Comment, error) {
+	rows, err := q.db.Query(ctx, listCommentsSinceForIssue,
 		arg.IssueID,
 		arg.WorkspaceID,
 		arg.CreatedAt,
 		arg.Limit,
-		arg.Offset,
 	)
 	if err != nil {
 		return nil, err
@@ -464,6 +273,9 @@ func (q *Queries) ListCommentsSincePaginated(ctx context.Context, arg ListCommen
 			&i.UpdatedAt,
 			&i.ParentID,
 			&i.WorkspaceID,
+			&i.ResolvedAt,
+			&i.ResolvedByType,
+			&i.ResolvedByID,
 		); err != nil {
 			return nil, err
 		}
@@ -473,6 +285,77 @@ func (q *Queries) ListCommentsSincePaginated(ctx context.Context, arg ListCommen
 		return nil, err
 	}
 	return items, nil
+}
+
+const resolveComment = `-- name: ResolveComment :one
+UPDATE comment SET
+    resolved_at = COALESCE(resolved_at, now()),
+    resolved_by_type = COALESCE(resolved_by_type, $2),
+    resolved_by_id = COALESCE(resolved_by_id, $3),
+    updated_at = CASE WHEN resolved_at IS NULL THEN now() ELSE updated_at END
+WHERE id = $1
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id
+`
+
+type ResolveCommentParams struct {
+	ID             pgtype.UUID `json:"id"`
+	ResolvedByType pgtype.Text `json:"resolved_by_type"`
+	ResolvedByID   pgtype.UUID `json:"resolved_by_id"`
+}
+
+// Idempotent: re-resolving keeps the original resolved_at + resolver. Always
+// returns the row so the handler can surface the canonical state.
+func (q *Queries) ResolveComment(ctx context.Context, arg ResolveCommentParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, resolveComment, arg.ID, arg.ResolvedByType, arg.ResolvedByID)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+	)
+	return i, err
+}
+
+const unresolveComment = `-- name: UnresolveComment :one
+UPDATE comment SET
+    resolved_at = NULL,
+    resolved_by_type = NULL,
+    resolved_by_id = NULL,
+    updated_at = CASE WHEN resolved_at IS NOT NULL THEN now() ELSE updated_at END
+WHERE id = $1
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id
+`
+
+// Idempotent: a no-op clear (already unresolved) just returns the row.
+func (q *Queries) UnresolveComment(ctx context.Context, id pgtype.UUID) (Comment, error) {
+	row := q.db.QueryRow(ctx, unresolveComment, id)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+	)
+	return i, err
 }
 
 const updateComment = `-- name: UpdateComment :one
@@ -480,7 +363,7 @@ UPDATE comment SET
     content = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id
 `
 
 type UpdateCommentParams struct {
@@ -502,6 +385,9 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (C
 		&i.UpdatedAt,
 		&i.ParentID,
 		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
 	)
 	return i, err
 }

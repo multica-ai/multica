@@ -25,10 +25,6 @@ Autopilot 有两种执行模式，**建议从"先建 issue 模式"开始**：
 - **先建 issue 模式**（`create_issue`）—— 默认，**推荐**。每次触发先在工作区里建一个 issue（标题支持 `{{date}}` 这样的插值），再按分配流程把 issue 派给智能体。所有工作都落在 issue 看板上，历史、评论、状态和手动分配的 issue 完全一致。
 - **直跑模式**（`run_only`）—— 不建 issue，直接入队一个 `task`。看板上看不到这一次运行——只能在 Autopilot 的运行历史里看到。
 
-<Callout type="warning">
-**直跑模式当前不稳定**——目前在 CLI 里被标注为"not yet supported end-to-end"，派发路径有已知问题。新用户只使用先建 issue 模式，等直跑模式 ship 稳定版再切。
-</Callout>
-
 ## 让它按时间跑
 
 每个 Autopilot 至少要一个 `schedule` 触发器。Cron 是**标准 5 字段格式**（分 时 日 月 周），最小粒度 **1 分钟**（没有秒级）。时区用 IANA 格式（例如 `Asia/Shanghai`），决定 cron 表达式按哪个时区解读。

@@ -16,8 +16,7 @@
  * - Rendering mentions with the same IssueMentionCard component and .mention class
  */
 
-import { isValidElement, memo, useEffect, useId, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { isValidElement, memo, useCallback, useMemo, useRef, useState } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
@@ -35,13 +34,17 @@ import { Maximize2, Download, Link as LinkIcon, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
+import type { Attachment } from "@multica/core/types";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
+import { openExternal } from "../platform";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { ImageLightbox } from "./extensions/image-view";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { preprocessMarkdown } from "./utils/preprocess";
+import { MermaidDiagram } from "./mermaid-diagram";
+import { useDownloadAttachment } from "./use-download-attachment";
 import "katex/dist/katex.min.css";
 import "./content-editor.css";
 
@@ -50,140 +53,6 @@ import "./content-editor.css";
 // ---------------------------------------------------------------------------
 
 const lowlight = createLowlight(common);
-
-type MermaidAPI = typeof import("mermaid").default;
-
-type MermaidLayout = {
-  width?: number;
-  height?: number;
-};
-
-let mermaidPromise: Promise<MermaidAPI> | null = null;
-
-function getMermaid(): Promise<MermaidAPI> {
-  mermaidPromise ??= import("mermaid").then(({ default: mermaid }) => mermaid);
-
-  return mermaidPromise;
-}
-
-function toLegacyColor(color: string, fallback: string, ownerDocument: Document): string {
-  const canvas = ownerDocument.createElement("canvas");
-  canvas.width = 1;
-  canvas.height = 1;
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) return fallback;
-
-  // Mermaid's color parser only supports legacy color syntax. Canvas can parse
-  // modern CSS Color 4 values such as oklch(), then getImageData gives concrete
-  // 8-bit sRGB bytes that Mermaid can consume safely.
-  context.fillStyle = "#000";
-  context.fillStyle = color || fallback;
-  context.fillRect(0, 0, 1, 1);
-  const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
-
-  return `rgb(${red}, ${green}, ${blue})`;
-}
-
-function resolveCssColor(
-  host: HTMLElement,
-  variableName: string,
-  fallback: string,
-): string {
-  const probe = host.ownerDocument.createElement("span");
-  probe.style.color = `var(${variableName})`;
-  probe.style.display = "none";
-  host.appendChild(probe);
-  const color = getComputedStyle(probe).color;
-  probe.remove();
-
-  return toLegacyColor(color || fallback, fallback, host.ownerDocument);
-}
-
-function getMermaidThemeVariables(host: HTMLElement | null) {
-  if (!host) {
-    return {
-      primaryColor: "rgb(245, 245, 245)",
-      primaryBorderColor: "rgb(59, 130, 246)",
-      primaryTextColor: "rgb(17, 24, 39)",
-      lineColor: "rgb(107, 114, 128)",
-      fontFamily: "inherit",
-    };
-  }
-
-  return {
-    primaryColor: resolveCssColor(host, "--muted", "rgb(245, 245, 245)"),
-    primaryBorderColor: resolveCssColor(host, "--primary", "rgb(59, 130, 246)"),
-    primaryTextColor: resolveCssColor(host, "--foreground", "rgb(17, 24, 39)"),
-    lineColor: resolveCssColor(host, "--muted-foreground", "rgb(107, 114, 128)"),
-    fontFamily: "inherit",
-  };
-}
-
-function getSandboxCssVariables(host: HTMLElement | null): string {
-  const styles = host ? getComputedStyle(host) : null;
-  return ["--muted", "--primary", "--foreground", "--muted-foreground"]
-    .map((name) => `${name}: ${styles?.getPropertyValue(name).trim() || "initial"};`)
-    .join(" ");
-}
-
-function getMermaidLayout(svg: string): MermaidLayout {
-  const viewBoxMatch = svg.match(
-    /viewBox=["']\s*([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s*["']/i,
-  );
-  const [, , , widthValue, heightValue] = viewBoxMatch ?? [];
-  const width = widthValue ? Number.parseFloat(widthValue) : undefined;
-  const height = heightValue ? Number.parseFloat(heightValue) : undefined;
-
-  if (width && height && width > 0 && height > 0) {
-    return {
-      width: Math.ceil(width),
-      height: Math.ceil(height),
-    };
-  }
-
-  return {};
-}
-
-function buildSandboxedMermaidDocument(svg: string, host: HTMLElement | null): string {
-  const cssVariables = getSandboxCssVariables(host);
-
-  return `<!doctype html><html><head><style>:root { ${cssVariables} } body { margin: 0; display: flex; justify-content: center; background: transparent; } svg { max-width: 100%; height: auto; }</style></head><body>${svg}</body></html>`;
-}
-
-function buildExpandedMermaidDocument(svg: string, host: HTMLElement | null): string {
-  const cssVariables = getSandboxCssVariables(host);
-
-  return `<!doctype html><html><head><style>:root { ${cssVariables} } html, body { width: 100%; height: 100%; } body { margin: 0; display: flex; align-items: center; justify-content: center; background: transparent; } svg { max-width: 100%; max-height: 100%; width: auto; height: auto; }</style></head><body>${svg}</body></html>`;
-}
-
-function useThemeVersion() {
-  const [themeVersion, setThemeVersion] = useState(0);
-
-  useEffect(() => {
-    const bumpThemeVersion = () => setThemeVersion((version) => version + 1);
-    const observer = new MutationObserver(bumpThemeVersion);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class", "style", "data-theme"],
-    });
-    if (document.body) {
-      observer.observe(document.body, {
-        attributes: true,
-        attributeFilter: ["class", "style", "data-theme"],
-      });
-    }
-
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    mediaQuery.addEventListener("change", bumpThemeVersion);
-
-    return () => {
-      observer.disconnect();
-      mediaQuery.removeEventListener("change", bumpThemeVersion);
-    };
-  }, []);
-
-  return themeVersion;
-}
 
 // ---------------------------------------------------------------------------
 // Sanitization schema — extends GitHub defaults to allow file-card data attrs
@@ -294,278 +163,209 @@ function ReadonlyLink({
   );
 }
 
-function MermaidLightbox({
-  srcDoc,
-  onClose,
+// Image renderer with a download button that prefers fresh-signed URLs.
+// Lifted out of the components map so it can call hooks; receives the
+// attachment lookup as props so the components map can stay a pure
+// data-build inside `ReadonlyContent`'s `useMemo`.
+function ReadonlyImage({
+  src,
+  alt,
+  resolveAttachmentId,
+  onDownload,
 }: {
-  srcDoc: string;
-  onClose: () => void;
+  src?: string;
+  alt?: string;
+  resolveAttachmentId: (url: string) => string | undefined;
+  onDownload: (attachmentId: string) => void;
 }) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
+  const { t } = useT("editor");
+  const [lightbox, setLightbox] = useState(false);
+  const imgSrc = typeof src === "string" ? src : "";
+  const imgAlt = alt ?? "";
 
-  return createPortal(
-    <div
-      className="mermaid-diagram-lightbox"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Mermaid diagram fullscreen view"
-      onClick={onClose}
-    >
-      <iframe
-        className="mermaid-diagram-lightbox-frame"
-        sandbox=""
-        srcDoc={srcDoc}
-        title="Mermaid diagram fullscreen"
-        onClick={(e) => e.stopPropagation()}
-      />
-    </div>,
-    document.body,
+  const handleView = () => setLightbox(true);
+  const handleDownload = () => {
+    const id = imgSrc ? resolveAttachmentId(imgSrc) : undefined;
+    if (id) {
+      onDownload(id);
+      return;
+    }
+    // External image — no attachment record to re-sign through. Falling back
+    // to `openExternal` keeps us off `window.open(...)` (which Electron's
+    // setWindowOpenHandler would route through openExternalSafely anyway,
+    // but only after rejecting non-http schemes loudly).
+    if (imgSrc) openExternal(imgSrc);
+  };
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(imgSrc);
+      toast.success(t(($) => $.image.link_copied));
+    } catch {
+      toast.error(t(($) => $.image.copy_link_failed));
+    }
+  };
+
+  return (
+    <span className="image-node">
+      <span className="image-figure" onClick={handleView}>
+        <img src={imgSrc} alt={imgAlt} className="image-content" draggable={false} />
+        <span
+          className="image-toolbar"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button type="button" onClick={handleView} title={t(($) => $.image.view)}>
+            <Maximize2 className="size-3.5" />
+          </button>
+          <button type="button" onClick={handleDownload} title={t(($) => $.image.download)}>
+            <Download className="size-3.5" />
+          </button>
+          <button type="button" onClick={handleCopyLink} title={t(($) => $.image.copy_link)}>
+            <LinkIcon className="size-3.5" />
+          </button>
+        </span>
+      </span>
+      {lightbox && (
+        <ImageLightbox src={imgSrc} alt={imgAlt} onClose={() => setLightbox(false)} />
+      )}
+    </span>
   );
 }
 
-function MermaidDiagram({ chart }: { chart: string }) {
-  const { t } = useT("editor");
-  const reactId = useId();
-  const containerRef = useRef<HTMLDivElement>(null);
-  const diagramId = useMemo(
-    () => `mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`,
-    [reactId],
-  );
-  const themeVersion = useThemeVersion();
-  const [sandboxedDocument, setSandboxedDocument] = useState<string | null>(null);
-  const [expandedDocument, setExpandedDocument] = useState<string | null>(null);
-  const [layout, setLayout] = useState<MermaidLayout>({});
-  const [error, setError] = useState<string | null>(null);
-  const [lightboxOpen, setLightboxOpen] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function renderDiagram() {
-      try {
-        setError(null);
-        setSandboxedDocument(null);
-        setExpandedDocument(null);
-        setLayout({});
-        const mermaid = await getMermaid();
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: "strict",
-          theme: "base",
-          themeVariables: getMermaidThemeVariables(containerRef.current),
-        });
-        const { svg: renderedSvg } = await mermaid.render(diagramId, chart);
-        if (!cancelled) {
-          setLayout(getMermaidLayout(renderedSvg));
-          setSandboxedDocument(
-            buildSandboxedMermaidDocument(renderedSvg, containerRef.current),
-          );
-          setExpandedDocument(
-            buildExpandedMermaidDocument(renderedSvg, containerRef.current),
-          );
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to render Mermaid diagram");
-        }
-      }
+// Inline file card — same download semantics as the standalone attachment
+// list: fresh-sign through `useDownloadAttachment` when the href matches a
+// known attachment, otherwise hand the raw URL to the platform's external
+// opener.
+function ReadonlyFileCard({
+  href,
+  filename,
+  resolveAttachmentId,
+  onDownload,
+}: {
+  href: string;
+  filename: string;
+  resolveAttachmentId: (url: string) => string | undefined;
+  onDownload: (attachmentId: string) => void;
+}) {
+  const handleClick = () => {
+    const id = resolveAttachmentId(href);
+    if (id) {
+      onDownload(id);
+      return;
     }
-
-    void renderDiagram();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [chart, diagramId, themeVersion]);
-
-  if (error) {
-    return (
-      <div ref={containerRef} className="mermaid-diagram mermaid-diagram-error">
-        <p>{t(($) => $.mermaid.render_error)}</p>
-        <pre>
-          <code>{chart}</code>
-        </pre>
-      </div>
-    );
-  }
-
+    openExternal(href);
+  };
   return (
-    <div ref={containerRef} className="mermaid-diagram" aria-label="Mermaid diagram">
-      {sandboxedDocument ? (
-        <>
-          <iframe
-            className="mermaid-diagram-frame"
-            sandbox=""
-            srcDoc={sandboxedDocument}
-            style={{
-              height: layout.height ? `${layout.height}px` : undefined,
-              width: layout.width ? `${layout.width}px` : undefined,
-            }}
-            title="Mermaid diagram"
-          />
-          <div className="mermaid-diagram-toolbar">
-            <button
-              type="button"
-              onClick={() => setLightboxOpen(true)}
-              title="Open fullscreen"
-              aria-label="Open Mermaid diagram fullscreen"
-            >
-              <Maximize2 className="size-3.5" />
-            </button>
-          </div>
-          {lightboxOpen && expandedDocument && (
-            <MermaidLightbox
-              srcDoc={expandedDocument}
-              onClose={() => setLightboxOpen(false)}
-            />
-          )}
-        </>
-      ) : (
-        <div className="mermaid-diagram-loading">{t(($) => $.mermaid.rendering)}</div>
+    <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
+      <FileText className="size-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm">{filename}</p>
+      </div>
+      {href && (
+        <button
+          type="button"
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          onClick={handleClick}
+        >
+          <Download className="size-3.5" />
+        </button>
       )}
     </div>
   );
 }
 
-const components: Partial<Components> = {
-  // Links — route mention:// to mention components, others show preview card
-  a: ReadonlyLink,
+function buildComponents(
+  resolveAttachmentId: (url: string) => string | undefined,
+  onDownload: (attachmentId: string) => void,
+): Partial<Components> {
+  return {
+    // Links — route mention:// to mention components, others show preview card
+    a: ReadonlyLink,
 
-  // Images — centered with toolbar + lightbox (matches Tiptap ImageView NodeView)
-  img: function ReadonlyImage({ src, alt }) {
-    const { t } = useT("editor");
-    const [lightbox, setLightbox] = useState(false);
-    const imgSrc = typeof src === "string" ? src : "";
-    const imgAlt = alt ?? "";
+    // Images — centered with toolbar + lightbox (matches Tiptap ImageView NodeView)
+    img: ({ src, alt }) => (
+      <ReadonlyImage
+        src={typeof src === "string" ? src : undefined}
+        alt={alt ?? undefined}
+        resolveAttachmentId={resolveAttachmentId}
+        onDownload={onDownload}
+      />
+    ),
 
-    const handleView = () => setLightbox(true);
-    const handleDownload = () => {
-      window.open(imgSrc, "_blank", "noopener,noreferrer");
-    };
-    const handleCopyLink = async () => {
-      try {
-        await navigator.clipboard.writeText(imgSrc);
-        toast.success(t(($) => $.image.link_copied));
-      } catch {
-        toast.error(t(($) => $.image.copy_link_failed));
+    // FileCard — intercept <div data-type="fileCard"> from preprocessMarkdown
+    div: ({ node, children, ...props }) => {
+      const dataType = node?.properties?.dataType as string | undefined;
+      if (dataType === "fileCard") {
+        const rawHref = (node?.properties?.dataHref as string) || "";
+        // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
+        const href = /^https?:\/\//i.test(rawHref) ? rawHref : "";
+        const filename = (node?.properties?.dataFilename as string) || "";
+        return (
+          <ReadonlyFileCard
+            href={href}
+            filename={filename}
+            resolveAttachmentId={resolveAttachmentId}
+            onDownload={onDownload}
+          />
+        );
       }
-    };
+      return <div {...props}>{children}</div>;
+    },
 
-    return (
-      <span className="image-node">
-        <span className="image-figure" onClick={handleView}>
-          <img src={imgSrc} alt={imgAlt} className="image-content" draggable={false} />
-          <span
-            className="image-toolbar"
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button type="button" onClick={handleView} title={t(($) => $.image.view)}>
-              <Maximize2 className="size-3.5" />
-            </button>
-            <button type="button" onClick={handleDownload} title={t(($) => $.image.download)}>
-              <Download className="size-3.5" />
-            </button>
-            <button type="button" onClick={handleCopyLink} title={t(($) => $.image.copy_link)}>
-              <LinkIcon className="size-3.5" />
-            </button>
-          </span>
-        </span>
-        {lightbox && (
-          <ImageLightbox src={imgSrc} alt={imgAlt} onClose={() => setLightbox(false)} />
-        )}
-      </span>
-    );
-  },
+    // Tables — wrap in tableWrapper div for border/radius/scroll (matches Tiptap)
+    table: ({ children }) => (
+      <div className="tableWrapper">
+        <table>{children}</table>
+      </div>
+    ),
 
-  // FileCard — intercept <div data-type="fileCard"> from preprocessMarkdown
-  div: ({ node, children, ...props }) => {
-    const dataType = node?.properties?.dataType as string | undefined;
-    if (dataType === "fileCard") {
-      const rawHref = (node?.properties?.dataHref as string) || "";
-      // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
-      const href = /^https?:\/\//i.test(rawHref) ? rawHref : "";
-      const filename = (node?.properties?.dataFilename as string) || "";
-      return (
-        <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
-          <FileText className="size-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm">{filename}</p>
-          </div>
-          {href && (
-            <button
-              type="button"
-              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              onClick={() => window.open(href, "_blank", "noopener,noreferrer")}
-            >
-              <Download className="size-3.5" />
-            </button>
-          )}
-        </div>
-      );
-    }
-    return <div {...props}>{children}</div>;
-  },
+    // Code — lowlight highlighting for blocks, plain render for inline
+    code: ({ className, children, node, ...props }) => {
+      const lang = /language-(\w+)/.exec(className || "")?.[1];
+      const isBlock =
+        node?.position &&
+        node.position.start.line !== node.position.end.line;
 
-  // Tables — wrap in tableWrapper div for border/radius/scroll (matches Tiptap)
-  table: ({ children }) => (
-    <div className="tableWrapper">
-      <table>{children}</table>
-    </div>
-  ),
+      if (isBlock && lang === "mermaid") {
+        return <MermaidDiagram chart={String(children).replace(/\n$/, "")} />;
+      }
 
-  // Code — lowlight highlighting for blocks, plain render for inline
-  code: ({ className, children, node, ...props }) => {
-    const lang = /language-(\w+)/.exec(className || "")?.[1];
-    const isBlock =
-      node?.position &&
-      node.position.start.line !== node.position.end.line;
+      if (!isBlock && !lang) {
+        // Inline code — CSS handles styling via .rich-text-editor code
+        return <code {...props}>{children}</code>;
+      }
 
-    if (isBlock && lang === "mermaid") {
-      return <MermaidDiagram chart={String(children).replace(/\n$/, "")} />;
-    }
+      // Block code — highlight with lowlight, output hljs classes
+      const code = String(children).replace(/\n$/, "");
+      try {
+        const tree = lang
+          ? lowlight.highlight(lang, code)
+          : lowlight.highlightAuto(code);
+        return (
+          <code
+            className={cn("hljs", lang && `language-${lang}`)}
+            dangerouslySetInnerHTML={{ __html: toHtml(tree) }}
+          />
+        );
+      } catch {
+        // Fallback — render without highlighting
+        return (
+          <code className={className} {...props}>
+            {children}
+          </code>
+        );
+      }
+    },
 
-    if (!isBlock && !lang) {
-      // Inline code — CSS handles styling via .rich-text-editor code
-      return <code {...props}>{children}</code>;
-    }
-
-    // Block code — highlight with lowlight, output hljs classes
-    const code = String(children).replace(/\n$/, "");
-    try {
-      const tree = lang
-        ? lowlight.highlight(lang, code)
-        : lowlight.highlightAuto(code);
-      return (
-        <code
-          className={cn("hljs", lang && `language-${lang}`)}
-          dangerouslySetInnerHTML={{ __html: toHtml(tree) }}
-        />
-      );
-    } catch {
-      // Fallback — render without highlighting
-      return (
-        <code className={className} {...props}>
-          {children}
-        </code>
-      );
-    }
-  },
-
-  // Pre — pass through (CSS handles styling via .rich-text-editor pre)
-  pre: ({ children }) => {
-    if (isValidElement(children) && children.type === MermaidDiagram) {
-      return <>{children}</>;
-    }
-    return <pre>{children}</pre>;
-  },
-};
+    // Pre — pass through (CSS handles styling via .rich-text-editor pre)
+    pre: ({ children }) => {
+      if (isValidElement(children) && children.type === MermaidDiagram) {
+        return <>{children}</>;
+      }
+      return <pre>{children}</pre>;
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -574,19 +374,46 @@ const components: Partial<Components> = {
 interface ReadonlyContentProps {
   content: string;
   className?: string;
+  /**
+   * Attachments associated with the surrounding entity (comment / issue
+   * body). When the markdown contains an inline `<img>` or file card whose
+   * URL matches one of these attachments, the download button re-signs the
+   * URL at click time via `useDownloadAttachment` instead of opening the
+   * potentially stale link embedded in the markdown.
+   *
+   * Callers SHOULD pass a stable reference (e.g. the field on a memoized
+   * timeline entry); a fresh array on every parent render busts the memo.
+   */
+  attachments?: Attachment[];
 }
 
 // Memoized so a long timeline of comments (Inbox + IssueDetail) does not
 // re-run the full react-markdown + rehype-* + lowlight pipeline on every
-// parent re-render. Props are `content` and `className` (both strings), so
-// React.memo's default shallow comparison is value-equality here.
+// parent re-render. Props are `content`/`className`/`attachments`, all
+// shallow-comparable; stability is the caller's responsibility for the
+// array.
 export const ReadonlyContent = memo(function ReadonlyContent({
   content,
   className,
+  attachments,
 }: ReadonlyContentProps) {
   const processed = useMemo(() => preprocessMarkdown(content), [content]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
+  const download = useDownloadAttachment();
+
+  const resolveAttachmentId = useCallback(
+    (url: string): string | undefined => {
+      if (!url || !attachments?.length) return undefined;
+      return attachments.find((a) => a.url === url)?.id;
+    },
+    [attachments],
+  );
+
+  const components = useMemo(
+    () => buildComponents(resolveAttachmentId, download),
+    [resolveAttachmentId, download],
+  );
 
   return (
     <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>

@@ -47,6 +47,8 @@ import type {
   CommentCreatedPayload,
   CommentUpdatedPayload,
   CommentDeletedPayload,
+  CommentResolvedPayload,
+  CommentUnresolvedPayload,
   ActivityCreatedPayload,
   ReactionAddedPayload,
   ReactionRemovedPayload,
@@ -251,6 +253,7 @@ export function useRealtimeSync(
     const specificEvents = new Set([
       "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
+      "comment:resolved", "comment:unresolved",
       "activity:created",
       "reaction:added", "reaction:removed",
       "issue_reaction:added", "issue_reaction:removed",
@@ -429,12 +432,25 @@ export function useRealtimeSync(
 
     // --- Timeline event handlers (global fallback) ---
     // These events are also handled granularly by useIssueTimeline when
-    // IssueDetail is mounted. This global handler ensures the timeline cache
-    // is invalidated even when IssueDetail is unmounted, so stale data
-    // isn't served on next mount (staleTime: Infinity relies on this).
-
+    // IssueDetail is mounted. This global handler exists to mark the
+    // timeline cache stale for issues whose IssueDetail is *not* mounted,
+    // so stale data isn't served on next mount (staleTime: Infinity, set on
+    // the QueryClient default, relies on this).
+    //
+    // `refetchType: "none"` is the load-bearing detail: without it, an
+    // active IssueDetail observer would refetch the entire timeline on
+    // every comment / activity / reaction event. The refetch replaces
+    // every entry's reference and busts React.memo on every CommentCard
+    // subtree (visible during AI streaming as a flash across all sibling
+    // threads, MUL-1941). Inactive observers don't refetch either way;
+    // when IssueDetail mounts later, the stale flag triggers the refetch
+    // through `refetchOnMount`. Active observers stay fresh via the
+    // granular setQueryData handlers in `useIssueTimeline`.
     const invalidateTimeline = (issueId: string) => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      qc.invalidateQueries({
+        queryKey: issueKeys.timeline(issueId),
+        refetchType: "none",
+      });
     };
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
@@ -450,6 +466,16 @@ export function useRealtimeSync(
     const unsubCommentDeleted = ws.on("comment:deleted", (p) => {
       const { issue_id } = p as CommentDeletedPayload;
       if (issue_id) invalidateTimeline(issue_id);
+    });
+
+    const unsubCommentResolved = ws.on("comment:resolved", (p) => {
+      const { comment } = p as CommentResolvedPayload;
+      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+    });
+
+    const unsubCommentUnresolved = ws.on("comment:unresolved", (p) => {
+      const { comment } = p as CommentUnresolvedPayload;
+      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
     });
 
     const unsubActivityCreated = ws.on("activity:created", (p) => {
@@ -1030,6 +1056,8 @@ export function useRealtimeSync(
       unsubCommentCreated();
       unsubCommentUpdated();
       unsubCommentDeleted();
+      unsubCommentResolved();
+      unsubCommentUnresolved();
       unsubActivityCreated();
       unsubReactionAdded();
       unsubReactionRemoved();

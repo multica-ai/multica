@@ -16,7 +16,7 @@ func TestQuickCreateDefaultsToSelfWhenNoPeers(t *testing.T) {
 		Agent:             &AgentData{Name: "Hermes"},
 		// PeerAgents intentionally empty.
 	}
-	out := BuildPrompt(task)
+	out := BuildPrompt(task, "")
 
 	// Self-assign default present; routing language NOT present.
 	if !strings.Contains(out, `default to YOURSELF: pass `+"`"+`--assignee "Hermes"`+"`") {
@@ -40,7 +40,7 @@ func TestQuickCreateAllowsPeerRouteWhenPeersExist(t *testing.T) {
 			{ID: "p-claude", Name: "Claude Code", Instructions: "Coding agent"},
 		},
 	}
-	out := BuildPrompt(task)
+	out := BuildPrompt(task, "")
 
 	// New language: route OR self-assign, picker decides.
 	if !strings.Contains(out, "decide based on the work") {
@@ -72,7 +72,7 @@ func TestQuickCreateNoAgentNameFallback(t *testing.T) {
 		QuickCreatePrompt: "fix the dashboard graph height",
 		// Agent: nil
 	}
-	out := BuildPrompt(task)
+	out := BuildPrompt(task, "")
 	if !strings.Contains(out, "default to YOURSELF (the picker agent)") {
 		t.Errorf("expected generic self-assign fallback; got:\n%s", out)
 	}

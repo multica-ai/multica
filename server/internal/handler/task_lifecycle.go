@@ -96,8 +96,12 @@ func (h *Handler) PinTaskSession(w http.ResponseWriter, r *http.Request) {
 
 // RerunIssue manually re-enqueues the issue's current agent assignment as a
 // fresh task. Useful when an issue is stuck or the user wants to retry a
-// failed run. The new task carries the most recent session_id/work_dir so
-// the agent can resume where it left off when the backend supports it.
+// failed run. The new task is flagged force_fresh_session=true: the daemon
+// claim handler skips the (agent_id, issue_id) session-resume lookup so the
+// agent starts a clean session. A user clicking rerun has just judged the
+// prior output bad — replaying the same conversation would replay the same
+// poisoned state. (Automatic retry, by contrast, intentionally inherits the
+// session — that path handles infrastructure failures, not bad output.)
 func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)

@@ -64,6 +64,22 @@
     "no_agents": "No agents are bound to this runtime yet.",
     "diagnostics_title": "Diagnostics",
     "diagnostics_cli": "CLI",
+    "diagnostics_visibility": "Visibility",
+    "diagnostics_timezone": "Timezone",
+    "visibility_label": {
+      "private": "Private",
+      "public": "Public"
+    },
+    "visibility_hint": {
+      "private": "Only you and workspace admins can create agents on this runtime.",
+      "public": "Any workspace member can create agents on this runtime."
+    },
+    "visibility_toast_updated": "Visibility set to {{visibility}}",
+    "visibility_toast_failed": "Failed to update visibility",
+    "timezone_browser_suffix": " (browser)",
+    "timezone_hint": "Token-usage charts on this runtime bucket dates by this timezone.",
+    "timezone_toast_updated": "Timezone updated to {{tz}}",
+    "timezone_toast_failed": "Failed to update timezone",
     "delete_dialog": {
       "title": "Delete Runtime",
       "description": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
@@ -175,8 +191,24 @@
     "legend_cache_write": "Cache write",
     "empty_no_usage": "No usage in this period.",
     "empty_pricing_missing": "Tokens recorded but pricing missing for:",
-    "empty_pricing_hint": "Add to MODEL_PRICING in packages/views/runtimes/utils.ts",
+    "empty_pricing_hint": "Set a custom rate to include them in cost totals.",
     "empty_zero_cost": "Tokens recorded but cost calculation returned $0.",
+    "unmapped_notice_one": "{{count}} model has no maintained price — its tokens are excluded from cost totals.",
+    "unmapped_notice_other": "{{count}} models have no maintained price — their tokens are excluded from cost totals.",
+    "custom_pricing": {
+      "open_button": "Set custom prices",
+      "title": "Custom model prices",
+      "description": "Enter per-million-token rates so we can price models we don't ship a maintained rate for. Stored locally on this machine.",
+      "empty": "No models need a custom price right now.",
+      "field_input": "Input",
+      "field_output": "Output",
+      "field_cache_read": "Cache read",
+      "field_cache_write": "Cache write",
+      "unit_hint": "All rates are USD per 1M tokens. Leave every field blank to remove an override.",
+      "remove_aria": "Remove custom price",
+      "cancel": "Cancel",
+      "save": "Save"
+    },
     "cost_by_title_agent": "Cost by agent",
     "cost_by_title_model": "Cost by model",
     "cost_by_tab_agent": "By agent",

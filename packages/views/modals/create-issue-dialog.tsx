@@ -57,13 +57,17 @@ export function CreateIssueDialog({
       ? cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
           "!top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2",
-          // Width is capped; height is content-driven up to 80vh so a
-          // pasted screenshot can't push the dialog past the viewport
-          // (the inner editor area scrolls instead).
-          "!max-w-xl !w-full !max-h-[80vh]",
           // Smooth size transition when switching modes — the manual mode
           // uses the same easing.
           "!transition-all !duration-300 !ease-out",
+          // Expanded matches manual's expanded footprint so toggling expand
+          // mid-flow (or after a mode switch) lands the user on the same
+          // visual size. Collapsed keeps the slim, content-driven default
+          // — pasted screenshots still scroll inside instead of pushing the
+          // dialog past the viewport.
+          isExpanded
+            ? "!max-w-4xl !w-full !h-5/6"
+            : "!max-w-xl !w-full !max-h-[80vh]",
         )
       : manualDialogContentClass(isExpanded, backlogHintIssueId);
 
@@ -79,6 +83,8 @@ export function CreateIssueDialog({
             onClose={onClose}
             onSwitchMode={switchTo("manual")}
             data={panelData}
+            isExpanded={isExpanded}
+            setIsExpanded={setIsExpanded}
           />
         ) : (
           <ManualCreatePanel

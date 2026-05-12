@@ -81,12 +81,19 @@ export function InvitationsPage() {
         acceptedIds.push(id);
       }
 
+      const firstAcceptedInvite = invitations?.find(
+        (inv) => inv.id === acceptedIds[0],
+      );
+
       // markOnboardingComplete is a frontend-side belt to the backend braces:
       // each AcceptInvitation transaction already sets onboarded_at via
       // MarkUserOnboarded, but calling this from the client makes sure the
       // returned `User` is freshly written and gives refreshMe something
       // canonical to read.
-      await api.markOnboardingComplete({ completion_path: "invite_accept" });
+      await api.markOnboardingComplete({
+        completion_path: "invite_accept",
+        workspace_id: firstAcceptedInvite?.workspace_id,
+      });
       await useAuthStore.getState().refreshMe();
 
       qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
@@ -95,9 +102,6 @@ export function InvitationsPage() {
         staleTime: 0,
       });
 
-      const firstAcceptedInvite = invitations?.find(
-        (inv) => inv.id === acceptedIds[0],
-      );
       const targetWs = firstAcceptedInvite
         ? wsList.find((w) => w.id === firstAcceptedInvite.workspace_id)
         : undefined;
