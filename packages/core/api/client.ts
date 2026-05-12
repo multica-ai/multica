@@ -702,6 +702,49 @@ export class ApiClient {
     return this.fetch<T>(qs ? `/api/cerebro/tasks?${qs}` : `/api/cerebro/tasks`);
   }
 
+  // CEREBRO-PATCH(cerebro-workflows-client): JEH-1047 workflow engine REST surface (PR 2/3).
+  async listCerebroWorkflows<T = unknown>(): Promise<T> {
+    return this.fetch<T>("/api/cerebro/workflows");
+  }
+  async getCerebroWorkflow<T = unknown>(id: string): Promise<T> {
+    return this.fetch<T>(`/api/cerebro/workflows/${id}`);
+  }
+  async createCerebroWorkflow<T = unknown>(payload: unknown): Promise<T> {
+    return this.fetch<T>("/api/cerebro/workflows", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+  async updateCerebroWorkflow<T = unknown>(id: string, payload: unknown): Promise<T> {
+    return this.fetch<T>(`/api/cerebro/workflows/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  }
+  async toggleCerebroWorkflow<T = unknown>(id: string, enabled: boolean): Promise<T> {
+    return this.fetch<T>(`/api/cerebro/workflows/${id}/toggle`, {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    });
+  }
+  async deleteCerebroWorkflow(id: string): Promise<void> {
+    await this.fetch<void>(`/api/cerebro/workflows/${id}`, { method: "DELETE" });
+  }
+  async listCerebroWorkflowRuns<T = unknown>(filter: {
+    workflowId?: string | null;
+    limit?: number;
+    offset?: number;
+  }): Promise<T> {
+    const params = new URLSearchParams();
+    if (filter.limit !== undefined) params.set("limit", String(filter.limit));
+    if (filter.offset !== undefined) params.set("offset", String(filter.offset));
+    const qs = params.toString();
+    const base = filter.workflowId
+      ? `/api/cerebro/workflows/${filter.workflowId}/runs`
+      : `/api/cerebro/workflows/runs`;
+    return this.fetch<T>(qs ? `${base}?${qs}` : base);
+  }
+
   // Web Push (per-device subscriptions). The server returns enabled=false
   // when VAPID keys aren't configured — callers should hide the subscribe UI
   // in that case.

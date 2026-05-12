@@ -9,28 +9,27 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
-
-// ErrUnimplementedAction is returned for action_types whose runtime path
-// ships in a later PR. Service.Execute treats it as a terminal failure (no
-// retries) and marks the run failed without scheduling a backoff.
-var ErrUnimplementedAction = errors.New("action not yet implemented in this build")
 
 // IssueActions is the narrow surface the action runner needs from the
 // upstream issue queries. Using an interface keeps the engine testable and
 // the upstream-zone import boundary one-way: we depend on db.Queries' shape
-// rather than on the service package.
+// rather than on the service package. CreateInboxItem joined the interface
+// in PR 2 when the send_reminder action shipped.
 type IssueActions interface {
 	UpdateIssueStatus(ctx context.Context, arg db.UpdateIssueStatusParams) (db.Issue, error)
 	CreateIssue(ctx context.Context, arg db.CreateIssueParams) (db.Issue, error)
 	IncrementIssueCounter(ctx context.Context, workspaceID pgtype.UUID) (int32, error)
 	GetIssue(ctx context.Context, id pgtype.UUID) (db.Issue, error)
+	CreateInboxItem(ctx context.Context, arg db.CreateInboxItemParams) (db.InboxItem, error)
 }
 
-// runAction dispatches on the workflow's action_type. The error return is
-// what controls the retry ladder in Service.Execute: ErrUnimplementedAction
-// is terminal, other errors trigger backoff.
+// runAction dispatches on the workflow's action_type. Any non-nil error
+// triggers the retry ladder in Service.Execute.
 func (s *Service) runAction(ctx context.Context, wf workflow, te TriggerEvent) error {
 	switch wf.actionType {
 	case ActionSetStatus:
@@ -39,10 +38,87 @@ func (s *Service) runAction(ctx context.Context, wf workflow, te TriggerEvent) e
 		_, err := s.actionCreateSubIssue(ctx, wf, te)
 		return err
 	case ActionSendReminder:
-		return ErrUnimplementedAction
+		return s.actionSendReminder(ctx, wf, te)
 	default:
 		return fmt.Errorf("unknown action_type %q", wf.actionType)
 	}
+}
+
+// actionSendReminder writes a single inbox_item to the configured recipient
+// and publishes inbox:new on the bus so the desktop / mobile notifier picks
+// it up live. PR 1 returned ErrUnimplementedAction here; PR 2 finishes the
+// implementation. Mobile-push fan-out happens downstream in the existing
+// inbox-listener chain — no extra plumbing needed on this side.
+func (s *Service) actionSendReminder(ctx context.Context, wf workflow, te TriggerEvent) error {
+	var cfg ActionConfigSendReminder
+	if err := json.Unmarshal(wf.actionConfig, &cfg); err != nil {
+		return fmt.Errorf("send_reminder: parse config: %w", err)
+	}
+	if cfg.RecipientID == "" || cfg.RecipientType == "" {
+		return errors.New("send_reminder: recipient_id and recipient_type are required")
+	}
+	if cfg.RecipientType != "member" && cfg.RecipientType != "agent" {
+		return fmt.Errorf("send_reminder: unsupported recipient_type %q", cfg.RecipientType)
+	}
+	if cfg.Message == "" {
+		return errors.New("send_reminder: message is required")
+	}
+
+	recipientID, err := parseUUID(cfg.RecipientID)
+	if err != nil {
+		return fmt.Errorf("send_reminder: %w", err)
+	}
+	wsID, err := parseUUID(te.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("send_reminder: %w", err)
+	}
+
+	var issueID pgtype.UUID
+	if te.IssueID != "" {
+		if id, ok := optionalUUID(te.IssueID); ok {
+			issueID = id
+		}
+	}
+
+	title := "Workflow reminder"
+	body := renderTitle(cfg.Message, te.Raw)
+
+	item, err := s.issues.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		WorkspaceID:   wsID,
+		RecipientType: cfg.RecipientType,
+		RecipientID:   recipientID,
+		Type:          "workflow_reminder",
+		Severity:      "info",
+		IssueID:       issueID,
+		Title:         title,
+		Body:          nullableText(body),
+		ActorType:     pgtype.Text{String: wf.createdByType, Valid: wf.createdByType != ""},
+		ActorID:       wf.createdByID,
+		Details: mustJSON(map[string]any{
+			"workflow_id":   uuidString(wf.id),
+			"workflow_name": cfg.Message,
+			"trigger_type":  te.Type,
+		}),
+		Route: "inbox",
+	})
+	if err != nil {
+		return fmt.Errorf("send_reminder: inbox write: %w", err)
+	}
+
+	// Best-effort: publish inbox:new so the recipient sees the reminder
+	// live without a refetch. Failure to publish only delays delivery to
+	// the next query refresh — the row is already persisted, so we don't
+	// retry the whole action on a bus issue.
+	if s.bus != nil {
+		s.bus.Publish(events.Event{
+			Type:        protocol.EventInboxNew,
+			WorkspaceID: te.WorkspaceID,
+			ActorType:   wf.createdByType,
+			ActorID:     uuidString(wf.createdByID),
+			Payload:     map[string]any{"item_id": util.UUIDToString(item.ID)},
+		})
+	}
+	return nil
 }
 
 func (s *Service) actionSetStatus(ctx context.Context, wf workflow, te TriggerEvent) error {

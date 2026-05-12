@@ -55,6 +55,7 @@
     "@multica/cerebro-runtime": "workspace:*",
     "@multica/cerebro-tasks": "workspace:*",
     "@multica/cerebro-ui": "workspace:*",
+    "@multica/cerebro-workflows": "workspace:*",
     "@multica/cerebro-users": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",

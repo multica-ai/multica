@@ -1,0 +1,38 @@
+{
+  "name": "@multica/cerebro-workflows",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./core": "./core/index.ts",
+    "./core/queries": "./core/queries.ts",
+    "./views": "./views/index.ts",
+    "./views/workflows-page": "./views/workflows-page.tsx",
+    "./views/workflow-form": "./views/workflow-form.tsx",
+    "./views/workflow-runs-page": "./views/workflow-runs-page.tsx",
+    "./views/workflows-nav-item": "./views/workflows-nav-item.tsx"
+  },
+  "dependencies": {
+    "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "@multica/views": "workspace:*"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "catalog:",
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "zustand": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

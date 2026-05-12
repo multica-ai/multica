@@ -35,6 +35,8 @@ import (
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler import
 	cerebrotasks "github.com/multica-ai/multica/server/internal/cerebro/tasks"
+	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow engine REST handler import
+	cerebroworkflows "github.com/multica-ai/multica/server/internal/cerebro/workflows"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -211,6 +213,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.RuntimeAccount = cerebroruntime.NewAccountService(cerebroQueries, cerebroAccountHandler.Service, bus)
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
+	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance — runtime service is owned by main.go; this handler is CRUD-only.
+	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries)
 
 	r := chi.NewRouter()
 
@@ -836,6 +840,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 			// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 cross-agent tasks list endpoint
 			r.Get("/api/cerebro/tasks", cerebroTasksHandler.List)
+			// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow engine REST surface (PR 2/3).
+			r.Route("/api/cerebro/workflows", func(r chi.Router) {
+				r.Get("/", cerebroWorkflowsHandler.List)
+				r.Post("/", cerebroWorkflowsHandler.Create)
+				r.Get("/runs", cerebroWorkflowsHandler.Runs)
+				r.Get("/{id}", cerebroWorkflowsHandler.Get)
+				r.Put("/{id}", cerebroWorkflowsHandler.Update)
+				r.Delete("/{id}", cerebroWorkflowsHandler.Delete)
+				r.Post("/{id}/toggle", cerebroWorkflowsHandler.Toggle)
+				r.Get("/{id}/runs", cerebroWorkflowsHandler.Runs)
+			})
 		})
 	})
 

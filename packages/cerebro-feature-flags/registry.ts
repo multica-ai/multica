@@ -22,7 +22,8 @@ export type CerebroFlagKey =
   | "cerebro_groups_enabled"
   | "cerebro_runtime_pause"
   | "cerebro_tasks"
-  | "cerebro_pin_input";
+  | "cerebro_pin_input"
+  | "cerebro_workflows";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -49,6 +50,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_runtime_pause: true,
   cerebro_tasks: false,
   cerebro_pin_input: true,
+  cerebro_workflows: false,
 };
 
 export interface CerebroFlagDefinition {
@@ -157,5 +159,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Pin issue input",
     description:
       "Enable a pin toggle on issue comment and reply inputs that keeps the active input stuck to the bottom of the viewport while scrolling. Issue pages only — channels and DMs are unaffected.",
+  },
+  {
+    key: "cerebro_workflows",
+    label: "Workflow engine",
+    description:
+      "Enable the cerebro workflow engine and the /:workspace/workflows page (data-driven status/trigger rules, builder UI, run log). Server-side execution is additionally gated by the CEREBRO_WORKFLOWS_ENABLED env var.",
   },
 ];

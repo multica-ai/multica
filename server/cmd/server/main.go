@@ -335,8 +335,8 @@ func main() {
 	go runDBStatsLogger(sweepCtx, pool)
 	// CEREBRO-PATCH(main-runtime-pause-sweeper): cerebro auto-unpause sweeper.
 	go cerebroruntime.New(cerebrodb.New(pool), taskSvc, bus).RunUnpauseSweeper(sweepCtx)
-	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 workflow engine subscribe + retry sweeper.
-	workflowSvc := cerebroworkflows.New(cerebrodb.New(pool), queries)
+	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 workflow engine subscribe + retry sweeper, wired to the event bus.
+	workflowSvc := cerebroworkflows.New(cerebrodb.New(pool), queries, bus)
 	cerebroworkflows.NewListener(workflowSvc).Attach(bus)
 	go workflowSvc.RunRetrySweeper(sweepCtx, 30*time.Second)
 	if gatewayCfg, err := cerebroruntime.LoadFirtalGatewayRuntimeConfig(); err != nil {

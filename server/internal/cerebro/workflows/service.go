@@ -3,7 +3,6 @@ package workflows
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/events"
 )
 
 // retryBackoffs are the spec-locked delays applied to attempts 2, 3, 4. The
@@ -36,20 +36,25 @@ var nowFunc = time.Now
 type Service struct {
 	queries *cerebrodb.Queries
 	issues  IssueActions
+	bus     *events.Bus
 
-	// enabled is the env-gated phase-1 master switch. PR 2 replaces this
-	// with the per-workspace + per-user cerebro_workflows feature flag once
-	// the UI surfaces a setting for it.
+	// enabled is the env-gated phase-1 master switch. PR 2 ships the
+	// per-user `cerebro_workflows` UI flag alongside this env var; the env
+	// var stays as the master kill switch so an ops-driven disable doesn't
+	// require a UI round-trip.
 	enabled bool
 }
 
 // New builds a Service. enabled is true when the CEREBRO_WORKFLOWS_ENABLED
 // env var is set to a truthy value (1, true, yes); otherwise the engine
-// still receives bus events but no-ops on them.
-func New(queries *cerebrodb.Queries, issues IssueActions) *Service {
+// still receives bus events but no-ops on them. The bus is needed by the
+// send_reminder action for inbox:new fan-out — passing nil there disables
+// the live notification but keeps the inbox row write working.
+func New(queries *cerebrodb.Queries, issues IssueActions, bus *events.Bus) *Service {
 	return &Service{
 		queries: queries,
 		issues:  issues,
+		bus:     bus,
 		enabled: envFlagEnabled("CEREBRO_WORKFLOWS_ENABLED"),
 	}
 }
@@ -178,15 +183,6 @@ func (s *Service) attempt(ctx context.Context, runID pgtype.UUID, wf workflow, t
 			return fmt.Errorf("mark success: %w", err)
 		}
 		return nil
-	}
-
-	if errors.Is(actErr, ErrUnimplementedAction) {
-		// Terminal — no retries for actions we cannot run yet.
-		return s.queries.MarkCerebroWorkflowRunFailed(ctx, cerebrodb.MarkCerebroWorkflowRunFailedParams{
-			ID:          runID,
-			Error:       pgtype.Text{String: actErr.Error(), Valid: true},
-			NextRetryAt: pgtype.Timestamptz{},
-		})
 	}
 
 	// Action failed — schedule the next attempt or escalate.

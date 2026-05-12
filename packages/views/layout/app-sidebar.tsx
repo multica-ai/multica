@@ -77,6 +77,8 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { DashboardNavItem } from "@multica/cerebro-dashboard/views/dashboard-nav-item";
 // CEREBRO-PATCH(cerebro-tasks-sidebar): JEH-900 sidebar entry for cerebro tasks page
 import { TasksNavItem } from "@multica/cerebro-tasks/views/tasks-nav-item";
+// CEREBRO-PATCH(cerebro-workflows-sidebar): JEH-1047 sidebar entry for cerebro workflows page
+import { WorkflowsNavItem } from "@multica/cerebro-workflows/views/workflows-nav-item";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/paths";
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
@@ -799,6 +801,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 <DashboardNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-tasks-sidebar): JEH-900 cerebro tasks entry in workspace group */}
                 <TasksNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
+                {/* CEREBRO-PATCH(cerebro-workflows-sidebar): JEH-1047 cerebro workflows entry in workspace group */}
+                <WorkflowsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {workspaceNav.map((item) => {
                   const href = p[item.key]();
                   const isActive = isNavActive(pathname, href);

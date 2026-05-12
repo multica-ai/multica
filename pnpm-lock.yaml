@@ -198,6 +198,9 @@ importers:
       '@multica/cerebro-users':
         specifier: workspace:*
         version: link:../../packages/cerebro-users
+      '@multica/cerebro-workflows':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-workflows
       '@multica/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -349,6 +352,9 @@ importers:
       '@multica/cerebro-users':
         specifier: workspace:*
         version: link:../../packages/cerebro-users
+      '@multica/cerebro-workflows':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-workflows
       '@multica/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -1484,6 +1490,46 @@ importers:
       jsdom:
         specifier: 'catalog:'
         version: 29.1.1(@noble/hashes@1.8.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.5(@opentelemetry/api@1.9.1)(@types/node@25.6.2)(jsdom@29.1.1(@noble/hashes@1.8.0))(msw@2.14.5(@types/node@25.6.2)(typescript@5.9.3))(vite@8.0.11(@types/node@25.6.2)(esbuild@0.27.7)(jiti@2.7.0))
+
+  packages/cerebro-workflows:
+    dependencies:
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
+      '@multica/core':
+        specifier: workspace:*
+        version: link:../core
+      '@multica/ui':
+        specifier: workspace:*
+        version: link:../ui
+      '@multica/views':
+        specifier: workspace:*
+        version: link:../views
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.100.9(react@19.2.3)
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.14.0(react@19.2.3)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.3
+      zustand:
+        specifier: 'catalog:'
+        version: 5.0.13(@types/react@19.2.14)(immer@11.1.8)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
+    devDependencies:
+      '@multica/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/react':
+        specifier: ^19.2.0
+        version: 19.2.14
       typescript:
         specifier: 'catalog:'
         version: 5.9.3

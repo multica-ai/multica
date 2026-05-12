@@ -40,9 +40,8 @@ type ActionConfigCreateSubIssue struct {
 	AssigneeType string `json:"assignee_type,omitempty"`
 }
 
-// ActionConfigSendReminder — write an inbox row + push notification.
-// Lands in PR 2 alongside the inbox-integration wiring. Phase 1 accepts the
-// config shape but the runtime returns ErrUnimplementedAction.
+// ActionConfigSendReminder — write an inbox row to the recipient and
+// publish inbox:new so the desktop/mobile notifier picks it up live.
 type ActionConfigSendReminder struct {
 	RecipientID   string `json:"recipient_id"`
 	RecipientType string `json:"recipient_type"`
