@@ -39,6 +39,7 @@ export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
 export type { TimelineEntry, AssigneeFrequencyEntry } from "./activity";
 export type { ReviewThread, ListReviewThreadsResponse } from "./review-thread";
+export type { CRAttempt, CRSignal, CROutcome, CRSignalKind } from "./cr-attempt";
 export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";
 export type * from "./api";

@@ -74,6 +74,8 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  CRAttempt,
+  CRSignal,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -473,6 +475,14 @@ export class ApiClient {
   ): Promise<import("../types/review-thread").ListReviewThreadsResponse> {
     const qs = params?.state ? `?state=${params.state}` : "";
     return this.fetch(`/api/issues/${issueId}/review-threads${qs}`);
+  }
+
+  async listCRAttempts(issueId: string): Promise<CRAttempt[]> {
+    return this.fetch(`/api/issues/${issueId}/cr-attempts`);
+  }
+
+  async listCRSignals(issueId: string, attemptId: string): Promise<CRSignal[]> {
+    return this.fetch(`/api/issues/${issueId}/cr-attempts/${attemptId}/signals`);
   }
 
   async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
