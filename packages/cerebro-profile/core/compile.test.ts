@@ -43,40 +43,96 @@ describe("compileProfile", () => {
     expect(compiled.startsWith("USER: Den grundige")).toBe(true);
   });
 
-  it("low-end sliders produce terse style + high-autonomy line set", () => {
+  it("low-end length + high autonomy + scope=1 produces terse style + autonomous line set + scope line of 1s", () => {
     const profile: Profile = {
       ...buildDefaultProfile("utalmodig"),
       lengthPref: 0,
       autonomyPref: 100,
-      techPref: 0,
+      gitPref: 1,
+      codePref: 1,
+      computerPref: 1,
+      processPref: 1,
     };
     const compiled = compileProfile(profile);
     expect(compiled).toContain("1–3 sætninger");
     expect(compiled).toContain("Reversibelt: bare kør");
-    expect(compiled).toContain("arch:surface");
+    expect(compiled).toContain("SCOPE: git:1, code:1, computer:1, process:1");
   });
 
-  it("max sliders produce verbose style + cautious autonomy + deep tech", () => {
+  it("max length + low autonomy + max scope produces verbose + cautious + scope line of 5s", () => {
     const profile: Profile = {
       ...buildDefaultProfile("grundig"),
       lengthPref: 100,
       autonomyPref: 0,
-      techPref: 100,
+      gitPref: 5,
+      codePref: 5,
+      computerPref: 5,
+      processPref: 5,
     };
     const compiled = compileProfile(profile);
     expect(compiled).toContain("Forklar ræsonnement");
     expect(compiled).toContain("Bekræft plan");
-    expect(compiled).toContain("arch:deep");
+    expect(compiled).toContain("SCOPE: git:5, code:5, computer:5, process:5");
   });
 
-  it("snapshot — empty anti-patterns + mid-range sliders", () => {
+  it("scope values out of range are clamped to 1..5", () => {
+    const profile: Profile = {
+      ...buildDefaultProfile("ekspert"),
+      gitPref: 0,
+      codePref: 99,
+      computerPref: -3,
+      processPref: 5,
+    };
+    const compiled = compileProfile(profile);
+    expect(compiled).toContain("SCOPE: git:1, code:5, computer:1, process:5");
+  });
+
+  it("replace mode with non-empty custom prompt returns only the custom prompt", () => {
+    const profile: Profile = {
+      ...buildDefaultProfile("grundig"),
+      customPrompt: "Bare giv mig svaret. Ingen sektioner.",
+      promptMode: "replace",
+    };
+    expect(compileProfile(profile, { displayName: "Jens" })).toBe(
+      "Bare giv mig svaret. Ingen sektioner.",
+    );
+  });
+
+  it("replace mode with empty/whitespace custom prompt falls back to compiled output", () => {
+    const profile: Profile = {
+      ...buildDefaultProfile("grundig"),
+      customPrompt: "   ",
+      promptMode: "replace",
+    };
+    const compiled = compileProfile(profile, { displayName: "Jens" });
+    expect(compiled.startsWith("USER: Jens (Den grundige, dansk)")).toBe(true);
+    expect(compiled).toContain("SCOPE:");
+  });
+
+  it("append mode pastes custom prompt under a CUSTOM section after the compiled body", () => {
+    const profile: Profile = {
+      ...buildDefaultProfile("grundig"),
+      customPrompt: "Husk altid at sige hej.",
+      promptMode: "append",
+    };
+    const compiled = compileProfile(profile, { displayName: "Jens" });
+    expect(compiled).toContain("USER: Jens (Den grundige, dansk)");
+    expect(compiled.endsWith("CUSTOM:\nHusk altid at sige hej.")).toBe(true);
+  });
+
+  it("snapshot — empty anti-patterns + mid-range sliders + mid-scope", () => {
     const profile: Profile = {
       persona: "ekspert",
       language: "da",
       lengthPref: 50,
       autonomyPref: 50,
-      techPref: 50,
+      gitPref: 3,
+      codePref: 3,
+      computerPref: 3,
+      processPref: 3,
       antiPatterns: [],
+      customPrompt: "",
+      promptMode: "append",
     };
     expect(compileProfile(profile, { displayName: "Jens" })).toBe(emptyAntiPatternsOutput);
   });
@@ -103,7 +159,7 @@ AUTONOMY:
 - Destruktivt: spørg først.
 - Spørg ikke om ting du selv kan finde/gøre.
 
-TECH: arch:deep, data:deep, ux:deep, code:deep
+SCOPE: git:5, code:5, computer:5, process:5
 
 AVOID:
 - Forklar grundlæggende begreber
@@ -118,7 +174,7 @@ AUTONOMY:
 - Bekræft plan før ikke-trivielle ændringer.
 - Destruktivt: spørg altid først.
 
-TECH: arch:deep, data:deep, ux:deep, code:deep
+SCOPE: git:4, code:4, computer:5, process:5
 
 AVOID:
 - Hop over edge-cases
@@ -133,7 +189,7 @@ AUTONOMY:
 - Bekræft plan før ikke-trivielle ændringer.
 - Destruktivt: spørg altid først.
 
-TECH: arch:medium, data:medium, ux:medium, code:medium
+SCOPE: git:2, code:2, computer:3, process:2
 
 AVOID:
 - Spring forklaring over
@@ -150,7 +206,7 @@ AUTONOMY:
 - Destruktivt: spørg først.
 - Spørg ikke om ting du selv kan finde/gøre.
 
-TECH: arch:deep, data:deep, ux:deep, code:deep
+SCOPE: git:4, code:4, computer:5, process:4
 
 AVOID:
 - "Let me know if you need anything else"
@@ -170,7 +226,7 @@ AUTONOMY:
 - Destructive: ask first.
 - Don't ask about things you can find or do yourself.
 
-TECH: arch:deep, data:deep, ux:deep, code:deep
+SCOPE: git:4, code:4, computer:5, process:4
 
 AVOID:
 - "Let me know if you need anything else"
@@ -187,7 +243,7 @@ AUTONOMY:
 - Reversibelt: gør det, opsummér ændringen.
 - Destruktivt eller tvetydigt: bekræft først.
 
-TECH: arch:medium, data:medium, ux:medium, code:medium`;
+SCOPE: git:3, code:3, computer:3, process:3`;
 
 const maxAntiPatternsOutput = `USER: Jens (Den utålmodige, dansk)
 
@@ -201,7 +257,7 @@ AUTONOMY:
 - Destruktivt: spørg først.
 - Spørg ikke om ting du selv kan finde/gøre.
 
-TECH: arch:deep, data:deep, ux:deep, code:deep
+SCOPE: git:4, code:4, computer:5, process:4
 
 AVOID:
 - anti-pattern-1

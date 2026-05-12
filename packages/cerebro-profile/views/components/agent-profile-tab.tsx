@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Slider } from "@multica/ui/components/ui/slider";
 import { Input } from "@multica/ui/components/ui/input";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Button } from "@multica/ui/components/ui/button";
 import { Label } from "@multica/ui/components/ui/label";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -18,8 +19,11 @@ import {
   ANTI_PATTERN_MAX_LENGTH,
   ANTI_PATTERNS_MAX_COUNT,
   COMPILED_PROMPT_TOKEN_CAP,
+  CUSTOM_PROMPT_MAX_LENGTH,
   PERSONAS,
   PERSONA_PRESETS,
+  SCOPE_MAX,
+  SCOPE_MIN,
   buildDefaultProfile,
   compileProfile,
   estimateTokens,
@@ -29,7 +33,9 @@ import {
   deleteMyProfileMutation,
   type Persona,
   type Profile,
+  type PromptMode,
   type Language,
+  type ScopeField,
 } from "@multica/cerebro-profile/core";
 import type { UserProfileResponse } from "@multica/core/types";
 
@@ -39,8 +45,13 @@ function profileFromResponse(row: UserProfileResponse): Profile {
     language: row.language,
     lengthPref: row.length_pref,
     autonomyPref: row.autonomy_pref,
-    techPref: row.tech_pref,
+    gitPref: row.git_pref,
+    codePref: row.code_pref,
+    computerPref: row.computer_pref,
+    processPref: row.process_pref,
     antiPatterns: [...row.anti_patterns],
+    customPrompt: row.custom_prompt,
+    promptMode: row.prompt_mode,
   };
 }
 
@@ -50,25 +61,41 @@ function profileEquals(a: Profile, b: Profile): boolean {
     a.language === b.language &&
     a.lengthPref === b.lengthPref &&
     a.autonomyPref === b.autonomyPref &&
-    a.techPref === b.techPref &&
+    a.gitPref === b.gitPref &&
+    a.codePref === b.codePref &&
+    a.computerPref === b.computerPref &&
+    a.processPref === b.processPref &&
+    a.customPrompt === b.customPrompt &&
+    a.promptMode === b.promptMode &&
     a.antiPatterns.length === b.antiPatterns.length &&
     a.antiPatterns.every((p, i) => p === b.antiPatterns[i])
   );
 }
 
 // Slider value -> readable label, language-aware. Used for slider captions.
-function sliderCaption(value: number, language: "da" | "en", axis: "length" | "ask" | "tech"): string {
+function sliderCaption(value: number, language: "da" | "en", axis: "length" | "ask"): string {
   const lo = value <= 33;
   const hi = value > 66;
   if (language === "en") {
     if (axis === "length") return lo ? "Terse" : hi ? "Verbose" : "Balanced";
-    if (axis === "ask") return lo ? "Cautious" : hi ? "Autonomous" : "Balanced";
-    return lo ? "Surface" : hi ? "Deep" : "Mid";
+    return lo ? "Cautious" : hi ? "Autonomous" : "Balanced";
   }
   if (axis === "length") return lo ? "Kort" : hi ? "Udførligt" : "Balanceret";
-  if (axis === "ask") return lo ? "Forsigtig" : hi ? "Autonom" : "Balanceret";
-  return lo ? "Overflade" : hi ? "Dybt" : "Mellem";
+  return lo ? "Forsigtig" : hi ? "Autonom" : "Balanceret";
 }
+
+interface ScopeQuestion {
+  field: ScopeField;
+  titleDa: string;
+  titleEn: string;
+}
+
+const SCOPE_QUESTIONS: ScopeQuestion[] = [
+  { field: "gitPref", titleDa: "Forstår du Git?", titleEn: "Do you understand Git?" },
+  { field: "codePref", titleDa: "Forstår du kode?", titleEn: "Do you understand code?" },
+  { field: "computerPref", titleDa: "Forstår du computer-brug?", titleEn: "Do you understand computer use?" },
+  { field: "processPref", titleDa: "Forstår du processer?", titleEn: "Do you understand processes?" },
+];
 
 export function AgentProfileTab() {
   const user = useAuthStore((s) => s.user);
@@ -114,8 +141,13 @@ export function AgentProfileTab() {
         language: profile.language,
         length_pref: profile.lengthPref,
         autonomy_pref: profile.autonomyPref,
-        tech_pref: profile.techPref,
+        git_pref: profile.gitPref,
+        code_pref: profile.codePref,
+        computer_pref: profile.computerPref,
+        process_pref: profile.processPref,
         anti_patterns: profile.antiPatterns,
+        custom_prompt: profile.customPrompt,
+        prompt_mode: profile.promptMode,
       },
       {
         onSuccess: () => {
@@ -144,15 +176,34 @@ export function AgentProfileTab() {
 
   const handlePersona = (persona: Persona) => {
     const next = buildDefaultProfile(persona, profile.language);
-    setProfile({ ...next, antiPatterns: [...next.antiPatterns] });
+    setProfile({
+      ...next,
+      antiPatterns: [...next.antiPatterns],
+      // Preserve user-typed custom prompt across persona changes — it's not
+      // part of the preset.
+      customPrompt: profile.customPrompt,
+      promptMode: profile.promptMode,
+    });
   };
 
   const handleSlider =
-    (field: "lengthPref" | "autonomyPref" | "techPref") =>
+    (field: "lengthPref" | "autonomyPref") =>
     (value: number | readonly number[]) => {
       const v = Array.isArray(value) ? value[0] : (value as number);
       setProfile((p) => ({ ...p, [field]: v }));
     };
+
+  const setScope = (field: ScopeField, value: number) => {
+    setProfile((p) => ({ ...p, [field]: value }));
+  };
+
+  const setCustomPrompt = (value: string) => {
+    setProfile((p) => ({ ...p, customPrompt: value }));
+  };
+
+  const setPromptMode = (mode: PromptMode) => {
+    setProfile((p) => ({ ...p, promptMode: mode }));
+  };
 
   const addAntiPattern = (raw: string) => {
     const value = raw.trim();
@@ -240,7 +291,7 @@ export function AgentProfileTab() {
         </div>
       </section>
 
-      {/* 2-4. Sliders */}
+      {/* 2-3. Length + Autonomy sliders */}
       <section className="space-y-6">
         {(
           [
@@ -255,12 +306,6 @@ export function AgentProfileTab() {
               axis: "ask" as const,
               titleDa: "3. Hvor meget skal jeg spørge?",
               titleEn: "3. How much should I ask?",
-            },
-            {
-              field: "techPref",
-              axis: "tech" as const,
-              titleDa: "4. Hvor teknisk?",
-              titleEn: "4. How technical?",
             },
           ] as const
         ).map(({ field, axis, titleDa, titleEn }) => {
@@ -286,6 +331,59 @@ export function AgentProfileTab() {
         })}
       </section>
 
+      {/* 4. Scope questions — 1-5 per dimension */}
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between">
+          <h3 className="text-sm font-medium">
+            {t === "da" ? "4. Hvor godt forstår du? (1-5)" : "4. How well do you understand? (1-5)"}
+          </h3>
+          <span className="text-xs text-muted-foreground">
+            {t === "da" ? "1 = slet ikke, 5 = ekspert" : "1 = not at all, 5 = expert"}
+          </span>
+        </div>
+        <div className="space-y-3">
+          {SCOPE_QUESTIONS.map(({ field, titleDa, titleEn }) => {
+            const label = t === "da" ? titleDa : titleEn;
+            const value = profile[field];
+            return (
+              <div key={field} className="flex items-center justify-between gap-3">
+                <Label htmlFor={`scope-${field}`} className="text-sm">
+                  {label}
+                </Label>
+                <div
+                  id={`scope-${field}`}
+                  className="flex gap-1.5"
+                  role="radiogroup"
+                  aria-label={label}
+                >
+                  {Array.from({ length: SCOPE_MAX - SCOPE_MIN + 1 }, (_, i) => SCOPE_MIN + i).map((n) => {
+                    const active = value === n;
+                    return (
+                      <button
+                        key={n}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        aria-label={`${label} ${n}`}
+                        onClick={() => setScope(field, n)}
+                        className={cn(
+                          "h-7 w-7 rounded-md border text-xs tabular-nums transition-colors",
+                          active
+                            ? "border-primary bg-primary/10 text-foreground"
+                            : "border-border text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {n}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
       {/* 5. Anti-patterns */}
       <section className="space-y-3">
         <div className="flex items-baseline justify-between">
@@ -302,6 +400,63 @@ export function AgentProfileTab() {
           onRemove={removeAntiPattern}
           language={profile.language}
         />
+      </section>
+
+      {/* 6. Custom prompt (escape hatch) */}
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between">
+          <h3 className="text-sm font-medium">
+            {t === "da" ? "6. Egen prompt" : "6. Your own prompt"}
+          </h3>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {profile.customPrompt.length} / {CUSTOM_PROMPT_MAX_LENGTH}
+          </span>
+        </div>
+        <div className="flex gap-2" role="radiogroup" aria-label={t === "da" ? "Prompt-tilstand" : "Prompt mode"}>
+          {(["append", "replace"] as const).map((mode) => {
+            const active = profile.promptMode === mode;
+            const labelDa = mode === "append" ? "Tilføj oven i" : "Erstat det hele";
+            const labelEn = mode === "append" ? "Append to compiled" : "Replace everything";
+            return (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => setPromptMode(mode)}
+                className={cn(
+                  "rounded-md border px-3 py-1.5 text-xs transition-colors",
+                  active
+                    ? "border-primary bg-primary/5 text-foreground"
+                    : "border-border text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t === "da" ? labelDa : labelEn}
+              </button>
+            );
+          })}
+        </div>
+        <Textarea
+          value={profile.customPrompt}
+          onChange={(e) => setCustomPrompt(e.target.value)}
+          rows={6}
+          maxLength={CUSTOM_PROMPT_MAX_LENGTH}
+          aria-label={t === "da" ? "Egen prompt" : "Your own prompt"}
+          placeholder={
+            t === "da"
+              ? "Skriv din egen prompt her. Lad være tom for at bruge den kompilerede."
+              : "Write your own prompt here. Leave empty to use the compiled one."
+          }
+        />
+        <p className="text-xs text-muted-foreground">
+          {t === "da"
+            ? profile.promptMode === "replace"
+              ? "Erstat-mode: din tekst sendes alene. Hvis den er tom, falder vi tilbage til den kompilerede."
+              : "Tilføj-mode: din tekst lægges som ekstra CUSTOM-sektion oven i den kompilerede."
+            : profile.promptMode === "replace"
+              ? "Replace mode: only your text is sent. If empty, we fall back to the compiled prompt."
+              : "Append mode: your text is added as an extra CUSTOM section on top of the compiled prompt."}
+        </p>
       </section>
 
       {/* Live preview */}
@@ -322,8 +477,8 @@ export function AgentProfileTab() {
         {overCap && (
           <p className="text-xs text-destructive">
             {t === "da"
-              ? `Profilen er over loftet på ${COMPILED_PROMPT_TOKEN_CAP} tokens. Fjern et par anti-patterns for at fortsætte.`
-              : `Profile exceeds the ${COMPILED_PROMPT_TOKEN_CAP}-token cap. Remove a few anti-patterns to continue.`}
+              ? `Profilen er over loftet på ${COMPILED_PROMPT_TOKEN_CAP} tokens. Kort din egen prompt eller fjern nogle anti-patterns.`
+              : `Profile exceeds the ${COMPILED_PROMPT_TOKEN_CAP}-token cap. Shorten your own prompt or remove a few anti-patterns.`}
           </p>
         )}
         <Card>

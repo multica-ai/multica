@@ -1055,14 +1055,21 @@ func (h *Handler) compileProfileForUser(ctx context.Context, userID pgtype.UUID)
 	if user, err := h.Queries.GetUser(ctx, userID); err == nil {
 		displayName = user.Name
 	}
+	// CEREBRO-PATCH(user-profile-v2-compile): JEH-1031 — pass the 4 scope
+	// ratings + custom prompt + mode into the compiler.
 	prompt, err := profile.CompileFromRow(
 		row.Persona,
 		row.Language,
 		displayName,
 		int(row.LengthPref),
 		int(row.AutonomyPref),
-		int(row.TechPref),
+		int(row.GitPref),
+		int(row.CodePref),
+		int(row.ComputerPref),
+		int(row.ProcessPref),
 		row.AntiPatterns,
+		row.CustomPrompt,
+		row.PromptMode,
 	)
 	if err != nil {
 		slog.Warn("compile user profile failed", "user_id", uuidToString(userID), "error", err)

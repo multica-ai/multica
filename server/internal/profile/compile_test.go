@@ -1,6 +1,8 @@
 package profile
 
 // CEREBRO-PATCH(profile-compile): cerebro modification of upstream file
+// CEREBRO-PATCH(profile-compile-v2): JEH-1031 — tests for the 4 scope ratings
+// and append/replace custom prompt modes.
 
 import (
 	"strings"
@@ -8,10 +10,10 @@ import (
 )
 
 // These golden strings MUST match the TS snapshots in
-// packages/core/profile/__snapshots__/compile.test.ts.snap. If a snapshot
-// changes, port the change here. Both implementations are the source of
-// truth for the same product behaviour — diverging silently means the user
-// sees one prompt in the UI preview and a different one at injection time.
+// packages/cerebro-profile/core/compile.test.ts. If a snapshot changes,
+// port the change here. Both implementations are the source of truth for
+// the same product behaviour — diverging silently means the user sees one
+// prompt in the UI preview and a different one at injection time.
 
 func TestCompileUtalmodigDanish(t *testing.T) {
 	got := Compile(Profile{
@@ -20,7 +22,10 @@ func TestCompileUtalmodigDanish(t *testing.T) {
 		DisplayName:  "Jens",
 		LengthPref:   15,
 		AutonomyPref: 85,
-		TechPref:     70,
+		GitPref:      5,
+		CodePref:     5,
+		ComputerPref: 5,
+		ProcessPref:  4,
 		AntiPatterns: []string{
 			`"Let me know if you need anything else"`,
 			`"Great question!"`,
@@ -39,7 +44,7 @@ AUTONOMY:
 - Destruktivt: spørg først.
 - Spørg ikke om ting du selv kan finde/gøre.
 
-TECH: arch:deep, data:deep, ux:deep, code:deep
+SCOPE: git:5, code:5, computer:5, process:4
 
 AVOID:
 - "Let me know if you need anything else"
@@ -58,7 +63,10 @@ func TestCompileUtalmodigEnglish(t *testing.T) {
 		DisplayName:  "Jens",
 		LengthPref:   15,
 		AutonomyPref: 85,
-		TechPref:     70,
+		GitPref:      5,
+		CodePref:     5,
+		ComputerPref: 5,
+		ProcessPref:  4,
 		AntiPatterns: []string{
 			`"Let me know if you need anything else"`,
 			`"Great question!"`,
@@ -77,7 +85,7 @@ AUTONOMY:
 - Destructive: ask first.
 - Don't ask about things you can find or do yourself.
 
-TECH: arch:deep, data:deep, ux:deep, code:deep
+SCOPE: git:5, code:5, computer:5, process:4
 
 AVOID:
 - "Let me know if you need anything else"
@@ -95,7 +103,10 @@ func TestCompileWithoutDisplayNameSkipsParenthesisForm(t *testing.T) {
 		Language:     "da",
 		LengthPref:   75,
 		AutonomyPref: 30,
-		TechPref:     80,
+		GitPref:      3,
+		CodePref:     3,
+		ComputerPref: 3,
+		ProcessPref:  3,
 	})
 	if !strings.HasPrefix(got, "USER: Den grundige, dansk\n\n") {
 		t.Fatalf("expected anonymous header, got: %q", got)
@@ -113,7 +124,13 @@ func TestCompileEmptyAntiPatternsOmitsAvoidSection(t *testing.T) {
 }
 
 func TestCompileFromRowDecodesAntiPatterns(t *testing.T) {
-	got, err := CompileFromRow("utalmodig", "da", "Jens", 15, 85, 70, []byte(`["foo","bar"]`))
+	got, err := CompileFromRow(
+		"utalmodig", "da", "Jens",
+		15, 85,
+		5, 5, 5, 4,
+		[]byte(`["foo","bar"]`),
+		"", "append",
+	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -123,7 +140,13 @@ func TestCompileFromRowDecodesAntiPatterns(t *testing.T) {
 }
 
 func TestCompileFromRowMalformedAntiPatternsReturnsError(t *testing.T) {
-	_, err := CompileFromRow("utalmodig", "da", "Jens", 15, 85, 70, []byte(`{"not": "an array"}`))
+	_, err := CompileFromRow(
+		"utalmodig", "da", "Jens",
+		15, 85,
+		3, 3, 3, 3,
+		[]byte(`{"not": "an array"}`),
+		"", "append",
+	)
 	if err == nil {
 		t.Fatal("expected error for non-array anti_patterns JSON")
 	}
@@ -149,5 +172,67 @@ func TestCompileSliderBucketsBoundaries(t *testing.T) {
 				t.Fatalf("lengthPref=%d expected %q in output:\n%s", c.lengthPref, c.wantInLine0, out)
 			}
 		})
+	}
+}
+
+func TestCompileCustomPromptReplaceMode(t *testing.T) {
+	got := Compile(Profile{
+		Persona:      "grundig",
+		Language:     "da",
+		DisplayName:  "Jens",
+		CustomPrompt: "Bare giv mig svaret. Ingen sektioner.",
+		PromptMode:   "replace",
+	})
+	if got != "Bare giv mig svaret. Ingen sektioner." {
+		t.Fatalf("replace mode should return only the custom prompt; got: %q", got)
+	}
+}
+
+func TestCompileCustomPromptReplaceModeEmptyFallsBack(t *testing.T) {
+	got := Compile(Profile{
+		Persona:      "grundig",
+		Language:     "da",
+		DisplayName:  "Jens",
+		CustomPrompt: "   ",
+		PromptMode:   "replace",
+	})
+	if !strings.Contains(got, "USER: Jens (Den grundige, dansk)") {
+		t.Fatalf("empty custom prompt should fall back to compiled output; got: %q", got)
+	}
+}
+
+func TestCompileCustomPromptAppendMode(t *testing.T) {
+	got := Compile(Profile{
+		Persona:      "grundig",
+		Language:     "da",
+		DisplayName:  "Jens",
+		LengthPref:   75,
+		AutonomyPref: 30,
+		GitPref:      3,
+		CodePref:     3,
+		ComputerPref: 3,
+		ProcessPref:  3,
+		CustomPrompt: "Husk altid at sige hej.",
+		PromptMode:   "append",
+	})
+	if !strings.Contains(got, "USER: Jens (Den grundige, dansk)") {
+		t.Fatalf("append mode should keep the compiled header; got: %q", got)
+	}
+	if !strings.Contains(got, "\n\nCUSTOM:\nHusk altid at sige hej.") {
+		t.Fatalf("append mode should append the custom prompt under CUSTOM:; got: %q", got)
+	}
+}
+
+func TestScopeLineClampsOutOfRange(t *testing.T) {
+	got := Compile(Profile{
+		Persona:     "ekspert",
+		Language:    "da",
+		GitPref:     0,
+		CodePref:    99,
+		ComputerPref: -3,
+		ProcessPref: 5,
+	})
+	if !strings.Contains(got, "SCOPE: git:1, code:5, computer:1, process:5") {
+		t.Fatalf("expected clamped scope line; got: %q", got)
 	}
 }

@@ -1,8 +1,9 @@
 // CEREBRO-PATCH(core-profile-presets): cerebro modification of upstream file
 import type { Language, Persona, Profile } from "./schema";
 
-// Persona presets seed sliders + curate a small starter set of anti-patterns.
-// Users may then tune any of the values without losing their persona choice.
+// Persona presets seed sliders + scope ratings + curate a small starter set
+// of anti-patterns. Users may then tune any of the values without losing
+// their persona choice.
 
 export interface LocalizedAntiPatterns {
   da: string[];
@@ -16,7 +17,10 @@ export interface PersonaPreset {
   defaults: {
     lengthPref: number;
     autonomyPref: number;
-    techPref: number;
+    gitPref: number;
+    codePref: number;
+    computerPref: number;
+    processPref: number;
     antiPatterns: LocalizedAntiPatterns;
   };
 }
@@ -32,7 +36,10 @@ export const PERSONA_PRESETS: Record<Persona, PersonaPreset> = {
     defaults: {
       lengthPref: 15,
       autonomyPref: 85,
-      techPref: 70,
+      gitPref: 4,
+      codePref: 4,
+      computerPref: 5,
+      processPref: 4,
       antiPatterns: {
         da: [
           "\"Let me know if you need anything else\"",
@@ -57,7 +64,10 @@ export const PERSONA_PRESETS: Record<Persona, PersonaPreset> = {
     defaults: {
       lengthPref: 40,
       autonomyPref: 70,
-      techPref: 95,
+      gitPref: 5,
+      codePref: 5,
+      computerPref: 5,
+      processPref: 5,
       antiPatterns: {
         da: ["Forklar grundlæggende begreber", "Corporate-jargon"],
         en: ["Explaining basic concepts", "Corporate jargon"],
@@ -74,7 +84,10 @@ export const PERSONA_PRESETS: Record<Persona, PersonaPreset> = {
     defaults: {
       lengthPref: 75,
       autonomyPref: 30,
-      techPref: 80,
+      gitPref: 4,
+      codePref: 4,
+      computerPref: 5,
+      processPref: 5,
       antiPatterns: {
         da: ["Hop over edge-cases", "Antag uden at sige det"],
         en: ["Skipping edge cases", "Unstated assumptions"],
@@ -91,7 +104,10 @@ export const PERSONA_PRESETS: Record<Persona, PersonaPreset> = {
     defaults: {
       lengthPref: 70,
       autonomyPref: 25,
-      techPref: 35,
+      gitPref: 2,
+      codePref: 2,
+      computerPref: 3,
+      processPref: 2,
       antiPatterns: {
         da: ["Spring forklaring over", "Brug jargon uden at definere"],
         en: ["Skipping explanation", "Using jargon without defining it"],
@@ -113,7 +129,12 @@ export function buildDefaultProfile(
     language,
     lengthPref: preset.defaults.lengthPref,
     autonomyPref: preset.defaults.autonomyPref,
-    techPref: preset.defaults.techPref,
+    gitPref: preset.defaults.gitPref,
+    codePref: preset.defaults.codePref,
+    computerPref: preset.defaults.computerPref,
+    processPref: preset.defaults.processPref,
     antiPatterns: [...preset.defaults.antiPatterns[language]],
+    customPrompt: "",
+    promptMode: "append",
   };
 }

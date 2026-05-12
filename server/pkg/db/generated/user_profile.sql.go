@@ -21,7 +21,7 @@ func (q *Queries) DeleteUserProfile(ctx context.Context, userID pgtype.UUID) err
 }
 
 const getUserProfile = `-- name: GetUserProfile :one
-SELECT user_id, persona, language, length_pref, autonomy_pref, tech_pref, anti_patterns, updated_at FROM user_profile
+SELECT user_id, persona, language, length_pref, autonomy_pref, anti_patterns, updated_at, git_pref, code_pref, computer_pref, process_pref, custom_prompt, prompt_mode FROM user_profile
 WHERE user_id = $1
 `
 
@@ -35,26 +35,38 @@ func (q *Queries) GetUserProfile(ctx context.Context, userID pgtype.UUID) (UserP
 		&i.Language,
 		&i.LengthPref,
 		&i.AutonomyPref,
-		&i.TechPref,
 		&i.AntiPatterns,
 		&i.UpdatedAt,
+		&i.GitPref,
+		&i.CodePref,
+		&i.ComputerPref,
+		&i.ProcessPref,
+		&i.CustomPrompt,
+		&i.PromptMode,
 	)
 	return i, err
 }
 
 const upsertUserProfile = `-- name: UpsertUserProfile :one
 INSERT INTO user_profile (
-    user_id, persona, language, length_pref, autonomy_pref, tech_pref, anti_patterns
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    user_id, persona, language, length_pref, autonomy_pref,
+    git_pref, code_pref, computer_pref, process_pref,
+    anti_patterns, custom_prompt, prompt_mode
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (user_id) DO UPDATE SET
     persona = EXCLUDED.persona,
     language = EXCLUDED.language,
     length_pref = EXCLUDED.length_pref,
     autonomy_pref = EXCLUDED.autonomy_pref,
-    tech_pref = EXCLUDED.tech_pref,
+    git_pref = EXCLUDED.git_pref,
+    code_pref = EXCLUDED.code_pref,
+    computer_pref = EXCLUDED.computer_pref,
+    process_pref = EXCLUDED.process_pref,
     anti_patterns = EXCLUDED.anti_patterns,
+    custom_prompt = EXCLUDED.custom_prompt,
+    prompt_mode = EXCLUDED.prompt_mode,
     updated_at = now()
-RETURNING user_id, persona, language, length_pref, autonomy_pref, tech_pref, anti_patterns, updated_at
+RETURNING user_id, persona, language, length_pref, autonomy_pref, anti_patterns, updated_at, git_pref, code_pref, computer_pref, process_pref, custom_prompt, prompt_mode
 `
 
 type UpsertUserProfileParams struct {
@@ -63,8 +75,13 @@ type UpsertUserProfileParams struct {
 	Language     string      `json:"language"`
 	LengthPref   int16       `json:"length_pref"`
 	AutonomyPref int16       `json:"autonomy_pref"`
-	TechPref     int16       `json:"tech_pref"`
+	GitPref      int16       `json:"git_pref"`
+	CodePref     int16       `json:"code_pref"`
+	ComputerPref int16       `json:"computer_pref"`
+	ProcessPref  int16       `json:"process_pref"`
 	AntiPatterns []byte      `json:"anti_patterns"`
+	CustomPrompt string      `json:"custom_prompt"`
+	PromptMode   string      `json:"prompt_mode"`
 }
 
 func (q *Queries) UpsertUserProfile(ctx context.Context, arg UpsertUserProfileParams) (UserProfile, error) {
@@ -74,8 +91,13 @@ func (q *Queries) UpsertUserProfile(ctx context.Context, arg UpsertUserProfilePa
 		arg.Language,
 		arg.LengthPref,
 		arg.AutonomyPref,
-		arg.TechPref,
+		arg.GitPref,
+		arg.CodePref,
+		arg.ComputerPref,
+		arg.ProcessPref,
 		arg.AntiPatterns,
+		arg.CustomPrompt,
+		arg.PromptMode,
 	)
 	var i UserProfile
 	err := row.Scan(
@@ -84,9 +106,14 @@ func (q *Queries) UpsertUserProfile(ctx context.Context, arg UpsertUserProfilePa
 		&i.Language,
 		&i.LengthPref,
 		&i.AutonomyPref,
-		&i.TechPref,
 		&i.AntiPatterns,
 		&i.UpdatedAt,
+		&i.GitPref,
+		&i.CodePref,
+		&i.ComputerPref,
+		&i.ProcessPref,
+		&i.CustomPrompt,
+		&i.PromptMode,
 	)
 	return i, err
 }

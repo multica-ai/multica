@@ -1,13 +1,16 @@
 // Package profile compiles a user_profile DB row into the prompt string that
-// gets injected into agent runs (JEH-304).
+// gets injected into agent runs (JEH-304 / JEH-1031).
 //
-// This is a Go port of packages/core/profile/compile.ts. The two MUST stay
-// in sync — both produce identical output for identical input. The TS version
-// powers the live UI preview; the Go version powers the actual injection at
-// task-claim time. If you change one, change the other.
+// This is a Go port of packages/cerebro-profile/core/compile.ts. The two MUST
+// stay in sync — both produce identical output for identical input. The TS
+// version powers the live UI preview; the Go version powers the actual
+// injection at task-claim time. If you change one, change the other.
 package profile
 
 // CEREBRO-PATCH(profile-compile): cerebro modification of upstream file
+// CEREBRO-PATCH(profile-compile-v2): JEH-1031 — replaced tech_pref with 4
+// scope ratings (git/code/computer/process) and added append/replace custom
+// prompt support.
 
 import (
 	"encoding/json"
@@ -21,15 +24,26 @@ type Profile struct {
 	DisplayName  string // optional — caller supplies user's display name
 	LengthPref   int
 	AutonomyPref int
-	TechPref     int
+	GitPref      int // 1-5
+	CodePref     int // 1-5
+	ComputerPref int // 1-5
+	ProcessPref  int // 1-5
 	AntiPatterns []string
+	CustomPrompt string
+	PromptMode   string // "append" or "replace"
 }
 
 // CompileFromRow takes a raw user_profile row (with anti_patterns as JSONB
 // bytes) plus the user's display name and returns the compiled prompt.
 // Returns ("", nil) when the row is empty/invalid — the caller treats that
 // as "no profile, skip injection".
-func CompileFromRow(persona, language, displayName string, lengthPref, autonomyPref, techPref int, antiPatternsJSON []byte) (string, error) {
+func CompileFromRow(
+	persona, language, displayName string,
+	lengthPref, autonomyPref int,
+	gitPref, codePref, computerPref, processPref int,
+	antiPatternsJSON []byte,
+	customPrompt, promptMode string,
+) (string, error) {
 	var antiPatterns []string
 	if len(antiPatternsJSON) > 0 {
 		if err := json.Unmarshal(antiPatternsJSON, &antiPatterns); err != nil {
@@ -42,13 +56,27 @@ func CompileFromRow(persona, language, displayName string, lengthPref, autonomyP
 		DisplayName:  displayName,
 		LengthPref:   lengthPref,
 		AutonomyPref: autonomyPref,
-		TechPref:     techPref,
+		GitPref:      gitPref,
+		CodePref:     codePref,
+		ComputerPref: computerPref,
+		ProcessPref:  processPref,
 		AntiPatterns: antiPatterns,
+		CustomPrompt: customPrompt,
+		PromptMode:   promptMode,
 	}
 	return Compile(p), nil
 }
 
 func Compile(p Profile) string {
+	custom := strings.TrimSpace(p.CustomPrompt)
+
+	// Replace mode + non-empty custom prompt → the user's own prompt fully
+	// overrides the compiled output. If the custom prompt is empty, we fall
+	// back to the compiled version so an agent never sees an empty profile.
+	if p.PromptMode == "replace" && custom != "" {
+		return custom
+	}
+
 	header := personaHeader(p)
 
 	var sb strings.Builder
@@ -65,8 +93,8 @@ func Compile(p Profile) string {
 		sb.WriteString(line)
 		sb.WriteString("\n")
 	}
-	sb.WriteString("\nTECH: ")
-	sb.WriteString(techLine(p))
+	sb.WriteString("\nSCOPE: ")
+	sb.WriteString(scopeLine(p))
 
 	if len(p.AntiPatterns) > 0 {
 		sb.WriteString("\n\nAVOID:\n")
@@ -75,11 +103,17 @@ func Compile(p Profile) string {
 			sb.WriteString(ap)
 			sb.WriteString("\n")
 		}
-		// Trim trailing newline added by the loop.
-		out := sb.String()
-		return strings.TrimRight(out, "\n")
 	}
-	return sb.String()
+
+	out := strings.TrimRight(sb.String(), "\n")
+
+	// Append mode adds the custom prompt as its own section under the
+	// compiled structure. Empty custom prompt means nothing to append.
+	if custom != "" {
+		label := "CUSTOM"
+		out += "\n\n" + label + ":\n" + custom
+	}
+	return out
 }
 
 func personaHeader(p Profile) string {
@@ -211,13 +245,25 @@ func autonomyLines(p Profile) []string {
 	}
 }
 
-func techLine(p Profile) string {
-	depth := "medium"
-	switch bucketSlider(p.TechPref) {
-	case bucketLow:
-		depth = "surface"
-	case bucketHigh:
-		depth = "deep"
+// scopeLine renders the four self-rated scope dimensions on one line.
+// Each value is clamped to 1-5; the validator at the API boundary already
+// enforces the range, but the clamp protects the prompt format against any
+// bypass.
+func scopeLine(p Profile) string {
+	clamp := func(v int) int {
+		if v < 1 {
+			return 1
+		}
+		if v > 5 {
+			return 5
+		}
+		return v
 	}
-	return fmt.Sprintf("arch:%s, data:%s, ux:%s, code:%s", depth, depth, depth, depth)
+	return fmt.Sprintf(
+		"git:%d, code:%d, computer:%d, process:%d",
+		clamp(p.GitPref),
+		clamp(p.CodePref),
+		clamp(p.ComputerPref),
+		clamp(p.ProcessPref),
+	)
 }

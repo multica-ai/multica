@@ -12,16 +12,21 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// User communication profile (JEH-304). Single repository function per CTO
-// review — all reads/writes for user_profile go through here, gated on
+// CEREBRO-PATCH(user-profile-v2-handler): JEH-1031 — replaced single
+// tech_pref slider with 4 scope ratings and added custom_prompt/prompt_mode.
+// User communication profile (JEH-304 / JEH-1031). Single repository function
+// per CTO review — all reads/writes for user_profile go through here, gated on
 // the authenticated user's own user_id. There is no RLS; if anyone adds an
 // ad-hoc query to user_profile elsewhere, the gate is bypassed.
 
 const (
-	maxAntiPatterns        = 20
-	maxAntiPatternLength   = 100
-	sliderMin              = 0
-	sliderMax              = 100
+	maxAntiPatterns      = 20
+	maxAntiPatternLength = 100
+	sliderMin            = 0
+	sliderMax            = 100
+	scopeMin             = 1
+	scopeMax             = 5
+	maxCustomPromptLen   = 4000
 )
 
 var validProfilePersonas = map[string]bool{
@@ -36,14 +41,24 @@ var validProfileLanguages = map[string]bool{
 	"en": true,
 }
 
+var validPromptModes = map[string]bool{
+	"append":  true,
+	"replace": true,
+}
+
 type UserProfileResponse struct {
 	UserID       string   `json:"user_id"`
 	Persona      string   `json:"persona"`
 	Language     string   `json:"language"`
 	LengthPref   int      `json:"length_pref"`
 	AutonomyPref int      `json:"autonomy_pref"`
-	TechPref     int      `json:"tech_pref"`
+	GitPref      int      `json:"git_pref"`
+	CodePref     int      `json:"code_pref"`
+	ComputerPref int      `json:"computer_pref"`
+	ProcessPref  int      `json:"process_pref"`
 	AntiPatterns []string `json:"anti_patterns"`
+	CustomPrompt string   `json:"custom_prompt"`
+	PromptMode   string   `json:"prompt_mode"`
 	UpdatedAt    string   `json:"updated_at"`
 }
 
@@ -52,8 +67,13 @@ type UpsertUserProfileRequest struct {
 	Language     string   `json:"language"`
 	LengthPref   int      `json:"length_pref"`
 	AutonomyPref int      `json:"autonomy_pref"`
-	TechPref     int      `json:"tech_pref"`
+	GitPref      int      `json:"git_pref"`
+	CodePref     int      `json:"code_pref"`
+	ComputerPref int      `json:"computer_pref"`
+	ProcessPref  int      `json:"process_pref"`
 	AntiPatterns []string `json:"anti_patterns"`
+	CustomPrompt string   `json:"custom_prompt"`
+	PromptMode   string   `json:"prompt_mode"`
 }
 
 func userProfileToResponse(p db.UserProfile) UserProfileResponse {
@@ -70,8 +90,13 @@ func userProfileToResponse(p db.UserProfile) UserProfileResponse {
 		Language:     p.Language,
 		LengthPref:   int(p.LengthPref),
 		AutonomyPref: int(p.AutonomyPref),
-		TechPref:     int(p.TechPref),
+		GitPref:      int(p.GitPref),
+		CodePref:     int(p.CodePref),
+		ComputerPref: int(p.ComputerPref),
+		ProcessPref:  int(p.ProcessPref),
 		AntiPatterns: antiPatterns,
+		CustomPrompt: p.CustomPrompt,
+		PromptMode:   p.PromptMode,
 		UpdatedAt:    timestampToString(p.UpdatedAt),
 	}
 }
@@ -99,8 +124,8 @@ func (h *Handler) GetMyProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpsertMyProfile creates or replaces the authenticated user's profile.
-// All validation also lives in packages/core/profile/schema.ts so the UI
-// can preflight; this is the authoritative gate.
+// All validation also lives in packages/cerebro-profile/core/schema.ts so the
+// UI can preflight; this is the authoritative gate.
 func (h *Handler) UpsertMyProfile(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -127,12 +152,37 @@ func (h *Handler) UpsertMyProfile(w http.ResponseWriter, r *http.Request) {
 	}{
 		{"length_pref", req.LengthPref},
 		{"autonomy_pref", req.AutonomyPref},
-		{"tech_pref", req.TechPref},
 	} {
 		if s.value < sliderMin || s.value > sliderMax {
 			writeError(w, http.StatusBadRequest, s.name+" must be between 0 and 100")
 			return
 		}
+	}
+	for _, s := range []struct {
+		name  string
+		value int
+	}{
+		{"git_pref", req.GitPref},
+		{"code_pref", req.CodePref},
+		{"computer_pref", req.ComputerPref},
+		{"process_pref", req.ProcessPref},
+	} {
+		if s.value < scopeMin || s.value > scopeMax {
+			writeError(w, http.StatusBadRequest, s.name+" must be between 1 and 5")
+			return
+		}
+	}
+	mode := req.PromptMode
+	if mode == "" {
+		mode = "append"
+	}
+	if !validPromptModes[mode] {
+		writeError(w, http.StatusBadRequest, "invalid prompt_mode")
+		return
+	}
+	if len(req.CustomPrompt) > maxCustomPromptLen {
+		writeError(w, http.StatusBadRequest, "custom_prompt too long")
+		return
 	}
 
 	if len(req.AntiPatterns) > maxAntiPatterns {
@@ -169,8 +219,13 @@ func (h *Handler) UpsertMyProfile(w http.ResponseWriter, r *http.Request) {
 		Language:     req.Language,
 		LengthPref:   int16(req.LengthPref),
 		AutonomyPref: int16(req.AutonomyPref),
-		TechPref:     int16(req.TechPref),
+		GitPref:      int16(req.GitPref),
+		CodePref:     int16(req.CodePref),
+		ComputerPref: int16(req.ComputerPref),
+		ProcessPref:  int16(req.ProcessPref),
 		AntiPatterns: encoded,
+		CustomPrompt: req.CustomPrompt,
+		PromptMode:   mode,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save profile")

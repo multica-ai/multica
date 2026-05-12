@@ -763,9 +763,14 @@ type UserProfile struct {
 	Language     string             `json:"language"`
 	LengthPref   int16              `json:"length_pref"`
 	AutonomyPref int16              `json:"autonomy_pref"`
-	TechPref     int16              `json:"tech_pref"`
 	AntiPatterns []byte             `json:"anti_patterns"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	GitPref      int16              `json:"git_pref"`
+	CodePref     int16              `json:"code_pref"`
+	ComputerPref int16              `json:"computer_pref"`
+	ProcessPref  int16              `json:"process_pref"`
+	CustomPrompt string             `json:"custom_prompt"`
+	PromptMode   string             `json:"prompt_mode"`
 }
 
 type VerificationCode struct {

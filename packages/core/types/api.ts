@@ -91,15 +91,24 @@ export interface UpdateMeRequest {
   language?: string;
 }
 
-// User communication profile (JEH-304). Mirrors the user_profile DB row.
+// CEREBRO-PATCH(user-profile-v2-types): JEH-1031 — replace tech_pref with 4
+// per-axis scope ratings and add custom_prompt + prompt_mode escape hatch.
+// User communication profile (JEH-304 / JEH-1031). Mirrors the user_profile
+// DB row. The single tech_pref slider was replaced by four 1-5 scope ratings,
+// plus an optional custom prompt with a mode flag for append vs replace.
 export interface UserProfileResponse {
   user_id: string;
   persona: "utalmodig" | "ekspert" | "grundig" | "larling";
   language: "da" | "en";
   length_pref: number;
   autonomy_pref: number;
-  tech_pref: number;
+  git_pref: number;
+  code_pref: number;
+  computer_pref: number;
+  process_pref: number;
   anti_patterns: string[];
+  custom_prompt: string;
+  prompt_mode: "append" | "replace";
   updated_at: string;
 }
 
@@ -108,8 +117,13 @@ export interface UserProfileRequest {
   language: "da" | "en";
   length_pref: number;
   autonomy_pref: number;
-  tech_pref: number;
+  git_pref: number;
+  code_pref: number;
+  computer_pref: number;
+  process_pref: number;
   anti_patterns: string[];
+  custom_prompt: string;
+  prompt_mode: "append" | "replace";
 }
 
 export interface CreateMemberRequest {

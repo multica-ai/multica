@@ -1,6 +1,6 @@
 // CEREBRO-PATCH(core-profile-compile): cerebro modification of upstream file
 import { PERSONA_PRESETS } from "./presets";
-import type { Language, Profile } from "./schema";
+import { SCOPE_MAX, SCOPE_MIN, type Language, type Profile } from "./schema";
 
 // Pure, deterministic Profile -> prompt-string transformation.
 // No I/O, no clocks, no randomness — same input always produces same output,
@@ -10,12 +10,13 @@ interface SectionLabels {
   user: string;
   style: string;
   autonomy: string;
-  tech: string;
+  scope: string;
   avoid: string;
-  techArch: string;
-  techData: string;
-  techUx: string;
-  techCode: string;
+  custom: string;
+  scopeGit: string;
+  scopeCode: string;
+  scopeComputer: string;
+  scopeProcess: string;
 }
 
 const LABELS: Record<Language, SectionLabels> = {
@@ -23,27 +24,27 @@ const LABELS: Record<Language, SectionLabels> = {
     user: "USER",
     style: "STYLE",
     autonomy: "AUTONOMY",
-    tech: "TECH",
+    scope: "SCOPE",
     avoid: "AVOID",
-    techArch: "arch",
-    techData: "data",
-    techUx: "ux",
-    techCode: "code",
+    custom: "CUSTOM",
+    scopeGit: "git",
+    scopeCode: "code",
+    scopeComputer: "computer",
+    scopeProcess: "process",
   },
   en: {
     user: "USER",
     style: "STYLE",
     autonomy: "AUTONOMY",
-    tech: "TECH",
+    scope: "SCOPE",
     avoid: "AVOID",
-    techArch: "arch",
-    techData: "data",
-    techUx: "ux",
-    techCode: "code",
+    custom: "CUSTOM",
+    scopeGit: "git",
+    scopeCode: "code",
+    scopeComputer: "computer",
+    scopeProcess: "process",
   },
 };
-
-type TechDepth = "surface" | "medium" | "deep";
 
 function bucketSlider(value: number): "low" | "mid" | "high" {
   if (value <= 33) return "low";
@@ -51,10 +52,10 @@ function bucketSlider(value: number): "low" | "mid" | "high" {
   return "high";
 }
 
-function techDepth(value: number): TechDepth {
-  if (value <= 33) return "surface";
-  if (value <= 66) return "medium";
-  return "deep";
+function clampScope(value: number): number {
+  if (value < SCOPE_MIN) return SCOPE_MIN;
+  if (value > SCOPE_MAX) return SCOPE_MAX;
+  return Math.round(value);
 }
 
 function styleLines(profile: Profile): string[] {
@@ -139,11 +140,16 @@ function autonomyLines(profile: Profile): string[] {
   ];
 }
 
-// The 4 tech axes are derived from a single slider for v1. When we add
-// per-axis controls in a later iteration, only this function needs to change.
-function techLine(profile: Profile, labels: SectionLabels): string {
-  const depth = techDepth(profile.techPref);
-  return `${labels.techArch}:${depth}, ${labels.techData}:${depth}, ${labels.techUx}:${depth}, ${labels.techCode}:${depth}`;
+// Renders the four self-rated scope dimensions on one line. Each value is
+// clamped to 1-5; the validator at the API boundary already enforces the
+// range, but the clamp protects the prompt format against any bypass.
+function scopeLine(profile: Profile, labels: SectionLabels): string {
+  return (
+    `${labels.scopeGit}:${clampScope(profile.gitPref)}, ` +
+    `${labels.scopeCode}:${clampScope(profile.codePref)}, ` +
+    `${labels.scopeComputer}:${clampScope(profile.computerPref)}, ` +
+    `${labels.scopeProcess}:${clampScope(profile.processPref)}`
+  );
 }
 
 function userHeader(profile: Profile): string {
@@ -160,6 +166,15 @@ export interface CompileOptions {
 
 export function compileProfile(profile: Profile, options: CompileOptions = {}): string {
   const labels = LABELS[profile.language];
+  const custom = profile.customPrompt.trim();
+
+  // Replace mode + non-empty custom prompt → the user's own prompt fully
+  // overrides the compiled output. Empty custom prompt falls back to the
+  // structured prompt so an agent never sees an empty profile.
+  if (profile.promptMode === "replace" && custom.length > 0) {
+    return custom;
+  }
+
   const header = options.displayName
     ? `${labels.user}: ${options.displayName} (${userHeader(profile)})`
     : `${labels.user}: ${userHeader(profile)}`;
@@ -174,12 +189,20 @@ export function compileProfile(profile: Profile, options: CompileOptions = {}): 
   for (const line of autonomyLines(profile)) sections.push(`- ${line}`);
   sections.push("");
 
-  sections.push(`${labels.tech}: ${techLine(profile, labels)}`);
+  sections.push(`${labels.scope}: ${scopeLine(profile, labels)}`);
 
   if (profile.antiPatterns.length > 0) {
     sections.push("");
     sections.push(`${labels.avoid}:`);
     for (const pattern of profile.antiPatterns) sections.push(`- ${pattern}`);
+  }
+
+  // Append mode pastes the custom prompt under its own CUSTOM: section,
+  // preserving the structured prompt above it.
+  if (custom.length > 0) {
+    sections.push("");
+    sections.push(`${labels.custom}:`);
+    sections.push(custom);
   }
 
   return sections.join("\n");
