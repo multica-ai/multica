@@ -10,7 +10,14 @@ spec:
     $patch: replace
     region: us-east-1
     engine: aurora-postgresql
-    engineVersion: "16.4"
+    # 16.8 matches every other working aurora-postgresql cluster on the dev
+    # EKS cluster (unsurvey, ai-playbooks, agent-eval-tool, etc.). 16.4 hit
+    # a Upbound RDS provider drift loop on enable_*_write_forwarding that
+    # prevented status.atProvider from being written back, which in turn
+    # held ArgoCD's health gate on the Cluster CR and blocked the entire
+    # wave-2/3 chain (Redis SubnetGroup, SecurityGroup, ReplicationGroup).
+    # 16.4 -> 16.8 is a valid in-place minor upgrade (no replacement).
+    engineVersion: "16.8"
     allowMajorVersionUpgrade: true
     applyImmediately: false
     databaseName: agentfarm
