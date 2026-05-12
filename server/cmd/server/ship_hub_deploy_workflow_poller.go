@@ -451,6 +451,13 @@ func recordRunAsDeployIfNew(
 //     OR (production_main_sha empty AND merged_main_sha == run.head_sha)
 //     AND stage is verifying / promoting / in_production
 //     (FindReleaseByProductionMainSHA handles the OR + stage filter)
+//   - production fallback → if exact SHA match misses, fall back to the
+//     oldest stuck "promoting" release in the same project whose
+//     merged_at predates this run. Handles the squash-merge /
+//     subsequent-commit case where the prod deploy fires on a SHA
+//     descended from the release's merge tip but not equal to it.
+//     Mirrors the Kanban time-based fallback in
+//     packages/views/ship/hooks/use-pr-state.ts.
 //
 // Already-linked releases are skipped (the existing deploy_id check).
 // This keeps the poller idempotent across restarts and across
@@ -479,6 +486,33 @@ func linkDeployToReleaseIfAny(
 			WorkspaceID:       ws.ID,
 			ProductionMainSha: pgtype.Text{String: run.HeadSHA, Valid: true},
 		})
+		if errors.Is(lookupErr, pgx.ErrNoRows) {
+			// Time-based fallback. The deploy ran successfully but no
+			// release's merged_main_sha / production_main_sha matches
+			// run.head_sha — almost always because the prod workflow
+			// fired on a SHA descended from the release's tip rather
+			// than the tip itself (squash merge, manual
+			// workflow_dispatch on a later commit, etc.). Look for the
+			// oldest stuck-in-promoting release in this project whose
+			// merged_at predates the deploy and link it.
+			if deployTime, ok := workflowRunDeployTime(run); ok {
+				release, lookupErr = queries.FindStuckPromotingReleaseForProject(ctx,
+					db.FindStuckPromotingReleaseForProjectParams{
+						WorkspaceID: ws.ID,
+						ProjectID:   project.ID,
+						MergedAt:    pgtype.Timestamptz{Time: deployTime, Valid: true},
+					})
+				if lookupErr == nil {
+					slog.Info("ship hub deploy poller: time-based fallback matched stuck promoting release",
+						"workspace_id", ws.ID,
+						"project_id", project.ID,
+						"release_id", release.ID,
+						"deploy_sha", run.HeadSHA,
+						"release_merged_main_sha", release.MergedMainSha.String,
+						"deploy_time", deployTime)
+				}
+			}
+		}
 	default:
 		return
 	}
@@ -656,6 +690,28 @@ func upsertSyntheticDeploy(
 		CurrentDeployedAt: deploy.TriggeredAt,
 	})
 	return deploy, true
+}
+
+// workflowRunDeployTime returns the best-available wall-clock time for
+// when the workflow run "happened" for purposes of the time-based
+// fallback. We prefer UpdatedAt (which on a status="completed" run is
+// the completion time), and fall back to RunStartedAt / CreatedAt if
+// UpdatedAt is somehow missing.
+//
+// Returns ok=false if no timestamp parses — the caller will skip the
+// fallback rather than guessing. Better to leave the release stuck and
+// rely on the manual button than to link a deploy with no time anchor.
+func workflowRunDeployTime(run gh.WorkflowRun) (time.Time, bool) {
+	candidates := []string{run.UpdatedAt, run.RunStartedAt, run.CreatedAt}
+	for _, s := range candidates {
+		if s == "" {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // uuidStringFromPg is a local copy of the handler-package helper. We
