@@ -34,13 +34,15 @@ type PRReviewClient interface {
 	// transition reflects the full set rather than racing the per-comment
 	// webhooks.
 	ListReviewComments(ctx context.Context, owner, repo string, prNumber int, reviewID int64) ([]ReviewComment, error)
+	ListPRsForCommit(ctx context.Context, owner, repo, sha string) ([]PullRequest, error)
 }
 
 // Review is the subset of /repos/{o}/{r}/pulls/{n}/reviews we use.
 type Review struct {
-	ID    int64  `json:"id"`
-	State string `json:"state"` // APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, PENDING
-	User  struct {
+	ID     int64  `json:"id"`
+	NodeID string `json:"node_id"`
+	State  string `json:"state"` // APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, PENDING
+	User   struct {
 		Login string `json:"login"`
 	} `json:"user"`
 	SubmittedAt string `json:"submitted_at"`
@@ -67,6 +69,13 @@ type ReviewComment struct {
 	User                struct {
 		Login string `json:"login"`
 	} `json:"user"`
+}
+
+// PullRequest is the subset of GET
+// /repos/{owner}/{repo}/commits/{sha}/pulls we use.
+type PullRequest struct {
+	Number int    `json:"number"`
+	State  string `json:"state"`
 }
 
 // EvaluatePredicate returns (NoOpenCRChangesRequest, NoUnresolvedCRThreads)
@@ -185,6 +194,16 @@ func (c *GitHubAPIClient) ListReviewComments(ctx context.Context, owner, repo st
 	u := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d/reviews/%d/comments?per_page=100",
 		url.PathEscape(owner), url.PathEscape(repo), prNumber, reviewID)
 	var out []ReviewComment
+	if err := c.doJSON(ctx, http.MethodGet, u, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *GitHubAPIClient) ListPRsForCommit(ctx context.Context, owner, repo, sha string) ([]PullRequest, error) {
+	u := fmt.Sprintf("https://api.github.com/repos/%s/%s/commits/%s/pulls?per_page=100",
+		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(sha))
+	var out []PullRequest
 	if err := c.doJSON(ctx, http.MethodGet, u, nil, &out); err != nil {
 		return nil, err
 	}

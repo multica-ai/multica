@@ -218,6 +218,76 @@ func (a *ReviewActions) ResolveReviewThread(ctx context.Context, binding db.Work
 }
 
 // ---------------------------------------------------------------------------
+// Dismiss prior CR CHANGES_REQUESTED
+// ---------------------------------------------------------------------------
+
+type DismissPriorResult struct {
+	Dismissed bool
+	ReviewID  string
+}
+
+func (a *ReviewActions) DismissPriorCRChangesRequested(ctx context.Context, binding db.WorkspaceRepoBinding, issue db.Issue) (*DismissPriorResult, error) {
+	if !issue.PrNumber.Valid {
+		return nil, errors.New("issue has no associated pull request number")
+	}
+	owner, name, err := splitRepoFullName(binding.RepoFullName)
+	if err != nil {
+		return nil, err
+	}
+	c := a.client(binding.InstallationID)
+	reviews, err := c.ListReviews(ctx, owner, name, int(issue.PrNumber.Int32))
+	if err != nil {
+		return nil, fmt.Errorf("list reviews: %w", err)
+	}
+
+	// GitHub's pull-request reviews REST endpoint returns reviews in
+	// chronological order, so overwriting target leaves the latest CR review.
+	// Only dismiss when that latest CR review is still CHANGES_REQUESTED; a
+	// later DISMISSED/APPROVED/COMMENTED review makes this endpoint a no-op.
+	var target Review
+	for _, r := range reviews {
+		if equalLogin(r.User.Login, binding.CrBotUsername) {
+			target = r
+		}
+	}
+	if target.NodeID == "" || target.State != "CHANGES_REQUESTED" {
+		return &DismissPriorResult{Dismissed: false}, nil
+	}
+	if err := c.DismissReview(ctx, target.NodeID, "Addressed via re-push and per-thread replies."); err != nil {
+		return nil, err
+	}
+	return &DismissPriorResult{Dismissed: true, ReviewID: target.NodeID}, nil
+}
+
+func (c *GitHubAPIClient) DismissReview(ctx context.Context, reviewNodeID, message string) error {
+	const mutation = `mutation($review:ID!, $message:String!) {
+	  dismissPullRequestReview(input: {pullRequestReviewId: $review, message: $message}) {
+	    pullRequestReview { id state }
+	  }
+	}`
+	payload := map[string]any{
+		"query": mutation,
+		"variables": map[string]any{
+			"review":  reviewNodeID,
+			"message": message,
+		},
+	}
+	buf, _ := json.Marshal(payload)
+	var resp struct {
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, "https://api.github.com/graphql", bytes.NewReader(buf), &resp); err != nil {
+		return fmt.Errorf("dismissPullRequestReview: %w", err)
+	}
+	if len(resp.Errors) > 0 {
+		return fmt.Errorf("graphql errors: %s", resp.Errors[0].Message)
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // Backfill
 // ---------------------------------------------------------------------------
 

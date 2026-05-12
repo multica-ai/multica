@@ -35,15 +35,8 @@ import "strings"
 //   pull_request.opened                                pre-in_review   coderabbit
 //   review.submitted state=changes_requested (CR bot)  coderabbit      resolving
 //   review.submitted (CR bot) + LocalUnresolvedCount>0 coderabbit      resolving
-//   review.submitted (CR bot) + LocalUnresolvedCount>0 in_review       resolving
 //   review.submitted state=approved (CR bot) + clean   coderabbit      staged
-//   review.submitted state=approved (CR bot) + clean   in_review       staged
 //   review.submitted state=commented + clean           coderabbit      noop  (race guard)
-//   review.submitted state=commented + clean           in_review       noop  (race guard)
-//   review_thread + LocalUnresolvedCount>0             coderabbit      resolving (race fallback)
-//   review_thread (any)                                in_review       noop  (sidecar-driven)
-//   review_thread + predicate clear                    coderabbit      noop  (req: APPROVED only)
-//   review_comment.created (CR bot) + count>0          coderabbit      resolving (via Decide(ReviewThread))
 //   pull_request.closed merged=true                    coderabbit      staged → done (chained)
 //   pull_request.closed merged=true                    in_review       staged → done (chained)
 //   pull_request.closed merged=true                    staged          done
@@ -91,6 +84,14 @@ const (
 	// ActionSetStatus changes the issue status to NewStatus. Used for
 	// transitions on already-linked PRs (synchronize, review, close, etc.).
 	ActionSetStatus
+
+	// ActionRecordPendingApproval records a COMMENTED+clean wrapping review
+	// for the settle sweeper without changing issue status.
+	ActionRecordPendingApproval
+
+	// ActionSetStatusAndCloseAttempt changes issue status and closes the
+	// current CR review attempt atomically.
+	ActionSetStatusAndCloseAttempt
 )
 
 // Status values referenced by the state machine.
@@ -163,7 +164,6 @@ type EventKind int
 const (
 	EventKindPR EventKind = iota
 	EventKindReview
-	EventKindReviewThread
 )
 
 // Input is everything the state machine needs to decide. The webhook handler
@@ -225,6 +225,11 @@ type Decision struct {
 	// ActivityKind is a short label that the webhook handler attaches to
 	// the activity row it emits. Empty when Action == ActionNoop.
 	ActivityKind string
+
+	AttemptOutcome    string
+	AttemptReason     string
+	ReviewStateRecord ReviewState
+	FindingsCount     int
 }
 
 // Decide is the pure transition function. The handler should NEVER mutate
@@ -235,8 +240,6 @@ func Decide(in Input) Decision {
 		return decidePR(in)
 	case EventKindReview:
 		return decideReview(in)
-	case EventKindReviewThread:
-		return decideReviewThread(in)
 	}
 	return Decision{Action: ActionNoop}
 }
@@ -338,91 +341,50 @@ func decideReview(in Input) Decision {
 	if !in.ReviewByCR {
 		return Decision{Action: ActionNoop}
 	}
-
-	// CHANGES_REQUESTED: CR formally blocked the PR. Bounce to `resolving`
-	// (the new CR-loop column) so Rosa addresses the feedback per-thread.
-	// Idempotent: already-resolving stays put.
+	if in.IssueStatus != StatusCoderabbit {
+		return Decision{Action: ActionNoop}
+	}
 	if in.ReviewState == ReviewChangesRequested {
-		if in.IssueStatus == StatusResolving {
-			return Decision{Action: ActionNoop}
-		}
-		// Only flip from columns where CR is the actor (coderabbit and
-		// in_review). Other columns (in_progress, fixing, code_review,
-		// testing) are owned by other agents in the inner loops; the
-		// sidecar handles those bounces.
-		if in.IssueStatus == StatusCoderabbit || in.IssueStatus == StatusInReview {
-			return Decision{
-				Action:       ActionSetStatus,
-				NewStatus:    StatusResolving,
-				ActivityKind: "review_changes_requested",
-			}
-		}
-		return Decision{Action: ActionNoop}
-	}
-
-	// COMMENTED review with at least one unresolved inline thread =
-	// soft-changes-requested. Same target as CHANGES_REQUESTED: resolving.
-	// Applies on coderabbit (first review pass) and on in_review (CR
-	// re-reviewed Marcus's resolving-cycle re-push and found new issues).
-	if in.LocalUnresolvedThreadCount > 0 {
-		if in.IssueStatus == StatusCoderabbit || in.IssueStatus == StatusInReview {
-			return Decision{
-				Action:       ActionSetStatus,
-				NewStatus:    StatusResolving,
-				ActivityKind: "review_comments_unresolved",
-			}
-		}
-		return Decision{Action: ActionNoop}
-	}
-
-	// Predicate clear + APPROVED: flip to staged.
-	//   - From coderabbit: first-pass clean, skip in_review entirely.
-	//   - From in_review: Marcus has finished posting replies + resolving threads.
-	//
-	// APPROVED is required (not COMMENTED) because GitHub delivers
-	// `pull_request_review` before the per-finding `pull_request_review_comment`
-	// webhooks: on a COMMENTED review with N inline findings the local mirror
-	// is still empty here and we would falsely promote. Once the inline rows
-	// land, the thread-event path or the per-comment re-evaluation in
-	// handleReviewComment drives `→ resolving`.
-	if in.ReviewState == ReviewApproved && in.NoOpenCRChangesRequest && in.NoUnresolvedCRThreads {
-		if in.IssueStatus == StatusCoderabbit || in.IssueStatus == StatusInReview {
-			return Decision{
-				Action:       ActionSetStatus,
-				NewStatus:    StatusStaged,
-				ActivityKind: "review_passed",
-			}
-		}
-	}
-	return Decision{Action: ActionNoop}
-}
-
-func decideReviewThread(in Input) Decision {
-	// Inline findings present on `coderabbit`: drive `→ resolving` without
-	// waiting for a wrapping `pull_request_review` event. Reachable from
-	// handleReviewComment's per-comment re-evaluation, which closes the
-	// COMMENTED-review race that decideReview's APPROVED gate leaves to
-	// the inline path.
-	//
-	// Intentionally NOT firing from `in_review`: thread events on in_review
-	// are Marcus's own /resolve calls in his bmad-pr-resolve cycle. Reacting
-	// to them here would bounce the issue back to resolving on every resolve
-	// during his loop. The CR-loop exit from in_review is sidecar-driven
-	// (Marcus emits a marker; sidecar flips in_review → coderabbit). New CR
-	// findings posted while the issue is in_review reach the state machine
-	// via decideReview when CR submits its wrapping review event.
-	if in.LocalUnresolvedThreadCount > 0 && in.IssueStatus == StatusCoderabbit {
 		return Decision{
-			Action:       ActionSetStatus,
-			NewStatus:    StatusResolving,
-			ActivityKind: "review_comments_unresolved",
+			Action:            ActionSetStatusAndCloseAttempt,
+			NewStatus:         StatusResolving,
+			ActivityKind:      "review_changes_requested",
+			AttemptOutcome:    "completed_with_findings",
+			AttemptReason:     "changes_requested",
+			ReviewStateRecord: ReviewChangesRequested,
+			FindingsCount:     in.LocalUnresolvedThreadCount,
 		}
 	}
-
-	// Predicate-clear → staged is intentionally absent: only an explicit
-	// APPROVED review from CR can autonomously promote an issue (handled in
-	// decideReview). Threads draining to zero is a "Marcus done" signal, not
-	// a "CR approved" signal — the sidecar handles the in_review exit.
+	if in.ReviewState == ReviewCommented && in.LocalUnresolvedThreadCount > 0 {
+		return Decision{
+			Action:            ActionSetStatusAndCloseAttempt,
+			NewStatus:         StatusResolving,
+			ActivityKind:      "review_comments_unresolved",
+			AttemptOutcome:    "completed_with_findings",
+			AttemptReason:     "commented_with_unresolved",
+			ReviewStateRecord: ReviewCommented,
+			FindingsCount:     in.LocalUnresolvedThreadCount,
+		}
+	}
+	if in.ReviewState == ReviewApproved && in.NoOpenCRChangesRequest && in.NoUnresolvedCRThreads {
+		return Decision{
+			Action:            ActionSetStatusAndCloseAttempt,
+			NewStatus:         StatusStaged,
+			ActivityKind:      "review_passed",
+			AttemptOutcome:    "completed_clean",
+			AttemptReason:     "approved_clean",
+			ReviewStateRecord: ReviewApproved,
+			FindingsCount:     0,
+		}
+	}
+	if in.ReviewState == ReviewCommented && in.NoOpenCRChangesRequest && in.NoUnresolvedCRThreads {
+		return Decision{
+			Action:            ActionRecordPendingApproval,
+			ActivityKind:      "review_commented_clean_pending",
+			ReviewStateRecord: ReviewCommented,
+			FindingsCount:     0,
+		}
+	}
 	return Decision{Action: ActionNoop}
 }
 

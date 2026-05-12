@@ -43,16 +43,19 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/pkg/protocol"
+	dbtx "github.com/multica-ai/multica/server/pkg/db"
+	audit "github.com/multica-ai/multica/server/pkg/db/audit"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // WebhookHandler holds the dependencies needed to process GitHub webhook
 // deliveries.
 type WebhookHandler struct {
-	Queries *db.Queries
-	Bus     *events.Bus
-	Auth    *AppAuth
+	Queries   *db.Queries
+	TxStarter dbtx.TxStarter
+	Bus       *events.Bus
+	Auth      *AppAuth
 
 	// Secret is the App-level webhook secret loaded from
 	// GITHUB_APP_WEBHOOK_SECRET. Empty disables HMAC verification — only
@@ -65,7 +68,7 @@ type WebhookHandler struct {
 
 // NewWebhookHandlerFromEnv constructs the handler using GITHUB_APP_*
 // environment variables.
-func NewWebhookHandlerFromEnv(queries *db.Queries, bus *events.Bus) (*WebhookHandler, error) {
+func NewWebhookHandlerFromEnv(queries *db.Queries, txStarter dbtx.TxStarter, bus *events.Bus) (*WebhookHandler, error) {
 	auth, err := NewAppAuthFromEnv()
 	if err != nil {
 		return nil, err
@@ -75,10 +78,11 @@ func NewWebhookHandlerFromEnv(queries *db.Queries, bus *events.Bus) (*WebhookHan
 		return nil, errors.New("GITHUB_APP_WEBHOOK_SECRET must be set")
 	}
 	return &WebhookHandler{
-		Queries: queries,
-		Bus:     bus,
-		Auth:    auth,
-		Secret:  secret,
+		Queries:   queries,
+		TxStarter: txStarter,
+		Bus:       bus,
+		Auth:      auth,
+		Secret:    secret,
 	}, nil
 }
 
@@ -111,7 +115,9 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	relevant := eventType == "pull_request" ||
 		eventType == "pull_request_review" ||
 		eventType == "pull_request_review_thread" ||
-		eventType == "pull_request_review_comment"
+		eventType == "pull_request_review_comment" ||
+		eventType == "check_run" ||
+		eventType == "issue_comment"
 	if !relevant {
 		writeOK(w, "ignored", map[string]any{"event": eventType})
 		return
@@ -190,6 +196,10 @@ func (h *WebhookHandler) dispatch(ctx context.Context, eventType string, payload
 		return h.handleReviewThread(ctx, payload, binding)
 	case "pull_request_review_comment":
 		return h.handleReviewComment(ctx, payload, binding)
+	case "check_run":
+		return h.handleCheckRun(ctx, payload, binding)
+	case "issue_comment":
+		return h.handleIssueComment(ctx, payload, binding)
 	}
 	return &dispatchResult{label: "ignored"}, nil
 }
@@ -271,10 +281,6 @@ func (h *WebhookHandler) handleReview(ctx context.Context, payload map[string]js
 	if err := decode(payload, "pull_request", &p.PR); err != nil {
 		return nil, err
 	}
-	if p.Action != "submitted" {
-		return &dispatchResult{label: "noop", fields: map[string]any{"reason": "non-submitted review action"}}, nil
-	}
-
 	issue, found, err := h.resolveIssueByPR(ctx, binding.RepoFullName, p.PR.Number)
 	if err != nil {
 		return nil, err
@@ -283,20 +289,47 @@ func (h *WebhookHandler) handleReview(ctx context.Context, payload map[string]js
 		return &dispatchResult{label: "issue_not_found", fields: map[string]any{"pr_number": p.PR.Number}}, nil
 	}
 
+	if strings.EqualFold(p.Review.User.Login, binding.CrBotUsername) {
+		h.recordCRSignal(ctx, issue, p.PR.HTMLURL, p.PR.Head.SHA, "review", p.Action, map[string]any{
+			"review_id": p.Review.ID,
+			"state":     p.Review.State,
+		})
+	}
+
+	if p.Action != "submitted" {
+		return &dispatchResult{label: "review_recorded", fields: map[string]any{"reason": "non-submitted review action"}}, nil
+	}
+
+	if issue.Status != StatusCoderabbit {
+		slog.Info("webhook: cr loop v2 review event mirrored only outside coderabbit",
+			"issue", uuidStr(issue.ID),
+			"status", issue.Status,
+			"review_id", p.Review.ID,
+			"review_state", p.Review.State,
+		)
+		return &dispatchResult{label: "v2_silent_mirror_review", fields: map[string]any{
+			"issue":        issue.ID.String(),
+			"status":       issue.Status,
+			"review_state": p.Review.State,
+		}}, nil
+	}
+
 	// Bulk-mirror the review's inline findings (CR only) before predicate +
 	// Decide. GitHub delivers `pull_request_review` ahead of the per-finding
 	// `pull_request_review_comment` webhooks, so without this fetch the
 	// LocalUnresolvedThreadCount branch in decideReview would race the count
 	// to zero and noop. Pulling them via REST is the canonical source — the
 	// per-comment webhooks become idempotent re-deliveries afterward.
-	// Failure degrades to the per-comment-driven path (see handleReviewComment).
+	// Failure degrades to the per-comment-driven path in v1. Under v2 the
+	// local mirror is load-bearing, so failures route fail-closed to blocked.
 	if strings.EqualFold(p.Review.User.Login, binding.CrBotUsername) {
 		if merr := h.bulkMirrorReviewComments(ctx, binding, issue, p.PR.Number, p.Review.ID); merr != nil {
-			slog.Warn("webhook: bulk-mirror CR review comments failed",
+			slog.Error("webhook: bulk-mirror failed under v2; failing closed",
 				"issue", uuidStr(issue.ID),
 				"review_id", p.Review.ID,
 				"error", merr,
 			)
+			return h.failClosedToBlocked(ctx, issue, p.PR, binding, "cr_bulk_mirror_failed: "+merr.Error())
 		}
 	}
 
@@ -374,22 +407,17 @@ func (h *WebhookHandler) handleReviewThread(ctx context.Context, payload map[str
 		}
 	}
 
-	noOpenChanges, noUnresolved, unresolvedCount, err := h.predicate(ctx, binding, p.PR.Number, issue.ID)
-	if err != nil {
-		return nil, err
+	if reviewThreadAuthoredByCR(ctx, h.Queries, p.Thread, binding.CrBotUsername) {
+		h.recordCRSignal(ctx, issue, p.PR.HTMLURL, p.PR.Head.SHA, "thread", p.Action, map[string]any{
+			"thread_node_id": p.Thread.NodeID,
+			"comment_count":  len(p.Thread.Comments),
+		})
 	}
-	in := Input{
-		Kind:                       EventKindReviewThread,
-		IssueStatus:                issue.Status,
-		NoOpenCRChangesRequest:     noOpenChanges,
-		NoUnresolvedCRThreads:      noUnresolved,
-		LocalUnresolvedThreadCount: unresolvedCount,
-	}
-	dec := Decide(in)
-	if dec.Action == ActionNoop {
-		return &dispatchResult{label: "noop"}, nil
-	}
-	return h.applyDecision(ctx, issue, dec, p.PR, binding, "pull_request_review_thread")
+
+	return &dispatchResult{
+		label:  "review_thread_recorded",
+		fields: map[string]any{"issue": uuidStr(issue.ID)},
+	}, nil
 }
 
 // handleReviewComment mirrors a single CR review comment (a per-line PR
@@ -430,6 +458,12 @@ func (h *WebhookHandler) handleReviewComment(ctx context.Context, payload map[st
 	if !found {
 		return &dispatchResult{label: "issue_not_found", fields: map[string]any{"pr_number": p.PR.Number}}, nil
 	}
+
+	h.recordCRSignal(ctx, issue, p.PR.HTMLURL, p.PR.Head.SHA, "review_comment", p.Action, map[string]any{
+		"comment_id": p.Comment.ID,
+		"path":       p.Comment.Path,
+		"line":       p.Comment.Line,
+	})
 
 	parsed := parseCRBody(p.Comment.Body)
 
@@ -494,30 +528,6 @@ func (h *WebhookHandler) handleReviewComment(ctx context.Context, payload map[st
 		h.publishCRReviewCommentCreated(issue, mirrored, row)
 	}
 
-	// Re-evaluate status: per-comment ingest is the only signal that drives
-	// `coderabbit → resolving` for COMMENTED reviews (decideReview's APPROVED
-	// gate no longer flips on the racing review event). predicate() must be
-	// called AFTER the upsert above so the count reflects the new row — do
-	// not hoist this above UpsertReviewThread.
-	noOpenChanges, noUnresolved, unresolvedCount, perr := h.predicate(ctx, binding, p.PR.Number, issue.ID)
-	if perr == nil {
-		dec := Decide(Input{
-			Kind:                       EventKindReviewThread,
-			IssueStatus:                issue.Status,
-			NoOpenCRChangesRequest:     noOpenChanges,
-			NoUnresolvedCRThreads:      noUnresolved,
-			LocalUnresolvedThreadCount: unresolvedCount,
-		})
-		if dec.Action != ActionNoop {
-			return h.applyDecision(ctx, issue, dec, p.PR, binding, "pull_request_review_comment")
-		}
-	} else {
-		slog.Warn("webhook: review comment predicate failed",
-			"issue", uuidStr(issue.ID),
-			"error", perr,
-		)
-	}
-
 	return &dispatchResult{
 		label: "review_comment_recorded",
 		fields: map[string]any{
@@ -527,6 +537,290 @@ func (h *WebhookHandler) handleReviewComment(ctx context.Context, payload map[st
 			"state":         row.State,
 		},
 	}, nil
+}
+
+func (h *WebhookHandler) handleCheckRun(ctx context.Context, payload map[string]json.RawMessage, binding db.WorkspaceRepoBinding) (*dispatchResult, error) {
+	var p checkRunPayload
+	if err := decode(payload, "action", &p.Action); err != nil {
+		return nil, err
+	}
+	if err := decode(payload, "check_run", &p.CheckRun); err != nil {
+		return nil, err
+	}
+	if !strings.EqualFold(p.CheckRun.App.Slug, "coderabbitai") &&
+		!strings.EqualFold(p.CheckRun.App.Slug, binding.CrBotUsername) {
+		return &dispatchResult{label: "noop", fields: map[string]any{"reason": "non-CR check_run"}}, nil
+	}
+
+	prNumber, err := h.resolvePRForCheckRun(ctx, binding, p.CheckRun)
+	if err != nil || prNumber == 0 {
+		return &dispatchResult{label: "noop", fields: map[string]any{"reason": "no PR for check_run", "error": fmt.Sprint(err)}}, nil
+	}
+	issue, found, err := h.resolveIssueByPR(ctx, binding.RepoFullName, prNumber)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return &dispatchResult{label: "issue_not_found"}, nil
+	}
+
+	h.recordCRSignal(ctx, issue, p.CheckRun.HTMLURL, p.CheckRun.HeadSHA, "check_run", p.Action, map[string]any{
+		"name":       p.CheckRun.Name,
+		"status":     p.CheckRun.Status,
+		"conclusion": p.CheckRun.Conclusion,
+	})
+
+	if p.Action != "completed" {
+		return &dispatchResult{label: "check_run_recorded"}, nil
+	}
+
+	crRound := readPhaseStateCRRound(ctx, h.Queries, issue.ID)
+	attempt, aerr := h.Queries.GetCRReviewAttempt(ctx, db.GetCRReviewAttemptParams{
+		IssueID: issue.ID,
+		CrRound: int32(crRound),
+	})
+	if aerr != nil && !errors.Is(aerr, pgx.ErrNoRows) {
+		return nil, aerr
+	}
+	if aerr == nil && attempt.ClosedAt.Valid {
+		return &dispatchResult{label: "check_run_recorded_attempt_already_closed"}, nil
+	}
+
+	switch p.CheckRun.Conclusion {
+	case "skipped", "neutral":
+		return h.txCloseAttemptAndSetStatus(ctx, issue, int32(crRound),
+			"skipped", "check_run_"+p.CheckRun.Conclusion,
+			StatusStaged, "check_run_skipped_to_staged",
+			"review_passed")
+	case "failure":
+		reason := "check_run_failure"
+		if p.CheckRun.Output.Title != "" {
+			reason += ": " + p.CheckRun.Output.Title
+		}
+		return h.txCloseAttemptAndFailClosed(ctx, issue, int32(crRound), reason)
+	}
+	return &dispatchResult{label: "check_run_recorded"}, nil
+}
+
+func (h *WebhookHandler) handleIssueComment(ctx context.Context, payload map[string]json.RawMessage, binding db.WorkspaceRepoBinding) (*dispatchResult, error) {
+	var p issueCommentPayload
+	if err := decode(payload, "action", &p.Action); err != nil {
+		return nil, err
+	}
+	if err := decode(payload, "issue", &p.Issue); err != nil {
+		return nil, err
+	}
+	if err := decode(payload, "comment", &p.Comment); err != nil {
+		return nil, err
+	}
+	if p.Action != "created" && p.Action != "edited" {
+		return &dispatchResult{label: "noop", fields: map[string]any{"reason": "non-created/edited issue_comment"}}, nil
+	}
+	if p.Issue.PullRequest == nil || p.Issue.Number == 0 {
+		return &dispatchResult{label: "noop", fields: map[string]any{"reason": "not a PR comment"}}, nil
+	}
+	if !strings.EqualFold(p.Comment.User.Login, binding.CrBotUsername) {
+		return &dispatchResult{label: "noop", fields: map[string]any{"reason": "non-CR issue_comment"}}, nil
+	}
+	issue, found, err := h.resolveIssueByPR(ctx, binding.RepoFullName, p.Issue.Number)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return &dispatchResult{label: "issue_not_found"}, nil
+	}
+	prURL := fmt.Sprintf("https://github.com/%s/pull/%d", binding.RepoFullName, p.Issue.Number)
+	if p.Issue.PullRequest.HTMLURL != "" {
+		prURL = p.Issue.PullRequest.HTMLURL
+	}
+	h.recordCRSignal(ctx, issue, prURL, "", "issue_comment", p.Action, map[string]any{
+		"comment_url": p.Comment.HTMLURL,
+	})
+	return &dispatchResult{label: "issue_comment_recorded"}, nil
+}
+
+func (h *WebhookHandler) recordCRSignal(ctx context.Context, issue db.Issue, prURL, headSHA string, signalKind, signalAction string, summary map[string]any) {
+	crRound := readPhaseStateCRRound(ctx, h.Queries, issue.ID)
+	attempt, err := h.Queries.UpsertCRReviewAttempt(ctx, db.UpsertCRReviewAttemptParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		CrRound:     int32(crRound),
+		PrUrl:       prURL,
+		HeadSha:     headSHA,
+	})
+	if err != nil {
+		slog.Warn("recordCRSignal: upsert attempt failed", "issue", uuidStr(issue.ID), "kind", signalKind, "error", err)
+		return
+	}
+	if err := h.Queries.RecordCRFirstSignal(ctx, db.RecordCRFirstSignalParams{
+		IssueID:         issue.ID,
+		CrRound:         int32(crRound),
+		FirstSignalKind: pgtype.Text{String: signalKind, Valid: true},
+	}); err != nil {
+		slog.Warn("recordCRSignal: first signal write failed", "issue", uuidStr(issue.ID), "kind", signalKind, "error", err)
+	}
+	summaryJSON, _ := json.Marshal(summary)
+	if err := h.Queries.InsertCRReviewSignal(ctx, db.InsertCRReviewSignalParams{
+		AttemptID:      attempt.ID,
+		SignalKind:     signalKind,
+		SignalAction:   pgtype.Text{String: signalAction, Valid: signalAction != ""},
+		PayloadSummary: summaryJSON,
+	}); err != nil {
+		slog.Warn("recordCRSignal: signal insert failed", "issue", uuidStr(issue.ID), "kind", signalKind, "error", err)
+	}
+}
+
+func reviewThreadAuthoredByCR(ctx context.Context, q *db.Queries, thread reviewThreadInfo, crBot string) bool {
+	for _, c := range thread.Comments {
+		if c.ID == 0 {
+			continue
+		}
+		local, err := q.GetReviewThreadByCommentID(ctx, c.ID)
+		if err == nil && strings.EqualFold(local.AuthorLogin, crBot) {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *WebhookHandler) txCloseAttemptAndSetStatus(ctx context.Context, issue db.Issue, crRound int32, outcome, outcomeReason, newStatus, label, activityKind string) (*dispatchResult, error) {
+	prevStatus := issue.Status
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	closed, err := qtx.CloseCRReviewAttempt(ctx, db.CloseCRReviewAttemptParams{
+		IssueID:       issue.ID,
+		CrRound:       crRound,
+		Outcome:       pgtype.Text{String: outcome, Valid: true},
+		OutcomeReason: pgtype.Text{String: outcomeReason, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return &dispatchResult{label: "check_run_attempt_already_closed"}, nil
+		}
+		return nil, err
+	}
+	updated, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issue.ID, Status: newStatus})
+	if err != nil {
+		return nil, err
+	}
+	if err := audit.WriteCRAttemptAuditComment(ctx, qtx, issue, closed); err != nil {
+		return nil, err
+	}
+	details, _ := json.Marshal(map[string]any{
+		"from": prevStatus, "to": newStatus, "reason": outcomeReason, "outcome": outcome, "cr_round": crRound,
+	})
+	if _, err := qtx.CreateActivity(ctx, db.CreateActivityParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     pgtype.UUID{Bytes: issue.ID.Bytes, Valid: true},
+		ActorType:   pgtype.Text{String: "system", Valid: true},
+		Action:      activityKind,
+		Details:     details,
+	}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	h.Bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: uuidStr(issue.WorkspaceID),
+		ActorType:   "system",
+		Payload: map[string]any{
+			"id": uuidStr(updated.ID), "status": updated.Status,
+			"prev": prevStatus, "prev_status": prevStatus, "status_changed": true,
+			"source": "cr_check_run", "src_event": outcomeReason,
+		},
+	})
+	return &dispatchResult{label: label}, nil
+}
+
+func (h *WebhookHandler) txCloseAttemptAndFailClosed(ctx context.Context, issue db.Issue, crRound int32, reason string) (*dispatchResult, error) {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	if _, err := qtx.CloseCRReviewAttempt(ctx, db.CloseCRReviewAttemptParams{
+		IssueID:       issue.ID,
+		CrRound:       crRound,
+		Outcome:       pgtype.Text{String: "failed", Valid: true},
+		OutcomeReason: pgtype.Text{String: reason, Valid: true},
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return &dispatchResult{label: "check_run_attempt_already_closed"}, nil
+		}
+		return nil, err
+	}
+	updated, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issue.ID, Status: StatusBlocked})
+	if err != nil {
+		return nil, err
+	}
+	body := fmt.Sprintf("<!-- sidecar-block -->\n\nreason: %s\n", reason)
+	if _, err := qtx.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+		AuthorType: "system", AuthorID: pgtype.UUID{Valid: false},
+		Content: body, Type: "system", ParentID: pgtype.UUID{Valid: false},
+	}); err != nil {
+		return nil, err
+	}
+	details, _ := json.Marshal(map[string]any{"from": issue.Status, "to": StatusBlocked, "reason": reason})
+	if _, err := qtx.CreateActivity(ctx, db.CreateActivityParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     pgtype.UUID{Bytes: issue.ID.Bytes, Valid: true},
+		ActorType:   pgtype.Text{String: "system", Valid: true},
+		Action:      "review_blocked",
+		Details:     details,
+	}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	h.Bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: uuidStr(issue.WorkspaceID),
+		ActorType:   "system",
+		Payload: map[string]any{
+			"id": uuidStr(updated.ID), "status": updated.Status,
+			"prev": issue.Status, "prev_status": issue.Status, "status_changed": true,
+			"source": "cr_check_run", "src_event": reason,
+		},
+	})
+	return &dispatchResult{label: "failed_closed_to_blocked", fields: map[string]any{"reason": reason}}, nil
+}
+
+func (h *WebhookHandler) resolvePRForCheckRun(ctx context.Context, binding db.WorkspaceRepoBinding, cr checkRunInfo) (int32, error) {
+	if len(cr.PullRequests) > 0 && cr.PullRequests[0].Number > 0 {
+		return cr.PullRequests[0].Number, nil
+	}
+	if cr.HeadSHA == "" {
+		return 0, nil
+	}
+	owner, repo, ok := splitRepo(binding.RepoFullName)
+	if !ok {
+		return 0, fmt.Errorf("invalid repo full name: %s", binding.RepoFullName)
+	}
+	var c PRReviewClient
+	if h.NewClient != nil {
+		c = h.NewClient(binding.InstallationID)
+	} else {
+		c = NewGitHubAPIClient(h.Auth, binding.InstallationID)
+	}
+	prs, err := c.ListPRsForCommit(ctx, owner, repo, cr.HeadSHA)
+	if err != nil {
+		return 0, err
+	}
+	for _, pr := range prs {
+		if pr.State == "open" {
+			return int32(pr.Number), nil
+		}
+	}
+	return 0, nil
 }
 
 // renderCRComment formats a CodeRabbit review-thread row as a markdown
@@ -751,9 +1045,9 @@ func (h *WebhookHandler) resolveIssueForPR(ctx context.Context, binding db.Works
 		return db.Issue{}, false, nil
 	}
 	issue, err := h.Queries.GetIssueByIdentifier(ctx, db.GetIssueByIdentifierParams{
-		WorkspaceID:  binding.WorkspaceID,
-		IssuePrefix:  id.Prefix,
-		Number:       id.Number,
+		WorkspaceID: binding.WorkspaceID,
+		IssuePrefix: id.Prefix,
+		Number:      id.Number,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -786,6 +1080,7 @@ func (h *WebhookHandler) applyDecision(ctx context.Context, issue db.Issue, dec 
 	prevStatus := issue.Status
 	var updated db.Issue
 	var err error
+	var tx pgx.Tx
 
 	switch dec.Action {
 	case ActionLinkPR:
@@ -806,6 +1101,103 @@ func (h *WebhookHandler) applyDecision(ctx context.Context, issue db.Issue, dec 
 			ID:     issue.ID,
 			Status: dec.NewStatus,
 		})
+	case ActionRecordPendingApproval:
+		crRound := readPhaseStateCRRound(ctx, h.Queries, issue.ID)
+		tx, err = h.TxStarter.Begin(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback(ctx)
+		qtx := h.Queries.WithTx(tx)
+		if _, err = qtx.UpsertCRReviewAttempt(ctx, db.UpsertCRReviewAttemptParams{
+			IssueID:     issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			CrRound:     int32(crRound),
+			PrUrl:       pr.HTMLURL,
+			HeadSha:     pr.Head.SHA,
+		}); err != nil {
+			return nil, err
+		}
+		if _, err = qtx.RecordCRWrappingReview(ctx, db.RecordCRWrappingReviewParams{
+			IssueID:       issue.ID,
+			CrRound:       int32(crRound),
+			ReviewState:   pgtype.Text{String: string(dec.ReviewStateRecord), Valid: true},
+			FindingsCount: int32(dec.FindingsCount),
+		}); err != nil {
+			return nil, err
+		}
+		details, _ := json.Marshal(map[string]any{
+			"status":    issue.Status,
+			"phase":     "commented_clean_pending",
+			"pr_url":    pr.HTMLURL,
+			"pr_number": pr.Number,
+			"pr_repo":   binding.RepoFullName,
+			"reason":    "commented_clean_pending_settle",
+			"cr_round":  crRound,
+		})
+		if _, err = qtx.CreateActivity(ctx, db.CreateActivityParams{
+			WorkspaceID: issue.WorkspaceID,
+			IssueID:     pgtype.UUID{Bytes: issue.ID.Bytes, Valid: true},
+			ActorType:   pgtype.Text{String: "system", Valid: true},
+			Action:      dec.ActivityKind,
+			Details:     details,
+		}); err != nil {
+			return nil, err
+		}
+		if err = tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		// No status changed here, so do not publish the normal issue:updated
+		// event. PR 3 can add a dedicated activity event for CR Activity refresh.
+		return &dispatchResult{label: "pending_approval_recorded", fields: map[string]any{"issue": uuidStr(issue.ID)}}, nil
+	case ActionSetStatusAndCloseAttempt:
+		crRound := readPhaseStateCRRound(ctx, h.Queries, issue.ID)
+		tx, err = h.TxStarter.Begin(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback(ctx)
+		qtx := h.Queries.WithTx(tx)
+		if _, err = qtx.UpsertCRReviewAttempt(ctx, db.UpsertCRReviewAttemptParams{
+			IssueID:     issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			CrRound:     int32(crRound),
+			PrUrl:       pr.HTMLURL,
+			HeadSha:     pr.Head.SHA,
+		}); err != nil {
+			return nil, err
+		}
+		if _, err = qtx.RecordCRWrappingReview(ctx, db.RecordCRWrappingReviewParams{
+			IssueID:       issue.ID,
+			CrRound:       int32(crRound),
+			ReviewState:   pgtype.Text{String: string(dec.ReviewStateRecord), Valid: true},
+			FindingsCount: int32(dec.FindingsCount),
+		}); err != nil {
+			return nil, err
+		}
+		closed, closeErr := qtx.CloseCRReviewAttempt(ctx, db.CloseCRReviewAttemptParams{
+			IssueID:       issue.ID,
+			CrRound:       int32(crRound),
+			Outcome:       pgtype.Text{String: dec.AttemptOutcome, Valid: true},
+			OutcomeReason: pgtype.Text{String: dec.AttemptReason, Valid: true},
+		})
+		if closeErr != nil {
+			err = closeErr
+			return nil, err
+		}
+		updated, err = qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ID:     issue.ID,
+			Status: dec.NewStatus,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err = audit.WriteCRAttemptAuditComment(ctx, qtx, issue, closed); err != nil {
+			return nil, err
+		}
+		if err = tx.Commit(ctx); err != nil {
+			return nil, err
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("apply decision: %w", err)
@@ -871,6 +1263,106 @@ func (h *WebhookHandler) applyDecision(ctx context.Context, issue db.Issue, dec 
 			"activity_kind": dec.ActivityKind,
 		},
 	}, nil
+}
+
+func (h *WebhookHandler) failClosedToBlocked(ctx context.Context, issue db.Issue, pr prInfo, binding db.WorkspaceRepoBinding, reason string) (*dispatchResult, error) {
+	if h.TxStarter == nil {
+		return nil, errors.New("fail-closed requires TxStarter")
+	}
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	crRound := readPhaseStateCRRound(ctx, h.Queries, issue.ID)
+	if _, err := qtx.UpsertCRReviewAttempt(ctx, db.UpsertCRReviewAttemptParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		CrRound:     int32(crRound),
+		PrUrl:       pr.HTMLURL,
+		HeadSha:     pr.Head.SHA,
+	}); err != nil {
+		return nil, fmt.Errorf("fail-closed upsert attempt: %w", err)
+	}
+	if _, err := qtx.CloseCRReviewAttempt(ctx, db.CloseCRReviewAttemptParams{
+		IssueID:       issue.ID,
+		CrRound:       int32(crRound),
+		Outcome:       pgtype.Text{String: "failed", Valid: true},
+		OutcomeReason: pgtype.Text{String: reason, Valid: true},
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return &dispatchResult{
+				label:  "fail_closed_attempt_already_closed",
+				fields: map[string]any{"reason": reason},
+			}, nil
+		}
+		return nil, fmt.Errorf("fail-closed close attempt: %w", err)
+	}
+	updated, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:     issue.ID,
+		Status: StatusBlocked,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("fail-closed status update: %w", err)
+	}
+	body := fmt.Sprintf("<!-- sidecar-block -->\n\nreason: %s\n", reason)
+	if _, err := qtx.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "system",
+		AuthorID:    pgtype.UUID{Valid: false},
+		Content:     body,
+		Type:        "system",
+		ParentID:    pgtype.UUID{Valid: false},
+	}); err != nil {
+		return nil, fmt.Errorf("fail-closed comment: %w", err)
+	}
+	details, _ := json.Marshal(map[string]any{
+		"from": issue.Status, "to": StatusBlocked, "reason": reason,
+	})
+	if _, err := qtx.CreateActivity(ctx, db.CreateActivityParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     pgtype.UUID{Bytes: issue.ID.Bytes, Valid: true},
+		ActorType:   pgtype.Text{String: "system", Valid: true},
+		Action:      "review_blocked",
+		Details:     details,
+	}); err != nil {
+		return nil, fmt.Errorf("fail-closed activity: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	h.Bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: uuidStr(issue.WorkspaceID),
+		ActorType:   "system",
+		Payload: map[string]any{
+			"id":             uuidStr(issue.ID),
+			"status":         updated.Status,
+			"prev":           issue.Status,
+			"prev_status":    issue.Status,
+			"status_changed": true,
+			"source":         "cr_fail_closed",
+			"src_event":      reason,
+		},
+	})
+	return &dispatchResult{label: "failed_closed_to_blocked", fields: map[string]any{"reason": reason}}, nil
+}
+
+func readPhaseStateCRRound(ctx context.Context, q *db.Queries, issueID pgtype.UUID) int {
+	iss, err := q.GetIssue(ctx, issueID)
+	if err != nil || len(iss.PhaseState) == 0 {
+		return 0
+	}
+	var s struct {
+		CRRound int `json:"cr_round"`
+	}
+	if err := json.Unmarshal(iss.PhaseState, &s); err != nil || s.CRRound < 0 {
+		return 0
+	}
+	return s.CRRound
 }
 
 // ---------------------------------------------------------------------------
@@ -1014,6 +1506,7 @@ type prInfo struct {
 	CreatedAt string `json:"created_at"`
 	Head      struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"head"`
 	HeadRef string `json:"-"`
 }
@@ -1042,9 +1535,9 @@ type reviewPayload struct {
 }
 
 type reviewThreadPayload struct {
-	Action string     `json:"action"`
-	PR     prInfo     `json:"pull_request"`
-	Sender senderInfo `json:"sender"`
+	Action string           `json:"action"`
+	PR     prInfo           `json:"pull_request"`
+	Sender senderInfo       `json:"sender"`
 	Thread reviewThreadInfo `json:"thread"`
 }
 
@@ -1076,6 +1569,44 @@ type reviewCommentPayload struct {
 	} `json:"comment"`
 	PR     prInfo     `json:"pull_request"`
 	Sender senderInfo `json:"sender"`
+}
+
+type checkRunPayload struct {
+	Action   string       `json:"action"`
+	CheckRun checkRunInfo `json:"check_run"`
+}
+
+type checkRunInfo struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	HeadSHA    string `json:"head_sha"`
+	HTMLURL    string `json:"html_url"`
+	App        struct {
+		Slug string `json:"slug"`
+	} `json:"app"`
+	Output struct {
+		Title string `json:"title"`
+	} `json:"output"`
+	PullRequests []struct {
+		Number int32 `json:"number"`
+	} `json:"pull_requests"`
+}
+
+type issueCommentPayload struct {
+	Action string `json:"action"`
+	Issue  struct {
+		Number      int32 `json:"number"`
+		PullRequest *struct {
+			HTMLURL string `json:"html_url"`
+		} `json:"pull_request"`
+	} `json:"issue"`
+	Comment struct {
+		HTMLURL string `json:"html_url"`
+		User    struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	} `json:"comment"`
 }
 
 // secondsSincePROpened returns the number of seconds between createdAt
@@ -1222,11 +1753,11 @@ func (h *WebhookHandler) publishCRReviewCommentCreated(issue db.Issue, mirrored 
 		WorkspaceID: wsID,
 		ActorType:   "system",
 		Payload: map[string]any{
-			"comment":       commentPayload,
-			"issue_title":   issue.Title,
-			"issue_status":  issue.Status,
-			"source":        "github_webhook",
-			"src_event":     "pull_request_review_comment",
+			"comment":      commentPayload,
+			"issue_title":  issue.Title,
+			"issue_status": issue.Status,
+			"source":       "github_webhook",
+			"src_event":    "pull_request_review_comment",
 		},
 	})
 }
@@ -1320,4 +1851,3 @@ func (h *WebhookHandler) buildIssueResponse(ctx context.Context, i db.Issue) (ma
 	}
 	return resp, prefix, nil
 }
-

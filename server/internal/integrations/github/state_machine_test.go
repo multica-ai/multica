@@ -199,7 +199,11 @@ func TestDecide_ReviewChangesRequested(t *testing.T) {
 			Kind: EventKindReview, IssueStatus: StatusCoderabbit,
 			ReviewState: ReviewChangesRequested, ReviewByCR: true,
 		})
-		want := Decision{Action: ActionSetStatus, NewStatus: StatusResolving, ActivityKind: "review_changes_requested"}
+		want := Decision{
+			Action: ActionSetStatusAndCloseAttempt, NewStatus: StatusResolving, ActivityKind: "review_changes_requested",
+			AttemptOutcome: "completed_with_findings", AttemptReason: "changes_requested",
+			ReviewStateRecord: ReviewChangesRequested,
+		}
 		if got != want {
 			t.Fatalf("got %+v; want %+v", got, want)
 		}
@@ -209,8 +213,8 @@ func TestDecide_ReviewChangesRequested(t *testing.T) {
 			Kind: EventKindReview, IssueStatus: StatusInReview,
 			ReviewState: ReviewChangesRequested, ReviewByCR: true,
 		})
-		if got.NewStatus != StatusResolving {
-			t.Fatalf("got %+v; want NewStatus=resolving", got)
+		if got.Action != ActionNoop {
+			t.Fatalf("got %+v; want noop", got)
 		}
 	})
 	t.Run("from staged by CR is noop (CR can't reopen staged)", func(t *testing.T) {
@@ -249,7 +253,11 @@ func TestDecide_ReviewCommentedWithUnresolved(t *testing.T) {
 			ReviewState: ReviewCommented, ReviewByCR: true,
 			LocalUnresolvedThreadCount: 3,
 		})
-		want := Decision{Action: ActionSetStatus, NewStatus: StatusResolving, ActivityKind: "review_comments_unresolved"}
+		want := Decision{
+			Action: ActionSetStatusAndCloseAttempt, NewStatus: StatusResolving, ActivityKind: "review_comments_unresolved",
+			AttemptOutcome: "completed_with_findings", AttemptReason: "commented_with_unresolved",
+			ReviewStateRecord: ReviewCommented, FindingsCount: 3,
+		}
 		if got != want {
 			t.Fatalf("got %+v; want %+v", got, want)
 		}
@@ -260,8 +268,8 @@ func TestDecide_ReviewCommentedWithUnresolved(t *testing.T) {
 			ReviewState: ReviewCommented, ReviewByCR: true,
 			LocalUnresolvedThreadCount: 1,
 		})
-		if got.NewStatus != StatusResolving {
-			t.Fatalf("got %+v; want resolving", got)
+		if got.Action != ActionNoop {
+			t.Fatalf("got %+v; want noop", got)
 		}
 	})
 	t.Run("from resolving + unresolved is noop (already there)", func(t *testing.T) {
@@ -289,8 +297,8 @@ func TestDecide_ReviewClean(t *testing.T) {
 			ReviewState: ReviewCommented, ReviewByCR: true,
 			NoOpenCRChangesRequest: true, NoUnresolvedCRThreads: true,
 		})
-		if got.Action != ActionNoop {
-			t.Fatalf("commented predicate-clean must noop on coderabbit (race guard); got %+v", got)
+		if got.Action != ActionRecordPendingApproval {
+			t.Fatalf("commented predicate-clean must record pending approval; got %+v", got)
 		}
 	})
 	t.Run("approved review from coderabbit + predicate → staged", func(t *testing.T) {
@@ -299,7 +307,11 @@ func TestDecide_ReviewClean(t *testing.T) {
 			ReviewState: ReviewApproved, ReviewByCR: true,
 			NoOpenCRChangesRequest: true, NoUnresolvedCRThreads: true,
 		})
-		want := Decision{Action: ActionSetStatus, NewStatus: StatusStaged, ActivityKind: "review_passed"}
+		want := Decision{
+			Action: ActionSetStatusAndCloseAttempt, NewStatus: StatusStaged, ActivityKind: "review_passed",
+			AttemptOutcome: "completed_clean", AttemptReason: "approved_clean",
+			ReviewStateRecord: ReviewApproved,
+		}
 		if got != want {
 			t.Fatalf("got %+v; want %+v", got, want)
 		}
@@ -320,8 +332,8 @@ func TestDecide_ReviewClean(t *testing.T) {
 			ReviewState: ReviewApproved, ReviewByCR: true,
 			NoOpenCRChangesRequest: true, NoUnresolvedCRThreads: true,
 		})
-		if got.NewStatus != StatusStaged {
-			t.Fatalf("got %+v; want NewStatus=staged", got)
+		if got.Action != ActionNoop {
+			t.Fatalf("got %+v; want noop", got)
 		}
 	})
 	t.Run("predicate fails (open changes) → noop", func(t *testing.T) {
@@ -346,77 +358,88 @@ func TestDecide_ReviewClean(t *testing.T) {
 	})
 }
 
-func TestDecide_ReviewThread(t *testing.T) {
-	// Inline findings present on coderabbit drive → resolving even without
-	// a wrapping review event. This branch is what handleReviewComment's
-	// per-comment re-evaluation reaches; it closes the COMMENTED-review
-	// race that decideReview's APPROVED gate leaves to the inline path.
-	t.Run("unresolved threads from coderabbit → resolving", func(t *testing.T) {
-		got := Decide(Input{
-			Kind: EventKindReviewThread, IssueStatus: StatusCoderabbit,
-			NoOpenCRChangesRequest: true, NoUnresolvedCRThreads: false,
-			LocalUnresolvedThreadCount: 5,
+func TestDecideReview_v2_OnlyFiresFromCoderabbit(t *testing.T) {
+	for _, status := range []string{StatusInReview, StatusFixing, StatusTesting, StatusInProgress} {
+		t.Run(status, func(t *testing.T) {
+			got := Decide(Input{
+				Kind:                   EventKindReview,
+				IssueStatus:            status,
+				ReviewState:            ReviewApproved,
+				ReviewByCR:             true,
+				NoOpenCRChangesRequest: true,
+				NoUnresolvedCRThreads:  true,
+			})
+			if got.Action != ActionNoop {
+				t.Fatalf("got %+v; want noop", got)
+			}
 		})
-		want := Decision{Action: ActionSetStatus, NewStatus: StatusResolving, ActivityKind: "review_comments_unresolved"}
-		if got != want {
-			t.Fatalf("got %+v; want %+v", got, want)
-		}
-	})
-	// Phase 1 invariant: thread events on in_review do NOT drive any
-	// state-machine transition. Marcus's /resolve calls in the
-	// bmad-pr-resolve loop fire pull_request_review_thread.resolved events;
-	// reacting to them would (a) bounce in_review → resolving on each
-	// resolve and (b) violate the "ONLY APPROVED → staged" rule when the
-	// last one drains the count to zero. The in_review exit is sidecar-driven
-	// (Marcus emits a marker; sidecar flips in_review → coderabbit).
-	t.Run("unresolved threads from in_review is noop (sidecar drives in_review)", func(t *testing.T) {
-		got := Decide(Input{
-			Kind: EventKindReviewThread, IssueStatus: StatusInReview,
-			NoOpenCRChangesRequest: true, NoUnresolvedCRThreads: false,
-			LocalUnresolvedThreadCount: 1,
+	}
+}
+
+func TestDecideReview_v2_AttemptLifecycleActions(t *testing.T) {
+	tests := []struct {
+		name string
+		in   Input
+		want Decision
+	}{
+		{
+			name: "changes requested closes with findings",
+			in: Input{
+				Kind: EventKindReview, IssueStatus: StatusCoderabbit,
+				ReviewState: ReviewChangesRequested, ReviewByCR: true,
+				LocalUnresolvedThreadCount: 2,
+			},
+			want: Decision{
+				Action: ActionSetStatusAndCloseAttempt, NewStatus: StatusResolving, ActivityKind: "review_changes_requested",
+				AttemptOutcome: "completed_with_findings", AttemptReason: "changes_requested",
+				ReviewStateRecord: ReviewChangesRequested, FindingsCount: 2,
+			},
+		},
+		{
+			name: "commented dirty closes with findings",
+			in: Input{
+				Kind: EventKindReview, IssueStatus: StatusCoderabbit,
+				ReviewState: ReviewCommented, ReviewByCR: true,
+				LocalUnresolvedThreadCount: 3,
+			},
+			want: Decision{
+				Action: ActionSetStatusAndCloseAttempt, NewStatus: StatusResolving, ActivityKind: "review_comments_unresolved",
+				AttemptOutcome: "completed_with_findings", AttemptReason: "commented_with_unresolved",
+				ReviewStateRecord: ReviewCommented, FindingsCount: 3,
+			},
+		},
+		{
+			name: "approved clean closes clean",
+			in: Input{
+				Kind: EventKindReview, IssueStatus: StatusCoderabbit,
+				ReviewState: ReviewApproved, ReviewByCR: true,
+				NoOpenCRChangesRequest: true, NoUnresolvedCRThreads: true,
+			},
+			want: Decision{
+				Action: ActionSetStatusAndCloseAttempt, NewStatus: StatusStaged, ActivityKind: "review_passed",
+				AttemptOutcome: "completed_clean", AttemptReason: "approved_clean",
+				ReviewStateRecord: ReviewApproved,
+			},
+		},
+		{
+			name: "commented clean records pending",
+			in: Input{
+				Kind: EventKindReview, IssueStatus: StatusCoderabbit,
+				ReviewState: ReviewCommented, ReviewByCR: true,
+				NoOpenCRChangesRequest: true, NoUnresolvedCRThreads: true,
+			},
+			want: Decision{
+				Action: ActionRecordPendingApproval, ActivityKind: "review_commented_clean_pending",
+				ReviewStateRecord: ReviewCommented,
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Decide(tc.in)
+			if got != tc.want {
+				t.Fatalf("got %+v; want %+v", got, tc.want)
+			}
 		})
-		if got.Action != ActionNoop {
-			t.Fatalf("got %+v; want noop", got)
-		}
-	})
-	t.Run("unresolved threads from resolving is noop (already there)", func(t *testing.T) {
-		got := Decide(Input{
-			Kind: EventKindReviewThread, IssueStatus: StatusResolving,
-			NoOpenCRChangesRequest: true, NoUnresolvedCRThreads: false,
-			LocalUnresolvedThreadCount: 2,
-		})
-		if got.Action != ActionNoop {
-			t.Fatalf("got %+v; want noop", got)
-		}
-	})
-	// Phase 1 invariant: predicate-clear thread events do NOT promote any
-	// column to staged. Only an explicit APPROVED CR review (handled in
-	// decideReview) can drive `→ staged` autonomously.
-	t.Run("predicate clear from coderabbit is noop (req: APPROVED only → staged)", func(t *testing.T) {
-		got := Decide(Input{
-			Kind: EventKindReviewThread, IssueStatus: StatusCoderabbit,
-			NoOpenCRChangesRequest: true, NoUnresolvedCRThreads: true,
-		})
-		if got.Action != ActionNoop {
-			t.Fatalf("got %+v; want noop", got)
-		}
-	})
-	t.Run("predicate clear from in_review is noop (sidecar drives this column)", func(t *testing.T) {
-		got := Decide(Input{
-			Kind: EventKindReviewThread, IssueStatus: StatusInReview,
-			NoOpenCRChangesRequest: true, NoUnresolvedCRThreads: true,
-		})
-		if got.Action != ActionNoop {
-			t.Fatalf("got %+v; want noop", got)
-		}
-	})
-	t.Run("from resolving is noop (sidecar drives this column)", func(t *testing.T) {
-		got := Decide(Input{
-			Kind: EventKindReviewThread, IssueStatus: StatusResolving,
-			NoOpenCRChangesRequest: true, NoUnresolvedCRThreads: true,
-		})
-		if got.Action != ActionNoop {
-			t.Fatalf("got %+v; want noop", got)
-		}
-	})
+	}
 }
