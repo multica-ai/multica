@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -20,7 +21,10 @@ import (
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
-const firtalGatewayServerDaemonID = "server:firtal-gateway"
+const (
+	firtalGatewayServerDaemonID  = "server:firtal-gateway"
+	firtalGatewayIssueCommentCap = 200
+)
 
 type FirtalGatewayExecutor struct {
 	cfg           FirtalGatewayRuntimeConfig
@@ -105,8 +109,9 @@ func (e *FirtalGatewayExecutor) syncRuntimes(ctx context.Context) {
 	}
 
 	metadata, _ := json.Marshal(map[string]any{
-		"managed_by": "multica-server",
-		"chat_only":  true,
+		"managed_by":   "multica-server",
+		"runtime_kind": "cloud",
+		"supports":     []string{"chat", "issue", "autopilot_run_only"},
 	})
 	for _, workspace := range workspaces {
 		workspaceID := workspace.ID
@@ -207,14 +212,14 @@ func (e *FirtalGatewayExecutor) dispatchAvailable(ctx context.Context) {
 			e.setRuntimeOffline(ctx, rt.WorkspaceID)
 			continue
 		}
-		claimed, err := e.cerebro.ClaimFirtalGatewayChatTask(ctx, rt.ID)
+		claimed, err := e.cerebro.ClaimFirtalGatewayTask(ctx, rt.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			e.release()
 			continue
 		}
 		if err != nil {
 			e.release()
-			e.logger.Warn("firtal gateway chat task claim failed", "runtime_id", util.UUIDToString(rt.ID), "error", err)
+			e.logger.Warn("firtal gateway task claim failed", "runtime_id", util.UUIDToString(rt.ID), "error", err)
 			continue
 		}
 		task := toDBAgentTaskQueue(claimed)
@@ -241,16 +246,14 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		e.failTask(parent, task, "failed to load agent: "+err.Error(), "agent_error")
 		return
 	}
-	if !task.ChatSessionID.Valid {
-		e.failTask(parent, task, "firtal gateway server runtime only supports chat tasks", "unsupported_task")
-		return
-	}
-	chatSession, err := e.queries.GetChatSession(parent, task.ChatSessionID)
+
+	plan, err := e.buildTaskPlan(parent, task, agent)
 	if err != nil {
-		e.failTask(parent, task, "failed to load chat session: "+err.Error(), "agent_error")
+		e.failTask(parent, task, err.Error(), "agent_error")
 		return
 	}
-	cfg, ok, err := e.effectiveWorkspaceConfig(parent, chatSession.WorkspaceID)
+
+	cfg, ok, err := e.effectiveWorkspaceConfig(parent, plan.workspaceID)
 	if err != nil {
 		e.failTask(parent, task, "failed to load firtal gateway settings: "+err.Error(), "agent_error")
 		return
@@ -260,21 +263,16 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		return
 	}
 	if e.budgetSvc != nil {
-		decision := e.budgetSvc.CheckPreClaim(parent, chatSession.WorkspaceID, task.AgentID)
+		decision := e.budgetSvc.CheckPreClaim(parent, plan.workspaceID, task.AgentID)
 		if !decision.Allowed {
 			e.failTask(parent, task, decision.Reason, "budget_blocked")
 			return
 		}
 	}
 
-	history, err := e.queries.ListChatMessages(parent, task.ChatSessionID)
-	if err != nil {
-		e.failTask(parent, task, "failed to load chat history: "+err.Error(), "agent_error")
-		return
-	}
-	messages := buildGatewayMessages(agent, history, task.StartedAt, cfg.HistoryLimit)
+	messages := plan.messagesWithLimit(cfg.HistoryLimit)
 	if !hasUserGatewayMessage(messages) {
-		e.failTask(parent, task, "chat task has no user message to answer", "agent_error")
+		e.failTask(parent, task, plan.emptyMessageError, "agent_error")
 		return
 	}
 
@@ -283,7 +281,7 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	completion, err := e.completeGateway(runCtx, cfg, agent.Model.String, messages, GatewayRequestMeta{
 		TaskID:      taskID,
 		AgentID:     util.UUIDToString(task.AgentID),
-		WorkspaceID: util.UUIDToString(chatSession.WorkspaceID),
+		WorkspaceID: util.UUIDToString(plan.workspaceID),
 	})
 	if err != nil {
 		e.failTask(parent, task, err.Error(), "agent_error")
@@ -293,7 +291,7 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	finalCtx, finalCancel := context.WithTimeout(context.WithoutCancel(parent), 10*time.Second)
 	defer finalCancel()
 	e.recordTaskMessage(finalCtx, task, completion.Output)
-	e.recordTaskUsage(finalCtx, task, chatSession.WorkspaceID, completion)
+	e.recordTaskUsage(finalCtx, task, plan.workspaceID, completion)
 
 	result, _ := json.Marshal(protocol.TaskCompletedPayload{
 		TaskID: taskID,
@@ -301,6 +299,85 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	})
 	if _, err := e.taskSvc.CompleteTask(finalCtx, task.ID, result, "", ""); err != nil {
 		e.logger.Warn("firtal gateway task complete failed", "task_id", taskID, "error", err)
+	}
+}
+
+// taskPlan captures everything the gateway needs to fulfil a task: the
+// workspace it belongs to (for config + budget + usage rollup), a function
+// that produces the message list given the history limit, and the error
+// message to surface when the resulting message list contains no user turn.
+type taskPlan struct {
+	workspaceID       pgtype.UUID
+	messagesWithLimit func(limit int) []GatewayMessage
+	emptyMessageError string
+}
+
+func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.AgentTaskQueue, agent db.Agent) (taskPlan, error) {
+	switch {
+	case task.ChatSessionID.Valid:
+		chatSession, err := e.queries.GetChatSession(ctx, task.ChatSessionID)
+		if err != nil {
+			return taskPlan{}, fmt.Errorf("failed to load chat session: %w", err)
+		}
+		history, err := e.queries.ListChatMessages(ctx, task.ChatSessionID)
+		if err != nil {
+			return taskPlan{}, fmt.Errorf("failed to load chat history: %w", err)
+		}
+		return taskPlan{
+			workspaceID: chatSession.WorkspaceID,
+			messagesWithLimit: func(limit int) []GatewayMessage {
+				return buildGatewayMessages(agent, history, task.StartedAt, limit)
+			},
+			emptyMessageError: "chat task has no user message to answer",
+		}, nil
+
+	case task.IssueID.Valid:
+		issue, err := e.queries.GetIssue(ctx, task.IssueID)
+		if err != nil {
+			return taskPlan{}, fmt.Errorf("failed to load issue: %w", err)
+		}
+		comments, err := e.queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
+			IssueID:     issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			Limit:       firtalGatewayIssueCommentCap,
+		})
+		if err != nil {
+			return taskPlan{}, fmt.Errorf("failed to load issue comments: %w", err)
+		}
+		var triggerComment *db.Comment
+		if task.TriggerCommentID.Valid {
+			c, err := e.queries.GetComment(ctx, task.TriggerCommentID)
+			if err == nil {
+				triggerComment = &c
+			}
+		}
+		return taskPlan{
+			workspaceID: issue.WorkspaceID,
+			messagesWithLimit: func(limit int) []GatewayMessage {
+				return buildGatewayIssueMessages(agent, issue, comments, triggerComment, task.StartedAt, limit)
+			},
+			emptyMessageError: "issue task has no user message to answer",
+		}, nil
+
+	case task.AutopilotRunID.Valid:
+		run, err := e.queries.GetAutopilotRun(ctx, task.AutopilotRunID)
+		if err != nil {
+			return taskPlan{}, fmt.Errorf("failed to load autopilot run: %w", err)
+		}
+		ap, err := e.queries.GetAutopilot(ctx, run.AutopilotID)
+		if err != nil {
+			return taskPlan{}, fmt.Errorf("failed to load autopilot: %w", err)
+		}
+		return taskPlan{
+			workspaceID: ap.WorkspaceID,
+			messagesWithLimit: func(_ int) []GatewayMessage {
+				return buildGatewayAutopilotMessages(agent, ap)
+			},
+			emptyMessageError: "autopilot run has no prompt to answer",
+		}, nil
+
+	default:
+		return taskPlan{}, fmt.Errorf("firtal gateway runtime cannot fulfil this task kind (no chat, issue, or autopilot link)")
 	}
 }
 
@@ -355,6 +432,122 @@ func buildGatewaySystemPrompt(agent db.Agent) string {
 		parts = append(parts, "Agent instructions:\n"+instructions)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// buildGatewayIssueSystemPrompt is the issue-task variant of the chat system
+// prompt. The model's text reply is written back to the issue as a comment
+// via TaskService.CompleteTask, so we frame the task accordingly and remind
+// the model it has no tools — it can't fetch repos, run shell, or call CLI
+// commands and must answer only from the issue context provided.
+func buildGatewayIssueSystemPrompt(agent db.Agent) string {
+	parts := []string{
+		"You are a Multica agent running on the server-side Firtal Data Registry AI Gateway runtime.",
+		"You have been asked to respond to an issue. You do not have local tools, shell access, repository checkout, files, or CLI commands. You cannot run code, edit files, or call multica subcommands.",
+		"Your reply will be posted as a comment on the issue. Answer concisely and directly from the issue context provided below.",
+	}
+	if instructions := strings.TrimSpace(agent.Instructions); instructions != "" {
+		parts = append(parts, "Agent instructions:\n"+instructions)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// buildGatewayIssueMessages renders an issue task into a chat-completion
+// transcript. The issue title + description becomes the opening user message;
+// each comment in chronological order becomes a "user" or "assistant" turn
+// depending on whether it was authored by this agent itself. When the task
+// was triggered by a specific comment, that comment is the final user turn —
+// so the model treats it as the message to answer rather than reacting to
+// older history. limit caps the transcript at the most recent N entries
+// (preserving the opening issue message + the trigger comment when set).
+func buildGatewayIssueMessages(agent db.Agent, issue db.Issue, comments []db.Comment, triggerComment *db.Comment, startedAt pgtype.Timestamptz, limit int) []GatewayMessage {
+	if limit <= 0 {
+		limit = defaultFirtalGatewayHistoryLimit
+	}
+	out := []GatewayMessage{{Role: "system", Content: buildGatewayIssueSystemPrompt(agent)}}
+	out = append(out, GatewayMessage{Role: "user", Content: formatIssueOpening(issue)})
+
+	transcript := make([]GatewayMessage, 0, len(comments))
+	for _, c := range comments {
+		// Skip comments created after this task started — they belong to a
+		// later turn and including them would confuse the model into answering
+		// in the past tense.
+		if startedAt.Valid && c.CreatedAt.Valid && c.CreatedAt.Time.After(startedAt.Time) {
+			continue
+		}
+		// Skip the trigger comment in the transcript; we re-append it as the
+		// final user turn so the model has a clear "answer this" cue.
+		if triggerComment != nil && c.ID == triggerComment.ID {
+			continue
+		}
+		content := strings.TrimSpace(c.Content)
+		if content == "" {
+			continue
+		}
+		role := "user"
+		if c.AuthorType == "agent" && c.AuthorID == agent.ID {
+			role = "assistant"
+		}
+		transcript = append(transcript, GatewayMessage{Role: role, Content: content})
+	}
+	if len(transcript) > limit {
+		transcript = transcript[len(transcript)-limit:]
+	}
+	out = append(out, transcript...)
+
+	if triggerComment != nil {
+		if content := strings.TrimSpace(triggerComment.Content); content != "" {
+			out = append(out, GatewayMessage{Role: "user", Content: content})
+		}
+	}
+	return out
+}
+
+func formatIssueOpening(issue db.Issue) string {
+	var b strings.Builder
+	b.WriteString("Issue: ")
+	if issue.Title != "" {
+		b.WriteString(issue.Title)
+	} else {
+		b.WriteString("(no title)")
+	}
+	if desc := strings.TrimSpace(issue.Description.String); desc != "" {
+		b.WriteString("\n\n")
+		b.WriteString(desc)
+	}
+	return b.String()
+}
+
+// buildGatewayAutopilotMessages renders an autopilot run-only task as a
+// single user turn. Run-only autopilots have no issue, no chat, and no
+// comment history — only the autopilot's title and description carry the
+// instruction, and the model's text reply is written to autopilot_run.result.
+func buildGatewayAutopilotMessages(agent db.Agent, ap db.Autopilot) []GatewayMessage {
+	systemParts := []string{
+		"You are a Multica agent running on the server-side Firtal Data Registry AI Gateway runtime.",
+		"You have been triggered by an autopilot. You do not have local tools, shell access, repository checkout, files, or CLI commands. Answer directly with the requested output as text.",
+	}
+	if instructions := strings.TrimSpace(agent.Instructions); instructions != "" {
+		systemParts = append(systemParts, "Agent instructions:\n"+instructions)
+	}
+
+	var userParts []string
+	if title := strings.TrimSpace(ap.Title); title != "" {
+		userParts = append(userParts, "Autopilot: "+title)
+	}
+	if desc := strings.TrimSpace(ap.Description.String); desc != "" {
+		userParts = append(userParts, desc)
+	}
+	user := strings.Join(userParts, "\n\n")
+	if user == "" {
+		// Defensive fallback: an autopilot with neither title nor description
+		// shouldn't realistically reach here, but if it does, give the model
+		// something to answer so hasUserGatewayMessage doesn't trip.
+		user = "Respond to the autopilot trigger."
+	}
+	return []GatewayMessage{
+		{Role: "system", Content: strings.Join(systemParts, "\n\n")},
+		{Role: "user", Content: user},
+	}
 }
 
 func hasUserGatewayMessage(messages []GatewayMessage) bool {

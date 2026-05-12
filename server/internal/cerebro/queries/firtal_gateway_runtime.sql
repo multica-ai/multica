@@ -21,14 +21,32 @@ WHERE workspace_id = @workspace_id
   AND provider = @provider
   AND daemon_id = @daemon_id;
 
--- name: ClaimFirtalGatewayChatTask :one
+-- name: ClaimFirtalGatewayTask :one
+-- Claims the next queued task for a Firtal gateway cloud runtime. The cloud
+-- runtime answers via gateway chat completion only (no shell, no repo
+-- checkout, no MCP tools), so it can fulfil any task whose result is just
+-- text the platform writes back through its existing fulfilment paths:
+--   - chat tasks       → assistant reply in chat_session
+--   - issue tasks      → comment on the issue (TaskService.CompleteTask
+--                        synthesises one from payload.Output when the agent
+--                        had no tools to post one itself)
+--   - autopilot run-only tasks → result blob on autopilot_run
+-- Quick-create tasks (all task-shape FKs NULL) are excluded because they
+-- require tools to actually create the issue, which this runtime does not
+-- have. Mirrors ClaimAgentTask's per-(issue, agent) and per-chat-session
+-- serialization rules so concurrent runs on the same conversation or issue
+-- are still blocked, and applies the per-agent max_concurrent_tasks cap.
 WITH next_task AS (
     SELECT atq.id
     FROM agent_task_queue atq
     JOIN agent a ON a.id = atq.agent_id
     WHERE atq.runtime_id = @runtime_id
       AND atq.status = 'queued'
-      AND atq.chat_session_id IS NOT NULL
+      AND (
+          atq.chat_session_id IS NOT NULL
+          OR atq.issue_id IS NOT NULL
+          OR atq.autopilot_run_id IS NOT NULL
+      )
       AND (
           SELECT count(*)
           FROM agent_task_queue running
@@ -40,7 +58,10 @@ WITH next_task AS (
           FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
             AND active.status IN ('dispatched', 'running')
-            AND active.chat_session_id = atq.chat_session_id
+            AND (
+              (atq.issue_id IS NOT NULL AND active.issue_id = atq.issue_id)
+              OR (atq.chat_session_id IS NOT NULL AND active.chat_session_id = atq.chat_session_id)
+            )
       )
     ORDER BY atq.priority DESC, atq.created_at ASC
     LIMIT 1
