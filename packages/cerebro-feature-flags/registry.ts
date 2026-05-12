@@ -21,7 +21,8 @@ export type CerebroFlagKey =
   | "cerebro_autopilot_scopes"
   | "cerebro_groups_enabled"
   | "cerebro_runtime_pause"
-  | "cerebro_tasks";
+  | "cerebro_tasks"
+  | "cerebro_pin_input";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -47,6 +48,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_groups_enabled: true,
   cerebro_runtime_pause: true,
   cerebro_tasks: false,
+  cerebro_pin_input: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -149,5 +151,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Tasks page",
     description:
       "Enable the cross-agent tasks page at /:workspace/tasks (full task list with filters and pagination).",
+  },
+  {
+    key: "cerebro_pin_input",
+    label: "Pin issue input",
+    description:
+      "Enable a pin toggle on issue comment and reply inputs that keeps the active input stuck to the bottom of the viewport while scrolling. Issue pages only — channels and DMs are unaffected.",
   },
 ];

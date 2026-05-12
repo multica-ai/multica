@@ -1,5 +1,5 @@
 {
-  "_comment": "CEREBRO-PATCH(views-package-cerebro-deps): adds cerebro-* package deps (incl. cerebro-channels — JEH-718, cerebro-groups — JEH-1006) + new exports for cerebro views",
+  "_comment": "CEREBRO-PATCH(views-package-cerebro-deps): adds cerebro-* package deps (incl. cerebro-channels — JEH-718, cerebro-groups — JEH-1006, cerebro-pin-input — JEH-1065) + new exports for cerebro views",
   "name": "@multica/views",
   "version": "0.0.0",
   "private": true,
@@ -61,6 +61,7 @@
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-groups": "workspace:*",
     "@multica/cerebro-inbox": "workspace:*",
+    "@multica/cerebro-pin-input": "workspace:*",
     "@tiptap/core": "^3.22.1",
     "@tiptap/extension-code-block-lowlight": "^3.22.1",
     "@tiptap/extension-document": "^3.22.1",

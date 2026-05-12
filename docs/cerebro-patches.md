@@ -470,3 +470,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `workspace-pause-handler` | server/internal/handler/workspace_pause.go<br>server/internal/handler/workspace_pause_test.go | 379 | Workspace-pause (cerebro feature) |
 | `workspace-reserved-slugs-cerebro` | server/internal/handler/workspace_reserved_slugs.go | 1 | Server handler additions |
 | `workspace-tab-cerebro` | packages/views/settings/components/workspace-tab.tsx | 8 | Settings page cerebro additions |
+| `reply-input-pin` | packages/views/issues/components/reply-input.tsx | ~60 | JEH-1065 — opt-in pin toggle that floats the reply input to the bottom of the viewport while pinned. Auto-unpins on submit. |
+| `comment-input-pin` | packages/views/issues/components/comment-input.tsx | ~50 | JEH-1065 — `pinnable` prop on CommentInput plus pin button + portal float. Issue pages opt in; channels/DMs leave it off so chat surfaces stay unchanged. |
+| `issue-detail-pin-comment-input` | packages/views/issues/components/issue-detail.tsx | 5 | JEH-1065 — passes `pinnable` to the bottom CommentInput on issue pages. |
+| `i18n-comment-pin` | packages/views/locales/en/issues.json<br>packages/views/locales/zh-Hans/issues.json | 4 | JEH-1065 — pin/unpin tooltip + pinned-placeholder copy for the issue comment input. |
+| `i18n-reply-pin` | packages/views/locales/en/issues.json<br>packages/views/locales/zh-Hans/issues.json | 4 | JEH-1065 — pin/unpin tooltip + pinned-placeholder copy for the issue reply input. |

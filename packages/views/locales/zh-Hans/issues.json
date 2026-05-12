@@ -175,6 +175,10 @@
     "leave_comment_placeholder": "留下评论...",
     "expand_tooltip": "展开",
     "collapse_tooltip": "收起",
+    "_comment_pin": "CEREBRO-PATCH(i18n-comment-pin): JEH-1065 — pin toggle on issue comment input",
+    "pin_tooltip": "固定到视口",
+    "unpin_tooltip": "取消固定",
+    "pinned_placeholder": "评论输入已固定 — 滚动浏览不受影响",
     "resolve": {
       "resolve_action": "标记为已解决",
       "unresolve_action": "重新打开",
@@ -188,7 +192,11 @@
   "reply": {
     "placeholder": "回复...",
     "expand_tooltip": "展开",
-    "collapse_tooltip": "收起"
+    "collapse_tooltip": "收起",
+    "_comment_pin": "CEREBRO-PATCH(i18n-reply-pin): JEH-1065 — pin toggle on issue reply input",
+    "pin_tooltip": "固定回复到视口",
+    "unpin_tooltip": "取消固定回复",
+    "pinned_placeholder": "回复已固定 — 滚动浏览不受影响"
   },
   "agent_live": {
     "is_working": "{{name}} 正在处理",

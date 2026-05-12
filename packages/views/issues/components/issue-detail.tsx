@@ -1859,7 +1859,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
             {/* Bottom comment input — no avatar, full width */}
             <div className="mt-4">
-              <CommentInput issueId={id} onSubmit={submitComment} />
+              {/* CEREBRO-PATCH(issue-detail-pin-comment-input): JEH-1065 — opt
+                  this input into the pin toggle. Channels/DMs (which also
+                  mount CommentInput via channel-detail.tsx) leave pinnable
+                  off so chat-style surfaces stay unchanged. */}
+              <CommentInput issueId={id} onSubmit={submitComment} pinnable />
             </div>
               </TabsContent>
             </Tabs>

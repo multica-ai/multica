@@ -177,6 +177,10 @@
     "leave_comment_placeholder": "Leave a comment...",
     "expand_tooltip": "Expand",
     "collapse_tooltip": "Collapse",
+    "_comment_pin": "CEREBRO-PATCH(i18n-comment-pin): JEH-1065 — pin toggle on issue comment input",
+    "pin_tooltip": "Pin to viewport",
+    "unpin_tooltip": "Unpin from viewport",
+    "pinned_placeholder": "Comment input pinned — scroll freely",
     "resolve": {
       "resolve_action": "Resolve thread",
       "unresolve_action": "Unresolve thread",
@@ -192,7 +196,11 @@
   "reply": {
     "placeholder": "Leave a reply...",
     "expand_tooltip": "Expand",
-    "collapse_tooltip": "Collapse"
+    "collapse_tooltip": "Collapse",
+    "_comment_pin": "CEREBRO-PATCH(i18n-reply-pin): JEH-1065 — pin toggle on issue reply input",
+    "pin_tooltip": "Pin reply to viewport",
+    "unpin_tooltip": "Unpin reply from viewport",
+    "pinned_placeholder": "Reply pinned — scroll freely"
   },
   "agent_live": {
     "is_working": "{{name}} is working",
