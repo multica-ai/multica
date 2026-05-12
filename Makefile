@@ -1,4 +1,4 @@
-.PHONY: dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-stop
+.PHONY: dev dev-cli server daemon cli multica build build-cli test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-stop
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -196,6 +196,10 @@ check-worktree:
 dev:
 	@bash scripts/dev.sh
 
+# One-command dev + CLI build: bootstrap env/deps/db/migrations, build CLI, then start all services
+dev-cli:
+	@bash scripts/dev-with-cli.sh
+
 # Go server only
 server:
 	$(REQUIRE_ENV)
@@ -219,6 +223,9 @@ build:
 	cd server && go build -o bin/server ./cmd/server
 	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica ./cmd/multica
 	cd server && go build -o bin/migrate ./cmd/migrate
+
+build-cli:
+	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica ./cmd/multica
 
 test:
 	$(REQUIRE_ENV)
