@@ -143,50 +143,61 @@ jobs:
             });
 
       - name: Stop orphaned containers from prior builds
-        # `docker compose up` only manages containers under its OWN
-        # project name (here: `multica-prod`, set via `name:` in
-        # docker-compose.selfhost.yml). Stale containers from other
-        # project namespaces still hold the host ports we're about to
-        # bind, and the up command fails with "Bind for 0.0.0.0:PORT
-        # failed: port is already allocated".
+        # ONLY sweeps containers from OTHER project namespaces — never
+        # touches our own `multica-prod-*` containers. Pre-this-change,
+        # this step did `docker compose down` on our own project at the
+        # start of every run, which meant a workflow cancelled after
+        # `down` but before `up` left the stack DARK. That's exactly
+        # what happened on 2026-05-12 when a 6-PR merge-train fired 7
+        # deploys in 14s, several got cancelled mid-cycle, and prod
+        # was unreachable for ~2.5 minutes.
         #
-        # Two classes of orphan to sweep:
+        # Post-this-change, the down step is gone. We rely on
+        # `docker compose up -d --build` to handle recreation
+        # idempotently:
+        #   - rebuilds images whose source changed
+        #   - recreates containers whose image hash moved
+        #   - leaves running containers alone otherwise
+        # A cancellation between this step and `up` is now a no-op
+        # rather than an outage.
+        #
+        # The sweep still handles two real cases:
         #
         # 1. Legacy `multica-*` containers from the pre-rename era
-        #    (before docker-compose.selfhost.yml moved from
-        #    `name: multica` to `name: multica-prod`). One-time
-        #    migration scrub for the first deploy after the rename
-        #    PR lands.
+        #    (pre-PR #46, when selfhost used `name: multica`).
+        #    One-time scrub on the first post-rename deploy.
+        # 2. Stray `multica-*` containers from agent task workspaces
+        #    that share the docker engine. Each workspace's
+        #    `docker-compose.yml` declares `name: multica` (the
+        #    dev/worktree default), so any `make dev` / `make test`
+        #    from an agent task creates conflicting container names.
         #
-        # 2. Stray `multica-*` containers spawned by agent task
-        #    workspaces that share the docker engine. Each agent
-        #    workspace's `docker-compose.yml` declares
-        #    `name: multica` (the dev/worktree default), so any
-        #    `make dev` / `make test` from an agent workspace
-        #    creates `multica-postgres-1` etc. — which collide on
-        #    container names with the old prod stack and also pin
-        #    host ports. We sweep them so the next compose up has
-        #    a clean field.
-        #
-        # The filter explicitly excludes `multica-prod-*` so we
-        # don't take out our own freshly-created containers.
-        #
-        # Runs BEFORE the preflight port check so our own stale
-        # containers (multica-backend-1 from a half-failed prior
-        # deploy still holding :8080) don't trip the preflight.
+        # The filter explicitly excludes `multica-prod-*` so we never
+        # take out our own production containers, running or not.
         run: |
           export PATH="${DOCKER_PATH_EXTRAS}:${PATH}"
           set -e
-          # Tear down anything still labeled with this project first.
-          docker compose ${COMPOSE_FILES} down --remove-orphans || true
-          # Then catch loose containers from outside the project name:
-          # legacy pre-rename `multica-*` AND transient agent-workspace
-          # `multica-*`. Skip `multica-prod-*` (our own, just torn down
-          # by the compose down above and possibly mid-recreate).
           for n in $(docker ps -a --format '{{.Names}}' | grep '^multica-' | grep -v '^multica-prod-' || true); do
-            echo "Removing orphan container $n"
+            echo "Removing orphan (non-prod) container $n"
             docker rm -f "$n" || true
           done
+
+      - name: Report current stack state
+        # Pre-deploy visibility: log what's currently running under our
+        # project name. Used by operators triaging cascade incidents
+        # ("was prod up when this deploy started?") and by the
+        # build-SHA verification follow-on (compares to the SHA the
+        # post-deploy step proves).
+        run: |
+          export PATH="${DOCKER_PATH_EXTRAS}:${PATH}"
+          running=$(docker ps --filter "label=com.docker.compose.project=multica-prod" --format '{{.Names}} {{.Status}}')
+          if [ -z "$running" ]; then
+            echo "::warning::No multica-prod containers running on this host before deploy."
+            echo "If this deploy is recovering from a cancelled run, that's expected."
+          else
+            echo "Current multica-prod containers:"
+            echo "$running"
+          fi
 
       - name: Pre-flight — required host ports are free
         # If something OUTSIDE our own docker project holds the port
@@ -240,12 +251,21 @@ jobs:
       - name: Build + restart containers
         # `up -d --build` is idempotent: rebuilds images that changed,
         # recreates only containers whose image hash moved, leaves
-        # postgres alone. Single command rather than separate build +
-        # restart because compose handles the "did anything change"
-        # question better than we would scripting it.
+        # postgres alone if its image hash is unchanged. Single command
+        # rather than separate build + restart because compose handles
+        # the "did anything change" question better than we would
+        # scripting it.
+        #
+        # We explicitly include postgres in the service list so a
+        # missing-postgres state (e.g. after a cascade incident or a
+        # daemon restart) gets reconciled — `up postgres frontend
+        # backend` is no-op if postgres is already running, and brings
+        # it back if it isn't. Pre-this-change the command only named
+        # frontend + backend, which left a missing-postgres situation
+        # silently stuck.
         run: |
           export PATH="${DOCKER_PATH_EXTRAS}:${PATH}"
-          docker compose ${COMPOSE_FILES} up -d --build frontend backend
+          docker compose ${COMPOSE_FILES} up -d --build postgres frontend backend
 
       - name: Health check
         # Curl the published frontend port from the runner. The host
