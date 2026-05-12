@@ -296,8 +296,7 @@ When using browser automation (blueprint, claude-in-chrome, etc.) to verify UI f
 
 1. Read the current URL via `browser_status` / `browser_tabs list` / a screenshot.
 2. If it points at a tunnel, production host, or any non-`localhost` origin, you are testing **someone else's deployment**, not your branch. Examples that LOOK local but aren't:
-   - `sara.tailbde0.ts.net/...` → sara.local mac mini (separate checkout, often on `main`)
-   - `app.multica.io` / `*.firtal.com` → production
+   - `sara.tailbde0.ts.net/...` / `*.firtal.com` → Firtal production (sara.local mac mini, runs `origin/main`)
    - any tailscale `.ts.net` host → another machine
 3. To test your branch's running dev server, navigate explicitly to the port from your worktree's `.env.worktree` (`FRONTEND_PORT`, typically 13083 or 3000).
 4. Authenticating on your local dev: cerebro has removed the upstream `888888` master code as a security patch (`server/internal/handler/auth_master_code_test.go` enforces this). Use the real "Send code" flow — the code is printed to `/tmp/multica-server.log` when `RESEND_API_KEY` is unset.
@@ -418,11 +417,11 @@ make check
 
 **Quick iteration:** If you know only TypeScript or Go is affected, run individual checks first for faster feedback, then finish with a full `make check` before marking work complete.
 
-## Production Deploy (app.multica.io)
+## Production Deploy (sara.tailbde0.ts.net)
 
 Production runs on a self-hosted Mac mini at `/Users/sara/code/firtal-cerebro`. Backend, frontend, and daemon each run as a launchd job (`com.multica.backend`, `com.multica.frontend`, `com.multica.daemon`). There is no Vercel / Netlify / cloud deploy — everything ships from `origin/main` on the runner.
 
-**Deploy trigger.** GitHub posts a push event for `main` to a webhook listener on the runner (port 9000, `com.multica.webhook`), which executes `.deploy/deploy.sh`. **Merging a PR into `main` IS the deploy.** No tag, no release, no manual step required for app.multica.io to pick up the change.
+**Deploy trigger.** GitHub posts a push event for `main` to a webhook listener on the runner (port 9000, `com.multica.webhook`), which executes `.deploy/deploy.sh`. **Merging a PR into `main` IS the deploy.** No tag, no release, no manual step required for sara.tailbde0.ts.net to pick up the change.
 
 **What `.deploy/deploy.sh` does:**
 
@@ -444,9 +443,9 @@ bash ~/code/firtal-cerebro/.deploy/deploy.sh
 
 Logs land in `.deploy/logs/deploy-latest.log` on the runner.
 
-**Verifying a deploy from outside the runner.** The server has no `/version` endpoint exposing the deployed git SHA, so an agent that merges to `main` cannot programmatically confirm the deploy fired. Either ask the runner operator, or trust the webhook fired and check the visible behaviour change at `https://app.multica.io`.
+**Verifying a deploy from outside the runner.** The server has no `/version` endpoint exposing the deployed git SHA, so an agent that merges to `main` cannot programmatically confirm the deploy fired. Either ask the runner operator, or trust the webhook fired and check the visible behaviour change at `https://sara.tailbde0.ts.net`.
 
-**Important — CLI release is NOT a prod deploy.** Cutting a `v0.x.y` tag only publishes binaries to GitHub Releases + Homebrew. It does NOT push code to app.multica.io. Prod always runs `origin/main`, regardless of the latest CLI tag. The two pipelines are fully independent.
+**Important — CLI release is NOT a prod deploy.** Cutting a `v0.x.y` tag only publishes binaries to GitHub Releases + Homebrew. It does NOT push code to sara.tailbde0.ts.net. Prod always runs `origin/main`, regardless of the latest CLI tag. The two pipelines are fully independent.
 
 ## CLI Release (binary distribution)
 
