@@ -12,5 +12,6 @@ export {
   useUpdateMemoryArtifact,
   useArchiveMemoryArtifact,
   useRestoreMemoryArtifact,
+  useVerifyMemoryArtifact,
   useDeleteMemoryArtifact,
 } from "./mutations";

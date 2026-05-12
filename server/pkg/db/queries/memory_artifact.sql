@@ -132,6 +132,14 @@ SET archived_at = NULL,
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;
 
+-- name: VerifyMemoryArtifact :one
+-- Stamps verified_at without touching content or creating a revision.
+-- Does NOT update updated_at — content didn't change.
+UPDATE memory_artifact
+SET verified_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
 -- name: DeleteMemoryArtifact :exec
 -- Hard delete. Available but not the default — UI surfaces archive
 -- as the primary action; delete is reserved for admins.

@@ -112,6 +112,7 @@ type MemoryArtifactResponse struct {
 	ArchivedBy            *string         `json:"archived_by"`
 	CreatedAt             string          `json:"created_at"`
 	UpdatedAt             string          `json:"updated_at"`
+	VerifiedAt            *string         `json:"verified_at"`
 }
 
 func memoryArtifactToResponse(a db.MemoryArtifact) MemoryArtifactResponse {
@@ -142,6 +143,7 @@ func memoryArtifactToResponse(a db.MemoryArtifact) MemoryArtifactResponse {
 		ArchivedBy:            uuidToPtr(a.ArchivedBy),
 		CreatedAt:             timestampToString(a.CreatedAt),
 		UpdatedAt:             timestampToString(a.UpdatedAt),
+		VerifiedAt:            timestampToPtr(a.VerifiedAt),
 	}
 }
 
@@ -250,6 +252,10 @@ func (h *Handler) fetchMemoryArtifactsForTask(
 			anchorTypeStr = anchorOverride
 			anchorIDStr = ""
 		}
+		verifiedAt := ""
+		if row.VerifiedAt.Valid {
+			verifiedAt = timestampToString(row.VerifiedAt)
+		}
 		out = append(out, MemoryArtifactData{
 			ID:         id,
 			Kind:       row.Kind,
@@ -259,6 +265,7 @@ func (h *Handler) fetchMemoryArtifactsForTask(
 			AnchorType: anchorTypeStr,
 			AnchorID:   anchorIDStr,
 			UpdatedAt:  timestampToString(row.UpdatedAt),
+			VerifiedAt: verifiedAt,
 		})
 	}
 
@@ -496,11 +503,11 @@ func (h *Handler) SearchMemoryArtifacts(w http.ResponseWriter, r *http.Request) 
 	}
 	limit, offset := parseListPagination(r)
 	rows, err := h.Queries.SearchMemoryArtifacts(r.Context(), db.SearchMemoryArtifactsParams{
-		WorkspaceID:         wsUUID,
-		WebsearchToTsquery:  q,
-		Kind:                kindFilter,
-		Limit:               limit,
-		Offset:              offset,
+		WorkspaceID:        wsUUID,
+		WebsearchToTsquery: q,
+		Kind:               kindFilter,
+		Limit:              limit,
+		Offset:             offset,
 	})
 	if err != nil {
 		slog.Warn("SearchMemoryArtifacts failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -533,6 +540,7 @@ func (h *Handler) SearchMemoryArtifacts(w http.ResponseWriter, r *http.Request) 
 			ArchivedBy:  p.ArchivedBy,
 			CreatedAt:   p.CreatedAt,
 			UpdatedAt:   p.UpdatedAt,
+			VerifiedAt:  p.VerifiedAt,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -919,6 +927,42 @@ func (h *Handler) RestoreMemoryArtifact(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (h *Handler) VerifyMemoryArtifact(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "memory artifact id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	if _, err := h.Queries.GetMemoryArtifact(r.Context(), db.GetMemoryArtifactParams{
+		ID: idUUID, WorkspaceID: wsUUID,
+	}); err != nil {
+		writeError(w, http.StatusNotFound, "memory artifact not found")
+		return
+	}
+	verified, err := h.Queries.VerifyMemoryArtifact(r.Context(), db.VerifyMemoryArtifactParams{
+		ID: idUUID, WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to verify memory artifact")
+		return
+	}
+	resp := memoryArtifactToResponse(verified)
+	authorType, authorID := h.resolveActor(r, userID, workspaceID)
+	h.publish(protocol.EventMemoryArtifactUpdated, workspaceID, authorType, authorID, map[string]any{
+		"memory_artifact": resp,
+	})
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) DeleteMemoryArtifact(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	workspaceID := h.resolveWorkspaceID(r)
@@ -1232,7 +1276,7 @@ func (h *Handler) RestoreMemoryArtifactRevision(w http.ResponseWriter, r *http.R
 
 	resp := memoryArtifactToResponse(updated)
 	h.publish(protocol.EventMemoryArtifactUpdated, workspaceID, editorType, editorID, map[string]any{
-		"memory_artifact":     resp,
+		"memory_artifact":        resp,
 		"restored_from_revision": revNum,
 	})
 	writeJSON(w, http.StatusOK, resp)

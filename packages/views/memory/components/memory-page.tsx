@@ -44,6 +44,19 @@ const KIND_BADGE: Record<MemoryArtifactKind, string> = {
   decision: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
 };
 
+const STALE_THRESHOLD_DAYS = 30;
+
+function isStale(artifact: MemoryArtifact): boolean {
+  const freshDate =
+    artifact.verified_at && artifact.verified_at > artifact.updated_at
+      ? artifact.verified_at
+      : artifact.updated_at;
+  const days = Math.floor(
+    (Date.now() - new Date(freshDate).getTime()) / (1000 * 60 * 60 * 24),
+  );
+  return days >= STALE_THRESHOLD_DAYS;
+}
+
 function MemoryRow({ artifact }: { artifact: MemoryArtifact }) {
   const wsPaths = useWorkspacePaths();
   const { getActorName } = useActorName();
@@ -83,6 +96,12 @@ function MemoryRow({ artifact }: { artifact: MemoryArtifact }) {
             </span>
           )}
         </div>
+      )}
+
+      {isStale(artifact) && (
+        <span className="hidden md:inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
+          Stale
+        </span>
       )}
 
       <span className="hidden lg:flex w-32 shrink-0 items-center gap-1.5 text-xs text-muted-foreground">

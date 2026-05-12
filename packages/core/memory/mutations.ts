@@ -124,6 +124,33 @@ export function useRestoreMemoryArtifact() {
   });
 }
 
+export function useVerifyMemoryArtifact() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.verifyMemoryArtifact(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: memoryKeys.detail(wsId, id) });
+      const prevDetail = qc.getQueryData<MemoryArtifact>(
+        memoryKeys.detail(wsId, id),
+      );
+      qc.setQueryData<MemoryArtifact>(memoryKeys.detail(wsId, id), (old) =>
+        old ? { ...old, verified_at: new Date().toISOString() } : old,
+      );
+      return { prevDetail, id };
+    },
+    onError: (_err, id, ctx) => {
+      if (ctx?.prevDetail) {
+        qc.setQueryData(memoryKeys.detail(wsId, id), ctx.prevDetail);
+      }
+    },
+    onSettled: (_data, _err, id) => {
+      qc.invalidateQueries({ queryKey: memoryKeys.detail(wsId, id) });
+      qc.invalidateQueries({ queryKey: memoryKeys.all(wsId) });
+    },
+  });
+}
+
 // Hard delete — admin-only path. The UI surfaces archive as the primary
 // destructive action; delete is reserved for explicit "Delete forever"
 // affordances on the detail page.

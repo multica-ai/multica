@@ -202,7 +202,11 @@ describe("SearchCommand", () => {
     await waitFor(() => {
       expect(useSearchStore.getState().open).toBe(false);
     });
-    expect(screen.queryByPlaceholderText("Type a command or search...")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.queryByPlaceholderText("Type a command or search..."),
+      ).not.toBeInTheDocument();
+    });
   });
 
   it("shows only New Issue by default and hides Pages / Switch Workspace / low-frequency commands until query", () => {

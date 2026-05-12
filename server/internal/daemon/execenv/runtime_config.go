@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // runtimeGOOS is the host-platform string used by buildMetaSkillContent and
@@ -324,6 +325,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			byAnchor[a.AnchorType] = append(byAnchor[a.AnchorType], a)
 		}
 
+		const memoryStaleThresholdDays = 30
 		writeArtifacts := func(header string, list []MemoryArtifactForEnv) {
 			if len(list) == 0 {
 				return
@@ -336,7 +338,23 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 				}
 				b.WriteString(strings.TrimSpace(a.Content))
 				b.WriteString("\n\n")
-				fmt.Fprintf(&b, "<sub>Memory artifact `%s` · updated %s</sub>\n\n", a.ID, a.UpdatedAt)
+				freshDate := a.UpdatedAt
+				if a.VerifiedAt != "" && a.VerifiedAt > a.UpdatedAt {
+					freshDate = a.VerifiedAt
+				}
+				var staleWarning string
+				if t, err := time.Parse(time.RFC3339, freshDate); err == nil {
+					days := int(time.Since(t).Hours() / 24)
+					if days >= memoryStaleThresholdDays {
+						staleWarning = fmt.Sprintf(" ⚠ Not verified in %d days — re-validate before acting on this.", days)
+					}
+				}
+				verifiedNote := ""
+				if a.VerifiedAt != "" {
+					verifiedNote = fmt.Sprintf(" · verified %s", a.VerifiedAt)
+				}
+				fmt.Fprintf(&b, "<sub>Memory artifact `%s` · updated %s%s%s</sub>\n\n",
+					a.ID, a.UpdatedAt, verifiedNote, staleWarning)
 			}
 		}
 

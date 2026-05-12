@@ -54,6 +54,7 @@ type MemoryArtifactForEnv struct {
 	AnchorType string   // "issue" | "project" — used for section grouping
 	AnchorID   string   // for fetch-more-via-CLI suggestions
 	UpdatedAt  string   // ISO8601 — surfaced so agent can reason about freshness
+	VerifiedAt string   // ISO8601, empty = never explicitly verified
 }
 
 // PrepareParams holds all inputs needed to set up an execution environment.

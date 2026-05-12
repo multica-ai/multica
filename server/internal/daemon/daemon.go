@@ -2667,6 +2667,7 @@ func convertMemoryArtifactsForEnv(artifacts []MemoryArtifactData) []execenv.Memo
 			AnchorType: a.AnchorType,
 			AnchorID:   a.AnchorID,
 			UpdatedAt:  a.UpdatedAt,
+			VerifiedAt: a.VerifiedAt,
 		}
 	}
 	return result

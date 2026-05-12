@@ -579,6 +579,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteMemoryArtifact)
 					r.Post("/archive", h.ArchiveMemoryArtifact)
 					r.Post("/restore", h.RestoreMemoryArtifact)
+					r.Post("/verify", h.VerifyMemoryArtifact)
 					// History endpoints — list revisions, get a specific
 					// revision in full, restore (which is itself a new
 					// edit, snapshotting the current state first).
