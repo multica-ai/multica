@@ -3,12 +3,14 @@
 import { useState, useEffect } from "react";
 import { Bot } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { MulticaIcon } from "./multica-icon";
 
 interface ActorAvatarProps {
   name: string;
   initials: string;
   avatarUrl?: string | null;
   isAgent?: boolean;
+  isSystem?: boolean;
   size?: number;
   className?: string;
 }
@@ -18,6 +20,7 @@ function ActorAvatar({
   initials,
   avatarUrl,
   isAgent,
+  isSystem,
   size = 20,
   className,
 }: ActorAvatarProps) {
@@ -46,6 +49,8 @@ function ActorAvatar({
           className="h-full w-full object-cover"
           onError={() => setImgError(true)}
         />
+      ) : isSystem ? (
+        <MulticaIcon noSpin style={{ width: size * 0.55, height: size * 0.55 }} />
       ) : isAgent ? (
         <Bot style={{ width: size * 0.55, height: size * 0.55 }} />
       ) : (

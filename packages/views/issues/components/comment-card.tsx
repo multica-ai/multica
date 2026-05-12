@@ -36,7 +36,7 @@ import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
-import { useCommentCollapseStore } from "@multica/core/issues/stores";
+import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------
@@ -201,6 +201,22 @@ function CommentRow({
     enabled: editing,
   });
 
+  // Edit-mode draft: virtualization unmounts the card when it scrolls out
+  // of viewport, taking the in-progress edit with it. Persist via store
+  // so a scroll-away + scroll-back round-trip restores the user's edits.
+  // Key includes issueId so two issues with the same comment id (impossible
+  // but defensive) don't collide; cleared on cancel and on save.
+  const editDraftKey = `edit:${issueId}:${entry.id}` as const;
+  const getEditDraft = useCommentDraftStore.getState().getDraft;
+  const setEditDraft = useCommentDraftStore((s) => s.setDraft);
+  const clearEditDraft = useCommentDraftStore((s) => s.clearDraft);
+  // Read the snapshot once when the edit pass mounts; ContentEditor only
+  // honors `defaultValue` on mount, so a live store subscription here would
+  // cause an extra unmount/remount on every keystroke.
+  const editInitialValue = editing
+    ? (getEditDraft(editDraftKey) ?? entry.content ?? "")
+    : (entry.content ?? "");
+
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
   const canDeleteEntry = isOwn || canModerate;
@@ -215,6 +231,7 @@ function CommentRow({
   const cancelEdit = () => {
     cancelledRef.current = true;
     setEditing(false);
+    clearEditDraft(editDraftKey);
   };
 
   const saveEdit = async () => {
@@ -225,11 +242,13 @@ function CommentRow({
       .trim();
     if (!trimmed || trimmed === (entry.content ?? "").trim()) {
       setEditing(false);
+      clearEditDraft(editDraftKey);
       return;
     }
     try {
       await onEdit(entry.id, trimmed);
       setEditing(false);
+      clearEditDraft(editDraftKey);
     } catch {
       toast.error(t(($) => $.comment.update_failed));
     }
@@ -319,8 +338,12 @@ function CommentRow({
           <div className="text-sm leading-relaxed">
             <ContentEditor
               ref={editEditorRef}
-              defaultValue={entry.content ?? ""}
+              defaultValue={editInitialValue}
               placeholder={t(($) => $.comment.edit_placeholder)}
+              onUpdate={(md) => {
+                if (md.trim().length > 0) setEditDraft(editDraftKey, md);
+                else clearEditDraft(editDraftKey);
+              }}
               onSubmit={saveEdit}
               onUploadFile={(file) => uploadWithToast(file, { issueId })}
               debounceMs={100}
@@ -395,6 +418,15 @@ function CommentCardImpl({
     enabled: editing,
   });
 
+  // Edit-mode draft (root comment). Same rationale as CommentRow's draft.
+  const parentEditDraftKey = `edit:${issueId}:${entry.id}` as const;
+  const getParentEditDraft = useCommentDraftStore.getState().getDraft;
+  const setParentEditDraft = useCommentDraftStore((s) => s.setDraft);
+  const clearParentEditDraft = useCommentDraftStore((s) => s.clearDraft);
+  const parentEditInitialValue = editing
+    ? (getParentEditDraft(parentEditDraftKey) ?? entry.content ?? "")
+    : (entry.content ?? "");
+
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   // Author-only edit is the same as before; admins additionally get edit
   // *and* delete on member-authored comments, plus delete on agent-authored
@@ -413,6 +445,7 @@ function CommentCardImpl({
   const cancelEdit = () => {
     cancelledRef.current = true;
     setEditing(false);
+    clearParentEditDraft(parentEditDraftKey);
   };
 
   const saveEdit = async () => {
@@ -423,11 +456,13 @@ function CommentCardImpl({
       .trim();
     if (!trimmed || trimmed === (entry.content ?? "").trim()) {
       setEditing(false);
+      clearParentEditDraft(parentEditDraftKey);
       return;
     }
     try {
       await onEdit(entry.id, trimmed);
       setEditing(false);
+      clearParentEditDraft(parentEditDraftKey);
     } catch {
       toast.error(t(($) => $.comment.update_failed));
     }
@@ -581,8 +616,12 @@ function CommentCardImpl({
                 <div className="text-sm leading-relaxed">
                   <ContentEditor
                     ref={editEditorRef}
-                    defaultValue={entry.content ?? ""}
+                    defaultValue={parentEditInitialValue}
                     placeholder={t(($) => $.comment.edit_placeholder)}
+                    onUpdate={(md) => {
+                      if (md.trim().length > 0) setParentEditDraft(parentEditDraftKey, md);
+                      else clearParentEditDraft(parentEditDraftKey);
+                    }}
                     onSubmit={saveEdit}
                     onUploadFile={(file) => uploadWithToast(file, { issueId })}
                     debounceMs={100}
@@ -645,6 +684,7 @@ function CommentCardImpl({
               size="sm"
               avatarType="member"
               avatarId={currentUserId ?? ""}
+              draftKey={`reply:${issueId}:${entry.id}`}
               onSubmit={(content, attachmentIds) => onReply(entry.id, content, attachmentIds)}
             />
           </div>

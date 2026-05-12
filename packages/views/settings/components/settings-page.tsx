@@ -28,6 +28,7 @@ import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
+import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { useT } from "../../i18n";
@@ -53,26 +54,26 @@ const ACCOUNT_TAB_ICONS = {
 const WORKSPACE_TAB_KEYS = [
   "general",
   "repositories",
+  "integrations",
   "labs",
   "members",
   "work_calendars",
-  "integrations",
 ] as const;
 const WORKSPACE_TAB_VALUES = {
   general: "workspace",
   repositories: "repositories",
+  integrations: "integrations",
   labs: "labs",
   members: "members",
   work_calendars: "work_calendars",
-  integrations: "integrations",
 } as const;
 const WORKSPACE_TAB_ICONS = {
   general: Settings,
   repositories: FolderGit2,
+  integrations: Plug,
   labs: FlaskConical,
   members: Users,
   work_calendars: CalendarDays,
-  integrations: Plug,
 } as const;
 
 const DEFAULT_TAB = "profile";
@@ -193,6 +194,9 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="repositories">
             <RepositoriesTab />
           </TabsContent>
+          <TabsContent value="integrations">
+            <IntegrationsTab />
+          </TabsContent>
           <TabsContent value="labs">
             <LabsTab />
           </TabsContent>
@@ -202,9 +206,9 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="work_calendars">
             <WorkCalendarsTab />
           </TabsContent>
-          <TabsContent value="integrations">
+          {/* <TabsContent value="integrations">
             <WorkspaceIntegrationsTab />
-          </TabsContent>
+          </TabsContent> */}
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>
               {tab.content}

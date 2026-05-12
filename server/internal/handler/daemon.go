@@ -1241,12 +1241,29 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.PriorWorkDir = prior.WorkDir.String
 				}
 			}
-			// Load the latest user message for the chat prompt.
+			// Load the latest user message for the chat prompt, plus any
+			// attachments linked to that exact message. Without the structured
+			// attachment list the agent only sees the markdown URL in
+			// `ChatMessage` — fine for vision models inline but unusable when
+			// the agent wants to `multica attachment download <id>` (URL is
+			// signed and 30-min expiring on private CDN).
 			if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
-				// Find the last user message.
 				for i := len(msgs) - 1; i >= 0; i-- {
 					if msgs[i].Role == "user" {
 						resp.ChatMessage = msgs[i].Content
+						if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
+							ChatMessageID: msgs[i].ID,
+							WorkspaceID:   parseUUID(resp.WorkspaceID),
+						}); attErr == nil && len(atts) > 0 {
+							resp.ChatMessageAttachments = make([]ChatAttachmentMeta, len(atts))
+							for j, a := range atts {
+								resp.ChatMessageAttachments[j] = ChatAttachmentMeta{
+									ID:          uuidToString(a.ID),
+									Filename:    a.Filename,
+									ContentType: a.ContentType,
+								}
+							}
+						}
 						break
 					}
 				}

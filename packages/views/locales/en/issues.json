@@ -98,8 +98,15 @@
     "add_sub_issue_aria": "Add sub-issue",
     "section_properties": "Properties",
     "section_parent_issue": "Parent issue",
+    "section_pull_requests": "Pull requests",
     "section_details": "Details",
     "section_token_usage": "Token usage",
+    "pull_requests_loading": "Loading…",
+    "pull_requests_empty": "No linked pull requests yet. Reference this issue's identifier in a PR's branch name, title, or body to auto-link it.",
+    "pull_request_state_open": "Open",
+    "pull_request_state_draft": "Draft",
+    "pull_request_state_merged": "Merged",
+    "pull_request_state_closed": "Closed",
     "prop_status": "Status",
     "prop_priority": "Priority",
     "prop_assignee": "Assignee",
@@ -126,6 +133,8 @@
     "pin_tooltip": "Pin to sidebar",
     "unpin_tooltip": "Unpin from sidebar",
     "sidebar_tooltip": "Toggle sidebar",
+    "cmdf_toast_title": "Find on page only covers what's visible",
+    "cmdf_toast_description": "The timeline is virtualized — ⌘F can't see off-screen comments. Full in-app search is coming.",
     "update_failed": "Failed to update issue",
     "link_copied": "Link copied",
     "link_copy_failed": "Failed to copy link",
@@ -229,6 +238,13 @@
     "status_completed": "Completed",
     "status_failed": "Failed",
     "status_cancelled": "Cancelled"
+  },
+  "terminate_dialog": {
+    "title": "Stop this task?",
+    "body": "The task will be cancelled and cannot be resumed.",
+    "running_note": " Running work may take a few seconds to fully halt.",
+    "keep": "Keep running",
+    "confirm": "Stop task"
   },
   "batch": {
     "selected": "{{count}} selected",

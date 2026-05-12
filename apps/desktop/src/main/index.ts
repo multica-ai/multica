@@ -11,10 +11,25 @@ import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 
-// Bundled icon used for dev-mode dock/taskbar branding. In production the
-// app bundle icon (from electron-builder) wins; this path is only consumed
-// by the `is.dev` branch below.
-const DEV_ICON_PATH = join(__dirname, "../../resources/icon.png");
+// Bundled icon used for dock/taskbar branding. macOS/Windows production
+// builds let the OS pick up the icon from the .app bundle / .exe resources,
+// but Linux production needs an explicit BrowserWindow `icon` — AppImage
+// direct-launch doesn't register the .desktop entry, so GNOME has no path
+// from the running window to the hicolor icon and falls back to the
+// theme default. Consumed in createWindow() (all platforms in dev, Linux
+// in prod) and the macOS dev dock branch.
+//
+// `asarUnpack: resources/**` in electron-builder.yml extracts the icon to
+// `app.asar.unpacked/`, but `__dirname` resolves into `app.asar/`. The
+// Linux native window-icon code path expects a real filesystem path
+// (unlike Electron's nativeImage loader which transparently reads from
+// asar), so swap the segment — same pattern as bundledCliPath() in
+// daemon-manager.ts. In dev `__dirname` has no `app.asar`, so the replace
+// is a no-op.
+const BUNDLED_ICON_PATH = join(__dirname, "../../resources/icon.png").replace(
+  "app.asar",
+  "app.asar.unpacked",
+);
 
 // macOS/Linux GUI launches inherit a minimal PATH from launchd that omits
 // the user's shell config (~/.zshrc, Homebrew, nvm, ~/.local/bin, etc.).
@@ -106,9 +121,14 @@ function createWindow(): void {
     trafficLightPosition: { x: 16, y: 13 },
     show: false,
     autoHideMenuBar: true,
-    // Windows/Linux pick up the window/taskbar icon from this option in
-    // dev — on macOS it's ignored (dock comes from app.dock.setIcon below).
-    ...(is.dev ? { icon: DEV_ICON_PATH } : {}),
+    // Windows/Linux pick up the window/taskbar icon from this option.
+    // On macOS it's ignored (dock comes from app.dock.setIcon below).
+    // Linux production needs this explicitly because AppImage direct-launch
+    // does not install a .desktop entry, so the WM has no other path to
+    // the bundled icon; without it Ubuntu falls back to the theme default.
+    ...(is.dev || process.platform === "linux"
+      ? { icon: BUNDLED_ICON_PATH }
+      : {}),
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
@@ -251,7 +271,7 @@ if (!gotTheLock) {
     // so the Canary dev build is visually distinct from a stock Electron
     // run. `app.dock` is macOS-only — guard the call.
     if (is.dev && process.platform === "darwin" && app.dock) {
-      const icon = nativeImage.createFromPath(DEV_ICON_PATH);
+      const icon = nativeImage.createFromPath(BUNDLED_ICON_PATH);
       if (!icon.isEmpty()) app.dock.setIcon(icon);
     }
 

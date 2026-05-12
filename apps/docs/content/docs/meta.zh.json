@@ -26,6 +26,8 @@
     "autopilots",
     "---收件箱---",
     "inbox",
+    "---集成---",
+    "github-integration",
     "---自部署运维---",
     "environment-variables",
     "auth-setup",

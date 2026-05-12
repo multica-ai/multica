@@ -97,8 +97,15 @@
     "add_sub_issue_aria": "添加子 issue",
     "section_properties": "属性",
     "section_parent_issue": "父 issue",
+    "section_pull_requests": "Pull Request",
     "section_details": "详情",
     "section_token_usage": "Token 用量",
+    "pull_requests_loading": "加载中…",
+    "pull_requests_empty": "还没有关联的 PR。在 PR 的分支名、标题或正文里引用本 issue 的 identifier 即可自动关联。",
+    "pull_request_state_open": "Open",
+    "pull_request_state_draft": "Draft",
+    "pull_request_state_merged": "Merged",
+    "pull_request_state_closed": "Closed",
     "prop_status": "状态",
     "prop_priority": "优先级",
     "prop_assignee": "负责人",
@@ -125,6 +132,8 @@
     "pin_tooltip": "固定到侧边栏",
     "unpin_tooltip": "从侧边栏取消固定",
     "sidebar_tooltip": "切换侧边栏",
+    "cmdf_toast_title": "页面内查找仅覆盖可见区",
+    "cmdf_toast_description": "评论列表已虚拟滚动,⌘F 找不到视口外的评论。完整应用内搜索即将推出。",
     "update_failed": "更新 issue 失败",
     "link_copied": "已复制链接",
     "link_copy_failed": "复制链接失败",
@@ -224,6 +233,13 @@
     "status_completed": "已完成",
     "status_failed": "失败",
     "status_cancelled": "已取消"
+  },
+  "terminate_dialog": {
+    "title": "确定停止该 task？",
+    "body": "Task 会被取消且无法恢复。",
+    "running_note": " 进行中的 task 可能需要几秒才能完全停止。",
+    "keep": "保留运行",
+    "confirm": "停止 task"
   },
   "batch": {
     "selected": "已选择 {{count}} 个",

@@ -63,7 +63,18 @@
     "no_agents": "还没有智能体绑定到这个运行时。",
     "diagnostics_title": "诊断",
     "diagnostics_cli": "CLI",
+    "diagnostics_visibility": "可见性",
     "diagnostics_timezone": "时区",
+    "visibility_label": {
+      "private": "私有",
+      "public": "公开"
+    },
+    "visibility_hint": {
+      "private": "仅你和工作区管理员可以在此运行时上创建智能体。",
+      "public": "工作区内任何成员都可以在此运行时上创建智能体。"
+    },
+    "visibility_toast_updated": "可见性已设为「{{visibility}}」",
+    "visibility_toast_failed": "更新可见性失败",
     "timezone_browser_suffix": "（浏览器）",
     "timezone_hint": "该 Runtime 的 Token 用量图表会按此时区进行日期分桶。",
     "timezone_toast_updated": "时区已更新为 {{tz}}",

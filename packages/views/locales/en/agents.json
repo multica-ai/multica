@@ -212,6 +212,8 @@
     "runtime_none": "No runtime available",
     "runtime_register_first": "Register a runtime before creating an agent",
     "runtime_cloud_badge": "Cloud",
+    "runtime_private_badge": "Private",
+    "runtime_private_locked_tooltip": "Private runtime — only its owner or a workspace admin can create agents on it. Ask the owner to switch it to Public to share.",
     "duplicate_copy_suffix": " (Copy)",
     "create": "Create",
     "creating": "Creating...",

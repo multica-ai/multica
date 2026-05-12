@@ -1,6 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  Fragment,
+} from "react";
+import { Virtuoso } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -88,6 +96,7 @@ import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
+import { PullRequestList } from "./pull-request-list";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -257,6 +266,47 @@ function shallowEqualEntries(a: TimelineEntry[], b: TimelineEntry[]): boolean {
     if (a[i] !== b[i]) return false;
   }
   return true;
+}
+
+// Flat per-item shape consumed by <Virtuoso>. Virtuoso needs a flat array
+// where each entry is one rendered row; we keep the grouping logic from
+// `timelineView.groups` (consecutive same-actor activities still collapse
+// into one activity-group row) but project it into a discriminated union
+// the itemContent dispatcher can switch on.
+type TimelineItem =
+  | { kind: "comment"; id: string; entry: TimelineEntry }
+  | { kind: "resolved-bar"; id: string; entry: TimelineEntry }
+  | { kind: "activity-group"; id: string; entries: TimelineEntry[] };
+
+type RawTimelineGroup = {
+  type: "comment" | "activities";
+  entries: TimelineEntry[];
+};
+
+function flattenGroups(
+  groups: ReadonlyArray<RawTimelineGroup>,
+  expandedResolved: ReadonlySet<string>,
+): TimelineItem[] {
+  const out: TimelineItem[] = [];
+  for (const group of groups) {
+    if (group.type === "comment") {
+      const entry = group.entries[0]!;
+      const isResolved = !!entry.resolved_at;
+      const isExpanded = expandedResolved.has(entry.id);
+      out.push(
+        isResolved && !isExpanded
+          ? { kind: "resolved-bar", id: entry.id, entry }
+          : { kind: "comment", id: entry.id, entry },
+      );
+    } else {
+      out.push({
+        kind: "activity-group",
+        id: group.entries[0]!.id,
+        entries: group.entries,
+      });
+    }
+  }
+  return out;
 }
 
 function TimelineSkeleton() {
@@ -444,8 +494,14 @@ export function IssueDetail({
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
+  const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // Virtuoso's `customScrollParent` wants the HTMLElement, not a ref. A plain
+  // `useRef.current` does not trigger a re-render when it populates, so the
+  // Virtuoso prop would never receive the element. Callback ref + state fixes
+  // that: setState triggers the re-render that hands Virtuoso the element.
+  const [scrollContainerEl, setScrollContainerEl] =
+    useState<HTMLDivElement | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
   // Per-session: which resolved threads the user has temporarily expanded.
@@ -639,6 +695,40 @@ export function IssueDetail({
     return { threadReplies, groups };
   }, [timeline]);
 
+  // Flat array consumed by <Virtuoso>. Recomputed when timelineView.groups
+  // changes (timeline events) or expandedResolved flips (user toggles a
+  // resolved thread). Kept in a useMemo so Virtuoso's data identity is stable
+  // across unrelated re-renders.
+  const items = useMemo<TimelineItem[]>(
+    () => flattenGroups(timelineView.groups, expandedResolved),
+    [timelineView.groups, expandedResolved],
+  );
+
+  // Map of reply-comment id → root-comment id, so a deep-link to a reply
+  // (which lives inside a CommentCard, not in the flat items array) can fall
+  // back to scrolling the root thread into view. Without this, an inbox
+  // notification on a reply would land at items[-1] and short-circuit.
+  const replyToRoot = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [rootId, replies] of timelineView.threadReplies) {
+      for (const reply of replies) {
+        map.set(reply.id, rootId);
+      }
+    }
+    return map;
+  }, [timelineView.threadReplies]);
+
+  // Deep-link target index in the flat items array. For root comments this is
+  // a direct findIndex hit; for reply ids we look up the enclosing root.
+  const targetIdx = useMemo(() => {
+    if (!highlightCommentId) return -1;
+    const direct = items.findIndex((it) => it.id === highlightCommentId);
+    if (direct >= 0) return direct;
+    const rootId = replyToRoot.get(highlightCommentId);
+    if (!rootId) return -1;
+    return items.findIndex((it) => it.id === rootId);
+  }, [items, highlightCommentId, replyToRoot]);
+
   const {
     reactions: issueReactions,
     toggleReaction: handleToggleIssueReaction,
@@ -708,26 +798,75 @@ export function IssueDetail({
 
   const loading = issueLoading;
 
-  // Scroll to highlighted comment once both the issue and its timeline are
-  // available (fire only once per highlightCommentId). `loading` must be in
-  // the dep list: when timeline.length flips to >0 while the issue itself is
-  // still loading, the component is still rendering the skeleton, so
-  // getElementById finds nothing — without re-running on the loading→false
-  // transition, the scroll silently never happens and the user lands at the
-  // top of the issue.
+  // Deep-link landing. Semantically equivalent to navigating to
+  // `#comment-${id}`: find the element with that id, scrollIntoView it.
+  // When `highlightCommentId` is set the timeline below renders flat (no
+  // virtualization), so every comment id is in the DOM by the time this
+  // effect runs after commit.
+  //
+  // For a reply inside a folded resolved thread, the reply is not in items
+  // (only the resolved-bar root is). Auto-expand the thread first; the
+  // effect re-runs once items re-flatten.
+  //
+  // `scrollContainerEl` is in deps because the component early-returns a
+  // loading skeleton while the issue query is pending. The scroll-container
+  // ref populates only on the post-loading render, so it's the signal that
+  // the timeline (and the deep-link target id) has actually rendered.
   useEffect(() => {
-    if (!highlightCommentId || timeline.length === 0 || loading) return;
+    if (!highlightCommentId || items.length === 0) return;
     if (didHighlightRef.current === highlightCommentId) return;
-    const el = document.getElementById(`comment-${highlightCommentId}`);
-    if (el) {
-      didHighlightRef.current = highlightCommentId;
-      requestAnimationFrame(() => {
-        el.scrollIntoView({ behavior: "instant", block: "center" });
-        setHighlightedId(highlightCommentId);
-        setTimeout(() => setHighlightedId(null), 2000);
-      });
+
+    const rootId = replyToRoot.get(highlightCommentId);
+    if (
+      rootId &&
+      rootId !== highlightCommentId &&
+      items[targetIdx]?.kind === "resolved-bar"
+    ) {
+      toggleResolvedExpand(rootId, true);
+      return;
     }
-  }, [highlightCommentId, timeline.length, loading]);
+
+    const el = document.getElementById(`comment-${highlightCommentId}`);
+    if (!el) return;
+
+    didHighlightRef.current = highlightCommentId;
+    el.scrollIntoView({ block: "center" });
+
+    setHighlightedId(highlightCommentId);
+    const fade = window.setTimeout(() => setHighlightedId(null), 2500);
+    return () => clearTimeout(fade);
+  }, [
+    highlightCommentId,
+    items,
+    targetIdx,
+    scrollContainerEl,
+    replyToRoot,
+    toggleResolvedExpand,
+  ]);
+
+  // Cmd-F / Ctrl-F on a virtualized timeline only searches what's mounted in
+  // the viewport — off-screen comments are invisible to browser find-in-page.
+  // Intercept once per (session, issue) when the list is long enough that the
+  // user might actually try; let the keystroke pass through on short lists.
+  // Real fix is in-app search (separate PR); this is the toast stopgap.
+  useEffect(() => {
+    if (items.length <= 30) return;
+    const flagKey = `multica_cmdF_warned:${id}`;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "f" || !(e.metaKey || e.ctrlKey)) return;
+      if (sessionStorage.getItem(flagKey)) return;
+      e.preventDefault();
+      sessionStorage.setItem(flagKey, "1");
+      toast.message(
+        t(($) => $.detail.cmdf_toast_title),
+        {
+          description: t(($) => $.detail.cmdf_toast_description),
+        },
+      );
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [id, items.length, t]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } =
@@ -917,6 +1056,24 @@ export function IssueDetail({
         </div>
       )}
 
+      {/* Pull requests */}
+      <div>
+        <button
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setPullRequestsOpen(!pullRequestsOpen)}
+        >
+          {t(($) => $.detail.section_pull_requests)}
+          <ChevronRight
+            className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${pullRequestsOpen ? "rotate-90" : ""}`}
+          />
+        </button>
+        {pullRequestsOpen && (
+          <div className="pl-2">
+            <PullRequestList issueId={id} />
+          </div>
+        )}
+      </div>
+
       {/* Details */}
       <div>
         <button
@@ -1023,6 +1180,128 @@ export function IssueDetail({
       />
     </div>
   );
+
+  // Shared row renderer for both timeline render modes (flat / virtualized).
+  // The wrapper `id="comment-..."` is the deep-link target — equivalent to
+  // a native `<a href="#comment-...">` anchor.
+  const renderItem = (_i: number, item: TimelineItem): React.ReactElement => {
+    if (item.kind === "resolved-bar") {
+      return (
+        <div className="pb-3" id={`comment-${item.id}`}>
+          <ResolvedThreadBar
+            entry={item.entry}
+            replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
+            onExpand={() => toggleResolvedExpand(item.id, true)}
+          />
+        </div>
+      );
+    }
+    if (item.kind === "comment") {
+      const isResolved = !!item.entry.resolved_at;
+      return (
+        <div className="pb-3" id={`comment-${item.id}`}>
+          <CommentCard
+            issueId={id}
+            entry={item.entry}
+            replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
+            currentUserId={user?.id}
+            canModerate={canModerateComments}
+            onReply={submitReply}
+            onEdit={editComment}
+            onDelete={deleteComment}
+            onToggleReaction={handleToggleReaction}
+            onResolveToggle={handleResolveToggle}
+            onCollapseResolved={
+              isResolved
+                ? () => toggleResolvedExpand(item.id, false)
+                : undefined
+            }
+            highlightedCommentId={highlightedId}
+          />
+        </div>
+      );
+    }
+    // activity-group
+    return (
+      <div className="pb-3 px-4 flex flex-col gap-3">
+        {item.entries.map((entry) => {
+          const details = (entry.details ?? {}) as Record<string, string>;
+          const isStatusChange = entry.action === "status_changed";
+          const isPriorityChange = entry.action === "priority_changed";
+          const isDueDateChange = entry.action === "due_date_changed";
+
+          let leadIcon: React.ReactNode;
+          if (isStatusChange && details.to) {
+            leadIcon = (
+              <StatusIcon
+                status={details.to as IssueStatus}
+                className="h-4 w-4 shrink-0"
+              />
+            );
+          } else if (isPriorityChange && details.to) {
+            leadIcon = (
+              <PriorityIcon
+                priority={details.to as IssuePriority}
+                className="h-4 w-4 shrink-0"
+              />
+            );
+          } else if (isDueDateChange) {
+            leadIcon = (
+              <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />
+            );
+          } else {
+            leadIcon = (
+              <ActorAvatar
+                actorType={entry.actor_type}
+                actorId={entry.actor_id}
+                size={16}
+              />
+            );
+          }
+
+          return (
+            <div
+              key={entry.id}
+              className="flex items-center text-xs text-muted-foreground"
+            >
+              <div className="mr-2 flex w-4 shrink-0 justify-center">
+                {leadIcon}
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-1">
+                <span className="shrink-0 font-medium">
+                  {getActorName(entry.actor_type, entry.actor_id)}
+                </span>
+                <span className="truncate">
+                  {formatActivity(entry, t, getActorName)}
+                </span>
+                {(entry.coalesced_count ?? 1) > 1 &&
+                  entry.action !== "task_completed" &&
+                  entry.action !== "task_failed" && (
+                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                      {t(($) => $.activity.coalesced_badge, {
+                        count: entry.coalesced_count ?? 1,
+                      })}
+                    </span>
+                  )}
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span className="ml-auto shrink-0 cursor-default">
+                        {timeAgo(entry.created_at)}
+                      </span>
+                    }
+                  />
+                  <TooltipContent side="top">
+                    {new Date(entry.created_at).toLocaleString()}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   const detailContent = (
     <div className="flex h-full min-w-0 flex-1 flex-col">
@@ -1161,8 +1440,10 @@ export function IssueDetail({
         </div>
       </PageHeader>
 
-      {/* Content — scrollable */}
-      <div ref={scrollContainerRef} className="relative flex-1 overflow-y-auto">
+      <div
+        ref={setScrollContainerEl}
+        className="relative flex-1 overflow-y-auto"
+      >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
           <TitleEditor
             key={`title-${id}`}
@@ -1493,164 +1774,75 @@ export function IssueDetail({
                 clears any in-flight task state from the previous issue. */}
             <AgentLiveCard key={id} issueId={id} />
 
-            {/* Timeline entries */}
+            {/* Timeline entries — virtualized via react-virtuoso to keep
+                first-paint cost O(viewport) instead of O(N). On a 500-comment
+                issue the unvirtualized .map froze the page for several
+                seconds (markdown parse + lowlight code highlight runs per
+                CommentCard on mount).
+
+                customScrollParent guard: callback ref populates after the
+                first commit. Without this null guard Virtuoso falls back to
+                its own scroller, grabs 0 height inside overflow-y-auto, and
+                miscomputes total-height on first paint. */}
             {timelineLoading && timelineView.groups.length === 0 ? (
               <TimelineSkeleton />
-            ) : (
-              <>
-                <div className="mt-4 flex flex-col gap-3">
-                  {timelineView.groups.map((group) => {
-                    if (group.type === "comment") {
-                      const entry = group.entries[0]!;
-                      const isResolved = !!entry.resolved_at;
-                      const isExpanded = expandedResolved.has(entry.id);
-                      if (isResolved && !isExpanded) {
-                        return (
-                          <div key={entry.id} id={`comment-${entry.id}`}>
-                            <ResolvedThreadBar
-                              entry={entry}
-                              replies={
-                                timelineView.threadReplies.get(entry.id) ??
-                                EMPTY_REPLIES
-                              }
-                              onExpand={() =>
-                                toggleResolvedExpand(entry.id, true)
-                              }
-                            />
-                          </div>
-                        );
-                      }
-                      return (
-                        <div key={entry.id} id={`comment-${entry.id}`}>
-                          <CommentCard
-                            issueId={id}
-                            entry={entry}
-                            replies={
-                              timelineView.threadReplies.get(entry.id) ??
-                              EMPTY_REPLIES
-                            }
-                            currentUserId={user?.id}
-                            canModerate={canModerateComments}
-                            onReply={submitReply}
-                            onEdit={editComment}
-                            onDelete={deleteComment}
-                            onToggleReaction={handleToggleReaction}
-                            onResolveToggle={handleResolveToggle}
-                            onCollapseResolved={
-                              isResolved
-                                ? () => toggleResolvedExpand(entry.id, false)
-                                : undefined
-                            }
-                            highlightedCommentId={highlightedId}
-                          />
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div
-                        key={group.entries[0]!.id}
-                        className="px-4 flex flex-col gap-3"
-                      >
-                        {group.entries.map((entry, _idx) => {
-                          const details = (entry.details ?? {}) as Record<
-                            string,
-                            string
-                          >;
-                          const isStatusChange =
-                            entry.action === "status_changed";
-                          const isPriorityChange =
-                            entry.action === "priority_changed";
-                          const isDueDateChange =
-                            entry.action === "due_date_changed";
-
-                          let leadIcon: React.ReactNode;
-                          if (isStatusChange && details.to) {
-                            leadIcon = (
-                              <StatusIcon
-                                status={details.to as IssueStatus}
-                                className="h-4 w-4 shrink-0"
-                              />
-                            );
-                          } else if (isPriorityChange && details.to) {
-                            leadIcon = (
-                              <PriorityIcon
-                                priority={details.to as IssuePriority}
-                                className="h-4 w-4 shrink-0"
-                              />
-                            );
-                          } else if (isDueDateChange) {
-                            leadIcon = (
-                              <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />
-                            );
-                          } else {
-                            leadIcon = (
-                              <ActorAvatar
-                                actorType={entry.actor_type}
-                                actorId={entry.actor_id}
-                                size={16}
-                              />
-                            );
-                          }
-
-                          return (
-                            <div
-                              key={entry.id}
-                              className="flex items-center text-xs text-muted-foreground"
-                            >
-                              <div className="mr-2 flex w-4 shrink-0 justify-center">
-                                {leadIcon}
-                              </div>
-                              <div className="flex min-w-0 flex-1 items-center gap-1">
-                                <span className="shrink-0 font-medium">
-                                  {getActorName(
-                                    entry.actor_type,
-                                    entry.actor_id,
-                                  )}
-                                </span>
-                                <span className="truncate">
-                                  {formatActivity(entry, t, getActorName)}
-                                </span>
-                                {/* Coalesce badge for non-task actions: task_completed / task_failed already
-                                bake the count into their translation, so suppress the badge there to
-                                avoid showing "×N" twice. */}
-                                {(entry.coalesced_count ?? 1) > 1 &&
-                                  entry.action !== "task_completed" &&
-                                  entry.action !== "task_failed" && (
-                                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
-                                      {t(($) => $.activity.coalesced_badge, {
-                                        count: entry.coalesced_count ?? 1,
-                                      })}
-                                    </span>
-                                  )}
-                                <Tooltip>
-                                  <TooltipTrigger
-                                    render={
-                                      <span className="ml-auto shrink-0 cursor-default">
-                                        {timeAgo(entry.created_at)}
-                                      </span>
-                                    }
-                                  />
-                                  <TooltipContent side="top">
-                                    {new Date(
-                                      entry.created_at,
-                                    ).toLocaleString()}
-                                  </TooltipContent>
-                                </Tooltip>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
+            ) : // Two render modes:
+            //   - `highlightCommentId` set (came from inbox deep-link) →
+            //     render flat. Every comment mounts, every height is real,
+            //     the target id is in the DOM the instant the useEffect
+            //     above runs `scrollIntoView`. No virtualization estimate
+            //     errors, no spacer reflow drift. Pays cold-mount cost
+            //     proportional to items.length (markdown + lowlight per
+            //     comment), which is acceptable in the deep-link case —
+            //     the user has explicit intent to land on a specific item.
+            //   - otherwise → Virtuoso. Browsing mode, virtualization
+            //     wins on first-paint perf for long timelines.
+            //
+            // The split is deliberate: virtualization and "land precisely
+            // on a target" have fundamentally opposed contracts (estimated
+            // heights vs real heights). Trying to satisfy both in one
+            // path is what produced the bug history this PR closes.
+            !highlightCommentId ? (
+              !scrollContainerEl ? (
+                // Skeleton while the callback ref populates so the gap
+                // between IssueDetail mount and Virtuoso mount doesn't
+                // flash empty.
+                <TimelineSkeleton />
+              ) : (
+                <div className="mt-4">
+                  <Virtuoso
+                    key={`${wsId}:${id}`}
+                    customScrollParent={scrollContainerEl}
+                    data={items}
+                    increaseViewportBy={{ top: 800, bottom: 800 }}
+                    computeItemKey={(_i, item) => `${item.kind}:${item.id}`}
+                    skipAnimationFrameInResizeObserver
+                    // followOutput intentionally NOT set. Virtuoso treats
+                    // it as a sticky "is at bottom" flag and resets
+                    // scrollTop to maxScrollTop on every height-change
+                    // tick — issue-detail is document-shaped, not chat.
+                    itemContent={renderItem}
+                  />
                 </div>
-              </>
+              )
+            ) : (
+              <div className="mt-4">
+                {items.map((item, i) => (
+                  <Fragment key={`${item.kind}:${item.id}`}>
+                    {renderItem(i, item)}
+                  </Fragment>
+                ))}
+              </div>
             )}
 
             {/* Bottom comment input — no avatar, full width */}
             <div className="mt-4">
-              <CommentInput issueId={id} onSubmit={submitComment} />
+              {/* key={id}: web's /issues/[id] route doesn't remount on
+                  issueId change, so without an explicit key the editor
+                  keeps the previous issue's in-memory content and the
+                  next keystroke would flush it into the new issue's
+                  draft key. */}
+              <CommentInput key={id} issueId={id} onSubmit={submitComment} />
             </div>
           </div>
         </div>

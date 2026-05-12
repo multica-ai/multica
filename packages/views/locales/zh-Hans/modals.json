@@ -22,14 +22,15 @@
   },
   "feedback": {
     "title": "反馈",
-    "description": "告诉我们哪些好用、哪些不好用、希望接下来做什么。",
     "placeholder": "聊聊你的体验、遇到的 bug，或想看到的功能...",
     "toast_uploading": "请等待上传完成...",
     "toast_too_long": "内容过长",
     "toast_sent": "感谢反馈！",
     "toast_failed": "发送反馈失败",
     "send": "发送反馈",
-    "sending": "发送中..."
+    "sending": "发送中...",
+    "github_hint_prefix": "想被更快处理、参与讨论？请去 ",
+    "github_hint_link": "GitHub"
   },
   "issue_picker": {
     "search_placeholder": "搜索 issue...",

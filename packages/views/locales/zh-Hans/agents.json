@@ -208,6 +208,8 @@
     "runtime_none": "暂无可用运行时",
     "runtime_register_first": "请先注册一个运行时再创建智能体",
     "runtime_cloud_badge": "云端",
+    "runtime_private_badge": "私有",
+    "runtime_private_locked_tooltip": "私有运行时——只有 runtime 所有者或工作区管理员可在其上创建智能体。如果需要共享，请联系所有者切换为「公开」。",
     "duplicate_copy_suffix": "（副本）",
     "create": "创建",
     "creating": "创建中...",

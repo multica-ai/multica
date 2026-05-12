@@ -64,7 +64,18 @@
     "no_agents": "No agents are bound to this runtime yet.",
     "diagnostics_title": "Diagnostics",
     "diagnostics_cli": "CLI",
+    "diagnostics_visibility": "Visibility",
     "diagnostics_timezone": "Timezone",
+    "visibility_label": {
+      "private": "Private",
+      "public": "Public"
+    },
+    "visibility_hint": {
+      "private": "Only you and workspace admins can create agents on this runtime.",
+      "public": "Any workspace member can create agents on this runtime."
+    },
+    "visibility_toast_updated": "Visibility set to {{visibility}}",
+    "visibility_toast_failed": "Failed to update visibility",
     "timezone_browser_suffix": " (browser)",
     "timezone_hint": "Token-usage charts on this runtime bucket dates by this timezone.",
     "timezone_toast_updated": "Timezone updated to {{tz}}",
