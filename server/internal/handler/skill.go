@@ -514,8 +514,14 @@ type clawhubGetSkillResponse struct {
 	LatestVersion *clawhubLatestVersion `json:"latestVersion"`
 }
 
-type clawhubSearchResponse struct {
-	Items []clawhubSkill `json:"items"`
+type clawhubAPISearchResult struct {
+	Slug        string `json:"slug"`
+	DisplayName string `json:"displayName"`
+	Summary     string `json:"summary"`
+}
+
+type clawhubAPISearchResponse struct {
+	Results []clawhubAPISearchResult `json:"results"`
 }
 
 type clawhubSkill struct {
@@ -1655,9 +1661,9 @@ func (h *Handler) SearchMarketplaceSkills(w http.ResponseWriter, r *http.Request
 	}
 
 	params := url.Values{}
-	params.Set("search", query)
+	params.Set("q", query)
 	params.Set("limit", strconv.Itoa(limit))
-	apiURL := "https://clawhub.ai/api/v1/skills?" + params.Encode()
+	apiURL := "https://clawhub.ai/api/v1/search?" + params.Encode()
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	resp, err := httpClient.Get(apiURL)
@@ -1672,14 +1678,14 @@ func (h *Handler) SearchMarketplaceSkills(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var clawhubResp clawhubSearchResponse
+	var clawhubResp clawhubAPISearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&clawhubResp); err != nil {
 		writeError(w, http.StatusBadGateway, "failed to parse ClawHub response")
 		return
 	}
 
-	skills := make([]MarketplaceSkill, 0, len(clawhubResp.Items))
-	for _, item := range clawhubResp.Items {
+	skills := make([]MarketplaceSkill, 0, len(clawhubResp.Results))
+	for _, item := range clawhubResp.Results {
 		if item.Slug == "" {
 			continue
 		}
