@@ -340,6 +340,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `page-header-sticky` | packages/views/layout/page-header.tsx | 2 | JEH-821 — keep dashboard headers visible while mobile keyboard focus changes the visual viewport |
 | `pricing-pricing` | server/pkg/pricing/pricing.go | 108 | Pricing additions (token cost calc) |
 | `pricing-pricing-test` | server/pkg/pricing/pricing_test.go | 90 | Pricing additions (token cost calc) |
+| `pricing-anthropic-rates-2026-05` | server/pkg/pricing/pricing.go | 1 | Correct Opus 4.5+ rates to actual Anthropic pricing (was 3× over-charging, JEH-996); add Opus 4 / 4.1 / Sonnet 4 / Haiku 3.5 rows + date-suffix stripping in lookup |
+| `pricing-test-anthropic-rates-2026-05` | server/pkg/pricing/pricing_test.go | 3 | Expectations updated for corrected Opus 4.5+ rates and the new date-suffix stripping in lookup() (JEH-996) |
 | `privacy-toggle` | packages/views/issues/components/privacy-toggle.tsx | 59 | Privacy/restricted-access UI primitives |
 | `profile-compile` | server/internal/profile/compile.go<br>server/internal/profile/compile_test.go | 372 | Profile-compile server logic |
 | `project-access-handler` | server/internal/handler/project_access_test.go<br>server/internal/handler/project_access.go | 562 | Project-access + privacy enforcement (cerebro feature) |
