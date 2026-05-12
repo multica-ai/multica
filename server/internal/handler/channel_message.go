@@ -659,15 +659,16 @@ func (h *Handler) triggerMentionedAgentTasks(ctx context.Context, workspaceID pg
 
 	for _, cand := range candidates {
 		_, err := h.TaskService.EnqueueTaskForChannelMention(ctx, service.EnqueueTaskForChannelMentionParams{
-			WorkspaceID:    workspaceID,
-			AgentID:        cand.AgentID,
-			ChannelID:      ch.ID,
-			ChannelName:    ch.Name,
-			ChannelKind:    ch.Kind,
-			MessageID:      msg.ID,
-			MessageContent: msg.Content,
-			AuthorType:     author.Type,
-			AuthorID:       uuidToString(author.ID),
+			WorkspaceID:     workspaceID,
+			AgentID:         cand.AgentID,
+			ChannelID:       ch.ID,
+			ChannelName:     ch.Name,
+			ChannelKind:     ch.Kind,
+			MessageID:       msg.ID,
+			MessageContent:  msg.Content,
+			AuthorType:      author.Type,
+			AuthorID:        uuidToString(author.ID),
+			ParentMessageID: msg.ParentMessageID,
 		})
 		if err != nil {
 			slog.Warn("channel mention: enqueue task failed",

@@ -534,6 +534,9 @@ type ChannelMentionContext struct {
 	ChannelKind    string `json:"channel_kind"`
 	MessageID      string `json:"message_id"`
 	MessageContent string `json:"message_content"`
+	// ParentMessageID is non-empty when the triggering message was itself a
+	// thread reply. The agent's response should be posted in the same thread.
+	ParentMessageID string `json:"parent_message_id,omitempty"`
 	// AuthorType + AuthorID identify who triggered the mention so the
 	// daemon can address them by name in the agent's prompt.
 	AuthorType string `json:"author_type"`
@@ -609,6 +612,8 @@ type EnqueueTaskForChannelMentionParams struct {
 	MessageContent string
 	AuthorType     string
 	AuthorID       string
+	// ParentMessageID is valid when the triggering message is a thread reply.
+	ParentMessageID pgtype.UUID
 }
 
 // EnqueueTaskForChannelMention creates a queued task for an agent
@@ -644,6 +649,9 @@ func (s *TaskService) EnqueueTaskForChannelMention(ctx context.Context, p Enqueu
 		MessageContent: p.MessageContent,
 		AuthorType:     p.AuthorType,
 		AuthorID:       p.AuthorID,
+	}
+	if p.ParentMessageID.Valid {
+		payload.ParentMessageID = util.UUIDToString(p.ParentMessageID)
 	}
 	contextJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -1418,17 +1426,30 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 						// the @-mention task and surface a link to the
 						// task transcript / cancel button if desired.
 						metaJSON, _ := json.Marshal(map[string]any{
-							"task_id":              util.UUIDToString(task.ID),
-							"trigger_message_id":   cm.MessageID,
-							"trigger_author_type":  cm.AuthorType,
+							"task_id":             util.UUIDToString(task.ID),
+							"trigger_message_id":  cm.MessageID,
+							"trigger_author_type": cm.AuthorType,
 						})
-						msg, err := s.Queries.CreateChannelMessage(ctx, db.CreateChannelMessageParams{
+						replyParams := db.CreateChannelMessageParams{
 							ChannelID:  channelUUID,
 							AuthorType: "agent",
 							AuthorID:   task.AgentID,
 							Content:    redact.Text(body),
 							Metadata:   metaJSON,
-						})
+						}
+						if cm.ParentMessageID != "" {
+							parentUUID, perr := util.ParseUUID(cm.ParentMessageID)
+							if perr == nil {
+								replyParams.ParentMessageID = parentUUID
+							} else {
+								slog.Warn("channel-mention completion: invalid parent_message_id",
+									"task_id", util.UUIDToString(task.ID),
+									"parent_message_id", cm.ParentMessageID,
+									"error", perr,
+								)
+							}
+						}
+						msg, err := s.Queries.CreateChannelMessage(ctx, replyParams)
 						if err != nil {
 							slog.Error("channel-mention completion: failed to post reply",
 								"task_id", util.UUIDToString(task.ID),
