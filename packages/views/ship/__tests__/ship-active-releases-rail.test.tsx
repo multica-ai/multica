@@ -20,6 +20,16 @@ vi.mock("@multica/core/ship", () => ({
     data: activeReleasesFixture,
     isLoading: false,
   }),
+  useCollapsedProjects: <T,>(
+    selector: (state: {
+      activeReleasesCollapsed: boolean;
+      toggleActiveReleases: () => void;
+    }) => T,
+  ): T =>
+    selector({
+      activeReleasesCollapsed: false,
+      toggleActiveReleases: () => {},
+    }),
 }));
 
 vi.mock("@multica/core/paths", () => ({

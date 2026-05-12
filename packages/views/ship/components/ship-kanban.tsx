@@ -27,17 +27,6 @@ interface ShipKanbanProps {
   projectId: string;
 }
 
-const COLUMNS: ShipKanbanColumn[] = [
-  "drafted",
-  "in_review",
-  "ready_to_land",
-  "merged_pre_staging",
-  "in_staging",
-  "promoting",
-  "in_production",
-  "done",
-];
-
 const COLUMN_ACCENT: Record<ShipKanbanColumn, string> = {
   // Semantic accent strips on top of each column for quick visual scanning.
   // Use semantic tokens where available; the saturated accent pulls from
@@ -127,6 +116,21 @@ export function ShipKanban({ pullRequests, isLoading, projectId }: ShipKanbanPro
   const { t } = useT("ship");
   const isMobile = useIsMobile();
   const snapshot = useDeploySnapshot(projectId);
+  const visibleColumns = useMemo<ShipKanbanColumn[]>(() => {
+    const cols: ShipKanbanColumn[] = [
+      "drafted",
+      "in_review",
+      "ready_to_land",
+      "merged_pre_staging",
+    ];
+    if (snapshot.staging) cols.push("in_staging");
+    if (snapshot.production) {
+      cols.push("promoting");
+      cols.push("in_production");
+    }
+    cols.push("done");
+    return cols;
+  }, [snapshot.staging, snapshot.production]);
   const buckets = useMemo(
     () => bucketPullRequests(pullRequests, snapshot),
     [pullRequests, snapshot],
@@ -161,7 +165,7 @@ export function ShipKanban({ pullRequests, isLoading, projectId }: ShipKanbanPro
 
       {isMobile ? (
         <div className="space-y-2">
-          {COLUMNS.map((col) => (
+          {visibleColumns.map((col) => (
             <details
               key={col}
               open={buckets[col].length > 0}
@@ -187,7 +191,7 @@ export function ShipKanban({ pullRequests, isLoading, projectId }: ShipKanbanPro
       ) : (
         <div className="overflow-x-auto pb-2">
           <div className="flex gap-3 min-w-max">
-            {COLUMNS.map((col) => (
+            {visibleColumns.map((col) => (
               <div
                 key={col}
                 className="flex w-64 shrink-0 flex-col rounded-md border bg-muted/20"
