@@ -292,6 +292,7 @@ func init() {
 	// issue comment list
 	issueCommentListCmd.Flags().String("output", "table", "Output format: table or json")
 	issueCommentListCmd.Flags().String("since", "", "Only return comments created after this timestamp (RFC3339)")
+	issueCommentListCmd.Flags().Bool("threads", false, "Group comments into threads showing depth and reply counts")
 
 	// issue runs
 	issueRunsCmd.Flags().String("output", "table", "Output format: table or json")
@@ -877,11 +878,44 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "Showing %d comments.\n", len(comments))
 
 	output, _ := cmd.Flags().GetString("output")
+	actors := loadActorDisplayLookup(ctx, client)
+	threads, _ := cmd.Flags().GetBool("threads")
+	if threads {
+		roots := buildCommentThreads(comments)
+		if output == "json" {
+			return cli.PrintJSON(os.Stdout, buildThreadsJSON(roots, actors))
+		}
+
+		flat := flattenThreads(roots)
+		headers := []string{"ID", "DEPTH", "AUTHOR", "REPLIES", "PREVIEW", "CREATED"}
+		rows := make([][]string, 0, len(flat))
+		for _, n := range flat {
+			content := strVal(n.comment, "content")
+			if utf8.RuneCountInString(content) > 60 {
+				runes := []rune(content)
+				content = string(runes[:57]) + "..."
+			}
+			created := strVal(n.comment, "created_at")
+			if len(created) >= 16 {
+				created = created[:16]
+			}
+			rows = append(rows, []string{
+				strVal(n.comment, "id"),
+				fmt.Sprintf("%d", n.depth),
+				actors.actor(strVal(n.comment, "author_type"), strVal(n.comment, "author_id")),
+				fmt.Sprintf("%d", len(n.replies)),
+				content,
+				created,
+			})
+		}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
+	}
+
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, comments)
 	}
 
-	actors := loadActorDisplayLookup(ctx, client)
 	headers := []string{"ID", "PARENT", "AUTHOR", "TYPE", "CONTENT", "CREATED"}
 	rows := make([][]string, 0, len(comments))
 	for _, c := range comments {
@@ -1328,6 +1362,68 @@ type assigneeMatch struct {
 	Type string // "member" or "agent"
 	ID   string // user_id for members, agent id for agents
 	Name string
+}
+
+type threadNode struct {
+	comment map[string]any
+	depth   int
+	replies []*threadNode
+}
+
+func buildCommentThreads(comments []map[string]any) []*threadNode {
+	byID := make(map[string]*threadNode, len(comments))
+	var roots []*threadNode
+	for _, c := range comments {
+		id := strVal(c, "id")
+		node := &threadNode{comment: c, depth: 0}
+		byID[id] = node
+		parentID := strVal(c, "parent_id")
+		if parentID == "" {
+			roots = append(roots, node)
+		} else if parent, ok := byID[parentID]; ok {
+			node.depth = parent.depth + 1
+			parent.replies = append(parent.replies, node)
+		} else {
+			roots = append(roots, node)
+		}
+	}
+	return roots
+}
+
+func flattenThreads(roots []*threadNode) []*threadNode {
+	var out []*threadNode
+	var walk func(n *threadNode)
+	walk = func(n *threadNode) {
+		out = append(out, n)
+		for _, r := range n.replies {
+			walk(r)
+		}
+	}
+	for _, r := range roots {
+		walk(r)
+	}
+	return out
+}
+
+func buildThreadsJSON(nodes []*threadNode, actors actorDisplayLookup) []map[string]any {
+	out := make([]map[string]any, 0, len(nodes))
+	for _, n := range nodes {
+		item := map[string]any{
+			"id":          strVal(n.comment, "id"),
+			"author":      actors.actor(strVal(n.comment, "author_type"), strVal(n.comment, "author_id")),
+			"author_type": strVal(n.comment, "author_type"),
+			"author_id":   strVal(n.comment, "author_id"),
+			"content":     strVal(n.comment, "content"),
+			"type":        strVal(n.comment, "type"),
+			"parent_id":   strVal(n.comment, "parent_id"),
+			"created_at":  strVal(n.comment, "created_at"),
+			"depth":       n.depth,
+			"reply_count": len(n.replies),
+			"replies":     buildThreadsJSON(n.replies, actors),
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func resolveAssignee(ctx context.Context, client *cli.APIClient, name string) (string, string, error) {
