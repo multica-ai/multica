@@ -117,7 +117,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                 {t(($) => $.resources.popover_title)}
               </div>
               {workspace?.repos && workspace.repos.length > 0 && (
-                <div className="space-y-1">
+                <div className="space-y-1 max-h-48 overflow-y-auto">
                   {workspace.repos.map((repo) => {
                     const isAttached = attachedUrls.has(repo.url);
                     const isDisabled = isAttached || createResource.isPending;
