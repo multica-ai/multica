@@ -617,13 +617,12 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	// Status priority: active issues first
 	statusRank := `CASE i.status
 		WHEN 'in_progress' THEN 0
-		WHEN 'in_review' THEN 1
-		WHEN 'todo' THEN 2
-		WHEN 'blocked' THEN 3
-		WHEN 'backlog' THEN 4
-		WHEN 'done' THEN 5
-		WHEN 'cancelled' THEN 6
-		ELSE 7
+		WHEN 'todo' THEN 1
+		WHEN 'blocked' THEN 2
+		WHEN 'backlog' THEN 3
+		WHEN 'done' THEN 4
+		WHEN 'cancelled' THEN 5
+		ELSE 6
 	END`
 
 	// --- match_source expression ---

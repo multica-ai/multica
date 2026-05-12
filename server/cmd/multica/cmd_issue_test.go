@@ -428,7 +428,6 @@ func TestValidIssueStatuses(t *testing.T) {
 		"code_review":   true,
 		"fixing":        true,
 		"testing":       true,
-		"in_review":     true,
 		"staged":        true,
 		"done":          true,
 		"blocked":       true,

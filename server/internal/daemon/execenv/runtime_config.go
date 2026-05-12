@@ -88,7 +88,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica issue comment add <issue-id> --content \"...\" [--parent <comment-id>]` — Post a comment (use --parent to reply to a specific comment)\n")
 	b.WriteString("  - For content with special characters (backticks, quotes), pipe via stdin: `cat <<'COMMENT' | multica issue comment add <issue-id> --content-stdin`\n")
 	b.WriteString("- `multica issue comment delete <comment-id>` — Delete a comment\n")
-	b.WriteString("- `multica issue status <id> <status>` — Update issue status (todo, in_progress, in_review, done, blocked)\n")
+	b.WriteString("- `multica issue status <id> <status>` — Update issue status (todo, in_progress, staged, done, blocked)\n")
 	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X]` — Update issue fields\n")
 	b.WriteString("- `multica autopilot create --title \"...\" --agent <name> --mode create_issue [--description \"...\"]` — Create an autopilot\n")
 	b.WriteString("- `multica autopilot update <id> [--title X] [--description X] [--status active|paused]` — Update an autopilot\n")
@@ -167,7 +167,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		// Assignment-triggered, BMAD agent: status transitions are owned by
 		// the sidecar via contract markers (impl-plan, completion-note,
 		// review-findings, fix-note, plan-issue). The generic "flip to
-		// in_progress / in_review" loop below would race the sidecar's
+		// in_progress" loop below would race the sidecar's
 		// marker-based router and corrupt column state, so it is omitted
 		// for BMAD agents. (See bug investigation 2026-04-28.)
 		b.WriteString("**Status transitions are owned by the BMAD sidecar, not by you.** As of the marker-only architecture (2026-04-28), the Multica BMAD sidecar reads contract markers in your comments (`<!-- claim -->`, `<!-- impl-plan -->`, `<!-- completion-note -->`, `<!-- review-findings -->`, `<!-- fix-note -->`, `<!-- plan-issue -->`, `<!-- pr-opened -->`) and routes the issue automatically. Follow the exact marker rules in your persona's SKILL.md.\n\n")
@@ -188,7 +188,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("3. Read comments for additional context or human instructions\n")
 		b.WriteString("4. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)\n")
 		fmt.Fprintf(&b, "5. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
-		fmt.Fprintf(&b, "6. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
+		fmt.Fprintf(&b, "6. When done, run `multica issue status %s staged`\n", ctx.IssueID)
 		fmt.Fprintf(&b, "7. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
 	}
 

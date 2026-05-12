@@ -178,7 +178,7 @@ var issueReviewThreadsResolveCmd = &cobra.Command{
 }
 
 var validIssueStatuses = []string{
-	"backlog", "todo", "planning", "ready_for_dev", "in_progress", "code_review", "fixing", "testing", "in_review", "staged", "done", "blocked", "cancelled",
+	"backlog", "todo", "planning", "ready_for_dev", "in_progress", "code_review", "fixing", "testing", "staged", "done", "blocked", "cancelled",
 }
 
 func init() {

@@ -390,10 +390,11 @@ func TestSweepResetsInProgressIssueToTodo(t *testing.T) {
 	}
 }
 
-// TestSweepDoesNotResetIssueAlreadyInReview verifies that the sweeper only resets
-// issues that are truly stuck in in_progress — it must not clobber issues whose
-// agents already moved them forward (e.g. to in_review) before the task timed out.
-func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
+// TestSweepDoesNotResetIssueAlreadyAdvanced verifies that the sweeper only
+// resets issues truly stuck in in_progress — it must not clobber issues whose
+// agents already moved them forward (e.g. to staged) before the task timed
+// out.
+func TestSweepDoesNotResetIssueAlreadyAdvanced(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
 	}
@@ -412,11 +413,11 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 		t.Fatalf("failed to find test agent: %v", err)
 	}
 
-	// Issue already advanced to in_review by the agent before the task timed out.
+	// Issue already advanced to staged by the agent before the task timed out.
 	var issueID string
 	err = testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id)
-		SELECT $1, 'Already in_review issue', 'in_review', 'none', 'member', m.user_id, 'agent', $2
+		SELECT $1, 'Already staged issue', 'staged', 'none', 'member', m.user_id, 'agent', $2
 		FROM member m WHERE m.workspace_id = $1 LIMIT 1
 		RETURNING id
 	`, testWorkspaceID, agentID).Scan(&issueID)
@@ -451,14 +452,14 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 
 	broadcastFailedTasks(ctx, queries, nil, bus, failedTasks)
 
-	// Issue should remain in_review — the sweeper must not clobber agent progress.
+	// Issue should remain staged — the sweeper must not clobber agent progress.
 	var issueStatus string
 	err = testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&issueStatus)
 	if err != nil {
 		t.Fatalf("failed to query issue status: %v", err)
 	}
-	if issueStatus != "in_review" {
-		t.Fatalf("expected issue status 'in_review' to be preserved, got '%s'", issueStatus)
+	if issueStatus != "staged" {
+		t.Fatalf("expected issue status 'staged' to be preserved, got '%s'", issueStatus)
 	}
 }
 
