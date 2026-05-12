@@ -322,9 +322,22 @@ func firstGitHubRepoURL(ctx context.Context, queries *db.Queries, projectID pgty
 
 // pollEnvironmentForRelease — poll one (workspace, project, env_kind)
 // triple. Lists the last N completed workflow runs on main; for each
-// success run, look up a release matching the head_sha + the
-// environment-appropriate stage filter, and on hit synthesize a
-// deploy + run the linkage.
+// success run:
+//
+//  1. Record the run as a deploy on the matching env if we haven't
+//     seen this (env, sha) before. This advances env.current_sha so
+//     the "what's running" pill is accurate even when the deploy
+//     didn't come from a Ship Hub release (direct PR merges, hotfixes
+//     pushed straight to main, etc.).
+//
+//  2. Optionally link the new deploy to a Ship Hub release whose
+//     merged_main_sha / production_main_sha matches the run. Misses
+//     here are common — most direct merges have no release object —
+//     and are silently ignored.
+//
+// Pre-fix, step 2 was the only path. A direct merge to main left
+// env.current_sha permanently stale because no release ever matched
+// the workflow run, and the deploy row was never inserted.
 func pollEnvironmentForRelease(
 	ctx context.Context,
 	queries *db.Queries,
@@ -356,13 +369,71 @@ func pollEnvironmentForRelease(
 		if run.HeadSHA == "" {
 			continue
 		}
-		linkRunIfMatchingRelease(ctx, queries, bus, ws, project, client, run, envKind)
+		deploy, ok := recordRunAsDeployIfNew(ctx, queries, ws.ID, project.ID, envKind, run)
+		if !ok {
+			continue
+		}
+		linkDeployToReleaseIfAny(ctx, queries, bus, ws, project, client, run, deploy, envKind)
 	}
 }
 
-// linkRunIfMatchingRelease — the per-run match logic. Returns nothing
-// because the entire path is best-effort; every miss is silent and
-// every error is logged + swallowed.
+// recordRunAsDeployIfNew is the new always-on path: idempotently insert
+// a deploy row for (env, run.HeadSHA) and bump env.current_sha. Returns
+// the existing deploy if one already exists for this sha (no-op), or
+// the freshly-inserted row, or {} + false on error. The release
+// linkage in linkDeployToReleaseIfAny runs after this — they're now
+// orthogonal concerns instead of nested.
+func recordRunAsDeployIfNew(
+	ctx context.Context,
+	queries *db.Queries,
+	workspaceID, projectID pgtype.UUID,
+	envKind db.DeployEnvironmentKind,
+	run gh.WorkflowRun,
+) (db.Deploy, bool) {
+	// Resolve the env once up front so the dedup check has a key.
+	// upsertSyntheticDeploy reads envs again internally for the create
+	// path — fine, the row count is tiny.
+	envs, err := queries.ListDeployEnvironmentsByProject(ctx, projectID)
+	if err != nil {
+		slog.Warn("ship hub deploy poller: list envs for dedup failed",
+			"project_id", projectID, "error", err)
+		return db.Deploy{}, false
+	}
+	var envID pgtype.UUID
+	for _, e := range envs {
+		if e.Kind == envKind {
+			envID = e.ID
+			break
+		}
+	}
+	if envID.Valid {
+		// Dedup: have we already recorded a deploy with this exact
+		// (env, sha)? Poller runs every 2 minutes; without this guard
+		// we'd insert a duplicate row on every tick.
+		existing, err := queries.GetDeployByEnvAndSHA(ctx, db.GetDeployByEnvAndSHAParams{
+			EnvironmentID: envID,
+			Sha:           run.HeadSHA,
+		})
+		if err == nil {
+			return existing, true
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("ship hub deploy poller: dedup lookup failed",
+				"env_id", envID, "sha", run.HeadSHA, "error", err)
+			return db.Deploy{}, false
+		}
+	}
+	return upsertSyntheticDeploy(ctx, queries, workspaceID, projectID, envKind, run)
+}
+
+// linkDeployToReleaseIfAny — the per-run release-linkage logic. Returns
+// nothing because the entire path is best-effort; every miss is silent
+// and every error is logged + swallowed.
+//
+// Pre-fix this function ALSO created the deploy row; now the deploy
+// has already been recorded by recordRunAsDeployIfNew before we get
+// here. This function only handles the optional "tag this deploy to a
+// Ship Hub release" step.
 //
 // Match criteria:
 //   - staging → release whose merged_main_sha == run.head_sha AND
@@ -376,7 +447,7 @@ func pollEnvironmentForRelease(
 // Already-linked releases are skipped (the existing deploy_id check).
 // This keeps the poller idempotent across restarts and across
 // multiple workspaces sharing a sha (rare but possible).
-func linkRunIfMatchingRelease(
+func linkDeployToReleaseIfAny(
 	ctx context.Context,
 	queries *db.Queries,
 	bus *events.Bus,
@@ -384,6 +455,7 @@ func linkRunIfMatchingRelease(
 	project db.Project,
 	client *gh.Client,
 	run gh.WorkflowRun,
+	deploy db.Deploy,
 	envKind db.DeployEnvironmentKind,
 ) {
 	var release db.ShipRelease
@@ -436,11 +508,8 @@ func linkRunIfMatchingRelease(
 		}
 	}
 
-	deploy, ok := upsertSyntheticDeploy(ctx, queries, ws.ID, project.ID, envKind, run)
-	if !ok {
-		return
-	}
-
+	// Deploy row was created by the caller (recordRunAsDeployIfNew);
+	// we just use it for the release linkage.
 	deps := buildPollerStagingDeps(ctx, bus)
 	switch envKind {
 	case db.DeployEnvironmentKindStaging:
