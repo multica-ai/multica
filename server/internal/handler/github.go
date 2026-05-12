@@ -578,11 +578,24 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 		}
 		linkedIssueIDs = append(linkedIssueIDs, uuidToString(issue.ID))
 
-		// PR merged → move issue to done if it isn't already terminal.
-		// We deliberately avoid clobbering 'cancelled' since that signals
-		// the user explicitly abandoned the work.
+		// PR merged → move issue to done, but only when (a) the issue is not
+		// already terminal and (b) no sibling PR linked to the same issue is
+		// still in flight. We deliberately avoid clobbering 'cancelled' since
+		// that signals the user explicitly abandoned the work; and an issue
+		// linked to multiple PRs is not "done" until every PR has resolved
+		// (merged or closed-without-merge).
 		if state == "merged" && issue.Status != "done" && issue.Status != "cancelled" {
-			h.advanceIssueToDone(ctx, issue, workspaceID)
+			openSiblings, err := h.Queries.CountOpenSiblingPullRequestsForIssue(ctx, db.CountOpenSiblingPullRequestsForIssueParams{
+				IssueID: issue.ID,
+				ID:      pr.ID,
+			})
+			if err != nil {
+				slog.Warn("github: count open siblings failed", "err", err, "issue_id", uuidToString(issue.ID))
+				continue
+			}
+			if openSiblings == 0 {
+				h.advanceIssueToDone(ctx, issue, workspaceID)
+			}
 		}
 	}
 

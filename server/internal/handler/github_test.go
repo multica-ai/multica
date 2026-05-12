@@ -369,3 +369,125 @@ func TestWebhook_UninstallReturnsWorkspaceForBroadcast(t *testing.T) {
 		t.Error("expected ErrNoRows on second delete, got nil")
 	}
 }
+
+// TestWebhook_MergedPR_WaitsForOpenSibling guards the multi-PR case: when an
+// issue is linked to two PRs and only one is merged, the issue must stay in
+// its current status. Only the merge that resolves the LAST in-flight PR
+// closes the issue.
+func TestWebhook_MergedPR_WaitsForOpenSibling(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "multi-pr-test-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Multi-PR auto-merge test",
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	const installationID int64 = 55667788
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "multi-pr-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	// Helper to fire one pull_request webhook.
+	fire := func(t *testing.T, repo string, prNumber int32, merged bool) {
+		t.Helper()
+		state := "open"
+		if merged {
+			state = "closed"
+		}
+		payload := map[string]any{
+			"action": state,
+			"pull_request": map[string]any{
+				"number":     prNumber,
+				"html_url":   "https://github.com/acme/" + repo + "/pull/1",
+				"title":      "Fix " + created.Identifier,
+				"body":       "",
+				"state":      state,
+				"draft":      false,
+				"merged":     merged,
+				"merged_at":  "2026-04-29T00:00:00Z",
+				"closed_at":  "2026-04-29T00:00:00Z",
+				"created_at": "2026-04-28T00:00:00Z",
+				"updated_at": "2026-04-29T00:00:00Z",
+				"head":       map[string]any{"ref": "fix/multi"},
+				"user":       map[string]any{"login": "octocat"},
+			},
+			"repository": map[string]any{
+				"name":  repo,
+				"owner": map[string]any{"login": "acme"},
+			},
+			"installation": map[string]any{"id": installationID},
+		}
+		raw, _ := json.Marshal(payload)
+		mac := hmac.New(sha256.New, []byte(secret))
+		mac.Write(raw)
+		sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+		rec := httptest.NewRecorder()
+		hookReq := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(raw))
+		hookReq.Header.Set("X-GitHub-Event", "pull_request")
+		hookReq.Header.Set("X-Hub-Signature-256", sig)
+		testHandler.HandleGitHubWebhook(rec, hookReq)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("webhook: expected 202, got %d (%s)", rec.Code, rec.Body.String())
+		}
+	}
+
+	// Open PR A and PR B against two repos so the (workspace, owner, repo,
+	// number) uniqueness on github_pull_request leaves room for both.
+	fire(t, "repo-a", 1, false)
+	fire(t, "repo-b", 2, false)
+
+	// Sanity: both linked.
+	linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(linked) != 2 {
+		t.Fatalf("expected 2 linked PRs, got %d", len(linked))
+	}
+
+	// Merge PR A. Issue must stay in_progress because PR B is still open.
+	fire(t, "repo-a", 1, true)
+	issueAfterA, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	if issueAfterA.Status != "in_progress" {
+		t.Errorf("issue should stay in_progress while sibling PR is open, got %q", issueAfterA.Status)
+	}
+
+	// Now merge PR B. Issue should advance to done — last sibling resolved.
+	fire(t, "repo-b", 2, true)
+	issueAfterB, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	if issueAfterB.Status != "done" {
+		t.Errorf("expected issue 'done' after every linked PR merged, got %q", issueAfterB.Status)
+	}
+}

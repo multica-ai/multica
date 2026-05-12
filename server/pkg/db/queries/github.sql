@@ -80,6 +80,18 @@ ORDER BY pr.pr_created_at DESC;
 SELECT issue_id FROM issue_pull_request
 WHERE pull_request_id = $1;
 
+-- name: CountOpenSiblingPullRequestsForIssue :one
+-- Counts pull requests linked to an issue whose state is still "open" or
+-- "draft", excluding one PR by id (the PR currently being processed by the
+-- webhook handler). Used to decide whether merging one PR should auto-close
+-- the issue — if any sibling is still in flight, we leave the issue alone.
+SELECT COUNT(*)::bigint
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE ipr.issue_id = $1
+  AND pr.id <> $2
+  AND pr.state IN ('open', 'draft');
+
 -- =====================
 -- Issue ↔ Pull Request link
 -- =====================
