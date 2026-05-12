@@ -57,7 +57,10 @@ jobs:
       # and `docker compose build` then fails with
       # "docker-credential-desktop: executable not found".
       DOCKER_PATH_EXTRAS: /usr/local/bin:/Applications/Docker.app/Contents/Resources/bin
-      COMPOSE_PROJECT: multica
+      # Note: project name (`multica-prod`) is set authoritatively in
+      # docker-compose.selfhost.yml via its top-level `name:` field, so
+      # there's no need to set COMPOSE_PROJECT_NAME here. (The legacy
+      # `COMPOSE_PROJECT: multica` env line was unused and is gone.)
       COMPOSE_FILES: -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml
     steps:
       - name: Checkout
@@ -128,18 +131,32 @@ jobs:
 
       - name: Stop orphaned containers from prior builds
         # `docker compose up` only manages containers under its OWN
-        # project name (here: `multica`, set via `name:` in
-        # docker-compose.selfhost.yml). Containers left over from a
-        # prior local build that didn't use the same project name
-        # still hold the host ports we're about to bind, and the up
-        # command fails with "Bind for 0.0.0.0:PORT failed: port is
-        # already allocated".
+        # project name (here: `multica-prod`, set via `name:` in
+        # docker-compose.selfhost.yml). Stale containers from other
+        # project namespaces still hold the host ports we're about to
+        # bind, and the up command fails with "Bind for 0.0.0.0:PORT
+        # failed: port is already allocated".
         #
-        # Sweep any leftover containers whose name starts with
-        # `multica-` (from a no-project-name compose) OR matches
-        # known service names. Idempotent — silently no-ops on a
-        # clean host. Force-rm because we'll recreate them in the
-        # next step.
+        # Two classes of orphan to sweep:
+        #
+        # 1. Legacy `multica-*` containers from the pre-rename era
+        #    (before docker-compose.selfhost.yml moved from
+        #    `name: multica` to `name: multica-prod`). One-time
+        #    migration scrub for the first deploy after the rename
+        #    PR lands.
+        #
+        # 2. Stray `multica-*` containers spawned by agent task
+        #    workspaces that share the docker engine. Each agent
+        #    workspace's `docker-compose.yml` declares
+        #    `name: multica` (the dev/worktree default), so any
+        #    `make dev` / `make test` from an agent workspace
+        #    creates `multica-postgres-1` etc. — which collide on
+        #    container names with the old prod stack and also pin
+        #    host ports. We sweep them so the next compose up has
+        #    a clean field.
+        #
+        # The filter explicitly excludes `multica-prod-*` so we
+        # don't take out our own freshly-created containers.
         #
         # Runs BEFORE the preflight port check so our own stale
         # containers (multica-backend-1 from a half-failed prior
@@ -149,9 +166,11 @@ jobs:
           set -e
           # Tear down anything still labeled with this project first.
           docker compose ${COMPOSE_FILES} down --remove-orphans || true
-          # Then catch loose containers from outside the project name
-          # (old `docker compose up` runs that didn't use `name:`).
-          for n in $(docker ps -aq --filter "name=multica-"); do
+          # Then catch loose containers from outside the project name:
+          # legacy pre-rename `multica-*` AND transient agent-workspace
+          # `multica-*`. Skip `multica-prod-*` (our own, just torn down
+          # by the compose down above and possibly mid-recreate).
+          for n in $(docker ps -a --format '{{.Names}}' | grep '^multica-' | grep -v '^multica-prod-' || true); do
             echo "Removing orphan container $n"
             docker rm -f "$n" || true
           done
