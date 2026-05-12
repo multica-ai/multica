@@ -50,7 +50,7 @@ import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
+import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker, IssueIdentifierBadge } from ".";
 import { maxSiblingStage } from "./pickers/stage-picker";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
@@ -1793,31 +1793,32 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       : [];
 
   const detailContent = (
-    <div className="relative flex h-full min-w-0 flex-1 flex-col">
-        {/* In-page find bar — floats over the top-right of the content column
-            (below the breadcrumb header), outside the scroll container so it
-            stays put while the timeline scrolls and its own text isn't walked. */}
+<div className="relative flex h-full min-w-0 flex-1 flex-col">
         {find.open && (
           <FindBar find={find} className="absolute right-4 top-14 z-20" />
         )}
-        <BreadcrumbHeader
-          segments={breadcrumbSegments}
-          leaf={
-            <AppLink
-              href={paths.issueDetail(issue.id)}
-              className="flex min-w-0 transition-opacity hover:opacity-80"
-            >
-              <span className="truncate font-medium text-foreground">
-                {issue.identifier} {issue.title}
-              </span>
-            </AppLink>
-          }
-          actions={
-            <>
-            {/* Live "agent is working" chip, leftmost in the right cluster so
-                it never overlaps the title (which truncates to make room).
-                It self-hides when no agent is active. */}
-            <IssueAgentHeaderChip issueId={id} />
+      <BreadcrumbHeader
+        segments={breadcrumbSegments}
+        leaf={
+          <AppLink
+            href={paths.issueDetail(issue.id)}
+            className="flex min-w-0 items-center gap-2 transition-opacity hover:opacity-80"
+          >
+            <IssueIdentifierBadge
+              issue={issue}
+              onCopy={actions.copyIdentifier}
+            />
+            <span className="truncate font-medium text-foreground">
+              {issue.title}
+            </span>
+          </AppLink>
+        }
+        actions={
+          <>
+          {/* Live "agent is working" chip, leftmost in the right cluster so
+              it never overlaps the title (which truncates to make room).
+              It self-hides when no agent is active. */}
+          <IssueAgentHeaderChip issueId={id} />
             {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
               <Tooltip>
                 <TooltipTrigger

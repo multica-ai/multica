@@ -20,6 +20,7 @@ export interface UseIssueActionsResult {
   updateField: (updates: Partial<UpdateIssueRequest>) => void;
   togglePin: () => void;
   copyLink: () => Promise<void>;
+  copyIdentifier: () => Promise<void>;
   openCreateSubIssue: () => void;
   openSetParent: () => void;
   removeParent: () => void;
@@ -128,6 +129,16 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     }
   }, [paths, issueId, navigation, t]);
 
+  const copyIdentifier = useCallback(async () => {
+    if (!issueIdentifier) return;
+    try {
+      await navigator.clipboard.writeText(issueIdentifier);
+      toast.success(t(($) => $.detail.identifier_copied, { identifier: issueIdentifier }));
+    } catch {
+      toast.error(t(($) => $.detail.identifier_copy_failed));
+    }
+  }, [issueIdentifier, t]);
+
   const openCreateSubIssue = useCallback(() => {
     if (!issueId) return;
     openModal("create-issue", {
@@ -201,6 +212,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     updateField,
     togglePin,
     copyLink,
+    copyIdentifier,
     openCreateSubIssue,
     openSetParent,
     removeParent,
