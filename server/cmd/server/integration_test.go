@@ -1034,6 +1034,61 @@ func TestCerebroGroupsVisibilityAndValidation(t *testing.T) {
 	resp.Body.Close()
 }
 
+// CEREBRO-PATCH(cerebro-groups-description-coercion-tests): JEH-1055 — creating
+// a group without a description (or with an explicit null) used to surface as
+// 500 "groups request failed" because the server passed NULL through to a
+// column that was eventually constrained NOT NULL. The service now coerces a
+// missing description to an empty string on create. These tests pin the
+// behaviour so the path can't regress and the description response field stays
+// a string.
+func TestCerebroGroupsDescriptionOmittedOrNull(t *testing.T) {
+	for name, body := range map[string]map[string]any{
+		"omitted":      {"name": "JEH-1055 Omitted"},
+		"explicit_nil": {"name": "JEH-1055 Null", "description": nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := authRequest(t, "POST", "/api/workspaces/"+testWorkspaceID+"/groups", body)
+			if resp.StatusCode != http.StatusCreated {
+				t.Fatalf("CreateGroup %s: expected 201, got %d", name, resp.StatusCode)
+			}
+			var created map[string]any
+			readJSON(t, resp, &created)
+			if got := created["description"]; got != "" {
+				t.Fatalf("CreateGroup %s description = %v (%T), want \"\"", name, got, got)
+			}
+			groupID := created["id"].(string)
+			t.Cleanup(func() {
+				_, _ = testPool.Exec(context.Background(), `DELETE FROM cerebro_group WHERE id = $1`, groupID)
+			})
+
+			// Update path: PATCH with an explicit empty string clears the
+			// description via COALESCE (empty string is non-NULL in SQL).
+			resp = authRequest(t, "PATCH", "/api/groups/"+groupID, map[string]any{
+				"description": "set",
+			})
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("UpdateGroup %s set description: expected 200, got %d", name, resp.StatusCode)
+			}
+			var updated map[string]any
+			readJSON(t, resp, &updated)
+			if updated["description"] != "set" {
+				t.Fatalf("UpdateGroup %s description = %v, want \"set\"", name, updated["description"])
+			}
+
+			resp = authRequest(t, "PATCH", "/api/groups/"+groupID, map[string]any{
+				"description": "",
+			})
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("UpdateGroup %s clear description: expected 200, got %d", name, resp.StatusCode)
+			}
+			readJSON(t, resp, &updated)
+			if updated["description"] != "" {
+				t.Fatalf("UpdateGroup %s cleared description = %v, want \"\"", name, updated["description"])
+			}
+		})
+	}
+}
+
 // TestDeleteWorkspaceRequiresOwner is a defense-in-depth regression test for the
 // permission gate on DELETE /api/workspaces/{id}. It creates a separate workspace
 // in which the integration test user is only an "admin" (not "owner") and asserts

@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
@@ -224,9 +225,45 @@ func (h *Handler) writeServiceError(w http.ResponseWriter, r *http.Request, err 
 	case errors.Is(err, ErrUserNotWorkspaceMember):
 		writeError(w, http.StatusBadRequest, "user is not a workspace member")
 	default:
+		if status, msg, ok := mapPgError(err); ok {
+			writeError(w, status, msg)
+			return
+		}
 		slog.Error("cerebro groups request failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "groups request failed")
 	}
+}
+
+// mapPgError surfaces common postgres constraint violations as 400/409 with a
+// field hint instead of an opaque 500. Without this, a NOT NULL on description
+// (or a unique-name collision) showed up to users as "groups request failed".
+func mapPgError(err error) (int, string, bool) {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return 0, "", false
+	}
+	field := pgErr.ColumnName
+	switch pgErr.Code {
+	case "23502":
+		if field == "" {
+			return http.StatusBadRequest, "missing required field", true
+		}
+		return http.StatusBadRequest, field + " is required", true
+	case "23505":
+		return http.StatusConflict, "a group with that name already exists", true
+	case "22001":
+		return http.StatusBadRequest, "value too long for field" + fieldSuffix(field), true
+	case "23514":
+		return http.StatusBadRequest, "invalid value for field" + fieldSuffix(field), true
+	}
+	return 0, "", false
+}
+
+func fieldSuffix(field string) string {
+	if field == "" {
+		return ""
+	}
+	return " " + field
 }
 
 func workspaceIDFromRequest(w http.ResponseWriter, r *http.Request) (workspaceID pgtype.UUID, ok bool) {

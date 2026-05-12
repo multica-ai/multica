@@ -135,7 +135,7 @@ function CreateGroupForm() {
     try {
       await create.mutateAsync({
         name: trimmed,
-        description: description.trim() || null,
+        description: description.trim(),
       });
       setName("");
       setDescription("");
@@ -196,7 +196,7 @@ function GroupCard({ group, isAdmin }: { group: CerebroGroup; isAdmin: boolean }
     try {
       await update.mutateAsync({
         id: group.id,
-        body: { name: trimmed, description: description.trim() || null },
+        body: { name: trimmed, description: description.trim() },
       });
       setEditing(false);
       toast.success("Group updated");

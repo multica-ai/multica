@@ -238,7 +238,7 @@ describe("GroupsTab", () => {
     await waitFor(() => {
       expect(mockCreateGroup).toHaveBeenCalledWith("ws-1", {
         name: "Design",
-        description: null,
+        description: "",
       });
     });
   });

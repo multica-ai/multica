@@ -66,7 +66,7 @@ func (s *Service) Create(ctx context.Context, workspaceID, actorID pgtype.UUID, 
 	group, err := s.Cerebro.CreateCerebroGroup(ctx, cerebrodb.CreateCerebroGroupParams{
 		WorkspaceID: workspaceID,
 		Name:        name,
-		Description: textFromPtr(description),
+		Description: textOrEmpty(description),
 		CreatedBy:   actorID,
 	})
 	if err != nil {
@@ -196,6 +196,17 @@ func (s *Service) publish(eventType string, workspaceID, actorID pgtype.UUID, pa
 func textFromPtr(s *string) pgtype.Text {
 	if s == nil {
 		return pgtype.Text{}
+	}
+	return pgtype.Text{String: *s, Valid: true}
+}
+
+// textOrEmpty mirrors textFromPtr but treats nil as the empty string instead of
+// SQL NULL, so a missing/null description on create maps to "" — avoids 23502
+// regressions if a NOT NULL constraint ever gets added downstream, and keeps
+// the response shape (`"description": ""`) consistent for empty descriptions.
+func textOrEmpty(s *string) pgtype.Text {
+	if s == nil {
+		return pgtype.Text{String: "", Valid: true}
 	}
 	return pgtype.Text{String: *s, Valid: true}
 }
