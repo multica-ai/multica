@@ -71,6 +71,11 @@ export const viewport: Viewport = {
   // Cover the entire device viewport including notch / home indicator on iOS
   // so installed-PWA pages can opt into safe-area-inset-* via CSS.
   viewportFit: "cover",
+  // Shrink the layout viewport when the on-screen keyboard opens (instead of
+  // the default "resizes-visual" which keeps layout viewport tall and makes
+  // the keyboard overlap content). Combined with our h-svh layout this keeps
+  // the page header pinned and the input row visible above the keyboard.
+  interactiveWidget: "resizes-content",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
     { media: "(prefers-color-scheme: dark)", color: "#05070b" },
