@@ -9,7 +9,10 @@
     "placeholder_no_agent": "Create an agent to start chatting",
     "placeholder_archived": "This session is archived",
     "placeholder_named": "Tell {{name}} what to do…",
-    "placeholder_default": "Tell me what to do…"
+    "placeholder_default": "Tell me what to do…",
+    "_comment": "CEREBRO-PATCH(chat-input-expand): JEH-887 — expand/collapse toggle for chat input",
+    "expand_tooltip": "Expand",
+    "collapse_tooltip": "Collapse"
   },
   "message_list": {
     "show_details": "Show details",

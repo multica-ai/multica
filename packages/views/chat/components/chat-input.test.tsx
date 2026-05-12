@@ -18,6 +18,7 @@ import { forwardRef, useImperativeHandle, type Ref } from "react";
 
 const editorMarkdown = vi.hoisted(() => ({ value: "hello agent" }));
 const lastAutoFocus = vi.hoisted(() => ({ value: undefined as boolean | undefined }));
+const editorFocus = vi.hoisted(() => vi.fn());
 const chatStoreMock = vi.hoisted(() => {
   const setInputDraft = vi.fn();
   const clearInputDraft = vi.fn();
@@ -78,7 +79,7 @@ vi.mock("../../editor", () => {
         },
         uploadFile: () => {},
         blur: () => {},
-        focus: () => {},
+        focus: editorFocus,
       }));
       return (
         <div>
@@ -116,6 +117,7 @@ beforeEach(() => {
   chatStoreMock.state.inputDrafts = {};
   chatStoreMock.setInputDraft.mockClear();
   chatStoreMock.clearInputDraft.mockClear();
+  editorFocus.mockClear();
 });
 
 describe("ChatInput — JEH-330 lock removal", () => {
@@ -202,5 +204,37 @@ describe("ChatInput — JEH-756 autofocus prop wiring", () => {
   it("suppresses autoFocus when no agent is available", () => {
     render(<ChatInput onSend={vi.fn()} autoFocus noAgent />);
     expect(lastAutoFocus.value).toBe(false);
+  });
+});
+
+describe("ChatInput — JEH-887 expand toggle", () => {
+  // The card div is the second child after the outer wrapper. We grab it via
+  // its rounded-lg + bg-card classes so we don't depend on test-id additions
+  // to the upstream-zone JSX.
+  const findCard = (container: HTMLElement) =>
+    container.querySelector(".rounded-lg.bg-card") as HTMLElement;
+
+  it("starts collapsed (max-h-40, no h-[70vh])", () => {
+    const { container } = render(<ChatInput onSend={vi.fn()} />);
+    const card = findCard(container);
+    expect(card.className).toContain("max-h-40");
+    expect(card.className).not.toContain("h-[70vh]");
+  });
+
+  it("expands to 70vh when the toggle is clicked, and collapses again on second click", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<ChatInput onSend={vi.fn()} />);
+    const expandBtn = screen.getByRole("button", { name: /expand|collapse/i });
+
+    await user.click(expandBtn);
+    let card = findCard(container);
+    expect(card.className).toContain("h-[70vh]");
+    expect(card.className).not.toContain("max-h-40");
+    expect(editorFocus).toHaveBeenCalled();
+
+    await user.click(expandBtn);
+    card = findCard(container);
+    expect(card.className).toContain("max-h-40");
+    expect(card.className).not.toContain("h-[70vh]");
   });
 });

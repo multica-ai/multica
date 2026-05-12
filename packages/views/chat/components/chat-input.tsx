@@ -14,7 +14,10 @@ import {
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { Button } from "@multica/ui/components/ui/button";
-import { Square } from "lucide-react";
+// CEREBRO-PATCH(chat-input-expand): JEH-887 — expand toggle imports
+import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+// CEREBRO-PATCH(chat-input-expand): JEH-887 — Maximize2/Minimize2 for the toggle button
+import { Maximize2, Minimize2, Square } from "lucide-react";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -84,6 +87,9 @@ export function ChatInput({
   const setInputDraft = useChatStore((s) => s.setInputDraft);
   const clearInputDraft = useChatStore((s) => s.clearInputDraft);
   const [isEmpty, setIsEmpty] = useState(!inputDraft.trim());
+  // CEREBRO-PATCH(chat-input-expand): JEH-887 — toggle to expand the input
+  // to 70vh, mirroring the issue comment-input expand button.
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const { uploadWithToast } = useFileUpload(api);
   const handleUpload = useCallback(
@@ -150,7 +156,10 @@ export function ChatInput({
       <div
         {...dropZoneProps}
         className={cn(
-          "relative mx-auto flex min-h-16 max-h-40 w-full max-w-4xl flex-col rounded-lg bg-card pb-9 border-1 border-border transition-colors focus-within:border-brand",
+          // CEREBRO-PATCH(chat-input-expand): JEH-887 — height becomes
+          // conditional so the expand toggle can grow the input to 70vh.
+          "relative mx-auto flex min-h-16 w-full max-w-4xl flex-col rounded-lg bg-card pb-9 border-1 border-border transition-colors focus-within:border-brand",
+          isExpanded ? "h-[70vh]" : "max-h-40",
           // Visual + interaction lock when there's no agent. We don't
           // toggle ContentEditor's editable mode (Tiptap can't switch
           // cleanly post-mount, and the prop has been removed); instead
@@ -208,6 +217,29 @@ export function ChatInput({
             onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
           />
           {rightAdornment}
+          {/* CEREBRO-PATCH(chat-input-expand): JEH-887 — expand toggle.
+              Mirrors the issue comment-input button: same icons, same
+              tooltip pattern, same focus-restore behaviour. */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsExpanded((v) => !v);
+                    editorRef.current?.focus();
+                  }}
+                  aria-label={isExpanded ? "Collapse" : "Expand"}
+                  className="rounded-sm p-1.5 text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                >
+                  {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                </button>
+              }
+            />
+            <TooltipContent side="top">
+              {isExpanded ? t(($) => $.input.collapse_tooltip) : t(($) => $.input.expand_tooltip)}
+            </TooltipContent>
+          </Tooltip>
           {isRunning && onStop && (
             <Button
               size="icon-sm"

@@ -8,7 +8,10 @@
     "placeholder_no_agent": "创建一个智能体后才能开始对话",
     "placeholder_archived": "此会话已归档",
     "placeholder_named": "告诉 {{name}} 该做什么...",
-    "placeholder_default": "告诉我该做什么..."
+    "placeholder_default": "告诉我该做什么...",
+    "_comment": "CEREBRO-PATCH(chat-input-expand): JEH-887 — expand/collapse toggle for chat input",
+    "expand_tooltip": "展开",
+    "collapse_tooltip": "收起"
   },
   "message_list": {
     "show_details": "查看详情",
