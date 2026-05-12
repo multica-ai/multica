@@ -99,23 +99,18 @@ function urlTransform(url: string): string {
 // Custom react-markdown components
 // ---------------------------------------------------------------------------
 
-// CEREBRO-PATCH(issue-mention-new-tab): always open issue mentions inside
-// readonly content (comments, descriptions) in a new tab/window with a full
-// https:// href, so the user keeps the current context and right-click →
-// Copy Link returns a shareable URL — Electron's renderer origin would
-// otherwise leak a non-https:// link.
+// CEREBRO-PATCH(issue-mention-new-tab): open issue mentions inside readonly
+// content (comments, descriptions) in a new tab via the relative workspace
+// path, so href resolves against the current origin (sara.local / app.multica.io /
+// localhost) instead of hard-coding `appUrl` — which defaulted to multica.ai
+// on desktop and made the link visibly wrong for cerebro deployments (JEH-1048).
 function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
-  const { openInNewTab, getShareableUrl } = useNavigation();
+  const { openInNewTab } = useNavigation();
   const p = useWorkspacePaths();
   const path = p.issueDetail(issueId);
-  const shareableUrl = getShareableUrl
-    ? getShareableUrl(path)
-    : typeof window !== "undefined"
-      ? window.location.origin + path
-      : path;
   return (
     <a
-      href={shareableUrl}
+      href={path}
       target="_blank"
       rel="noopener noreferrer"
       className="issue-mention not-prose inline-flex"
@@ -123,7 +118,7 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
         e.preventDefault();
         e.stopPropagation();
         if (openInNewTab) openInNewTab(path, label);
-        else window.open(shareableUrl, "_blank", "noopener,noreferrer");
+        else window.open(path, "_blank", "noopener,noreferrer");
       }}
     >
       <IssueChip
