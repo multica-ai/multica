@@ -22,15 +22,14 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service/ship"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // shipHubReleaseFinalizerInterval — every 15 minutes. Releases past
@@ -102,34 +101,50 @@ func runShipHubReleaseFinalizerOnce(
 		slog.Warn("ship hub release finalizer: list past-window failed", "error", err)
 		return
 	}
+	svc := &ship.Service{Q: queries}
+	deps := &ship.StagingDeps{
+		ParentCtx:  ctx,
+		ChannelOps: finalizerOps{queries: queries},
+		Publisher:  finalizerMergePublisher{bus: bus},
+	}
 	for _, rel := range releases {
-		now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
-		updated, err := queries.UpdateReleaseStage(ctx, db.UpdateReleaseStageParams{
-			ID:     rel.ID,
-			Stage:  db.ReleaseStageDone,
-			DoneAt: now,
-		})
+		_, err := svc.MarkReleaseDone(ctx, rel.ID, deps)
 		if err != nil {
 			slog.Warn("ship hub release finalizer: update stage failed",
 				"release_id", util.UUIDToString(rel.ID), "error", err)
 			continue
 		}
-		// Audit row.
-		payload, _ := json.Marshal(map[string]any{
-			"reason": "24h post-deploy window elapsed without rollback",
-		})
-		_, _ = queries.InsertReleaseEvent(ctx, db.InsertReleaseEventParams{
-			ReleaseID:   rel.ID,
-			EventType:   "release_done",
-			ActorUserID: pgtype.UUID{},
-			Payload:     payload,
-		})
-		// WS event so the release page flips without a refresh.
-		if bus != nil {
-			bus.Publish(protocol.EventReleaseUpdated, util.UUIDToString(updated.WorkspaceID), map[string]any{
-				"release_id": util.UUIDToString(updated.ID),
-				"stage":      string(updated.Stage),
-			})
-		}
 	}
+}
+
+type finalizerMergePublisher struct {
+	bus shipHubBusPublisher
+}
+
+func (p finalizerMergePublisher) PublishMergeEvent(eventType, workspaceID string, payload map[string]any) {
+	if p.bus == nil {
+		return
+	}
+	p.bus.Publish(eventType, workspaceID, payload)
+}
+
+type finalizerOps struct {
+	queries *db.Queries
+}
+
+func (o finalizerOps) CreateReleaseChannel(
+	ctx context.Context,
+	workspaceID pgtype.UUID,
+	name, displayName, description string,
+	creator ship.ChannelMember,
+	members []ship.ChannelMember,
+) (db.Channel, error) {
+	return db.Channel{}, nil
+}
+
+func (o finalizerOps) ArchiveReleaseChannel(ctx context.Context, channelID pgtype.UUID) error {
+	if o.queries == nil {
+		return nil
+	}
+	return o.queries.ArchiveChannel(ctx, channelID)
 }

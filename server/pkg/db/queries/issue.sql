@@ -57,6 +57,13 @@ UPDATE issue SET
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateIssueDescription :one
+UPDATE issue SET
+    description = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: CreateIssueWithOrigin :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,

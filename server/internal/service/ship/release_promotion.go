@@ -304,8 +304,15 @@ func (s *Service) LinkProductionDeploy(
 			"stage":      string(updated.Stage),
 		})
 	}
+	if releasePRsAllMerged(ctx, s.Q, releaseID) {
+		finalized, err := s.MarkReleaseDone(ctx, releaseID, deps)
+		if err != nil {
+			return updated, err
+		}
+		return finalized, nil
+	}
 	postReleaseChannelStaging(deps, ctx, updated.ChannelID, fmt.Sprintf(
-		"🟢 Production deploy landed · sha=%s · monitoring health for 24h",
+		"Production deploy landed · sha=%s",
 		shortSHA(deploySHA),
 	))
 	return updated, nil
@@ -384,8 +391,8 @@ func (s *Service) MarkReleaseRollback(
 			// Just log via insertReleaseEvent so the user has a trail
 			// of which PRs failed to mark.
 			_, _ = s.insertReleaseEvent(ctx, releaseID, "warning", requestedBy, map[string]any{
-				"reason":  "mark pr revert pending failed: " + perErr.Error(),
-				"pr_id":   uuidString(row.PullRequestID),
+				"reason": "mark pr revert pending failed: " + perErr.Error(),
+				"pr_id":  uuidString(row.PullRequestID),
 			})
 		}
 	}
@@ -466,6 +473,25 @@ func (s *Service) MarkReleaseDone(
 	if err != nil {
 		return release, fmt.Errorf("update stage to done: %w", err)
 	}
+	if err := s.Q.DeactivateReleasePullRequests(ctx, releaseID); err != nil {
+		_, _ = s.insertReleaseEvent(ctx, releaseID, "warning", pgtype.UUID{}, map[string]any{
+			"reason": "release PR deactivation failed: " + err.Error(),
+		})
+	}
+	if flipped.IssueID.Valid {
+		if err := s.closeReleaseTrackingIssue(ctx, releaseID, flipped.IssueID); err != nil {
+			_, _ = s.insertReleaseEvent(ctx, releaseID, "warning", pgtype.UUID{}, map[string]any{
+				"reason": "issue close failed: " + err.Error(),
+			})
+		}
+	}
+	if flipped.ChannelID.Valid && deps != nil && deps.ChannelOps != nil {
+		if err := deps.ChannelOps.ArchiveReleaseChannel(ctx, flipped.ChannelID); err != nil {
+			_, _ = s.insertReleaseEvent(ctx, releaseID, "warning", pgtype.UUID{}, map[string]any{
+				"reason": "channel archive failed: " + err.Error(),
+			})
+		}
+	}
 	_, _ = s.insertReleaseEvent(ctx, releaseID, "release_done", pgtype.UUID{}, map[string]any{
 		"done_at": deps.now().Format(time.RFC3339),
 	})
@@ -476,8 +502,50 @@ func (s *Service) MarkReleaseDone(
 		})
 	}
 	postReleaseChannelStaging(deps, ctx, flipped.ChannelID,
-		"✅ Release closed · 24h post-deploy window elapsed without rollback")
+		"Release closed · production deployed and all release PRs are merged")
 	return flipped, nil
+}
+
+func releasePRsAllMerged(ctx context.Context, q *db.Queries, releaseID pgtype.UUID) bool {
+	rows, err := q.ListReleasePullRequests(ctx, releaseID)
+	if err != nil || len(rows) == 0 {
+		return false
+	}
+	for _, row := range rows {
+		if row.State != db.PullRequestStateMerged && row.MembershipMergeState != db.PrMergeStateMerged {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Service) closeReleaseTrackingIssue(ctx context.Context, releaseID, issueID pgtype.UUID) error {
+	issue, err := s.Q.GetIssue(ctx, issueID)
+	if err != nil {
+		return err
+	}
+	if issue.Description.Valid && issue.Description.String != "" {
+		checked := strings.ReplaceAll(issue.Description.String, "- [ ] #", "- [x] #")
+		if checked != issue.Description.String {
+			if _, err := s.Q.UpdateIssueDescription(ctx, db.UpdateIssueDescriptionParams{
+				ID:          issueID,
+				Description: pgtype.Text{String: checked, Valid: true},
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	_, err = s.Q.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:     issueID,
+		Status: "done",
+	})
+	if err == nil {
+		_, _ = s.insertReleaseEvent(ctx, releaseID, "issue_closed", pgtype.UUID{}, map[string]any{
+			"issue_id": uuidString(issueID),
+			"status":   "done",
+		})
+	}
+	return err
 }
 
 // shortSHA truncates a SHA to its 7-char abbreviation. Returns the

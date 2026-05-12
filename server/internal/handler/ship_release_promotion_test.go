@@ -450,6 +450,76 @@ func TestMarkReleaseDone_FromInProduction(t *testing.T) {
 	}
 }
 
+func TestMarkReleaseDone_ClosesTrackingIssueAndFreesPRs(t *testing.T) {
+	enablePromotionTest(t)
+	projectID := createShipProject(t, "https://github.com/multica-ai/done-tracking")
+	releaseID := seedReleaseVerifying(t, projectID, "main-sha-7d-track", "low")
+	prID := seedRollbackPR(t, projectID, releaseID, 1, "merged")
+	issueID := seedReleaseTrackingIssue(t, projectID, "- [ ] #1 — Track me (@tester)\n")
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE ship_release
+		 SET stage = 'in_production', promoted_at = NOW(), issue_id = $2
+		 WHERE id = $1`,
+		releaseID, issueID); err != nil {
+		t.Fatalf("seed in_production issue: %v", err)
+	}
+
+	svc := &ship.Service{Q: testHandler.Queries}
+	deps := &ship.StagingDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
+	updated, err := svc.MarkReleaseDone(context.Background(), parseUUID(releaseID), deps)
+	if err != nil {
+		t.Fatalf("MarkReleaseDone: %v", err)
+	}
+	if updated.Stage != db.ReleaseStageDone {
+		t.Fatalf("expected stage=done, got %q", updated.Stage)
+	}
+
+	var status, description string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT status, description FROM issue WHERE id = $1`, issueID).Scan(&status, &description); err != nil {
+		t.Fatalf("read issue: %v", err)
+	}
+	if status != "done" {
+		t.Fatalf("expected issue status done, got %q", status)
+	}
+	if !strings.Contains(description, "- [x] #1") {
+		t.Fatalf("expected checked release checklist, got %q", description)
+	}
+	var active bool
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT is_active FROM ship_release_pull_request WHERE release_id = $1 AND pull_request_id = $2`,
+		releaseID, prID).Scan(&active); err != nil {
+		t.Fatalf("read release membership: %v", err)
+	}
+	if active {
+		t.Fatalf("expected release PR membership inactive after done")
+	}
+}
+
+func TestLinkProductionDeploy_AllPRsMergedAutoFinalizes(t *testing.T) {
+	enablePromotionTest(t)
+	projectID := createShipProject(t, "https://github.com/multica-ai/link-prod-done")
+	releaseID := seedReleaseVerifying(t, projectID, "main-sha-7d-autodone", "low")
+	seedRollbackPR(t, projectID, releaseID, 1, "merged")
+
+	svc := &ship.Service{Q: testHandler.Queries}
+	deps := &ship.StagingDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
+	if _, err := svc.PromoteRelease(context.Background(),
+		parseUUID(releaseID), parseUUID(testUserID), ship.ApprovalContext{}, deps); err != nil {
+		t.Fatalf("PromoteRelease setup: %v", err)
+	}
+	deployID := seedProductionDeploy(t, projectID, "main-sha-7d-autodone")
+
+	updated, err := svc.LinkProductionDeploy(context.Background(),
+		parseUUID(releaseID), parseUUID(deployID), "main-sha-7d-autodone", deps)
+	if err != nil {
+		t.Fatalf("LinkProductionDeploy: %v", err)
+	}
+	if updated.Stage != db.ReleaseStageDone {
+		t.Fatalf("expected stage=done, got %q", updated.Stage)
+	}
+}
+
 // TestUpsertReleaseHealth_Idempotent — two writes for the same release
 // produce one row with the latest values.
 func TestUpsertReleaseHealth_Idempotent(t *testing.T) {
@@ -553,4 +623,44 @@ func seedRollbackPR(t *testing.T, projectID, releaseID string, position int, mer
 		t.Fatalf("seed membership: %v", err)
 	}
 	return prID
+}
+
+func seedReleaseTrackingIssue(t *testing.T, projectID, description string) string {
+	t.Helper()
+	number, err := testHandler.Queries.IncrementIssueCounter(context.Background(), parseUUID(testWorkspaceID))
+	if err != nil {
+		t.Fatalf("increment issue counter: %v", err)
+	}
+	var issueID string
+	if err := testPool.QueryRow(context.Background(),
+		`INSERT INTO issue
+			(workspace_id, title, description, status, priority, creator_type, creator_id, position, number, project_id)
+		 VALUES ($1, 'release tracking', $2, 'in_progress', 'medium', 'member', $3, 0, $4, $5)
+		 RETURNING id`,
+		testWorkspaceID, description, testUserID, number, projectID).Scan(&issueID); err != nil {
+		t.Fatalf("seed release tracking issue: %v", err)
+	}
+	return issueID
+}
+
+func seedProductionDeploy(t *testing.T, projectID, sha string) string {
+	t.Helper()
+	if err := testPool.QueryRow(context.Background(),
+		`INSERT INTO deploy_environment (workspace_id, project_id, kind, name, target_branch)
+		 VALUES ($1, $2, 'production', 'production', 'main')
+		 ON CONFLICT (project_id, kind) DO UPDATE SET name = EXCLUDED.name
+		 RETURNING id`,
+		testWorkspaceID, projectID).Scan(new(string)); err != nil {
+		t.Fatalf("seed prod env: %v", err)
+	}
+	var deployID string
+	if err := testPool.QueryRow(context.Background(),
+		`INSERT INTO deploy (workspace_id, environment_id, ref, sha, status)
+		 SELECT $1, id, 'main', $3, 'succeeded'
+		 FROM deploy_environment WHERE workspace_id = $1 AND project_id = $2 AND kind = 'production'
+		 RETURNING id`,
+		testWorkspaceID, projectID, sha).Scan(&deployID); err != nil {
+		t.Fatalf("seed prod deploy: %v", err)
+	}
+	return deployID
 }
