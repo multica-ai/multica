@@ -152,7 +152,7 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] 
 
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "issues", labelKey: "issues", icon: ListTodo },
-  { key: "projects", labelKey: "projects", icon: FolderKanban },
+  // CEREBRO-PATCH(no-duplicate-projects-nav): JEH-1004 — Projects entry moved to the nested-projects Collapsible block below.
   // CEREBRO-PATCH(sidebar-documents-nav): workspace documents page
   { key: "documents", labelKey: "documents", icon: FileText },
   { key: "autopilots", labelKey: "autopilots", icon: Zap },
