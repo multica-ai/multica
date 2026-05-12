@@ -110,6 +110,7 @@
     "prop_status": "Status",
     "prop_priority": "Priority",
     "prop_assignee": "Assignee",
+    "prop_captain": "Captain",
     "prop_due_date": "Due date",
     "prop_project": "Project",
     "prop_labels": "Labels",
@@ -151,6 +152,9 @@
     "assigned_to": "assigned to {{name}}",
     "removed_assignee": "removed assignee",
     "changed_assignee": "changed assignee",
+    "set_captain_to": "set captain to {{name}}",
+    "removed_captain": "removed captain",
+    "changed_captain": "changed captain",
     "status_changed": "changed status from {{from}} to {{to}}",
     "priority_changed": "changed priority from {{from}} to {{to}}",
     "due_date_set": "set due date to {{date}}",
@@ -288,6 +292,11 @@
       "trigger_unassigned": "Unassigned",
       "search_placeholder": "Assign to...",
       "members_group": "Members",
+      "agents_group": "Agents"
+    },
+    "captain": {
+      "trigger_no_captain": "No captain",
+      "search_placeholder": "Set captain to...",
       "agents_group": "Agents"
     },
     "due_date": {

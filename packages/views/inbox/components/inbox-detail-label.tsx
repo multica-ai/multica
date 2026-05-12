@@ -16,6 +16,7 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     issue_assigned: t(($) => $.types.issue_assigned),
     unassigned: t(($) => $.types.unassigned),
     assignee_changed: t(($) => $.types.assignee_changed),
+    captain_changed: t(($) => $.types.captain_changed),
     status_changed: t(($) => $.types.status_changed),
     priority_changed: t(($) => $.types.priority_changed),
     due_date_changed: t(($) => $.types.due_date_changed),
@@ -82,6 +83,12 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
         return <span>{t(($) => $.labels.assigned_to, { name: getActorName(details.new_assignee_type ?? "member", details.new_assignee_id) })}</span>;
       }
       return <span>{typeLabels[item.type]}</span>;
+    }
+    case "captain_changed": {
+      if (details.new_captain_id) {
+        return <span>{t(($) => $.labels.set_captain_to, { name: getActorName(details.new_captain_type ?? "agent", details.new_captain_id) })}</span>;
+      }
+      return <span>{t(($) => $.labels.removed_captain)}</span>;
     }
     case "due_date_changed": {
       if (details.to) return <span>{t(($) => $.labels.set_due_date_to, { date: shortDate(details.to) })}</span>;

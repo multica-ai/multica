@@ -42,7 +42,7 @@ import type { Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueReque
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
+import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, CaptainPicker, LabelPicker } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
@@ -126,6 +126,14 @@ function formatActivity(
       if (toName) return t(($) => $.activity.assigned_to, { name: toName });
       if (details.from_id && !details.to_id) return t(($) => $.activity.removed_assignee);
       return t(($) => $.activity.changed_assignee);
+    }
+    case "captain_changed": {
+      const toName = details.to_id && details.to_type && resolveActorName
+        ? resolveActorName(details.to_type, details.to_id)
+        : null;
+      if (toName) return t(($) => $.activity.set_captain_to, { name: toName });
+      if (details.from_id && !details.to_id) return t(($) => $.activity.removed_captain);
+      return t(($) => $.activity.changed_captain);
     }
     case "due_date_changed": {
       if (!details.to) return t(($) => $.activity.due_date_removed);
@@ -881,6 +889,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
+          </PropRow>
+          <PropRow label={t(($) => $.detail.prop_captain)}>
+            <CaptainPicker captainType={issue.captain_type} captainId={issue.captain_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_due_date)}>
             <DueDatePicker dueDate={issue.due_date} onUpdate={handleUpdateField} />

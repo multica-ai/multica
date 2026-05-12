@@ -109,6 +109,7 @@
     "prop_status": "状态",
     "prop_priority": "优先级",
     "prop_assignee": "负责人",
+    "prop_captain": "舵手",
     "prop_due_date": "截止日期",
     "prop_project": "项目",
     "prop_labels": "标签",
@@ -150,6 +151,9 @@
     "assigned_to": "分配给 {{name}}",
     "removed_assignee": "移除了负责人",
     "changed_assignee": "更改了负责人",
+    "set_captain_to": "将舵手设为 {{name}}",
+    "removed_captain": "移除了舵手",
+    "changed_captain": "更改了舵手",
     "status_changed": "状态从 {{from}} 改为 {{to}}",
     "priority_changed": "优先级从 {{from}} 改为 {{to}}",
     "due_date_set": "截止日期设为 {{date}}",
@@ -279,6 +283,11 @@
       "trigger_unassigned": "未分配",
       "search_placeholder": "分配给...",
       "members_group": "成员",
+      "agents_group": "智能体"
+    },
+    "captain": {
+      "trigger_no_captain": "无舵手",
+      "search_placeholder": "设置舵手为...",
       "agents_group": "智能体"
     },
     "due_date": {
