@@ -27,11 +27,12 @@ WHERE id = $1 AND workspace_id = $2;
 
 -- name: ListActiveReleasesByWorkspace :many
 -- "Active" = anything not yet in a terminal stage. Drives the home-page
--- "Active releases" rail. Newest activity first.
+-- "Active releases" rail. Most recently deployed first: production deploy
+-- time (promoted_at) beats staging (staged_at) beats creation time.
 SELECT * FROM ship_release
 WHERE workspace_id = $1
   AND stage NOT IN ('done', 'rolled_back', 'cancelled')
-ORDER BY updated_at DESC;
+ORDER BY COALESCE(promoted_at, staged_at, created_at) DESC;
 
 -- name: ListReleasesByProject :many
 -- Project-scoped list, defaults to active stages. Pass include_terminal=TRUE

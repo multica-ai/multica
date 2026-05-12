@@ -729,11 +729,11 @@ const listActiveReleasesByWorkspace = `-- name: ListActiveReleasesByWorkspace :m
 SELECT id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method, smoke_run_id, smoke_run_url, smoke_status, smoke_completed_at, qa_verified_at, qa_verified_by, merged_main_sha, promoted_by, production_main_sha, rolled_back_by, rolled_back_completed_at FROM ship_release
 WHERE workspace_id = $1
   AND stage NOT IN ('done', 'rolled_back', 'cancelled')
-ORDER BY updated_at DESC
+ORDER BY COALESCE(promoted_at, staged_at, created_at) DESC
 `
 
 // "Active" = anything not yet in a terminal stage. Drives the home-page
-// "Active releases" rail. Newest activity first.
+// "Active releases" rail. Most recently deployed first.
 func (q *Queries) ListActiveReleasesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ShipRelease, error) {
 	rows, err := q.db.Query(ctx, listActiveReleasesByWorkspace, workspaceID)
 	if err != nil {

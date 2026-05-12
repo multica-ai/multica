@@ -64,6 +64,39 @@ function Wrapper({ children }: { children: ReactNode }) {
   );
 }
 
+function makeRelease(
+  overrides: Partial<ListReleasesResponse["releases"][number]> & {
+    id: string;
+    title: string;
+  },
+): ListReleasesResponse["releases"][number] {
+  return {
+    workspace_id: "ws-1",
+    project_id: "p-1",
+    description: null,
+    stage: "assembling",
+    risk_level: "medium",
+    channel_id: null,
+    issue_id: null,
+    approver_id: null,
+    second_approver_id: null,
+    staging_deploy_id: null,
+    production_deploy_id: null,
+    created_by: null,
+    created_at: "2026-05-01T10:00:00Z",
+    updated_at: "2026-05-01T10:00:00Z",
+    merged_at: null,
+    staged_at: null,
+    promoted_at: null,
+    done_at: null,
+    rollback_reason: null,
+    pr_count: 1,
+    merge_paused: false,
+    merge_method: "merge",
+    ...overrides,
+  };
+}
+
 describe("ShipActiveReleasesRail", () => {
   it("renders nothing when there are no active releases", () => {
     activeReleasesFixture = { releases: [] };
@@ -75,39 +108,66 @@ describe("ShipActiveReleasesRail", () => {
 
   it("renders one card per release with a workspace-scoped View link", () => {
     activeReleasesFixture = {
-      releases: [
-        {
-          id: "rel-1",
-          workspace_id: "ws-1",
-          project_id: "p-1",
-          title: "May rollout",
-          description: null,
-          stage: "assembling",
-          risk_level: "medium",
-          channel_id: null,
-          issue_id: null,
-          approver_id: null,
-          second_approver_id: null,
-          staging_deploy_id: null,
-          production_deploy_id: null,
-          created_by: null,
-          created_at: "",
-          updated_at: "",
-          merged_at: null,
-          staged_at: null,
-          promoted_at: null,
-          done_at: null,
-          rollback_reason: null,
-          pr_count: 3,
-          merge_paused: false,
-          merge_method: "merge",
-        },
-      ],
+      releases: [makeRelease({ id: "rel-1", title: "May rollout", pr_count: 3 })],
     };
     render(<ShipActiveReleasesRail />, { wrapper: Wrapper });
     expect(screen.getByText("May rollout")).toBeInTheDocument();
     expect(screen.getByText(/3 PRs/)).toBeInTheDocument();
     const link = screen.getByTestId("ship-active-release-view");
     expect(link).toHaveAttribute("href", "/acme/ship/release/rel-1");
+  });
+
+  it("shows promoted_at as the deployment timestamp when set", () => {
+    activeReleasesFixture = {
+      releases: [
+        makeRelease({
+          id: "rel-1",
+          title: "Prod release",
+          staged_at: "2026-05-09T10:00:00Z",
+          promoted_at: "2026-05-09T14:30:00Z",
+        }),
+      ],
+    };
+    render(<ShipActiveReleasesRail />, { wrapper: Wrapper });
+    const timeEl = document.querySelector("time");
+    expect(timeEl).not.toBeNull();
+    expect(timeEl?.getAttribute("dateTime")).toBe("2026-05-09T14:30:00Z");
+  });
+
+  it("falls back to staged_at when promoted_at is absent", () => {
+    activeReleasesFixture = {
+      releases: [
+        makeRelease({
+          id: "rel-1",
+          title: "Staging release",
+          staged_at: "2026-05-09T10:00:00Z",
+          promoted_at: null,
+        }),
+      ],
+    };
+    render(<ShipActiveReleasesRail />, { wrapper: Wrapper });
+    const timeEl = document.querySelector("time");
+    expect(timeEl?.getAttribute("dateTime")).toBe("2026-05-09T10:00:00Z");
+  });
+
+  it("sorts cards by deployment time, newest first", () => {
+    activeReleasesFixture = {
+      releases: [
+        makeRelease({
+          id: "rel-old",
+          title: "Old release",
+          promoted_at: "2026-05-01T08:00:00Z",
+        }),
+        makeRelease({
+          id: "rel-new",
+          title: "New release",
+          promoted_at: "2026-05-10T16:00:00Z",
+        }),
+      ],
+    };
+    render(<ShipActiveReleasesRail />, { wrapper: Wrapper });
+    const cards = screen.getAllByTestId("ship-active-release-card");
+    expect(cards[0]).toHaveTextContent("New release");
+    expect(cards[1]).toHaveTextContent("Old release");
   });
 });

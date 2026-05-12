@@ -13,12 +13,42 @@ import { useActiveReleases, useCollapsedProjects } from "@multica/core/ship";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useT } from "../../i18n";
 import { AppLink } from "../../navigation";
+import type { Release } from "@multica/core/types";
+
+/** Returns the most significant deployment timestamp for a release:
+ *  production deploy (promoted_at) > staging deploy (staged_at) > creation. */
+function releaseDeployedAt(r: Pick<Release, "promoted_at" | "staged_at" | "created_at">): string {
+  return r.promoted_at ?? r.staged_at ?? r.created_at;
+}
+
+/** Compact absolute timestamp: "May 9, 3:42 PM". Drops the year for the
+ *  current year since active releases are always recent. */
+function formatDeployedAt(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: d.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined,
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 export function ShipActiveReleasesRail() {
   const { t } = useT("ship");
   const workspace = useCurrentWorkspace();
   const { data, isLoading } = useActiveReleases(true);
-  const releases = data?.releases ?? [];
+  const rawReleases = data?.releases ?? [];
+  // Sort newest-deployed first so the most recently promoted/staged release
+  // appears at the top. Mirrors the backend ORDER BY but guards against any
+  // cache entries delivered in an older order.
+  const releases = [...rawReleases].sort(
+    (a, b) =>
+      new Date(releaseDeployedAt(b)).getTime() -
+      new Date(releaseDeployedAt(a)).getTime(),
+  );
   const collapsed = useCollapsedProjects((s) => s.activeReleasesCollapsed);
   const toggleActiveReleases = useCollapsedProjects(
     (s) => s.toggleActiveReleases,
@@ -94,6 +124,12 @@ export function ShipActiveReleasesRail() {
                     <span aria-hidden>·</span>
                     <span className="capitalize">{release.risk_level}</span>
                   </div>
+                  <time
+                    dateTime={releaseDeployedAt(release)}
+                    className="mt-0.5 block text-xs text-muted-foreground"
+                  >
+                    {formatDeployedAt(releaseDeployedAt(release))}
+                  </time>
                   {slug && (
                     <AppLink
                       href={`/${slug}/ship/release/${release.id}`}
