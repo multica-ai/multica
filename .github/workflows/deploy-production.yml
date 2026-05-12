@@ -74,6 +74,19 @@ jobs:
           # bump this.
           fetch-depth: 1
 
+      - name: Capture build SHA for /build_info injection
+        # The Go binary embeds main.commit via -ldflags so the
+        # /build_info endpoint can report what's actually running.
+        # We compute the SHA from the checked-out workdir (so a
+        # workflow_dispatch with a custom input.sha gets the SHA
+        # that was actually checked out, not whatever main is at
+        # right now). docker-compose.selfhost.build.yml reads
+        # MULTICA_BUILD_COMMIT as a build arg.
+        run: |
+          SHA="$(git rev-parse HEAD)"
+          echo "MULTICA_BUILD_COMMIT=${SHA}" >> "$GITHUB_ENV"
+          echo "Build SHA: ${SHA}"
+
       - name: Materialize operator .env from stable host path
         # actions/checkout wipes untracked files in the workdir on
         # every run, including any .env the operator dropped there
@@ -272,6 +285,50 @@ jobs:
           export PATH="${DOCKER_PATH_EXTRAS}:${PATH}"
           docker compose ${COMPOSE_FILES} logs --tail 50 backend frontend || true
           exit 1
+
+      - name: Verify build SHA matches the running container
+        # Post-health-check assertion that the backend container is
+        # actually serving the SHA we just built — not a stale image
+        # from a half-finished prior deploy. Closes the 2026-05-12
+        # 17:06 UTC failure mode where env.current_sha showed e72c66dd
+        # but the host was actually running ea58198.
+        #
+        # We curl the backend's /build_info endpoint (unauthenticated,
+        # returns {commit, version, go_version}) from the runner's
+        # localhost. If the commit doesn't match MULTICA_BUILD_COMMIT,
+        # the deploy fails — the runtime answer wins, the workflow's
+        # belief about what was deployed does not.
+        run: |
+          if [ -f .env ]; then
+            set -o allexport
+            # shellcheck disable=SC1091
+            . ./.env
+            set +o allexport
+          fi
+          BACKEND_HOST_PORT="${PORT:-8080}"
+          # Poll briefly — backend might be up but /build_info is at the
+          # tail end of its initialization. 10x 1s is more than enough.
+          for i in $(seq 1 10); do
+            running_commit=$(curl -s "http://localhost:${BACKEND_HOST_PORT}/build_info" \
+                              | grep -o '"commit":"[^"]*"' \
+                              | cut -d'"' -f4 || true)
+            if [ -n "$running_commit" ]; then break; fi
+            sleep 1
+          done
+          if [ -z "$running_commit" ]; then
+            echo "::error::Could not read /build_info from running backend after 10s"
+            exit 1
+          fi
+          if [ "$running_commit" = "unknown" ]; then
+            echo "::error::Backend reports commit='unknown' — image was built without -ldflags injection. Refusing to mark deploy successful."
+            exit 1
+          fi
+          if [ "$running_commit" != "$MULTICA_BUILD_COMMIT" ]; then
+            echo "::error::Build SHA mismatch! Workflow deployed ${MULTICA_BUILD_COMMIT} but container serves ${running_commit}"
+            echo "This is the 2026-05-12 stale-container failure mode. Refusing to mark deploy successful."
+            exit 1
+          fi
+          echo "Verified: running container serves ${running_commit} (matches deploy target)"
 
       - name: Mark deployment success
         if: success() && steps.deployment.outputs.deployment_id

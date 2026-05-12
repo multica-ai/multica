@@ -178,6 +178,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Get("/readyz", health.readyHandler)
 	r.Get("/healthz", health.readyHandler)
 
+	// Build info — exposes the compile-time-baked git SHA + version so
+	// the deploy workflow can verify the running container actually
+	// serves the SHA that was just built. Closes the
+	// "deploy succeeded but container runs stale code" class
+	// (incident 2026-05-12 17:06 UTC).
+	//
+	// Unauthenticated by design — the deploy workflow on the runner
+	// needs to hit this with a plain curl post-deploy, and the data
+	// (git SHA, version string) is non-sensitive (readable from the
+	// binary anyway via `strings $(which multica) | grep -F 'commit='`).
+	r.Get("/build_info", buildInfoHandler())
+
 	// Realtime subsystem metrics — connection counts, slow-client evictions,
 	// and per-event-type send QPS counters. Exposed as JSON so it can be
 	// scraped by ops or surfaced in the admin UI without adding a Prometheus

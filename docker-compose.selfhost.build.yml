@@ -7,6 +7,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # Inject the git commit SHA into the binary at build time so the
+      # `/build_info` endpoint can report what's actually running. The
+      # deploy workflow sets MULTICA_BUILD_COMMIT to the deployed SHA;
+      # local `make` invocations leave it empty and the binary falls
+      # back to "unknown" (see main.go).
+      args:
+        COMMIT: ${MULTICA_BUILD_COMMIT:-unknown}
+        VERSION: ${MULTICA_BUILD_VERSION:-dev}
 
   frontend:
     image: multica-web:dev
