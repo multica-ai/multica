@@ -34,6 +34,8 @@ import { Button } from "@multica/ui/components/ui/button";
 // CEREBRO-PATCH(issue-detail-cerebro-extras): sticky-bottom + jump-to-latest from cerebro-ui
 import { useStickyBottom } from "@multica/cerebro-ui/hooks/use-sticky-bottom";
 import { JumpToLatestButton } from "@multica/cerebro-ui/components/jump-to-latest-button";
+// CEREBRO-PATCH(issue-detail-highlight-scroll-hook): JEH-1002 retry-based inbox→comment scroll lives in cerebro-ui (replaces the prior single-shot inline effect).
+import { useHighlightCommentScroll } from "@multica/cerebro-ui/hooks/use-highlight-comment-scroll";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -473,7 +475,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { isAtBottom, scrollToBottom } = useStickyBottom(scrollContainerRef, {
     initialScroll: false,
   });
-  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  // CEREBRO-PATCH(issue-detail-highlight-scroll-hook): see import above (JEH-1002).
+  const highlightedId = useHighlightCommentScroll(highlightCommentId);
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
@@ -494,7 +497,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       return next;
     });
   }, []);
-  const didHighlightRef = useRef<string | null>(null);
 
   // Issue data from TQ — uses detail query, seeded from list cache if available.
   // Only seed when description is present; list API omits it, and ContentEditor
@@ -711,25 +713,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [allChildrenSelected, childIssueIds, deselectIds, selectIds]);
 
   const loading = issueLoading;
-
-  // Jump to highlighted comment once timeline loads. Instant (not smooth) —
-  // a multi-second smooth-scroll animation is exactly the inbox-yank behavior
-  // users hate. The 2s pulse on `highlightedId` is enough to draw the eye.
-  useEffect(() => {
-    if (!highlightCommentId || timeline.length === 0) return;
-    if (didHighlightRef.current === highlightCommentId) return;
-    const el = document.getElementById(`comment-${highlightCommentId}`);
-    if (el) {
-      didHighlightRef.current = highlightCommentId;
-      requestAnimationFrame(() => {
-        // CEREBRO-PATCH(issue-detail-mobile-scroll-to-start): block:start anchors the comment top to the viewport top (JEH-1002). Upstream's block:center leaves visible whitespace above the message on mobile, where vertical space is precious — the result feels "off".
-        el.scrollIntoView({ behavior: "instant", block: "start" });
-        setHighlightedId(highlightCommentId);
-        const timer = setTimeout(() => setHighlightedId(null), 2000);
-        return () => clearTimeout(timer);
-      });
-    }
-  }, [highlightCommentId, timeline.length]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
