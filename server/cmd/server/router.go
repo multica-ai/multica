@@ -25,6 +25,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/feature_flags"
 	// CEREBRO-PATCH(cerebro-groups-routes): JEH-721 group handler import
 	cerebrogroups "github.com/multica-ai/multica/server/internal/cerebro/groups"
+	// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 permission model handler import
+	cerebrogrouppermissions "github.com/multica-ai/multica/server/internal/cerebro/grouppermissions"
 	cerebroinbox "github.com/multica-ai/multica/server/internal/cerebro/inbox"
 	cerebronotifications "github.com/multica-ai/multica/server/internal/cerebro/notifications"
 	// CEREBRO-PATCH(references-routes): JEH-837 issue references handler import.
@@ -186,6 +188,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-groups-routes): JEH-721 workspace groups handler
 	cerebroGroupsHandler := cerebrogroups.New(cerebroQueries, queries, bus)
+	// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 group permission model handler
+	cerebroGroupPermissionsHandler := cerebrogrouppermissions.New(cerebroQueries, queries, bus)
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 workspace accounts handler
 	cerebroAccountHandler := cerebroaccount.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(references-routes): JEH-837 issue references handler instance.
@@ -480,6 +484,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/{id}/members", cerebroGroupsHandler.ListMembers)
 				r.Post("/{id}/members", cerebroGroupsHandler.AddMember)
 				r.Delete("/{id}/members/{userId}", cerebroGroupsHandler.RemoveMember)
+				// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 permission endpoints.
+				r.Get("/{id}/capabilities", cerebroGroupPermissionsHandler.ListCapabilities)
+				r.Post("/{id}/capabilities", cerebroGroupPermissionsHandler.SetCapability)
+				r.Delete("/{id}/capabilities/{capability}", cerebroGroupPermissionsHandler.RemoveCapability)
+				r.Get("/{id}/runtimes", cerebroGroupPermissionsHandler.ListRuntimes)
+				r.Post("/{id}/runtimes", cerebroGroupPermissionsHandler.AddRuntime)
+				r.Delete("/{id}/runtimes/{runtimeId}", cerebroGroupPermissionsHandler.RemoveRuntime)
+				r.Get("/{id}/agents", cerebroGroupPermissionsHandler.ListAgents)
+				r.Post("/{id}/agents", cerebroGroupPermissionsHandler.AddAgent)
+				r.Delete("/{id}/agents/{agentId}", cerebroGroupPermissionsHandler.RemoveAgent)
 			})
 
 			// Issues
@@ -565,6 +579,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/members", h.ListProjectMembers)
 					r.Post("/members", h.AddProjectMember)
 					r.Delete("/members/{userId}", h.RemoveProjectMember)
+					// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 project group access.
+					r.Get("/group-access", cerebroGroupPermissionsHandler.ListProjectGroups)
+					r.Post("/group-access", cerebroGroupPermissionsHandler.AddProjectGroup)
+					r.Delete("/group-access/{groupId}", cerebroGroupPermissionsHandler.RemoveProjectGroup)
 					r.Get("/artifacts", h.ListArtifactsForProject)
 					r.Get("/resources", h.ListProjectResources)
 					r.Post("/resources", h.CreateProjectResource)

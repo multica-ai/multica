@@ -266,11 +266,32 @@ type CerebroGroup struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroGroupAgentAccess struct {
+	GroupID   pgtype.UUID        `json:"group_id"`
+	AgentID   pgtype.UUID        `json:"agent_id"`
+	GrantedBy pgtype.UUID        `json:"granted_by"`
+	GrantedAt pgtype.Timestamptz `json:"granted_at"`
+}
+
+type CerebroGroupCapability struct {
+	GroupID    pgtype.UUID        `json:"group_id"`
+	Capability string             `json:"capability"`
+	GrantedBy  pgtype.UUID        `json:"granted_by"`
+	GrantedAt  pgtype.Timestamptz `json:"granted_at"`
+}
+
 type CerebroGroupMember struct {
 	GroupID pgtype.UUID        `json:"group_id"`
 	UserID  pgtype.UUID        `json:"user_id"`
 	AddedBy pgtype.UUID        `json:"added_by"`
 	AddedAt pgtype.Timestamptz `json:"added_at"`
+}
+
+type CerebroGroupRuntimeAccess struct {
+	GroupID   pgtype.UUID        `json:"group_id"`
+	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	GrantedBy pgtype.UUID        `json:"granted_by"`
+	GrantedAt pgtype.Timestamptz `json:"granted_at"`
 }
 
 type CerebroIssueReference struct {
@@ -286,6 +307,19 @@ type CerebroIssueReference struct {
 	CreatedByID   pgtype.UUID        `json:"created_by_id"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroProjectGroupMember struct {
+	ProjectID pgtype.UUID        `json:"project_id"`
+	GroupID   pgtype.UUID        `json:"group_id"`
+	AddedBy   pgtype.UUID        `json:"added_by"`
+	AddedAt   pgtype.Timestamptz `json:"added_at"`
+}
+
+type CerebroWorkspaceDefaultGroup struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	GroupID     pgtype.UUID        `json:"group_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type ChatMessage struct {
