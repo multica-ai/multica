@@ -8,7 +8,28 @@
 # Frontend: http://localhost:3000
 # Backend:  http://localhost:8080 (also used by CLI/daemon)
 
-name: multica
+# Compose project name. Distinct from `multica` (the project name the
+# dev / worktree compose file uses — see CLAUDE.md "All checkouts share
+# one PostgreSQL container") so that running `make dev` or any
+# `docker compose up postgres` from an arbitrary multica checkout on
+# the same docker engine cannot stomp the prod stack's containers.
+#
+# Why this matters: on a self-hosted runner that ALSO hosts agent task
+# workspaces, every agent workspace is a checkout of this repo with
+# `docker-compose.yml` (the dev compose file). Without a distinct name
+# here, both stacks would compete for the project namespace `multica`,
+# and the next agent `make dev` would tear down + recreate the prod
+# postgres container under the dev spec — outage, port collisions, the
+# works.
+#
+# Override via `MULTICA_SELFHOST_PROJECT` in operator .env if you need
+# the legacy name (e.g. existing installations that haven't migrated).
+#
+# Pre-existing data volumes are preserved via the explicit `name:`
+# attribute on the volumes block below — they keep their literal
+# `multica_pgdata` / `multica_backend_uploads` names regardless of the
+# project rename, so this migration is non-destructive for upgrades.
+name: ${MULTICA_SELFHOST_PROJECT:-multica-prod}
 
 services:
   postgres:
@@ -79,5 +100,14 @@ services:
     restart: unless-stopped
 
 volumes:
+  # Volumes are pinned to their literal names via `name:` so existing
+  # installations that have data under `multica_pgdata` /
+  # `multica_backend_uploads` (created when this stack used
+  # `name: multica`) keep their data after the project rename to
+  # `multica-prod`. Without `name:` here, compose would prefix the
+  # volume with the new project name (`multica-prod_pgdata`) and the
+  # old volume would be orphaned — silent data loss on upgrade.
   pgdata:
+    name: multica_pgdata
   backend_uploads:
+    name: multica_backend_uploads
