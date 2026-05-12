@@ -215,11 +215,22 @@ jobs:
         #   - frontend: ${FRONTEND_PORT:-3000}
         # (postgres no longer publishes a host port — see PR #26.)
         #
+        # **Skip ports held by our OWN multica-prod-* containers.**
+        # Pre-PR #53, the workflow always ran `docker compose down`
+        # before this check, so any port we wanted was free by
+        # definition. PR #53 removed that down to survive cancelled
+        # deploys — but that left this preflight failing on the
+        # workflow's FIRST run after PR #53 landed (own containers
+        # still up, holding the ports). The fix: ignore ports held
+        # by our own project's containers and only fail on truly
+        # foreign holders.
+        #
         # Source the operator's .env first so the values here line up
         # with what docker compose will actually use — otherwise the
         # preflight checks the defaults (3000/8080) even when .env
         # retargets the frontend onto a different host port.
         run: |
+          export PATH="${DOCKER_PATH_EXTRAS}:${PATH}"
           if [ -f .env ]; then
             set -o allexport
             # shellcheck disable=SC1091
@@ -228,16 +239,25 @@ jobs:
           fi
           BACKEND_PORT="${PORT:-8080}"
           FRONTEND_HOST_PORT="${FRONTEND_PORT:-3000}"
+          # Build the set of ports OUR project is already publishing,
+          # so we don't fail the preflight on our own containers.
+          our_ports=$(docker ps --filter "label=com.docker.compose.project=multica-prod" --format '{{.Ports}}' \
+                       | grep -oE '0\.0\.0\.0:[0-9]+' | cut -d: -f2 | sort -u)
           fail=0
           for port in "$BACKEND_PORT" "$FRONTEND_HOST_PORT"; do
             holder=$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | tail -n +2 || true)
-            if [ -n "$holder" ]; then
-              echo "::error::Port $port is already bound on the host:"
-              echo "$holder"
-              fail=1
-            else
+            if [ -z "$holder" ]; then
               echo "Port $port is free."
+              continue
             fi
+            # Is the holder one of our own multica-prod-* containers?
+            if echo "$our_ports" | grep -qx "$port"; then
+              echo "Port $port is held by an existing multica-prod container — OK (compose up will recreate it in place)."
+              continue
+            fi
+            echo "::error::Port $port is bound by something outside our project:"
+            echo "$holder"
+            fail=1
           done
           if [ $fail -eq 1 ]; then
             echo ""
