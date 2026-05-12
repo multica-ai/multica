@@ -130,7 +130,7 @@ func (h *Handler) loadChannelHistoryForTask(ctx context.Context, cm service.Chan
 		}
 	}
 
-	rows, err := h.ChannelMessageService.List(ctx, channel.ListMessagesParams{
+	rows, _, err := h.ChannelMessageService.List(ctx, channel.ListMessagesParams{
 		ChannelID:       channelUUID,
 		BeforeCreatedAt: before,
 		Limit:           channelAgentContextWindow(),

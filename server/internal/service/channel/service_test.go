@@ -558,32 +558,65 @@ func TestMessageList_TopLevelOnlyAndCursor(t *testing.T) {
 	}
 
 	// Top-level view excludes the reply.
-	top, err := testMessageSvc.List(ctx, ListMessagesParams{ChannelID: ch.ID, Limit: 50})
+	top, hasMore, err := testMessageSvc.List(ctx, ListMessagesParams{ChannelID: ch.ID, Limit: 50})
 	if err != nil {
 		t.Fatalf("List: %v", err)
+	}
+	if hasMore {
+		t.Fatalf("hasMore = true, want false for full top-level list")
 	}
 	if len(top) != 3 {
 		t.Fatalf("expected 3 top-level messages, got %d (%+v)", len(top), top)
 	}
 
+	firstPage, hasMore, err := testMessageSvc.List(ctx, ListMessagesParams{ChannelID: ch.ID, Limit: 2})
+	if err != nil {
+		t.Fatalf("List first page: %v", err)
+	}
+	if !hasMore {
+		t.Fatalf("hasMore = false, want true for first limited page")
+	}
+	if len(firstPage) != 2 {
+		t.Fatalf("expected first page length 2, got %d", len(firstPage))
+	}
+	pageCursor := firstPage[len(firstPage)-1].CreatedAt
+	lastPage, hasMore, err := testMessageSvc.List(ctx, ListMessagesParams{
+		ChannelID: ch.ID, BeforeCreatedAt: &pageCursor, Limit: 2,
+	})
+	if err != nil {
+		t.Fatalf("List last page: %v", err)
+	}
+	if hasMore {
+		t.Fatalf("hasMore = true, want false for last limited page")
+	}
+	if len(lastPage) != 1 {
+		t.Fatalf("expected last page length 1, got %d", len(lastPage))
+	}
+
 	// Cursor: "before the oldest message" returns nothing.
 	oldest := top[len(top)-1].CreatedAt
-	older, err := testMessageSvc.List(ctx, ListMessagesParams{
+	older, hasMore, err := testMessageSvc.List(ctx, ListMessagesParams{
 		ChannelID: ch.ID, BeforeCreatedAt: &oldest, Limit: 50,
 	})
 	if err != nil {
 		t.Fatalf("List with cursor: %v", err)
+	}
+	if hasMore {
+		t.Fatalf("hasMore = true, want false for empty older page")
 	}
 	if len(older) != 0 {
 		t.Fatalf("expected empty older page, got %d", len(older))
 	}
 
 	// IncludeThreaded brings the reply back.
-	all, err := testMessageSvc.List(ctx, ListMessagesParams{
+	all, hasMore, err := testMessageSvc.List(ctx, ListMessagesParams{
 		ChannelID: ch.ID, Limit: 50, IncludeThreaded: true,
 	})
 	if err != nil {
 		t.Fatalf("List threaded: %v", err)
+	}
+	if hasMore {
+		t.Fatalf("hasMore = true, want false for threaded full list")
 	}
 	if len(all) != 4 {
 		t.Fatalf("expected 4 messages incl. reply, got %d", len(all))
@@ -642,7 +675,7 @@ func TestSoftDeleteOldMessages(t *testing.T) {
 	}
 
 	// Top-level list excludes soft-deleted rows.
-	visible, err := testMessageSvc.List(ctx, ListMessagesParams{ChannelID: ch.ID, Limit: 50})
+	visible, _, err := testMessageSvc.List(ctx, ListMessagesParams{ChannelID: ch.ID, Limit: 50})
 	if err != nil {
 		t.Fatalf("List after sweep: %v", err)
 	}
@@ -767,7 +800,7 @@ func TestRunRetentionSweep_RetainForeverSkips(t *testing.T) {
 	}
 
 	// Belt-and-braces: the ancient message is still visible.
-	visible, _ := testMessageSvc.List(ctx, ListMessagesParams{ChannelID: ch.ID, Limit: 50})
+	visible, _, _ := testMessageSvc.List(ctx, ListMessagesParams{ChannelID: ch.ID, Limit: 50})
 	if len(visible) != 1 {
 		t.Fatalf("expected the ancient message to remain visible, got %d", len(visible))
 	}
