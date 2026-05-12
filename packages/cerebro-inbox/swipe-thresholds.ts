@@ -13,12 +13,19 @@
  *        firing when the browser committed to native vertical scroll mid-
  *        gesture, giving an "on/off" feel where the row sometimes tracked
  *        and sometimes didn't.
- *  - v4 (current): native TouchEvent listeners with `{ passive: false }` so
- *        we can `preventDefault()` once the gesture is horizontal — the
- *        textbook fix for iOS Safari's pointer-handoff. Commit dropped to
- *        35% to match Gmail's actual feel; click is also suppressed on any
+ *  - v4: native TouchEvent listeners with `{ passive: false }` so we can
+ *        `preventDefault()` once the gesture is horizontal — the textbook
+ *        fix for iOS Safari's pointer-handoff. Commit dropped to 35% to
+ *        match Gmail's actual feel; click is also suppressed on any
  *        meaningful swipe attempt (>16 px), not just on commit, so a tiny
  *        swipe that springs back doesn't navigate the user into the issue.
+ *  - v5 (current): timestamp-based click suppression. v4 used a boolean
+ *        "swipeJustCompleted" flag reset by the synthetic click — but iOS
+ *        Safari doesn't fire a click after a real drag, so the flag stayed
+ *        stuck and swallowed the user's NEXT tap on the reveal panel
+ *        (mute / mark-unread "did nothing"). Replaced with a timestamp
+ *        window so the flag self-clears after `POST_SWIPE_CLICK_SUPPRESS_MS`
+ *        regardless of whether the synthetic click ever fires.
  *
  * Sources:
  *  - "Pointer events vs touch events for swipe" — react-swipeable's README
@@ -36,6 +43,17 @@ export const SWIPE_COMMIT_MAX_PX = 200;
  * cross the commit threshold. Without this, a tiny swipe that springs back
  * would still trigger the row's onClick and navigate the user away. */
 export const SWIPE_INTENT_PX = 16;
+
+/** Milliseconds after a swipe ends during which we still suppress the
+ * synthetic click on the row. iOS Safari only fires a synthetic click for
+ * tap-like touch sequences — once a touch has enough movement to count as
+ * a drag, no click is dispatched. The previous boolean "did we just swipe"
+ * flag relied on the click firing to reset itself, so when no click ever
+ * arrived (the common case after a real swipe) the flag stayed stuck and
+ * swallowed the user's NEXT real tap — e.g. on the swipe-left reveal
+ * panel's mark-unread / mute buttons. A timestamp window lets the flag
+ * age out on its own, making tap-after-swipe reliable. */
+export const POST_SWIPE_CLICK_SUPPRESS_MS = 350;
 
 /** Total movement before we decide which axis dominates. Below this, we
  * wait — the very first sample of a touch is noisy. */

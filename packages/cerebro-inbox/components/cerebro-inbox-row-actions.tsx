@@ -39,6 +39,7 @@ import {
   DIRECTION_DECIDE_PX,
   LEFT_PANEL_REVEAL_PX,
   LONG_PRESS_MS,
+  POST_SWIPE_CLICK_SUPPRESS_MS,
   SWIPE_INTENT_PX,
   commitThresholdPx,
 } from "../swipe-thresholds";
@@ -288,12 +289,16 @@ function MobileRowActions({
   // Tracks whether the gesture is still in flight so the transform effect
   // can decide whether to apply a snap-back transition on release.
   const gestureActiveRef = useRef(false);
-  // Set true after touchend if any meaningful horizontal motion happened
-  // (commit OR partial swipe). The synthetic click that mobile Safari
-  // dispatches after the touch sequence is then swallowed by the parent
-  // shell's capture-phase click listener so the row's onClick (navigation)
-  // doesn't fire on a swipe attempt.
-  const swipeJustCompletedRef = useRef(false);
+  // Timestamp (ms-since-epoch) of the most recent touchend with meaningful
+  // horizontal motion. The parent shell's capture-phase click listener
+  // suppresses clicks that arrive within POST_SWIPE_CLICK_SUPPRESS_MS of
+  // this stamp, so the synthetic click iOS Safari sometimes fires after a
+  // swipe doesn't navigate the user into the issue. Using a timestamp
+  // instead of a boolean is critical: when the gesture has enough movement
+  // to count as a drag, iOS Safari does NOT fire a synthetic click at all,
+  // so a boolean flag never gets reset by the swallow path — it stays
+  // stuck-true and eats the user's NEXT tap on the reveal panel.
+  const swipeEndedAtRef = useRef(0);
 
   // Stable refs for callbacks so the touch-event effect doesn't have to
   // re-attach listeners on every render — listener re-attachment in the
@@ -404,7 +409,7 @@ function MobileRowActions({
       // otherwise a partial swipe that springs back navigates the user
       // into the issue, which feels like the gesture didn't work at all.
       if (Math.abs(live) > SWIPE_INTENT_PX) {
-        swipeJustCompletedRef.current = true;
+        swipeEndedAtRef.current = Date.now();
       }
 
       if (live >= commitPx) {
@@ -433,15 +438,17 @@ function MobileRowActions({
   }, [setOffsetX]);
 
   // Capture-phase click listener on the parent shell <button>: when a
-  // meaningful swipe just happened, the synthetic click fired by the
-  // browser after touchend is intercepted here and prevented from firing
-  // the row's onClick (navigation).
+  // meaningful swipe just happened, the synthetic click iOS Safari
+  // sometimes fires after touchend is intercepted here so the row's
+  // onClick (navigation) doesn't run on a swipe attempt. The timestamp
+  // window auto-expires, so a legitimate tap on the reveal panel that
+  // arrives later still goes through.
   useEffect(() => {
     const node = containerRef.current?.parentElement;
     if (!node) return;
     const handler = (e: MouseEvent) => {
-      if (swipeJustCompletedRef.current) {
-        swipeJustCompletedRef.current = false;
+      if (Date.now() - swipeEndedAtRef.current < POST_SWIPE_CLICK_SUPPRESS_MS) {
+        swipeEndedAtRef.current = 0;
         e.stopPropagation();
         e.preventDefault();
       }
@@ -741,7 +748,9 @@ function SwipeArchiveOnly({
     setOffsetXState(v);
   }, []);
   const gestureActiveRef = useRef(false);
-  const swipeJustCompletedRef = useRef(false);
+  // Timestamp of the most recent meaningful swipe; see MobileRowActions
+  // for the full rationale on why this is a timestamp, not a boolean.
+  const swipeEndedAtRef = useRef(0);
 
   // Stable ref for the archive callback so the touch effect doesn't re-
   // attach listeners every render.
@@ -765,8 +774,8 @@ function SwipeArchiveOnly({
     const node = containerRef.current?.parentElement;
     if (!node) return;
     const handler = (e: MouseEvent) => {
-      if (swipeJustCompletedRef.current) {
-        swipeJustCompletedRef.current = false;
+      if (Date.now() - swipeEndedAtRef.current < POST_SWIPE_CLICK_SUPPRESS_MS) {
+        swipeEndedAtRef.current = 0;
         e.stopPropagation();
         e.preventDefault();
       }
@@ -834,7 +843,7 @@ function SwipeArchiveOnly({
       const live = offsetXRef.current;
       const rowWidth = overlay.parentElement?.clientWidth ?? 360;
       if (live > SWIPE_INTENT_PX) {
-        swipeJustCompletedRef.current = true;
+        swipeEndedAtRef.current = Date.now();
       }
       if (live >= commitThresholdPx(rowWidth)) {
         setOffsetX(0);

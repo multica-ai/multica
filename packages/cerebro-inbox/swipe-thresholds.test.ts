@@ -1,9 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
+  POST_SWIPE_CLICK_SUPPRESS_MS,
   SWIPE_COMMIT_MAX_PX,
   SWIPE_COMMIT_MIN_PX,
   commitThresholdPx,
 } from "./swipe-thresholds";
+
+describe("POST_SWIPE_CLICK_SUPPRESS_MS", () => {
+  it("covers iOS Safari's synthetic-click delay with a small safety margin", () => {
+    // iOS Safari fires the synthetic click within ~300 ms of touchend
+    // when it fires at all. The window must exceed that so a legit
+    // post-swipe synthetic click can be swallowed, but stay short enough
+    // that a user's deliberate tap on the reveal panel (typically >500 ms
+    // after the swipe) goes through.
+    expect(POST_SWIPE_CLICK_SUPPRESS_MS).toBeGreaterThan(300);
+    expect(POST_SWIPE_CLICK_SUPPRESS_MS).toBeLessThan(500);
+  });
+});
 
 describe("commitThresholdPx", () => {
   it("returns 35% of width inside the clamp band", () => {
