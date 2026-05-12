@@ -409,9 +409,13 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 // Skips self-mentions, agents with on_mention trigger disabled, and private
 // agents mentioned by non-owner members (only the agent owner or workspace
 // admin/owner can mention a private agent).
-// Note: no status gate here — @mention is an explicit action and should work
-// even on done/cancelled issues (the agent can reopen the issue if needed).
+// Explicit mentions still work on done/cancelled issues, but blocked issues and
+// unresolved dependencies remain hard execution gates.
 func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
+	if issue.Status == "blocked" || h.hasUnresolvedIssueDependencies(ctx, issue.ID) {
+		return
+	}
+
 	wsID := uuidToString(issue.WorkspaceID)
 	mentions := util.ParseMentions(comment.Content)
 	if shouldInheritParentMentions(parentComment, mentions, authorType) {
