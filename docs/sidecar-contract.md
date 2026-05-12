@@ -75,33 +75,29 @@ sidecar performs the reset by writing a `phase_state` patch with those
 keys removed. `stall_retry` resets when status leaves a column (separate
 lifecycle).
 
-### CR-resolution loop (2026-05-03 redesign)
+### CR-resolution loop
 
-The CR loop is a tight three-column cycle. Quinn (`code_review`) and Murat
-(`testing`) are intentionally not in the post-CR loop — CR re-reviewing the
-push IS the quality gate, so re-running them every iteration is wasted
-work.
+The CR loop is a tight two-column cycle: `coderabbit ↔ resolving`. Quinn
+(`code_review`) and Murat (`testing`) are intentionally not in the
+post-CR loop — CR re-reviewing the push IS the quality gate, so re-running
+them every iteration is wasted work.
 
 1. Sidecar bumps `cr_round` and writes it into `phase_state` on every
    `coderabbit → resolving` transition. `cr_round` is the persistent
    indicator that "the issue has been through resolving at least once."
-2. Rosa's `<!-- resolution-note -->` marker routes `resolving → in_review`.
-   `previous_loop` is intentionally NOT set — nothing downstream needs the
-   cr-lineage signal in the new flow.
-3. Marcus runs `bmad-pr-resolve` on `in_review`: pushes Rosa's accumulated
-   patches, posts each thread's verbatim `fixer_reply` to GitHub, calls
-   `/resolve` on each thread, then emits `<!-- pr-republished -->` to exit.
-   The sidecar routes `in_review → coderabbit`.
-4. CR re-reviews on the push. The state machine handles the next move:
+2. Rosa addresses each thread on `resolving`: drafts replies and applies
+   the fix; Marcus pushes the resulting patches and `/resolve`s each
+   thread when its reply lands. The push triggers CR.
+3. CR re-reviews on the push. The state machine handles the next move:
    - APPROVED → `coderabbit → staged` (the SOLE path to staged).
    - COMMENTED with new findings → `coderabbit → resolving` (loop, `cr_round` bumps again).
    - CHANGES_REQUESTED → `coderabbit → resolving` (loop).
-5. `staged → done` fires on `pull_request.closed merged=true`. Both
+4. `staged → done` fires on `pull_request.closed merged=true`. Both
    terminal flips reset all loop counters.
 
-Rationale: predicate-clear → staged was removed in Phase 1 (state machine,
-2026-05-03) so threads draining to zero (Marcus's own `/resolve` calls)
-cannot promote the issue. Only an explicit CR APPROVED review can.
+Rationale: predicate-clear → staged was removed in Phase 1 so threads
+draining to zero (Marcus's own `/resolve` calls) cannot promote the
+issue. Only an explicit CR APPROVED review can.
 
 ## Comment-marker contract
 
@@ -120,11 +116,9 @@ parser ignores all other types. The full vocabulary lives in
 | `<!-- arch-blocked -->` | planning | blocked | Suppresses default sidecar audit. |
 | `<!-- review-findings -->` | code_review | testing (approved) / fixing (changes_requested) | Sets `previous_loop=test` or `=review`; bumps `review_loop` on changes_requested. |
 | `<!-- fix-note -->` | fixing | code_review (review) / testing (test) | Routes by `phase_state.previous_loop`. The legacy `pr` lane was retired 2026-05. |
-| `<!-- resolution-note -->` | resolving | in_review | Rosa's exit. `previous_loop` is NOT set (cr-lineage signal unused post-redesign). (UPDATED 2026-05-03.) |
 | `<!-- completion-note -->` (role: dev) | in_progress | code_review (GREEN) / blocked (RED) | Sets `previous_loop=review` on GREEN. |
-| `<!-- completion-note -->` (role: tea) | testing | coderabbit (GREEN) / fixing (RED) | The pre-CR `testing → coderabbit` path. The CR loop no longer re-enters testing, so the legacy `cr_round > 0 → in_review` branch is unreachable in the new flow. |
-| `<!-- pr-opened -->` | coderabbit / in_review | (non-routing) | Records `phase_state.last_pr_url`. Marcus emits this on the initial publish on coderabbit. |
-| `<!-- pr-republished -->` | in_review | coderabbit | Marcus's exit after push + reply + resolve. (NEW 2026-05-03.) |
+| `<!-- completion-note -->` (role: tea) | testing | coderabbit (GREEN) / fixing (RED) | The pre-CR `testing → coderabbit` path. The CR loop no longer re-enters testing. |
+| `<!-- pr-opened -->` | coderabbit | (non-routing) | Records `phase_state.last_pr_url`. Marcus emits this on the initial publish on coderabbit. |
 | `<!-- post-merge-noop -->` | ready_for_dev / in_progress | staged | Step 1.1.0 short-circuit when PR has already been merged externally. |
 
 ### Sidecar audit comments
@@ -135,9 +129,9 @@ namespace (e.g. `<!-- sidecar-loop-bump -->`, `<!-- sidecar-bridge -->`,
 routing decisions — they are records, not triggers. Multica writes none
 of these; only the sidecar does.
 
-## Status enum (2026-05-03 redesign)
+## Status enum
 
-The CR-resolution loop is a tight three-column cycle; the pre-CR pipeline
+The CR-resolution loop is a tight two-column cycle; the pre-CR pipeline
 is unchanged from the original BMAD spec:
 
 ```
@@ -149,10 +143,7 @@ backlog → todo → planning → ready_for_dev → in_progress
                                       ↓
                                    coderabbit  ◄────────────────┐
                                       ↓ (CR found issues)       │
-                                   resolving   (Rosa fixes; cr_round bumps)
-                                      ↓ (resolution-note)        │
-                                   in_review   (Marcus pushes + posts replies + resolves)
-                                      ↓ (pr-republished)         │
+                                   resolving   (Rosa drafts; Marcus pushes; cr_round bumps)
                                       └──────────────────────────┘
                                       ↓
                                    coderabbit  → staged   (CR APPROVED — sole path)
@@ -181,9 +172,8 @@ vocabulary:
 ## Authority
 
 - Multica owns: status enum, comment.type CHECK, comment-API write
-  guards, the GitHub webhook → state-machine glue, the
-  in_review/coderabbit predicate (`noUnresolvedCRThreads`), the
-  cr-settle sweeper.
+  guards, the GitHub webhook → state-machine glue, the coderabbit
+  predicate (`noUnresolvedCRThreads`), the cr-settle sweeper.
 - Sidecar owns: `phase_state` schema, comment-marker vocabulary,
   predecessor validation, loop caps, watchdog/dispatch verification,
   blocked-origin tracking, mention-router unblock.

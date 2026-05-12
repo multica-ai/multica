@@ -125,7 +125,7 @@ SELECT i.id, i.title, i.status, i.updated_at,
 FROM issue i
 LEFT JOIN cr_review_attempt a ON a.issue_id = i.id
   AND a.cr_round = (SELECT MAX(cr_round) FROM cr_review_attempt WHERE issue_id = i.id)
-WHERE i.status IN ('coderabbit', 'resolving', 'in_review');
+WHERE i.status IN ('coderabbit', 'resolving');
 ```
 
 ```sql

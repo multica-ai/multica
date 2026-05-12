@@ -336,7 +336,7 @@ multica issue assign <issue-id> --agent <agent-slug>
 - **写什么**（1500-2000 字）:
   - **Issues 部分**:
     - Polymorphic assignee（member/agent/null）——第一次正式提"可以分配给 agent"
-    - Status 枚举（backlog/todo/in_progress/in_review/done/blocked/cancelled），**无强制 FSM**
+    - Status 枚举（backlog/todo/in_progress/done/blocked/cancelled），**无强制 FSM**
     - Priority / Label / Subscription / Reaction / Dependency / Bulk 操作
     - Issue number per-workspace 自增
     - Comment reply 树、@mention
