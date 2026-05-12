@@ -68,6 +68,7 @@ func TestKnownEnums(t *testing.T) {
 	}
 	for _, a := range []string{
 		ActionSetStatus, ActionCreateSubIssue, ActionSendReminder,
+		ActionRunSkill, ActionCommentOnIssue,
 	} {
 		if !knownAction(a) {
 			t.Errorf("knownAction(%q) = false, want true", a)
@@ -75,6 +76,43 @@ func TestKnownEnums(t *testing.T) {
 	}
 	if knownTrigger("") || knownAction("") {
 		t.Fatal("empty string must not be a known trigger or action")
+	}
+}
+
+func TestKnownEditorMode(t *testing.T) {
+	for _, m := range []string{EditorModeForm, EditorModeCanvas} {
+		if !knownEditorMode(m) {
+			t.Errorf("knownEditorMode(%q) = false, want true", m)
+		}
+	}
+	if knownEditorMode("") || knownEditorMode("zapier") {
+		t.Fatal("empty and unknown values must be rejected")
+	}
+}
+
+func TestValidateWriteRequest_AcceptsPhase2Actions(t *testing.T) {
+	cases := []string{ActionRunSkill, ActionCommentOnIssue}
+	for _, a := range cases {
+		err := validateWriteRequest(writeWorkflowRequest{
+			Name:        "x",
+			TriggerType: TriggerStatusChanged,
+			ActionType:  a,
+		})
+		if err != nil {
+			t.Errorf("validateWriteRequest must accept %q, got %v", a, err)
+		}
+	}
+}
+
+func TestValidateWriteRequest_RejectsUnknownEditorMode(t *testing.T) {
+	err := validateWriteRequest(writeWorkflowRequest{
+		Name:        "x",
+		TriggerType: TriggerStatusChanged,
+		ActionType:  ActionSetStatus,
+		EditorMode:  "zapier",
+	})
+	if err == nil {
+		t.Fatal("unknown editor_mode must be rejected")
 	}
 }
 

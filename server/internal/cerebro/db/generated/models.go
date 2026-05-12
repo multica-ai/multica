@@ -341,6 +341,8 @@ type CerebroWorkflow struct {
 	CreatedByType string             `json:"created_by_type"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	EditorMode    string             `json:"editor_mode"`
+	EditorLayout  []byte             `json:"editor_layout"`
 }
 
 type CerebroWorkflowIdempotencyKey struct {

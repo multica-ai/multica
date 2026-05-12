@@ -66,6 +66,11 @@ func (s *Service) Enabled() bool { return s.enabled }
 // workflow is the engine's flat projection of a cerebrodb.CerebroWorkflow
 // row. Mostly an alias, but separating it lets test code build a workflow
 // without depending on sqlc-generated types.
+//
+// editorMode / editorLayout (phase 2) are not used by the runtime engine
+// itself — they exist purely to round-trip the column data through the
+// engine in case a future trigger needs to inspect them. The handler
+// reads them via the cerebrodb row directly, not through this struct.
 type workflow struct {
 	id            pgtype.UUID
 	workspaceID   pgtype.UUID

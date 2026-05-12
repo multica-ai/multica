@@ -7,7 +7,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        trigger_type, trigger_config, conditions,
        action_type, action_config,
        created_by_id, created_by_type,
-       created_at, updated_at
+       created_at, updated_at,
+       editor_mode, editor_layout
 FROM cerebro_workflow
 WHERE workspace_id = $1
   AND trigger_type = $2
@@ -18,7 +19,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        trigger_type, trigger_config, conditions,
        action_type, action_config,
        created_by_id, created_by_type,
-       created_at, updated_at
+       created_at, updated_at,
+       editor_mode, editor_layout
 FROM cerebro_workflow
 WHERE workspace_id = $1
 ORDER BY created_at DESC;
@@ -28,7 +30,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        trigger_type, trigger_config, conditions,
        action_type, action_config,
        created_by_id, created_by_type,
-       created_at, updated_at
+       created_at, updated_at,
+       editor_mode, editor_layout
 FROM cerebro_workflow
 WHERE id = $1;
 
@@ -37,14 +40,16 @@ INSERT INTO cerebro_workflow (
     workspace_id, project_id, name, enabled,
     trigger_type, trigger_config, conditions,
     action_type, action_config,
-    created_by_id, created_by_type
+    created_by_id, created_by_type,
+    editor_mode, editor_layout
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 RETURNING id, workspace_id, project_id, name, enabled,
           trigger_type, trigger_config, conditions,
           action_type, action_config,
           created_by_id, created_by_type,
-          created_at, updated_at;
+          created_at, updated_at,
+          editor_mode, editor_layout;
 
 -- name: UpdateCerebroWorkflow :one
 UPDATE cerebro_workflow
@@ -56,13 +61,16 @@ SET name = $2,
     conditions = $7,
     action_type = $8,
     action_config = $9,
+    editor_mode = $10,
+    editor_layout = $11,
     updated_at = now()
 WHERE id = $1
 RETURNING id, workspace_id, project_id, name, enabled,
           trigger_type, trigger_config, conditions,
           action_type, action_config,
           created_by_id, created_by_type,
-          created_at, updated_at;
+          created_at, updated_at,
+          editor_mode, editor_layout;
 
 -- name: SetCerebroWorkflowEnabled :exec
 UPDATE cerebro_workflow

@@ -44,6 +44,11 @@ type workflowResponse struct {
 	Conditions    json.RawMessage `json:"conditions"`
 	ActionType    string          `json:"action_type"`
 	ActionConfig  json.RawMessage `json:"action_config"`
+	// EditorMode / EditorLayout (phase 2): which builder opens this workflow
+	// and the xyflow node-positions for canvas mode. Form-mode rows leave
+	// EditorLayout null.
+	EditorMode    string          `json:"editor_mode"`
+	EditorLayout  json.RawMessage `json:"editor_layout,omitempty"`
 	CreatedByID   string          `json:"created_by_id"`
 	CreatedByType string          `json:"created_by_type"`
 	CreatedAt     string          `json:"created_at"`
@@ -61,6 +66,7 @@ func toWorkflowResponse(row cerebrodb.CerebroWorkflow) workflowResponse {
 		Conditions:    nonEmptyJSON(row.Conditions),
 		ActionType:    row.ActionType,
 		ActionConfig:  nonEmptyJSON(row.ActionConfig),
+		EditorMode:    row.EditorMode,
 		CreatedByID:   util.UUIDToString(row.CreatedByID),
 		CreatedByType: row.CreatedByType,
 		CreatedAt:     row.CreatedAt.Time.UTC().Format(rfc3339),
@@ -68,6 +74,9 @@ func toWorkflowResponse(row cerebrodb.CerebroWorkflow) workflowResponse {
 	}
 	if row.ProjectID.Valid {
 		out.ProjectID = util.UUIDToString(row.ProjectID)
+	}
+	if len(row.EditorLayout) > 0 {
+		out.EditorLayout = row.EditorLayout
 	}
 	return out
 }
@@ -126,6 +135,9 @@ type writeWorkflowRequest struct {
 	Conditions    json.RawMessage `json:"conditions,omitempty"`
 	ActionType    string          `json:"action_type"`
 	ActionConfig  json.RawMessage `json:"action_config,omitempty"`
+	// Phase-2 editor metadata. Optional; absent → defaults to "form" + null.
+	EditorMode   string          `json:"editor_mode,omitempty"`
+	EditorLayout json.RawMessage `json:"editor_layout,omitempty"`
 }
 
 // validateWriteRequest enforces the shape we let through to the DB before we
@@ -141,6 +153,9 @@ func validateWriteRequest(req writeWorkflowRequest) error {
 	if !knownAction(req.ActionType) {
 		return errors.New("unknown action_type")
 	}
+	if req.EditorMode != "" && !knownEditorMode(req.EditorMode) {
+		return errors.New("unknown editor_mode")
+	}
 	return nil
 }
 
@@ -154,7 +169,16 @@ func knownTrigger(t string) bool {
 
 func knownAction(a string) bool {
 	switch a {
-	case ActionSetStatus, ActionCreateSubIssue, ActionSendReminder:
+	case ActionSetStatus, ActionCreateSubIssue, ActionSendReminder,
+		ActionRunSkill, ActionCommentOnIssue:
+		return true
+	}
+	return false
+}
+
+func knownEditorMode(m string) bool {
+	switch m {
+	case EditorModeForm, EditorModeCanvas:
 		return true
 	}
 	return false
@@ -246,6 +270,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		enabled = *req.Enabled
 	}
 
+	editorMode := req.EditorMode
+	if editorMode == "" {
+		editorMode = EditorModeForm
+	}
 	row, err := h.Cerebro.CreateCerebroWorkflow(r.Context(), cerebrodb.CreateCerebroWorkflowParams{
 		WorkspaceID:   wsUUID,
 		ProjectID:     projectID,
@@ -256,6 +284,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Conditions:    defaultJSON(req.Conditions, "[]"),
 		ActionType:    req.ActionType,
 		ActionConfig:  defaultJSON(req.ActionConfig, "{}"),
+		EditorMode:    editorMode,
+		EditorLayout:  []byte(req.EditorLayout),
 		CreatedByID:   creatorUUID,
 		CreatedByType: actorType(r),
 	})
@@ -310,6 +340,13 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		projectID = parsed
 	}
 
+	editorMode := req.EditorMode
+	if editorMode == "" {
+		editorMode = existing.EditorMode
+	}
+	if editorMode == "" {
+		editorMode = EditorModeForm
+	}
 	row, err := h.Cerebro.UpdateCerebroWorkflow(r.Context(), cerebrodb.UpdateCerebroWorkflowParams{
 		ID:            id,
 		Name:          req.Name,
@@ -320,6 +357,8 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		Conditions:    defaultJSON(req.Conditions, "[]"),
 		ActionType:    req.ActionType,
 		ActionConfig:  defaultJSON(req.ActionConfig, "{}"),
+		EditorMode:    editorMode,
+		EditorLayout:  []byte(req.EditorLayout),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update workflow")

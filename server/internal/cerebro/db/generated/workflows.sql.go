@@ -34,14 +34,16 @@ INSERT INTO cerebro_workflow (
     workspace_id, project_id, name, enabled,
     trigger_type, trigger_config, conditions,
     action_type, action_config,
-    created_by_id, created_by_type
+    created_by_id, created_by_type,
+    editor_mode, editor_layout
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 RETURNING id, workspace_id, project_id, name, enabled,
           trigger_type, trigger_config, conditions,
           action_type, action_config,
           created_by_id, created_by_type,
-          created_at, updated_at
+          created_at, updated_at,
+          editor_mode, editor_layout
 `
 
 type CreateCerebroWorkflowParams struct {
@@ -56,6 +58,8 @@ type CreateCerebroWorkflowParams struct {
 	ActionConfig  []byte      `json:"action_config"`
 	CreatedByID   pgtype.UUID `json:"created_by_id"`
 	CreatedByType string      `json:"created_by_type"`
+	EditorMode    string      `json:"editor_mode"`
+	EditorLayout  []byte      `json:"editor_layout"`
 }
 
 func (q *Queries) CreateCerebroWorkflow(ctx context.Context, arg CreateCerebroWorkflowParams) (CerebroWorkflow, error) {
@@ -71,6 +75,8 @@ func (q *Queries) CreateCerebroWorkflow(ctx context.Context, arg CreateCerebroWo
 		arg.ActionConfig,
 		arg.CreatedByID,
 		arg.CreatedByType,
+		arg.EditorMode,
+		arg.EditorLayout,
 	)
 	var i CerebroWorkflow
 	err := row.Scan(
@@ -88,6 +94,8 @@ func (q *Queries) CreateCerebroWorkflow(ctx context.Context, arg CreateCerebroWo
 		&i.CreatedByType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EditorMode,
+		&i.EditorLayout,
 	)
 	return i, err
 }
@@ -185,7 +193,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        trigger_type, trigger_config, conditions,
        action_type, action_config,
        created_by_id, created_by_type,
-       created_at, updated_at
+       created_at, updated_at,
+       editor_mode, editor_layout
 FROM cerebro_workflow
 WHERE id = $1
 `
@@ -208,6 +217,8 @@ func (q *Queries) GetCerebroWorkflow(ctx context.Context, id pgtype.UUID) (Cereb
 		&i.CreatedByType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EditorMode,
+		&i.EditorLayout,
 	)
 	return i, err
 }
@@ -289,7 +300,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        trigger_type, trigger_config, conditions,
        action_type, action_config,
        created_by_id, created_by_type,
-       created_at, updated_at
+       created_at, updated_at,
+       editor_mode, editor_layout
 FROM cerebro_workflow
 WHERE workspace_id = $1
 ORDER BY created_at DESC
@@ -319,6 +331,8 @@ func (q *Queries) ListCerebroWorkflows(ctx context.Context, workspaceID pgtype.U
 			&i.CreatedByType,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EditorMode,
+			&i.EditorLayout,
 		); err != nil {
 			return nil, err
 		}
@@ -335,7 +349,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        trigger_type, trigger_config, conditions,
        action_type, action_config,
        created_by_id, created_by_type,
-       created_at, updated_at
+       created_at, updated_at,
+       editor_mode, editor_layout
 FROM cerebro_workflow
 WHERE workspace_id = $1
   AND trigger_type = $2
@@ -375,6 +390,8 @@ func (q *Queries) ListCerebroWorkflowsForTrigger(ctx context.Context, arg ListCe
 			&i.CreatedByType,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EditorMode,
+			&i.EditorLayout,
 		); err != nil {
 			return nil, err
 		}
@@ -628,13 +645,16 @@ SET name = $2,
     conditions = $7,
     action_type = $8,
     action_config = $9,
+    editor_mode = $10,
+    editor_layout = $11,
     updated_at = now()
 WHERE id = $1
 RETURNING id, workspace_id, project_id, name, enabled,
           trigger_type, trigger_config, conditions,
           action_type, action_config,
           created_by_id, created_by_type,
-          created_at, updated_at
+          created_at, updated_at,
+          editor_mode, editor_layout
 `
 
 type UpdateCerebroWorkflowParams struct {
@@ -647,6 +667,8 @@ type UpdateCerebroWorkflowParams struct {
 	Conditions    []byte      `json:"conditions"`
 	ActionType    string      `json:"action_type"`
 	ActionConfig  []byte      `json:"action_config"`
+	EditorMode    string      `json:"editor_mode"`
+	EditorLayout  []byte      `json:"editor_layout"`
 }
 
 func (q *Queries) UpdateCerebroWorkflow(ctx context.Context, arg UpdateCerebroWorkflowParams) (CerebroWorkflow, error) {
@@ -660,6 +682,8 @@ func (q *Queries) UpdateCerebroWorkflow(ctx context.Context, arg UpdateCerebroWo
 		arg.Conditions,
 		arg.ActionType,
 		arg.ActionConfig,
+		arg.EditorMode,
+		arg.EditorLayout,
 	)
 	var i CerebroWorkflow
 	err := row.Scan(
@@ -677,6 +701,8 @@ func (q *Queries) UpdateCerebroWorkflow(ctx context.Context, arg UpdateCerebroWo
 		&i.CreatedByType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EditorMode,
+		&i.EditorLayout,
 	)
 	return i, err
 }
