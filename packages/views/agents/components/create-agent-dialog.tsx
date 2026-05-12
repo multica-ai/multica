@@ -86,10 +86,19 @@ export function CreateAgentDialog({
       : runtimes;
   }, [runtimes, currentUserId]);
 
-  // When duplicating, default to the template's runtime so the clone
-  // lands on the same machine — caller can still switch in the picker.
+  // When duplicating, only seed the template's runtime if the caller owns
+  // it — otherwise fall back to the caller's first runtime so the clone
+  // doesn't bind to someone else's hardware/tokens.
+  const templateRuntimeUsable =
+    template?.runtime_id && currentUserId
+      ? runtimes.some(
+          (r) => r.id === template.runtime_id && r.owner_id === currentUserId,
+        )
+      : false;
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(
-    template?.runtime_id ?? filteredRuntimes[0]?.id ?? "",
+    templateRuntimeUsable
+      ? template!.runtime_id
+      : filteredRuntimes[0]?.id ?? "",
   );
 
   useEffect(() => {
