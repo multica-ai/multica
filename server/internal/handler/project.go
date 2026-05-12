@@ -32,6 +32,11 @@ type ProjectResponse struct {
 	UpdatedAt   string  `json:"updated_at"`
 	IssueCount  int64   `json:"issue_count"`
 	DoneCount   int64   `json:"done_count"`
+	// PipelineKind drives the Ship Hub release flow + stage progress
+	// bar. `staged` = full pipeline through staging/QA; `direct_to_prod`
+	// = skip staging stages (merging → promoting → in_production).
+	// See migration 095 and completeMergeTrain in release_merge.go.
+	PipelineKind string `json:"pipeline_kind"`
 	// ResourceCount is a breadcrumb pointing at the sub-collection at
 	// /api/projects/{id}/resources. Resources themselves stay out of this
 	// payload to keep parent metadata and child collections separate; clients
@@ -41,19 +46,20 @@ type ProjectResponse struct {
 
 func projectToResponse(p db.Project) ProjectResponse {
 	return ProjectResponse{
-		ID:          uuidToString(p.ID),
-		WorkspaceID: uuidToString(p.WorkspaceID),
-		Title:       p.Title,
-		Description: textToPtr(p.Description),
-		Icon:        textToPtr(p.Icon),
-		Status:      p.Status,
-		Priority:    p.Priority,
-		LeadType:    textToPtr(p.LeadType),
-		LeadID:      uuidToPtr(p.LeadID),
-		ArchivedAt:  timestampToPtr(p.ArchivedAt),
-		ArchivedBy:  uuidToPtr(p.ArchivedBy),
-		CreatedAt:   timestampToString(p.CreatedAt),
-		UpdatedAt:   timestampToString(p.UpdatedAt),
+		ID:           uuidToString(p.ID),
+		WorkspaceID:  uuidToString(p.WorkspaceID),
+		Title:        p.Title,
+		Description:  textToPtr(p.Description),
+		Icon:         textToPtr(p.Icon),
+		Status:       p.Status,
+		Priority:     p.Priority,
+		LeadType:     textToPtr(p.LeadType),
+		LeadID:       uuidToPtr(p.LeadID),
+		ArchivedAt:   timestampToPtr(p.ArchivedAt),
+		ArchivedBy:   uuidToPtr(p.ArchivedBy),
+		CreatedAt:    timestampToString(p.CreatedAt),
+		UpdatedAt:    timestampToString(p.UpdatedAt),
+		PipelineKind: string(p.PipelineKind),
 	}
 }
 
@@ -102,6 +108,9 @@ type UpdateProjectRequest struct {
 	Priority    *string `json:"priority"`
 	LeadType    *string `json:"lead_type"`
 	LeadID      *string `json:"lead_id"`
+	// PipelineKind: `staged` | `direct_to_prod`. Optional — when nil
+	// the existing value is preserved.
+	PipelineKind *string `json:"pipeline_kind"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -428,6 +437,22 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.LeadID = leadUUID
 		} else {
 			params.LeadID = pgtype.UUID{Valid: false}
+		}
+	}
+	if req.PipelineKind != nil {
+		// Validate against the enum. Reject anything else with 400
+		// rather than letting Postgres reject the cast at write time
+		// with a generic enum-value-out-of-range error.
+		switch *req.PipelineKind {
+		case string(db.ProjectPipelineKindStaged), string(db.ProjectPipelineKindDirectToProd):
+			params.PipelineKind = db.NullProjectPipelineKind{
+				ProjectPipelineKind: db.ProjectPipelineKind(*req.PipelineKind),
+				Valid:               true,
+			}
+		default:
+			writeError(w, http.StatusBadRequest,
+				"pipeline_kind must be 'staged' or 'direct_to_prod'")
+			return
 		}
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)

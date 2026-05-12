@@ -17,7 +17,7 @@ SET archived_at = now(),
     archived_by = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, archived_at, archived_by
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, archived_at, archived_by, pipeline_kind
 `
 
 type ArchiveProjectParams struct {
@@ -44,6 +44,7 @@ func (q *Queries) ArchiveProject(ctx context.Context, arg ArchiveProjectParams) 
 		&i.Priority,
 		&i.ArchivedAt,
 		&i.ArchivedBy,
+		&i.PipelineKind,
 	)
 	return i, err
 }
@@ -66,7 +67,7 @@ INSERT INTO project (
     lead_type, lead_id, priority
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, archived_at, archived_by
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, archived_at, archived_by, pipeline_kind
 `
 
 type CreateProjectParams struct {
@@ -106,6 +107,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.Priority,
 		&i.ArchivedAt,
 		&i.ArchivedBy,
+		&i.PipelineKind,
 	)
 	return i, err
 }
@@ -120,7 +122,7 @@ func (q *Queries) DeleteProject(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, archived_at, archived_by FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, archived_at, archived_by, pipeline_kind FROM project
 WHERE id = $1
 `
 
@@ -141,12 +143,13 @@ func (q *Queries) GetProject(ctx context.Context, id pgtype.UUID) (Project, erro
 		&i.Priority,
 		&i.ArchivedAt,
 		&i.ArchivedBy,
+		&i.PipelineKind,
 	)
 	return i, err
 }
 
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, archived_at, archived_by FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, archived_at, archived_by, pipeline_kind FROM project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -172,6 +175,7 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.Priority,
 		&i.ArchivedAt,
 		&i.ArchivedBy,
+		&i.PipelineKind,
 	)
 	return i, err
 }
@@ -212,7 +216,7 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, projectIds []pgtype.
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, archived_at, archived_by FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, archived_at, archived_by, pipeline_kind FROM project
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
@@ -258,6 +262,7 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.Priority,
 			&i.ArchivedAt,
 			&i.ArchivedBy,
+			&i.PipelineKind,
 		); err != nil {
 			return nil, err
 		}
@@ -275,7 +280,7 @@ SET archived_at = NULL,
     archived_by = NULL,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, archived_at, archived_by
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, archived_at, archived_by, pipeline_kind
 `
 
 // Reverses ArchiveProject. archived_by is cleared so the next archive
@@ -297,6 +302,7 @@ func (q *Queries) RestoreProject(ctx context.Context, id pgtype.UUID) (Project, 
 		&i.Priority,
 		&i.ArchivedAt,
 		&i.ArchivedBy,
+		&i.PipelineKind,
 	)
 	return i, err
 }
@@ -310,20 +316,22 @@ UPDATE project SET
     priority = COALESCE($6, priority),
     lead_type = $7,
     lead_id = $8,
+    pipeline_kind = COALESCE($9::project_pipeline_kind, pipeline_kind),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, archived_at, archived_by
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, archived_at, archived_by, pipeline_kind
 `
 
 type UpdateProjectParams struct {
-	ID          pgtype.UUID `json:"id"`
-	Title       pgtype.Text `json:"title"`
-	Description pgtype.Text `json:"description"`
-	Icon        pgtype.Text `json:"icon"`
-	Status      pgtype.Text `json:"status"`
-	Priority    pgtype.Text `json:"priority"`
-	LeadType    pgtype.Text `json:"lead_type"`
-	LeadID      pgtype.UUID `json:"lead_id"`
+	ID           pgtype.UUID             `json:"id"`
+	Title        pgtype.Text             `json:"title"`
+	Description  pgtype.Text             `json:"description"`
+	Icon         pgtype.Text             `json:"icon"`
+	Status       pgtype.Text             `json:"status"`
+	Priority     pgtype.Text             `json:"priority"`
+	LeadType     pgtype.Text             `json:"lead_type"`
+	LeadID       pgtype.UUID             `json:"lead_id"`
+	PipelineKind NullProjectPipelineKind `json:"pipeline_kind"`
 }
 
 func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
@@ -336,6 +344,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		arg.Priority,
 		arg.LeadType,
 		arg.LeadID,
+		arg.PipelineKind,
 	)
 	var i Project
 	err := row.Scan(
@@ -352,6 +361,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.Priority,
 		&i.ArchivedAt,
 		&i.ArchivedBy,
+		&i.PipelineKind,
 	)
 	return i, err
 }

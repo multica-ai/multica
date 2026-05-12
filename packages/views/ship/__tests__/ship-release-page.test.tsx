@@ -6,7 +6,7 @@
 // in the assembling stage.
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -21,14 +21,11 @@ import { ShipReleasePage } from "../components/ship-release-page";
 
 let detailFixture: ReleaseDetailResponse;
 
-// Default to a project that HAS both envs (staging + production) so the
-// 7-stage progress bar renders for the existing tests. Per-test
-// overrides via `deployEnvsFixture = [{ kind: "production" }]` exercise
-// the direct-to-prod / staging-skipped path.
-let deployEnvsFixture: Array<{ kind: string }> = [
-  { kind: "staging" },
-  { kind: "production" },
-];
+// Project pipeline_kind drives the stage progress bar's "show staging
+// stages?" decision. Defaults to `staged` so existing tests see all 7
+// chips; per-test overrides via `projectPipelineKind = "direct_to_prod"`
+// exercise the staging-skipped path.
+let projectPipelineKind: "staged" | "direct_to_prod" = "staged";
 
 // Phase 7b — the merge train mutations are added to the mock so the
 // release page renders the new buttons without exploding. Each
@@ -137,14 +134,41 @@ vi.mock("@multica/core/ship", () => ({
     mutateAsync: vi.fn().mockResolvedValue({ name: "release-2026-05-10" }),
     isPending: false,
   }),
-  // Stage progress bar pulls the project's deploy envs to decide
-  // whether the in_staging / verifying chips render. Reads through
-  // the module-scope deployEnvsFixture so individual tests can swap
-  // it before render to exercise the no-staging path.
-  useDeployEnvironments: () => ({
-    data: { environments: deployEnvsFixture },
-    isLoading: false,
-    isError: false,
+}));
+
+// The release page resolves project metadata (pipeline_kind, title) via
+// `projectListOptions` from @multica/core/projects/queries. Mocking this
+// module returns a single-project fixture tied to the release's
+// project_id ("p-1"). Tests that need the direct-to-prod pipeline
+// override `projectPipelineKind` before mounting.
+vi.mock("@multica/core/projects/queries", () => ({
+  projectListOptions: () => ({
+    queryKey: ["projects", "ws-test", "list"],
+    queryFn: async () => ({
+      projects: [
+        {
+          id: "p-1",
+          workspace_id: "ws-test",
+          title: "Test Project",
+          description: null,
+          icon: null,
+          status: "in_progress",
+          priority: "none",
+          lead_type: null,
+          lead_id: null,
+          archived_at: null,
+          archived_by: null,
+          created_at: "2026-05-01T00:00:00Z",
+          updated_at: "2026-05-01T00:00:00Z",
+          issue_count: 0,
+          done_count: 0,
+          resource_count: 0,
+          pipeline_kind: projectPipelineKind,
+        },
+      ],
+      total: 1,
+    }),
+    select: (data: { projects: unknown[] }) => data.projects,
   }),
 }));
 
@@ -311,8 +335,8 @@ describe("ShipReleasePage", () => {
     expect(screen.queryByTestId("release-cancel-button")).not.toBeInTheDocument();
   });
 
-  it("hides in_staging + verifying chips when the project has no staging env", () => {
-    deployEnvsFixture = [{ kind: "production" }];
+  it("hides in_staging + verifying chips when project pipeline_kind=direct_to_prod", async () => {
+    projectPipelineKind = "direct_to_prod";
     detailFixture = {
       release: makeRelease({ stage: "promoting" }),
       pull_requests: [makeReleasePR()],
@@ -320,23 +344,29 @@ describe("ShipReleasePage", () => {
     };
     render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
 
-    const bar = screen.getByTestId("release-stage-progress");
-    // The chip text comes from i18n; for resilience we assert on the
-    // chip COUNT (5 vs 7) plus the absence of staging-related labels.
-    const chips = bar.querySelectorAll("li");
-    expect(chips.length).toBe(5);
+    // The projects query is async; wait for the chip count to update
+    // from the default 7 to the direct-to-prod 5. Without the wait,
+    // we'd see the loading-state default (staged, all 7 chips).
+    await waitFor(() => {
+      const chips = screen
+        .getByTestId("release-stage-progress")
+        .querySelectorAll("li");
+      expect(chips.length).toBe(5);
+    });
     // Cleanup so subsequent tests see the default fixture.
-    deployEnvsFixture = [{ kind: "staging" }, { kind: "production" }];
+    projectPipelineKind = "staged";
   });
 
-  it("renders all 7 stage chips when project has staging + production envs", () => {
-    deployEnvsFixture = [{ kind: "staging" }, { kind: "production" }];
+  it("renders all 7 stage chips when project pipeline_kind=staged", () => {
+    projectPipelineKind = "staged";
     detailFixture = {
       release: makeRelease({ stage: "assembling" }),
       pull_requests: [makeReleasePR()],
       events: [],
     };
     render(<ShipReleasePage releaseId="rel-1" />, { wrapper: Wrapper });
+    // Default render path (no project loaded yet OR project=staged) is
+    // 7 chips, so this passes synchronously without waitFor.
     const chips = screen
       .getByTestId("release-stage-progress")
       .querySelectorAll("li");
