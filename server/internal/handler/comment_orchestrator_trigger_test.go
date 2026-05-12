@@ -93,7 +93,7 @@ func TestCommentTriggersOrchestratorTask(t *testing.T) {
 	req = newRequest("POST", "/api/issues/"+issue.ID+"/comments", map[string]any{
 		"content": "Work complete. Ready for review.",
 	})
-	req.Header.Set("X-Agent-ID", assigneeAgentID)
+	req = setAgentActor(t, req, assigneeAgentID)
 	req = withURLParam(req, "id", issue.ID)
 	testHandler.CreateComment(w, req)
 	if w.Code != http.StatusCreated {
@@ -230,7 +230,7 @@ func TestCommentDoesNotTriggerOrchestratorOnSelfLoop(t *testing.T) {
 	req = newRequest("POST", "/api/issues/"+issue.ID+"/comments", map[string]any{
 		"content": "Routing this to Claude Code.",
 	})
-	req.Header.Set("X-Agent-ID", orchestratorID)
+	req = setAgentActor(t, req, orchestratorID)
 	req = withURLParam(req, "id", issue.ID)
 	testHandler.CreateComment(w, req)
 	if w.Code != http.StatusCreated {

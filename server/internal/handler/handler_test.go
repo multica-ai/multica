@@ -183,6 +183,23 @@ func withURLParam(req *http.Request, key, value string) *http.Request {
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 }
 
+// setAgentActor sets both X-Agent-ID and X-Task-ID on the request so
+// resolveActor grants "agent" identity. Upstream tightened resolveActor
+// to require BOTH headers (and to validate the task belongs to that
+// agent) — setting only X-Agent-ID now falls back to "member", which
+// silently breaks any test that depends on agent-scoped behavior.
+//
+// Creates a fresh queued task each call and registers a t.Cleanup; the
+// caller doesn't have to track the task UUID. For tests that already
+// have a task in scope, just set the headers directly instead.
+func setAgentActor(t *testing.T, req *http.Request, agentID string) *http.Request {
+	t.Helper()
+	taskID := createHandlerTestTaskForAgent(t, agentID)
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	return req
+}
+
 func handlerTestRuntimeID(t *testing.T) string {
 	t.Helper()
 
