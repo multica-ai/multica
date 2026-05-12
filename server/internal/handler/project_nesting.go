@@ -17,9 +17,10 @@ import (
 
 type ProjectTreeItemResponse struct {
 	ProjectResponse
-	ParentProjectID *string `json:"parent_project_id"`
-	ShowDescendants bool    `json:"show_descendants"`
-	Depth           int16   `json:"depth"`
+	// ParentProjectID lives on the embedded ProjectResponse — clients still see
+	// `parent_project_id` here. Tree-only metadata stays below.
+	ShowDescendants bool  `json:"show_descendants"`
+	Depth           int16 `json:"depth"`
 }
 
 type setProjectParentRequest struct {
@@ -151,10 +152,10 @@ func (h *Handler) ListProjectTree(w http.ResponseWriter, r *http.Request) {
 		}
 		resp[i] = ProjectTreeItemResponse{
 			ProjectResponse: projectToResponse(project),
-			ParentProjectID: nestingParentID(row),
 			ShowDescendants: row.ShowDescendants,
 			Depth:           row.Depth,
 		}
+		resp[i].ParentProjectID = nestingParentID(row)
 		if row.ShowDescendants {
 			if stats, err := h.Queries.GetProjectRollupStats(r.Context(), project.ID); err == nil {
 				resp[i].IssueCount = stats.TotalCount
@@ -286,10 +287,10 @@ func (h *Handler) SetProjectParent(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r)
 	resp := ProjectTreeItemResponse{
 		ProjectResponse: projectToResponse(project),
-		ParentProjectID: nestingParentID(updated),
 		ShowDescendants: updated.ShowDescendants,
 		Depth:           updated.Depth,
 	}
+	resp.ParentProjectID = nestingParentID(updated)
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -331,10 +332,10 @@ func (h *Handler) SetProjectShowDescendants(w http.ResponseWriter, r *http.Reque
 	}
 	resp := ProjectTreeItemResponse{
 		ProjectResponse: projectToResponse(project),
-		ParentProjectID: nestingParentID(row),
 		ShowDescendants: row.ShowDescendants,
 		Depth:           row.Depth,
 	}
+	resp.ParentProjectID = nestingParentID(row)
 	userID := requestUserID(r)
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
 	writeJSON(w, http.StatusOK, resp)

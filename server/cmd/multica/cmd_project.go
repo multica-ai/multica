@@ -143,6 +143,7 @@ func init() {
 	projectUpdateCmd.Flags().String("status", "", "New status")
 	projectUpdateCmd.Flags().String("icon", "", "New icon (emoji)")
 	projectUpdateCmd.Flags().String("lead", "", "New lead name (member or agent)")
+	projectUpdateCmd.Flags().String("parent", "", "Parent project ID (empty string detaches the project to the top level)") // CEREBRO-PATCH(nested-projects): move project under another parent.
 	projectUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// project delete
@@ -385,13 +386,27 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		body["lead_id"] = aID
 	}
 
-	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead")
+	parentChanged := cmd.Flags().Changed("parent")
+	if len(body) == 0 && !parentChanged {
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --parent")
 	}
 
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/projects/"+projectRef.ID, body, &result); err != nil {
-		return fmt.Errorf("update project: %w", err)
+	if len(body) > 0 {
+		if err := client.PutJSON(ctx, "/api/projects/"+projectRef.ID, body, &result); err != nil {
+			return fmt.Errorf("update project: %w", err)
+		}
+	}
+	if parentChanged {
+		// CEREBRO-PATCH(nested-projects): empty string detaches the project to
+		// the top level; any other value moves it under that parent. The server
+		// (PUT /api/projects/{id}/parent) treats `"parent_project_id": ""` as
+		// unset, so we send the raw string straight through.
+		raw, _ := cmd.Flags().GetString("parent")
+		parentBody := map[string]any{"parent_project_id": strings.TrimSpace(raw)}
+		if err := client.PutJSON(ctx, "/api/projects/"+projectRef.ID+"/parent", parentBody, &result); err != nil {
+			return fmt.Errorf("set project parent: %w", err)
+		}
 	}
 
 	output, _ := cmd.Flags().GetString("output")

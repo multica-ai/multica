@@ -40,6 +40,10 @@ type ProjectResponse struct {
 	// payload to keep parent metadata and child collections separate; clients
 	// that need the list call ListProjectResources directly.
 	ResourceCount int64 `json:"resource_count"`
+	// CEREBRO-PATCH(nested-projects): expose nesting parent on every project
+	// read so CLI / MCP / API consumers can see the hierarchy without an extra
+	// /tree round-trip. Nil = root project (no parent).
+	ParentProjectID *string `json:"parent_project_id"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -139,6 +143,11 @@ func (h *Handler) GetProjectByRepo(w http.ResponseWriter, r *http.Request) {
 	total, done := h.loadProjectIssueStats(r.Context(), project.ID)
 	resp.IssueCount = total
 	resp.DoneCount = done
+	// CEREBRO-PATCH(nested-projects): include parent_project_id for symmetry
+	// with GetProject.
+	if row, err := h.Queries.GetProjectNesting(r.Context(), project.ID); err == nil {
+		resp.ParentProjectID = nestingParentID(row)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"project": resp})
 }
 
@@ -196,6 +205,12 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// CEREBRO-PATCH(nested-projects): batch-fetch nesting so list responses
+	// carry parent_project_id without a /tree round-trip.
+	nestingMap := map[string]db.ProjectNesting{}
+	if rows, err := h.Queries.ListProjectNesting(r.Context(), wsUUID); err == nil {
+		nestingMap = nestingByProject(rows)
+	}
 
 	resp := make([]ProjectResponse, len(projects))
 	for i, p := range projects {
@@ -205,6 +220,9 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 			resp[i].DoneCount = s.DoneCount
 		}
 		resp[i].ResourceCount = resourceCountMap[resp[i].ID]
+		if row, ok := nestingMap[resp[i].ID]; ok {
+			resp[i].ParentProjectID = nestingParentID(row)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"projects": resp, "total": len(resp)})
 }
@@ -236,6 +254,10 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
+	// CEREBRO-PATCH(nested-projects): include parent_project_id (nil = root).
+	if row, err := h.Queries.GetProjectNesting(r.Context(), project.ID); err == nil {
+		resp.ParentProjectID = nestingParentID(row)
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -503,6 +525,11 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := projectToResponse(project)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
+	// CEREBRO-PATCH(nested-projects): include parent_project_id so update
+	// echoes match list/get shape.
+	if row, err := h.Queries.GetProjectNesting(r.Context(), project.ID); err == nil {
+		resp.ParentProjectID = nestingParentID(row)
+	}
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
