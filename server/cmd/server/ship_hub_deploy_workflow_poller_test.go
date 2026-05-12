@@ -23,23 +23,42 @@ import (
 	gh "github.com/multica-ai/multica/server/pkg/github"
 )
 
-// pollerMigrationApplied probes for the 091 migration so a checkout
-// running pre-091 just skips the new tests.
+// pollerMigrationApplied probes for the 091 and 096 migrations so a
+// checkout running pre-091 or pre-096 just skips the new tests.
+//
+// 091 adds ship_hub_deploy_workflow_staging to workspace.
+// 096 adds provenance + provenance_ref to deploy (required by InsertDeploy).
 func pollerMigrationApplied(t *testing.T) bool {
 	t.Helper()
 	if testPool == nil {
 		return false
 	}
-	var exists bool
+
+	// Migration 091: workspace deploy workflow columns.
+	var exists091 bool
 	err := testPool.QueryRow(context.Background(),
 		`SELECT EXISTS (
 			SELECT 1 FROM information_schema.columns
 			WHERE table_name = 'workspace' AND column_name = 'ship_hub_deploy_workflow_staging'
-		)`).Scan(&exists)
+		)`).Scan(&exists091)
 	if err != nil {
-		t.Fatalf("probe phase 7d follow-up migration: %v", err)
+		t.Fatalf("probe phase 7d follow-up migration (091): %v", err)
 	}
-	return exists
+	if !exists091 {
+		return false
+	}
+
+	// Migration 096: deploy provenance columns (required by InsertDeploy).
+	var exists096 bool
+	err = testPool.QueryRow(context.Background(),
+		`SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'deploy' AND column_name = 'provenance'
+		)`).Scan(&exists096)
+	if err != nil {
+		t.Fatalf("probe deploy provenance migration (096): %v", err)
+	}
+	return exists096
 }
 
 // fakeGitHubServer returns an httptest server that responds to the
