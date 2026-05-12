@@ -267,27 +267,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// commenting agent IS the captain itself, and skip when a pending task
 	// already exists for (issue, captain).
 	if issue.CaptainType.Valid && issue.CaptainID.Valid {
-		captainID := uuidToString(issue.CaptainID)
-		isCaptainAuthor := authorType == "agent" && authorID == captainID
-		if !isCaptainAuthor {
-			pending, _ := h.Queries.HasPendingTaskForIssueAndAgent(r.Context(), db.HasPendingTaskForIssueAndAgentParams{
-				IssueID: issue.ID,
-				AgentID: issue.CaptainID,
-			})
-			if !pending {
-				if agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-					ID:          issue.CaptainID,
-					WorkspaceID: issue.WorkspaceID,
-				}); err == nil && !agent.ArchivedAt.Valid {
-					actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
-					if h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, uuidToString(issue.WorkspaceID)) {
-						if _, err := h.TaskService.EnqueueTaskForCaptain(r.Context(), issue, issue.CaptainID, comment.ID); err != nil {
-							slog.Warn("enqueue captain task on comment failed", "issue_id", issueID, "error", err)
-						}
-					}
-				}
-			}
-		}
+		h.tryEnqueueCaptainOnComment(r, issue, comment, authorType, authorID, issueID)
 	} else if authorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue) &&
 		!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
 		!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
@@ -306,6 +286,43 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID)
 
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// tryEnqueueCaptainOnComment routes a comment-trigger decision through the
+// issue's captain when one is set. Returns silently for any of:
+//   - the comment author IS the captain (avoid self-loop)
+//   - a queued/dispatched task already exists for (issue, captain) (dedup)
+//   - the captain agent is missing or archived
+//   - the commenter is not allowed to access the captain (private agent gate)
+//
+// Logs at warn for transport-level failures only; missing-permission and
+// missing-agent are silent because they are normal "skip" outcomes.
+func (h *Handler) tryEnqueueCaptainOnComment(r *http.Request, issue db.Issue, comment db.Comment, authorType, authorID, issueID string) {
+	captainID := uuidToString(issue.CaptainID)
+	if authorType == "agent" && authorID == captainID {
+		return
+	}
+	pending, _ := h.Queries.HasPendingTaskForIssueAndAgent(r.Context(), db.HasPendingTaskForIssueAndAgentParams{
+		IssueID: issue.ID,
+		AgentID: issue.CaptainID,
+	})
+	if pending {
+		return
+	}
+	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          issue.CaptainID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || agent.ArchivedAt.Valid {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
+	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, uuidToString(issue.WorkspaceID)) {
+		return
+	}
+	if _, err := h.TaskService.EnqueueTaskForCaptain(r.Context(), issue, issue.CaptainID, comment.ID); err != nil {
+		slog.Warn("enqueue captain task on comment failed", "issue_id", issueID, "error", err)
+	}
 }
 
 // commentMentionsOthersButNotAssignee returns true if the comment @mentions
