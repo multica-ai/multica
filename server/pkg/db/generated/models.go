@@ -295,6 +295,15 @@ type CerebroGroupRuntimeAccess struct {
 	GrantedAt pgtype.Timestamptz `json:"granted_at"`
 }
 
+type CerebroIssueDueTime struct {
+	IssueID   pgtype.UUID        `json:"issue_id"`
+	DueAt     pgtype.Timestamptz `json:"due_at"`
+	SetByID   pgtype.UUID        `json:"set_by_id"`
+	SetByType string             `json:"set_by_type"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroIssueReference struct {
 	ID            pgtype.UUID        `json:"id"`
 	IssueID       pgtype.UUID        `json:"issue_id"`
@@ -315,6 +324,46 @@ type CerebroProjectGroupMember struct {
 	GroupID   pgtype.UUID        `json:"group_id"`
 	AddedBy   pgtype.UUID        `json:"added_by"`
 	AddedAt   pgtype.Timestamptz `json:"added_at"`
+}
+
+type CerebroWorkflow struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
+	Name          string             `json:"name"`
+	Enabled       bool               `json:"enabled"`
+	TriggerType   string             `json:"trigger_type"`
+	TriggerConfig []byte             `json:"trigger_config"`
+	Conditions    []byte             `json:"conditions"`
+	ActionType    string             `json:"action_type"`
+	ActionConfig  []byte             `json:"action_config"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroWorkflowIdempotencyKey struct {
+	Key        string             `json:"key"`
+	WorkflowID pgtype.UUID        `json:"workflow_id"`
+	RunID      pgtype.UUID        `json:"run_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroWorkflowRun struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkflowID    pgtype.UUID        `json:"workflow_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	TriggerEvent  []byte             `json:"trigger_event"`
+	TargetIssueID pgtype.UUID        `json:"target_issue_id"`
+	TaskID        pgtype.UUID        `json:"task_id"`
+	Status        string             `json:"status"`
+	Attempt       int32              `json:"attempt"`
+	Error         pgtype.Text        `json:"error"`
+	StartedAt     pgtype.Timestamptz `json:"started_at"`
+	FinishedAt    pgtype.Timestamptz `json:"finished_at"`
+	NextRetryAt   pgtype.Timestamptz `json:"next_retry_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type CerebroWorkspaceDefaultGroup struct {
