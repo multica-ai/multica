@@ -331,6 +331,8 @@ func taskErrorType(reason string) string {
 		return "agent_output"
 	case "cancelled", "user_cancelled":
 		return "cancelled"
+	case "infrastructure_error":
+		return "infrastructure"
 	default:
 		return "agent_error"
 	}
@@ -1163,9 +1165,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
 var retryableReasons = map[string]bool{
-	"runtime_offline":  true,
-	"runtime_recovery": true,
-	"timeout":          true,
+	"runtime_offline":       true,
+	"runtime_recovery":      true,
+	"timeout":               true,
+	"infrastructure_error":  true,
 }
 
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed

@@ -68,6 +68,7 @@ type Daemon struct {
 	cfg       Config
 	client    *Client
 	repoCache repoCacheBackend
+	outbox    *Outbox
 	logger    *slog.Logger
 
 	mu           sync.Mutex
@@ -114,7 +115,8 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
-	return &Daemon{
+
+	d := &Daemon{
 		cfg:                   cfg,
 		client:                client,
 		repoCache:             repocache.New(cacheRoot, logger),
@@ -128,6 +130,18 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		runtimeGoneInflight:   make(map[string]struct{}),
 		reregisterNextAttempt: make(map[string]time.Time),
 	}
+
+	// Outbox is optional — a failure to initialise it (e.g. unresolvable
+	// home directory) should not block daemon startup. When outbox is nil
+	// the daemon falls back to the pre-outbox direct-HTTP behaviour.
+	outbox, err := NewOutbox(client, logger, cfg.Profile)
+	if err != nil {
+		logger.Warn("outbox initialisation failed, task result delivery will not be durable", "error", err)
+	} else {
+		d.outbox = outbox
+	}
+
+	return d
 }
 
 // setAgentVersion records the detected CLI version for an agent provider so
@@ -523,6 +537,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Start workspace sync loop to discover newly created workspaces.
 	go d.workspaceSyncLoop(ctx)
+
+	// Replay any pending outbox entries from a previous daemon run.
+	if d.outbox != nil {
+		go d.outbox.Run(ctx)
+	}
 
 	taskWakeups := make(chan struct{}, 1)
 	go d.taskWakeupLoop(ctx, taskWakeups)
@@ -1786,9 +1805,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
 		taskLog.Error("start task failed", "error", err)
-		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("start task failed: %s", err.Error()), "", "", "agent_error"); failErr != nil {
-			taskLog.Error("fail task after start error", "error", failErr)
-		}
+		d.failTaskWithOutbox(ctx, task.ID, fmt.Sprintf("start task failed: %s", err.Error()), "", "", "agent_error", taskLog)
 		return
 	}
 
@@ -1823,9 +1840,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		taskLog.Error("task failed", "error", err)
 		// runTask returned without a TaskResult, so we don't have a SessionID
 		// to forward — best we can do is record the failure.
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "agent_error"); failErr != nil {
-			taskLog.Error("fail task callback failed", "error", failErr)
-		}
+		d.failTaskWithOutbox(ctx, task.ID, err.Error(), "", "", "agent_error", taskLog)
 		return
 	}
 
@@ -1864,22 +1879,37 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 
 // reportTaskResult writes the final task disposition back to the server.
 //
-// Fail closed: only an explicit "completed" status is reported as success.
-// Anything else — "blocked", "cancelled", or any future status we forget to
-// enumerate — must go through FailTask, so a run that never produced a real
-// result can never be displayed as "Completed" in the UI (e.g. provider 429 /
-// out-of-credit / runtime crash). Forward SessionID/WorkDir on every path:
-// the agent may have built a real session before getting stuck, and we want
-// the next chat turn to resume there rather than start over and "forget"
-// the conversation.
+// When the outbox is available, results are persisted for durable delivery
+// with exponential backoff. The daemon must NOT fall back to FailTask when
+// CompleteTask fails — the outbox handles retry independently, and the
+// server's orphan sweeper is the fallback path.
+//
+// When the outbox is nil (e.g. initialisation failure), falls back to
+// direct HTTP calls (legacy behaviour, not durable).
 func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) {
 	switch result.Status {
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
-		if err := d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
-			taskLog.Error("complete task failed, falling back to fail", "error", err)
-			if failErr := d.client.FailTask(ctx, taskID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error"); failErr != nil {
-				taskLog.Error("fail task fallback also failed", "error", failErr)
+		if d.outbox != nil {
+			if err := d.outbox.EnqueueComplete(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
+				taskLog.Error("outbox complete delivery failed, will retry in background", "error", err)
+			}
+		} else {
+			if err := d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
+				taskLog.Error("complete task failed, falling back to fail", "error", err)
+				// Classify the completion delivery failure: if the
+				// server-side infrastructure is unhealthy (5xx
+				// response, database locked, deadlock detected), use
+				// infrastructure_error so the server's auto-retry path
+				// can re-queue the task instead of treating it as an
+				// agent error that never retries.
+				fr := classifyInfrastructureError(err)
+				if fr == "" {
+					fr = "agent_error"
+				}
+				if failErr := d.client.FailTask(ctx, taskID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, fr); failErr != nil {
+					taskLog.Error("fail task fallback also failed", "error", failErr)
+				}
 			}
 		}
 	default:
@@ -1892,8 +1922,29 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			}
 		}
 		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
-		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
-			taskLog.Error("report failed task failed", "error", err)
+		if d.outbox != nil {
+			if err := d.outbox.EnqueueFail(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
+				taskLog.Error("outbox fail delivery failed, will retry in background", "error", err)
+			}
+		} else {
+			if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
+				taskLog.Error("report failed task failed", "error", err)
+			}
+		}
+	}
+}
+
+// failTaskWithOutbox reports a task failure to the server, preferring the
+// outbox for durable delivery when available. Falls back to direct HTTP
+// when the outbox is nil.
+func (d *Daemon) failTaskWithOutbox(ctx context.Context, taskID, errMsg, sessionID, workDir, failureReason string, taskLog *slog.Logger) {
+	if d.outbox != nil {
+		if err := d.outbox.EnqueueFail(ctx, taskID, errMsg, sessionID, workDir, failureReason); err != nil {
+			taskLog.Error("outbox fail delivery failed, will retry in background", "error", err)
+		}
+	} else {
+		if failErr := d.client.FailTask(ctx, taskID, errMsg, sessionID, workDir, failureReason); failErr != nil {
+			taskLog.Error("fail task callback failed", "error", failErr)
 		}
 	}
 }

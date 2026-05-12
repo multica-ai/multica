@@ -1,6 +1,9 @@
 package daemon
 
-import "strings"
+import (
+	"errors"
+	"strings"
+)
 
 // FailureReason values for tasks whose session is "poisoned" — i.e.
 // resuming the same conversation on a follow-up task would deterministically
@@ -17,9 +20,10 @@ import "strings"
 //     The bad message is already baked into the conversation history, so
 //     every resume hits the same 400. Detected via classifyPoisonedError.
 const (
-	FailureReasonIterationLimit    = "iteration_limit"
-	FailureReasonAgentFallbackMsg  = "agent_fallback_message"
-	FailureReasonAPIInvalidRequest = "api_invalid_request"
+	FailureReasonIterationLimit       = "iteration_limit"
+	FailureReasonAgentFallbackMsg     = "agent_fallback_message"
+	FailureReasonAPIInvalidRequest    = "api_invalid_request"
+	FailureReasonInfrastructureError = "infrastructure_error"
 )
 
 // poisonedOutputMaxLen caps how long an output can be and still be
@@ -97,4 +101,51 @@ func classifyPoisonedError(errMsg string) (string, bool) {
 		return FailureReasonAPIInvalidRequest, true
 	}
 	return "", false
+}
+
+// classifyInfrastructureError inspects the given error and returns
+// FailureReasonInfrastructureError when the error indicates a platform
+// infrastructure failure that the caller should NOT classify as an
+// agent error. This function is intended to be called ONLY on errors
+// that originate from daemon platform operations (server HTTP calls,
+// daemon-local filesystem I/O) — NOT on errors reported by the agent
+// itself. This call-site discipline is the boundary that distinguishes
+// platform SQLite / infrastructure errors from application SQLite /
+// agent errors without relying on bare string matching.
+//
+// Recognised patterns:
+//   - *requestError with status >= 500 (server internal error,
+//     which includes DB lock contention, deadlocks, overload).
+//   - *requestError whose body text contains a known infrastructure
+//     keyword (e.g. "database is locked"). This is defence-in-depth for
+//     the edge case where an infrastructure error reaches the client
+//     with a non-5xx status (e.g. a reverse-proxy layer returning 502).
+func classifyInfrastructureError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	lowered := strings.ToLower(msg)
+
+	// Check for infrastructure error markers in the full error string.
+	// This catches requestError (server communication errors) as well
+	// as daemon-local I/O errors when the OS message happens to include
+	// a known keyword.
+	if strings.Contains(lowered, "database is locked") ||
+		strings.Contains(lowered, "database locked") ||
+		strings.Contains(lowered, "deadlock detected") {
+		return FailureReasonInfrastructureError
+	}
+
+	// requestError from the daemon HTTP client signals a server-side
+	// failure. 5xx status codes indicate the server infrastructure
+	// (database, upstream services) is unhealthy, not that the request
+	// itself is invalid. The caller must not classify these as agent
+	// errors.
+	var reqErr *requestError
+	if errors.As(err, &reqErr) && reqErr.StatusCode >= 500 {
+		return FailureReasonInfrastructureError
+	}
+
+	return ""
 }

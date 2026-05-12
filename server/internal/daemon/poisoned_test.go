@@ -1,6 +1,9 @@
 package daemon
 
 import (
+	"errors"
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -165,6 +168,124 @@ func TestClassifyPoisonedError(t *testing.T) {
 			}
 			if ok && reason != tc.wantReason {
 				t.Fatalf("classifyPoisonedError(%q) reason=%q, want %q", tc.errMsg, reason, tc.wantReason)
+			}
+		})
+	}
+}
+
+func TestClassifyInfrastructureError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "server 500 with database locked body",
+			err: &requestError{
+				Method:     http.MethodPost,
+				Path:       "/api/daemon/tasks/abc/complete",
+				StatusCode: http.StatusInternalServerError,
+				Body:       "database is locked",
+			},
+			want: FailureReasonInfrastructureError,
+		},
+		{
+			name: "server 503 overload",
+			err: &requestError{
+				Method:     http.MethodPost,
+				Path:       "/api/daemon/tasks/abc/fail",
+				StatusCode: http.StatusServiceUnavailable,
+				Body:       "service unavailable",
+			},
+			want: FailureReasonInfrastructureError,
+		},
+		{
+			name: "server 502 bad gateway",
+			err: &requestError{
+				Method:     http.MethodPost,
+				Path:       "/api/daemon/tasks/abc/complete",
+				StatusCode: http.StatusBadGateway,
+				Body:       "",
+			},
+			want: FailureReasonInfrastructureError,
+		},
+		{
+			name: "server 500 with generic body — 5xx alone is infrastructure",
+			err: &requestError{
+				Method:     http.MethodPost,
+				Path:       "/api/daemon/tasks/abc/complete",
+				StatusCode: http.StatusInternalServerError,
+				Body:       "internal server error",
+			},
+			want: FailureReasonInfrastructureError,
+		},
+		{
+			name: "server 4xx is not infrastructure",
+			err: &requestError{
+				Method:     http.MethodPost,
+				Path:       "/api/daemon/tasks/abc/complete",
+				StatusCode: http.StatusBadRequest,
+				Body:       "invalid request body",
+			},
+			want: "",
+		},
+		{
+			name: "server 404 is not infrastructure",
+			err: &requestError{
+				Method:     http.MethodGet,
+				Path:       "/api/daemon/tasks/abc/status",
+				StatusCode: http.StatusNotFound,
+				Body:       "task not found",
+			},
+			want: "",
+		},
+		{
+			name: "server 401 is not infrastructure",
+			err: &requestError{
+				Method:     http.MethodPost,
+				Path:       "/api/daemon/tasks/abc/complete",
+				StatusCode: http.StatusUnauthorized,
+				Body:       "unauthorized",
+			},
+			want: "",
+		},
+		{
+			name: "raw string 'database is locked' matched — caller must ensure platform context",
+			err:  fmt.Errorf("database is locked"),
+			want: FailureReasonInfrastructureError,
+		},
+		{
+			name: "deadlock detected in error message — defence-in-depth",
+			err:  fmt.Errorf("ERROR: deadlock detected"),
+			want: FailureReasonInfrastructureError,
+		},
+		{
+			name: "nil error",
+			err:  nil,
+			want: "",
+		},
+		{
+			name: "generic agent error is not infrastructure",
+			err:  fmt.Errorf("agent failed: pr url not found"),
+			want: "",
+		},
+		{
+			name: "context canceled from server polling — not a requestError",
+			err:  errors.New("context deadline exceeded"),
+			want: "",
+		},
+		{
+			name: "database locked case insensitive",
+			err:  fmt.Errorf("DATABASE IS LOCKED"),
+			want: FailureReasonInfrastructureError,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := classifyInfrastructureError(tc.err)
+			if got != tc.want {
+				t.Fatalf("classifyInfrastructureError(%v) = %q, want %q", tc.err, got, tc.want)
 			}
 		})
 	}
