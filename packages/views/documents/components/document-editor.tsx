@@ -104,7 +104,7 @@ export function DocumentEditor({
             disabled={disabled || saveStatus === "saved"}
             className="text-[10px] font-medium text-primary hover:underline disabled:text-muted-foreground/50"
           >
-            {t(($) => $.editor.save_now)} (Ctrl+S)
+            {t(($) => $.editor.save_now)} {t(($) => $.editor.save_shortcut)}
           </button>
         </div>
         <span

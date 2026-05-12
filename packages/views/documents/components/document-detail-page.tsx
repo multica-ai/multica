@@ -188,7 +188,7 @@ export function DocumentDetailPage({ documentId }: DocumentDetailPageProps) {
               value="editor"
               className="rounded-none border-b-2 border-transparent px-3 py-1.5 text-xs data-[state=active]:border-primary data-[state=active]:bg-transparent"
             >
-              Editor
+              {t(($) => $.editor.tab)}
             </TabsTrigger>
             <TabsTrigger
               value="history"

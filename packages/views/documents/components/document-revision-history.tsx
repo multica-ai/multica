@@ -94,7 +94,7 @@ export function DocumentRevisionHistory({
                     </span>
                     {isLatest && (
                       <Badge variant="secondary" className="text-[10px]">
-                        latest
+                        {t(($) => $.history.latest)}
                       </Badge>
                     )}
                   </div>

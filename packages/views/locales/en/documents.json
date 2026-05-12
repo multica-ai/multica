@@ -30,7 +30,9 @@
     "saving": "Saving…",
     "saved": "Saved",
     "unsaved": "Unsaved changes",
-    "save_now": "Save now"
+    "save_now": "Save now",
+    "save_shortcut": "(Ctrl+S)",
+    "tab": "Editor"
   },
   "header": {
     "pin": "Pin",
@@ -56,6 +58,7 @@
     "restore_confirm_action": "Restore",
     "restore_cancel": "Cancel",
     "view_diff": "View diff",
+    "latest": "latest",
     "author_human": "Human",
     "author_agent": "Agent",
     "operation": {
