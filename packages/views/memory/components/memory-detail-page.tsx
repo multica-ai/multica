@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   Archive,
   ArchiveRestore,
+  CheckCircle,
   MoreHorizontal,
   Trash2,
 } from "lucide-react";
@@ -15,12 +16,13 @@ import {
   useUpdateMemoryArtifact,
   useArchiveMemoryArtifact,
   useRestoreMemoryArtifact,
+  useVerifyMemoryArtifact,
   useDeleteMemoryArtifact,
 } from "@multica/core/memory";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
-import type { MemoryArtifactKind } from "@multica/core/types";
+import type { MemoryArtifact, MemoryArtifactKind } from "@multica/core/types";
 import { ContentEditor, type ContentEditorRef, TitleEditor } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useNavigation, AppLink } from "../../navigation";
@@ -44,6 +46,19 @@ const KIND_BADGE: Record<MemoryArtifactKind, string> = {
   decision: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
 };
 
+const STALE_THRESHOLD_DAYS = 30;
+
+function isStale(artifact: MemoryArtifact): boolean {
+  const freshDate =
+    artifact.verified_at && artifact.verified_at > artifact.updated_at
+      ? artifact.verified_at
+      : artifact.updated_at;
+  const days = Math.floor(
+    (Date.now() - new Date(freshDate).getTime()) / (1000 * 60 * 60 * 24),
+  );
+  return days >= STALE_THRESHOLD_DAYS;
+}
+
 interface MemoryDetailPageProps {
   id: string;
 }
@@ -62,6 +77,7 @@ export function MemoryDetailPage({ id }: MemoryDetailPageProps) {
   const updateArtifact = useUpdateMemoryArtifact();
   const archiveArtifact = useArchiveMemoryArtifact();
   const restoreArtifact = useRestoreMemoryArtifact();
+  const verifyArtifact = useVerifyMemoryArtifact();
   const deleteArtifact = useDeleteMemoryArtifact();
 
   // Track the editor's ref so we can pull the markdown on title-blur
@@ -136,6 +152,13 @@ export function MemoryDetailPage({ id }: MemoryDetailPageProps) {
     });
   };
 
+  const handleVerify = () => {
+    verifyArtifact.mutate(artifact.id, {
+      onSuccess: () => toast.success(t(($) => $.detail.toast_verified)),
+      onError: () => toast.error(t(($) => $.detail.toast_verify_failed)),
+    });
+  };
+
   const handleDelete = () => {
     if (!window.confirm(t(($) => $.detail.delete_confirm))) {
       return;
@@ -171,10 +194,21 @@ export function MemoryDetailPage({ id }: MemoryDetailPageProps) {
               {t(($) => $.detail.restore)}
             </Button>
           ) : (
-            <Button size="sm" variant="outline" onClick={handleArchive}>
-              <Archive className="h-3.5 w-3.5 mr-1" />
-              {t(($) => $.detail.archive)}
-            </Button>
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleVerify}
+                disabled={verifyArtifact.isPending}
+              >
+                <CheckCircle className="h-3.5 w-3.5 mr-1" />
+                {t(($) => $.detail.verify)}
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleArchive}>
+                <Archive className="h-3.5 w-3.5 mr-1" />
+                {t(($) => $.detail.archive)}
+              </Button>
+            </>
           )}
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -232,6 +266,12 @@ export function MemoryDetailPage({ id }: MemoryDetailPageProps) {
             <span>
               {t(($) => $.detail.updated_on, { date: new Date(artifact.updated_at).toLocaleDateString() })}
             </span>
+            <span>·</span>
+            <span>
+              {artifact.verified_at
+                ? t(($) => $.detail.verified_on, { date: new Date(artifact.verified_at).toLocaleDateString() })
+                : t(($) => $.detail.never_verified)}
+            </span>
             {artifact.tags.length > 0 && (
               <>
                 <span>·</span>
@@ -248,6 +288,12 @@ export function MemoryDetailPage({ id }: MemoryDetailPageProps) {
               </>
             )}
           </div>
+
+          {!isArchived && isStale(artifact) && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+              {t(($) => $.detail.stale_warning)}
+            </div>
+          )}
 
           <div className="pt-2">
             <ContentEditor

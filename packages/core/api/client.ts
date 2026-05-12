@@ -1705,6 +1705,10 @@ export class ApiClient {
     return this.fetch(`/api/memory/${id}/restore`, { method: "POST" });
   }
 
+  async verifyMemoryArtifact(id: string): Promise<MemoryArtifact> {
+    return this.fetch(`/api/memory/${id}/verify`, { method: "POST" });
+  }
+
   async deleteMemoryArtifact(id: string): Promise<void> {
     await this.fetch(`/api/memory/${id}`, { method: "DELETE" });
   }

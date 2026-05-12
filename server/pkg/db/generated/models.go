@@ -857,6 +857,7 @@ type MemoryArtifact struct {
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 	AlwaysInjectAtRuntime bool               `json:"always_inject_at_runtime"`
+	VerifiedAt            pgtype.Timestamptz `json:"verified_at"`
 }
 
 type MemoryArtifactRevision struct {

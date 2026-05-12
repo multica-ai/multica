@@ -42,6 +42,7 @@ export interface MemoryArtifact {
   archived_by: string | null;
   created_at: string;
   updated_at: string;
+  verified_at: string | null;
 }
 
 export interface CreateMemoryArtifactRequest {

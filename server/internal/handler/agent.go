@@ -148,6 +148,7 @@ type MemoryArtifactData struct {
 	AnchorType string   `json:"anchor_type,omitempty"`
 	AnchorID   string   `json:"anchor_id,omitempty"`
 	UpdatedAt  string   `json:"updated_at"`
+	VerifiedAt string   `json:"verified_at,omitempty"`
 }
 
 type AgentTaskResponse struct {
@@ -169,30 +170,30 @@ type AgentTaskResponse struct {
 	ParentTaskID            *string               `json:"parent_task_id,omitempty"`
 	Agent                   *TaskAgentData        `json:"agent,omitempty"`
 	Repos                   []RepoData            `json:"repos,omitempty"`
-	ProjectID               string                  `json:"project_id,omitempty"`           // issue's project, when present
-	ProjectTitle            string                  `json:"project_title,omitempty"`        // for surfacing in agent context
-	ProjectResources        []ProjectResourceData   `json:"project_resources,omitempty"`    // resources attached to the project
-	PeerAgents              []PeerAgentData         `json:"peer_agents,omitempty"`          // other agents in the same workspace (excluding the claiming agent), so orchestrators can route to peers by name/id
-	IsOrchestratorWake      bool                    `json:"is_orchestrator_wake,omitempty"` // true when the claiming agent is the workspace's configured orchestrator AND the trigger was an agent-authored comment. Tells the prompt builder to render the orchestrator review-and-act block instead of the generic "decide whether to reply" block.
-	MemoryArtifacts         []MemoryArtifactData    `json:"memory_artifacts,omitempty"`     // wiki/note/runbook/decision artifacts anchored to this issue or its project
-	CreatedAt               string                  `json:"created_at"`
-	PriorSessionID          string                  `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
-	PriorWorkDir            string                  `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
-	WorkDir                 string                  `json:"work_dir,omitempty"`                  // local working directory pinned for this task; populated once the daemon reports it
-	TriggerCommentID        *string                 `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
-	TriggerCommentContent   string                  `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
-	TriggerSummary          *string                 `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
-	TriggerAuthorType       string                  `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
-	TriggerAuthorName       string                  `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
-	ChatSessionID           string                  `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
-	ChatMessage             string                  `json:"chat_message,omitempty"`              // user message for chat tasks
-	AutopilotRunID          string                  `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
-	AutopilotID             string                  `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
-	AutopilotTitle          string                  `json:"autopilot_title,omitempty"`           // autopilot title used as task context
-	AutopilotDescription    string                  `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
-	AutopilotSource         string                  `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
-	AutopilotTriggerPayload json.RawMessage         `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
-	QuickCreatePrompt       string                  `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	ProjectID               string                `json:"project_id,omitempty"`           // issue's project, when present
+	ProjectTitle            string                `json:"project_title,omitempty"`        // for surfacing in agent context
+	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"`    // resources attached to the project
+	PeerAgents              []PeerAgentData       `json:"peer_agents,omitempty"`          // other agents in the same workspace (excluding the claiming agent), so orchestrators can route to peers by name/id
+	IsOrchestratorWake      bool                  `json:"is_orchestrator_wake,omitempty"` // true when the claiming agent is the workspace's configured orchestrator AND the trigger was an agent-authored comment. Tells the prompt builder to render the orchestrator review-and-act block instead of the generic "decide whether to reply" block.
+	MemoryArtifacts         []MemoryArtifactData  `json:"memory_artifacts,omitempty"`     // wiki/note/runbook/decision artifacts anchored to this issue or its project
+	CreatedAt               string                `json:"created_at"`
+	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
+	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
+	WorkDir                 string                `json:"work_dir,omitempty"`                  // local working directory pinned for this task; populated once the daemon reports it
+	TriggerCommentID        *string               `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
+	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
+	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
+	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
+	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
+	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
+	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks
+	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
+	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
+	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context
+	AutopilotDescription    string                `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
+	AutopilotSource         string                `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
+	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
+	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	// Channels Phase 3b — populated when the daemon claims a task whose
 	// JSONB context.type == "channel_mention". Hydrated by ClaimTaskByRuntime
 	// from service.ChannelMentionContext.
