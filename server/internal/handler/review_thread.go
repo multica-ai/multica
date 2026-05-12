@@ -717,6 +717,11 @@ func (h *Handler) ResolveReviewThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
 	if !ok {
@@ -726,6 +731,8 @@ func (h *Handler) ResolveReviewThread(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	_ = userID // used by resolveAgentActor in the reply branch below
 
 	// Body is optional — fall through to resolve-only when missing/empty.
 	var body resolveRequest
@@ -749,6 +756,28 @@ func (h *Handler) ResolveReviewThread(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if reply := strings.TrimSpace(body.Reply); reply != "" {
+		// NEW: if no FixerReplyCommentID supplied, create the fixer_reply row first
+		// so the local DB mirrors what we're about to post to GitHub.
+		fixerReplyID := body.FixerReplyCommentID
+		if fixerReplyID == "" {
+			parentID, err := h.Queries.GetParentCRReviewCommentForThread(ctx, thread.ID)
+			if err == nil {
+				actorAgentID, _ := h.resolveAgentActor(w, r, userID, issue.WorkspaceID)
+				created, cerr := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+					IssueID:     issue.ID,
+					WorkspaceID: issue.WorkspaceID,
+					AuthorType:  "agent",
+					AuthorID:    actorAgentID,
+					Content:     reply,
+					Type:        "fixer_reply",
+					ParentID:    parentID,
+				})
+				if cerr == nil {
+					fixerReplyID = uuidToString(created.ID)
+				}
+			}
+		}
+		
 		replyRes, err := h.ReviewActions.ReplyToReviewThread(ctx, binding, thread, reply)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "github reply failed: "+err.Error())
@@ -756,7 +785,8 @@ func (h *Handler) ResolveReviewThread(w http.ResponseWriter, r *http.Request) {
 		}
 		resp["comment_id"] = replyRes.CommentID
 		resp["comment_url"] = replyRes.CommentURL
-		if postedAt := h.maybeMarkFixerReplyPosted(ctx, issue.ID, body.FixerReplyCommentID, thread.ID); postedAt != "" {
+		resp["fixer_reply_id"] = fixerReplyID  // NEW: expose to caller
+		if postedAt := h.maybeMarkFixerReplyPosted(ctx, issue.ID, fixerReplyID, thread.ID); postedAt != "" {
 			resp["fixer_reply_posted_at"] = postedAt
 		}
 	}

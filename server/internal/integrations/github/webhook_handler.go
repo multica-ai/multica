@@ -450,6 +450,16 @@ func (h *WebhookHandler) handleReviewComment(ctx context.Context, payload map[st
 		return &dispatchResult{label: "noop", fields: map[string]any{"reason": "non-CR author", "author": p.Comment.User.Login}}, nil
 	}
 
+	// Drop CR auto-ack replies ("Skipped: comment is from another GitHub
+	// bot.") — these are CR's response to *our* fixer-reply posts and they
+	// generate new review_thread rows that the resolver then tries to
+	// process, creating an infinite bot-loop. The marker comment
+	// `<!-- This is an auto-generated reply by CodeRabbit -->` is unique
+	// to these auto-replies; legitimate review findings never carry it.
+	if isCRAutoAckBody(p.Comment.Body) {
+		return &dispatchResult{label: "noop", fields: map[string]any{"reason": "cr_auto_ack", "gh_comment_id": p.Comment.ID}}, nil
+	}
+
 	issue, found, err := h.resolveIssueByPR(ctx, binding.RepoFullName, p.PR.Number)
 	if err != nil {
 		return nil, err
@@ -1548,6 +1558,15 @@ type reviewThreadInfo struct {
 	Comments []struct {
 		ID int64 `json:"id"`
 	} `json:"comments"`
+}
+
+// isCRAutoAckBody returns true when a CodeRabbit review comment body is one
+// of CR's automatic acknowledgement replies (e.g. "Skipped: comment is from
+// another GitHub bot."). These carry a unique HTML marker that legitimate CR
+// findings never include. Dropping them at ingest time prevents the resolver
+// from chasing CR's reply to its own fixer-reply post.
+func isCRAutoAckBody(body string) bool {
+	return strings.Contains(body, "<!-- This is an auto-generated reply by CodeRabbit -->")
 }
 
 // reviewCommentPayload mirrors the pull_request_review_comment event. We
