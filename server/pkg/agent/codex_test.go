@@ -178,7 +178,10 @@ func TestCodexHandleServerRequestPromptAllow(t *testing.T) {
 		if req.Type != "command_approval" {
 			t.Errorf("expected type command_approval, got %q", req.Type)
 		}
-		return "allow", true, nil
+		if len(req.Options) != 3 || req.Options[0].Label != "Allow this command" || req.Options[1].ID != "accept_similar" {
+			t.Errorf("expected mapped command options, got %#v", req.Options)
+		}
+		return "accept_once", true, nil
 	}
 
 	c.handleLine(`{"jsonrpc":"2.0","id":20,"method":"execCommandApproval","params":{"command":"ls -la"}}`)
@@ -192,6 +195,49 @@ func TestCodexHandleServerRequestPromptAllow(t *testing.T) {
 	result := resp["result"].(map[string]any)
 	if result["decision"] != "accept" {
 		t.Fatalf("expected decision=accept, got %v", result["decision"])
+	}
+}
+
+func TestCodexHandleServerRequestUserInputMapsOptions(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	c.runCtx = context.Background()
+	c.onApproval = func(_ context.Context, req ApprovalRequest) (string, bool, error) {
+		if req.Type != "user_input_request" {
+			t.Errorf("expected type user_input_request, got %q", req.Type)
+		}
+		if req.Title != "Plan approval" {
+			t.Errorf("title = %q, want Plan approval", req.Title)
+		}
+		if req.Detail != "How should Codex proceed?" {
+			t.Errorf("detail = %q", req.Detail)
+		}
+		if len(req.Options) != 3 {
+			t.Fatalf("expected 3 mapped options, got %#v", req.Options)
+		}
+		if req.Options[0].ID != "Approve plan" || req.Options[1].ID != "Edit plan" || req.Options[2].ID != "Cancel" {
+			t.Fatalf("unexpected options: %#v", req.Options)
+		}
+		return "Edit plan", true, nil
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","id":23,"method":"item/tool/requestUserInput","params":{"questions":[{"id":"q1","header":"Plan approval","question":"How should Codex proceed?","options":[{"label":"Approve plan","description":"Continue with the plan"},{"label":"Edit plan","description":"Provide more guidance"},{"label":"Cancel","description":"Stop"}]}]}}`)
+
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(lines))
+	}
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	result := resp["result"].(map[string]any)
+	answers := result["answers"].(map[string]any)
+	q1 := answers["q1"].(map[string]any)
+	values := q1["answers"].([]any)
+	if len(values) != 1 || values[0] != "Edit plan" {
+		t.Fatalf("unexpected answers: %#v", values)
 	}
 }
 
@@ -213,8 +259,8 @@ func TestCodexHandleServerRequestPromptDeny(t *testing.T) {
 	var resp map[string]any
 	json.Unmarshal([]byte(lines[0]), &resp)
 	result := resp["result"].(map[string]any)
-	if result["decision"] != "reject" {
-		t.Fatalf("expected decision=reject, got %v", result["decision"])
+	if result["decision"] != "decline" {
+		t.Fatalf("expected decision=decline, got %v", result["decision"])
 	}
 }
 
@@ -239,8 +285,8 @@ func TestCodexHandleServerRequestPromptFileChangeDeny(t *testing.T) {
 	var resp map[string]any
 	json.Unmarshal([]byte(lines[0]), &resp)
 	result := resp["result"].(map[string]any)
-	if result["decision"] != "reject" {
-		t.Fatalf("expected decision=reject, got %v", result["decision"])
+	if result["decision"] != "decline" {
+		t.Fatalf("expected decision=decline, got %v", result["decision"])
 	}
 }
 
@@ -857,6 +903,9 @@ func TestCodexStartOrResumeThreadPromptPassesOnRequest(t *testing.T) {
 				if params["approvalPolicy"] != "on-request" {
 					t.Errorf("prompt mode should pass approvalPolicy=on-request, got %v", params["approvalPolicy"])
 				}
+				if params["approvalsReviewer"] != "user" {
+					t.Errorf("prompt mode should pass approvalsReviewer=user, got %v", params["approvalsReviewer"])
+				}
 			},
 		},
 	})
@@ -871,6 +920,46 @@ func TestCodexStartOrResumeThreadPromptPassesOnRequest(t *testing.T) {
 	}
 	if resumed {
 		t.Error("resumed should be false")
+	}
+}
+
+func TestCodexStartOrResumeThreadPromptPassesPolicyOnResume(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	c.onApproval = func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+		return "accept", true, nil
+	}
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/resume",
+			result: json.RawMessage(`{"thread":{"id":"thr_prior"}}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if params["approvalPolicy"] != "on-request" {
+					t.Errorf("resume prompt mode should pass approvalPolicy=on-request, got %v", params["approvalPolicy"])
+				}
+				if params["approvalsReviewer"] != "user" {
+					t.Errorf("resume prompt mode should pass approvalsReviewer=user, got %v", params["approvalsReviewer"])
+				}
+			},
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_prior"},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_prior" {
+		t.Errorf("threadID = %q, want thr_prior", threadID)
+	}
+	if !resumed {
+		t.Error("expected resumed=true")
 	}
 }
 

@@ -25,19 +25,20 @@ type RepoData struct {
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
-	ID                    string     `json:"id"`
-	AgentID               string     `json:"agent_id"`
-	RuntimeID             string     `json:"runtime_id"`
-	IssueID               string     `json:"issue_id"`
-	WorkspaceID           string     `json:"workspace_id"`
-	Agent                 *AgentData `json:"agent,omitempty"`
-	Repos                 []RepoData `json:"repos,omitempty"`
-	PriorSessionID        string     `json:"prior_session_id,omitempty"`        // Claude session ID from a previous task on this issue
-	PriorWorkDir          string     `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on this issue
-	TriggerCommentID      string     `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
-	TriggerCommentContent string     `json:"trigger_comment_content,omitempty"` // content of the triggering comment
-	ChatSessionID         string     `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
-	ChatMessage           string     `json:"chat_message,omitempty"`            // user message content for chat tasks
+	ID                    string          `json:"id"`
+	AgentID               string          `json:"agent_id"`
+	RuntimeID             string          `json:"runtime_id"`
+	IssueID               string          `json:"issue_id"`
+	WorkspaceID           string          `json:"workspace_id"`
+	Agent                 *AgentData      `json:"agent,omitempty"`
+	Context               json.RawMessage `json:"context,omitempty"`
+	Repos                 []RepoData      `json:"repos,omitempty"`
+	PriorSessionID        string          `json:"prior_session_id,omitempty"`        // Claude session ID from a previous task on this issue
+	PriorWorkDir          string          `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on this issue
+	TriggerCommentID      string          `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
+	TriggerCommentContent string          `json:"trigger_comment_content,omitempty"` // content of the triggering comment
+	ChatSessionID         string          `json:"chat_session_id,omitempty"`         // non-empty for chat tasks
+	ChatMessage           string          `json:"chat_message,omitempty"`            // user message content for chat tasks
 }
 
 // AgentData holds agent details returned by the claim endpoint.

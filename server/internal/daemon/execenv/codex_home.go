@@ -42,6 +42,11 @@ type CodexHomeOptions struct {
 	// Empty means use runtime.GOOS. Primarily exists so tests can exercise
 	// both macOS and Linux paths deterministically.
 	GOOS string
+	// PreferWorkspaceWrite forces workspace-write even on platforms where the
+	// background auto mode normally falls back to danger-full-access. This is
+	// used for Ask me approval mode so Codex can surface sandbox/permission
+	// requests similarly to local interactive usage.
+	PreferWorkspaceWrite bool
 }
 
 // prepareCodexHome is a thin wrapper around prepareCodexHomeWithOpts kept for
@@ -95,10 +100,14 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		}
 	}
 
-	// Write a daemon-managed sandbox block into config.toml. On macOS we may
-	// need to fall back to danger-full-access because of openai/codex#10390;
-	// see codex_sandbox.go for the full rationale.
+	// Write a daemon-managed sandbox block into config.toml. In auto mode, on
+	// macOS we may fall back to danger-full-access for background API access.
+	// In Ask me mode, force workspace-write so Codex can actually ask when it
+	// needs to leave the workspace.
 	policy := codexSandboxPolicyFor(opts.GOOS, opts.CodexVersion)
+	if opts.PreferWorkspaceWrite {
+		policy = codexWorkspaceWritePromptPolicy()
+	}
 	if err := ensureCodexSandboxConfig(filepath.Join(codexHome, "config.toml"), policy, opts.CodexVersion, logger); err != nil {
 		logger.Warn("execenv: codex-home ensure sandbox config failed", "error", err)
 	}
@@ -291,7 +300,6 @@ func ensureSymlink(src, dst string) error {
 // sandbox/network directives now live in a managed block rendered by
 // codex_sandbox.go's ensureCodexSandboxConfig so they can be updated
 // idempotently without touching user-managed keys.)
-
 
 // copyFileIfExists copies src to dst. If src doesn't exist, it's a no-op.
 // If dst already exists, it's not overwritten.

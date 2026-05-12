@@ -92,6 +92,38 @@ func TestWithApprovalTraceNilStore(t *testing.T) {
 	}
 }
 
+func TestWithApprovalTraceSkipsCachedApproval(t *testing.T) {
+	ctx := context.Background()
+	store := newTraceStoreForTest(t)
+	defer store.Close()
+
+	taskID := "task-cached-approval"
+	runID := "run-cached-approval"
+
+	wrapped := WithApprovalTrace(func(_ context.Context, _ agent.ApprovalRequest) (string, bool, error) {
+		return agent.EncodeApprovalChoice("accept_similar", agent.CachedApprovalResponseMessage), true, nil
+	}, store, taskID, runID, "claude")
+
+	chosen, approved, err := wrapped(ctx, agent.ApprovalRequest{Type: "command_approval", Title: "Run command"})
+	if err != nil {
+		t.Fatalf("callback: %v", err)
+	}
+	if !approved {
+		t.Fatal("expected cached approval to approve")
+	}
+	if chosen == "" {
+		t.Fatal("expected chosen option")
+	}
+
+	lines, err := store.ListSince(ctx, taskID, runID, 0)
+	if err != nil {
+		t.Fatalf("ListSince: %v", err)
+	}
+	if len(lines) != 0 {
+		t.Fatalf("expected no trace lines for cached approval, got %d", len(lines))
+	}
+}
+
 func TestWithApprovalTraceNilCallback(t *testing.T) {
 	store := newTraceStoreForTest(t)
 	defer store.Close()

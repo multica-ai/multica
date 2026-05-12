@@ -87,3 +87,26 @@ func TestLaunchHeaderReturnsEmptyForUnknownType(t *testing.T) {
 		t.Errorf("expected empty header for unknown type, got %q", header)
 	}
 }
+
+func TestCapabilities(t *testing.T) {
+	t.Parallel()
+
+	claude := Capabilities("claude")
+	if !claude.PromptPlan || claude.NativePlan != "experimental" || !claude.NativeApproval || !claude.StructuredStreaming {
+		t.Fatalf("unexpected claude capabilities: %+v", claude)
+	}
+
+	codex := Capabilities("codex")
+	if !codex.PromptPlan || codex.NativePlan != "" || !codex.NativeApproval || !codex.NativeUserInput {
+		t.Fatalf("unexpected codex capabilities: %+v", codex)
+	}
+
+	gemini := Capabilities("gemini")
+	if !gemini.PromptPlan || gemini.NativePlan != "" || gemini.NativeApproval {
+		t.Fatalf("unexpected gemini capabilities: %+v", gemini)
+	}
+
+	if got := Capabilities("unknown"); got != (PlanCapability{}) {
+		t.Fatalf("unknown capabilities = %+v", got)
+	}
+}

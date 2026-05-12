@@ -26,39 +26,44 @@ type ReportInteractionRequest struct {
 }
 
 type RespondInteractionRequest struct {
-	ChosenOption string `json:"chosen_option"`
+	ChosenOption    string `json:"chosen_option"`
+	ResponseMessage string `json:"response_message,omitempty"`
 }
 
 type InteractionDTO struct {
-	ID            string                       `json:"id"`
-	TaskID        string                       `json:"task_id"`
-	Provider      string                       `json:"provider"`
-	Type          string                       `json:"type"`
-	Title         string                       `json:"title"`
-	Detail        string                       `json:"detail,omitempty"`
-	Options       []protocol.InteractionOption `json:"options"`
-	DefaultOption string                       `json:"default_option,omitempty"`
-	Status        string                       `json:"status"`
-	CreatedAt     string                       `json:"created_at"`
-	ExpiresAt     string                       `json:"expires_at"`
-	RespondedAt   *string                      `json:"responded_at,omitempty"`
-	ChosenOption  string                       `json:"chosen_option,omitempty"`
+	ID              string                       `json:"id"`
+	TaskID          string                       `json:"task_id"`
+	Provider        string                       `json:"provider"`
+	Type            string                       `json:"type"`
+	Title           string                       `json:"title"`
+	Detail          string                       `json:"detail,omitempty"`
+	Options         []protocol.InteractionOption `json:"options"`
+	DefaultOption   string                       `json:"default_option,omitempty"`
+	Status          string                       `json:"status"`
+	CreatedAt       string                       `json:"created_at"`
+	ExpiresAt       string                       `json:"expires_at"`
+	RespondedAt     *string                      `json:"responded_at,omitempty"`
+	ChosenOption    string                       `json:"chosen_option,omitempty"`
+	ResponseMessage string                       `json:"response_message,omitempty"`
 }
 
 func interactionToDTO(req protocol.InteractionRequest) InteractionDTO {
 	dto := InteractionDTO{
-		ID:            req.ID,
-		TaskID:        req.TaskID,
-		Provider:      req.Provider,
-		Type:          req.Type,
-		Title:         req.Title,
-		Detail:        req.Detail,
-		Options:       req.Options,
-		DefaultOption: req.DefaultOption,
-		Status:        req.Status,
-		CreatedAt:     req.CreatedAt.Format(time.RFC3339),
-		ExpiresAt:     req.ExpiresAt.Format(time.RFC3339),
-		ChosenOption:  req.ChosenOption,
+		ID:              req.ID,
+		TaskID:          req.TaskID,
+		Provider:        req.Provider,
+		Type:            req.Type,
+		Title:           req.Title,
+		Detail:          req.Detail,
+		Options:         req.Options,
+		DefaultOption:   req.DefaultOption,
+		Status:          req.Status,
+		CreatedAt:       req.CreatedAt.Format(time.RFC3339),
+		ChosenOption:    req.ChosenOption,
+		ResponseMessage: req.ResponseMessage,
+	}
+	if !req.ExpiresAt.IsZero() {
+		dto.ExpiresAt = req.ExpiresAt.Format(time.RFC3339)
 	}
 	if req.RespondedAt != nil {
 		s := req.RespondedAt.Format(time.RFC3339)
@@ -91,8 +96,14 @@ func (h *Handler) ReportInteraction(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	expiresIn := 5 * time.Minute
-	if body.ExpiresIn > 0 {
+	if body.ExpiresIn < 0 {
+		expiresIn = 0
+	} else if body.ExpiresIn > 0 {
 		expiresIn = time.Duration(body.ExpiresIn) * time.Second
+	}
+	expiresAt := time.Time{}
+	if expiresIn > 0 {
+		expiresAt = now.Add(expiresIn)
 	}
 
 	req := protocol.InteractionRequest{
@@ -106,7 +117,7 @@ func (h *Handler) ReportInteraction(w http.ResponseWriter, r *http.Request) {
 		DefaultOption: body.DefaultOption,
 		Status:        protocol.InteractionStatusPending,
 		CreatedAt:     now,
-		ExpiresAt:     now.Add(expiresIn),
+		ExpiresAt:     expiresAt,
 	}
 
 	id := h.InteractionStore.Create(req)
@@ -183,7 +194,7 @@ func (h *Handler) RespondInteraction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.InteractionStore.Respond(interactionID, body.ChosenOption); err != nil {
+	if err := h.InteractionStore.Respond(interactionID, body.ChosenOption, body.ResponseMessage); err != nil {
 		if err.Error() == "interaction not found" {
 			writeError(w, http.StatusNotFound, "interaction not found")
 		} else {
@@ -196,10 +207,11 @@ func (h *Handler) RespondInteraction(w http.ResponseWriter, r *http.Request) {
 
 	wsID := middleware.WorkspaceIDFromContext(r.Context())
 	h.publish(protocol.EventInteractionResolved, wsID, "member", requestUserID(r), protocol.InteractionResolvedPayload{
-		RequestID:    interactionID,
-		TaskID:       taskID,
-		Status:       item.Status,
-		ChosenOption: body.ChosenOption,
+		RequestID:       interactionID,
+		TaskID:          taskID,
+		Status:          item.Status,
+		ChosenOption:    body.ChosenOption,
+		ResponseMessage: body.ResponseMessage,
 	})
 
 	writeJSON(w, http.StatusOK, interactionToDTO(item))

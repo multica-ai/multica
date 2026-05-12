@@ -125,6 +125,41 @@ func TestReportInteraction_DaemonSuccess(t *testing.T) {
 	cleanInteraction(t, dto.ID)
 }
 
+func TestReportInteraction_PlanApprovalDoesNotExpire(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	taskID := createTestTask(t)
+
+	body := ReportInteractionRequest{
+		Type:      protocol.InteractionPlanApproval,
+		Title:     "Plan ready",
+		Provider:  "claude",
+		ExpiresIn: -1,
+	}
+
+	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/interactions", body, testWorkspaceID, "test-daemon")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("taskId", taskID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	w := httptest.NewRecorder()
+	testHandler.ReportInteraction(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var dto InteractionDTO
+	json.NewDecoder(w.Body).Decode(&dto)
+	defer cleanInteraction(t, dto.ID)
+
+	if dto.ExpiresAt != "" {
+		t.Fatalf("plan approval should not expire, got expires_at=%q", dto.ExpiresAt)
+	}
+}
+
 func TestRespondInteraction_UserSuccess(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

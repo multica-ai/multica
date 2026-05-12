@@ -110,6 +110,11 @@ export function SettingsTab({
 
     setSaving(true);
     try {
+      const runtimeConfig: Record<string, unknown> = {
+        ...agent.runtime_config,
+        approval_policy: approvalPolicy,
+        trace_enabled: traceEnabled === "on",
+      };
       await onSave({
         name: name.trim(),
         description,
@@ -117,11 +122,7 @@ export function SettingsTab({
         max_concurrent_tasks: maxTasks,
         runtime_id: selectedRuntimeId,
         model,
-        runtime_config: {
-          ...agent.runtime_config,
-          approval_policy: approvalPolicy,
-          trace_enabled: traceEnabled === "on",
-        },
+        runtime_config: runtimeConfig,
       });
       toast.success("Settings saved");
     } catch {
@@ -388,7 +389,18 @@ export function SettingsTab({
           disabled={readOnly}
         >
           <SelectTrigger className="mt-1.5 w-48">
-            <SelectValue />
+            <SelectValue>
+              {(value: string | null) => {
+                switch (value) {
+                  case "prompt":
+                    return "Ask me";
+                  case "deny":
+                    return "Deny";
+                  default:
+                    return "Auto";
+                }
+              }}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="auto">Auto</SelectItem>

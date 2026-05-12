@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, ChevronRight, ChevronDown, Loader2, ArrowDown, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2 } from "lucide-react";
+import { Bot, ChevronRight, ChevronDown, Loader2, ArrowDown, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2, PauseCircle } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWSEvent } from "@multica/core/realtime";
 import type { TaskMessagePayload, TaskCompletedPayload, TaskFailedPayload, TaskCancelledPayload } from "@multica/core/types/events";
@@ -271,6 +271,7 @@ interface SingleAgentLiveCardProps {
 
 function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiveCardProps) {
   const [elapsed, setElapsed] = useState("");
+  const [paused, setPaused] = useState(false);
   const [open, setOpen] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const [cancelling, setCancelling] = useState(false);
@@ -285,6 +286,28 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
     const interval = setInterval(() => setElapsed(formatElapsed(startRef)), 1000);
     return () => clearInterval(interval);
   }, [task.started_at, task.dispatched_at]);
+
+  const refreshPaused = useCallback(() => {
+    api.listTaskInteractions(task.id, "pending")
+      .then((items) => setPaused(items.length > 0))
+      .catch(() => setPaused(false));
+  }, [task.id]);
+
+  useEffect(() => {
+    refreshPaused();
+    const interval = setInterval(refreshPaused, 3000);
+    return () => clearInterval(interval);
+  }, [refreshPaused]);
+
+  useWSEvent("interaction:created", useCallback((payload: unknown) => {
+    const p = payload as { task_id?: string };
+    if (p.task_id === task.id) refreshPaused();
+  }, [task.id, refreshPaused]));
+
+  useWSEvent("interaction:resolved", useCallback((payload: unknown) => {
+    const p = payload as { task_id?: string };
+    if (p.task_id === task.id) refreshPaused();
+  }, [task.id, refreshPaused]));
 
   // Auto-scroll timeline to bottom
   useEffect(() => {
@@ -317,7 +340,10 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
   const toolCount = items.filter((i) => i.type === "tool_use").length;
 
   return (
-    <div className="rounded-lg border border-info/20 bg-info/5 backdrop-blur-sm">
+    <div className={cn(
+      "rounded-lg border backdrop-blur-sm",
+      paused ? "border-indigo-300/40 bg-indigo-500/10 dark:border-indigo-800/60 dark:bg-indigo-950/25" : "border-info/20 bg-info/5",
+    )}>
       {/* Header — click to toggle timeline */}
       <div
         className="group flex items-center gap-2 px-3 py-2 cursor-pointer select-none text-muted-foreground hover:text-foreground transition-colors"
@@ -340,9 +366,14 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
           </div>
         )}
         <div className="flex items-center gap-1.5 text-xs min-w-0">
-          <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
-          <span className="font-medium text-foreground truncate">{agentName} is working</span>
+          {paused ? (
+            <PauseCircle className="h-3 w-3 text-indigo-500 shrink-0" />
+          ) : (
+            <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
+          )}
+          <span className="font-medium text-foreground truncate">{agentName} is {paused ? "paused" : "working"}</span>
           <span className="text-muted-foreground tabular-nums shrink-0">{elapsed}</span>
+          {paused && <span className="text-indigo-600 dark:text-indigo-300 shrink-0">waiting for input</span>}
           {toolCount > 0 && (
             <span className="text-muted-foreground shrink-0">{toolCount} tools</span>
           )}

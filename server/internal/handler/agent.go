@@ -22,31 +22,31 @@ import (
 )
 
 type AgentResponse struct {
-	ID                 string            `json:"id"`
-	WorkspaceID        string            `json:"workspace_id"`
-	RuntimeID          string            `json:"runtime_id"`
-	Name               string            `json:"name"`
-	Description        string            `json:"description"`
-	Instructions       string            `json:"instructions"`
-	AvatarURL          *string           `json:"avatar_url"`
-	RuntimeMode        string            `json:"runtime_mode"`
-	RuntimeConfig      any               `json:"runtime_config"`
-	CustomEnv          map[string]string `json:"custom_env"`
-	CustomArgs         []string          `json:"custom_args"`
-	McpConfig          json.RawMessage   `json:"mcp_config"`
-	CustomEnvRedacted  bool              `json:"custom_env_redacted"`
-	McpConfigRedacted  bool              `json:"mcp_config_redacted"`
-	Visibility         string            `json:"visibility"`
-	Status             string            `json:"status"`
-	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
-	Model              string            `json:"model"`
-	OwnerID            *string           `json:"owner_id"`
-	Skills             []SkillResponse   `json:"skills"`
-	CreatedAt          string            `json:"created_at"`
-	UpdatedAt          string            `json:"updated_at"`
-	ArchivedAt              *string           `json:"archived_at"`
-	ArchivedBy              *string           `json:"archived_by"`
-	CustomEnvCopiedPending  bool              `json:"custom_env_copied_pending"`
+	ID                     string            `json:"id"`
+	WorkspaceID            string            `json:"workspace_id"`
+	RuntimeID              string            `json:"runtime_id"`
+	Name                   string            `json:"name"`
+	Description            string            `json:"description"`
+	Instructions           string            `json:"instructions"`
+	AvatarURL              *string           `json:"avatar_url"`
+	RuntimeMode            string            `json:"runtime_mode"`
+	RuntimeConfig          any               `json:"runtime_config"`
+	CustomEnv              map[string]string `json:"custom_env"`
+	CustomArgs             []string          `json:"custom_args"`
+	McpConfig              json.RawMessage   `json:"mcp_config"`
+	CustomEnvRedacted      bool              `json:"custom_env_redacted"`
+	McpConfigRedacted      bool              `json:"mcp_config_redacted"`
+	Visibility             string            `json:"visibility"`
+	Status                 string            `json:"status"`
+	MaxConcurrentTasks     int32             `json:"max_concurrent_tasks"`
+	Model                  string            `json:"model"`
+	OwnerID                *string           `json:"owner_id"`
+	Skills                 []SkillResponse   `json:"skills"`
+	CreatedAt              string            `json:"created_at"`
+	UpdatedAt              string            `json:"updated_at"`
+	ArchivedAt             *string           `json:"archived_at"`
+	ArchivedBy             *string           `json:"archived_by"`
+	CustomEnvCopiedPending bool              `json:"custom_env_copied_pending"`
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
@@ -84,26 +84,26 @@ func agentToResponse(a db.Agent) AgentResponse {
 	}
 
 	return AgentResponse{
-		ID:                 uuidToString(a.ID),
-		WorkspaceID:        uuidToString(a.WorkspaceID),
-		RuntimeID:          uuidToString(a.RuntimeID),
-		Name:               a.Name,
-		Description:        a.Description,
-		Instructions:       a.Instructions,
-		AvatarURL:          textToPtr(a.AvatarUrl),
-		RuntimeMode:        a.RuntimeMode,
-		RuntimeConfig:      rc,
-		CustomEnv:          customEnv,
-		CustomArgs:         customArgs,
-		McpConfig:          mcpConfig,
-		Visibility:         a.Visibility,
-		Status:             a.Status,
-		MaxConcurrentTasks: a.MaxConcurrentTasks,
-		Model:              a.Model.String,
-		OwnerID:            uuidToPtr(a.OwnerID),
-		Skills:             []SkillResponse{},
-		CreatedAt:          timestampToString(a.CreatedAt),
-		UpdatedAt:          timestampToString(a.UpdatedAt),
+		ID:                     uuidToString(a.ID),
+		WorkspaceID:            uuidToString(a.WorkspaceID),
+		RuntimeID:              uuidToString(a.RuntimeID),
+		Name:                   a.Name,
+		Description:            a.Description,
+		Instructions:           a.Instructions,
+		AvatarURL:              textToPtr(a.AvatarUrl),
+		RuntimeMode:            a.RuntimeMode,
+		RuntimeConfig:          rc,
+		CustomEnv:              customEnv,
+		CustomArgs:             customArgs,
+		McpConfig:              mcpConfig,
+		Visibility:             a.Visibility,
+		Status:                 a.Status,
+		MaxConcurrentTasks:     a.MaxConcurrentTasks,
+		Model:                  a.Model.String,
+		OwnerID:                uuidToPtr(a.OwnerID),
+		Skills:                 []SkillResponse{},
+		CreatedAt:              timestampToString(a.CreatedAt),
+		UpdatedAt:              timestampToString(a.UpdatedAt),
 		ArchivedAt:             timestampToPtr(a.ArchivedAt),
 		ArchivedBy:             uuidToPtr(a.ArchivedBy),
 		CustomEnvCopiedPending: a.CustomEnvCopiedPending,
@@ -150,6 +150,7 @@ type AgentTaskResponse struct {
 	CompletedAt           *string        `json:"completed_at"`
 	Result                any            `json:"result"`
 	Error                 *string        `json:"error"`
+	Context               any            `json:"context,omitempty"`
 	Agent                 *TaskAgentData `json:"agent,omitempty"`
 	Repos                 []RepoData     `json:"repos,omitempty"`
 	CreatedAt             string         `json:"created_at"`
@@ -180,6 +181,10 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
 	}
+	var context any
+	if t.Context != nil {
+		json.Unmarshal(t.Context, &context)
+	}
 	return AgentTaskResponse{
 		ID:               uuidToString(t.ID),
 		AgentID:          uuidToString(t.AgentID),
@@ -192,6 +197,7 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		CompletedAt:      timestampToPtr(t.CompletedAt),
 		Result:           result,
 		Error:            textToPtr(t.Error),
+		Context:          context,
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 	}
@@ -405,22 +411,22 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
-		WorkspaceID:              parseUUID(workspaceID),
-		Name:                     req.Name,
-		Description:              req.Description,
-		Instructions:             req.Instructions,
-		AvatarUrl:                ptrToText(req.AvatarURL),
-		RuntimeMode:              runtime.RuntimeMode,
-		RuntimeConfig:            rc,
-		RuntimeID:                runtime.ID,
-		Visibility:               req.Visibility,
-		MaxConcurrentTasks:       req.MaxConcurrentTasks,
-		OwnerID:                  parseUUID(ownerID),
-		CustomEnv:                ce,
-		CustomArgs:               ca,
-		McpConfig:                mc,
-		Model:                    pgtype.Text{String: req.Model, Valid: req.Model != ""},
-		CustomEnvCopiedPending:   false,
+		WorkspaceID:            parseUUID(workspaceID),
+		Name:                   req.Name,
+		Description:            req.Description,
+		Instructions:           req.Instructions,
+		AvatarUrl:              ptrToText(req.AvatarURL),
+		RuntimeMode:            runtime.RuntimeMode,
+		RuntimeConfig:          rc,
+		RuntimeID:              runtime.ID,
+		Visibility:             req.Visibility,
+		MaxConcurrentTasks:     req.MaxConcurrentTasks,
+		OwnerID:                parseUUID(ownerID),
+		CustomEnv:              ce,
+		CustomArgs:             ca,
+		McpConfig:              mc,
+		Model:                  pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		CustomEnvCopiedPending: false,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -558,22 +564,22 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 	qtx := h.Queries.WithTx(tx)
 
 	newAgent, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
-		WorkspaceID:              sourceAgent.WorkspaceID,
-		Name:                     newName,
-		Description:              sourceAgent.Description,
-		Instructions:             sourceAgent.Instructions,
-		AvatarUrl:                sourceAgent.AvatarUrl,
-		RuntimeMode:              sourceAgent.RuntimeMode,
-		RuntimeConfig:            rc,
-		RuntimeID:                sourceAgent.RuntimeID,
-		Visibility:               sourceAgent.Visibility,
-		MaxConcurrentTasks:       sourceAgent.MaxConcurrentTasks,
-		OwnerID:                  parseUUID(userID),
-		CustomEnv:                ce,
-		CustomArgs:               ca,
-		McpConfig:                mc,
-		Model:                    sourceAgent.Model,
-		CustomEnvCopiedPending:   envCopiedPending,
+		WorkspaceID:            sourceAgent.WorkspaceID,
+		Name:                   newName,
+		Description:            sourceAgent.Description,
+		Instructions:           sourceAgent.Instructions,
+		AvatarUrl:              sourceAgent.AvatarUrl,
+		RuntimeMode:            sourceAgent.RuntimeMode,
+		RuntimeConfig:          rc,
+		RuntimeID:              sourceAgent.RuntimeID,
+		Visibility:             sourceAgent.Visibility,
+		MaxConcurrentTasks:     sourceAgent.MaxConcurrentTasks,
+		OwnerID:                parseUUID(userID),
+		CustomEnv:              ce,
+		CustomArgs:             ca,
+		McpConfig:              mc,
+		Model:                  sourceAgent.Model,
+		CustomEnvCopiedPending: envCopiedPending,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError

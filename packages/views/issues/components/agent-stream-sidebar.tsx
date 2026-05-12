@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Radio } from "lucide-react";
+import { PauseCircle, Radio } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWSEvent } from "@multica/core/realtime";
 import type { AgentTask } from "@multica/core/types";
@@ -42,19 +42,58 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
 
   const task = activeTasks[0] ?? recentTask;
   const isLive = activeTasks.length > 0;
+  const runMode = taskRunMode(task);
+  const [paused, setPaused] = useState(false);
+
+  const refreshPaused = useCallback(() => {
+    if (!task || !isLive) {
+      setPaused(false);
+      return;
+    }
+    api.listTaskInteractions(task.id, "pending")
+      .then((items) => setPaused(items.length > 0))
+      .catch(() => setPaused(false));
+  }, [task, isLive]);
+
+  useEffect(() => {
+    refreshPaused();
+    const interval = setInterval(refreshPaused, 3000);
+    return () => clearInterval(interval);
+  }, [refreshPaused]);
+
+  useWSEvent("interaction:created", (payload: unknown) => {
+    const p = payload as { task_id?: string };
+    if (p.task_id === task?.id) refreshPaused();
+  });
+
+  useWSEvent("interaction:resolved", (payload: unknown) => {
+    const p = payload as { task_id?: string };
+    if (p.task_id === task?.id) refreshPaused();
+  });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="mb-3 flex items-center gap-2 px-1 text-sm font-medium">
-        <Radio className={cn("h-3 w-3", isLive ? "text-success" : "text-muted-foreground")} />
+        {paused ? (
+          <PauseCircle className="h-3 w-3 text-indigo-500" />
+        ) : (
+          <Radio className={cn("h-3 w-3", isLive ? "text-success" : "text-muted-foreground")} />
+        )}
         <span>Agent stream</span>
         {task && (
-          <span className={cn(
-            "ml-auto rounded px-1.5 py-0.5 text-[11px]",
-            isLive ? "bg-success/10 text-success" : "bg-muted text-muted-foreground",
-          )}>
-            {isLive ? "live" : "recent"}
-          </span>
+          <div className="ml-auto flex items-center gap-1">
+            {runMode === "plan" && (
+              <span className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info">
+                plan
+              </span>
+            )}
+            <span className={cn(
+              "rounded px-1.5 py-0.5 text-[11px]",
+              paused ? "bg-indigo-500/10 text-indigo-500" : isLive ? "bg-success/10 text-success" : "bg-muted text-muted-foreground",
+            )}>
+              {paused ? "paused" : isLive ? "live" : "recent"}
+            </span>
+          </div>
         )}
       </div>
       <div className="min-h-0 flex-1">
@@ -70,6 +109,11 @@ export function AgentStreamSidebar({ issueId }: AgentStreamSidebarProps) {
       </div>
     </div>
   );
+}
+
+function taskRunMode(task: AgentTask | null): string {
+  const value = task?.context?.run_mode;
+  return typeof value === "string" ? value : "normal";
 }
 
 function sortRecentTasks(tasks: AgentTask[]): AgentTask[] {

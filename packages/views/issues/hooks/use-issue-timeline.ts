@@ -209,12 +209,13 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   // --- Mutation functions ---
 
   const submitComment = useCallback(
-    async (content: string, attachmentIds?: string[]) => {
+    async (content: string, attachmentIds?: string[], type = "comment") => {
       if (!content.trim() || submitting || !userId) return;
       setSubmitting(true);
       try {
         await createCommentMutation.mutateAsync({
           content,
+          type,
           attachmentIds,
         });
       } catch {

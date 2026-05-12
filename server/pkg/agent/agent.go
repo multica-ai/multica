@@ -9,7 +9,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // Backend is the unified interface for executing prompts via coding agents.
@@ -38,9 +41,31 @@ type ApprovalCallback func(ctx context.Context, req ApprovalRequest) (chosenOpti
 
 // ApprovalRequest describes a single approval prompt surfaced to the user.
 type ApprovalRequest struct {
-	Type   string // e.g. "command_approval", "file_change_approval", "permission_request"
-	Title  string
-	Detail string
+	Type          string // e.g. "command_approval", "file_change_approval", "permission_request"
+	Title         string
+	Detail        string
+	Options       []protocol.InteractionOption
+	DefaultOption string
+}
+
+const approvalChoiceMessageSeparator = "\x1f"
+const CachedApprovalResponseMessage = "__multica_cached_approval__"
+
+func EncodeApprovalChoice(chosenOption, responseMessage string) string {
+	responseMessage = strings.TrimSpace(responseMessage)
+	if responseMessage == "" {
+		return chosenOption
+	}
+	return chosenOption + approvalChoiceMessageSeparator + responseMessage
+}
+
+func SplitApprovalChoice(value string) (chosenOption, responseMessage string) {
+	parts := strings.SplitN(value, approvalChoiceMessageSeparator, 2)
+	chosenOption = parts[0]
+	if len(parts) > 1 {
+		responseMessage = strings.TrimSpace(parts[1])
+	}
+	return chosenOption, responseMessage
 }
 
 // TraceCallback is called by provider adapters to record events in the local
@@ -52,16 +77,19 @@ type TraceCallback func(channel, content, rawPayload string)
 
 // ExecOptions configures a single execution.
 type ExecOptions struct {
-	Cwd             string
-	Model           string
-	SystemPrompt    string
-	MaxTurns        int
-	Timeout         time.Duration
-	ResumeSessionID string           // if non-empty, resume a previous agent session
-	CustomArgs      []string         // additional CLI arguments appended to the agent command
-	McpConfig       json.RawMessage  // if non-nil, MCP server config to pass via --mcp-config
-	OnApproval      ApprovalCallback // nil = auto-approve (default behaviour)
-	TraceCallback   TraceCallback    // nil = no trace recording (default)
+	Cwd                  string
+	Model                string
+	SystemPrompt         string
+	VisibleLanguage      string
+	MaxTurns             int
+	Timeout              time.Duration
+	ResumeSessionID      string           // if non-empty, resume a previous agent session
+	CustomArgs           []string         // additional CLI arguments appended to the agent command
+	McpConfig            json.RawMessage  // if non-nil, MCP server config to pass via --mcp-config
+	OnApproval           ApprovalCallback // nil = auto-approve (default behaviour)
+	TraceCallback        TraceCallback    // nil = no trace recording (default)
+	ClaudePermissionMode string           // optional controlled override: default, plan, acceptEdits
+	ClaudeUseSDKBridge   bool             // route Claude execution through the Agent SDK bridge
 }
 
 // Session represents a running agent execution.
@@ -121,6 +149,46 @@ type Config struct {
 	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
+}
+
+type PlanCapability struct {
+	PromptPlan          bool
+	NativePlan          string // "", "experimental", or "verified"
+	NativeApproval      bool
+	NativeUserInput     bool
+	StructuredStreaming bool
+}
+
+func Capabilities(agentType string) PlanCapability {
+	switch agentType {
+	case "claude":
+		return PlanCapability{
+			PromptPlan:          true,
+			NativePlan:          "experimental",
+			NativeApproval:      true,
+			StructuredStreaming: true,
+		}
+	case "codex":
+		return PlanCapability{
+			PromptPlan:          true,
+			NativeApproval:      true,
+			NativeUserInput:     true,
+			StructuredStreaming: true,
+		}
+	case "hermes", "kimi", "kiro":
+		return PlanCapability{
+			PromptPlan:          true,
+			NativeApproval:      true,
+			StructuredStreaming: true,
+		}
+	case "copilot", "cursor", "gemini", "opencode", "openclaw", "pi":
+		return PlanCapability{
+			PromptPlan:          true,
+			StructuredStreaming: true,
+		}
+	default:
+		return PlanCapability{}
+	}
 }
 
 // New creates a Backend for the given agent type.

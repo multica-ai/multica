@@ -712,10 +712,10 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
         <TabsTrigger value="stream">Stream</TabsTrigger>
         <TabsTrigger value="properties">Properties</TabsTrigger>
       </TabsList>
-      <TabsContent value="stream" className="mt-0 min-h-0 flex-1">
+      <TabsContent value="stream" keepMounted className="mt-0 min-h-0 flex-1">
         <AgentStreamSidebar issueId={issue.id} />
       </TabsContent>
-      <TabsContent value="properties" className="mt-0 min-h-0 flex-1 overflow-y-auto">
+      <TabsContent value="properties" keepMounted className="mt-0 min-h-0 flex-1 overflow-y-auto">
         {propertiesContent}
       </TabsContent>
     </Tabs>

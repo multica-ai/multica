@@ -60,7 +60,7 @@ func TestInteractionRegistry_Respond(t *testing.T) {
 		},
 	})
 
-	if err := r.Respond(id, "allow"); err != nil {
+	if err := r.Respond(id, "allow", ""); err != nil {
 		t.Fatalf("Respond: %v", err)
 	}
 
@@ -85,11 +85,33 @@ func TestInteractionRegistry_RespondDeny(t *testing.T) {
 		Type:   protocol.InteractionCommandApproval,
 	})
 
-	if err := r.Respond(id, "deny"); err != nil {
+	if err := r.Respond(id, "deny", ""); err != nil {
 		t.Fatalf("Respond: %v", err)
 	}
 
 	got, _ := r.Get(id)
+	if got.Status != protocol.InteractionStatusDenied {
+		t.Errorf("status = %q, want %q", got.Status, protocol.InteractionStatusDenied)
+	}
+}
+
+func TestInteractionRegistry_RespondStoresResponseMessage(t *testing.T) {
+	r := NewInteractionRegistry()
+	defer r.Stop()
+
+	id := r.Create(protocol.InteractionRequest{
+		TaskID: "task-1",
+		Type:   protocol.InteractionPlanApproval,
+	})
+
+	if err := r.Respond(id, "revise", "focus phase 1 first"); err != nil {
+		t.Fatalf("Respond: %v", err)
+	}
+
+	got, _ := r.Get(id)
+	if got.ResponseMessage != "focus phase 1 first" {
+		t.Errorf("response_message = %q", got.ResponseMessage)
+	}
 	if got.Status != protocol.InteractionStatusDenied {
 		t.Errorf("status = %q, want %q", got.Status, protocol.InteractionStatusDenied)
 	}
@@ -100,9 +122,9 @@ func TestInteractionRegistry_RespondAlreadyResolved(t *testing.T) {
 	defer r.Stop()
 
 	id := r.Create(protocol.InteractionRequest{TaskID: "task-1", Type: protocol.InteractionCommandApproval})
-	_ = r.Respond(id, "allow")
+	_ = r.Respond(id, "allow", "")
 
-	err := r.Respond(id, "deny")
+	err := r.Respond(id, "deny", "")
 	if err != ErrInteractionResolved {
 		t.Fatalf("expected ErrInteractionResolved, got %v", err)
 	}
@@ -129,7 +151,7 @@ func TestInteractionRegistry_CancelAlreadyResolved(t *testing.T) {
 	defer r.Stop()
 
 	id := r.Create(protocol.InteractionRequest{TaskID: "task-1", Type: protocol.InteractionCommandApproval})
-	_ = r.Respond(id, "allow")
+	_ = r.Respond(id, "allow", "")
 
 	err := r.Cancel(id)
 	if err != ErrInteractionResolved {
@@ -143,7 +165,7 @@ func TestInteractionRegistry_ListFilterByStatus(t *testing.T) {
 
 	r.Create(protocol.InteractionRequest{TaskID: "t1", Type: protocol.InteractionCommandApproval})
 	id2 := r.Create(protocol.InteractionRequest{TaskID: "t2", Type: protocol.InteractionFileChangeApproval})
-	_ = r.Respond(id2, "allow")
+	_ = r.Respond(id2, "allow", "")
 
 	pending := r.List(protocol.InteractionStatusPending)
 	if len(pending) != 1 {
@@ -196,7 +218,7 @@ func TestInteractionRegistry_TimeoutDoesNotAffectResolved(t *testing.T) {
 		CreatedAt: past,
 		ExpiresAt: past.Add(time.Second),
 	})
-	_ = r.Respond(id, "allow")
+	_ = r.Respond(id, "allow", "")
 
 	r.expireAt(time.Now())
 

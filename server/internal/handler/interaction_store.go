@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,7 +47,7 @@ func (s *InteractionStore) Create(req protocol.InteractionRequest) string {
 	if req.CreatedAt.IsZero() {
 		req.CreatedAt = time.Now()
 	}
-	if req.ExpiresAt.IsZero() {
+	if req.ExpiresAt.IsZero() && req.Type != protocol.InteractionPlanApproval {
 		req.ExpiresAt = req.CreatedAt.Add(5 * time.Minute)
 	}
 	s.items[req.ID] = &req
@@ -79,7 +80,7 @@ func (s *InteractionStore) ListByTask(taskID, status string) []protocol.Interact
 	return out
 }
 
-func (s *InteractionStore) Respond(id, chosenOption string) error {
+func (s *InteractionStore) Respond(id, chosenOption, responseMessage string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	item, ok := s.items[id]
@@ -91,13 +92,23 @@ func (s *InteractionStore) Respond(id, chosenOption string) error {
 	}
 	now := time.Now()
 	item.ChosenOption = chosenOption
+	item.ResponseMessage = strings.TrimSpace(responseMessage)
 	item.RespondedAt = &now
-	if chosenOption == "deny" {
+	if isDeniedInteractionOption(chosenOption) {
 		item.Status = protocol.InteractionStatusDenied
 	} else {
 		item.Status = protocol.InteractionStatusApproved
 	}
 	return nil
+}
+
+func isDeniedInteractionOption(chosenOption string) bool {
+	switch strings.ToLower(strings.TrimSpace(chosenOption)) {
+	case "deny", "reject", "decline", "cancel", "stop", "revise", "keep_planning":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *InteractionStore) Stop() {
@@ -126,7 +137,7 @@ func (s *InteractionStore) expireAt(now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, item := range s.items {
-		if item.Status == protocol.InteractionStatusPending && now.After(item.ExpiresAt) {
+		if item.Status == protocol.InteractionStatusPending && !item.ExpiresAt.IsZero() && now.After(item.ExpiresAt) {
 			item.Status = protocol.InteractionStatusTimedOut
 			t := now
 			item.RespondedAt = &t

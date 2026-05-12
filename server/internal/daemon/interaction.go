@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -83,7 +84,7 @@ func (r *InteractionRegistry) List(status string) []protocol.InteractionRequest 
 }
 
 // Respond resolves a pending interaction with the chosen option.
-func (r *InteractionRegistry) Respond(id, chosenOption string) error {
+func (r *InteractionRegistry) Respond(id, chosenOption, responseMessage string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -97,12 +98,22 @@ func (r *InteractionRegistry) Respond(id, chosenOption string) error {
 
 	now := time.Now()
 	item.Status = protocol.InteractionStatusApproved
-	if chosenOption == "deny" {
+	if isDeniedRegistryOption(chosenOption) {
 		item.Status = protocol.InteractionStatusDenied
 	}
 	item.ChosenOption = chosenOption
+	item.ResponseMessage = strings.TrimSpace(responseMessage)
 	item.RespondedAt = &now
 	return nil
+}
+
+func isDeniedRegistryOption(chosenOption string) bool {
+	switch strings.ToLower(strings.TrimSpace(chosenOption)) {
+	case "deny", "reject", "decline", "cancel", "stop", "revise", "keep_planning":
+		return true
+	default:
+		return false
+	}
 }
 
 // Cancel marks a pending interaction as cancelled.

@@ -737,10 +737,10 @@ export class ApiClient {
     return this.fetch(`/api/tasks/${taskId}/interactions${qs}`);
   }
 
-  async respondInteraction(taskId: string, interactionId: string, chosenOption: string): Promise<TaskInteraction> {
+  async respondInteraction(taskId: string, interactionId: string, chosenOption: string, responseMessage?: string): Promise<TaskInteraction> {
     return this.fetch(`/api/tasks/${taskId}/interactions/${interactionId}/respond`, {
       method: "POST",
-      body: JSON.stringify({ chosen_option: chosenOption }),
+      body: JSON.stringify({ chosen_option: chosenOption, response_message: responseMessage }),
     });
   }
 

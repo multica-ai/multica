@@ -33,25 +33,27 @@ type InteractionOption struct {
 
 // InteractionRequest is a pending approval request from an agent runtime.
 type InteractionRequest struct {
-	ID            string              `json:"id"`
-	TaskID        string              `json:"task_id"`
-	Provider      string              `json:"provider"`
-	Type          string              `json:"type"`
-	Title         string              `json:"title"`
-	Detail        string              `json:"detail,omitempty"`
-	Options       []InteractionOption `json:"options"`
-	DefaultOption string              `json:"default_option,omitempty"`
-	Status        string              `json:"status"`
-	CreatedAt     time.Time           `json:"created_at"`
-	ExpiresAt     time.Time           `json:"expires_at"`
-	RespondedAt   *time.Time          `json:"responded_at,omitempty"`
-	ChosenOption  string              `json:"chosen_option,omitempty"`
+	ID              string              `json:"id"`
+	TaskID          string              `json:"task_id"`
+	Provider        string              `json:"provider"`
+	Type            string              `json:"type"`
+	Title           string              `json:"title"`
+	Detail          string              `json:"detail,omitempty"`
+	Options         []InteractionOption `json:"options"`
+	DefaultOption   string              `json:"default_option,omitempty"`
+	Status          string              `json:"status"`
+	CreatedAt       time.Time           `json:"created_at"`
+	ExpiresAt       time.Time           `json:"expires_at"`
+	RespondedAt     *time.Time          `json:"responded_at,omitempty"`
+	ChosenOption    string              `json:"chosen_option,omitempty"`
+	ResponseMessage string              `json:"response_message,omitempty"`
 }
 
 // InteractionResponse is the user/system answer to an InteractionRequest.
 type InteractionResponse struct {
-	RequestID    string `json:"request_id"`
-	ChosenOption string `json:"chosen_option"`
+	RequestID       string `json:"request_id"`
+	ChosenOption    string `json:"chosen_option"`
+	ResponseMessage string `json:"response_message,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +65,30 @@ const (
 	ApprovalPolicyPrompt = "prompt" // surface to user for decision
 	ApprovalPolicyDeny   = "deny"   // silently deny
 )
+
+const (
+	TaskRunModeNormal = "normal"
+	TaskRunModePlan   = "plan"
+)
+
+// ResolveTaskRunMode extracts the per-task execution intent from
+// agent_task_queue.context. It defaults to normal so existing tasks are
+// unaffected when the field is absent or malformed.
+func ResolveTaskRunMode(taskContext []byte) string {
+	if len(taskContext) == 0 {
+		return TaskRunModeNormal
+	}
+	var cfg struct {
+		RunMode string `json:"run_mode"`
+	}
+	if err := json.Unmarshal(taskContext, &cfg); err != nil {
+		return TaskRunModeNormal
+	}
+	if cfg.RunMode == TaskRunModePlan {
+		return TaskRunModePlan
+	}
+	return TaskRunModeNormal
+}
 
 // ResolveApprovalPolicy extracts approval_policy from an agent's runtime_config
 // JSON blob. Returns ApprovalPolicyAuto if absent, empty, or unrecognised.
@@ -98,6 +124,28 @@ func ResolveTraceEnabled(runtimeConfig []byte) bool {
 		return true
 	}
 	return *cfg.TraceEnabled
+}
+
+// ResolveClaudePermissionMode extracts an optional Claude Code permission mode
+// override. The daemon still blocks custom_args from changing this flag; this
+// controlled runtime_config field is only used for explicit verification flows
+// such as Claude plan mode.
+func ResolveClaudePermissionMode(runtimeConfig []byte) string {
+	if len(runtimeConfig) == 0 {
+		return ""
+	}
+	var cfg struct {
+		ClaudePermissionMode string `json:"claude_permission_mode"`
+	}
+	if err := json.Unmarshal(runtimeConfig, &cfg); err != nil {
+		return ""
+	}
+	switch cfg.ClaudePermissionMode {
+	case "default", "plan", "acceptEdits":
+		return cfg.ClaudePermissionMode
+	default:
+		return ""
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -156,8 +204,9 @@ type InteractionCreatedPayload struct {
 
 // InteractionResolvedPayload is broadcast when an interaction is resolved.
 type InteractionResolvedPayload struct {
-	RequestID    string `json:"request_id"`
-	TaskID       string `json:"task_id"`
-	Status       string `json:"status"`
-	ChosenOption string `json:"chosen_option,omitempty"`
+	RequestID       string `json:"request_id"`
+	TaskID          string `json:"task_id"`
+	Status          string `json:"status"`
+	ChosenOption    string `json:"chosen_option,omitempty"`
+	ResponseMessage string `json:"response_message,omitempty"`
 }

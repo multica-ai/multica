@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // codexBlockedArgs are flags hardcoded by the daemon that must not be
@@ -250,11 +252,14 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		}
 
 		// 3. Send turn and wait for completion
+		approvalPolicy := codexApprovalPolicy(c.onApproval)
 		_, err = c.request(runCtx, "turn/start", map[string]any{
 			"threadId": threadID,
 			"input": []map[string]any{
 				{"type": "text", "text": prompt},
 			},
+			"approvalPolicy":    approvalPolicy,
+			"approvalsReviewer": codexApprovalsReviewer(approvalPolicy),
 		})
 		if err != nil {
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
@@ -350,6 +355,8 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 // must reference, and resumed indicates whether the prior thread was picked
 // up (only useful for logging).
 func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions, logger *slog.Logger) (string, bool, error) {
+	approvalPolicy := codexApprovalPolicy(c.onApproval)
+	approvalsReviewer := codexApprovalsReviewer(approvalPolicy)
 	if priorThreadID := opts.ResumeSessionID; priorThreadID != "" {
 		// thread/resume reuses the thread's persisted model and reasoning
 		// effort; only override fields the daemon actually cares about.
@@ -358,6 +365,8 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 			"cwd":                   opts.Cwd,
 			"model":                 nilIfEmpty(opts.Model),
 			"developerInstructions": nilIfEmpty(opts.SystemPrompt),
+			"approvalPolicy":        approvalPolicy,
+			"approvalsReviewer":     approvalsReviewer,
 		})
 		if err == nil {
 			if threadID := extractThreadID(resumeResult); threadID != "" {
@@ -369,20 +378,13 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		}
 	}
 
-	// Determine approvalPolicy: when the caller provided an approval callback
-	// (prompt mode), tell Codex to ask for approval on commands/file changes;
-	// otherwise leave nil so Codex uses its default (auto-approve).
-	var approvalPolicy any
-	if c.onApproval != nil {
-		approvalPolicy = "on-request"
-	}
-
 	startResult, err := c.request(ctx, "thread/start", map[string]any{
 		"model":                  nilIfEmpty(opts.Model),
 		"modelProvider":          nil,
 		"profile":                nil,
 		"cwd":                    opts.Cwd,
 		"approvalPolicy":         approvalPolicy,
+		"approvalsReviewer":      approvalsReviewer,
 		"sandbox":                nil,
 		"config":                 nil,
 		"baseInstructions":       nil,
@@ -400,6 +402,23 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		return "", false, fmt.Errorf("codex thread/start returned no thread ID")
 	}
 	return threadID, false, nil
+}
+
+func codexApprovalPolicy(onApproval ApprovalCallback) any {
+	if onApproval == nil {
+		return nil
+	}
+	// Match Codex's local "ask when needed" behaviour instead of forcing every
+	// untrusted action to stop. Stricter review should be a separate product
+	// mode, not the default Ask me mapping.
+	return "on-request"
+}
+
+func codexApprovalsReviewer(approvalPolicy any) any {
+	if approvalPolicy == nil {
+		return nil
+	}
+	return "user"
 }
 
 // ── codexClient: JSON-RPC 2.0 transport ──
@@ -608,6 +627,10 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 			c.respond(id, map[string]any{"decision": "accept"})
 		case "item/fileChange/requestApproval", "applyPatchApproval":
 			c.respond(id, map[string]any{"decision": "accept"})
+		case "item/permissions/requestApproval":
+			c.respond(id, codexPermissionResponse(raw["params"], true))
+		case "item/tool/requestUserInput":
+			c.respond(id, map[string]any{"answers": map[string]any{}})
 		default:
 			c.respond(id, map[string]any{})
 		}
@@ -628,11 +651,22 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 				detail, _ = params["command"].(string)
 			}
 		}
+		if isTrustedReadOnlyPlatformCommand(detail) {
+			c.respond(id, map[string]any{"decision": "accept"})
+			return
+		}
 		_, approved, err := c.onApproval(c.runCtx, ApprovalRequest{
-			Type: "command_approval", Title: title, Detail: detail,
+			Type:  "command_approval",
+			Title: title, Detail: detail,
+			Options: []protocol.InteractionOption{
+				{ID: "accept_once", Label: "Allow this command"},
+				{ID: "accept_similar", Label: "Allow similar commands this run"},
+				{ID: "decline", Label: "Reject"},
+			},
+			DefaultOption: "decline",
 		})
 		if err != nil || !approved {
-			c.respond(id, map[string]any{"decision": "reject"})
+			c.respond(id, map[string]any{"decision": "decline"})
 		} else {
 			c.respond(id, map[string]any{"decision": "accept"})
 		}
@@ -650,15 +684,138 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 			}
 		}
 		_, approved, err := c.onApproval(c.runCtx, ApprovalRequest{
-			Type: "file_change_approval", Title: title, Detail: detail,
+			Type:  "file_change_approval",
+			Title: title, Detail: detail,
+			Options: []protocol.InteractionOption{
+				{ID: "accept_once", Label: "Allow this change"},
+				{ID: "accept_similar", Label: "Allow similar changes this run"},
+				{ID: "decline", Label: "Reject"},
+			},
+			DefaultOption: "decline",
 		})
 		if err != nil || !approved {
-			c.respond(id, map[string]any{"decision": "reject"})
+			c.respond(id, map[string]any{"decision": "decline"})
 		} else {
 			c.respond(id, map[string]any{"decision": "accept"})
 		}
+	case "item/permissions/requestApproval":
+		req := buildCodexPermissionApproval(raw["params"])
+		_, approved, err := c.onApproval(c.runCtx, req)
+		c.respond(id, codexPermissionResponse(raw["params"], err == nil && approved))
+	case "item/tool/requestUserInput":
+		req, questionID := buildCodexUserInputApproval(raw["params"])
+		chosen, approved, err := c.onApproval(c.runCtx, req)
+		if err != nil || !approved || chosen == "" || questionID == "" {
+			c.respond(id, map[string]any{"answers": map[string]any{}})
+			return
+		}
+		c.respond(id, map[string]any{
+			"answers": map[string]any{
+				questionID: map[string]any{"answers": []string{chosen}},
+			},
+		})
 	default:
 		c.respond(id, map[string]any{})
+	}
+}
+
+type codexUserInputOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+type codexUserInputQuestion struct {
+	ID       string                 `json:"id"`
+	Header   string                 `json:"header"`
+	Question string                 `json:"question"`
+	Options  []codexUserInputOption `json:"options"`
+}
+
+type codexUserInputParams struct {
+	Questions []codexUserInputQuestion `json:"questions"`
+}
+
+func buildCodexUserInputApproval(raw json.RawMessage) (ApprovalRequest, string) {
+	req := ApprovalRequest{
+		Type:          "user_input_request",
+		Title:         "Input requested",
+		DefaultOption: "continue",
+		Options:       []protocol.InteractionOption{{ID: "continue", Label: "Continue"}},
+	}
+	var params codexUserInputParams
+	if len(raw) == 0 || json.Unmarshal(raw, &params) != nil || len(params.Questions) == 0 {
+		return req, ""
+	}
+
+	q := params.Questions[0]
+	if q.Header != "" {
+		req.Title = q.Header
+	}
+	if req.Title == "Input requested" && q.Question != "" {
+		req.Title = q.Question
+	}
+	req.Detail = q.Question
+
+	if len(q.Options) > 0 {
+		req.Options = make([]protocol.InteractionOption, 0, len(q.Options))
+		for _, opt := range q.Options {
+			id := strings.TrimSpace(opt.Label)
+			label := strings.TrimSpace(opt.Label)
+			if label == "" {
+				label = strings.TrimSpace(opt.Description)
+			}
+			if id == "" {
+				id = label
+			}
+			if id == "" {
+				continue
+			}
+			req.Options = append(req.Options, protocol.InteractionOption{ID: id, Label: label})
+		}
+		if len(req.Options) > 0 {
+			req.DefaultOption = req.Options[0].ID
+		}
+	}
+
+	return req, q.ID
+}
+
+func buildCodexPermissionApproval(raw json.RawMessage) ApprovalRequest {
+	req := ApprovalRequest{
+		Type:          "permission_request",
+		Title:         "Permission request",
+		Options:       []protocol.InteractionOption{{ID: "grant_once", Label: "Allow this request"}, {ID: "accept_similar", Label: "Allow similar requests this run"}, {ID: "decline", Label: "Reject"}},
+		DefaultOption: "decline",
+	}
+	if len(raw) == 0 {
+		return req
+	}
+	var params map[string]any
+	if json.Unmarshal(raw, &params) != nil {
+		return req
+	}
+	if reason, _ := params["reason"].(string); reason != "" {
+		req.Title = reason
+	}
+	if b, err := json.Marshal(params); err == nil {
+		req.Detail = string(b)
+	}
+	return req
+}
+
+func codexPermissionResponse(raw json.RawMessage, approved bool) map[string]any {
+	permissions := map[string]any{}
+	if approved && len(raw) > 0 {
+		var params map[string]any
+		if json.Unmarshal(raw, &params) == nil {
+			if requested, ok := params["permissions"].(map[string]any); ok {
+				permissions = requested
+			}
+		}
+	}
+	return map[string]any{
+		"permissions": permissions,
+		"scope":       "turn",
 	}
 }
 

@@ -990,6 +990,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		Repos:             convertReposForEnv(task.Repos),
 		ChatSessionID:     task.ChatSessionID,
 	}
+	if task.Agent != nil {
+		taskCtx.RuntimeConfig = task.Agent.RuntimeConfig
+	}
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
 	var env *execenv.Environment
@@ -1115,6 +1118,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		CustomArgs:      customArgs,
 		McpConfig:       mcpConfig,
 	}
+	runMode := protocol.ResolveTaskRunMode(task.Context)
+	visibleLanguage := detectVisibleLanguage(task)
 	// Resolve approval policy from agent runtime_config and inject callback.
 	// Default is "auto" — nil callback preserves existing auto-approve behaviour.
 	{
@@ -1123,15 +1128,38 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			rtCfg = task.Agent.RuntimeConfig
 		}
 		policy := protocol.ResolveApprovalPolicy(rtCfg)
-		execOpts.OnApproval = BuildApprovalCallback(policy, task.ID, provider, d.client)
+		if provider == "claude" && runMode == protocol.TaskRunModePlan {
+			execOpts.OnApproval = BuildPlanAwareApprovalCallback(policy, task.ID, provider, d.client)
+		} else {
+			execOpts.OnApproval = BuildApprovalCallback(policy, task.ID, provider, d.client)
+		}
 		traceEnabled := protocol.ResolveTraceEnabled(rtCfg)
 		if traceEnabled {
-			execOpts.OnApproval = WithApprovalTrace(execOpts.OnApproval, d.traceStore, task.ID, traceRunID, provider)
+			if provider == "claude" && runMode == protocol.TaskRunModePlan && policy == protocol.ApprovalPolicyAuto {
+				execOpts.OnApproval = WithApprovalTraceFilter(execOpts.OnApproval, d.traceStore, task.ID, traceRunID, provider, func(req agent.ApprovalRequest) bool {
+					return req.Type == protocol.InteractionPlanApproval
+				})
+			} else {
+				execOpts.OnApproval = WithApprovalTrace(execOpts.OnApproval, d.traceStore, task.ID, traceRunID, provider)
+			}
 			execOpts.TraceCallback = BuildTraceCallback(d.traceStore, task.ID, traceRunID, provider)
 		}
+		if provider == "claude" {
+			execOpts.ClaudePermissionMode = protocol.ResolveClaudePermissionMode(rtCfg)
+			if runMode == protocol.TaskRunModePlan {
+				execOpts.ClaudePermissionMode = "plan"
+				execOpts.ClaudeUseSDKBridge = true
+			}
+		}
+		execOpts.VisibleLanguage = visibleLanguage
 		if policy != protocol.ApprovalPolicyAuto {
 			taskLog.Info("approval policy active", "policy", policy)
 		}
+	}
+	if execOpts.TraceCallback != nil && runMode == protocol.TaskRunModePlan {
+		emitDaemonDisplayTrace(execOpts.TraceCallback, "plan_stage", "Plan mode", localizedPlanDraftingMessage(visibleLanguage), map[string]any{
+			"stage": "planning",
+		})
 	}
 
 	// openclaw loads its bootstrap files (AGENTS.md, SOUL.md, ...) from its own
@@ -1509,6 +1537,25 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 		}
 	}
 	return result
+}
+
+func emitDaemonDisplayTrace(cb agent.TraceCallback, eventType, title, content string, metadata map[string]any) {
+	if cb == nil {
+		return
+	}
+	payload := map[string]any{
+		"type":    eventType,
+		"title":   title,
+		"content": content,
+	}
+	if len(metadata) > 0 {
+		payload["metadata"] = metadata
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	cb(trace.ChannelDisplayEvent, string(data), "")
 }
 
 // isBlockedEnvKey returns true if the key must not be overridden by user-

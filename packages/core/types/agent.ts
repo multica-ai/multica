@@ -35,6 +35,7 @@ export interface AgentTask {
   completed_at: string | null;
   result: unknown;
   error: string | null;
+  context?: Record<string, unknown>;
   created_at: string;
 }
 
@@ -253,9 +254,10 @@ export interface TaskInteraction {
   default_option?: string;
   status: "pending" | "approved" | "denied" | "timed_out" | "cancelled";
   created_at: string;
-  expires_at: string;
+  expires_at?: string;
   responded_at?: string;
   chosen_option?: string;
+  response_message?: string;
 }
 
 export type TaskTraceChannel =

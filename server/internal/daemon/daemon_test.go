@@ -69,6 +69,7 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 	for _, want := range []string{
 		issueID,
 		"multica issue get",
+		"same language as the user's request",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q", want)
@@ -124,6 +125,7 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 		commentID,
 		"multica issue comment add " + issueID + " --parent " + commentID,
 		"do NOT reuse --parent values from previous turns",
+		"same language as the user's request",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q\n---\n%s", want, prompt)
@@ -133,6 +135,32 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 	// Should still contain CLI hint for fetching issue context.
 	if !strings.Contains(prompt, "multica issue get") {
 		t.Fatal("prompt missing CLI hint for issue context")
+	}
+}
+
+func TestBuildPromptPlanMode(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildPrompt(Task{
+		IssueID:               "issue-id",
+		TriggerCommentID:      "comment-id",
+		TriggerCommentContent: "先给方案",
+		Context:               []byte(`{"run_mode":"plan"}`),
+		Agent:                 &AgentData{Name: "Test"},
+	})
+
+	for _, want := range []string{
+		"Run mode: PLAN ONLY.",
+		"Do not modify files",
+		"Produce a clear, actionable plan",
+		"wait for a later user confirmation",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("plan prompt missing %q\n---\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "Plan first") {
+		t.Fatalf("plan prompt should not expose the old UI control text\n---\n%s", prompt)
 	}
 }
 

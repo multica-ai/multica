@@ -114,6 +114,38 @@ func TestClaudeHandleUserToolResult(t *testing.T) {
 	}
 }
 
+func TestClaudeHandleUserDetectsPermissionNotGrantedText(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+
+	msg := claudeSDKMessage{
+		Type: "user",
+		Message: mustMarshal(t, claudeMessageContent{
+			Role: "user",
+			Content: []claudeContentBlock{
+				{
+					Type:      "tool_result",
+					ToolUseID: "call-1",
+					Content:   mustMarshal(t, "Claude requested permissions to write to /tmp/example.txt, but you haven't granted it yet."),
+				},
+			},
+		}),
+	}
+
+	if !b.handleUser(msg, ch, nil) {
+		t.Fatal("expected permission-not-granted text to be detected")
+	}
+}
+
+func TestClaudePermissionNotGrantedMatcherIgnoresNormalOutput(t *testing.T) {
+	t.Parallel()
+	if isClaudePermissionNotGranted("normal tool output") {
+		t.Fatal("normal output should not match permission-not-granted text")
+	}
+}
+
 func TestClaudeHandleControlRequestAutoApproves(t *testing.T) {
 	t.Parallel()
 
@@ -334,6 +366,124 @@ func TestBuildClaudeArgsPromptModeBlocksCustomPermissionMode(t *testing.T) {
 	}
 	if !foundModel {
 		t.Fatalf("expected --model o3 to pass through: %v", args)
+	}
+}
+
+func TestBuildClaudeArgsPromptModeAllowsControlledPlanMode(t *testing.T) {
+	t.Parallel()
+
+	dummyCallback := func(_ context.Context, _ ApprovalRequest) (string, bool, error) {
+		return "allow", true, nil
+	}
+	args := buildClaudeArgs(ExecOptions{
+		OnApproval:           dummyCallback,
+		ClaudePermissionMode: "plan",
+	}, slog.Default())
+
+	for i, a := range args {
+		if a == "--permission-mode" && i+1 < len(args) {
+			if args[i+1] != "plan" {
+				t.Fatalf("expected controlled plan mode, got %q: %v", args[i+1], args)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing --permission-mode: %v", args)
+}
+
+func TestBuildClaudeArgsAutoIgnoresControlledPlanMode(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{ClaudePermissionMode: "plan"}, slog.Default())
+	for i, a := range args {
+		if a == "--permission-mode" && i+1 < len(args) {
+			if args[i+1] != "bypassPermissions" {
+				t.Fatalf("auto mode should keep bypassPermissions, got %q: %v", args[i+1], args)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing --permission-mode: %v", args)
+}
+
+func TestClaudeSDKBridgeApprovalRequestUsesSDKPromptFields(t *testing.T) {
+	t.Parallel()
+
+	req := bridgeApprovalRequest(claudeSDKBridgeEvent{
+		ToolName: "Bash",
+		Input:    mustMarshal(t, map[string]any{"command": "ls"}),
+		Title:    "Claude wants to run a command",
+		Desc:     "The command reads the workspace.",
+	})
+
+	if req.Type != "permission_request" {
+		t.Fatalf("type = %q, want permission_request", req.Type)
+	}
+	if req.Title != "Claude wants to run a command" {
+		t.Fatalf("title = %q", req.Title)
+	}
+	if !strings.Contains(req.Detail, "The command reads the workspace.") || !strings.Contains(req.Detail, `"command":"ls"`) {
+		t.Fatalf("detail missing SDK prompt fields: %q", req.Detail)
+	}
+	if len(req.Options) != 3 || req.Options[1].ID != "accept_similar" {
+		t.Fatalf("unexpected options: %+v", req.Options)
+	}
+}
+
+func TestClaudeSDKBridgeExitPlanModeBecomesPlanApproval(t *testing.T) {
+	t.Parallel()
+
+	req := bridgeApprovalRequest(claudeSDKBridgeEvent{
+		ToolName: "ExitPlanMode",
+		Input:    mustMarshal(t, map[string]any{"plan": "1. inspect\n2. change"}),
+	})
+
+	if req.Type != "plan_approval" {
+		t.Fatalf("type = %q, want plan_approval", req.Type)
+	}
+	if req.Title != "Plan ready" {
+		t.Fatalf("title = %q", req.Title)
+	}
+	if len(req.Options) != 3 || req.Options[0].Label != "Run this plan" || req.Options[1].ID != "revise" || req.Options[2].ID != "deny" {
+		t.Fatalf("unexpected options: %+v", req.Options)
+	}
+}
+
+func TestApprovalChoiceCarriesResponseMessage(t *testing.T) {
+	t.Parallel()
+
+	encoded := EncodeApprovalChoice("revise", "focus on phase 1")
+	chosen, message := SplitApprovalChoice(encoded)
+
+	if chosen != "revise" {
+		t.Fatalf("chosen = %q, want revise", chosen)
+	}
+	if message != "focus on phase 1" {
+		t.Fatalf("message = %q", message)
+	}
+}
+
+func TestClaudeSDKBridgeExtractsExitPlanText(t *testing.T) {
+	t.Parallel()
+
+	got := extractExitPlanText(mustMarshal(t, map[string]any{"plan": "# Plan\n\n1. Inspect\n2. Implement"}))
+
+	if !strings.Contains(got, "# Plan") || !strings.Contains(got, "Implement") {
+		t.Fatalf("unexpected plan text: %q", got)
+	}
+}
+
+func TestClaudeSDKBridgePlanApprovalRejectAbortsLocally(t *testing.T) {
+	t.Parallel()
+
+	if !shouldAbortPlanApproval("deny", nil) {
+		t.Fatal("deny should abort plan approval locally")
+	}
+	if shouldAbortPlanApproval("revise", nil) {
+		t.Fatal("revise should stay in the Claude plan session")
+	}
+	if shouldAbortPlanApproval("allow", nil) {
+		t.Fatal("allow should continue the Claude plan session")
 	}
 }
 

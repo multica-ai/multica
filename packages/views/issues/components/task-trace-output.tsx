@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Brain, Check, ChevronDown, ChevronRight, Code2, FileText, Loader2, MessageSquare, Radio, RefreshCw, ShieldAlert, Terminal, Wrench, X } from "lucide-react";
+import { Brain, Check, ChevronDown, ChevronRight, ClipboardList, Code2, FileText, Loader2, MessageSquare, Radio, RefreshCw, ShieldAlert, Terminal, Wrench, X } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWSEvent } from "@multica/core/realtime";
 import type { AgentTask, TaskInteraction, TaskTraceLine } from "@multica/core/types";
@@ -199,6 +199,17 @@ function inputText(input: unknown, keys: string[]): string {
   return "";
 }
 
+function exitPlanText(input: unknown): string {
+  if (typeof input === "string") return input.trim();
+  if (!input || typeof input !== "object") return "";
+  const record = input as Record<string, unknown>;
+  for (const key of ["plan", "content", "summary", "message"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
 function classifyCommand(command: string): string {
   if (!command) return "Run command";
   if (/\bmultica\s+issue\s+get\b/.test(command)) return "Read issue";
@@ -292,7 +303,7 @@ function buildWorkItems(lines: TaskTraceLine[], showRaw: boolean): TraceWorkItem
       recentNarration.set(key, i);
     }
 
-    if (event.type === "status" && (event.content === "running" || event.content === "completed")) {
+    if (event.type === "status" && (event.content === "running" || event.content === "completed" || event.content === "task_progress")) {
       continue;
     }
 
@@ -397,6 +408,12 @@ function DisplayTraceLine({ line, event: parsedEvent, pairedEvent, group, groupK
           <div className="whitespace-pre-wrap break-words text-violet-950 dark:text-violet-100">{content}</div>
         </WorkLogBlock>
       );
+    case "plan_stage":
+      return (
+        <WorkLogBlock title={title || "Plan mode"} tone="plan" icon={<ClipboardList className="h-3.5 w-3.5" />}>
+          <div className="whitespace-pre-wrap break-words text-indigo-950 dark:text-indigo-100">{content}</div>
+        </WorkLogBlock>
+      );
     case "command_start":
       return (
         <CommandBlock command={content} result={pairedEvent?.content} />
@@ -411,6 +428,20 @@ function DisplayTraceLine({ line, event: parsedEvent, pairedEvent, group, groupK
       const input = event.metadata?.input;
       const command = commandFromInput(input);
       const description = descriptionFromInput(input);
+      if (title === "ExitPlanMode") {
+        const plan = exitPlanText(input);
+        return (
+          <WorkLogBlock title="Plan ready" tone="plan" icon={<ClipboardList className="h-3.5 w-3.5" />}>
+            {plan ? (
+              <Markdown mode="minimal" className="text-[13px] leading-5">
+                {redactSecrets(plan)}
+              </Markdown>
+            ) : (
+              <ExpandableRaw label="Tool input" value={redactSecrets(compactJson(input))} defaultOpen />
+            )}
+          </WorkLogBlock>
+        );
+      }
       if (title === "Bash" || command) {
         return <CommandBlock command={command} description={description} result={pairedEvent?.content} />;
       }
@@ -449,6 +480,13 @@ function DisplayTraceLine({ line, event: parsedEvent, pairedEvent, group, groupK
         </WorkLogBlock>
       );
     case "approval_prompt":
+      if (event.metadata?.interaction_type === "plan_approval") {
+        return (
+          <WorkLogBlock title="Plan decision" tone="plan" icon={<ClipboardList className="h-3.5 w-3.5" />}>
+            <div className="font-medium text-indigo-700 dark:text-indigo-300">{content || title}</div>
+          </WorkLogBlock>
+        );
+      }
       return (
         <WorkLogBlock title="Approval required" tone="warning">
           <div className="font-medium text-warning">{title}</div>
@@ -491,7 +529,7 @@ function WorkLogBlock({
   title: string;
   children: ReactNode;
   icon?: ReactNode;
-  tone?: "assistant" | "thinking" | "command" | "result" | "read" | "file" | "warning" | "error";
+  tone?: "assistant" | "thinking" | "plan" | "command" | "result" | "read" | "file" | "warning" | "error";
   muted?: boolean;
 }) {
   return (
@@ -499,6 +537,7 @@ function WorkLogBlock({
       "min-w-0 max-w-full overflow-hidden rounded-md border px-3 py-2 text-[13px] leading-5",
       tone === "assistant" && "border-sky-200 bg-sky-50 text-sky-950 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-100",
       tone === "thinking" && "border-violet-200 bg-violet-50 text-violet-950 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-100",
+      tone === "plan" && "border-indigo-200 bg-indigo-50 text-indigo-950 dark:border-indigo-900/60 dark:bg-indigo-950/30 dark:text-indigo-100",
       tone === "command" && "border-blue-200 bg-blue-50 dark:border-blue-900/60 dark:bg-blue-950/30",
       tone === "result" && "border-emerald-200 bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-950/25",
       tone === "read" && "border-cyan-200 bg-cyan-50 dark:border-cyan-900/60 dark:bg-cyan-950/25",
@@ -513,6 +552,7 @@ function WorkLogBlock({
           "mb-1.5 flex min-w-0 items-center gap-1.5 text-xs font-semibold",
           tone === "assistant" && "text-sky-700 dark:text-sky-300",
           tone === "thinking" && "text-violet-700 dark:text-violet-300",
+          tone === "plan" && "text-indigo-700 dark:text-indigo-300",
           tone === "command" && "text-blue-700 dark:text-blue-300",
           tone === "result" && "text-emerald-700 dark:text-emerald-300",
           tone === "read" && "text-cyan-700 dark:text-cyan-300",
@@ -907,58 +947,84 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
 
   useEffect(() => {
     if (!healthPort) return;
+    let cancelled = false;
     setLines([]);
     setRunId("");
     setConnected(false);
     setLoading(true);
 
-    const source = new EventSource(api.getLocalTaskTraceStreamUrl(healthPort, task.id, { tail: 300 }));
-    source.addEventListener("open", () => {
-      setConnected(true);
-      setError(null);
-    });
-    source.addEventListener("ready", (event) => {
-      try {
-        const payload = JSON.parse((event as MessageEvent).data) as { run_id?: string };
-        const nextRunId = payload.run_id ?? "";
-        setRunId(nextRunId);
-      } catch {
-        // Ignore malformed ready events.
-      }
-      setLoading(false);
-    });
-    source.addEventListener("trace", (event) => {
-      try {
-        const line = JSON.parse((event as MessageEvent).data) as TaskTraceLine;
-        setRunId(line.run_id);
-        setLines((prev) => {
-          if (prev.some((item) => item.run_id === line.run_id && item.seq === line.seq)) {
-            return prev;
-          }
-          return [...prev, line].sort((a, b) => a.seq - b.seq);
-        });
-      } catch {
-        // Ignore malformed trace events.
-      }
-      setLoading(false);
-    });
-    source.addEventListener("error", (event) => {
-      setConnected(false);
-      setLoading(false);
-      const data = (event as MessageEvent).data;
-      if (typeof data === "string" && data) {
-        try {
-          const payload = JSON.parse(data) as { error?: string };
-          setError(payload.error ?? "Local trace stream disconnected.");
-          return;
-        } catch {
-          // Fall through to generic message.
-        }
-      }
-      setError("Local trace stream disconnected.");
-    });
+    let source: EventSource | null = null;
 
-    return () => source.close();
+    const connect = (initialRunId?: string, afterSeq?: number) => {
+      if (cancelled) return;
+      source = new EventSource(api.getLocalTaskTraceStreamUrl(healthPort, task.id, {
+        run_id: initialRunId || undefined,
+        after_seq: afterSeq,
+      }));
+      source.addEventListener("open", () => {
+        setConnected(true);
+        setError(null);
+      });
+      source.addEventListener("ready", (event) => {
+        try {
+          const payload = JSON.parse((event as MessageEvent).data) as { run_id?: string };
+          const nextRunId = payload.run_id ?? "";
+          if (nextRunId) setRunId(nextRunId);
+        } catch {
+          // Ignore malformed ready events.
+        }
+        setLoading(false);
+      });
+      source.addEventListener("trace", (event) => {
+        try {
+          const line = JSON.parse((event as MessageEvent).data) as TaskTraceLine;
+          setRunId(line.run_id);
+          setLines((prev) => {
+            if (prev.some((item) => item.run_id === line.run_id && item.seq === line.seq)) {
+              return prev;
+            }
+            return [...prev, line].sort((a, b) => a.seq - b.seq);
+          });
+        } catch {
+          // Ignore malformed trace events.
+        }
+        setLoading(false);
+      });
+      source.addEventListener("error", (event) => {
+        setConnected(false);
+        setLoading(false);
+        const data = (event as MessageEvent).data;
+        if (typeof data === "string" && data) {
+          try {
+            const payload = JSON.parse(data) as { error?: string };
+            setError(payload.error ?? "Local trace stream disconnected.");
+            return;
+          } catch {
+            // Fall through to generic message.
+          }
+        }
+        setError("Local trace stream disconnected.");
+      });
+    };
+
+    api.getLocalTaskTrace(healthPort, task.id)
+      .then((trace) => {
+        if (cancelled) return;
+        const history = [...trace.lines].sort((a, b) => a.seq - b.seq);
+        setRunId(trace.run_id ?? history.at(-1)?.run_id ?? "");
+        setLines(history);
+        connect(trace.run_id || undefined, history.at(-1)?.seq);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "Failed to load local task trace.");
+        connect();
+      });
+
+    return () => {
+      cancelled = true;
+      source?.close();
+    };
   }, [healthPort, streamNonce, task.id]);
 
   useEffect(() => {
@@ -971,14 +1037,19 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
     if (showRaw) return lines;
     return lines.filter((line) => (
       line.channel === "display_event" ||
-      line.channel === "command_stdout" ||
-      line.channel === "command_stderr" ||
       line.channel === "approval_request" ||
       line.channel === "approval_response"
     ));
   }, [lines, showRaw]);
 
   const workItems = useMemo(() => buildWorkItems(visibleLines, showRaw), [visibleLines, showRaw]);
+  const runMode = taskRunMode(task);
+  const planPhase = useMemo(() => latestPlanPhase(lines), [lines]);
+  const planBadge = runMode === "plan"
+    ? planPhase === "executing" || planPhase === "rejected" || planPhase === "expired" || planPhase === "cancelled"
+      ? planPhase
+      : "plan"
+    : "";
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className={cn("max-w-full overflow-hidden", fill && "flex h-full min-h-0 flex-col")}>
@@ -988,8 +1059,18 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
             {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
             <Radio className={cn("h-3 w-3", connected ? "text-success" : "text-muted-foreground")} />
             <span className="shrink-0 font-medium text-foreground">Agent stream</span>
+            {planBadge && <span className="rounded bg-info/10 px-1.5 py-0.5 text-info">{planBadge}</span>}
             <span className="shrink-0 text-muted-foreground">{workItems.length}/{lines.length}</span>
-            {interactions.length > 0 && <span className="rounded bg-warning/10 px-1.5 py-0.5 text-warning">{interactions.length} approval</span>}
+            {interactions.length > 0 && (
+              <span className={cn(
+                "rounded px-1.5 py-0.5",
+                interactions.some((interaction) => interaction.type === "plan_approval")
+                  ? "bg-indigo-500/10 text-indigo-500"
+                  : "bg-warning/10 text-warning",
+              )}>
+                {interactions.some((interaction) => interaction.type === "plan_approval") ? "plan decision" : `${interactions.length} approval`}
+              </span>
+            )}
             {runId && <span className="min-w-0 truncate text-muted-foreground/70">{runId}</span>}
           </CollapsibleTrigger>
           <button
@@ -1034,14 +1115,6 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
             </div>
           ) : (
             <div className="space-y-2">
-              {interactions.map((interaction) => (
-                <TraceInteractionCard
-                  key={interaction.id}
-                  interaction={interaction}
-                  taskId={task.id}
-                  onResolved={fetchPendingInteractions}
-                />
-              ))}
               {workItems.length === 0 ? (
                 <div className="py-2 text-xs text-muted-foreground">
                   No local trace lines yet.
@@ -1060,12 +1133,37 @@ export function TaskTraceOutput({ task, defaultOpen = false, compact = false, fi
                   )
                 ))
               )}
+              {interactions.map((interaction) => (
+                <TraceInteractionCard
+                  key={interaction.id}
+                  interaction={interaction}
+                  taskId={task.id}
+                  onResolved={fetchPendingInteractions}
+                />
+              ))}
             </div>
           )}
         </div>
       </CollapsibleContent>
     </Collapsible>
   );
+}
+
+function taskRunMode(task: AgentTask): string {
+  const value = task.context?.run_mode;
+  return typeof value === "string" ? value : "normal";
+}
+
+function latestPlanPhase(lines: TaskTraceLine[]): string {
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i]!;
+    if (line.channel !== "display_event") continue;
+    const event = parseDisplayEvent(line);
+    if (event?.type !== "plan_stage") continue;
+    const stage = event.metadata?.stage;
+    if (typeof stage === "string" && stage.trim()) return stage;
+  }
+  return "";
 }
 
 function TraceInteractionCard({
@@ -1078,12 +1176,22 @@ function TraceInteractionCard({
   onResolved: () => void;
 }) {
   const [responding, setResponding] = useState<string | null>(null);
+  const [revisionMessage, setRevisionMessage] = useState("");
+  const isPlanApproval = interaction.type === "plan_approval";
+  const options =
+    interaction.options.length > 0
+      ? interaction.options
+      : [
+          { id: "allow", label: "Allow" },
+          { id: "deny", label: "Deny" },
+        ];
 
   const handleRespond = async (option: string) => {
     if (responding) return;
     setResponding(option);
     try {
-      await api.respondInteraction(taskId, interaction.id, option);
+      const responseMessage = isPlanApproval && /revise|keep_planning/i.test(option) ? revisionMessage : undefined;
+      await api.respondInteraction(taskId, interaction.id, option, responseMessage);
       onResolved();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to respond");
@@ -1092,35 +1200,71 @@ function TraceInteractionCard({
   };
 
   return (
-    <div className="mb-2 rounded border border-warning/30 bg-warning/10 p-2 text-xs">
+    <div className={cn(
+      "mb-2 rounded border p-2 text-xs",
+      isPlanApproval
+        ? "border-indigo-300/50 bg-indigo-500/10 dark:border-indigo-800/60 dark:bg-indigo-950/30"
+        : "border-warning/30 bg-warning/10",
+    )}>
       <div className="flex items-start gap-2">
-        <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+        {isPlanApproval ? (
+          <ClipboardList className="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
+        ) : (
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+        )}
         <div className="min-w-0 flex-1">
           <div className="font-medium text-foreground">{interaction.title}</div>
           {interaction.detail && (
-            <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] text-muted-foreground">
-              {redactSecrets(interaction.detail)}
-            </pre>
+            isPlanApproval ? (
+              <div className="mt-2 max-h-80 overflow-auto rounded border border-info/20 bg-background/70 px-2 py-1.5">
+                <Markdown mode="minimal" className="text-[13px] leading-5">
+                  {redactSecrets(interaction.detail)}
+                </Markdown>
+              </div>
+            ) : (
+              <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] text-muted-foreground">
+                {redactSecrets(interaction.detail)}
+              </pre>
+            )
           )}
-          <div className="mt-2 flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => handleRespond("allow")}
+          {isPlanApproval && (
+            <textarea
+              value={revisionMessage}
+              onChange={(event) => setRevisionMessage(event.target.value)}
+              placeholder="Optional revision notes for Claude"
+              className="mt-2 min-h-16 w-full resize-y rounded border border-border bg-background px-2 py-1.5 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-info"
               disabled={responding !== null}
-              className="flex items-center gap-1 rounded bg-success/10 px-2 py-0.5 font-medium text-success transition-colors hover:bg-success/20 disabled:opacity-50"
-            >
-              {responding === "allow" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-              Allow
-            </button>
-            <button
-              type="button"
-              onClick={() => handleRespond("deny")}
-              disabled={responding !== null}
-              className="flex items-center gap-1 rounded bg-destructive/10 px-2 py-0.5 font-medium text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-50"
-            >
-              {responding === "deny" ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
-              Deny
-            </button>
+            />
+          )}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {options.map((option) => {
+              const destructive = /deny|reject|cancel|stop/i.test(`${option.id} ${option.label}`);
+              const revise = /revise|keep planning/i.test(`${option.id} ${option.label}`);
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => handleRespond(option.id)}
+                  disabled={responding !== null}
+                  className={
+                    destructive
+                      ? "flex items-center gap-1 rounded bg-destructive/10 px-2 py-0.5 font-medium text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-50"
+                      : revise
+                        ? "flex items-center gap-1 rounded bg-warning/10 px-2 py-0.5 font-medium text-warning transition-colors hover:bg-warning/20 disabled:opacity-50"
+                      : "flex items-center gap-1 rounded bg-success/10 px-2 py-0.5 font-medium text-success transition-colors hover:bg-success/20 disabled:opacity-50"
+                  }
+                >
+                  {responding === option.id ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : destructive ? (
+                    <X className="h-3 w-3" />
+                  ) : (
+                    <Check className="h-3 w-3" />
+                  )}
+                  {option.label}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
