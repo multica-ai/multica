@@ -729,12 +729,19 @@ func (s *Service) failPRAndPause(
 // queued PR has been consumed (merged or skipped). Phase 7c picks up
 // staging deploy from there.
 //
-// Projects without a staging deploy environment skip the staging
-// stages entirely: merging → promoting → in_production. This avoids
-// parking releases in `in_staging` forever waiting for a staging
-// deploy that will never come (a real ROA-216-class outage —
-// see #46's release page for the symptom). The presence check is
-// existence-based on a deploy_environment row with kind='staging'.
+// Pipeline topology drives stage selection: `staged` projects go
+// merging → in_staging (the historical default), `direct_to_prod`
+// projects skip to `promoting` with synthetic staged_at +
+// qa_verified_at stamps so the timeline view doesn't show a gap and
+// PromoteRelease's `qa_verified_at IS NOT NULL` precondition holds.
+//
+// Pipeline kind is an explicit project column (`project.pipeline_kind`,
+// migration 095). Pre-095 the flow inferred the answer by querying
+// for the existence of a `kind='staging'` env row — that worked but
+// was indirect, and any phantom staging env produced by an
+// over-eager poller created stuck releases (PR #47 incident). Now
+// the project itself declares its topology and the env table goes
+// back to being purely about "where code physically lands."
 func (s *Service) completeMergeTrain(
 	ctx context.Context,
 	releaseID pgtype.UUID,
@@ -743,34 +750,31 @@ func (s *Service) completeMergeTrain(
 ) error {
 	now := s.now()
 
-	// Read the project's staging-env presence to pick the next stage.
-	// We need the release row first to discover project_id; fetched
-	// here rather than threaded through the caller because every code
-	// path into completeMergeTrain has the release id but not always
-	// the project id.
+	// Fetch release → project so we can read the pipeline column.
+	// Every code path into completeMergeTrain has the release id but
+	// not always the project id, so we do the extra round-trip here
+	// rather than thread it through every caller.
 	release, err := s.Q.GetRelease(ctx, releaseID)
 	if err != nil {
-		return fmt.Errorf("fetch release for staging-env check: %w", err)
+		return fmt.Errorf("fetch release for pipeline lookup: %w", err)
 	}
-	hasStaging, err := s.Q.ProjectHasStagingEnv(ctx, release.ProjectID)
+	project, err := s.Q.GetProject(ctx, release.ProjectID)
 	if err != nil {
-		// Defensive: if the lookup fails, default to the old behavior
-		// (transition to in_staging). Better to be stuck in staging
-		// than to skip QA gates on a project that actually has them.
-		slog.Warn("ship: project staging-env check failed; defaulting to in_staging",
+		// Defensive: if we can't read the project (deleted? race?),
+		// default to the safer `staged` flow. Better to be stuck in
+		// staging waiting for a manual unblock than to skip QA gates
+		// on a project that actually has them.
+		slog.Warn("ship: project lookup for pipeline_kind failed; defaulting to staged",
 			"release_id", uuidString(releaseID),
 			"project_id", uuidString(release.ProjectID),
 			"error", err)
-		hasStaging = true
+		project = db.Project{PipelineKind: db.ProjectPipelineKindStaged}
 	}
 
+	directToProd := project.PipelineKind == db.ProjectPipelineKindDirectToProd
+
 	nextStage := db.ReleaseStageInStaging
-	if !hasStaging {
-		// No staging env → skip merging → in_staging → verifying and
-		// land at `promoting`. We stamp staged_at AND a synthetic
-		// qa_verified_at so the timeline view doesn't show a gap and
-		// so PromoteRelease's `qa_verified_at IS NOT NULL` precondition
-		// (when present) still holds.
+	if directToProd {
 		nextStage = db.ReleaseStagePromoting
 	}
 
@@ -779,12 +783,11 @@ func (s *Service) completeMergeTrain(
 		Stage:    nextStage,
 		MergedAt: pgtype.Timestamptz{Time: now, Valid: true},
 	}
-	if !hasStaging {
-		// Backfill the staged_at timestamp so the timeline reads
-		// "merged → staged → promoting" rather than "merged → ???".
-		// staged_at is COALESCE'd in the SQL — if a real staging deploy
-		// later somehow gets recorded against this release, it
-		// preserves this synthetic value.
+	if directToProd {
+		// Backfill staged_at so the timeline reads "merged → staged →
+		// promoting" rather than "merged → ???". COALESCE in the SQL
+		// preserves this synthetic value if a real deploy later writes
+		// a different timestamp.
 		updateParams.StagedAt = pgtype.Timestamptz{Time: now, Valid: true}
 	}
 	updated, err := s.Q.UpdateReleaseStage(ctx, updateParams)
@@ -792,11 +795,11 @@ func (s *Service) completeMergeTrain(
 		return fmt.Errorf("update stage to %s: %w", nextStage, err)
 	}
 
-	// Projects without staging additionally need qa_verified_at stamped
-	// because PromoteRelease (and any future auto-promote) treats a
-	// missing verification as the in_staging → verifying gate. We use
-	// the same `now` so the timeline is coherent.
-	if !hasStaging {
+	// Direct-to-prod projects also need qa_verified_at stamped because
+	// PromoteRelease (and auto-promote) treats a missing verification
+	// as the in_staging → verifying gate. We use the same `now` so the
+	// timeline is coherent.
+	if directToProd {
 		if _, err := s.Q.SetReleaseQAVerified(ctx, db.SetReleaseQAVerifiedParams{
 			ID:           releaseID,
 			QaVerifiedAt: pgtype.Timestamptz{Time: now, Valid: true},

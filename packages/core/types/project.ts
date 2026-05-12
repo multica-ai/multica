@@ -2,6 +2,15 @@ export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" |
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
 
+/**
+ * Ship Hub pipeline topology. Determines which stages a release for this
+ * project passes through:
+ *   `staged`         → merging → in_staging → verifying → promoting → in_production → done
+ *   `direct_to_prod` → merging → promoting → in_production → done
+ * See migration 095 + completeMergeTrain in server/internal/service/ship/.
+ */
+export type ProjectPipelineKind = "staged" | "direct_to_prod";
+
 export interface Project {
   id: string;
   workspace_id: string;
@@ -24,6 +33,7 @@ export interface Project {
   issue_count: number;
   done_count: number;
   resource_count: number;
+  pipeline_kind: ProjectPipelineKind;
 }
 
 export interface CreateProjectRequest {
@@ -47,6 +57,7 @@ export interface UpdateProjectRequest {
   priority?: ProjectPriority;
   lead_type?: "member" | "agent" | null;
   lead_id?: string | null;
+  pipeline_kind?: ProjectPipelineKind;
 }
 
 export interface ListProjectsResponse {

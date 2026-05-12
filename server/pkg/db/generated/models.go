@@ -188,6 +188,48 @@ func (ns NullPrRevertState) Value() (driver.Value, error) {
 	return string(ns.PrRevertState), nil
 }
 
+type ProjectPipelineKind string
+
+const (
+	ProjectPipelineKindStaged       ProjectPipelineKind = "staged"
+	ProjectPipelineKindDirectToProd ProjectPipelineKind = "direct_to_prod"
+)
+
+func (e *ProjectPipelineKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ProjectPipelineKind(s)
+	case string:
+		*e = ProjectPipelineKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ProjectPipelineKind: %T", src)
+	}
+	return nil
+}
+
+type NullProjectPipelineKind struct {
+	ProjectPipelineKind ProjectPipelineKind `json:"project_pipeline_kind"`
+	Valid               bool                `json:"valid"` // Valid is true if ProjectPipelineKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullProjectPipelineKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.ProjectPipelineKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ProjectPipelineKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullProjectPipelineKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ProjectPipelineKind), nil
+}
+
 type PullRequestState string
 
 const (
@@ -867,19 +909,20 @@ type PinnedItem struct {
 }
 
 type Project struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Title       string             `json:"title"`
-	Description pgtype.Text        `json:"description"`
-	Icon        pgtype.Text        `json:"icon"`
-	Status      string             `json:"status"`
-	LeadType    pgtype.Text        `json:"lead_type"`
-	LeadID      pgtype.UUID        `json:"lead_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	Priority    string             `json:"priority"`
-	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
-	ArchivedBy  pgtype.UUID        `json:"archived_by"`
+	ID           pgtype.UUID         `json:"id"`
+	WorkspaceID  pgtype.UUID         `json:"workspace_id"`
+	Title        string              `json:"title"`
+	Description  pgtype.Text         `json:"description"`
+	Icon         pgtype.Text         `json:"icon"`
+	Status       string              `json:"status"`
+	LeadType     pgtype.Text         `json:"lead_type"`
+	LeadID       pgtype.UUID         `json:"lead_id"`
+	CreatedAt    pgtype.Timestamptz  `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz  `json:"updated_at"`
+	Priority     string              `json:"priority"`
+	ArchivedAt   pgtype.Timestamptz  `json:"archived_at"`
+	ArchivedBy   pgtype.UUID         `json:"archived_by"`
+	PipelineKind ProjectPipelineKind `json:"pipeline_kind"`
 }
 
 type ProjectResource struct {

@@ -75,7 +75,7 @@ func (q *Queries) DeleteProjectResource(ctx context.Context, id pgtype.UUID) err
 }
 
 const findProjectByRepoURL = `-- name: FindProjectByRepoURL :one
-SELECT p.id, p.workspace_id, p.title, p.description, p.icon, p.status, p.lead_type, p.lead_id, p.created_at, p.updated_at, p.priority, p.archived_at, p.archived_by FROM project p
+SELECT p.id, p.workspace_id, p.title, p.description, p.icon, p.status, p.lead_type, p.lead_id, p.created_at, p.updated_at, p.priority, p.archived_at, p.archived_by, p.pipeline_kind FROM project p
 JOIN project_resource pr ON pr.project_id = p.id
 WHERE p.workspace_id = $1
   AND pr.resource_type = 'github_repo'
@@ -112,6 +112,7 @@ func (q *Queries) FindProjectByRepoURL(ctx context.Context, arg FindProjectByRep
 		&i.Priority,
 		&i.ArchivedAt,
 		&i.ArchivedBy,
+		&i.PipelineKind,
 	)
 	return i, err
 }

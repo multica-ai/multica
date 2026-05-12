@@ -34,6 +34,7 @@ UPDATE project SET
     priority = COALESCE(sqlc.narg('priority'), priority),
     lead_type = sqlc.narg('lead_type'),
     lead_id = sqlc.narg('lead_id'),
+    pipeline_kind = COALESCE(sqlc.narg('pipeline_kind')::project_pipeline_kind, pipeline_kind),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

@@ -60,7 +60,6 @@ import {
   useMarkReleaseDone,
   useOpenReleaseChannel,
   useReleaseHealth,
-  useDeployEnvironments,
 } from "@multica/core/ship";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -182,23 +181,17 @@ export function ShipReleasePage({ releaseId }: ShipReleasePageProps) {
     if (!pid) return null;
     return (projectsQuery.data ?? []).find((p) => p.id === pid) ?? null;
   }, [projectsQuery.data, data?.release.project_id]);
-  // Project's deploy envs drive the "show staging stages?" decision in
-  // the progress bar. The backend skips in_staging/verifying entirely
-  // when no staging env exists, so rendering those chips as forever-
-  // pending is just noise. The hook reads from the projects cache and
-  // is cheap (workspace-scoped, refetch on focus only).
+  // The release stage progress bar reads `project.pipeline_kind` to
+  // decide whether to render the in_staging + verifying chips.
+  // Pre-this-change the answer was inferred from the project's deploy
+  // env rows; that was indirect and tripped on phantom envs. Now the
+  // project itself declares its pipeline shape — `staged` shows all 7
+  // chips, `direct_to_prod` hides the staging-only ones.
   //
-  // While the envs query is loading, default to TRUE so we don't
-  // briefly hide chips that should be visible and then flicker them
-  // back in.
-  const projectId = data?.release.project_id ?? "";
-  const deployEnvsQuery = useDeployEnvironments(projectId);
-  const hasStaging = useMemo(() => {
-    if (!projectId) return true;
-    if (deployEnvsQuery.isLoading) return true;
-    const envs = deployEnvsQuery.data?.environments ?? [];
-    return envs.some((env) => env.kind === "staging");
-  }, [projectId, deployEnvsQuery.isLoading, deployEnvsQuery.data]);
+  // While `project` is still loading from the projects cache the
+  // default is `staged` (i.e. show all 7 chips), so we don't briefly
+  // hide chips that should be visible and then flicker them back in.
+  const hasStaging = project?.pipeline_kind !== "direct_to_prod";
   const cancelMutation = useCancelRelease(releaseId);
   const removePR = useRemovePullRequestFromRelease(releaseId);
   const startMerge = useStartMergeTrain(releaseId);
