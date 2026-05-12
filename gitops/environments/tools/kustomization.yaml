@@ -29,4 +29,4 @@ images:
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newTag: "bc90fc3e"
   - name: ghcr.io/g2crowd/agentfarm-agentrunner-prod
-    newTag: "68563038"
+    newTag: "bc90fc3e"
