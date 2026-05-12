@@ -15,6 +15,7 @@ import {
 } from "@multica/ui/components/ui/sheet";
 import { ChannelMessageList } from "../../channels/components/channel-message-list";
 import { ChannelComposer } from "../../channels/components/channel-composer";
+import { useT } from "../../i18n";
 import { ShipConciergeSetupDialog } from "./ship-concierge-setup-dialog";
 
 /**
@@ -40,6 +41,7 @@ import { ShipConciergeSetupDialog } from "./ship-concierge-setup-dialog";
  * channel here automatically).
  */
 export function ShipConciergePanel() {
+  const { t } = useT("ship");
   const wsId = useWorkspaceId();
   const [open, setOpen] = useState(false);
 
@@ -68,7 +70,7 @@ export function ShipConciergePanel() {
             data-testid="ship-concierge-toggle"
           >
             <Bot className="size-3.5" />
-            Concierge
+            {t(($) => $.concierge_panel.trigger)}
             {concierge && concierge.unread_count > 0 && (
               <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground">
                 {concierge.unread_count}
@@ -90,7 +92,9 @@ export function ShipConciergePanel() {
         <SheetHeader className="border-b px-4 py-3">
           <SheetTitle className="flex items-center gap-2 text-sm">
             <Bot className="size-4 text-muted-foreground" />
-            {concierge ? concierge.display_name || concierge.name : "Ship Concierge"}
+            {concierge
+              ? concierge.display_name || concierge.name
+              : t(($) => $.concierge_setup_dialog.default_display_name)}
           </SheetTitle>
         </SheetHeader>
 
@@ -117,6 +121,7 @@ export function ShipConciergePanel() {
  * ambient listener) atomically. No copy-paste curl required.
  */
 function ConciergeEmptyState() {
+  const { t } = useT("ship");
   const [setupOpen, setSetupOpen] = useState(false);
 
   return (
@@ -124,13 +129,10 @@ function ConciergeEmptyState() {
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2 font-medium text-foreground">
           <MessageCircle className="size-4 text-muted-foreground" />
-          No Concierge channel configured yet
+          {t(($) => $.concierge_panel.empty_title)}
         </div>
         <p className="text-muted-foreground">
-          The Ship Concierge is a channel where you can talk to Claude
-          naturally — no @-mention required — and Claude answers using
-          the Ship Hub tools (release state, deploy diagnostics,
-          merge-train control, etc.).
+          {t(($) => $.concierge_panel.empty_description)}
         </p>
       </div>
 
@@ -140,12 +142,11 @@ function ConciergeEmptyState() {
         data-testid="ship-concierge-setup-open"
       >
         <Bot className="size-3.5" />
-        Set up Concierge
+        {t(($) => $.concierge_panel.setup_button)}
       </Button>
 
       <p className="text-xs text-muted-foreground">
-        Picks a workspace agent + creates the channel + wires the
-        ambient-listener designation in one go.
+        {t(($) => $.concierge_panel.setup_hint)}
       </p>
 
       <ShipConciergeSetupDialog open={setupOpen} onOpenChange={setSetupOpen} />

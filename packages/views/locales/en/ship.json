@@ -16,6 +16,38 @@
     "no_token_description": "Add a GitHub personal access token in Settings → Ship Hub. PRs from your project repos will appear here once it's set.",
     "configure_token": "Configure GitHub token"
   },
+  "concierge_setup_dialog": {
+    "title": "Set up Ship Concierge",
+    "description": "Designates one workspace agent as the ambient listener on a channel. Every member message in that channel dispatches a task to the agent — no @-mention required.",
+    "default_display_name": "Ship Concierge",
+    "channel_description": "Ship Hub Concierge — chat with Claude about releases.",
+    "channel_slug_label": "Channel slug",
+    "channel_slug_hint": "Lowercase + hyphens. Becomes #{{name}} in the channels sidebar.",
+    "name_fallback": "name",
+    "display_name_label": "Display name",
+    "agent_label": "Concierge agent",
+    "loading_agents": "Loading agents…",
+    "no_agents": "No agents in this workspace",
+    "pick_agent": "Pick an agent",
+    "add_agent_hint": "Add an agent in Settings → Agents first.",
+    "agent_required": "Pick an agent first.",
+    "channel_name_required": "Channel name is required.",
+    "configured_toast": "Ship Concierge configured.",
+    "cancel": "Cancel",
+    "configuring": "Configuring…",
+    "submit": "Set up"
+  },
+  "concierge_inline": {
+    "collapse": "Collapse",
+    "expand": "Expand"
+  },
+  "concierge_panel": {
+    "trigger": "Concierge",
+    "empty_title": "No Concierge channel configured yet",
+    "empty_description": "The Ship Concierge is a channel where you can talk to Claude naturally — no @-mention required — and Claude answers using the Ship Hub tools (release state, deploy diagnostics, merge-train control, etc.).",
+    "setup_button": "Set up Concierge",
+    "setup_hint": "Picks a workspace agent + creates the channel + wires the ambient-listener designation in one go."
+  },
   "errors": {
     "token_expired_title": "GitHub token expired",
     "token_expired_description": "The token saved for this workspace was rejected by GitHub. Re-enter a fresh token to resume syncing.",

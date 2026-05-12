@@ -16,6 +16,38 @@
     "no_token_description": "在「设置 → 发布中心」中添加 GitHub 个人访问令牌。配置完成后，项目仓库的 PR 会显示在此。",
     "configure_token": "配置 GitHub 令牌"
   },
+  "concierge_setup_dialog": {
+    "title": "设置 Ship Concierge",
+    "description": "将一个工作区智能体指定为频道的环境监听者。该频道中每条成员消息都会派发任务给此智能体，无需 @ 提及。",
+    "default_display_name": "Ship Concierge",
+    "channel_description": "Ship Hub Concierge — 与 Claude 讨论发布。",
+    "channel_slug_label": "频道 slug",
+    "channel_slug_hint": "小写字母 + 连字符。会在频道侧边栏中显示为 #{{name}}。",
+    "name_fallback": "name",
+    "display_name_label": "显示名称",
+    "agent_label": "Concierge 智能体",
+    "loading_agents": "加载智能体中…",
+    "no_agents": "此工作区没有智能体",
+    "pick_agent": "选择一个智能体",
+    "add_agent_hint": "请先在「设置 → 智能体」中添加智能体。",
+    "agent_required": "请先选择一个智能体。",
+    "channel_name_required": "频道名称为必填项。",
+    "configured_toast": "Ship Concierge 已配置。",
+    "cancel": "取消",
+    "configuring": "配置中…",
+    "submit": "设置"
+  },
+  "concierge_inline": {
+    "collapse": "收起",
+    "expand": "展开"
+  },
+  "concierge_panel": {
+    "trigger": "Concierge",
+    "empty_title": "尚未配置 Concierge 频道",
+    "empty_description": "Ship Concierge 是一个频道，你可以在其中自然地与 Claude 讨论，无需 @ 提及；Claude 会使用 Ship Hub 工具回答（发布状态、部署诊断、合并队列控制等）。",
+    "setup_button": "设置 Concierge",
+    "setup_hint": "一次性选择工作区智能体、创建频道并配置环境监听者。"
+  },
   "errors": {
     "token_expired_title": "GitHub 令牌已失效",
     "token_expired_description": "本工作区保存的令牌被 GitHub 拒绝。请重新输入有效令牌以恢复同步。",

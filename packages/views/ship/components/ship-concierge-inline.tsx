@@ -9,6 +9,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { ChannelMessageList } from "../../channels/components/channel-message-list";
 import { ChannelComposer } from "../../channels/components/channel-composer";
+import { useT } from "../../i18n";
 
 /**
  * ROA-178 Ship Concierge — inline panel at the top of the Ship page.
@@ -31,6 +32,7 @@ import { ChannelComposer } from "../../channels/components/channel-composer";
  * already carries the setup recipe).
  */
 export function ShipConciergeInline() {
+  const { t } = useT("ship");
   const wsId = useWorkspaceId();
   const [expanded, setExpanded] = useState(false);
 
@@ -82,12 +84,12 @@ export function ShipConciergeInline() {
           {expanded ? (
             <>
               <ChevronUp className="size-3.5" />
-              Collapse
+              {t(($) => $.concierge_inline.collapse)}
             </>
           ) : (
             <>
               <ChevronDown className="size-3.5" />
-              Expand
+              {t(($) => $.concierge_inline.expand)}
             </>
           )}
         </Button>

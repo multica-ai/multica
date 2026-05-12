@@ -26,6 +26,7 @@ import { api } from "@multica/core/api";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { channelKeys } from "@multica/core/channels";
+import { useT } from "../../i18n";
 
 interface ShipConciergeSetupDialogProps {
   open: boolean;
@@ -56,10 +57,13 @@ export function ShipConciergeSetupDialog({
   open,
   onOpenChange,
 }: ShipConciergeSetupDialogProps) {
+  const { t } = useT("ship");
   const wsId = useWorkspaceId();
   const queryClient = useQueryClient();
   const [channelName, setChannelName] = useState("ship-concierge");
-  const [channelDisplayName, setChannelDisplayName] = useState("Ship Concierge");
+  const [channelDisplayName, setChannelDisplayName] = useState(
+    t(($) => $.concierge_setup_dialog.default_display_name),
+  );
   const [agentId, setAgentId] = useState<string>("");
 
   const { data: agents = [], isLoading: agentsLoading } = useQuery(
@@ -73,8 +77,8 @@ export function ShipConciergeSetupDialog({
 
   const setup = useMutation({
     mutationFn: async () => {
-      if (!agentId) throw new Error("Pick an agent first.");
-      if (!channelName.trim()) throw new Error("Channel name is required.");
+      if (!agentId) throw new Error(t(($) => $.concierge_setup_dialog.agent_required));
+      if (!channelName.trim()) throw new Error(t(($) => $.concierge_setup_dialog.channel_name_required));
       // Step 1 — create the channel. Channel slug rules:
       //   * lowercase, digits, hyphens only
       //   * the server validates; an invalid input surfaces here as
@@ -82,7 +86,7 @@ export function ShipConciergeSetupDialog({
       const ch = await api.createChannel({
         name: channelName.trim(),
         display_name: channelDisplayName.trim() || channelName.trim(),
-        description: "Ship Hub Concierge — chat with Claude about releases.",
+        description: t(($) => $.concierge_setup_dialog.channel_description),
         visibility: "public",
       });
       // Step 2 — add the agent as a member.
@@ -96,7 +100,6 @@ export function ShipConciergeSetupDialog({
         // is re-run. The ambient listener PATCH below is the real
         // designation; membership is just a soft prerequisite for
         // the agent to appear in channel UIs.
-        // eslint-disable-next-line no-console
         console.warn("addChannelMember failed (already member?):", err);
       }
       // Step 3 — designate the ambient listener.
@@ -104,7 +107,7 @@ export function ShipConciergeSetupDialog({
       return ch;
     },
     onSuccess: () => {
-      toast.success("Ship Concierge configured.");
+      toast.success(t(($) => $.concierge_setup_dialog.configured_toast));
       // Bust the channels-list cache so the drawer + inline panel
       // re-render with the newly-configured channel without a
       // refresh.
@@ -122,19 +125,17 @@ export function ShipConciergeSetupDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <Bot className="size-4 text-muted-foreground" />
-            Set up Ship Concierge
+            {t(($) => $.concierge_setup_dialog.title)}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Designates one workspace agent as the ambient listener on a channel.
-            Every member message in that channel dispatches a task to the agent —
-            no @-mention required.
+            {t(($) => $.concierge_setup_dialog.description)}
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-3 py-2">
           <div className="grid gap-1.5">
             <Label htmlFor="concierge-channel-name" className="text-xs">
-              Channel slug
+              {t(($) => $.concierge_setup_dialog.channel_slug_label)}
             </Label>
             <Input
               id="concierge-channel-name"
@@ -144,25 +145,27 @@ export function ShipConciergeSetupDialog({
               className="h-8 text-xs"
             />
             <p className="text-[10px] text-muted-foreground">
-              Lowercase + hyphens. Becomes <code>#{channelName || "name"}</code> in the channels sidebar.
+              {t(($) => $.concierge_setup_dialog.channel_slug_hint, {
+                name: channelName || t(($) => $.concierge_setup_dialog.name_fallback),
+              })}
             </p>
           </div>
 
           <div className="grid gap-1.5">
             <Label htmlFor="concierge-channel-display" className="text-xs">
-              Display name
+              {t(($) => $.concierge_setup_dialog.display_name_label)}
             </Label>
             <Input
               id="concierge-channel-display"
               value={channelDisplayName}
               onChange={(e) => setChannelDisplayName(e.target.value)}
-              placeholder="Ship Concierge"
+              placeholder={t(($) => $.concierge_setup_dialog.default_display_name)}
               className="h-8 text-xs"
             />
           </div>
 
           <div className="grid gap-1.5">
-            <Label className="text-xs">Concierge agent</Label>
+            <Label className="text-xs">{t(($) => $.concierge_setup_dialog.agent_label)}</Label>
             <Select
               value={agentId}
               onValueChange={(v: string | null) => setAgentId(v ?? "")}
@@ -171,10 +174,10 @@ export function ShipConciergeSetupDialog({
                 <SelectValue
                   placeholder={
                     agentsLoading
-                      ? "Loading agents..."
+                      ? t(($) => $.concierge_setup_dialog.loading_agents)
                       : liveAgents.length === 0
-                        ? "No agents in this workspace"
-                        : "Pick an agent"
+                        ? t(($) => $.concierge_setup_dialog.no_agents)
+                        : t(($) => $.concierge_setup_dialog.pick_agent)
                   }
                 />
               </SelectTrigger>
@@ -188,7 +191,7 @@ export function ShipConciergeSetupDialog({
             </Select>
             {liveAgents.length === 0 && !agentsLoading && (
               <p className="text-[10px] text-muted-foreground">
-                Add an agent in Settings → Agents first.
+                {t(($) => $.concierge_setup_dialog.add_agent_hint)}
               </p>
             )}
           </div>
@@ -201,7 +204,7 @@ export function ShipConciergeSetupDialog({
             onClick={() => onOpenChange(false)}
             disabled={setup.isPending}
           >
-            Cancel
+            {t(($) => $.concierge_setup_dialog.cancel)}
           </Button>
           <Button
             size="sm"
@@ -209,7 +212,9 @@ export function ShipConciergeSetupDialog({
             disabled={setup.isPending || !agentId || !channelName.trim()}
             data-testid="ship-concierge-setup-submit"
           >
-            {setup.isPending ? "Configuring..." : "Set up"}
+            {setup.isPending
+              ? t(($) => $.concierge_setup_dialog.configuring)
+              : t(($) => $.concierge_setup_dialog.submit)}
           </Button>
         </DialogFooter>
       </DialogContent>
