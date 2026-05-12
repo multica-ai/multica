@@ -368,6 +368,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `settings-mobile-nav` | packages/views/settings/components/settings-page.tsx<br>packages/views/settings/components/cerebro-mobile-tab-nav.tsx | 62 | JEH-821 — replace Settings' stacked mobile tab sidebar with a sticky Select and global nav trigger |
 | `settings-page-cerebro` | packages/views/settings/components/settings-page.tsx | 119 | Settings page cerebro additions |
 | `skill-detail-mobile-nav` | packages/views/skills/components/skill-detail-page.tsx | 4 | JEH-821 — expose the global sidebar trigger on skill detail pages at mobile widths |
+| `skills-mobile-toolbar` | packages/views/skills/components/skills-page.tsx | ~10 | JEH-885 — stack the search + scope filters and tighten the body padding so the Skills list is usable at 375px |
+| `skills-mobile-detail-layout` | packages/views/skills/components/skill-detail-page.tsx<br>packages/views/locales/en/skills.json<br>packages/views/locales/zh-Hans/skills.json | ~60 | JEH-885 — collapse the file tree pane and metadata sidebar into Sheet drawers under md so the editor takes full width on phones; topbar exposes Files/Info triggers (new translation keys for the sheet triggers) |
 | `setup-jwt-handler` | server/internal/handler/setup_jwt_test.go | 12 | JWT setup helper additions |
 | `sqlc-agent` | server/pkg/db/queries/agent.sql | 19 | Cerebro sqlc query additions |
 | `sqlc-agent-task-title` | server/pkg/db/queries/agent.sql | 3 | JEH-698 — `title` column on agent_task_queue + INSERT param. Curated short display label generated at enqueue time, distinct from `trigger_summary` (verbatim provenance) |

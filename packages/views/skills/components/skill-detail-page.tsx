@@ -6,7 +6,9 @@ import {
   AlertTriangle,
   ArrowLeft,
   ChevronRight,
+  FolderTree,
   HardDrive,
+  Info,
   Loader2,
   Lock,
   Pencil,
@@ -49,6 +51,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
@@ -56,6 +59,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { AppLink, useNavigation } from "../../navigation";
 import { MobileSidebarTrigger } from "../../layout/page-header";
 import { useCanEditSkill } from "../hooks/use-can-edit-skill";
@@ -282,6 +286,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [addingFile, setAddingFile] = useState(false);
   const [conflictPending, setConflictPending] = useState(false);
+  // CEREBRO-PATCH(skills-mobile-detail-layout): mobile collapses the file tree + metadata sidebar into Sheet drawers.
+  const isMobile = useIsMobile();
+  const [filesSheetOpen, setFilesSheetOpen] = useState(false);
+  const [infoSheetOpen, setInfoSheetOpen] = useState(false);
 
   const draftRef = useRef({ name, description, content, files });
   draftRef.current = { name, description, content, files };
@@ -368,6 +376,18 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       setSelectedPath(SKILL_MD);
     }
   }, [fileMap, selectedPath]);
+
+  // CEREBRO-PATCH(skills-mobile-detail-layout): close the mobile files sheet after the user picks a file or adds one.
+  useEffect(() => {
+    if (isMobile) setFilesSheetOpen(false);
+  }, [selectedPath, isMobile]);
+  // CEREBRO-PATCH(skills-mobile-detail-layout): collapse both sheets when leaving mobile so desktop shows the inline panes.
+  useEffect(() => {
+    if (!isMobile) {
+      setFilesSheetOpen(false);
+      setInfoSheetOpen(false);
+    }
+  }, [isMobile]);
 
   const isDirty = useMemo(() => {
     if (!skill) return false;
@@ -553,12 +573,173 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     return t(($) => $.detail.subline.origin_workspace);
   })();
 
+  // CEREBRO-PATCH(skills-mobile-detail-layout): file tree pane content reused inline (desktop) and inside a Sheet (mobile).
+  const filePaneContent = (
+    <div className="flex h-full flex-col">
+      <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
+        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          {t(($) => $.detail.files_label, { count: totalFileCount(skill) })}
+        </span>
+        {canEdit && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setAddingFile(true)}
+                  className="text-muted-foreground"
+                  aria-label={t(($) => $.detail.add_file_aria)}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </Button>
+              }
+            />
+            <TooltipContent>{t(($) => $.detail.add_file_tooltip)}</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+      {addingFile && (
+        <AddFileInline
+          existingPaths={filePaths}
+          onAdd={handleAddFile}
+          onCancel={() => setAddingFile(false)}
+        />
+      )}
+      <div className="flex-1 overflow-y-auto">
+        <FileTree
+          filePaths={filePaths}
+          selectedPath={selectedPath}
+          onSelect={setSelectedPath}
+        />
+      </div>
+      {selectedPath !== SKILL_MD && canEdit && (
+        <div className="border-t px-3 py-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={handleDeleteFile}
+            className="text-muted-foreground hover:text-destructive"
+          >
+            <Trash2 className="h-3 w-3" />
+            {t(($) => $.detail.delete_file)}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+
+  // CEREBRO-PATCH(skills-mobile-detail-layout): metadata sidebar content reused inline (desktop) and inside a Sheet (mobile).
+  const metadataPaneContent = (
+    <div className="flex flex-col gap-4">
+      <div>
+        <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          {t(($) => $.detail.sidebar.metadata)}
+        </h3>
+        <dl className="space-y-1.5 text-xs">
+          <div className="flex gap-2">
+            <dt className="min-w-20 text-muted-foreground">
+              {t(($) => $.detail.sidebar.created)}
+            </dt>
+            <dd className="min-w-0 flex-1">
+              {timeAgo(skill.created_at)}
+            </dd>
+          </div>
+          <div className="flex gap-2">
+            <dt className="min-w-20 text-muted-foreground">
+              {t(($) => $.detail.sidebar.updated)}
+            </dt>
+            <dd className="min-w-0 flex-1">
+              {timeAgo(skill.updated_at)}
+            </dd>
+          </div>
+          {creator && (
+            <div className="flex gap-2">
+              <dt className="min-w-20 text-muted-foreground">
+                {t(($) => $.detail.sidebar.created_by)}
+              </dt>
+              <dd className="min-w-0 flex-1">{creator.name}</dd>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <dt className="min-w-20 text-muted-foreground">
+              {t(($) => $.detail.sidebar.files)}
+            </dt>
+            <dd className="min-w-0 flex-1">{totalFileCount(skill)}</dd>
+          </div>
+          <div
+            className="flex gap-2"
+            title={skill.id}
+          >
+            <dt className="min-w-20 text-muted-foreground">
+              {t(($) => $.detail.sidebar.id)}
+            </dt>
+            <dd className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
+              {skill.id.slice(0, 8)}…
+            </dd>
+          </div>
+        </dl>
+      </div>
+
+      {origin && origin.type !== "manual" && (
+        <div>
+          <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            {t(($) => $.detail.sidebar.origin)}
+          </h3>
+          <OriginSidebarCard origin={origin} runtime={originRuntime} />
+        </div>
+      )}
+
+      <div>
+        <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          {t(($) => $.detail.sidebar.used_by, { count: skillAgents.length })}
+        </h3>
+        <UsedBySection agents={skillAgents} />
+      </div>
+
+      <div>
+        <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          {t(($) => $.detail.sidebar.permissions)}
+        </h3>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {canEdit
+            ? t(($) => $.detail.sidebar.permissions_owner)
+            : creator
+              ? t(($) => $.detail.sidebar.permissions_locked_creator, { name: creator.name })
+              : t(($) => $.detail.sidebar.permissions_locked)}
+        </p>
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       {/* Topbar */}
       <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
         {/* CEREBRO-PATCH(skill-detail-mobile-nav): expose global nav on mobile detail pages. */}
         <MobileSidebarTrigger className="mr-0" />
+        {/* CEREBRO-PATCH(skills-mobile-detail-layout): mobile-only Files trigger opens the file tree sheet. */}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground md:hidden"
+                onClick={() => setFilesSheetOpen(true)}
+                aria-label={t(($) => $.detail.files_trigger_aria)}
+              >
+                <FolderTree className="h-3.5 w-3.5" />
+              </Button>
+            }
+          />
+          <TooltipContent side="bottom">
+            {t(($) => $.detail.files_trigger_tooltip)}
+          </TooltipContent>
+        </Tooltip>
         <Button
           variant="ghost"
           size="xs"
@@ -578,6 +759,26 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               {t(($) => $.detail.read_only)}
             </span>
           )}
+          {/* CEREBRO-PATCH(skills-mobile-detail-layout): mobile-only Info trigger opens the metadata sheet. */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground md:hidden"
+                  onClick={() => setInfoSheetOpen(true)}
+                  aria-label={t(($) => $.detail.info_trigger_aria)}
+                >
+                  <Info className="h-3.5 w-3.5" />
+                </Button>
+              }
+            />
+            <TooltipContent side="bottom">
+              {t(($) => $.detail.info_trigger_tooltip)}
+            </TooltipContent>
+          </Tooltip>
           {canEdit && (
             <Tooltip>
               <TooltipTrigger
@@ -621,60 +822,10 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
 
       {/* Body: file tree | editor | sidebar */}
       <div className="flex flex-1 min-h-0">
-        {/* File tree */}
-        <aside className="flex w-56 shrink-0 flex-col border-r">
-          <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
-            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              {t(($) => $.detail.files_label, { count: totalFileCount(skill) })}
-            </span>
-            {canEdit && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => setAddingFile(true)}
-                      className="text-muted-foreground"
-                      aria-label={t(($) => $.detail.add_file_aria)}
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                    </Button>
-                  }
-                />
-                <TooltipContent>{t(($) => $.detail.add_file_tooltip)}</TooltipContent>
-              </Tooltip>
-            )}
-          </div>
-          {addingFile && (
-            <AddFileInline
-              existingPaths={filePaths}
-              onAdd={handleAddFile}
-              onCancel={() => setAddingFile(false)}
-            />
-          )}
-          <div className="flex-1 overflow-y-auto">
-            <FileTree
-              filePaths={filePaths}
-              selectedPath={selectedPath}
-              onSelect={setSelectedPath}
-            />
-          </div>
-          {selectedPath !== SKILL_MD && canEdit && (
-            <div className="border-t px-3 py-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={handleDeleteFile}
-                className="text-muted-foreground hover:text-destructive"
-              >
-                <Trash2 className="h-3 w-3" />
-                {t(($) => $.detail.delete_file)}
-              </Button>
-            </div>
-          )}
+        {/* File tree (desktop only — mobile uses the Files sheet below) */}
+        {/* CEREBRO-PATCH(skills-mobile-detail-layout): hide inline file tree under md so the editor gets full width on phones. */}
+        <aside className="hidden w-56 shrink-0 flex-col border-r md:flex">
+          {filePaneContent}
         </aside>
 
         {/* Editor */}
@@ -815,87 +966,32 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           )}
         </section>
 
-        {/* Sidebar */}
-        <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-y-auto border-l bg-muted/20 px-4 py-4">
-          <div>
-            <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              {t(($) => $.detail.sidebar.metadata)}
-            </h3>
-            <dl className="space-y-1.5 text-xs">
-              <div className="flex gap-2">
-                <dt className="min-w-20 text-muted-foreground">
-                  {t(($) => $.detail.sidebar.created)}
-                </dt>
-                <dd className="min-w-0 flex-1">
-                  {timeAgo(skill.created_at)}
-                </dd>
-              </div>
-              <div className="flex gap-2">
-                <dt className="min-w-20 text-muted-foreground">
-                  {t(($) => $.detail.sidebar.updated)}
-                </dt>
-                <dd className="min-w-0 flex-1">
-                  {timeAgo(skill.updated_at)}
-                </dd>
-              </div>
-              {creator && (
-                <div className="flex gap-2">
-                  <dt className="min-w-20 text-muted-foreground">
-                    {t(($) => $.detail.sidebar.created_by)}
-                  </dt>
-                  <dd className="min-w-0 flex-1">{creator.name}</dd>
-                </div>
-              )}
-              <div className="flex gap-2">
-                <dt className="min-w-20 text-muted-foreground">
-                  {t(($) => $.detail.sidebar.files)}
-                </dt>
-                <dd className="min-w-0 flex-1">{totalFileCount(skill)}</dd>
-              </div>
-              <div
-                className="flex gap-2"
-                title={skill.id}
-              >
-                <dt className="min-w-20 text-muted-foreground">
-                  {t(($) => $.detail.sidebar.id)}
-                </dt>
-                <dd className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
-                  {skill.id.slice(0, 8)}…
-                </dd>
-              </div>
-            </dl>
-          </div>
-
-          {origin && origin.type !== "manual" && (
-            <div>
-              <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                {t(($) => $.detail.sidebar.origin)}
-              </h3>
-              <OriginSidebarCard origin={origin} runtime={originRuntime} />
-            </div>
-          )}
-
-          <div>
-            <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              {t(($) => $.detail.sidebar.used_by, { count: skillAgents.length })}
-            </h3>
-            <UsedBySection agents={skillAgents} />
-          </div>
-
-          <div>
-            <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              {t(($) => $.detail.sidebar.permissions)}
-            </h3>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              {canEdit
-                ? t(($) => $.detail.sidebar.permissions_owner)
-                : creator
-                  ? t(($) => $.detail.sidebar.permissions_locked_creator, { name: creator.name })
-                  : t(($) => $.detail.sidebar.permissions_locked)}
-            </p>
-          </div>
+        {/* Sidebar (desktop only — mobile uses the Info sheet below) */}
+        {/* CEREBRO-PATCH(skills-mobile-detail-layout): hide inline metadata sidebar under md; mobile opens it from the Info trigger. */}
+        <aside className="hidden w-72 shrink-0 flex-col overflow-y-auto border-l bg-muted/20 px-4 py-4 md:flex">
+          {metadataPaneContent}
         </aside>
       </div>
+
+      {/* CEREBRO-PATCH(skills-mobile-detail-layout): mobile sheets for the file tree (left) and metadata (right). */}
+      <Sheet open={filesSheetOpen} onOpenChange={setFilesSheetOpen}>
+        <SheetContent
+          side="left"
+          showCloseButton={false}
+          className="w-[85vw] max-w-xs p-0"
+        >
+          {filePaneContent}
+        </SheetContent>
+      </Sheet>
+      <Sheet open={infoSheetOpen} onOpenChange={setInfoSheetOpen}>
+        <SheetContent
+          side="right"
+          showCloseButton
+          className="w-[85vw] max-w-xs overflow-y-auto p-4"
+        >
+          {metadataPaneContent}
+        </SheetContent>
+      </Sheet>
 
       {/* Delete confirmation */}
       <Dialog

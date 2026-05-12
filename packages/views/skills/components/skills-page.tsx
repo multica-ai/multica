@@ -107,39 +107,43 @@ function CardToolbar({
 }) {
   const { t } = useT("skills");
   return (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+    // CEREBRO-PATCH(skills-mobile-toolbar): stack search + filters on mobile, horizontally scroll filters when narrow.
+    <div className="flex shrink-0 flex-col gap-2 border-b p-3 sm:h-12 sm:flex-row sm:items-center sm:gap-2 sm:p-0 sm:px-4">
       <div className="relative">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t(($) => $.page.search_placeholder)}
-          className="h-8 w-64 pl-8 text-sm"
+          className="h-8 w-full pl-8 text-sm sm:w-64"
         />
       </div>
-      {SCOPE_KEYS.map((scope) => (
-        <Tooltip key={scope}>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="outline"
-                size="sm"
-                className={
-                  filter === scope
-                    ? "bg-accent text-accent-foreground hover:bg-accent/80"
-                    : "text-muted-foreground"
-                }
-                onClick={() => setFilter(scope)}
-              >
-                {t(($) => $.page.scopes[scope].label)}
-              </Button>
-            }
-          />
-          <TooltipContent side="bottom">
-            {t(($) => $.page.scopes[scope].description)}
-          </TooltipContent>
-        </Tooltip>
-      ))}
+      {/* CEREBRO-PATCH(skills-mobile-toolbar): scope filters scroll horizontally on narrow viewports. */}
+      <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 sm:mx-0 sm:overflow-visible sm:px-0">
+        {SCOPE_KEYS.map((scope) => (
+          <Tooltip key={scope}>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={
+                    filter === scope
+                      ? "shrink-0 bg-accent text-accent-foreground hover:bg-accent/80"
+                      : "shrink-0 text-muted-foreground"
+                  }
+                  onClick={() => setFilter(scope)}
+                >
+                  {t(($) => $.page.scopes[scope].label)}
+                </Button>
+              }
+            />
+            <TooltipContent side="bottom">
+              {t(($) => $.page.scopes[scope].description)}
+            </TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
     </div>
   );
 }
@@ -285,7 +289,8 @@ export default function SkillsPage() {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
         <PageHeaderBar totalCount={0} onCreate={() => setCreateOpen(true)} />
-        <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
+        {/* CEREBRO-PATCH(skills-mobile-toolbar): tighten body padding so 375px keeps a usable card width. */}
+        <div className="flex flex-1 min-h-0 flex-col gap-4 p-3 sm:p-6">
           <div className="space-y-3 pl-4">
             <Skeleton className="h-5 w-full max-w-2xl rounded-md" />
             <Skeleton className="h-14 w-full max-w-3xl rounded-md" />
@@ -360,7 +365,8 @@ export default function SkillsPage() {
         </div>
       )}
 
-      <div className="flex flex-1 min-h-0 flex-col gap-4 p-6">
+      {/* CEREBRO-PATCH(skills-mobile-toolbar): tighten body padding so 375px keeps a usable card width. */}
+      <div className="flex flex-1 min-h-0 flex-col gap-4 p-3 sm:p-6">
         {!showEmpty && (
           <div className="max-w-3xl rounded-r-md border-l-2 border-l-brand bg-brand/5 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
             <span className="font-medium text-foreground">
