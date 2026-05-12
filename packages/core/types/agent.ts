@@ -209,6 +209,19 @@ export interface Skill extends SkillSummary {
   files: SkillFile[];
 }
 
+export interface MarketplaceSkill {
+  name: string;
+  slug: string;
+  description: string;
+  source_url: string;
+  source: "clawhub";
+}
+
+export interface MarketplaceSearchResult {
+  skills: MarketplaceSkill[];
+  total: number;
+}
+
 export interface SkillFile {
   id: string;
   skill_id: string;

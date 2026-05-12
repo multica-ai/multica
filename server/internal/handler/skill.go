@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,6 +80,19 @@ type SkillFileResponse struct {
 type SkillWithFilesResponse struct {
 	SkillResponse
 	Files []SkillFileResponse `json:"files"`
+}
+
+type MarketplaceSkill struct {
+	Name        string `json:"name"`
+	Slug        string `json:"slug"`
+	Description string `json:"description"`
+	SourceURL   string `json:"source_url"`
+	Source      string `json:"source"`
+}
+
+type MarketplaceSearchResponse struct {
+	Skills []MarketplaceSkill `json:"skills"`
+	Total  int                `json:"total"`
 }
 
 func skillToResponse(s db.Skill) SkillResponse {
@@ -498,6 +512,10 @@ func (s *importedSkill) addFile(path, content string) error {
 type clawhubGetSkillResponse struct {
 	Skill         clawhubSkill          `json:"skill"`
 	LatestVersion *clawhubLatestVersion `json:"latestVersion"`
+}
+
+type clawhubSearchResponse struct {
+	Items []clawhubSkill `json:"items"`
 }
 
 type clawhubSkill struct {
@@ -1614,6 +1632,78 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
 	h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (h *Handler) SearchMarketplaceSkills(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		writeError(w, http.StatusBadRequest, "q is required")
+		return
+	}
+
+	limit := 20
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil || parsed < 1 {
+			writeError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		if parsed > 50 {
+			parsed = 50
+		}
+		limit = parsed
+	}
+
+	params := url.Values{}
+	params.Set("search", query)
+	params.Set("limit", strconv.Itoa(limit))
+	apiURL := "https://clawhub.ai/api/v1/skills?" + params.Encode()
+
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	resp, err := httpClient.Get(apiURL)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to reach ClawHub: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("ClawHub returned status %d", resp.StatusCode))
+		return
+	}
+
+	var clawhubResp clawhubSearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&clawhubResp); err != nil {
+		writeError(w, http.StatusBadGateway, "failed to parse ClawHub response")
+		return
+	}
+
+	skills := make([]MarketplaceSkill, 0, len(clawhubResp.Items))
+	for _, item := range clawhubResp.Items {
+		if item.Slug == "" {
+			continue
+		}
+		name := item.DisplayName
+		if name == "" {
+			name = item.Slug
+		}
+		slugParts := strings.Split(item.Slug, "/")
+		for i, part := range slugParts {
+			slugParts[i] = url.PathEscape(part)
+		}
+		skills = append(skills, MarketplaceSkill{
+			Name:        name,
+			Slug:        item.Slug,
+			Description: item.Summary,
+			SourceURL:   "https://clawhub.ai/" + strings.Join(slugParts, "/"),
+			Source:      "clawhub",
+		})
+	}
+
+	writeJSON(w, http.StatusOK, MarketplaceSearchResponse{
+		Skills: skills,
+		Total:  len(skills),
+	})
 }
 
 // --- Skill File endpoints ---

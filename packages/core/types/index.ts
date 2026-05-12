@@ -14,6 +14,8 @@ export type {
   UpdateAgentRequest,
   Skill,
   SkillSummary,
+  MarketplaceSkill,
+  MarketplaceSearchResult,
   AgentSkillSummary,
   SkillFile,
   CreateSkillRequest,

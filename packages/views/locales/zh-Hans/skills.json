@@ -174,6 +174,10 @@
       "runtime": {
         "title": "从运行时复制",
         "desc": "扫描本地运行时，把它磁盘上的 skill 提升到工作区。"
+      },
+      "marketplace": {
+        "title": "浏览 Marketplace",
+        "desc": "从社区 marketplace 搜索并导入 skill。"
       }
     },
     "method_card": {
@@ -182,7 +186,9 @@
       "url_title": "从 URL 导入",
       "url_desc": "从 ClawHub 或 Skills.sh 拉取已发布的 skill。",
       "runtime_title": "从运行时复制",
-      "runtime_desc": "把本地运行时里已经装好的 skill 提升过来。"
+      "runtime_desc": "把本地运行时里已经装好的 skill 提升过来。",
+      "marketplace_title": "浏览 Marketplace",
+      "marketplace_desc": "搜索 ClawHub 上社区发布的 skill，并一键导入。"
     },
     "manual": {
       "name_label": "名称",
@@ -209,6 +215,16 @@
       "fallback_error": "导入失败",
       "cancel": "取消",
       "toast_imported": "已导入 skill"
+    },
+    "marketplace": {
+      "search_placeholder": "搜索 skill...",
+      "importing": "导入中...",
+      "import": "导入",
+      "empty_query": "在上方输入关键词来搜索 marketplace。",
+      "no_results": "没有找到匹配 \"{{query}}\" 的 skill。",
+      "error": "无法连接 marketplace。",
+      "source_badge": "ClawHub",
+      "toast_imported": "已从 marketplace 导入 skill。"
     }
   },
   "runtime_import": {

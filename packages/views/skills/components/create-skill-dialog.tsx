@@ -10,6 +10,7 @@ import {
   Loader2,
   Pencil,
   Plus,
+  Store,
   X as XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -39,10 +40,11 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { cn } from "@multica/ui/lib/utils";
 import { openExternal } from "../../platform";
+import { MarketplaceBrowsePanel } from "./marketplace-browse-panel";
 import { RuntimeLocalSkillImportPanel } from "./runtime-local-skill-import-panel";
 import { useT } from "../../i18n";
 
-type Method = "chooser" | "manual" | "url" | "runtime";
+type Method = "chooser" | "manual" | "url" | "runtime" | "marketplace";
 
 function seedAfterCreate(
   qc: ReturnType<typeof useQueryClient>,
@@ -59,7 +61,7 @@ function isNameConflictError(msg: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Chooser — initial method picker (3 cards)
+// Chooser — initial method picker
 // ---------------------------------------------------------------------------
 
 function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
@@ -67,11 +69,12 @@ function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
   const methods: {
     key: Method;
     icon: typeof Plus;
-    titleKey: "manual" | "url" | "runtime";
+    titleKey: "manual" | "url" | "runtime" | "marketplace";
   }[] = [
     { key: "manual", icon: Plus, titleKey: "manual" },
     { key: "url", icon: Download, titleKey: "url" },
     { key: "runtime", icon: HardDrive, titleKey: "runtime" },
+    { key: "marketplace", icon: Store, titleKey: "marketplace" },
   ];
   return (
     <div className="grid gap-2 p-5">
@@ -442,7 +445,7 @@ export function CreateSkillDialog({
     onClose();
   };
 
-  const wide = method === "runtime";
+  const wide = method === "runtime" || method === "marketplace";
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
@@ -518,6 +521,9 @@ export function CreateSkillDialog({
         )}
         {method === "runtime" && (
           <RuntimeLocalSkillImportPanel onImported={handleCreated} />
+        )}
+        {method === "marketplace" && (
+          <MarketplaceBrowsePanel onImported={handleCreated} />
         )}
       </DialogContent>
     </Dialog>
