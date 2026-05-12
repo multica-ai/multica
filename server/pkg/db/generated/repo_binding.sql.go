@@ -15,7 +15,7 @@ const createRepoBinding = `-- name: CreateRepoBinding :one
 INSERT INTO workspace_repo_binding (
     workspace_id, repo_full_name, installation_id, cr_bot_username
 ) VALUES ($1, $2, $3, COALESCE($4::text, 'coderabbitai[bot]'))
-RETURNING id, workspace_id, repo_full_name, installation_id, cr_bot_username, active, created_at, updated_at
+RETURNING id, workspace_id, repo_full_name, installation_id, cr_bot_username, active, created_at, updated_at, cr_required
 `
 
 type CreateRepoBindingParams struct {
@@ -42,6 +42,7 @@ func (q *Queries) CreateRepoBinding(ctx context.Context, arg CreateRepoBindingPa
 		&i.Active,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CrRequired,
 	)
 	return i, err
 }
@@ -62,7 +63,7 @@ func (q *Queries) DeleteRepoBinding(ctx context.Context, arg DeleteRepoBindingPa
 }
 
 const getRepoBinding = `-- name: GetRepoBinding :one
-SELECT id, workspace_id, repo_full_name, installation_id, cr_bot_username, active, created_at, updated_at FROM workspace_repo_binding
+SELECT id, workspace_id, repo_full_name, installation_id, cr_bot_username, active, created_at, updated_at, cr_required FROM workspace_repo_binding
 WHERE id = $1
 `
 
@@ -78,12 +79,13 @@ func (q *Queries) GetRepoBinding(ctx context.Context, id pgtype.UUID) (Workspace
 		&i.Active,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CrRequired,
 	)
 	return i, err
 }
 
 const getRepoBindingByRepo = `-- name: GetRepoBindingByRepo :one
-SELECT id, workspace_id, repo_full_name, installation_id, cr_bot_username, active, created_at, updated_at FROM workspace_repo_binding
+SELECT id, workspace_id, repo_full_name, installation_id, cr_bot_username, active, created_at, updated_at, cr_required FROM workspace_repo_binding
 WHERE repo_full_name = $1 AND active = true
 `
 
@@ -99,12 +101,13 @@ func (q *Queries) GetRepoBindingByRepo(ctx context.Context, repoFullName string)
 		&i.Active,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CrRequired,
 	)
 	return i, err
 }
 
 const listRepoBindingsForWorkspace = `-- name: ListRepoBindingsForWorkspace :many
-SELECT id, workspace_id, repo_full_name, installation_id, cr_bot_username, active, created_at, updated_at FROM workspace_repo_binding
+SELECT id, workspace_id, repo_full_name, installation_id, cr_bot_username, active, created_at, updated_at, cr_required FROM workspace_repo_binding
 WHERE workspace_id = $1
 ORDER BY created_at DESC
 `
@@ -127,6 +130,7 @@ func (q *Queries) ListRepoBindingsForWorkspace(ctx context.Context, workspaceID 
 			&i.Active,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CrRequired,
 		); err != nil {
 			return nil, err
 		}
@@ -143,7 +147,7 @@ UPDATE workspace_repo_binding SET
     active = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, repo_full_name, installation_id, cr_bot_username, active, created_at, updated_at
+RETURNING id, workspace_id, repo_full_name, installation_id, cr_bot_username, active, created_at, updated_at, cr_required
 `
 
 type SetRepoBindingActiveParams struct {
@@ -163,6 +167,7 @@ func (q *Queries) SetRepoBindingActive(ctx context.Context, arg SetRepoBindingAc
 		&i.Active,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CrRequired,
 	)
 	return i, err
 }
@@ -172,7 +177,7 @@ UPDATE workspace_repo_binding SET
     installation_id = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, repo_full_name, installation_id, cr_bot_username, active, created_at, updated_at
+RETURNING id, workspace_id, repo_full_name, installation_id, cr_bot_username, active, created_at, updated_at, cr_required
 `
 
 type UpdateRepoBindingInstallationParams struct {
@@ -192,6 +197,7 @@ func (q *Queries) UpdateRepoBindingInstallation(ctx context.Context, arg UpdateR
 		&i.Active,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CrRequired,
 	)
 	return i, err
 }

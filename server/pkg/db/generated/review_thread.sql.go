@@ -32,6 +32,109 @@ func (q *Queries) BackfillReviewThreadNodeID(ctx context.Context, arg BackfillRe
 	return result.RowsAffected(), nil
 }
 
+const claimNextUnprocessedThread = `-- name: ClaimNextUnprocessedThread :one
+WITH next_thread AS (
+    SELECT rt.id
+    FROM issue_review_thread rt
+    WHERE rt.issue_id = $1
+      AND rt.state = 'unresolved'
+      AND rt.processed_by_resolver_at IS NULL
+      AND (rt.claim_expires_at IS NULL OR rt.claim_expires_at < now())
+    ORDER BY
+      CASE rt.severity
+        WHEN 'issue'      THEN 0
+        WHEN 'refactor'   THEN 1
+        WHEN 'suggestion' THEN 2
+        WHEN 'nitpick'    THEN 3
+        ELSE 4
+      END,
+      rt.file_path ASC,
+      rt.line ASC NULLS LAST
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+), claimed AS (
+    UPDATE issue_review_thread t
+    SET claimed_by_agent = $2,
+        claim_expires_at = now() + make_interval(secs => $3::int),
+        updated_at       = now()
+    FROM next_thread
+    WHERE t.id = next_thread.id
+    RETURNING t.id, t.workspace_id, t.issue_id, t.pr_repo, t.pr_number, t.gh_comment_id, t.gh_thread_node_id, t.file_path, t.line, t.side, t.severity, t.title, t.body, t.url, t.author_login, t.state, t.resolved_by_agent, t.resolved_at, t.created_at, t.updated_at, t.severity_badge, t.effort_badge, t.ai_prompt, t.processed_by_resolver_at, t.processed_by_agent, t.claimed_by_agent, t.claim_expires_at
+)
+SELECT id, workspace_id, issue_id, pr_repo, pr_number, gh_comment_id, gh_thread_node_id, file_path, line, side, severity, title, body, url, author_login, state, resolved_by_agent, resolved_at, created_at, updated_at, severity_badge, effort_badge, ai_prompt, processed_by_resolver_at, processed_by_agent, claimed_by_agent, claim_expires_at FROM claimed
+`
+
+type ClaimNextUnprocessedThreadParams struct {
+	IssueID        pgtype.UUID `json:"issue_id"`
+	ClaimedByAgent pgtype.UUID `json:"claimed_by_agent"`
+	ClaimTtlSecs   int32       `json:"claim_ttl_secs"`
+}
+
+type ClaimNextUnprocessedThreadRow struct {
+	ID                    pgtype.UUID        `json:"id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	IssueID               pgtype.UUID        `json:"issue_id"`
+	PrRepo                string             `json:"pr_repo"`
+	PrNumber              int32              `json:"pr_number"`
+	GhCommentID           int64              `json:"gh_comment_id"`
+	GhThreadNodeID        pgtype.Text        `json:"gh_thread_node_id"`
+	FilePath              string             `json:"file_path"`
+	Line                  pgtype.Int4        `json:"line"`
+	Side                  pgtype.Text        `json:"side"`
+	Severity              string             `json:"severity"`
+	Title                 string             `json:"title"`
+	Body                  string             `json:"body"`
+	Url                   string             `json:"url"`
+	AuthorLogin           string             `json:"author_login"`
+	State                 string             `json:"state"`
+	ResolvedByAgent       pgtype.UUID        `json:"resolved_by_agent"`
+	ResolvedAt            pgtype.Timestamptz `json:"resolved_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	SeverityBadge         string             `json:"severity_badge"`
+	EffortBadge           string             `json:"effort_badge"`
+	AiPrompt              string             `json:"ai_prompt"`
+	ProcessedByResolverAt pgtype.Timestamptz `json:"processed_by_resolver_at"`
+	ProcessedByAgent      pgtype.UUID        `json:"processed_by_agent"`
+	ClaimedByAgent        pgtype.UUID        `json:"claimed_by_agent"`
+	ClaimExpiresAt        pgtype.Timestamptz `json:"claim_expires_at"`
+}
+
+func (q *Queries) ClaimNextUnprocessedThread(ctx context.Context, arg ClaimNextUnprocessedThreadParams) (ClaimNextUnprocessedThreadRow, error) {
+	row := q.db.QueryRow(ctx, claimNextUnprocessedThread, arg.IssueID, arg.ClaimedByAgent, arg.ClaimTtlSecs)
+	var i ClaimNextUnprocessedThreadRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.PrRepo,
+		&i.PrNumber,
+		&i.GhCommentID,
+		&i.GhThreadNodeID,
+		&i.FilePath,
+		&i.Line,
+		&i.Side,
+		&i.Severity,
+		&i.Title,
+		&i.Body,
+		&i.Url,
+		&i.AuthorLogin,
+		&i.State,
+		&i.ResolvedByAgent,
+		&i.ResolvedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SeverityBadge,
+		&i.EffortBadge,
+		&i.AiPrompt,
+		&i.ProcessedByResolverAt,
+		&i.ProcessedByAgent,
+		&i.ClaimedByAgent,
+		&i.ClaimExpiresAt,
+	)
+	return i, err
+}
+
 const countUnresolvedReviewThreadsByIssue = `-- name: CountUnresolvedReviewThreadsByIssue :one
 SELECT COUNT(*) FROM issue_review_thread
 WHERE issue_id = $1 AND state = 'unresolved'
@@ -44,8 +147,21 @@ func (q *Queries) CountUnresolvedReviewThreadsByIssue(ctx context.Context, issue
 	return count, err
 }
 
+const getParentCRReviewCommentForThread = `-- name: GetParentCRReviewCommentForThread :one
+SELECT id FROM comment
+WHERE review_thread_id = $1 AND type = 'cr_review_comment'
+LIMIT 1
+`
+
+func (q *Queries) GetParentCRReviewCommentForThread(ctx context.Context, reviewThreadID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getParentCRReviewCommentForThread, reviewThreadID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getReviewThreadByCommentID = `-- name: GetReviewThreadByCommentID :one
-SELECT id, workspace_id, issue_id, pr_repo, pr_number, gh_comment_id, gh_thread_node_id, file_path, line, side, severity, title, body, url, author_login, state, resolved_by_agent, resolved_at, created_at, updated_at, severity_badge, effort_badge, ai_prompt FROM issue_review_thread
+SELECT id, workspace_id, issue_id, pr_repo, pr_number, gh_comment_id, gh_thread_node_id, file_path, line, side, severity, title, body, url, author_login, state, resolved_by_agent, resolved_at, created_at, updated_at, severity_badge, effort_badge, ai_prompt, processed_by_resolver_at, processed_by_agent, claimed_by_agent, claim_expires_at FROM issue_review_thread
 WHERE gh_comment_id = $1
 `
 
@@ -76,12 +192,61 @@ func (q *Queries) GetReviewThreadByCommentID(ctx context.Context, ghCommentID in
 		&i.SeverityBadge,
 		&i.EffortBadge,
 		&i.AiPrompt,
+		&i.ProcessedByResolverAt,
+		&i.ProcessedByAgent,
+		&i.ClaimedByAgent,
+		&i.ClaimExpiresAt,
+	)
+	return i, err
+}
+
+const getReviewThreadInIssue = `-- name: GetReviewThreadInIssue :one
+SELECT id, workspace_id, issue_id, pr_repo, pr_number, gh_comment_id, gh_thread_node_id, file_path, line, side, severity, title, body, url, author_login, state, resolved_by_agent, resolved_at, created_at, updated_at, severity_badge, effort_badge, ai_prompt, processed_by_resolver_at, processed_by_agent, claimed_by_agent, claim_expires_at FROM issue_review_thread
+WHERE id = $1 AND issue_id = $2
+`
+
+type GetReviewThreadInIssueParams struct {
+	ID      pgtype.UUID `json:"id"`
+	IssueID pgtype.UUID `json:"issue_id"`
+}
+
+func (q *Queries) GetReviewThreadInIssue(ctx context.Context, arg GetReviewThreadInIssueParams) (IssueReviewThread, error) {
+	row := q.db.QueryRow(ctx, getReviewThreadInIssue, arg.ID, arg.IssueID)
+	var i IssueReviewThread
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.PrRepo,
+		&i.PrNumber,
+		&i.GhCommentID,
+		&i.GhThreadNodeID,
+		&i.FilePath,
+		&i.Line,
+		&i.Side,
+		&i.Severity,
+		&i.Title,
+		&i.Body,
+		&i.Url,
+		&i.AuthorLogin,
+		&i.State,
+		&i.ResolvedByAgent,
+		&i.ResolvedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SeverityBadge,
+		&i.EffortBadge,
+		&i.AiPrompt,
+		&i.ProcessedByResolverAt,
+		&i.ProcessedByAgent,
+		&i.ClaimedByAgent,
+		&i.ClaimExpiresAt,
 	)
 	return i, err
 }
 
 const listReviewThreadsByIssue = `-- name: ListReviewThreadsByIssue :many
-SELECT id, workspace_id, issue_id, pr_repo, pr_number, gh_comment_id, gh_thread_node_id, file_path, line, side, severity, title, body, url, author_login, state, resolved_by_agent, resolved_at, created_at, updated_at, severity_badge, effort_badge, ai_prompt FROM issue_review_thread
+SELECT id, workspace_id, issue_id, pr_repo, pr_number, gh_comment_id, gh_thread_node_id, file_path, line, side, severity, title, body, url, author_login, state, resolved_by_agent, resolved_at, created_at, updated_at, severity_badge, effort_badge, ai_prompt, processed_by_resolver_at, processed_by_agent, claimed_by_agent, claim_expires_at FROM issue_review_thread
 WHERE issue_id = $1
 ORDER BY created_at ASC
 `
@@ -119,6 +284,10 @@ func (q *Queries) ListReviewThreadsByIssue(ctx context.Context, issueID pgtype.U
 			&i.SeverityBadge,
 			&i.EffortBadge,
 			&i.AiPrompt,
+			&i.ProcessedByResolverAt,
+			&i.ProcessedByAgent,
+			&i.ClaimedByAgent,
+			&i.ClaimExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -198,8 +367,76 @@ func (q *Queries) ListStuckCoderabbitIssues(ctx context.Context, settleSeconds i
 	return items, nil
 }
 
+const listThreadsWithUnpostedFixerReplies = `-- name: ListThreadsWithUnpostedFixerReplies :many
+SELECT
+    t.id                AS thread_id,
+    t.gh_thread_node_id,
+    t.state             AS thread_state,
+    t.severity,
+    t.file_path,
+    t.line,
+    reply.id            AS fixer_reply_comment_id,
+    reply.content       AS reply_body
+FROM issue_review_thread t
+JOIN comment parent ON parent.review_thread_id = t.id AND parent.type = 'cr_review_comment'
+JOIN comment reply  ON reply.parent_id = parent.id   AND reply.type  = 'fixer_reply'
+WHERE t.issue_id = $1
+  AND reply.posted_to_github_at IS NULL
+ORDER BY
+  CASE t.severity
+    WHEN 'issue'      THEN 0
+    WHEN 'refactor'   THEN 1
+    WHEN 'suggestion' THEN 2
+    WHEN 'nitpick'    THEN 3
+    ELSE 4
+  END,
+  t.file_path ASC,
+  t.line ASC NULLS LAST,
+  reply.created_at ASC
+`
+
+type ListThreadsWithUnpostedFixerRepliesRow struct {
+	ThreadID            pgtype.UUID `json:"thread_id"`
+	GhThreadNodeID      pgtype.Text `json:"gh_thread_node_id"`
+	ThreadState         string      `json:"thread_state"`
+	Severity            string      `json:"severity"`
+	FilePath            string      `json:"file_path"`
+	Line                pgtype.Int4 `json:"line"`
+	FixerReplyCommentID pgtype.UUID `json:"fixer_reply_comment_id"`
+	ReplyBody           string      `json:"reply_body"`
+}
+
+func (q *Queries) ListThreadsWithUnpostedFixerReplies(ctx context.Context, issueID pgtype.UUID) ([]ListThreadsWithUnpostedFixerRepliesRow, error) {
+	rows, err := q.db.Query(ctx, listThreadsWithUnpostedFixerReplies, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListThreadsWithUnpostedFixerRepliesRow{}
+	for rows.Next() {
+		var i ListThreadsWithUnpostedFixerRepliesRow
+		if err := rows.Scan(
+			&i.ThreadID,
+			&i.GhThreadNodeID,
+			&i.ThreadState,
+			&i.Severity,
+			&i.FilePath,
+			&i.Line,
+			&i.FixerReplyCommentID,
+			&i.ReplyBody,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnresolvedReviewThreadsByIssue = `-- name: ListUnresolvedReviewThreadsByIssue :many
-SELECT id, workspace_id, issue_id, pr_repo, pr_number, gh_comment_id, gh_thread_node_id, file_path, line, side, severity, title, body, url, author_login, state, resolved_by_agent, resolved_at, created_at, updated_at, severity_badge, effort_badge, ai_prompt FROM issue_review_thread
+SELECT id, workspace_id, issue_id, pr_repo, pr_number, gh_comment_id, gh_thread_node_id, file_path, line, side, severity, title, body, url, author_login, state, resolved_by_agent, resolved_at, created_at, updated_at, severity_badge, effort_badge, ai_prompt, processed_by_resolver_at, processed_by_agent, claimed_by_agent, claim_expires_at FROM issue_review_thread
 WHERE issue_id = $1 AND state = 'unresolved'
 ORDER BY created_at ASC
 `
@@ -237,6 +474,10 @@ func (q *Queries) ListUnresolvedReviewThreadsByIssue(ctx context.Context, issueI
 			&i.SeverityBadge,
 			&i.EffortBadge,
 			&i.AiPrompt,
+			&i.ProcessedByResolverAt,
+			&i.ProcessedByAgent,
+			&i.ClaimedByAgent,
+			&i.ClaimExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -246,6 +487,79 @@ func (q *Queries) ListUnresolvedReviewThreadsByIssue(ctx context.Context, issueI
 		return nil, err
 	}
 	return items, nil
+}
+
+const markThreadProcessedByResolver = `-- name: MarkThreadProcessedByResolver :one
+UPDATE issue_review_thread
+SET processed_by_resolver_at = now(),
+    processed_by_agent       = $2,
+    claimed_by_agent         = NULL,
+    claim_expires_at         = NULL,
+    updated_at               = now()
+WHERE id = $1
+  AND processed_by_resolver_at IS NULL
+  AND claimed_by_agent = $2
+  AND claim_expires_at IS NOT NULL
+  AND claim_expires_at > now()
+RETURNING id, workspace_id, issue_id, pr_repo, pr_number, gh_comment_id, gh_thread_node_id, file_path, line, side, severity, title, body, url, author_login, state, resolved_by_agent, resolved_at, created_at, updated_at, severity_badge, effort_badge, ai_prompt, processed_by_resolver_at, processed_by_agent, claimed_by_agent, claim_expires_at
+`
+
+type MarkThreadProcessedByResolverParams struct {
+	ID               pgtype.UUID `json:"id"`
+	ProcessedByAgent pgtype.UUID `json:"processed_by_agent"`
+}
+
+func (q *Queries) MarkThreadProcessedByResolver(ctx context.Context, arg MarkThreadProcessedByResolverParams) (IssueReviewThread, error) {
+	row := q.db.QueryRow(ctx, markThreadProcessedByResolver, arg.ID, arg.ProcessedByAgent)
+	var i IssueReviewThread
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.PrRepo,
+		&i.PrNumber,
+		&i.GhCommentID,
+		&i.GhThreadNodeID,
+		&i.FilePath,
+		&i.Line,
+		&i.Side,
+		&i.Severity,
+		&i.Title,
+		&i.Body,
+		&i.Url,
+		&i.AuthorLogin,
+		&i.State,
+		&i.ResolvedByAgent,
+		&i.ResolvedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SeverityBadge,
+		&i.EffortBadge,
+		&i.AiPrompt,
+		&i.ProcessedByResolverAt,
+		&i.ProcessedByAgent,
+		&i.ClaimedByAgent,
+		&i.ClaimExpiresAt,
+	)
+	return i, err
+}
+
+const releaseThreadClaim = `-- name: ReleaseThreadClaim :exec
+UPDATE issue_review_thread
+SET claimed_by_agent = NULL,
+    claim_expires_at = NULL,
+    updated_at       = now()
+WHERE id = $1 AND claimed_by_agent = $2
+`
+
+type ReleaseThreadClaimParams struct {
+	ID             pgtype.UUID `json:"id"`
+	ClaimedByAgent pgtype.UUID `json:"claimed_by_agent"`
+}
+
+func (q *Queries) ReleaseThreadClaim(ctx context.Context, arg ReleaseThreadClaimParams) error {
+	_, err := q.db.Exec(ctx, releaseThreadClaim, arg.ID, arg.ClaimedByAgent)
+	return err
 }
 
 const setReviewThreadStateByCommentID = `-- name: SetReviewThreadStateByCommentID :execrows
@@ -322,6 +636,24 @@ func (q *Queries) SetReviewThreadStateByThreadNodeID(ctx context.Context, arg Se
 	return result.RowsAffected(), nil
 }
 
+const sweepExpiredThreadClaims = `-- name: SweepExpiredThreadClaims :execrows
+UPDATE issue_review_thread
+SET claimed_by_agent = NULL,
+    claim_expires_at = NULL,
+    updated_at       = now()
+WHERE claim_expires_at IS NOT NULL
+  AND claim_expires_at < now()
+  AND processed_by_resolver_at IS NULL
+`
+
+func (q *Queries) SweepExpiredThreadClaims(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, sweepExpiredThreadClaims)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertReviewThread = `-- name: UpsertReviewThread :one
 INSERT INTO issue_review_thread (
     workspace_id, issue_id, pr_repo, pr_number,
@@ -348,7 +680,7 @@ ON CONFLICT (gh_comment_id) DO UPDATE SET
     author_login   = EXCLUDED.author_login,
     gh_thread_node_id = COALESCE(EXCLUDED.gh_thread_node_id, issue_review_thread.gh_thread_node_id),
     updated_at     = now()
-RETURNING id, workspace_id, issue_id, pr_repo, pr_number, gh_comment_id, gh_thread_node_id, file_path, line, side, severity, title, body, url, author_login, state, resolved_by_agent, resolved_at, created_at, updated_at, severity_badge, effort_badge, ai_prompt
+RETURNING id, workspace_id, issue_id, pr_repo, pr_number, gh_comment_id, gh_thread_node_id, file_path, line, side, severity, title, body, url, author_login, state, resolved_by_agent, resolved_at, created_at, updated_at, severity_badge, effort_badge, ai_prompt, processed_by_resolver_at, processed_by_agent, claimed_by_agent, claim_expires_at
 `
 
 type UpsertReviewThreadParams struct {
@@ -416,6 +748,10 @@ func (q *Queries) UpsertReviewThread(ctx context.Context, arg UpsertReviewThread
 		&i.SeverityBadge,
 		&i.EffortBadge,
 		&i.AiPrompt,
+		&i.ProcessedByResolverAt,
+		&i.ProcessedByAgent,
+		&i.ClaimedByAgent,
+		&i.ClaimExpiresAt,
 	)
 	return i, err
 }

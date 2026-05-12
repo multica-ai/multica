@@ -201,6 +201,33 @@ type CommentReaction struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type CrReviewAttempt struct {
+	ID                pgtype.UUID        `json:"id"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	CrRound           int32              `json:"cr_round"`
+	PrUrl             string             `json:"pr_url"`
+	HeadSha           string             `json:"head_sha"`
+	StartedAt         pgtype.Timestamptz `json:"started_at"`
+	ReviewSubmittedAt pgtype.Timestamptz `json:"review_submitted_at"`
+	ReviewState       pgtype.Text        `json:"review_state"`
+	FindingsCount     int32              `json:"findings_count"`
+	Outcome           pgtype.Text        `json:"outcome"`
+	OutcomeReason     pgtype.Text        `json:"outcome_reason"`
+	ClosedAt          pgtype.Timestamptz `json:"closed_at"`
+	FirstSignalAt     pgtype.Timestamptz `json:"first_signal_at"`
+	FirstSignalKind   pgtype.Text        `json:"first_signal_kind"`
+}
+
+type CrReviewSignal struct {
+	ID             pgtype.UUID        `json:"id"`
+	AttemptID      pgtype.UUID        `json:"attempt_id"`
+	SignalKind     string             `json:"signal_kind"`
+	SignalAction   pgtype.Text        `json:"signal_action"`
+	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+	PayloadSummary []byte             `json:"payload_summary"`
+}
+
 type DaemonConnection struct {
 	ID              pgtype.UUID        `json:"id"`
 	AgentID         pgtype.UUID        `json:"agent_id"`
@@ -329,29 +356,33 @@ type IssueReaction struct {
 }
 
 type IssueReviewThread struct {
-	ID              pgtype.UUID        `json:"id"`
-	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	IssueID         pgtype.UUID        `json:"issue_id"`
-	PrRepo          string             `json:"pr_repo"`
-	PrNumber        int32              `json:"pr_number"`
-	GhCommentID     int64              `json:"gh_comment_id"`
-	GhThreadNodeID  pgtype.Text        `json:"gh_thread_node_id"`
-	FilePath        string             `json:"file_path"`
-	Line            pgtype.Int4        `json:"line"`
-	Side            pgtype.Text        `json:"side"`
-	Severity        string             `json:"severity"`
-	Title           string             `json:"title"`
-	Body            string             `json:"body"`
-	Url             string             `json:"url"`
-	AuthorLogin     string             `json:"author_login"`
-	State           string             `json:"state"`
-	ResolvedByAgent pgtype.UUID        `json:"resolved_by_agent"`
-	ResolvedAt      pgtype.Timestamptz `json:"resolved_at"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	SeverityBadge   string             `json:"severity_badge"`
-	EffortBadge     string             `json:"effort_badge"`
-	AiPrompt        string             `json:"ai_prompt"`
+	ID                    pgtype.UUID        `json:"id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	IssueID               pgtype.UUID        `json:"issue_id"`
+	PrRepo                string             `json:"pr_repo"`
+	PrNumber              int32              `json:"pr_number"`
+	GhCommentID           int64              `json:"gh_comment_id"`
+	GhThreadNodeID        pgtype.Text        `json:"gh_thread_node_id"`
+	FilePath              string             `json:"file_path"`
+	Line                  pgtype.Int4        `json:"line"`
+	Side                  pgtype.Text        `json:"side"`
+	Severity              string             `json:"severity"`
+	Title                 string             `json:"title"`
+	Body                  string             `json:"body"`
+	Url                   string             `json:"url"`
+	AuthorLogin           string             `json:"author_login"`
+	State                 string             `json:"state"`
+	ResolvedByAgent       pgtype.UUID        `json:"resolved_by_agent"`
+	ResolvedAt            pgtype.Timestamptz `json:"resolved_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	SeverityBadge         string             `json:"severity_badge"`
+	EffortBadge           string             `json:"effort_badge"`
+	AiPrompt              string             `json:"ai_prompt"`
+	ProcessedByResolverAt pgtype.Timestamptz `json:"processed_by_resolver_at"`
+	ProcessedByAgent      pgtype.UUID        `json:"processed_by_agent"`
+	ClaimedByAgent        pgtype.UUID        `json:"claimed_by_agent"`
+	ClaimExpiresAt        pgtype.Timestamptz `json:"claim_expires_at"`
 }
 
 type IssueSubscriber struct {
@@ -519,4 +550,5 @@ type WorkspaceRepoBinding struct {
 	Active         bool               `json:"active"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	CrRequired     bool               `json:"cr_required"`
 }

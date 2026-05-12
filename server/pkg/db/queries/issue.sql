@@ -80,6 +80,13 @@ UPDATE issue SET
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateIssueStatusIfCurrent :one
+UPDATE issue SET
+    status = sqlc.arg(new_status),
+    updated_at = now()
+WHERE id = sqlc.arg(id) AND status = sqlc.arg(expected_status)
+RETURNING *;
+
 -- name: CreateIssueWithOrigin :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
