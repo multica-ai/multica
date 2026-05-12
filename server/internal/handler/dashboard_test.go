@@ -47,6 +47,11 @@ func TestDashboardEndpoints(t *testing.T) {
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID) })
 
+	// issue.number is `UNIQUE (workspace_id, number)` (migration 020) and
+	// defaults to 0. Two inserts into the same workspace would collide on the
+	// default; allocate `MAX(number) + 1` per row to stay sequential and
+	// avoid stepping on rows other tests have left behind in the shared
+	// fixture workspace.
 	mkIssue := func(withProject bool) string {
 		var id string
 		var pid any
@@ -54,8 +59,11 @@ func TestDashboardEndpoints(t *testing.T) {
 			pid = projectID
 		}
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id)
-			VALUES ($1, 'dashboard test', $2, 'member', $3)
+			INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
+			VALUES (
+				$1, 'dashboard test', $2, 'member', $3,
+				(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1)
+			)
 			RETURNING id
 		`, testWorkspaceID, testUserID, pid).Scan(&id); err != nil {
 			t.Fatalf("insert issue: %v", err)
