@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bot } from "lucide-react";
+import { Bot, Lock } from "lucide-react";
+import { GROUP_ACCESS_LOCKED_TOOLTIP } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { ActorAvatar } from "../../../common/actor-avatar";
@@ -70,19 +71,34 @@ export function AgentPicker({
       {filteredAgents.length === 0 ? (
         <PickerEmpty />
       ) : (
-        filteredAgents.map((a) => (
-          <PickerItem
-            key={a.id}
-            selected={a.id === agentId}
-            onClick={() => {
-              onChange(a.id);
-              setOpen(false);
-            }}
-          >
-            <ActorAvatar actorType="agent" actorId={a.id} size={16} showStatusDot />
-            <span className="truncate">{a.name}</span>
-          </PickerItem>
-        ))
+        filteredAgents.map((a) => {
+          // CEREBRO-PATCH(autopilot-agent-picker-group-lock): JEH-1066 —
+          // group-locked agents render in the list with a lock and a
+          // disabled state so users can SEE the agent but can't pick it
+          // for an autopilot trigger they'd be denied by the backend.
+          const locked = a.can_trigger === false;
+          return (
+            <PickerItem
+              key={a.id}
+              selected={a.id === agentId}
+              disabled={locked}
+              tooltip={locked ? GROUP_ACCESS_LOCKED_TOOLTIP : undefined}
+              onClick={() => {
+                if (locked) return;
+                onChange(a.id);
+                setOpen(false);
+              }}
+            >
+              <ActorAvatar actorType="agent" actorId={a.id} size={16} showStatusDot />
+              <span className={`truncate ${locked ? "text-muted-foreground" : ""}`}>
+                {a.name}
+              </span>
+              {locked && (
+                <Lock className="ml-auto h-3 w-3 text-muted-foreground" />
+              )}
+            </PickerItem>
+          );
+        })
       )}
     </PropertyPicker>
   );

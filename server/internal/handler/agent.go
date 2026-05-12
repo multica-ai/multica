@@ -53,6 +53,13 @@ type AgentResponse struct {
 	UpdatedAt          string              `json:"updated_at"`
 	ArchivedAt         *string             `json:"archived_at"`
 	ArchivedBy         *string             `json:"archived_by"`
+	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — visibility/trigger split.
+	// True iff the caller is allowed to trigger this agent under the cerebro
+	// group permission model. Non-cerebro deployments default to true (the
+	// upstream/group seam never denies visibility). The field is set by the
+	// handlers via setCanTrigger* after agentToResponse runs; agentToResponse
+	// itself leaves it false so callers must make an explicit decision.
+	CanTrigger bool `json:"can_trigger"`
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
@@ -313,21 +320,17 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// CEREBRO-PATCH(list-agents-group-filter): JEH-1009 narrow non-admin viewers to
-	// the agents granted via their group memberships. Admins (no filter) and
-	// nil-seam paths short-circuit; members with no group grant get an empty slice.
-	// CEREBRO-PATCH(list-agents-owner-exempt): JEH-1057 — owner exemption
-	// gated on create_agent capability so visibility ≤ create rights.
+	// CEREBRO-PATCH(list-agents-visibility-split): JEH-1066 — workspace
+	// members always SEE every agent in the workspace; the cerebro group
+	// allowlist only decides whether each agent is triggerable, surfaced as
+	// `can_trigger` on the response. The trigger gate stays the upstream
+	// `cerebroRequireAgentAccess` / `cerebroCanUseAgent` path — visibility
+	// here is purely informational so users no longer face an empty picker
+	// they can't reason about (replaces the older
+	// list-agents-group-filter / list-agents-owner-exempt skip logic).
 	visibleAgents, hasFilter, ownerExempt, _ := h.cerebroVisibleAgentIDSet(r.Context(), r, workspaceID)
-	// All agents (including private) are visible to workspace members.
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
-		if hasFilter {
-			_, allowedByGroup := visibleAgents[uuidToString(a.ID)]
-			if !allowedByGroup && !ownerExempt(a.OwnerID) {
-				continue
-			}
-		}
 		resp := agentToResponse(a)
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
@@ -336,6 +339,15 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		if !canViewAgentEnv(a, userID, member.Role) {
 			redactEnv(&resp)
 			redactMcpConfig(&resp)
+		}
+		// hasFilter=false means admin / nil-seam — every agent is triggerable.
+		// hasFilter=true means cerebro group rules apply: group allowlist OR
+		// owner-exemption (own agent + create_agent capability, JEH-1057).
+		if !hasFilter {
+			resp.CanTrigger = true
+		} else {
+			_, allowedByGroup := visibleAgents[uuidToString(a.ID)]
+			resp.CanTrigger = allowedByGroup || ownerExempt(a.OwnerID)
 		}
 		visible = append(visible, resp)
 	}
@@ -378,6 +390,10 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 			redactMcpConfig(&resp)
 		}
 	}
+
+	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — surface trigger eligibility
+	// so the UI can render the lock + tooltip without a second round-trip.
+	resp.CanTrigger = h.cerebroCanTrigger(r.Context(), r, uuidToString(agent.WorkspaceID), agent.ID, agent.OwnerID)
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -551,6 +567,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := agentToResponse(agent)
+	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — surface trigger eligibility.
+	resp.CanTrigger = h.cerebroCanTrigger(r.Context(), r, workspaceID, agent.ID, agent.OwnerID)
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
 
@@ -734,6 +752,8 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := agentToResponse(agent)
+	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — surface trigger eligibility.
+	resp.CanTrigger = h.cerebroCanTrigger(r.Context(), r, uuidToString(agent.WorkspaceID), agent.ID, agent.OwnerID)
 	slog.Info("agent updated", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", uuidToString(agent.WorkspaceID))...)
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(agent.WorkspaceID))
@@ -779,6 +799,8 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	wsID := uuidToString(archived.WorkspaceID)
 	slog.Info("agent archived", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", wsID)...)
 	resp := agentToResponse(archived)
+	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — surface trigger eligibility.
+	resp.CanTrigger = h.cerebroCanTrigger(r.Context(), r, wsID, archived.ID, archived.OwnerID)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentArchived, wsID, actorType, actorID, map[string]any{"agent": resp})
 	writeJSON(w, http.StatusOK, resp)
@@ -808,6 +830,8 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	wsID := uuidToString(restored.WorkspaceID)
 	slog.Info("agent restored", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", wsID)...)
 	resp := agentToResponse(restored)
+	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — surface trigger eligibility.
+	resp.CanTrigger = h.cerebroCanTrigger(r.Context(), r, wsID, restored.ID, restored.OwnerID)
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentRestored, wsID, actorType, actorID, map[string]any{"agent": resp})

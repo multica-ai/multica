@@ -230,16 +230,28 @@ func (h *Handler) cerebroCanUseAgent(ctx context.Context, r *http.Request, works
 // cerebroAgentAccessAsValidatorError calls cerebroCanUseAgent and maps the
 // result to the (status, message) tuple shape used by validateAssigneePair.
 // status == 0 means the gate passed.
+//
+// CEREBRO-PATCH(agent-trigger-denied-copy): JEH-1066 — friendly copy lines up
+// with the picker lock tooltip so users see the same explanation whether they
+// hover the lock or attempt a trigger.
 func (h *Handler) cerebroAgentAccessAsValidatorError(ctx context.Context, r *http.Request, workspaceID string, agentID, ownerID pgtype.UUID) (int, string) {
 	allowed, err := h.cerebroCanUseAgent(ctx, r, workspaceID, agentID, ownerID)
 	if err != nil {
 		return http.StatusInternalServerError, "failed to check agent access"
 	}
 	if !allowed {
-		return http.StatusForbidden, "no group grants access to this agent — ask a workspace admin"
+		return http.StatusForbidden, agentTriggerDeniedMessage
 	}
 	return 0, ""
 }
+
+// agentTriggerDeniedMessage is the shared 403 body the trigger gates return
+// when the cerebro group allowlist denies an agent. Mirrors the frontend
+// GROUP_ACCESS_LOCKED_TOOLTIP so users see the same explanation on the lock
+// hover and on the trigger-attempt toast.
+//
+// CEREBRO-PATCH(agent-trigger-denied-copy): JEH-1066 — friendly trigger denial copy.
+const agentTriggerDeniedMessage = "You don't have group access to this agent — ask a workspace admin to add you to a group that grants access."
 
 // cerebroRequireAgentAccess gates an endpoint on the viewer being in at least
 // one group that grants access to the agent. Admins bypass. Writes 403 on
@@ -270,7 +282,7 @@ func (h *Handler) cerebroRequireAgentAccess(w http.ResponseWriter, r *http.Reque
 			return false
 		}
 		if !exempt {
-			writeError(w, http.StatusForbidden, "no group grants access to this agent — ask a workspace admin")
+			writeError(w, http.StatusForbidden, agentTriggerDeniedMessage)
 			return false
 		}
 	}
@@ -440,6 +452,31 @@ func ownerExemptFn(viewerUserID pgtype.UUID, canCreate bool) func(ownerID pgtype
 	return func(ownerID pgtype.UUID) bool {
 		return ownerID.Valid && ownerID.Bytes == viewerUserID.Bytes
 	}
+}
+
+// cerebroCanTrigger returns whether the requesting viewer is allowed to
+// trigger the given agent. Mirrors `cerebroCanUseAgent` but never writes to
+// the response — it's a pure read used to compute the `can_trigger` field
+// surfaced on AgentResponse so the UI can render a lock state without a
+// second permission round-trip.
+//
+// Returns true when:
+//   - the cerebro seam is not wired (upstream-only test fixtures); OR
+//   - the viewer is a workspace admin/owner; OR
+//   - the viewer's group allowlist includes the agent; OR
+//   - the viewer owns the agent and holds `create_agent` (JEH-1057 exemption).
+//
+// On a service-level error (DB hiccup) we fail closed — the UI surfaces a
+// locked agent rather than silently inviting a trigger attempt that the
+// canonical gate would reject.
+//
+// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — visibility/trigger split.
+func (h *Handler) cerebroCanTrigger(ctx context.Context, r *http.Request, workspaceID string, agentID, ownerID pgtype.UUID) bool {
+	allowed, err := h.cerebroCanUseAgent(ctx, r, workspaceID, agentID, ownerID)
+	if err != nil {
+		return false
+	}
+	return allowed
 }
 
 // cerebroVisibleProjectIDsForViewer returns the project IDs the viewer has

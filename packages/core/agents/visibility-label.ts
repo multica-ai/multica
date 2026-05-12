@@ -26,6 +26,14 @@ export const VISIBILITY_TOOLTIP: Record<AgentVisibility, string> = {
   private: "Personal — only you and workspace admins can assign",
 };
 
+// CEREBRO-PATCH(group-access-locked-tooltip): JEH-1066 — tooltip + toast copy
+// shown when an agent is visible but the cerebro group-permission gate denies
+// trigger. The same string is shown on the picker lock icon and as the
+// trigger-failure toast so users get a consistent answer to "why is this
+// agent disabled?" and "why did my trigger fail?".
+export const GROUP_ACCESS_LOCKED_TOOLTIP =
+  "You don't have group access to this agent — ask a workspace admin to add you to a group that grants access.";
+
 export function visibilityLabel(v: AgentVisibility): string {
   return VISIBILITY_LABEL[v];
 }

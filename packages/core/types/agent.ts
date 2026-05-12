@@ -165,6 +165,18 @@ export interface Agent {
   updated_at: string;
   archived_at: string | null;
   archived_by: string | null;
+  /**
+   * CEREBRO-PATCH(agent-can-trigger): JEH-1066 — true when the caller is
+   * allowed to trigger this agent under the cerebro group-permission model.
+   * Workspace members can SEE every agent in the workspace, but trigger
+   * surfaces (assignee picker, chat, autopilot agent picker) must render a
+   * lock state when this is false instead of letting the user attempt a
+   * trigger that the backend would reject. Optional on the wire — older
+   * servers omit the field and the UI treats `undefined` as "no extra gate"
+   * (i.e. assume triggerable; the canonical 403 from the trigger endpoint
+   * is still the source of truth).
+   */
+  can_trigger?: boolean;
 }
 
 /**

@@ -6,6 +6,7 @@ import type { Agent, AgentRuntime } from "@multica/core/types";
 import {
   type AgentActivity,
   type AgentPresenceDetail,
+  GROUP_ACCESS_LOCKED_TOOLTIP,
   summarizeActivityWindow,
   VISIBILITY_TOOLTIP,
 } from "@multica/core/agents";
@@ -197,6 +198,23 @@ function AgentNameCell({ row }: { row: AgentRow }) {
               />
               <TooltipContent>
                 {VISIBILITY_TOOLTIP.private}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {/* CEREBRO-PATCH(agents-page-group-lock): JEH-1066 — surface the
+              cerebro group-access lock so members understand at a glance why
+              an agent appears but isn't triggerable. Suppressed on private
+              rows (the visibility lock above already conveys "you can't use
+              this") and on archived rows (presence is meaningless there). */}
+          {agent.can_trigger === false && !isPrivate && !isArchived && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Lock className="h-3 w-3 shrink-0 text-amber-600" />
+                }
+              />
+              <TooltipContent>
+                {GROUP_ACCESS_LOCKED_TOOLTIP}
               </TooltipContent>
             </Tooltip>
           )}

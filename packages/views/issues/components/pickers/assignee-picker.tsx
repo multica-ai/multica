@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Lock, UserMinus } from "lucide-react";
 import type { Agent, IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
+import { GROUP_ACCESS_LOCKED_TOOLTIP } from "@multica/core/agents";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -170,13 +171,25 @@ export function AssigneePicker({
                   ? memberRole
                   : null,
             });
-            const allowed = decision.allowed;
+            // CEREBRO-PATCH(assignee-picker-group-lock): JEH-1066 — layer
+            // the cerebro group-trigger gate on top of the upstream
+            // visibility/role check. When the server reports
+            // can_trigger=false the row is shown but disabled with the
+            // group-access tooltip, so members understand *why* the agent
+            // is locked instead of facing an empty picker.
+            const groupLocked = a.can_trigger === false;
+            const allowed = decision.allowed && !groupLocked;
+            const tooltip = !decision.allowed
+              ? decision.message
+              : groupLocked
+                ? GROUP_ACCESS_LOCKED_TOOLTIP
+                : undefined;
             return (
               <PickerItem
                 key={a.id}
                 selected={isSelected("agent", a.id)}
                 disabled={!allowed}
-                tooltip={!allowed ? decision.message : undefined}
+                tooltip={tooltip}
                 onClick={() => {
                   if (!allowed) return;
                   onUpdate({
@@ -188,7 +201,7 @@ export function AssigneePicker({
               >
                 <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
                 <span className={allowed ? "" : "text-muted-foreground"}>{a.name}</span>
-                {a.visibility === "private" && (
+                {(a.visibility === "private" || groupLocked) && (
                   <Lock className="ml-auto h-3 w-3 text-muted-foreground" />
                 )}
               </PickerItem>

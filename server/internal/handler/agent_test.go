@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // TestListWorkspaceAgentTaskSnapshot covers the agent presence snapshot endpoint:
@@ -137,6 +139,93 @@ func TestListWorkspaceAgentTaskSnapshot(t *testing.T) {
 			t.Errorf("agent %s: cancelled rows must be excluded from snapshot; got %d",
 				agentID, counts[key{agentID, "cancelled"}])
 		}
+	}
+}
+
+// CEREBRO-PATCH(list-agents-visibility-split): JEH-1066 — ListAgents must
+// return every agent in the workspace to a plain member, even agents whose
+// trigger gate denies them. The cerebro group allowlist is surfaced via the
+// new `can_trigger` flag rather than filtering rows out — that's the whole
+// point of the visibility/trigger split (replaces the older filter-skip
+// behavior the JEH-1009 PR 4 tests would have asserted).
+//
+// This test also pins the inverse: for an allowed agent, `can_trigger` is
+// true. Together those two cases describe the contract the picker UI relies
+// on (lock icon iff !can_trigger).
+func TestListAgents_VisibilitySplit_MemberSeesAllWithCanTrigger(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	// Agent A is "denied"; agent B is "allowed" — the stub flips the answer
+	// based on which UUID the gate is queried for.
+	agentA := createHandlerTestAgent(t, "visibility-split-denied", []byte(`{}`))
+	agentB := createHandlerTestAgent(t, "visibility-split-allowed", []byte(`{}`))
+
+	// Demote the test user to "member" so the cerebro seam is consulted
+	// (admins bypass the gate inside cerebroVisibleAgentIDSet).
+	if _, err := testPool.Exec(ctx,
+		`UPDATE member SET role = 'member' WHERE workspace_id = $1 AND user_id = $2`,
+		testWorkspaceID, testUserID,
+	); err != nil {
+		t.Fatalf("demote to member: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx,
+			`UPDATE member SET role = 'owner' WHERE workspace_id = $1 AND user_id = $2`,
+			testWorkspaceID, testUserID,
+		)
+	})
+
+	// Wire a stub group-permissions invoker: VisibleAgentIDs grants only
+	// agent B; CanCreateAgent returns false so the owner-exemption does NOT
+	// fire and we can isolate the visibility behavior of the new code path.
+	prev := testHandler.GroupPermissions
+	stub := &stubGroupPermissions{
+		resolve: func(context.Context, pgtype.UUID, pgtype.UUID) ([]pgtype.UUID, error) {
+			return nil, nil
+		},
+		canAG: func(context.Context, GroupPermissionsViewer, pgtype.UUID) (bool, error) {
+			return false, nil
+		},
+		visAgents: func(context.Context, GroupPermissionsViewer, pgtype.UUID) ([]pgtype.UUID, error) {
+			return []pgtype.UUID{parseUUID(agentB)}, nil
+		},
+	}
+	testHandler.GroupPermissions = stub
+	t.Cleanup(func() { testHandler.GroupPermissions = prev })
+
+	w := httptest.NewRecorder()
+	testHandler.ListAgents(w, newRequest(http.MethodGet, "/api/agents", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListAgents: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var agents []AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&agents); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	byID := map[string]AgentResponse{}
+	for _, a := range agents {
+		byID[a.ID] = a
+	}
+
+	gotA, okA := byID[agentA]
+	if !okA {
+		t.Fatalf("agent A (denied) must still appear in the list — the visibility/trigger split means we never hide rows")
+	}
+	if gotA.CanTrigger {
+		t.Errorf("agent A: expected can_trigger=false (not in allowlist, owner-exemption disabled), got true")
+	}
+
+	gotB, okB := byID[agentB]
+	if !okB {
+		t.Fatalf("agent B (allowed) missing from list")
+	}
+	if !gotB.CanTrigger {
+		t.Errorf("agent B: expected can_trigger=true (in allowlist), got false")
 	}
 }
 
