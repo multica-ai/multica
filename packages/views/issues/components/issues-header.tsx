@@ -49,6 +49,8 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { labelListOptions } from "@multica/core/labels/queries";
+import { useAuthStore } from "@multica/core/auth";
+import { isAgentSelectable } from "@multica/core/permissions";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { LabelChip } from "../../labels/label-chip";
@@ -182,12 +184,13 @@ function ActorSubContent({
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const user = useAuthStore((s) => s.user);
   const query = search.trim().toLowerCase();
   const filteredMembers = members.filter((m) =>
     m.name.toLowerCase().includes(query),
   );
   const filteredAgents = agents.filter((a) =>
-    !a.archived_at && a.name.toLowerCase().includes(query),
+    isAgentSelectable(a, user?.id ?? null) && a.name.toLowerCase().includes(query),
   );
 
   const isSelected = (type: "member" | "agent", id: string) =>

@@ -29,6 +29,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
+import { isAgentSelectable } from "@multica/core/permissions";
 import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { OfflineBanner } from "./offline-banner";
@@ -111,14 +112,10 @@ export function ChatWindow() {
   const createSession = useCreateChatSession();
   const markRead = useMarkChatSessionRead();
 
-  // Chat dialog uses strict visibility: only non-private agents and
+  // Chat dialog uses strict visibility: only workspace agents and
   // private agents owned by the current user. No admin/owner bypass —
-  // private agents are personal to their creator.
-  const availableAgents = agents.filter(
-    (a) =>
-      !a.archived_at &&
-      (a.visibility !== "private" || a.owner_id === user?.id),
-  );
+  // all members see the same selectable set (OPE-531).
+  const availableAgents = agents.filter((a) => isAgentSelectable(a, user?.id ?? null));
 
   // Resolve selected agent: stored preference → first available
   const activeAgent =
