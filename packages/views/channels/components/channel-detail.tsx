@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Archive, Hash, MessageSquare, Pin, PinOff } from "lucide-react";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
+import { useChatStore } from "@multica/core/chat";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   channelDetailOptions,
@@ -19,10 +20,13 @@ import { useArchiveChannel } from "@multica/cerebro-channels";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import type { Channel, ChannelMember, InboxItem, TimelineEntry } from "@multica/core/types";
 import { useIssueTimeline } from "../../issues/hooks/use-issue-timeline";
-import { CommentCard } from "../../issues/components/comment-card";
 import { CommentInput } from "../../issues/components/comment-input";
-import { collectThreadReplies } from "../../issues/components/thread-utils";
 import { ActorAvatar } from "../../common/actor-avatar";
+// CEREBRO-PATCH(channels-slack-message-view): JEH-1017 — Slack-style message
+// view + right slide-in thread panel replace the inline CommentCard stream
+// for channels and DMs.
+import { SlackMessageView } from "./slack-message-view";
+import { ThreadSidePanel } from "./thread-side-panel";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { AvatarGroup } from "@multica/ui/components/ui/avatar";
@@ -86,7 +90,31 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
     markChannelRead.mutate(channelId);
   }, [channelId, channel, markChannelRead]);
 
-  const grouped = useMemo(() => groupTimeline(timeline), [timeline]);
+  // CEREBRO-PATCH(channels-slack-message-view): JEH-1017 — produce {topLevel,
+  // repliesByParent} for SlackMessageView + ThreadSidePanel.
+  const { topLevel, repliesByParent } = useMemo(() => splitTimeline(timeline), [timeline]);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const activeThreadEntry = useMemo(
+    () => (activeThreadId ? topLevel.find((e) => e.id === activeThreadId) ?? null : null),
+    [activeThreadId, topLevel],
+  );
+  // If the active thread parent disappears from the timeline (deleted), close
+  // the panel rather than leaving a dangling header.
+  useEffect(() => {
+    if (activeThreadId && !activeThreadEntry) setActiveThreadId(null);
+  }, [activeThreadId, activeThreadEntry]);
+
+  // CEREBRO-PATCH(channels-slack-message-view): hide the floating agent-chat
+  // bubble while the channel/DM is open — the ThreadSidePanel docks where the
+  // bubble sits and the two overlap. Mirrors the same pattern in
+  // InboxChatPanel for agent chats.
+  const setHideFloatingChat = useChatStore((s) => s.setHideFloatingChat);
+  const setChatOpen = useChatStore((s) => s.setOpen);
+  useEffect(() => {
+    setHideFloatingChat(true);
+    if (useChatStore.getState().isOpen) setChatOpen(false);
+    return () => setHideFloatingChat(false);
+  }, [setHideFloatingChat, setChatOpen]);
 
   // --- Pin to sidebar ----------------------------------------------------
   // Pins are scoped per user; we look up whether this channel/dm is already
@@ -203,42 +231,59 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
         ) : null}
       </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4">
-        {grouped.length === 0 && (
-          <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-            <MessageSquare className="mb-3 size-10 text-muted-foreground/30" />
-            <p className="text-sm">No messages yet — say hi!</p>
+      {/* CEREBRO-PATCH(channels-slack-message-view): JEH-1017 — horizontal
+          split so the right-slide-in ThreadSidePanel can dock against the
+          message column without floating over it. The panel returns null
+          when closed, so the message column reclaims the full width. */}
+      <div className="flex flex-1 min-h-0">
+        <div className="flex flex-1 min-h-0 flex-col">
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {topLevel.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+                <MessageSquare className="mb-3 size-10 text-muted-foreground/30" />
+                <p className="text-sm">No messages yet — say hi!</p>
+              </div>
+            ) : (
+              <SlackMessageView
+                channelId={channelId}
+                topLevel={topLevel}
+                repliesByParent={repliesByParent}
+                currentUserId={userId}
+                activeThreadId={activeThreadId}
+                onOpenThread={setActiveThreadId}
+                onEdit={editComment}
+                onDelete={deleteComment}
+                onToggleReaction={toggleReaction}
+              />
+            )}
           </div>
-        )}
-        {grouped.map((entry) => (
-          <div key={entry.id} id={`comment-${entry.id}`}>
-            <CommentCard
-              issueId={channelId}
-              entry={entry.entry}
-              replies={entry.replies}
-              currentUserId={userId}
-              onReply={submitReply}
-              onEdit={editComment}
-              onDelete={deleteComment}
-              onToggleReaction={toggleReaction}
-            />
-          </div>
-        ))}
-      </div>
 
-      {/* JEH-698: inline "agent is working" rows sit between the comment
-          stream and the input, so when a member triggers an agent via
-          @mention or comment they see the task spin up immediately
-          (avatar + "Lando is working: <generated title>" + Stop) instead
-          of waiting blindly for the reply to land. */}
-      <div className="shrink-0 px-4 pt-2 empty:hidden">
-        {/* CEREBRO-PATCH(channels-favorites-cycle-break): inject ActorAvatar so cerebro-channels stays free of an @multica/views dep (JEH-718). */}
-        <ChannelAgentInlineRow channelId={channelId} AvatarComponent={ActorAvatar} />
-      </div>
-      <div className="shrink-0 border-t px-4 py-3">
-        {/* CEREBRO-PATCH(input-autofocus): JEH-756 — channels & DMs are
-            chat-like; entering one should land the caret in the input. */}
-        <CommentInput issueId={channelId} onSubmit={submitComment} autoFocus />
+          {/* JEH-698: inline "agent is working" rows sit between the
+              message stream and the input — see channels-favorites-cycle-break
+              for the avatar-injection rationale. */}
+          <div className="shrink-0 px-4 pt-2 empty:hidden">
+            {/* CEREBRO-PATCH(channels-favorites-cycle-break): inject ActorAvatar so cerebro-channels stays free of an @multica/views dep (JEH-718). */}
+            <ChannelAgentInlineRow channelId={channelId} AvatarComponent={ActorAvatar} />
+          </div>
+          <div className="shrink-0 border-t px-4 py-3">
+            {/* CEREBRO-PATCH(input-autofocus): JEH-756 — channels & DMs are
+                chat-like; entering one should land the caret in the input. */}
+            <CommentInput issueId={channelId} onSubmit={submitComment} autoFocus />
+          </div>
+        </div>
+
+        <ThreadSidePanel
+          channelId={channelId}
+          parentEntry={activeThreadEntry}
+          repliesByParent={repliesByParent}
+          open={!!activeThreadEntry}
+          onClose={() => setActiveThreadId(null)}
+          onSubmit={submitReply}
+          onEdit={editComment}
+          onDelete={deleteComment}
+          onToggleReaction={toggleReaction}
+          currentUserId={userId}
+        />
       </div>
 
       <ParticipantsPanel
@@ -411,18 +456,16 @@ function participantsLabel(channel: Channel): string {
   return `${count} participant${count === 1 ? "" : "s"}`;
 }
 
-interface GroupedComment {
-  id: string;
-  entry: TimelineEntry;
-  replies: TimelineEntry[];
-}
-
 /**
+ * Split the timeline into top-level messages and a map of direct replies.
  * Channels treat comments as messages and don't need the activity coalescing
- * the issue timeline does. We just split top-level comments out, keeping a
- * map of replies for thread expansion in CommentCard.
+ * the issue timeline does. SlackMessageView walks `repliesByParent` to count
+ * descendants; ThreadSidePanel flattens it via `collectThreadReplies`.
  */
-function groupTimeline(timeline: TimelineEntry[]): GroupedComment[] {
+function splitTimeline(timeline: TimelineEntry[]): {
+  topLevel: TimelineEntry[];
+  repliesByParent: Map<string, TimelineEntry[]>;
+} {
   const repliesByParent = new Map<string, TimelineEntry[]>();
   const topLevel: TimelineEntry[] = [];
   for (const e of timeline) {
@@ -435,9 +478,5 @@ function groupTimeline(timeline: TimelineEntry[]): GroupedComment[] {
       topLevel.push(e);
     }
   }
-  return topLevel.map((entry) => ({
-    id: entry.id,
-    entry,
-    replies: collectThreadReplies(entry.id, repliesByParent),
-  }));
+  return { topLevel, repliesByParent };
 }

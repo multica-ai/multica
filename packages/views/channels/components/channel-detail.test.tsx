@@ -17,6 +17,14 @@ vi.mock("@multica/core/auth", () => ({
     selector({ user: { id: "me" } }),
 }));
 
+vi.mock("@multica/core/chat", () => ({
+  useChatStore: Object.assign(
+    (selector: (s: { setHideFloatingChat: (h: boolean) => void; setOpen: (o: boolean) => void; isOpen: boolean }) => unknown) =>
+      selector({ setHideFloatingChat: vi.fn(), setOpen: vi.fn(), isOpen: false }),
+    { getState: () => ({ setHideFloatingChat: vi.fn(), setOpen: vi.fn(), isOpen: false }) },
+  ),
+}));
+
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws",
 }));
@@ -106,10 +114,15 @@ vi.mock("../../issues/hooks/use-issue-timeline", () => ({
   }),
 }));
 
-// CommentCard / CommentInput rely on tiptap; stub them to keep the test
-// focused on the thread header + archive plumbing.
-vi.mock("../../issues/components/comment-card", () => ({
-  CommentCard: () => <div data-testid="comment-card" />,
+// SlackMessageView / ThreadSidePanel / CommentInput rely on tiptap; stub
+// them to keep the test focused on the thread header + archive plumbing.
+vi.mock("./slack-message-view", () => ({
+  SlackMessageView: () => <div data-testid="slack-message-view" />,
+}));
+
+vi.mock("./thread-side-panel", () => ({
+  ThreadSidePanel: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="thread-side-panel" /> : null,
 }));
 
 vi.mock("../../issues/components/comment-input", () => ({

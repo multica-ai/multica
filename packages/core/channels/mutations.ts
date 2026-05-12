@@ -247,11 +247,21 @@ export function useCreateChannel() {
       });
       return api.createChannel(data);
     },
-    onSuccess: (channel) => {
+    onSuccess: async (channel) => {
       logger.info("createChannel.success", {
         channelId: channel.id,
         kind: channel.kind,
       });
+      // CEREBRO-PATCH(channels-create-cache-write): JEH-1017 — write the new
+      // channel into the list cache so consumers (inbox redirect guard) see
+      // it on the very next render instead of after the invalidate refetch.
+      // Cancel any in-flight list refetch first so a stale response can't
+      // resolve after this write and overwrite the new entry away. Mirrors
+      // the pattern in useMarkChannelRead / useUpdateChannel below.
+      await qc.cancelQueries({ queryKey: channelKeys.list(wsId) });
+      qc.setQueryData<Channel[]>(channelKeys.list(wsId), (old) =>
+        old && old.some((c) => c.id === channel.id) ? old : [channel, ...(old ?? [])],
+      );
     },
     onError: (err) => {
       logger.error("createChannel.error", err);
