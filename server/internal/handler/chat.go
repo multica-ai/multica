@@ -74,7 +74,8 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// CEREBRO-PATCH(create-chat-session-agent-allowlist): JEH-1009 enforce allowlist.
-	if !h.cerebroRequireAgentAccess(w, r, workspaceID, agent.ID) {
+	// CEREBRO-PATCH(agent-access-owner-exemption): JEH-1057 owner+create_agent exemption layered via ownerID.
+	if !h.cerebroRequireAgentAccess(w, r, workspaceID, agent.ID, agent.OwnerID) {
 		return
 	}
 

@@ -154,7 +154,7 @@ func TestCerebroRequireAgentAccess_NilInvokerPasses(t *testing.T) {
 	h := &Handler{}
 	r := httptest.NewRequest(http.MethodPost, "/api/chat/sessions", nil)
 	w := httptest.NewRecorder()
-	if !h.cerebroRequireAgentAccess(w, r, "00000000-0000-0000-0000-000000000000", pgtype.UUID{}) {
+	if !h.cerebroRequireAgentAccess(w, r, "00000000-0000-0000-0000-000000000000", pgtype.UUID{}, pgtype.UUID{}) {
 		t.Fatalf("nil GroupPermissions: gate must pass, body=%q", w.Body.String())
 	}
 }
@@ -165,7 +165,7 @@ func TestCerebroCanUseAgent_NilInvokerReturnsTrue(t *testing.T) {
 	// upstream-only test fixtures continue to work.
 	h := &Handler{}
 	r := httptest.NewRequest(http.MethodPost, "/api/issues", nil)
-	allowed, err := h.cerebroCanUseAgent(context.Background(), r, "00000000-0000-0000-0000-000000000000", pgtype.UUID{})
+	allowed, err := h.cerebroCanUseAgent(context.Background(), r, "00000000-0000-0000-0000-000000000000", pgtype.UUID{}, pgtype.UUID{})
 	if err != nil {
 		t.Fatalf("nil invoker should not error, got %v", err)
 	}
@@ -180,7 +180,7 @@ func TestCerebroAgentAccessAsValidatorError_NilInvokerPasses(t *testing.T) {
 	// without a cerebro service would fail closed.
 	h := &Handler{}
 	r := httptest.NewRequest(http.MethodPost, "/api/issues", nil)
-	status, msg := h.cerebroAgentAccessAsValidatorError(context.Background(), r, "00000000-0000-0000-0000-000000000000", pgtype.UUID{})
+	status, msg := h.cerebroAgentAccessAsValidatorError(context.Background(), r, "00000000-0000-0000-0000-000000000000", pgtype.UUID{}, pgtype.UUID{})
 	if status != 0 {
 		t.Fatalf("nil-invoker validatorError: expected status 0, got %d (%q)", status, msg)
 	}
@@ -277,5 +277,121 @@ func TestCerebroCanSeeProjectViaGroup_NilInvokerReturnsFalse(t *testing.T) {
 	h := &Handler{}
 	if h.cerebroCanSeeProjectViaGroup(context.Background(), pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}) {
 		t.Fatalf("nil invoker: cerebroCanSeeProjectViaGroup must return false")
+	}
+}
+
+// CEREBRO-PATCH(agent-access-owner-exemption): JEH-1057 — pin the owner-exemption decision tree. The rule:
+//
+//	exempt = ownerID.Valid AND viewer.UserID == ownerID
+//	         AND (viewer.IsAdmin OR CanCreateAgent(viewer))
+//
+// cerebroViewerOwnsAgentWithCapability is the canonical implementation;
+// cerebroCanUseAgent (single-agent gate) and the ownerExempt closure returned
+// from cerebroVisibleAgentIDSet (list-handler precomputation) both compose
+// this rule on top of the group allowlist. Testing the rule directly here
+// keeps the matrix small and avoids dragging the workspace-member lookup into
+// the unit layer.
+
+// uuidFromString is a small test helper — production code uses parseUUID which
+// panics on bad input; tests want a controlled failure path.
+func mustTestUUID(t *testing.T, s string) pgtype.UUID {
+	t.Helper()
+	var u pgtype.UUID
+	if err := u.Scan(s); err != nil {
+		t.Fatalf("test uuid scan %q: %v", s, err)
+	}
+	return u
+}
+
+func TestCerebroViewerOwnsAgentWithCapability_InvalidIDs(t *testing.T) {
+	h := &Handler{GroupPermissions: &stubGroupPermissions{}}
+	viewer := GroupPermissionsViewer{UserID: mustTestUUID(t, "11111111-1111-1111-1111-111111111111")}
+
+	// Owner not valid (Agent.OwnerID is NULL) → no exemption.
+	if exempt, err := h.cerebroViewerOwnsAgentWithCapability(context.Background(), viewer, "ws", pgtype.UUID{}); err != nil || exempt {
+		t.Fatalf("invalid ownerID: expected (false, nil), got (%v, %v)", exempt, err)
+	}
+
+	// Viewer not valid (unauthenticated) → no exemption even if owner matches.
+	if exempt, err := h.cerebroViewerOwnsAgentWithCapability(context.Background(), GroupPermissionsViewer{}, "ws", mustTestUUID(t, "22222222-2222-2222-2222-222222222222")); err != nil || exempt {
+		t.Fatalf("invalid viewer: expected (false, nil), got (%v, %v)", exempt, err)
+	}
+}
+
+func TestCerebroViewerOwnsAgentWithCapability_NotOwner(t *testing.T) {
+	h := &Handler{GroupPermissions: &stubGroupPermissions{
+		canAG: func(context.Context, GroupPermissionsViewer, pgtype.UUID) (bool, error) { return true, nil },
+	}}
+	viewer := GroupPermissionsViewer{UserID: mustTestUUID(t, "11111111-1111-1111-1111-111111111111")}
+	otherOwner := mustTestUUID(t, "22222222-2222-2222-2222-222222222222")
+
+	// viewer != owner — exemption denied even with create_agent.
+	exempt, err := h.cerebroViewerOwnsAgentWithCapability(context.Background(), viewer, "00000000-0000-0000-0000-000000000000", otherOwner)
+	if err != nil || exempt {
+		t.Fatalf("viewer != owner with capability: expected (false, nil), got (%v, %v)", exempt, err)
+	}
+}
+
+func TestCerebroViewerOwnsAgentWithCapability_AdminBypass(t *testing.T) {
+	// Admins are always considered to hold every capability — the rule must
+	// match that. Otherwise the list-handler's owner exemption would behave
+	// inconsistently for admins (irrelevant in practice because cerebroVisible*
+	// short-circuits for admins, but the helper must stay coherent on its own).
+	h := &Handler{GroupPermissions: &stubGroupPermissions{
+		canAG: func(context.Context, GroupPermissionsViewer, pgtype.UUID) (bool, error) {
+			// Never called — admin should bypass.
+			t.Fatalf("CanCreateAgent should not be queried for admin viewer")
+			return false, nil
+		},
+	}}
+	ownerID := mustTestUUID(t, "11111111-1111-1111-1111-111111111111")
+	viewer := GroupPermissionsViewer{UserID: ownerID, IsAdmin: true}
+
+	exempt, err := h.cerebroViewerOwnsAgentWithCapability(context.Background(), viewer, "ws", ownerID)
+	if err != nil || !exempt {
+		t.Fatalf("admin owner: expected (true, nil), got (%v, %v)", exempt, err)
+	}
+}
+
+func TestCerebroViewerOwnsAgentWithCapability_OwnerWithCapability(t *testing.T) {
+	wsID := "00000000-0000-0000-0000-000000000099"
+	called := false
+	h := &Handler{GroupPermissions: &stubGroupPermissions{
+		canAG: func(_ context.Context, v GroupPermissionsViewer, ws pgtype.UUID) (bool, error) {
+			called = true
+			if !v.UserID.Valid {
+				t.Errorf("expected viewer.UserID to be valid")
+			}
+			if uuidToString(ws) != wsID {
+				t.Errorf("expected ws=%s, got %s", wsID, uuidToString(ws))
+			}
+			return true, nil
+		},
+	}}
+	ownerID := mustTestUUID(t, "11111111-1111-1111-1111-111111111111")
+	viewer := GroupPermissionsViewer{UserID: ownerID}
+
+	exempt, err := h.cerebroViewerOwnsAgentWithCapability(context.Background(), viewer, wsID, ownerID)
+	if err != nil || !exempt {
+		t.Fatalf("owner with create_agent: expected (true, nil), got (%v, %v)", exempt, err)
+	}
+	if !called {
+		t.Fatalf("CanCreateAgent should have been queried")
+	}
+}
+
+func TestCerebroViewerOwnsAgentWithCapability_OwnerWithoutCapability(t *testing.T) {
+	// Owner lost create_agent (moved to a group without the capability) — the
+	// rule denies the exemption. This is the JEH-1057 promise: revoking the
+	// capability also hides own agents from the user.
+	h := &Handler{GroupPermissions: &stubGroupPermissions{
+		canAG: func(context.Context, GroupPermissionsViewer, pgtype.UUID) (bool, error) { return false, nil },
+	}}
+	ownerID := mustTestUUID(t, "11111111-1111-1111-1111-111111111111")
+	viewer := GroupPermissionsViewer{UserID: ownerID}
+
+	exempt, err := h.cerebroViewerOwnsAgentWithCapability(context.Background(), viewer, "00000000-0000-0000-0000-000000000000", ownerID)
+	if err != nil || exempt {
+		t.Fatalf("owner without create_agent: expected (false, nil), got (%v, %v)", exempt, err)
 	}
 }

@@ -1687,7 +1687,8 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 			}
 		}
 		// CEREBRO-PATCH(validate-assignee-agent-group): JEH-1009 agent allowlist gate.
-		if status, msg := h.cerebroAgentAccessAsValidatorError(ctx, r, workspaceID, agent.ID); status != 0 {
+		// CEREBRO-PATCH(agent-access-owner-exemption): JEH-1057 owner+create_agent exemption layered via agent.OwnerID.
+		if status, msg := h.cerebroAgentAccessAsValidatorError(ctx, r, workspaceID, agent.ID, agent.OwnerID); status != 0 {
 			return status, msg
 		}
 		return 0, ""
@@ -1715,7 +1716,8 @@ func (h *Handler) canAssignAgent(ctx context.Context, r *http.Request, agentID, 
 		return false, "cannot assign to private agent"
 	}
 	// CEREBRO-PATCH(can-assign-agent-group): JEH-1009 agent allowlist gate.
-	if _, msg := h.cerebroAgentAccessAsValidatorError(ctx, r, workspaceID, agent.ID); msg != "" {
+	// CEREBRO-PATCH(agent-access-owner-exemption): JEH-1057 owner+create_agent exemption layered via agent.OwnerID.
+	if _, msg := h.cerebroAgentAccessAsValidatorError(ctx, r, workspaceID, agent.ID, agent.OwnerID); msg != "" {
 		return false, msg
 	}
 	return true, ""

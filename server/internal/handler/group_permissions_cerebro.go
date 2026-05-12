@@ -202,7 +202,12 @@ func (h *Handler) cerebroRequireRuntimeAccess(w http.ResponseWriter, r *http.Req
 //
 // nil-invoker → (true, nil). Same fail-open rationale as
 // cerebroRequireCapability — upstream-only test fixtures must keep working.
-func (h *Handler) cerebroCanUseAgent(ctx context.Context, r *http.Request, workspaceID string, agentID pgtype.UUID) (bool, error) {
+//
+// CEREBRO-PATCH(agent-access-owner-exemption): JEH-1057 — ownerID is the agent's
+// owner_id; when the group allowlist denies, the viewer still passes if she
+// owns the agent AND holds create_agent capability via any group. Callers that
+// don't have the agent loaded can pass pgtype.UUID{} to skip the exemption.
+func (h *Handler) cerebroCanUseAgent(ctx context.Context, r *http.Request, workspaceID string, agentID, ownerID pgtype.UUID) (bool, error) {
 	if h.GroupPermissions == nil {
 		return true, nil
 	}
@@ -214,14 +219,19 @@ func (h *Handler) cerebroCanUseAgent(ctx context.Context, r *http.Request, works
 		// an agent.
 		return false, nil
 	}
-	return h.GroupPermissions.CanUseAgent(ctx, viewer, agentID)
+	allowed, err := h.GroupPermissions.CanUseAgent(ctx, viewer, agentID)
+	if err != nil || allowed {
+		return allowed, err
+	}
+	// CEREBRO-PATCH(agent-access-owner-exemption): JEH-1057 — owner+capability override.
+	return h.cerebroViewerOwnsAgentWithCapability(ctx, viewer, workspaceID, ownerID)
 }
 
 // cerebroAgentAccessAsValidatorError calls cerebroCanUseAgent and maps the
 // result to the (status, message) tuple shape used by validateAssigneePair.
 // status == 0 means the gate passed.
-func (h *Handler) cerebroAgentAccessAsValidatorError(ctx context.Context, r *http.Request, workspaceID string, agentID pgtype.UUID) (int, string) {
-	allowed, err := h.cerebroCanUseAgent(ctx, r, workspaceID, agentID)
+func (h *Handler) cerebroAgentAccessAsValidatorError(ctx context.Context, r *http.Request, workspaceID string, agentID, ownerID pgtype.UUID) (int, string) {
+	allowed, err := h.cerebroCanUseAgent(ctx, r, workspaceID, agentID, ownerID)
 	if err != nil {
 		return http.StatusInternalServerError, "failed to check agent access"
 	}
@@ -235,7 +245,11 @@ func (h *Handler) cerebroAgentAccessAsValidatorError(ctx context.Context, r *htt
 // one group that grants access to the agent. Admins bypass. Writes 403 on
 // deny. Mirrors cerebroRequireRuntimeAccess; used by direct trigger endpoints
 // that don't already own their own error responses.
-func (h *Handler) cerebroRequireAgentAccess(w http.ResponseWriter, r *http.Request, workspaceID string, agentID pgtype.UUID) bool {
+//
+// CEREBRO-PATCH(agent-access-owner-exemption): JEH-1057 — ownerID layers the
+// owner+create_agent exemption on top of the group allowlist (same rule as
+// cerebroCanUseAgent, see above).
+func (h *Handler) cerebroRequireAgentAccess(w http.ResponseWriter, r *http.Request, workspaceID string, agentID, ownerID pgtype.UUID) bool {
 	if h.GroupPermissions == nil {
 		return true
 	}
@@ -249,10 +263,46 @@ func (h *Handler) cerebroRequireAgentAccess(w http.ResponseWriter, r *http.Reque
 		return false
 	}
 	if !allowed {
-		writeError(w, http.StatusForbidden, "no group grants access to this agent — ask a workspace admin")
-		return false
+		// CEREBRO-PATCH(agent-access-owner-exemption): JEH-1057 — owner+capability override.
+		exempt, err := h.cerebroViewerOwnsAgentWithCapability(r.Context(), viewer, workspaceID, ownerID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "permission check failed")
+			return false
+		}
+		if !exempt {
+			writeError(w, http.StatusForbidden, "no group grants access to this agent — ask a workspace admin")
+			return false
+		}
 	}
 	return true
+}
+
+// cerebroViewerOwnsAgentWithCapability is the JEH-1057 owner-exemption rule:
+// returns true iff ownerID is valid, equals the viewer's user_id, and the
+// viewer holds the create_agent capability via any group. Admins are always
+// considered to hold the capability — they bypass the gate anyway via
+// HasCapability, so the symmetry keeps the rule honest for non-admin owners.
+//
+// Callers reach this only after the group allowlist has already denied; the
+// helper is the second-chance check that lets a viewer continue to see and
+// trigger agents she owns. Revoking create_agent therefore also hides own
+// agents from her — no ghost rows for a member no longer allowed to manage
+// agents (the same shape as the JEH-1056 runtime fix).
+func (h *Handler) cerebroViewerOwnsAgentWithCapability(ctx context.Context, viewer GroupPermissionsViewer, workspaceID string, ownerID pgtype.UUID) (bool, error) {
+	if !ownerID.Valid || !viewer.UserID.Valid {
+		return false, nil
+	}
+	if uuidToString(viewer.UserID) != uuidToString(ownerID) {
+		return false, nil
+	}
+	if viewer.IsAdmin {
+		return true, nil
+	}
+	wsUUID, perr := util.ParseUUID(workspaceID)
+	if perr != nil {
+		return false, nil
+	}
+	return h.GroupPermissions.CanCreateAgent(ctx, viewer, wsUUID)
 }
 
 // cerebroBuildViewer is a non-writing variant of cerebroGroupViewer for
