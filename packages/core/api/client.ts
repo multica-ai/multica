@@ -513,6 +513,63 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(cerebro-groups-client): JEH-1006 workspace groups CRUD + member management.
+  // Endpoints are mounted by `cerebro-groups-routes` in server/cmd/server/router.go.
+  // Server paths are NOT under /api/cerebro/* — they live on the generic
+  // /api/workspaces/{id}/groups (workspace-scoped) and /api/groups/{id}
+  // (workspace-membership-gated) routes; matching them here is what makes
+  // the GroupsTab actually reach the handler.
+  async listCerebroGroups<T = unknown>(wsId: string): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/groups`);
+  }
+
+  async createCerebroGroup<T = unknown>(
+    wsId: string,
+    body: { name: string; description?: string | null },
+  ): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/groups`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async updateCerebroGroup<T = unknown>(
+    groupId: string,
+    body: { name?: string; description?: string | null },
+  ): Promise<T> {
+    return this.fetch<T>(`/api/groups/${groupId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteCerebroGroup(groupId: string): Promise<void> {
+    await this.fetch(`/api/groups/${groupId}`, { method: "DELETE" });
+  }
+
+  async listCerebroGroupMembers<T = unknown>(groupId: string): Promise<T> {
+    return this.fetch<T>(`/api/groups/${groupId}/members`);
+  }
+
+  async addCerebroGroupMember<T = unknown>(
+    groupId: string,
+    userId: string,
+  ): Promise<T> {
+    return this.fetch<T>(`/api/groups/${groupId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
+    });
+  }
+
+  async removeCerebroGroupMember(
+    groupId: string,
+    userId: string,
+  ): Promise<void> {
+    await this.fetch(`/api/groups/${groupId}/members/${userId}`, {
+      method: "DELETE",
+    });
+  }
+
   // CEREBRO-PATCH(cerebro-dashboard-client): JEH-684 dashboard overview endpoint
   async getCerebroDashboardOverview<T = unknown>(
     range: "24h" | "7d" | "30d",

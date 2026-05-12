@@ -29,6 +29,10 @@ import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "@multica/cerebro-notifications/views/notifications-tab";
 // CEREBRO-PATCH(settings-page-agent-profile): cerebro agent profile tab
 import { AgentProfileTab } from "@multica/cerebro-profile/views";
+// CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 workspace groups tab
+import { GroupsTab } from "@multica/cerebro-groups/views";
+// CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 feature flag gate
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useT } from "../../i18n";
 import {
   CerebroMobileTabNav,
@@ -58,6 +62,8 @@ const WORKSPACE_TAB_ICONS = {
   labs: FlaskConical,
   members: Users,
 } as const;
+// CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 workspace groups tab value
+const GROUPS_TAB_VALUE = "groups";
 
 const DEFAULT_TAB = "profile";
 const TAB_QUERY_KEY = "tab";
@@ -87,6 +93,8 @@ export function SettingsPage({
   const { t } = useT("settings");
   const workspaceName = useCurrentWorkspace()?.name;
   const navigation = useNavigation();
+  // CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 feature-flagged Groups tab
+  const groupsEnabled = useFeatureFlag("cerebro_groups_enabled");
 
   // Whitelist of valid tab values; unknown ?tab=… values silently fall back to
   // the default. Whitelisting also blocks junk like ?tab=<script> from
@@ -98,11 +106,13 @@ export function SettingsPage({
         // CEREBRO-PATCH(settings-page-agent-profile-valid): include cerebro Agent Profile tab
         AGENT_PROFILE_TAB_VALUE,
         ...Object.values(WORKSPACE_TAB_VALUES),
+        // CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 valid tab
+        ...(groupsEnabled ? [GROUPS_TAB_VALUE] : []),
         // CEREBRO-PATCH(settings-page-documentation): documentation tab is valid
         ...(documentationContent ? ["documentation"] : []),
         ...(extraAccountTabs?.map((tab) => tab.value) ?? []),
       ]),
-    [extraAccountTabs, documentationContent],
+    [extraAccountTabs, documentationContent, groupsEnabled],
   );
 
   const tabFromUrl = navigation.searchParams.get(TAB_QUERY_KEY);
@@ -139,6 +149,19 @@ export function SettingsPage({
       });
     });
 
+    const workspaceItems: CerebroMobileTabNavGroup["items"] = WORKSPACE_TAB_KEYS.map((key) => ({
+      value: WORKSPACE_TAB_VALUES[key],
+      label: t(($) => $.page.tabs[key]),
+      icon: WORKSPACE_TAB_ICONS[key],
+    }));
+    // CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 mobile nav entry
+    if (groupsEnabled) {
+      workspaceItems.push({
+        value: GROUPS_TAB_VALUE,
+        label: "Groups",
+        icon: Users,
+      });
+    }
     const groups: CerebroMobileTabNavGroup[] = [
       {
         label: t(($) => $.page.my_account),
@@ -146,11 +169,7 @@ export function SettingsPage({
       },
       {
         label: workspaceName ?? t(($) => $.page.workspace_fallback),
-        items: WORKSPACE_TAB_KEYS.map((key) => ({
-          value: WORKSPACE_TAB_VALUES[key],
-          label: t(($) => $.page.tabs[key]),
-          icon: WORKSPACE_TAB_ICONS[key],
-        })),
+        items: workspaceItems,
       },
     ];
 
@@ -168,7 +187,7 @@ export function SettingsPage({
     }
 
     return groups;
-  }, [documentationContent, extraAccountTabs, t, workspaceName]);
+  }, [documentationContent, extraAccountTabs, t, workspaceName, groupsEnabled]);
 
   return (
     <Tabs
@@ -224,6 +243,13 @@ export function SettingsPage({
               </TabsTrigger>
             );
           })}
+          {/* CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 workspace groups trigger */}
+          {groupsEnabled && (
+            <TabsTrigger value={GROUPS_TAB_VALUE}>
+              <Users className="h-4 w-4" />
+              Groups
+            </TabsTrigger>
+          )}
 
           {/* CEREBRO-PATCH(settings-page-documentation): Resources group with Documentation tab */}
           {documentationContent && (
@@ -257,6 +283,10 @@ export function SettingsPage({
             <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
             <TabsContent value="labs"><LabsTab /></TabsContent>
             <TabsContent value="members"><MembersTab /></TabsContent>
+            {/* CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 workspace groups content */}
+            {groupsEnabled && (
+              <TabsContent value={GROUPS_TAB_VALUE}><GroupsTab /></TabsContent>
+            )}
             {extraAccountTabs?.map((tab) => (
               <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
             ))}

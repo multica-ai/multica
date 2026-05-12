@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "@multica/core": "workspace:*",
-    "@multica/cerebro-artifacts": "workspace:*"
+    "@multica/cerebro-artifacts": "workspace:*",
+    "@multica/cerebro-groups": "workspace:*"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:"

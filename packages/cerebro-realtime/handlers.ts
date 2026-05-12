@@ -5,6 +5,7 @@ import { artifactKeys } from "@multica/cerebro-artifacts/core";
 import { channelKeys } from "@multica/core/channels";
 import { chatKeys } from "@multica/core/chat/queries";
 import type { ChatSession } from "@multica/core/types";
+import { registerCerebroGroupHandlers } from "@multica/cerebro-groups";
 
 /**
  * Registers WS handlers for cerebro-only events (currently: artifact:created /
@@ -111,6 +112,9 @@ export function registerCerebroHandlers(
     invalidateChannelList,
   );
 
+  // JEH-1006 — workspace groups settings list/members invalidation.
+  const unsubGroups = registerCerebroGroupHandlers(ws, qc);
+
   return () => {
     unsubArtifactCreated();
     unsubArtifactUpdated();
@@ -118,5 +122,6 @@ export function registerCerebroHandlers(
     unsubChatSessionUpdated();
     unsubChannelArchived();
     unsubChannelUnarchived();
+    unsubGroups();
   };
 }
