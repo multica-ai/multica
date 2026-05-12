@@ -549,3 +549,15 @@ SET status = CASE WHEN EXISTS (
     updated_at = now()
 WHERE a.id = $1
 RETURNING *;
+
+-- name: CountRecentAgentTriggeredTasksForIssue :one
+-- Returns how many tasks for this (agent, issue) pair were triggered by
+-- an agent-authored comment within the last window_secs seconds.
+-- Used as a circuit-breaker to suppress runaway agent mention loops.
+SELECT count(*)::int AS task_count
+FROM agent_task_queue t
+JOIN comment c ON c.id = t.trigger_comment_id
+WHERE t.issue_id = @issue_id
+  AND t.agent_id = @agent_id
+  AND c.author_type = 'agent'
+  AND t.created_at > now() - make_interval(secs => @window_secs::double precision);

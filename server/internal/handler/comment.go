@@ -315,12 +315,28 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 			isSelfLoop := uuidToString(orchID) == authorID
 			isAssignee := issue.AssigneeID.Valid && uuidToString(issue.AssigneeID) == uuidToString(orchID)
 			if !isSelfLoop && !isAssignee {
-				if _, err := h.TaskService.EnqueueOrchestratorTask(r.Context(), issue, orchID, comment.ID); err != nil {
-					slog.Warn("orchestrator wake-up failed",
+				const loopWindowSecs = 300.0
+				const loopThreshold = int32(5)
+				orchCount, cbErr := h.Queries.CountRecentAgentTriggeredTasksForIssue(r.Context(),
+					db.CountRecentAgentTriggeredTasksForIssueParams{
+						IssueID:    issue.ID,
+						AgentID:    orchID,
+						WindowSecs: loopWindowSecs,
+					})
+				if cbErr != nil || orchCount < loopThreshold {
+					if _, err := h.TaskService.EnqueueOrchestratorTask(r.Context(), issue, orchID, comment.ID); err != nil {
+						slog.Warn("orchestrator wake-up failed",
+							"issue_id", issueID,
+							"orchestrator_agent_id", uuidToString(orchID),
+							"comment_id", uuidToString(comment.ID),
+							"error", err,
+						)
+					}
+				} else {
+					slog.Warn("orchestrator loop suppressed",
 						"issue_id", issueID,
 						"orchestrator_agent_id", uuidToString(orchID),
-						"comment_id", uuidToString(comment.ID),
-						"error", err,
+						"recent_count", orchCount,
 					)
 				}
 			}
@@ -516,6 +532,28 @@ func (h *Handler) enqueueAgentMention(ctx context.Context, issue db.Issue, comme
 	})
 	if err != nil || hasPending {
 		return
+	}
+	// Circuit breaker: suppress agent-to-agent mention loops. If an agent
+	// comment has triggered 5+ tasks for this (issue, target-agent) pair
+	// within the last 5 minutes, skip enqueueing another one.
+	if authorType == "agent" {
+		const loopWindowSecs = 300.0
+		const loopThreshold = int32(5)
+		recentCount, cbErr := h.Queries.CountRecentAgentTriggeredTasksForIssue(ctx,
+			db.CountRecentAgentTriggeredTasksForIssueParams{
+				IssueID:    issue.ID,
+				AgentID:    agentUUID,
+				WindowSecs: loopWindowSecs,
+			})
+		if cbErr == nil && recentCount >= loopThreshold {
+			slog.Warn("agent mention loop suppressed",
+				"issue_id", uuidToString(issue.ID),
+				"mentioned_agent_id", agentID,
+				"triggering_agent_id", authorID,
+				"recent_count", recentCount,
+			)
+			return
+		}
 	}
 	if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, comment.ID); err != nil {
 		slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", agentID, "error", err)

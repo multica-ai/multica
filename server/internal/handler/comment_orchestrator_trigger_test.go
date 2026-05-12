@@ -300,6 +300,169 @@ func TestUpdateWorkspaceSetOrchestratorAgent(t *testing.T) {
 	})
 }
 
+// TestOrchestratorLoopCircuitBreaker asserts that the circuit breaker suppresses
+// the orchestrator wake-up when 5+ tasks for the orchestrator on this issue
+// were already triggered by agent-authored comments in the last 5 minutes.
+func TestOrchestratorLoopCircuitBreaker(t *testing.T) {
+	ctx := context.Background()
+
+	posterID := createHandlerTestAgent(t, "Loop Poster Agent", nil)
+	orchestratorID := createHandlerTestAgent(t, "Loop Orchestrator Agent", nil)
+
+	if _, err := testPool.Exec(ctx,
+		`UPDATE workspace SET orchestrator_agent_id = $1 WHERE id = $2`,
+		orchestratorID, testWorkspaceID,
+	); err != nil {
+		t.Fatalf("set orchestrator_agent_id: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx,
+			`UPDATE workspace SET orchestrator_agent_id = NULL WHERE id = $1`,
+			testWorkspaceID,
+		)
+	})
+
+	// Issue unassigned (orchestrator is not the assignee, so suppression doesn't fire).
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Circuit-breaker orchestrator fixture",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issue.ID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issue.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issue.ID)
+	})
+
+	// Seed 5 agent-authored comments + orchestrator tasks pointing at them to
+	// simulate a loop that already hit the threshold.
+	for i := 0; i < 5; i++ {
+		var seedCommentID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO comment (issue_id, workspace_id, author_id, author_type, content)
+			VALUES ($1, $2, $3, 'agent', 'loop comment')
+			RETURNING id
+		`, issue.ID, testWorkspaceID, posterID).Scan(&seedCommentID); err != nil {
+			t.Fatalf("seed comment %d: %v", i, err)
+		}
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO agent_task_queue (issue_id, agent_id, runtime_id, trigger_comment_id, status)
+			VALUES ($1, $2, $3, $4, 'completed')
+		`, issue.ID, orchestratorID, handlerTestRuntimeID(t), seedCommentID); err != nil {
+			t.Fatalf("seed task %d: %v", i, err)
+		}
+	}
+
+	// Snapshot task count for the orchestrator before the triggering comment.
+	var beforeCount int
+	testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`,
+		issue.ID, orchestratorID).Scan(&beforeCount)
+
+	// Agent posts a comment — this would normally wake the orchestrator.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+issue.ID+"/comments", map[string]any{
+		"content": "Triggering comment that should be circuit-broken.",
+	})
+	req = setAgentActor(t, req, posterID)
+	req = withURLParam(req, "id", issue.ID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: %d %s", w.Code, w.Body.String())
+	}
+
+	// Orchestrator task count must NOT have increased.
+	var afterCount int
+	testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`,
+		issue.ID, orchestratorID).Scan(&afterCount)
+	if afterCount != beforeCount {
+		t.Fatalf("circuit breaker did not fire: orchestrator task count went %d → %d (expected no change)", beforeCount, afterCount)
+	}
+}
+
+// TestMentionLoopCircuitBreaker asserts that the circuit breaker suppresses
+// @mention task enqueuing when 5+ tasks for the target agent on this issue
+// were already triggered by agent-authored comments in the last 5 minutes.
+func TestMentionLoopCircuitBreaker(t *testing.T) {
+	ctx := context.Background()
+
+	callerID := createHandlerTestAgent(t, "Loop Caller Agent", nil)
+	targetID := createHandlerTestAgent(t, "Loop Target Agent", nil)
+
+	// Issue unassigned.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Circuit-breaker mention fixture",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issue.ID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issue.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issue.ID)
+	})
+
+	// Get the target agent's mention link format so we can @mention them.
+	var targetMentionID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE id = $1`, targetID,
+	).Scan(&targetMentionID); err != nil {
+		t.Fatalf("look up target agent: %v", err)
+	}
+
+	// Seed 5 agent-authored comments + tasks for the target to simulate a loop.
+	for i := 0; i < 5; i++ {
+		var seedCommentID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO comment (issue_id, workspace_id, author_id, author_type, content)
+			VALUES ($1, $2, $3, 'agent', 'loop mention comment')
+			RETURNING id
+		`, issue.ID, testWorkspaceID, callerID).Scan(&seedCommentID); err != nil {
+			t.Fatalf("seed comment %d: %v", i, err)
+		}
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO agent_task_queue (issue_id, agent_id, runtime_id, trigger_comment_id, status)
+			VALUES ($1, $2, $3, $4, 'completed')
+		`, issue.ID, targetID, handlerTestRuntimeID(t), seedCommentID); err != nil {
+			t.Fatalf("seed task %d: %v", i, err)
+		}
+	}
+
+	// Snapshot task count for the target before the new @mention.
+	var beforeCount int
+	testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`,
+		issue.ID, targetID).Scan(&beforeCount)
+
+	// Agent posts a comment that @mentions the target.
+	mentionContent := "[Target](mention://agent/" + targetID + ") please do the next step."
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+issue.ID+"/comments", map[string]any{
+		"content": mentionContent,
+	})
+	req = setAgentActor(t, req, callerID)
+	req = withURLParam(req, "id", issue.ID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: %d %s", w.Code, w.Body.String())
+	}
+
+	// Target task count must NOT have increased.
+	var afterCount int
+	testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`,
+		issue.ID, targetID).Scan(&afterCount)
+	if afterCount != beforeCount {
+		t.Fatalf("mention circuit breaker did not fire: task count went %d → %d (expected no change)", beforeCount, afterCount)
+	}
+}
+
 // TestUpdateWorkspaceRejectsCrossWorkspaceOrchestratorAgent covers a
 // security-relevant guard: a malicious or misconfigured client can't point
 // the orchestrator at an agent in a DIFFERENT workspace, which would

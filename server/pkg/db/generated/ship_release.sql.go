@@ -733,7 +733,8 @@ ORDER BY COALESCE(promoted_at, staged_at, created_at) DESC
 `
 
 // "Active" = anything not yet in a terminal stage. Drives the home-page
-// "Active releases" rail. Most recently deployed first.
+// "Active releases" rail. Most recently deployed first: production deploy
+// time (promoted_at) beats staging (staged_at) beats creation time.
 func (q *Queries) ListActiveReleasesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ShipRelease, error) {
 	rows, err := q.db.Query(ctx, listActiveReleasesByWorkspace, workspaceID)
 	if err != nil {

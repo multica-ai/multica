@@ -594,6 +594,32 @@ func (q *Queries) CompleteAgentTask(ctx context.Context, arg CompleteAgentTaskPa
 	return i, err
 }
 
+const countRecentAgentTriggeredTasksForIssue = `-- name: CountRecentAgentTriggeredTasksForIssue :one
+SELECT count(*)::int AS task_count
+FROM agent_task_queue t
+JOIN comment c ON c.id = t.trigger_comment_id
+WHERE t.issue_id = $1
+  AND t.agent_id = $2
+  AND c.author_type = 'agent'
+  AND t.created_at > now() - make_interval(secs => $3::double precision)
+`
+
+type CountRecentAgentTriggeredTasksForIssueParams struct {
+	IssueID    pgtype.UUID `json:"issue_id"`
+	AgentID    pgtype.UUID `json:"agent_id"`
+	WindowSecs float64     `json:"window_secs"`
+}
+
+// Returns how many tasks for this (agent, issue) pair were triggered by
+// an agent-authored comment within the last window_secs seconds.
+// Used as a circuit-breaker to suppress runaway agent mention loops.
+func (q *Queries) CountRecentAgentTriggeredTasksForIssue(ctx context.Context, arg CountRecentAgentTriggeredTasksForIssueParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countRecentAgentTriggeredTasksForIssue, arg.IssueID, arg.AgentID, arg.WindowSecs)
+	var task_count int32
+	err := row.Scan(&task_count)
+	return task_count, err
+}
+
 const countRunningTasks = `-- name: CountRunningTasks :one
 SELECT count(*) FROM agent_task_queue
 WHERE agent_id = $1 AND status IN ('dispatched', 'running')
