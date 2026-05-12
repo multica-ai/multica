@@ -32,7 +32,6 @@ import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { useT } from "../../i18n";
-import { WorkspaceIntegrationsTab } from "./workspace-integrations-tab";
 import { UserIntegrationsTab } from "./user-integrations-tab";
 import { WorkCalendarsTab } from "./work-calendars-tab";
 
@@ -206,9 +205,6 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="work_calendars">
             <WorkCalendarsTab />
           </TabsContent>
-          {/* <TabsContent value="integrations">
-            <WorkspaceIntegrationsTab />
-          </TabsContent> */}
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>
               {tab.content}
