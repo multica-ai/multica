@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -130,6 +131,58 @@ func TestShutdownHandlerRejectsNonPost(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	if cancelled {
 		t.Fatal("GET request should not trigger cancellation")
+	}
+}
+
+func TestServeHealthPprofRequiresEnvFlag(t *testing.T) {
+	t.Setenv("MULTICA_DAEMON_DEBUG_PPROF", "")
+	d := &Daemon{
+		cfg:        Config{CLIVersion: "v1.0.0"},
+		workspaces: map[string]*workspaceState{},
+		logger:     slog.Default(),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	go d.serveHealth(ctx, ln, time.Now())
+	defer cancel()
+
+	resp, err := http.Get("http://" + ln.Addr().String() + "/debug/pprof/goroutine?debug=2")
+	if err != nil {
+		t.Fatalf("get pprof without env: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected pprof to be disabled by default, got %d", resp.StatusCode)
+	}
+}
+
+func TestServeHealthPprofEnabledWithEnvFlag(t *testing.T) {
+	t.Setenv("MULTICA_DAEMON_DEBUG_PPROF", "1")
+	d := &Daemon{
+		cfg:        Config{CLIVersion: "v1.0.0"},
+		workspaces: map[string]*workspaceState{},
+		logger:     slog.Default(),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	go d.serveHealth(ctx, ln, time.Now())
+	defer cancel()
+
+	resp, err := http.Get("http://" + ln.Addr().String() + "/debug/pprof/goroutine?debug=2")
+	if err != nil {
+		t.Fatalf("get pprof with env: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected pprof to be enabled, got %d", resp.StatusCode)
 	}
 }
 

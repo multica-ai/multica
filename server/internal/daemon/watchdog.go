@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 )
@@ -21,8 +22,19 @@ func (d *Daemon) watchdogLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if d.stalledGap(threshold) {
-				d.logger.Error("watchdog: heartbeat stalled - exiting for KeepAlive to respawn",
-					"gap", time.Since(time.Unix(0, d.lastHeartbeatAt.Load())), "threshold", threshold)
+				gap := time.Since(time.Unix(0, d.lastHeartbeatAt.Load()))
+				// Best-effort: bypass slog/tint because the logger may be stuck on
+				// a blocked stderr write. Cap the attempt so exit always happens.
+				done := make(chan struct{})
+				go func() {
+					fmt.Fprintf(os.Stderr, "watchdog: heartbeat stalled (gap=%s threshold=%s) - exiting for KeepAlive to respawn\n",
+						gap.Round(time.Second), threshold)
+					close(done)
+				}()
+				select {
+				case <-done:
+				case <-time.After(500 * time.Millisecond):
+				}
 				os.Exit(2)
 			}
 		}

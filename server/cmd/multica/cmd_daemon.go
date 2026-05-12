@@ -355,6 +355,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	if dir := daemonDirForProfile(profile); dir != "" {
 		os.MkdirAll(dir, 0o755)
 		os.WriteFile(daemonPIDPathForProfile(profile), []byte(strconv.Itoa(os.Getpid())), 0o644)
+		setupGoroutineDump(dir)
 	}
 	defer os.Remove(daemonPIDPathForProfile(profile))
 

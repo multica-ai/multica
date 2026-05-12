@@ -68,6 +68,8 @@ func notifyShutdownContext(parent context.Context) (context.Context, context.Can
 	return signal.NotifyContext(parent, os.Interrupt, sigBreak)
 }
 
+func setupGoroutineDump(_ string) {}
+
 func tailLogFile(logPath string, lines int, follow bool) error {
 	f, err := os.Open(logPath)
 	if err != nil {

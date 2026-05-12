@@ -80,7 +80,7 @@ func (d *Daemon) runGC(ctx context.Context) {
 	}
 
 	// Prune stale worktree references from all bare repo caches.
-	d.pruneRepoWorktrees(root)
+	d.pruneRepoWorktrees(ctx, root)
 
 	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 {
 		d.logger.Info("gc: cycle complete",
@@ -517,7 +517,7 @@ func dirSize(root string) int64 {
 const gitCmdTimeout = 30 * time.Second
 
 // pruneRepoWorktrees runs `git worktree prune` on all bare repos in the cache.
-func (d *Daemon) pruneRepoWorktrees(workspacesRoot string) {
+func (d *Daemon) pruneRepoWorktrees(ctx context.Context, workspacesRoot string) {
 	reposRoot := filepath.Join(workspacesRoot, ".repos")
 	wsEntries, err := os.ReadDir(reposRoot)
 	if err != nil {
@@ -534,6 +534,9 @@ func (d *Daemon) pruneRepoWorktrees(workspacesRoot string) {
 			continue
 		}
 		for _, repoEntry := range repoEntries {
+			if ctx.Err() != nil {
+				return
+			}
 			if !repoEntry.IsDir() {
 				continue
 			}
@@ -541,13 +544,13 @@ func (d *Daemon) pruneRepoWorktrees(workspacesRoot string) {
 			if !isBareRepo(barePath) {
 				continue
 			}
-			d.pruneWorktree(barePath)
+			d.pruneWorktree(ctx, barePath)
 		}
 	}
 }
 
-func (d *Daemon) pruneWorktree(barePath string) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitCmdTimeout)
+func (d *Daemon) pruneWorktree(ctx context.Context, barePath string) {
+	ctx, cancel := context.WithTimeout(ctx, gitCmdTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "-C", barePath, "worktree", "prune")
 
