@@ -44,7 +44,6 @@ export function CreateAgentDialog({
   runtimesLoading,
   members,
   currentUserId,
-  isWorkspaceAdmin = false,
   template,
   onClose,
   onCreate,
@@ -53,11 +52,6 @@ export function CreateAgentDialog({
   runtimesLoading?: boolean;
   members: MemberWithUser[];
   currentUserId: string | null;
-  // Workspace owners/admins can bind agents to anyone's runtime; regular
-  // members can only bind to their own. When false the "All" tab is
-  // hidden and the runtime list is force-filtered to runtimes the user
-  // owns. Mirrors the server check in canBindAgentToRuntime.
-  isWorkspaceAdmin?: boolean;
   // When provided, the dialog opens in "Duplicate" mode: the visible
   // fields (name / description / runtime / visibility / model) are
   // pre-populated from this agent, and the hidden fields
@@ -89,65 +83,31 @@ export function CreateAgentDialog({
   };
 
   const hasOtherRuntimes = runtimes.some((r) => r.owner_id !== currentUserId);
-  // Non-admins can only bind to their own runtimes (the server enforces this).
-  // Force "mine" so a stale runtimeFilter from a previous admin session, or
-  // an attempt to render the "all" view, can't surface someone else's runtime
-  // and produce a 403 on submit.
-  const effectiveFilter: RuntimeFilter =
-    isWorkspaceAdmin ? runtimeFilter : "mine";
-  const showFilterTabs = isWorkspaceAdmin && hasOtherRuntimes;
 
   const filteredRuntimes = useMemo(() => {
-    // "all" stays unfiltered (admin only — non-admins are pinned to "mine"
-    // by effectiveFilter above). For "mine", missing currentUserId means we
-    // cannot identify the caller's runtimes — return empty rather than
-    // falling back to the full list, otherwise a transient null userId
-    // (auth not yet hydrated) would briefly expose other users' runtimes
-    // to a non-admin.
-    const filtered =
-      effectiveFilter === "all"
-        ? runtimes
-        : currentUserId
-          ? runtimes.filter((r) => r.owner_id === currentUserId)
-          : [];
+    const filtered = runtimeFilter === "mine" && currentUserId
+      ? runtimes.filter((r) => r.owner_id === currentUserId)
+      : runtimes;
     return [...filtered].sort((a, b) => {
       if (a.owner_id === currentUserId && b.owner_id !== currentUserId) return -1;
       if (a.owner_id !== currentUserId && b.owner_id === currentUserId) return 1;
       return 0;
     });
-  }, [runtimes, effectiveFilter, currentUserId]);
+  }, [runtimes, runtimeFilter, currentUserId]);
 
-  // When duplicating, seed the picker with the template's runtime — but
-  // only if it's actually in `filteredRuntimes` (i.e. the user is allowed
-  // to bind to it). The reconcile effect below corrects stale selections
-  // either way, so the seed is just for the first render to avoid a flash
-  // of "no selection" in the happy path.
-  const [selectedRuntimeId, setSelectedRuntimeId] = useState(() => {
-    const seed = template?.runtime_id ?? filteredRuntimes[0]?.id ?? "";
-    if (seed && filteredRuntimes.some((r) => r.id === seed)) return seed;
-    return filteredRuntimes[0]?.id ?? "";
-  });
+  // When duplicating, default to the template's runtime so the clone
+  // lands on the same machine — caller can still switch in the picker.
+  const [selectedRuntimeId, setSelectedRuntimeId] = useState(
+    template?.runtime_id ?? filteredRuntimes[0]?.id ?? "",
+  );
 
-  // Keep selection inside the visible filtered set. Two cases this guards:
-  // 1) duplicating an agent whose runtime is owned by someone else (template
-  //    seeds an unbindable id; we drop it back to the user's first own
-  //    runtime instead of letting the form submit a 403),
-  // 2) admin flipping the Mine/All tab, leaving a previously-selected
-  //    cross-owner runtime no longer in scope.
   useEffect(() => {
-    const stillVisible = filteredRuntimes.some((r) => r.id === selectedRuntimeId);
-    if (!stillVisible) {
-      setSelectedRuntimeId(filteredRuntimes[0]?.id ?? "");
+    if (!selectedRuntimeId && filteredRuntimes[0]) {
+      setSelectedRuntimeId(filteredRuntimes[0].id);
     }
   }, [filteredRuntimes, selectedRuntimeId]);
 
-  // Look up the selected runtime *inside the filtered set* so the trigger
-  // label, model picker, and submit button can never reference a runtime
-  // the user can't bind to. Belt-and-suspenders alongside the reconcile
-  // effect: if React batches/delays the effect, this still keeps the form
-  // in a coherent, submittable state.
-  const selectedRuntime =
-    filteredRuntimes.find((d) => d.id === selectedRuntimeId) ?? null;
+  const selectedRuntime = runtimes.find((d) => d.id === selectedRuntimeId) ?? null;
 
   const handleSubmit = async () => {
     if (!name.trim() || !selectedRuntime) return;
@@ -277,7 +237,7 @@ export function CreateAgentDialog({
           <div className="min-w-0">
             <div className="flex items-center justify-between">
               <Label className="text-xs text-muted-foreground">{t(($) => $.create_dialog.runtime_label)}</Label>
-              {showFilterTabs && (
+              {hasOtherRuntimes && (
                 <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
                   <button
                     type="button"

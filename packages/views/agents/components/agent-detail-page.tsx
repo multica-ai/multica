@@ -69,11 +69,6 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   } = useQuery(agentListOptions(wsId));
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const myRole =
-    currentUser
-      ? members.find((m) => m.user_id === currentUser.id)?.role ?? null
-      : null;
-  const isWorkspaceAdmin = myRole === "owner" || myRole === "admin";
 
   // Single workspace-level presence pass; this page just reads its slot.
   // The hook owns the 30s tick so the failed-window auto-clears here too.
@@ -220,7 +215,6 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           runtimes={runtimes}
           members={members}
           currentUserId={currentUser?.id ?? null}
-          isWorkspaceAdmin={isWorkspaceAdmin}
           canEdit={canEdit.allowed}
           onUpdate={handleUpdate}
         />

@@ -56,10 +56,6 @@ interface InspectorProps {
   runtimes: AgentRuntime[];
   members: MemberWithUser[];
   currentUserId: string | null;
-  /** Workspace owners/admins can rebind to anyone's runtime; regular
-   * members are pinned to their own. Mirrors the server check in
-   * canBindAgentToRuntime. */
-  isWorkspaceAdmin?: boolean;
   /**
    * Computed by the parent via `useAgentPermissions(agent).canEdit.allowed`.
    * When false the inspector renders all editable surfaces as static
@@ -91,7 +87,6 @@ export function AgentDetailInspector({
   runtimes,
   members,
   currentUserId,
-  isWorkspaceAdmin = false,
   canEdit,
   onUpdate,
 }: InspectorProps) {
@@ -122,7 +117,6 @@ export function AgentDetailInspector({
             runtimes={runtimes}
             members={members}
             currentUserId={currentUserId}
-            isWorkspaceAdmin={isWorkspaceAdmin}
             canEdit={canEdit}
             onChange={(id) => update({ runtime_id: id })}
           />

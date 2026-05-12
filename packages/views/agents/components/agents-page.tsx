@@ -466,7 +466,6 @@ export function AgentsPage() {
           runtimesLoading={runtimesLoading}
           members={members}
           currentUserId={currentUser?.id ?? null}
-          isWorkspaceAdmin={isWorkspaceAdmin}
           template={duplicateTemplate}
           onClose={() => {
             setShowCreate(false);

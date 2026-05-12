@@ -25,7 +25,6 @@ export function RuntimePicker({
   runtimes,
   members,
   currentUserId,
-  isWorkspaceAdmin = false,
   canEdit = true,
   onChange,
 }: {
@@ -33,9 +32,6 @@ export function RuntimePicker({
   runtimes: AgentRuntime[];
   members: MemberWithUser[];
   currentUserId: string | null;
-  /** Workspace owners/admins can pick anyone's runtime. Non-admins are
-   * force-filtered to their own — the server will 403 a mismatch. */
-  isWorkspaceAdmin?: boolean;
   /** When false, render a static read-only display and skip the popover. */
   canEdit?: boolean;
   onChange: (runtimeId: string) => Promise<void> | void;
@@ -47,24 +43,13 @@ export function RuntimePicker({
   const selected = runtimes.find((r) => r.id === value) ?? null;
   const Icon = selected?.runtime_mode === "cloud" ? Cloud : Monitor;
 
-  // Non-admin users are force-pinned to "mine" regardless of the local
-  // filter state — keeps the server check (canBindAgentToRuntime) and the
-  // UI consistent.
-  const effectiveFilter: Filter = isWorkspaceAdmin ? filter : "mine";
-
   // Compute filtered list unconditionally — the early `!canEdit` return
   // below would otherwise re-order this hook across renders.
-  // "all" stays unfiltered (admin only). For "mine", a missing currentUserId
-  // returns [] rather than the full list — a transient null userId during
-  // auth hydration must not briefly expose other users' runtimes to a
-  // non-admin.
   const filtered = useMemo(() => {
     const list =
-      effectiveFilter === "all"
-        ? runtimes
-        : currentUserId
-          ? runtimes.filter((r) => r.owner_id === currentUserId)
-          : [];
+      filter === "mine" && currentUserId
+        ? runtimes.filter((r) => r.owner_id === currentUserId)
+        : runtimes;
     return [...list].sort((a, b) => {
       if (a.owner_id === currentUserId && b.owner_id !== currentUserId)
         return -1;
@@ -72,7 +57,7 @@ export function RuntimePicker({
         return 1;
       return 0;
     });
-  }, [runtimes, effectiveFilter, currentUserId]);
+  }, [runtimes, filter, currentUserId]);
 
   if (!canEdit) {
     const isOnline = selected?.status === "online";
@@ -107,7 +92,6 @@ export function RuntimePicker({
     : t(($) => $.pickers.runtime_tooltip_none);
 
   const hasOtherRuntimes = runtimes.some((r) => r.owner_id !== currentUserId);
-  const showFilterTabs = isWorkspaceAdmin && hasOtherRuntimes;
 
   const getOwner = (id: string | null) =>
     id ? members.find((m) => m.user_id === id) ?? null : null;
@@ -145,7 +129,7 @@ export function RuntimePicker({
         </>
       }
       header={
-        showFilterTabs ? (
+        hasOtherRuntimes ? (
           <div className="p-2">
             <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
               <FilterButton
