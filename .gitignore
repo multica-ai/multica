@@ -61,6 +61,9 @@ _features/
 # runtime
 *.pid
 
+# PM2 deployment config (contains secrets)
+ecosystem.config.cjs
+
 # platform specific
 *.dmg
 *.app
