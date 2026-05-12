@@ -1,0 +1,197 @@
+---
+title: Ship MCP — AI-native release control
+description: "The multica mcp-stdio server exposes Ship Hub (and the rest of your workspace) as MCP tools so Claude Code, Cursor, Windsurf, and other MCP-aware clients can query releases, triage PRs, and drive the merge train without leaving the chat."
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+The Multica CLI ships a built-in **MCP (Model Context Protocol) server** — `multica mcp-stdio` — that exposes your workspace as tools an AI client can call. Any client that speaks the standard MCP stdio transport (Claude Code, Claude Desktop, Cursor, Windsurf, Zed, …) can connect to it.
+
+The Ship Hub tools are the highest-leverage part: they let the AI answer questions like _"what should I merge next?_", _"what's blocking release v1.4?"_, and _"is the production deploy healthy?"_ without copy-pasting GitHub URLs into chat.
+
+## Quick setup
+
+The MCP server is already inside the `multica` binary — no separate install.
+
+### Claude Code
+
+Add this block to your Claude Code MCP config (`.claude/mcp.json` in the project root, or the global `~/.claude/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "multica": {
+      "command": "multica",
+      "args": ["mcp-stdio"],
+      "env": {
+        "MULTICA_SERVER_URL": "https://app.multica.ai",
+        "MULTICA_WORKSPACE_ID": "<your-workspace-id>",
+        "MULTICA_TOKEN": "<your-token>"
+      }
+    }
+  }
+}
+```
+
+<Callout type="tip">
+If you have already run `multica login` and `multica config set workspace_id <id>`, the env block is optional — `mcp-stdio` reads the same `~/.multica/config.json` as every other CLI command.
+</Callout>
+
+### Claude Desktop
+
+Open **Claude Desktop → Settings → Developer → MCP Servers** and click **Edit Config**. Add the same JSON block from above under `mcpServers`.
+
+### Cursor / Windsurf
+
+Both tools read an MCP config JSON in their project settings. Consult their docs for the exact path (Cursor uses `.cursor/mcp.json`; Windsurf uses `.windsurf/mcp.json`). The server block is identical — just `"command": "multica"` + `"args": ["mcp-stdio"]`.
+
+### Authentication precedence
+
+`mcp-stdio` resolves credentials the same way every other `multica` command does:
+
+1. Explicit CLI flags (`--token`, `--workspace-id`, `--server-url`)
+2. Environment variables (`MULTICA_TOKEN`, `MULTICA_WORKSPACE_ID`, `MULTICA_SERVER_URL`)
+3. Config file at `~/.multica/config.json` (written by `multica login`)
+
+If your MCP client can't set env vars per-server, configure the CLI once with `multica login` + `multica config set workspace_id <id>` and the server will pick it up with no env block at all.
+
+---
+
+## What's in the MCP
+
+The server registers tools in eight resource groups. The model sees every tool at once; there's no scoping needed. Tool names are stable across releases — the model's cache keys on them.
+
+| Group | Prefix | What it covers |
+|---|---|---|
+| Issues | `multica_issue_*` | CRUD, search, status changes, comments, task run history |
+| Agents | `multica_agent_*` | List agents, fetch agent details and task history |
+| Channels | `multica_channel_*` | Read and post to workspace channels and DMs |
+| Projects | `multica_project_*` | List, get, search, and create projects |
+| Memory | `multica_memory_*` | Read and write wiki pages, runbooks, decisions, agent notes |
+| Labels | `multica_label_*` | List workspace labels, attach/detach from issues |
+| Autopilots | `multica_autopilot_*` | List, inspect, and manually trigger autopilots |
+| Workspace | `multica_workspace_*` | Active workspace metadata and member list |
+| **Ship Hub** | `multica_ship_*` | **Release coordination, PR triage, deploy logging** (detailed below) |
+
+---
+
+## Ship Hub tools
+
+Ship Hub is the release-coordination layer: it tracks pull requests from open → merged → deployed → done. The MCP tools mirror the dashboard you'd open in the browser — the difference is the AI can call them in context without you copy-pasting.
+
+### Start here
+
+| Tool | What it does |
+|---|---|
+| `multica_ship_workspace_summary` | Aggregate counts: open PRs, active releases, stale environments. Call this at the start of a session to orient. |
+| `multica_ship_list_projects` | List Ship Hub projects (projects with an attached GitHub repo). Returns `id`, `title`, `open_pr_count`. Use this to find the `project_id` for every other call. |
+| `multica_ship_list_active_releases` | Every in-flight release across the whole workspace — the "release radar." Use this to answer "what's shipping right now?" |
+
+### Pull requests
+
+| Tool | Key parameters | What it does |
+|---|---|---|
+| `multica_ship_list_pull_requests` | `project_id`, `state` (default `open`) | Cached PR list for a project, decorated with `active_release` when the PR is already in a release. |
+| `multica_ship_sync_project` | `project_id` | Refresh the cached PR list from GitHub. Run this first if data looks stale. |
+| `multica_ship_get_pull_request` | `pull_request_id` | Full bundle: PR row + linked Multica issue + agent task + active release + reviews + CI checks + recent actions. One call answers "tell me everything about PR X." |
+
+### Releases
+
+| Tool | Key parameters | What it does |
+|---|---|---|
+| `multica_ship_list_releases` | `project_id`, `status` (`active` / `all`) | Releases for one project. Default scope is `active`. Pass `all` for postmortems. |
+| `multica_ship_get_release` | `release_id` | Single release: stage, signoffs, attached PRs, event timeline, linked deploys. |
+| `multica_ship_create_release` | `project_id`, `title`, `pull_request_ids[]`, optional `approver_id` | Bundle PRs for coordinated rollout. Returns the new release id + auto-created Slack-style channel + tracking issue. Lands in `assembling` stage. |
+| `multica_ship_add_pr_to_release` | `release_id`, `pull_request_id` | Attach a PR while the release is still `assembling`. |
+| `multica_ship_remove_pr_from_release` | `release_id`, `pull_request_id` | Detach a PR (only in `assembling` stage). |
+| `multica_ship_cancel_release` | `release_id`, optional `reason` | Cancel before merging starts. Posts reason to the release channel. |
+
+### Merge train
+
+| Tool | Key parameters | What it does |
+|---|---|---|
+| `multica_ship_start_merge_train` | `release_id`, optional `merge_method` | Kick off ordered merging. Returns `202 Accepted`; poll with `multica_ship_get_release_merge_state`. |
+| `multica_ship_get_release_merge_state` | `release_id` | Per-PR merge state (`queued / merging / merged / failed / skipped`) + train status + blockers. |
+| `multica_ship_resume_merge_train` | `release_id`, optional `skip_pr_ids[]` | Resume a paused train; optionally skip failing PRs so the train can continue. |
+| `multica_ship_abort_merge_train` | `release_id`, optional `reason` | Abort. Already-merged PRs stay merged; remaining ones are abandoned. |
+
+### Staging verification and promote
+
+| Tool | Key parameters | What it does |
+|---|---|---|
+| `multica_ship_mark_release_verified` | `release_id`, optional `note` | Human-in-the-loop gate: mark staging as verified before promoting to production. |
+| `multica_ship_unverify_release` | `release_id`, `reason` | Reverse a verification if a problem turns up between verify and promote. |
+| `multica_ship_promote_release` | `release_id`, optional `rollback_plan` | Flip the release to `promoting`; CI/CD takes over from here. Rollback plan is captured in the audit trail. |
+| `multica_ship_mark_production_deployed` | `release_id` | Manual escape hatch when the `deployment_status` webhook didn't fire (e.g. CI provider doesn't support GitHub deployments). |
+| `multica_ship_mark_release_done` | `release_id` | Close the tracking issue and remove from the radar after a successful soak. |
+| `multica_ship_rollback_release` | `release_id`, `reason` | Mark rolled back after an incident. Does not revert code; that's a manual step. |
+
+### Deploy environments and logs
+
+| Tool | Key parameters | What it does |
+|---|---|---|
+| `multica_ship_list_deploy_environments` | `project_id` | Configured environments (staging / production) with `current_sha` and `current_deployed_at`. One call to answer "what's on prod?" |
+| `multica_ship_list_deploys` | `environment_id`, optional `limit` | Most recent deploys for an environment, newest first. Use to find the last failed deploy before recommending a rollback. |
+| `multica_ship_log_deploy` | `environment_id`, `sha`, `status` | Manually record a deploy when the webhook didn't fire (Vercel CLI, k8s rollout, etc.). A `succeeded` status updates `current_sha` and advances any linked release. |
+| `multica_ship_get_release_health` | `release_id` | Post-promote health: production deploy status, error rate, smoke test outcomes. |
+| `multica_ship_get_snapshot` | `project_id`, `at` | Time-machine snapshot of ship state at a given RFC3339 timestamp. Useful for postmortems: "what was on production when X failed?" |
+
+### PR actions
+
+These tools mutate GitHub state directly. They are gated behind the same workspace token the user has already trusted to `multica mcp-stdio`.
+
+| Tool | Key parameters | What it does |
+|---|---|---|
+| `multica_ship_submit_pr_review` | `pull_request_id`, `event` (`APPROVE / REQUEST_CHANGES / COMMENT`), optional `body` | Submit a GitHub review without leaving chat. Attribution is the workspace user behind the MCP token. |
+| `multica_ship_merge_pr` | `pull_request_id`, optional `method` (`merge / squash / rebase`) | Merge via GitHub's API. Requires owner/admin role. |
+| `multica_ship_comment_on_pr` | `pull_request_id`, `body` | Post an issue-style comment on a GitHub PR. Markdown supported. |
+| `multica_ship_close_pr_as_stale` | `pull_request_id`, optional `reason` | Close with a comment. Requires owner/admin role. |
+| `multica_ship_diagnose_ci_failure` | `pull_request_id` | Dispatch a diagnostic agent task to read the failing CI logs and post an analysis. Returns the `agent_task_id`. |
+| `multica_ship_summarize_review_feedback` | `pull_request_id` | Dispatch an agent task to consolidate all review comments into an actionable digest. |
+
+---
+
+## Typical workflows
+
+### "What should I merge next?"
+
+```
+1. multica_ship_workspace_summary         # how many open PRs / active releases?
+2. multica_ship_list_projects             # pick a project_id
+3. multica_ship_sync_project              # refresh cache from GitHub
+4. multica_ship_list_pull_requests        # scan open PRs — look at checks, reviews, active_release
+5. multica_ship_get_pull_request          # drill into any PR that looks ready
+```
+
+### "Create a release and start the merge train"
+
+```
+1. multica_ship_list_pull_requests        # identify eligible PRs
+2. multica_ship_create_release            # bundle them, get release_id
+3. multica_ship_start_merge_train         # kick off ordered merging
+4. multica_ship_get_release_merge_state   # poll until all PRs are merged or a failure surfaces
+```
+
+### "What's the current production state?"
+
+```
+1. multica_ship_list_active_releases      # anything promoting or in_production?
+2. multica_ship_list_deploy_environments  # current_sha + last deployed_at per environment
+3. multica_ship_get_release_health        # error rate + smoke tests for the latest release
+```
+
+---
+
+## Capabilities shipped in v1
+
+The server advertises `tools` only — resources, prompts, and sampling are intentionally out of scope until the tool surface stabilizes. New tools are added at the end of their resource group so the model's picker order stays stable across sessions.
+
+The MCP server is a direct Go port of the previous standalone `@multica/mcp` Node.js package. Behavior is identical; the binary is smaller and auth shares config with the rest of the CLI.
+
+## See also
+
+- [CLI command reference](/cli) — `multica mcp-stdio` and the full CLI surface
+- [Auth tokens](/auth-tokens) — how to mint a PAT for headless use
+- [Ship Hub and releases](/ship-hub) — the web UI counterpart to these tools
+- [Auto-deploy CD (self-hosted runner pattern)](/auto-deploy-cd) — wiring GitHub Actions to Ship Hub's deploy poller
+- [Deploy adapters](/integrations/deploy-adapters) — Vercel, Cloudflare Pages, Fly.io, Render webhooks
