@@ -689,7 +689,7 @@ const selectAutopilotsExceedingFailureThreshold = `-- name: SelectAutopilotsExce
 
 WITH stats AS (
     SELECT autopilot_id,
-           count(*) FILTER (WHERE status IN ('completed', 'failed', 'skipped')) AS total,
+           count(*) FILTER (WHERE status IN ('completed', 'failed')) AS total,
            count(*) FILTER (WHERE status = 'failed') AS failed
     FROM autopilot_run
     WHERE created_at >= $3::timestamptz
@@ -728,8 +728,13 @@ type SelectAutopilotsExceedingFailureThresholdRow struct {
 // Failure-rate auto-pause
 // =====================
 // Find active autopilots whose recent run failure rate exceeds the threshold.
-// Counts only terminal runs (completed | failed | skipped); pending,
-// issue_created and running are excluded so in-flight work isn't penalised.
+// Counts only "real" terminal runs (completed | failed). 'skipped' is
+// excluded from BOTH numerator and denominator: an admission-skipped run
+// (e.g. assignee runtime offline at dispatch time, MUL-1899) is neither a
+// success nor a failure, so it must not dilute the failure ratio (which
+// would let a 100%-failing autopilot mask itself behind a wall of skips)
+// nor inflate it. issue_created/running are still excluded so in-flight
+// work isn't penalised.
 // Used by the failure monitor to auto-pause sustained-failure autopilots
 // (the canonical example from MUL-1336 was an autopilot scheduled every 5 min
 // that 100% failed for days, burning ~1.5k useless tasks per week).
@@ -969,6 +974,45 @@ type UpdateAutopilotRunRunningParams struct {
 
 func (q *Queries) UpdateAutopilotRunRunning(ctx context.Context, arg UpdateAutopilotRunRunningParams) (AutopilotRun, error) {
 	row := q.db.QueryRow(ctx, updateAutopilotRunRunning, arg.ID, arg.TaskID)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateAutopilotRunSkipped = `-- name: UpdateAutopilotRunSkipped :one
+UPDATE autopilot_run
+SET status = 'skipped', completed_at = now(), failure_reason = $2
+WHERE id = $1
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at
+`
+
+type UpdateAutopilotRunSkippedParams struct {
+	ID            pgtype.UUID `json:"id"`
+	FailureReason pgtype.Text `json:"failure_reason"`
+}
+
+// Marks an autopilot_run as skipped without enqueueing any task. Used by the
+// pre-flight admission check when the assignee agent's runtime is offline:
+// creating an issue / task in that state would just pile a doomed job onto
+// agent_task_queue (the canonical "持续给离线 local agent 入队" symptom from
+// MUL-1899). Recording the skip + reason gives the UI / failure monitor / ops
+// a paper trail without polluting the failure ratio.
+func (q *Queries) UpdateAutopilotRunSkipped(ctx context.Context, arg UpdateAutopilotRunSkippedParams) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, updateAutopilotRunSkipped, arg.ID, arg.FailureReason)
 	var i AutopilotRun
 	err := row.Scan(
 		&i.ID,

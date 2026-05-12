@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ListIssuesResponse, TimelinePage } from "../types";
+import type { Attachment, ListIssuesResponse, TimelineEntry } from "../types";
 
 // ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
@@ -38,9 +38,39 @@ const ReactionSchema = z.object({
   created_at: z.string(),
 });
 
+// Nested attachments embedded in timeline/comment responses stay lenient on
+// purpose: a single malformed attachment must not knock the whole timeline
+// into the fallback `[]`.
 const AttachmentSchema = z.object({
   id: z.string(),
 }).loose();
+
+// Standalone attachment lookup (`GET /api/attachments/{id}`) is the source of
+// truth for click-time download URLs. The two fields the download flow opens
+// in a new tab — `download_url` and `url` — must be strings, otherwise we'd
+// happily `window.open(undefined)`. `filename` gates the toast/title and is
+// also enforced so a missing value falls back to the empty record below.
+export const AttachmentResponseSchema = z.object({
+  id: z.string(),
+  url: z.string(),
+  download_url: z.string(),
+  filename: z.string(),
+}).loose();
+
+export const EMPTY_ATTACHMENT: Attachment = {
+  id: "",
+  workspace_id: "",
+  issue_id: null,
+  comment_id: null,
+  uploader_type: "",
+  uploader_id: "",
+  filename: "",
+  url: "",
+  download_url: "",
+  content_type: "",
+  size_bytes: 0,
+  created_at: "",
+};
 
 // All object schemas use `.loose()` so unknown server-side fields pass
 // through unchanged. zod 4's `.object()` defaults to STRIP, which would
@@ -66,22 +96,12 @@ const TimelineEntrySchema = z.object({
   coalesced_count: z.number().optional(),
 }).loose();
 
-export const TimelinePageSchema = z.object({
-  entries: z.array(TimelineEntrySchema).default([]),
-  next_cursor: z.string().nullable().default(null),
-  prev_cursor: z.string().nullable().default(null),
-  has_more_before: z.boolean().default(false),
-  has_more_after: z.boolean().default(false),
-  target_index: z.number().optional(),
-}).loose();
+// /timeline returns a flat array of TimelineEntry, oldest first. The
+// previously cursor-paginated wrapper was removed (#1929) — at observed data
+// sizes (p99 ~30 entries per issue) paged delivery only created bugs.
+export const TimelineEntriesSchema = z.array(TimelineEntrySchema);
 
-export const EMPTY_TIMELINE_PAGE: TimelinePage = {
-  entries: [],
-  next_cursor: null,
-  prev_cursor: null,
-  has_more_before: false,
-  has_more_after: false,
-};
+export const EMPTY_TIMELINE_ENTRIES: TimelineEntry[] = [];
 
 export const CommentSchema = z.object({
   id: z.string(),

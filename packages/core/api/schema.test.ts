@@ -25,53 +25,34 @@ afterEach(() => {
 // an empty/safe shape, never throws into React.
 describe("ApiClient schema fallback", () => {
   describe("listTimeline", () => {
-    it("falls back to an empty page when required fields are missing", async () => {
-      stubFetchJson({});
+    it("falls back to an empty array when the body is null", async () => {
+      stubFetchJson(null);
       const client = new ApiClient("https://api.example.test");
-      const page = await client.listTimeline("issue-1");
-      expect(page).toEqual({
-        entries: [],
-        next_cursor: null,
-        prev_cursor: null,
-        has_more_before: false,
-        has_more_after: false,
-      });
+      const entries = await client.listTimeline("issue-1");
+      expect(entries).toEqual([]);
     });
 
-    it("falls back when a field has the wrong type", async () => {
-      stubFetchJson({
-        entries: "not-an-array",
-        next_cursor: null,
-        prev_cursor: null,
-        has_more_before: false,
-        has_more_after: false,
-      });
+    it("falls back when the body is not an array", async () => {
+      stubFetchJson({ wrong: "shape" });
       const client = new ApiClient("https://api.example.test");
-      const page = await client.listTimeline("issue-1");
-      expect(page.entries).toEqual([]);
-      expect(page.has_more_after).toBe(false);
+      const entries = await client.listTimeline("issue-1");
+      expect(entries).toEqual([]);
     });
 
     it("accepts a new entry type rather than crashing on enum drift", async () => {
-      stubFetchJson({
-        entries: [
-          {
-            type: "future_kind", // not in TS union
-            id: "e-1",
-            actor_type: "member",
-            actor_id: "u-1",
-            created_at: "2026-01-01T00:00:00Z",
-          },
-        ],
-        next_cursor: null,
-        prev_cursor: null,
-        has_more_before: false,
-        has_more_after: false,
-      });
+      stubFetchJson([
+        {
+          type: "future_kind", // not in TS union
+          id: "e-1",
+          actor_type: "member",
+          actor_id: "u-1",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ]);
       const client = new ApiClient("https://api.example.test");
-      const page = await client.listTimeline("issue-1");
-      expect(page.entries).toHaveLength(1);
-      expect(page.entries[0]?.type).toBe("future_kind");
+      const entries = await client.listTimeline("issue-1");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.type).toBe("future_kind");
     });
 
     // Forward-compat: when the server adds a new field to an existing
@@ -79,51 +60,21 @@ describe("ApiClient schema fallback", () => {
     // zod 4 strips it, which would silently break a future TS type that
     // adopts the field — see schemas.ts header comment.
     it("preserves unknown fields the schema didn't list", async () => {
-      stubFetchJson({
-        entries: [
-          {
-            type: "comment",
-            id: "e-1",
-            actor_type: "member",
-            actor_id: "u-1",
-            created_at: "2026-01-01T00:00:00Z",
-            // New server-side field not present in TimelineEntrySchema:
-            future_field: { nested: "value" },
-          },
-        ],
-        next_cursor: null,
-        prev_cursor: null,
-        has_more_before: false,
-        has_more_after: false,
-        // New top-level field not present in TimelinePageSchema:
-        page_metadata: { took_ms: 42 },
-      });
+      stubFetchJson([
+        {
+          type: "comment",
+          id: "e-1",
+          actor_type: "member",
+          actor_id: "u-1",
+          created_at: "2026-01-01T00:00:00Z",
+          // New server-side field not present in TimelineEntrySchema:
+          future_field: { nested: "value" },
+        },
+      ]);
       const client = new ApiClient("https://api.example.test");
-      const page = await client.listTimeline("issue-1");
-      const raw = page as unknown as Record<string, unknown>;
-      const entry = page.entries[0] as unknown as Record<string, unknown>;
+      const entries = await client.listTimeline("issue-1");
+      const entry = entries[0] as unknown as Record<string, unknown>;
       expect(entry.future_field).toEqual({ nested: "value" });
-      expect(raw.page_metadata).toEqual({ took_ms: 42 });
-    });
-
-    it("returns an empty page when the body is null", async () => {
-      stubFetchJson(null);
-      const client = new ApiClient("https://api.example.test");
-      const page = await client.listTimeline("issue-1");
-      expect(page.entries).toEqual([]);
-    });
-
-    it("treats null arrays as empty arrays", async () => {
-      stubFetchJson({
-        entries: null,
-        next_cursor: null,
-        prev_cursor: null,
-        has_more_before: false,
-        has_more_after: false,
-      });
-      const client = new ApiClient("https://api.example.test");
-      const page = await client.listTimeline("issue-1");
-      expect(page.entries).toEqual([]);
     });
   });
 

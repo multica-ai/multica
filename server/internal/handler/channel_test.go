@@ -154,7 +154,7 @@ func TestListAndGet_PrivateInvisibleToNonMembers(t *testing.T) {
 	// list and direct GET should 404.
 	w = httptest.NewRecorder()
 	req = newRequest("GET", "/api/channels", nil)
-	req.Header.Set("X-Agent-ID", testAgentID())
+	req = setAgentActor(t, req, testAgentID())
 	testHandler.ListChannels(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("agent ListChannels: want 200, got %d", w.Code)
@@ -169,7 +169,7 @@ func TestListAndGet_PrivateInvisibleToNonMembers(t *testing.T) {
 
 	w = httptest.NewRecorder()
 	req = newRequest("GET", "/api/channels/"+priv.ID, nil)
-	req.Header.Set("X-Agent-ID", testAgentID())
+	req = setAgentActor(t, req, testAgentID())
 	req = withURLParam(req, "channelId", priv.ID)
 	testHandler.GetChannel(w, req)
 	if w.Code != http.StatusNotFound {
@@ -392,7 +392,7 @@ func TestAddRemoveChannelMember(t *testing.T) {
 	// As that agent, GetChannel should now succeed.
 	w = httptest.NewRecorder()
 	req = newRequest("GET", "/api/channels/"+ch.ID, nil)
-	req.Header.Set("X-Agent-ID", testAgentID())
+	req = setAgentActor(t, req, testAgentID())
 	req = withURLParam(req, "channelId", ch.ID)
 	testHandler.GetChannel(w, req)
 	if w.Code != http.StatusOK {
@@ -412,7 +412,7 @@ func TestAddRemoveChannelMember(t *testing.T) {
 	// As that agent, GetChannel should now 404 again.
 	w = httptest.NewRecorder()
 	req = newRequest("GET", "/api/channels/"+ch.ID, nil)
-	req.Header.Set("X-Agent-ID", testAgentID())
+	req = setAgentActor(t, req, testAgentID())
 	req = withURLParam(req, "channelId", ch.ID)
 	testHandler.GetChannel(w, req)
 	if w.Code != http.StatusNotFound {
@@ -676,7 +676,7 @@ func TestSearchChannelMessages_RespectsVisibilityAndSoftDelete(t *testing.T) {
 	// Agent (non-member of priv) — only the public hit.
 	w = httptest.NewRecorder()
 	req = newRequest("GET", "/api/channels/search?q=umbrellafish", nil)
-	req.Header.Set("X-Agent-ID", testAgentID())
+	req = setAgentActor(t, req, testAgentID())
 	testHandler.SearchChannelMessages(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("agent search: %d", w.Code)
@@ -904,7 +904,7 @@ func TestEditChannelMessage_AuthorOnly(t *testing.T) {
 	req = newRequest("PATCH", "/api/channels/"+ch.ID+"/messages/"+msg.ID, map[string]any{
 		"content": "agent tries",
 	})
-	req.Header.Set("X-Agent-ID", testAgentID())
+	req = setAgentActor(t, req, testAgentID())
 	req = withURLParams(req, "channelId", ch.ID, "messageId", msg.ID)
 	testHandler.UpdateChannelMessage(w, req)
 	// Note: agent isn't a member, so requireChannelAccess fires first
@@ -1001,7 +1001,7 @@ func TestDeleteChannelMessage_ByChannelAdmin(t *testing.T) {
 	req = newRequest("POST", "/api/channels/"+ch.ID+"/messages", map[string]any{
 		"content": "agent message",
 	})
-	req.Header.Set("X-Agent-ID", testAgentID())
+	req = setAgentActor(t, req, testAgentID())
 	req = withURLParam(req, "channelId", ch.ID)
 	testHandler.CreateChannelMessage(w, req)
 	if w.Code != http.StatusCreated {
@@ -1309,7 +1309,7 @@ func TestReactions_HiddenFromNonMembersOfPrivateChannel(t *testing.T) {
 	// because the proper invariant is "no leak via the parent surface".
 	w = httptest.NewRecorder()
 	req = newRequest("GET", "/api/channels/"+ch.ID+"/messages", nil)
-	req.Header.Set("X-Agent-ID", testAgentID())
+	req = setAgentActor(t, req, testAgentID())
 	req = withURLParam(req, "channelId", ch.ID)
 	testHandler.ListChannelMessages(w, req)
 	if w.Code != http.StatusNotFound {
@@ -1323,7 +1323,7 @@ func TestReactions_HiddenFromNonMembersOfPrivateChannel(t *testing.T) {
 	req = newRequest("POST", "/api/channels/"+ch.ID+"/messages/"+msg.ID+"/reactions", map[string]any{
 		"emoji": "👀",
 	})
-	req.Header.Set("X-Agent-ID", testAgentID())
+	req = setAgentActor(t, req, testAgentID())
 	req = withURLParams(req, "channelId", ch.ID, "messageId", msg.ID)
 	testHandler.AddChannelReaction(w, req)
 	if w.Code != http.StatusNotFound {

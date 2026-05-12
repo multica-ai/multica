@@ -253,9 +253,12 @@ multica issue list --limit 20 --output json
 ### Get Issue
 
 ```bash
-multica issue get <id>
+multica issue get MUL-123
+multica issue get <uuid>
 multica issue get <id> --output json
 ```
+
+`<id>` 同时接受 issue key（`multica issue list` 表格里直接显示，例如 `MUL-123`）和完整 UUID（给 `list` 加 `--full-id` 可显示）。同样的规则适用于下面 `update` / `assign` / `status` / `comment` / `subscriber` / `runs` 等接受 `<id>` 的命令。
 
 ### Create Issue
 

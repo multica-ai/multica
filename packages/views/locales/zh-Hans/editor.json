@@ -33,6 +33,9 @@
     "link_copied": "已复制链接",
     "copy_link_failed": "复制链接失败"
   },
+  "attachment": {
+    "download_failed": "下载链接获取失败，请稍后重试。"
+  },
   "link_hover": {
     "copy_link": "复制链接",
     "open_link": "打开链接",

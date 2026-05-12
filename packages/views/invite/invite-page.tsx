@@ -69,7 +69,10 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
       // onboarded_at inside the same transaction, but explicitly calling
       // markOnboardingComplete + refreshMe here keeps local user state in
       // sync immediately so downstream guards don't see stale `null`.
-      await api.markOnboardingComplete({ completion_path: "invite_accept" });
+      await api.markOnboardingComplete({
+        completion_path: "invite_accept",
+        workspace_id: invitation?.workspace_id,
+      });
       await useAuthStore.getState().refreshMe();
       setDone("accepted");
       // Fetch the refreshed workspace list so we know the joined workspace's slug.

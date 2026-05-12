@@ -8,7 +8,9 @@
     "placeholder_no_agent": "创建一个智能体后才能开始对话",
     "placeholder_archived": "此会话已归档",
     "placeholder_named": "告诉 {{name}} 该做什么...",
-    "placeholder_default": "告诉我该做什么..."
+    "placeholder_default": "告诉我该做什么...",
+    "send_tooltip": "发送",
+    "stop_tooltip": "停止"
   },
   "message_list": {
     "show_details": "查看详情",

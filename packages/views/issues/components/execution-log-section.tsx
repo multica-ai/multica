@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Loader2, Square } from "lucide-react";
+import { ChevronRight, Loader2, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
@@ -165,7 +165,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
               {showPast && (
                 <div className="mt-0.5 space-y-0.5">
                   {pastTasks.map((task) => (
-                    <PastRow key={task.id} task={task} />
+                    <PastRow key={task.id} task={task} issueId={issueId} />
                   ))}
                 </div>
               )}
@@ -320,8 +320,9 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 
 // ─── Past row ──────────────────────────────────────────────────────────────
 
-function PastRow({ task }: { task: AgentTask }) {
+function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
+  const [retrying, setRetrying] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
@@ -330,6 +331,27 @@ function PastRow({ task }: { task: AgentTask }) {
     task.status === "failed" && task.failure_reason
       ? failureReasonLabel[task.failure_reason as TaskFailureReason]
       : null;
+
+  // Retry only makes sense for terminal-but-not-success rows. The rerun
+  // endpoint creates a fresh task on the issue's current agent assignee
+  // (not necessarily this row's agent) — clicking retry on a row whose
+  // agent has since been reassigned will rerun under the new assignee.
+  const canRetry = task.status === "failed" || task.status === "cancelled";
+
+  const handleRetry = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      await api.rerunIssue(issueId);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed));
+    } finally {
+      // Reset on both success and failure: the past row stays mounted
+      // (its task.id is unchanged), so leaving `retrying` true on success
+      // would pin the button as a permanent spinner.
+      setRetrying(false);
+    }
+  };
 
   return (
     <RowShell task={task}>
@@ -340,6 +362,28 @@ function PastRow({ task }: { task: AgentTask }) {
       </span>
       <RowActions>
         <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
+        {canRetry && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={handleRetry}
+                  disabled={retrying}
+                  aria-label={t(($) => $.execution_log.retry_task_aria)}
+                />
+              }
+              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {retrying ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RotateCcw className="h-3.5 w-3.5" />
+              )}
+            </TooltipTrigger>
+            <TooltipContent>{t(($) => $.execution_log.retry_task_tooltip)}</TooltipContent>
+          </Tooltip>
+        )}
       </RowActions>
     </RowShell>
   );

@@ -860,3 +860,262 @@ func TestNotification_ParentBubble_PriorityChangeSuppressed(t *testing.T) {
 		t.Fatalf("expected 0 inbox items bubbled to parent subscriber for priority_changed, got %d", len(items))
 	}
 }
+
+// countInboxByTypeForRecipient counts inbox rows of a given type for a
+// recipient, including archived rows. Used to distinguish "row never created"
+// from "row archived."
+func countInboxByTypeForRecipient(t *testing.T, recipientID, notifType string) (active, archived int) {
+	t.Helper()
+	rows, err := testPool.Query(context.Background(), `
+		SELECT archived FROM inbox_item
+		WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND type = $3
+	`, testWorkspaceID, recipientID, notifType)
+	if err != nil {
+		t.Fatalf("countInboxByTypeForRecipient: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var isArchived bool
+		if err := rows.Scan(&isArchived); err != nil {
+			t.Fatalf("countInboxByTypeForRecipient scan: %v", err)
+		}
+		if isArchived {
+			archived++
+		} else {
+			active++
+		}
+	}
+	return active, archived
+}
+
+// publishStatusChange is a small helper to publish the issue:updated event
+// shape used by the notification listener for status-only transitions.
+func publishStatusChange(bus *events.Bus, issueID, newStatus, prevStatus string) {
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "task_failed dismiss test",
+				Status:      newStatus,
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+			},
+			"assignee_changed": false,
+			"status_changed":   true,
+			"prev_status":      prevStatus,
+		},
+	})
+}
+
+// TestNotification_StatusChange_ArchivesStaleTaskFailed verifies that when an
+// issue transitions into a terminal status (in_review/done/cancelled), any
+// existing task_failed inbox rows for that issue are archived for every
+// affected member recipient, an inbox:batch-archived event fires per
+// recipient, and sibling notifications on the same issue are untouched.
+func TestNotification_StatusChange_ArchivesStaleTaskFailed(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	subEmail := "notif-archive-task-failed-sub@multica.ai"
+	subID := createTestUser(t, subEmail)
+	t.Cleanup(func() { cleanupTestUser(t, subEmail) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+	addTestSubscriber(t, issueID, "member", subID, "assignee")
+
+	agentID := "00000000-0000-0000-0000-aaaaaaaaaaaa"
+
+	// Two failed runs land before the status flip.
+	for i := 0; i < 2; i++ {
+		bus.Publish(events.Event{
+			Type:        protocol.EventTaskFailed,
+			WorkspaceID: testWorkspaceID,
+			ActorType:   "system",
+			Payload: map[string]any{
+				"task_id":  "00000000-0000-0000-0000-bbbbbbbbbbbb",
+				"agent_id": agentID,
+				"issue_id": issueID,
+			},
+		})
+	}
+
+	// A separate non-task notification on the same issue, so we can prove
+	// the archive scope is narrow. Use a comment-like notification by
+	// directly inserting a row of a different type.
+	_, err := testPool.Exec(context.Background(), `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, details)
+		VALUES ($1, 'member', $2, 'new_comment', 'info', $3, 'sibling notification', '{}')
+	`, testWorkspaceID, testUserID, issueID)
+	if err != nil {
+		t.Fatalf("seed sibling notification: %v", err)
+	}
+
+	if active, _ := countInboxByTypeForRecipient(t, testUserID, "task_failed"); active != 2 {
+		t.Fatalf("precondition: expected 2 active task_failed rows for creator, got %d", active)
+	}
+	if active, _ := countInboxByTypeForRecipient(t, subID, "task_failed"); active != 2 {
+		t.Fatalf("precondition: expected 2 active task_failed rows for sub, got %d", active)
+	}
+
+	// Track the batch-archived events fired during the status change.
+	var batchArchived []events.Event
+	bus.Subscribe(protocol.EventInboxBatchArchived, func(e events.Event) {
+		batchArchived = append(batchArchived, e)
+	})
+
+	publishStatusChange(bus, issueID, "in_review", "in_progress")
+
+	// task_failed rows are archived for both recipients.
+	for _, recipient := range []string{testUserID, subID} {
+		active, archived := countInboxByTypeForRecipient(t, recipient, "task_failed")
+		if active != 0 {
+			t.Fatalf("recipient %s: expected 0 active task_failed rows after terminal status, got %d", recipient, active)
+		}
+		if archived != 2 {
+			t.Fatalf("recipient %s: expected 2 archived task_failed rows after terminal status, got %d", recipient, archived)
+		}
+	}
+
+	// Sibling notification on the same issue is untouched.
+	if active, _ := countInboxByTypeForRecipient(t, testUserID, "new_comment"); active != 1 {
+		t.Fatalf("expected sibling new_comment row to remain active, got %d active", active)
+	}
+
+	// One inbox:batch-archived event per affected recipient.
+	if len(batchArchived) != 2 {
+		t.Fatalf("expected 2 inbox:batch-archived events (one per recipient), got %d", len(batchArchived))
+	}
+	seenRecipients := map[string]bool{}
+	for _, e := range batchArchived {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			t.Fatalf("inbox:batch-archived: unexpected payload type %T", e.Payload)
+		}
+		recipientID, _ := payload["recipient_id"].(string)
+		if recipientID == "" {
+			t.Fatalf("inbox:batch-archived: missing recipient_id in payload %+v", payload)
+		}
+		if payload["issue_id"] != issueID {
+			t.Fatalf("inbox:batch-archived: expected issue_id %q, got %v", issueID, payload["issue_id"])
+		}
+		if payload["reason"] != "issue_status_terminal" {
+			t.Fatalf("inbox:batch-archived: expected reason 'issue_status_terminal', got %v", payload["reason"])
+		}
+		if count, _ := payload["count"].(int64); count != 2 {
+			t.Fatalf("inbox:batch-archived: expected count=2 for recipient %s, got %v", recipientID, payload["count"])
+		}
+		seenRecipients[recipientID] = true
+	}
+	if !seenRecipients[testUserID] || !seenRecipients[subID] {
+		t.Fatalf("expected batch-archived events for both creator and sub, got %v", seenRecipients)
+	}
+}
+
+// TestNotification_StatusChange_NonTerminalKeepsTaskFailed verifies that a
+// transition to a non-terminal status (e.g. in_progress) does NOT archive
+// existing task_failed inbox rows.
+func TestNotification_StatusChange_NonTerminalKeepsTaskFailed(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskFailed,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "system",
+		Payload: map[string]any{
+			"task_id":  "00000000-0000-0000-0000-bbbbbbbbbbbb",
+			"agent_id": "00000000-0000-0000-0000-aaaaaaaaaaaa",
+			"issue_id": issueID,
+		},
+	})
+
+	if active, _ := countInboxByTypeForRecipient(t, testUserID, "task_failed"); active != 1 {
+		t.Fatalf("precondition: expected 1 active task_failed row, got %d", active)
+	}
+
+	publishStatusChange(bus, issueID, "in_progress", "todo")
+
+	// task_failed row stays active because in_progress is not terminal.
+	active, archived := countInboxByTypeForRecipient(t, testUserID, "task_failed")
+	if active != 1 || archived != 0 {
+		t.Fatalf("expected task_failed row to remain active after non-terminal transition, got active=%d archived=%d", active, archived)
+	}
+}
+
+// TestNotification_StatusChange_ReopenSurfacesNewTaskFailed verifies that
+// after a terminal-status auto-archive, a status flip back to in_progress
+// followed by a new task failure produces a fresh, visible task_failed row.
+// This guards the "reopen and rerun" path described in the design.
+func TestNotification_StatusChange_ReopenSurfacesNewTaskFailed(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+
+	agentID := "00000000-0000-0000-0000-aaaaaaaaaaaa"
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskFailed,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "system",
+		Payload: map[string]any{
+			"task_id":  "00000000-0000-0000-0000-bbbbbbbbbbbb",
+			"agent_id": agentID,
+			"issue_id": issueID,
+		},
+	})
+
+	// First terminal transition archives the original failure.
+	publishStatusChange(bus, issueID, "in_review", "in_progress")
+	if active, archived := countInboxByTypeForRecipient(t, testUserID, "task_failed"); active != 0 || archived != 1 {
+		t.Fatalf("after terminal transition: expected active=0 archived=1, got active=%d archived=%d", active, archived)
+	}
+
+	// Reviewer kicks the issue back; a rerun fails again.
+	publishStatusChange(bus, issueID, "in_progress", "in_review")
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskFailed,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "system",
+		Payload: map[string]any{
+			"task_id":  "00000000-0000-0000-0000-cccccccccccc",
+			"agent_id": agentID,
+			"issue_id": issueID,
+		},
+	})
+
+	// The new failure is visible; the old archived row stays archived.
+	active, archived := countInboxByTypeForRecipient(t, testUserID, "task_failed")
+	if active != 1 {
+		t.Fatalf("expected 1 active task_failed row after reopen+fail, got %d", active)
+	}
+	if archived != 1 {
+		t.Fatalf("expected 1 archived task_failed row preserved from prior cycle, got %d", archived)
+	}
+}

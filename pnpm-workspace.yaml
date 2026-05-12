@@ -46,6 +46,9 @@ catalog:
   # Loading animations (chat StatusPill)
   unicode-animations: "^1.0.3"
 
+  # Virtualized timeline (issue detail comments)
+  react-virtuoso: "^4.14.0"
+
   # Product analytics
   posthog-js: "^1.176.1"
 

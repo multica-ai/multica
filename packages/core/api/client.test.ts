@@ -144,4 +144,59 @@ describe("ApiClient", () => {
     expect(headers["X-Client-Version"]).toBeUndefined();
     expect(headers["X-Client-OS"]).toBeUndefined();
   });
+
+  describe("getAttachment", () => {
+    it("returns the parsed attachment for a well-formed response", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              id: "att-1",
+              workspace_id: "ws-1",
+              issue_id: null,
+              comment_id: null,
+              uploader_type: "member",
+              uploader_id: "u-1",
+              filename: "report.md",
+              url: "https://static.example.test/ws/att-1.md",
+              download_url:
+                "https://static.example.test/ws/att-1.md?Policy=p&Signature=s&Key-Pair-Id=k",
+              content_type: "text/markdown",
+              size_bytes: 123,
+              created_at: "2026-05-11T00:00:00Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const att = await client.getAttachment("att-1");
+
+      expect(att.id).toBe("att-1");
+      expect(att.download_url).toContain("Policy=");
+    });
+
+    it("falls back to an empty attachment when the response is missing download_url", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({ id: "att-1" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const att = await client.getAttachment("att-1");
+
+      // parseWithFallback returns the EMPTY_ATTACHMENT record so callers can
+      // safely read `download_url` without crashing — they'll see "" and
+      // surface a user-facing error instead of opening `undefined`.
+      expect(att.id).toBe("");
+      expect(att.download_url).toBe("");
+    });
+  });
 });

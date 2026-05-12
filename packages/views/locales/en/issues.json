@@ -128,6 +128,8 @@
     "pin_tooltip": "Pin to sidebar",
     "unpin_tooltip": "Unpin from sidebar",
     "sidebar_tooltip": "Toggle sidebar",
+    "cmdf_toast_title": "Find on page only covers what's visible",
+    "cmdf_toast_description": "The timeline is virtualized — ⌘F can't see off-screen comments. Full in-app search is coming.",
     "update_failed": "Failed to update issue",
     "link_copied": "Link copied",
     "link_copy_failed": "Failed to copy link",
@@ -136,11 +138,7 @@
     "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent"
   },
   "timeline": {
-    "show_older": "Show older",
-    "show_newer": "Show newer",
-    "loading": "Loading...",
-    "jump_to_latest": "Jump to latest",
-    "jump_to_latest_with_count": "Jump to latest · {{count}} new"
+    "loading": "Loading..."
   },
   "activity": {
     "created": "created this issue",
@@ -179,8 +177,20 @@
     "reply_count_one": "{{count}} reply",
     "reply_count_other": "{{count}} replies",
     "leave_comment_placeholder": "Leave a comment...",
+    "send_tooltip": "Send",
     "expand_tooltip": "Expand",
-    "collapse_tooltip": "Collapse"
+    "collapse_tooltip": "Collapse",
+    "resolve": {
+      "resolve_action": "Resolve thread",
+      "unresolve_action": "Unresolve thread",
+      "collapse": "Collapse",
+      "bar_one": "{{count}} resolved comment from {{authors}}",
+      "bar_other": "{{count}} resolved comments from {{authors}}",
+      "bar_authors_more_one": "{{names}} and {{count}} other",
+      "bar_authors_more_other": "{{names}} and {{count}} others",
+      "resolve_failed": "Failed to resolve thread",
+      "unresolve_failed": "Failed to unresolve thread"
+    }
   },
   "reply": {
     "placeholder": "Leave a reply...",
@@ -189,6 +199,8 @@
   },
   "agent_live": {
     "is_working": "{{name}} is working",
+    "is_queued": "{{name}} is queued",
+    "queued_elapsed_prefix": "queued for {{elapsed}}",
     "fallback_name": "Agent",
     "tool_count_one": "{{count}} tool",
     "tool_count_other": "{{count}} tools",
@@ -203,6 +215,9 @@
     "hide_past": "Hide past runs ({{count}})",
     "cancel_task_tooltip": "Cancel task",
     "cancel_task_aria": "Cancel task",
+    "retry_task_tooltip": "Retry task",
+    "retry_task_aria": "Retry task",
+    "retry_failed": "Failed to retry task",
     "transcript_tooltip": "View transcript",
     "cancel_failed": "Failed to cancel task",
     "trigger_retry": "Retry",
