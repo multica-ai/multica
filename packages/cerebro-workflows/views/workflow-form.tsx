@@ -15,6 +15,7 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
   ACTION_OPTIONS,
   TRIGGER_OPTIONS,
+  WORKFLOW_TEMPLATES,
   cerebroWorkflowDetailOptions,
   cerebroWorkflowsKeys,
   createWorkflow,
@@ -157,6 +158,38 @@ export function WorkflowForm({ workflowId }: WorkflowFormProps) {
             save.mutate();
           }}
         >
+          {!workflowId && (
+            <Section title="Start fra en skabelon (valgfri)">
+              <ul className="flex flex-col divide-y">
+                {WORKFLOW_TEMPLATES.map((tpl) => (
+                  <li
+                    key={tpl.key}
+                    className="flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">{tpl.label}</div>
+                      <div className="text-[11px] text-muted-foreground">{tpl.description}</div>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={tpl.status !== "active"}
+                      data-testid={`template-use-${tpl.key}`}
+                      onClick={() => {
+                        if (tpl.status === "active" && tpl.defaults) {
+                          setForm(formStateFromInput(tpl.defaults));
+                        }
+                      }}
+                    >
+                      {tpl.status === "active" ? "Brug" : "Kommer i fase 2"}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          )}
+
           <Section title="Grundlæggende">
             <Field label="Navn">
               <Input
@@ -349,6 +382,30 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   );
+}
+
+// formStateFromInput unfolds the flat WorkflowWriteInput stored on a
+// template back into the (looser, UI-only) FormState shape. Inverse of
+// buildPayload below. Unknown fields default to EMPTY so a template doesn't
+// have to specify every action_config slot.
+function formStateFromInput(input: WorkflowWriteInput): FormState {
+  const tc = (input.trigger_config as { from_status?: string; to_status?: string } | null) ?? {};
+  const ac = (input.action_config as Record<string, unknown> | null) ?? {};
+  return {
+    ...EMPTY,
+    name: input.name ?? "",
+    enabled: input.enabled ?? true,
+    triggerType: input.trigger_type,
+    fromStatus: tc.from_status ?? "",
+    toStatus: tc.to_status ?? EMPTY.toStatus,
+    actionType: input.action_type,
+    setStatus: (ac.status as string) ?? EMPTY.setStatus,
+    subIssueTitle: (ac.title as string) ?? "",
+    subIssueDescription: (ac.description as string) ?? "",
+    reminderRecipientId: (ac.recipient_id as string) ?? "",
+    reminderRecipientType: ((ac.recipient_type as "member" | "agent") ?? "member"),
+    reminderMessage: (ac.message as string) ?? "",
+  };
 }
 
 function buildPayload(f: FormState): WorkflowWriteInput {
