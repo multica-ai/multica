@@ -41,9 +41,14 @@ spec:
         kubernetes.io/arch: arm64
       securityContext:
         runAsNonRoot: true
-        runAsUser: 65532
-        runAsGroup: 65532
-        fsGroup: 65532
+        # uid/gid 1000 = the `agent` user baked into
+        # ghcr.io/g2crowd/agent-runtime-base. Was 65532 when the agentrunner
+        # built its own image with the backend's distroless uid scheme; the
+        # shared base standardizes on 1000 (configurable via UID/GID build args
+        # if/when a consumer needs to align with a host volume).
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -69,7 +74,7 @@ spec:
             # The daemon writes claimed-task workspaces under this root; mounted
             # as a writable emptyDir volume below.
             - name: MULTICA_WORKSPACES_ROOT
-              value: /home/agentrunner/multica_workspaces
+              value: /home/agent/multica_workspaces
           # The daemon's /health endpoint binds to 127.0.0.1 only
           # (server/internal/daemon/health.go), so kubelet can't reach it via
           # TCP. Use `multica daemon status` instead — it reads the PID file
@@ -102,7 +107,7 @@ spec:
                 - ALL
           volumeMounts:
             - name: home
-              mountPath: /home/agentrunner
+              mountPath: /home/agent
             - name: tmp
               mountPath: /tmp
       volumes:

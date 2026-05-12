@@ -1,0 +1,6 @@
+**
+!Dockerfile
+!docker-bake.hcl
+!entrypoint.sh
+!README.md
+!.dockerignore

@@ -1,58 +1,25 @@
-# --- Build stage: build the multica CLI from source ---
-FROM golang:1.26-alpine AS builder
+# syntax=docker/dockerfile:1.7
+#
+# agentfarm-agentrunner — the Multica daemon, running as a single-tenant pod
+# that claims tasks for every workspace its PAT has access to.
+#
+# Reduced to a FROM + entrypoint shim on top of ghcr.io/g2crowd/agent-runtime-base
+# (see docker/agent-runtime-base/). The base image bakes in multica + every
+# coding-agent CLI the daemon shells out to (claude, codex, opencode, pi,
+# hermes), the GitHub CLI for private-repo cloning, plus the substrate (node,
+# git, ripgrep, tini, non-root agent user).
 
-RUN apk add --no-cache git
+ARG BASE_IMAGE=ghcr.io/g2crowd/agent-runtime-base
+ARG BASE_TAG=latest
 
-WORKDIR /src
+FROM ${BASE_IMAGE}:${BASE_TAG}
 
-COPY server/go.mod server/go.sum ./server/
-RUN cd server && go mod download
-
-COPY server/ ./server/
-
-ARG VERSION=dev
-ARG COMMIT=unknown
-RUN cd server && CGO_ENABLED=0 go build \
-      -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
-      -o bin/multica ./cmd/multica
-
-# --- Runtime stage: alpine + node + claude code + multica ---
-FROM alpine:3.21
-
-ARG CLAUDE_CODE_VERSION=latest
-
-RUN apk add --no-cache \
-      ca-certificates \
-      tzdata \
-      git \
-      bash \
-      tini \
-      nodejs \
-      npm \
-      rsync \
-      jq \
-      kubectl \
-      github-cli
-
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
-    && npm cache clean --force
-
-COPY --from=builder /src/server/bin/multica /usr/local/bin/multica
-
-# Non-root runtime user matching the backend image's uid/gid scheme.
-RUN addgroup -g 65532 -S agentrunner \
-    && adduser -u 65532 -S -G agentrunner -h /home/agentrunner -s /bin/bash agentrunner \
-    && mkdir -p /home/agentrunner/.multica /home/agentrunner/multica_workspaces \
-    && chown -R agentrunner:agentrunner /home/agentrunner
+USER root
 
 COPY docker/agentrunner/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh \
-    && chmod +x /usr/local/bin/entrypoint.sh
+  && chmod +x /usr/local/bin/entrypoint.sh
 
-USER agentrunner
-WORKDIR /home/agentrunner
+USER agent
 
-ENV HOME=/home/agentrunner \
-    MULTICA_WORKSPACES_ROOT=/home/agentrunner/multica_workspaces
-
-ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
