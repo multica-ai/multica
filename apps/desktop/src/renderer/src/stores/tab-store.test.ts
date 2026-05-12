@@ -169,6 +169,27 @@ describe("useTabStore actions", () => {
     expect(useTabStore.getState().byWorkspace.acme.tabs).toHaveLength(2); // default + projects
   });
 
+  it("openWorkspaceTab switches workspace when opening a path from another workspace", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.switchWorkspace("butter");
+
+    const id = store.openWorkspaceTab(
+      "/acme/inbox?issue=issue-1",
+      "/acme/inbox?issue=issue-1",
+      "Inbox",
+    );
+
+    const s = useTabStore.getState();
+    expect(s.activeWorkspaceSlug).toBe("acme");
+    expect(s.byWorkspace.butter.tabs).toHaveLength(1);
+    const activeTab = s.byWorkspace.acme.tabs.find(
+      (t) => t.id === s.byWorkspace.acme.activeTabId,
+    );
+    expect(activeTab?.id).toBe(id);
+    expect(activeTab?.path).toBe("/acme/inbox?issue=issue-1");
+  });
+
   it("closeTab on the last tab in a workspace reseeds the default tab", () => {
     const store = useTabStore.getState();
     store.switchWorkspace("acme");

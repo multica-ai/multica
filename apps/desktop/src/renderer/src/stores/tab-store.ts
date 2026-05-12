@@ -57,6 +57,17 @@ interface TabStore {
    *     (VSCode / Slack behavior — workspaces resume where you left off).
    */
   switchWorkspace: (slug: string, openPath?: string) => void;
+  /**
+   * Open a workspace-scoped tab from a full path.
+   *   - If the path belongs to the active workspace, behave like `openTab`.
+   *   - If the path belongs to another workspace, switch to that workspace
+   *     before opening the tab.
+   *   - If the target workspace group doesn't exist yet, create it with this
+   *     path as its first tab.
+   *   - If a tab with the exact path already exists in the target workspace,
+   *     activate it; otherwise add a new tab and activate it.
+   */
+  openWorkspaceTab: (path: string, title: string, icon: string) => string;
   /** Open-or-activate (dedupes by path) a tab in the active workspace. */
   openTab: (path: string, title: string, icon: string) => string;
   /** Always creates a new tab (no dedupe) in the active workspace. */
@@ -290,6 +301,57 @@ export const useTabStore = create<TabStore>()(
 
         // No openPath (or openPath was rejected) — just restore the group.
         set({ activeWorkspaceSlug: slug });
+      },
+
+      openWorkspaceTab(path, title, icon) {
+        const clean = sanitizeTabPath(path);
+        if (!clean) return "";
+
+        const targetSlug = extractWorkspaceSlug(clean);
+        if (!targetSlug) return "";
+
+        const { activeWorkspaceSlug, byWorkspace } = get();
+        if (targetSlug === activeWorkspaceSlug) {
+          return get().openTab(clean, title, icon);
+        }
+
+        const existing = byWorkspace[targetSlug];
+        if (!existing) {
+          const tab = makeTab(clean, title, icon);
+          set({
+            activeWorkspaceSlug: targetSlug,
+            byWorkspace: {
+              ...byWorkspace,
+              [targetSlug]: { tabs: [tab], activeTabId: tab.id },
+            },
+          });
+          return tab.id;
+        }
+
+        const match = existing.tabs.find((t) => t.path === clean);
+        if (match) {
+          set({
+            activeWorkspaceSlug: targetSlug,
+            byWorkspace: {
+              ...byWorkspace,
+              [targetSlug]: { ...existing, activeTabId: match.id },
+            },
+          });
+          return match.id;
+        }
+
+        const tab = makeTab(clean, title, icon);
+        set({
+          activeWorkspaceSlug: targetSlug,
+          byWorkspace: {
+            ...byWorkspace,
+            [targetSlug]: {
+              tabs: [...existing.tabs, tab],
+              activeTabId: tab.id,
+            },
+          },
+        });
+        return tab.id;
       },
 
       openTab(path, title, icon) {

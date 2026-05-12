@@ -90,7 +90,7 @@ function useInternalLinkHandler() {
       if (!path) return;
       const icon = resolveRouteIcon(path);
       const store = useTabStore.getState();
-      const tabId = store.openTab(path, path, icon);
+      const tabId = store.openWorkspaceTab(path, path, icon);
       store.setActiveTab(tabId);
     };
     window.addEventListener("multica:navigate", handler);
