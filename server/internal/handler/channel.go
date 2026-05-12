@@ -117,6 +117,11 @@ func (h *Handler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 			UserID_2:    parseUUID(req.MemberIDs[0]),
 		})
 		if err == nil {
+			// CEREBRO-PATCH(channel-create-dm-unarchive): JEH-1046 — explicit
+			// DM reopen is a re-surface signal. No-op when not archived.
+			if h.ChannelListen != nil {
+				h.ChannelListen.MaybeUnarchiveForUser(r.Context(), existing.ID, parseUUID(userID), workspaceID, "member", userID)
+			}
 			resp := h.channelToResponse(r.Context(), existing, userID)
 			writeJSON(w, http.StatusOK, resp)
 			return

@@ -304,14 +304,16 @@ func (s *Service) registerArchiveResurfaceListener() {
 		if err != nil {
 			return
 		}
-		s.maybeUnarchiveOnInbox(context.Background(), channelID, recipientID, e.WorkspaceID, e.ActorType, e.ActorID)
+		s.MaybeUnarchiveForUser(context.Background(), channelID, recipientID, e.WorkspaceID, e.ActorType, e.ActorID)
 	})
 }
 
-// maybeUnarchiveOnInbox re-surfaces a channel/dm in the recipient's inbox
-// when a new inbox_item lands for it. No-op for non-channel issues or when
-// the recipient hasn't archived the channel.
-func (s *Service) maybeUnarchiveOnInbox(
+// MaybeUnarchiveForUser re-surfaces a channel/dm in the user's inbox when a
+// signal arrives that they want it back — a new inbox_item lands (re-surface
+// listener), or the user explicitly reopens the DM via the new-message modal
+// (JEH-1046). No-op for non-channel issues or when the user hasn't archived
+// the channel. Best-effort: failures are logged but never bubble.
+func (s *Service) MaybeUnarchiveForUser(
 	ctx context.Context,
 	channelID, userID pgtype.UUID,
 	workspaceID, actorType, actorID string,
