@@ -33,7 +33,7 @@ import TableCell from "@tiptap/extension-table-cell";
 import { Table } from "@tiptap/extension-table";
 import { Markdown } from "@tiptap/markdown";
 import { ReactNodeViewRenderer } from "@tiptap/react";
-import { Extension, type AnyExtension } from "@tiptap/core";
+import { Extension, InputRule, type AnyExtension } from "@tiptap/core";
 import { Suggestion } from "@tiptap/suggestion";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { BaseMentionExtension } from "./mention-extension";
@@ -77,6 +77,45 @@ const ImageExtension = Image.extend({
   allowBase64: false,
 });
 
+/**
+ * Prevents the OrderedList wrapping input rule from creating a nested
+ * ordered list when the user types "N. " while already inside a listItem.
+ *
+ * Flow that causes the bug:
+ *   1. User types "1. text" -> orderedList created (childCount=1)
+ *   2. User presses Enter -> empty sibling listItem created (childCount=2)
+ *   3. User types "2. " in the empty item -> input rule fires:
+ *      joinPredicate = childCount(2) + start(1) = 3 != 2 -> no join
+ *      -> wraps the paragraph in a NEW nested orderedList
+ *
+ * Fix: run with priority 200 (above StarterKit's default 100) so this
+ * handler fires first. When inside a listItem, preserve the typed text
+ * as-is and add a step to the transaction. That marks the rule as handled
+ * and prevents the StarterKit orderedList rule from firing.
+ */
+const orderedListInputGuard = Extension.create({
+  name: "orderedListInputGuard",
+  priority: 200,
+
+  addInputRules() {
+    return [
+      new InputRule({
+        find: /^(\d+)\.\s$/,
+        handler: ({ state, range, match }) => {
+          const $from = state.selection.$from;
+          for (let depth = $from.depth; depth > 0; depth--) {
+            if ($from.node(depth).type.name === "listItem") {
+              state.tr.insertText(match[0], range.from, range.to);
+              return;
+            }
+          }
+          return null;
+        },
+      }),
+    ];
+  },
+});
+
 export interface EditorExtensionsOptions {
   placeholder?: string;
   queryClient?: import("@tanstack/react-query").QueryClient;
@@ -103,6 +142,7 @@ export function createEditorExtensions(
   const { placeholder: placeholderText } = options;
 
   return [
+    orderedListInputGuard,
     StarterKit.configure({
       heading: { levels: [1, 2, 3] },
       link: false,
