@@ -200,6 +200,60 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("getAttachmentTextContent", () => {
+    it("returns body text and the original content type from the X-* header", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response("# heading\n\nbody\n", {
+            status: 200,
+            headers: {
+              "Content-Type": "text/plain; charset=utf-8",
+              "X-Original-Content-Type": "text/markdown",
+            },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const { text, originalContentType } =
+        await client.getAttachmentTextContent("att-1");
+
+      expect(text).toBe("# heading\n\nbody\n");
+      expect(originalContentType).toBe("text/markdown");
+    });
+
+    it("throws PreviewTooLargeError on 413", async () => {
+      const { PreviewTooLargeError } = await import("./client");
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response("", { status: 413, statusText: "Payload Too Large" }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getAttachmentTextContent("att-1")).rejects.toBeInstanceOf(
+        PreviewTooLargeError,
+      );
+    });
+
+    it("throws PreviewUnsupportedError on 415", async () => {
+      const { PreviewUnsupportedError } = await import("./client");
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response("", { status: 415, statusText: "Unsupported Media Type" }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getAttachmentTextContent("att-1")).rejects.toBeInstanceOf(
+        PreviewUnsupportedError,
+      );
+    });
+  });
+
   describe("chat attachment wiring", () => {
     it("uploadFile includes chat_session_id in the FormData body", async () => {
       const fetchMock = vi.fn().mockResolvedValue(
