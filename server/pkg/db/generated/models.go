@@ -249,6 +249,44 @@ type CerebroChannelArchived struct {
 	ArchivedAt pgtype.Timestamptz `json:"archived_at"`
 }
 
+type CerebroCredential struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Type           string             `json:"type"`
+	Name           string             `json:"name"`
+	Description    string             `json:"description"`
+	EncryptedValue []byte             `json:"encrypted_value"`
+	ValueHint      string             `json:"value_hint"`
+	Metadata       []byte             `json:"metadata"`
+	CreatedByType  string             `json:"created_by_type"`
+	CreatedByID    pgtype.UUID        `json:"created_by_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	LastRotatedAt  pgtype.Timestamptz `json:"last_rotated_at"`
+}
+
+type CerebroCredentialAudit struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	CredentialID pgtype.UUID        `json:"credential_id"`
+	Action       string             `json:"action"`
+	ActorType    string             `json:"actor_type"`
+	ActorID      pgtype.UUID        `json:"actor_id"`
+	Metadata     []byte             `json:"metadata"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroCredentialBinding struct {
+	ID            pgtype.UUID        `json:"id"`
+	CredentialID  pgtype.UUID        `json:"credential_id"`
+	ResourceType  string             `json:"resource_type"`
+	ResourceID    pgtype.UUID        `json:"resource_id"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type CerebroFeatureFlag struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	UserID      pgtype.UUID        `json:"user_id"`
