@@ -105,7 +105,10 @@
     "decision_process": "Decision process",
     "communication_preference": "Communication preference",
     "risk_notes": "Risk notes",
-    "cooperation_history": "Cooperation history"
+    "cooperation_history": "Cooperation history",
+    "suggest": "Suggest profile",
+    "suggestion_title": "Profile suggestion",
+    "apply_suggestion": "Apply suggestion"
   },
   "projects": {
     "title": "Projects",
@@ -196,7 +199,11 @@
     "follow_up_issue_prefix": "Follow up:",
     "issue_title": "Issue title",
     "issue_description": "Issue description",
-    "create_button": "Create"
+    "create_button": "Create",
+    "new_mailbox": "New mailbox",
+    "mailbox_saved": "Mailbox settings saved",
+    "preview_import": "Preview import",
+    "tls_none": "No TLS"
   },
   "notes": {
     "title": "Notes & activity",

@@ -393,8 +393,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Post("/follow-up-issues", h.CreateCRMFollowUpIssue)
 						r.Get("/profile", h.GetCRMAccountProfile)
 						r.Put("/profile", h.UpsertCRMAccountProfile)
+						r.Post("/profile/suggestions", h.SuggestCRMAccountProfile)
+						r.Post("/profile/suggestions/{suggestionId}/apply", h.ApplyCRMAccountProfileSuggestion)
 					})
 				})
+				r.Route("/imap-settings", func(r chi.Router) {
+					r.Get("/", h.ListCRMIMAPSettings)
+					r.Put("/", h.UpsertCRMIMAPSetting)
+					r.Post("/{mailboxId}/test", h.TestCRMIMAPSetting)
+				})
+				r.Post("/imap/preview", h.PreviewCRMIMAP)
 				r.Route("/email-threads", func(r chi.Router) {
 					r.Get("/", h.ListCRMEmailThreads)
 					r.Post("/", h.CreateCRMEmailThread)

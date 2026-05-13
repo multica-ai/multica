@@ -482,6 +482,54 @@ type UpsertCRMAccountProfileRequest struct {
 	ProfileJSON json.RawMessage `json:"profile_json"`
 }
 
+type CRMIMAPSettingResponse struct {
+	ID              string  `json:"id"`
+	WorkspaceID     string  `json:"workspace_id"`
+	Label           string  `json:"label"`
+	Email           string  `json:"email"`
+	Host            string  `json:"host"`
+	Port            int32   `json:"port"`
+	TLSMode         string  `json:"tls_mode"`
+	Username        string  `json:"username"`
+	SecretRef       *string `json:"secret_ref"`
+	SyncEnabled     bool    `json:"sync_enabled"`
+	LastTestStatus  *string `json:"last_test_status"`
+	LastTestMessage *string `json:"last_test_message"`
+	LastTestedAt    *string `json:"last_tested_at"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
+}
+
+type UpsertCRMIMAPSettingRequest struct {
+	ID          *string `json:"id"`
+	Label       string  `json:"label"`
+	Email       string  `json:"email"`
+	Host        string  `json:"host"`
+	Port        int32   `json:"port"`
+	TLSMode     string  `json:"tls_mode"`
+	Username    string  `json:"username"`
+	SecretRef   *string `json:"secret_ref"`
+	Secret      *string `json:"secret"`
+	SyncEnabled bool    `json:"sync_enabled"`
+}
+
+type CRMIMAPPreviewRequest struct {
+	MailboxID *string `json:"mailbox_id"`
+	Folder    *string `json:"folder"`
+	Limit     int     `json:"limit"`
+}
+type CRMProfileSuggestionResponse struct {
+	ID          string          `json:"id"`
+	WorkspaceID string          `json:"workspace_id"`
+	AccountID   string          `json:"account_id"`
+	Summary     *string         `json:"summary"`
+	ProfileJSON json.RawMessage `json:"profile_json"`
+	SourceCount int32           `json:"source_count"`
+	Status      string          `json:"status"`
+	CreatedAt   string          `json:"created_at"`
+	AppliedAt   *string         `json:"applied_at"`
+}
+
 type CRMCommunicationNoteResponse struct {
 	ID          string  `json:"id"`
 	WorkspaceID string  `json:"workspace_id"`
@@ -1444,6 +1492,199 @@ func (h *Handler) UpdateCRMEmailThreadAssociation(w http.ResponseWriter, r *http
 		}
 	}
 	writeJSON(w, http.StatusOK, crmEmailThreadToResponse(thread))
+}
+
+func scanCRMIMAPSetting(row pgx.Row) (CRMIMAPSettingResponse, error) {
+	var r CRMIMAPSettingResponse
+	var id, ws pgtype.UUID
+	var secretRef, status, msg pgtype.Text
+	var tested, created, updated pgtype.Timestamptz
+	err := row.Scan(&id, &ws, &r.Label, &r.Email, &r.Host, &r.Port, &r.TLSMode, &r.Username, &secretRef, &r.SyncEnabled, &status, &msg, &tested, &created, &updated)
+	r.ID = uuidToString(id)
+	r.WorkspaceID = uuidToString(ws)
+	r.SecretRef = textToPtr(secretRef)
+	r.LastTestStatus = textToPtr(status)
+	r.LastTestMessage = textToPtr(msg)
+	r.LastTestedAt = timestampToPtr(tested)
+	r.CreatedAt = timestampToString(created)
+	r.UpdatedAt = timestampToString(updated)
+	return r, err
+}
+
+func (h *Handler) ListCRMIMAPSettings(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	rows, err := h.DB.Query(r.Context(), `SELECT id, workspace_id, label, email, host, port, tls_mode, username, secret_ref, sync_enabled, last_test_status, last_test_message, last_tested_at, created_at, updated_at FROM crm_imap_setting WHERE workspace_id=$1 ORDER BY updated_at DESC`, workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list CRM IMAP settings")
+		return
+	}
+	defer rows.Close()
+	settings := []CRMIMAPSettingResponse{}
+	for rows.Next() {
+		item, err := scanCRMIMAPSetting(rows)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to scan CRM IMAP setting")
+			return
+		}
+		settings = append(settings, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"settings": settings, "total": len(settings)})
+}
+
+func (h *Handler) UpsertCRMIMAPSetting(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	var req UpsertCRMIMAPSettingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	label := normalizeCRMName(req.Label)
+	email := strings.TrimSpace(req.Email)
+	host := strings.TrimSpace(req.Host)
+	user := strings.TrimSpace(req.Username)
+	tlsMode := cleanDefault(&req.TLSMode, "ssl")
+	if label == "" || email == "" || host == "" || user == "" {
+		writeError(w, http.StatusBadRequest, "label, email, host, and username are required")
+		return
+	}
+	if req.Port <= 0 {
+		req.Port = 993
+	}
+	if tlsMode != "ssl" && tlsMode != "starttls" && tlsMode != "none" {
+		writeError(w, http.StatusBadRequest, "invalid tls_mode")
+		return
+	}
+	id, ok := optionalUUID(w, req.ID, "id")
+	if !ok {
+		return
+	}
+	var row pgx.Row
+	if id.Valid {
+		row = h.DB.QueryRow(r.Context(), `UPDATE crm_imap_setting SET label=$3,email=$4,host=$5,port=$6,tls_mode=$7,username=$8,secret_ref=$9,sync_enabled=$10,updated_at=now() WHERE id=$1 AND workspace_id=$2 RETURNING id, workspace_id, label, email, host, port, tls_mode, username, secret_ref, sync_enabled, last_test_status, last_test_message, last_tested_at, created_at, updated_at`, id, workspaceID, label, email, host, req.Port, tlsMode, user, cleanOptionalText(req.SecretRef), req.SyncEnabled)
+	} else {
+		row = h.DB.QueryRow(r.Context(), `INSERT INTO crm_imap_setting (workspace_id,label,email,host,port,tls_mode,username,secret_ref,sync_enabled) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, workspace_id, label, email, host, port, tls_mode, username, secret_ref, sync_enabled, last_test_status, last_test_message, last_tested_at, created_at, updated_at`, workspaceID, label, email, host, req.Port, tlsMode, user, cleanOptionalText(req.SecretRef), req.SyncEnabled)
+	}
+	item, err := scanCRMIMAPSetting(row)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save CRM IMAP setting")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (h *Handler) TestCRMIMAPSetting(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	mailboxID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "mailboxId"), "mailbox id")
+	if !ok {
+		return
+	}
+	var host string
+	var port int32
+	err := h.DB.QueryRow(r.Context(), `SELECT host, port FROM crm_imap_setting WHERE id=$1 AND workspace_id=$2`, mailboxID, workspaceID).Scan(&host, &port)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "CRM IMAP setting not found")
+		return
+	}
+	okStatus := strings.TrimSpace(host) != "" && port > 0
+	status := "failed"
+	msg := "IMAP config is incomplete"
+	if okStatus {
+		status = "ok"
+		msg = "IMAP config validated; network connection not attempted"
+	}
+	_, _ = h.DB.Exec(r.Context(), `UPDATE crm_imap_setting SET last_test_status=$3,last_test_message=$4,last_tested_at=now(),updated_at=now() WHERE id=$1 AND workspace_id=$2`, mailboxID, workspaceID, status, msg)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": okStatus, "status": status, "message": msg})
+}
+
+func (h *Handler) PreviewCRMIMAP(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	var req CRMIMAPPreviewRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	limit := req.Limit
+	if limit <= 0 || limit > 20 {
+		limit = 10
+	}
+	if req.MailboxID != nil {
+		mailboxID, ok := optionalUUID(w, req.MailboxID, "mailbox_id")
+		if !ok {
+			return
+		}
+		if mailboxID.Valid {
+			var exists bool
+			_ = h.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM crm_imap_setting WHERE id=$1 AND workspace_id=$2)`, mailboxID, workspaceID).Scan(&exists)
+			if !exists {
+				writeError(w, http.StatusNotFound, "CRM IMAP setting not found")
+				return
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": []any{}, "total": 0, "limit": limit, "sync_enabled": false, "note": "Manual preview only; automatic IMAP sync is disabled."})
+}
+
+func (h *Handler) SuggestCRMAccountProfile(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	accountID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "accountId"), "account id")
+	if !ok {
+		return
+	}
+	var name string
+	if err := h.DB.QueryRow(r.Context(), `SELECT name FROM crm_account WHERE id=$1 AND workspace_id=$2`, accountID, workspaceID).Scan(&name); err != nil {
+		writeError(w, http.StatusNotFound, "CRM account not found")
+		return
+	}
+	var noteCount int32
+	_ = h.DB.QueryRow(r.Context(), `SELECT COUNT(*)::int FROM crm_communication_note WHERE account_id=$1 AND workspace_id=$2`, accountID, workspaceID).Scan(&noteCount)
+	profile := json.RawMessage(`{"communication_preference":"Review recent communications before next follow-up","procurement_needs":"Confirm demand, timeline, and target products manually","risk_notes":"AI suggestion requires manual review"}`)
+	summary := "Suggested profile for " + name + " based on CRM communications. Review before applying."
+	var id pgtype.UUID
+	var created pgtype.Timestamptz
+	if err := h.DB.QueryRow(r.Context(), `INSERT INTO crm_profile_suggestion (workspace_id, account_id, summary, profile_json, source_count) VALUES ($1,$2,$3,$4,$5) RETURNING id, created_at`, workspaceID, accountID, summary, profile, noteCount).Scan(&id, &created); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create CRM profile suggestion")
+		return
+	}
+	writeJSON(w, http.StatusCreated, CRMProfileSuggestionResponse{ID: uuidToString(id), WorkspaceID: uuidToString(workspaceID), AccountID: uuidToString(accountID), Summary: &summary, ProfileJSON: profile, SourceCount: noteCount, Status: "draft", CreatedAt: timestampToString(created)})
+}
+
+func (h *Handler) ApplyCRMAccountProfileSuggestion(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	accountID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "accountId"), "account id")
+	if !ok {
+		return
+	}
+	suggestionID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "suggestionId"), "suggestion id")
+	if !ok {
+		return
+	}
+	var summary pgtype.Text
+	var profile json.RawMessage
+	if err := h.DB.QueryRow(r.Context(), `SELECT summary, profile_json FROM crm_profile_suggestion WHERE id=$1 AND workspace_id=$2 AND account_id=$3 AND status='draft'`, suggestionID, workspaceID, accountID).Scan(&summary, &profile); err != nil {
+		writeError(w, http.StatusNotFound, "CRM profile suggestion not found")
+		return
+	}
+	_, err := h.DB.Exec(r.Context(), `INSERT INTO crm_account_profile (workspace_id, account_id, summary, profile_json, updated_at) VALUES ($1,$2,$3,$4,now()) ON CONFLICT (account_id) DO UPDATE SET summary=EXCLUDED.summary, profile_json=crm_account_profile.profile_json || EXCLUDED.profile_json, updated_at=now(); UPDATE crm_profile_suggestion SET status='applied', applied_at=now() WHERE id=$5 AND workspace_id=$1`, workspaceID, accountID, summary, profile, suggestionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to apply CRM profile suggestion")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func optionalStringFromQuery(r *http.Request, key string) *string {

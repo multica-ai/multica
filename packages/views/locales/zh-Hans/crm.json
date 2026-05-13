@@ -105,7 +105,10 @@
     "decision_process": "决策流程",
     "communication_preference": "沟通偏好",
     "risk_notes": "风险备注",
-    "cooperation_history": "合作历史"
+    "cooperation_history": "合作历史",
+    "suggest": "生成画像建议",
+    "suggestion_title": "画像建议",
+    "apply_suggestion": "应用建议"
   },
   "projects": {
     "title": "项目跟进",
@@ -196,7 +199,11 @@
     "follow_up_issue_prefix": "跟进：",
     "issue_title": "Issue 标题",
     "issue_description": "Issue 描述",
-    "create_button": "创建"
+    "create_button": "创建",
+    "new_mailbox": "新邮箱",
+    "mailbox_saved": "邮箱设置已保存",
+    "preview_import": "预览导入",
+    "tls_none": "不使用 TLS"
   },
   "notes": {
     "title": "备注与动态",

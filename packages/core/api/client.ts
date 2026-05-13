@@ -69,6 +69,12 @@ import type {
   LinkCRMAccountProjectRequest,
   LinkCRMAccountProjectsResponse,
   CreateCRMFollowUpIssueRequest,
+  CRMIMAPSetting,
+  CRMIMAPTestResponse,
+  CRMIMAPPreviewResponse,
+  CRMProfileSuggestion,
+  UpsertCRMIMAPSettingRequest,
+  ListCRMIMAPSettingsResponse,
   CreateCRMAccountRequest,
   CreateCRMContactRequest,
   CreateCRMEmailThreadRequest,
@@ -1249,6 +1255,36 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  }
+
+  async listCRMIMAPSettings(): Promise<ListCRMIMAPSettingsResponse> {
+    return this.fetch("/api/crm/imap-settings");
+  }
+
+  async upsertCRMIMAPSetting(data: UpsertCRMIMAPSettingRequest): Promise<CRMIMAPSetting> {
+    return this.fetch("/api/crm/imap-settings", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async testCRMIMAPSetting(mailboxId: string): Promise<CRMIMAPTestResponse> {
+    return this.fetch(`/api/crm/imap-settings/${mailboxId}/test`, { method: "POST" });
+  }
+
+  async previewCRMIMAP(data: { mailbox_id?: string | null; folder?: string | null; limit?: number }): Promise<CRMIMAPPreviewResponse> {
+    return this.fetch("/api/crm/imap/preview", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async suggestCRMAccountProfile(accountId: string): Promise<CRMProfileSuggestion> {
+    return this.fetch(`/api/crm/accounts/${accountId}/profile/suggestions`, { method: "POST" });
+  }
+
+  async applyCRMAccountProfileSuggestion(accountId: string, suggestionId: string): Promise<{ ok: boolean }> {
+    return this.fetch(`/api/crm/accounts/${accountId}/profile/suggestions/${suggestionId}/apply`, { method: "POST" });
   }
 
   async listCRMEmailThreads(params?: { account_id?: string }): Promise<ListCRMEmailThreadsResponse> {

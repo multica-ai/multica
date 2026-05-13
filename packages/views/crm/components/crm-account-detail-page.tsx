@@ -30,6 +30,7 @@ import type {
   CRMCommunicationDirection,
   CRMContact,
   CRMContactDecisionRole,
+  CRMProfileSuggestion,
   CreateCRMContactRequest,
   Issue,
   Project,
@@ -451,6 +452,7 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
 
   const [accountForm, setAccountForm] = useState<AccountFormState | null>(null);
   const [profileForm, setProfileForm] = useState<ProfileFormState | null>(null);
+  const [profileSuggestion, setProfileSuggestion] = useState<CRMProfileSuggestion | null>(null);
   const [contactForm, setContactForm] = useState<ContactFormState | null>(null);
   const [noteForm, setNoteForm] = useState<NoteFormState>(() => blankNoteForm());
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
@@ -566,6 +568,22 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
     },
     onSuccess: async () => {
       setProfileForm(null);
+      await queryClient.invalidateQueries({ queryKey: crmKeys.profile(wsId, accountId) });
+    },
+  });
+
+  const suggestProfile = useMutation({
+    mutationFn: () => api.suggestCRMAccountProfile(accountId),
+    onSuccess: (suggestion) => setProfileSuggestion(suggestion),
+  });
+
+  const applyProfileSuggestion = useMutation({
+    mutationFn: () => {
+      if (!profileSuggestion) throw new Error("missing profile suggestion");
+      return api.applyCRMAccountProfileSuggestion(accountId, profileSuggestion.id);
+    },
+    onSuccess: async () => {
+      setProfileSuggestion(null);
       await queryClient.invalidateQueries({ queryKey: crmKeys.profile(wsId, accountId) });
     },
   });
@@ -776,10 +794,26 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
                   <h3 className="text-sm font-medium">{t(($) => $.profile.title)}</h3>
                   <p className="mt-1 text-xs text-muted-foreground">{t(($) => $.profile.help)}</p>
                 </div>
-                <Button size="sm" variant="outline" onClick={() => setProfileForm(profileToForm(profile))}>
-                  <Pencil className="mr-1 size-4" /> {profile ? t(($) => $.profile.edit) : t(($) => $.profile.add)}
-                </Button>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" disabled={suggestProfile.isPending} onClick={() => suggestProfile.mutate()}>
+                    {t(($) => $.profile.suggest)}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setProfileForm(profileToForm(profile))}>
+                    <Pencil className="mr-1 size-4" /> {profile ? t(($) => $.profile.edit) : t(($) => $.profile.add)}
+                  </Button>
+                </div>
               </div>
+              {profileSuggestion ? (
+                <div className="mt-4 rounded-md border bg-muted/20 p-4 text-sm">
+                  <div className="font-medium">{t(($) => $.profile.suggestion_title)}</div>
+                  <p className="mt-2 text-muted-foreground">{profileSuggestion.summary}</p>
+                  <pre className="mt-3 max-h-40 overflow-auto rounded bg-background p-3 text-xs">{JSON.stringify(profileSuggestion.profile_json, null, 2)}</pre>
+                  <div className="mt-3 flex gap-2">
+                    <Button size="sm" disabled={applyProfileSuggestion.isPending} onClick={() => applyProfileSuggestion.mutate()}>{t(($) => $.profile.apply_suggestion)}</Button>
+                    <Button size="sm" variant="outline" onClick={() => setProfileSuggestion(null)}>{t(($) => $.actions.cancel)}</Button>
+                  </div>
+                </div>
+              ) : null}
               {profileLoading ? (
                 <div className="mt-4 space-y-2"><Skeleton className="h-16 w-full" /><Skeleton className="h-16 w-full" /></div>
               ) : profile ? (

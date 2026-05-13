@@ -308,3 +308,68 @@ export interface CreateCRMFollowUpIssueRequest {
   assignee_id?: string | null;
   due_date?: string | null;
 }
+
+
+export type CRMIMAPTLSMode = "ssl" | "starttls" | "none";
+
+export interface CRMIMAPSetting {
+  id: string;
+  workspace_id: string;
+  label: string;
+  email: string;
+  host: string;
+  port: number;
+  tls_mode: CRMIMAPTLSMode;
+  username: string;
+  secret_ref?: string | null;
+  sync_enabled: boolean;
+  last_test_status?: string | null;
+  last_test_message?: string | null;
+  last_tested_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ListCRMIMAPSettingsResponse {
+  settings: CRMIMAPSetting[];
+  total: number;
+}
+
+export interface UpsertCRMIMAPSettingRequest {
+  id?: string | null;
+  label: string;
+  email: string;
+  host: string;
+  port: number;
+  tls_mode: CRMIMAPTLSMode;
+  username: string;
+  secret_ref?: string | null;
+  secret?: string | null;
+  sync_enabled?: boolean;
+}
+
+export interface CRMIMAPTestResponse {
+  ok: boolean;
+  status: string;
+  message: string;
+}
+
+export interface CRMIMAPPreviewResponse {
+  messages: CRMEmailMessage[];
+  total: number;
+  limit: number;
+  sync_enabled: boolean;
+  note: string;
+}
+
+export interface CRMProfileSuggestion {
+  id: string;
+  workspace_id: string;
+  account_id: string;
+  summary?: string | null;
+  profile_json: Record<string, unknown>;
+  source_count: number;
+  status: "draft" | "applied" | "dismissed";
+  created_at: string;
+  applied_at?: string | null;
+}
