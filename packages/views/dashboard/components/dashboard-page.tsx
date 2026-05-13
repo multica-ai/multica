@@ -22,7 +22,7 @@ import {
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { PageHeader } from "../../layout/page-header";
 import { KpiCard } from "../../runtimes/components/shared";
-import { DailyCostChart } from "../../runtimes/components/charts";
+import { DailyCostChart, DailyTokensChart } from "../../runtimes/components/charts";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
@@ -34,6 +34,7 @@ import { useT } from "../../i18n";
 import {
   aggregateAgentTokens,
   aggregateDailyCost,
+  aggregateDailyTokens,
   computeDailyTotals,
   formatDuration,
   mergeAgentDashboardRows,
@@ -160,6 +161,7 @@ export function DashboardPage() {
   // Cost / token math — re-derived when usage, days, or pricings change.
   const totals = useMemo(() => computeDailyTotals(dailyUsage), [dailyUsage]);
   const dailyCost = useMemo(() => aggregateDailyCost(dailyUsage), [dailyUsage]);
+  const dailyTokens = useMemo(() => aggregateDailyTokens(dailyUsage), [dailyUsage]);
   const agentTokenRows = useMemo(
     () => aggregateAgentTokens(byAgentUsage),
     [byAgentUsage],
@@ -263,8 +265,10 @@ export function DashboardPage() {
                 />
               </div>
 
-              {/* Daily cost chart — reuses the runtime DailyCostChart. */}
-              <DailyCostBlock dailyCost={dailyCost} />
+              {/* Daily trend chart — toggle picks Cost vs Tokens axis,
+                  mirroring the runtime-detail Usage section so both
+                  surfaces share one chart language. */}
+              <DailyTrendBlock dailyCost={dailyCost} dailyTokens={dailyTokens} />
 
               {/* Per-agent leaderboard — user picks the ranking metric;
                   the progress bar and column emphasis follow the metric. */}
@@ -338,28 +342,58 @@ function ProjectFilter({
   );
 }
 
-function DailyCostBlock({
+type DailyMetric = "cost" | "tokens";
+
+function DailyTrendBlock({
   dailyCost,
+  dailyTokens,
 }: {
   dailyCost: ReturnType<typeof aggregateDailyCost>;
+  dailyTokens: ReturnType<typeof aggregateDailyTokens>;
 }) {
   const { t } = useT("usage");
-  const total = dailyCost.reduce((sum, d) => sum + d.total, 0);
+  const [metric, setMetric] = useState<DailyMetric>("tokens");
+
+  // Empty-state is per-metric so a workspace that recorded tokens but
+  // has no priced models (unmapped) still gets a real Tokens chart while
+  // its Cost view falls through to the empty-state — same convention as
+  // the runtimes-side DailyTab in usage-section.tsx.
+  const totalCost = dailyCost.reduce((sum, d) => sum + d.total, 0);
+  const totalTokens = dailyTokens.reduce(
+    (sum, d) => sum + d.input + d.output + d.cacheRead + d.cacheWrite,
+    0,
+  );
+  const isEmpty = metric === "cost" ? totalCost === 0 : totalTokens === 0;
+
   return (
     <div className="rounded-lg border bg-card p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h4 className="text-sm font-semibold">{t(($) => $.daily.title)}</h4>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h4 className="text-sm font-semibold">
+          {metric === "cost"
+            ? t(($) => $.daily.title_cost)
+            : t(($) => $.daily.title_tokens)}
+        </h4>
+        <Segmented
+          value={metric}
+          onChange={setMetric}
+          options={[
+            { label: t(($) => $.daily.metric_tokens), value: "tokens" as const },
+            { label: t(($) => $.daily.metric_cost), value: "cost" as const },
+          ]}
+        />
       </div>
       <div className="min-h-[240px]">
-        {total === 0 ? (
+        {isEmpty ? (
           <div className="flex aspect-[3/1] flex-col items-center justify-center gap-2 rounded-md border border-dashed bg-muted/20 p-6 text-center">
             <BarChart3 className="h-5 w-5 text-muted-foreground/50" />
             <p className="text-xs text-muted-foreground">
               {t(($) => $.daily.no_data)}
             </p>
           </div>
-        ) : (
+        ) : metric === "cost" ? (
           <DailyCostChart data={dailyCost} />
+        ) : (
+          <DailyTokensChart data={dailyTokens} />
         )}
       </div>
     </div>
