@@ -179,6 +179,7 @@ export function createFileUploadExtension(
               const files = event.clipboardData?.files;
               if (!files?.length) return false;
               if (!onUploadFileRef.current) return false;
+              event.preventDefault(); // CEREBRO-PATCH(fix-paste-image-selection): prevent browser inserting image inline, which causes unwanted selection after paste
               handleFiles(files);
               return true;
             },
