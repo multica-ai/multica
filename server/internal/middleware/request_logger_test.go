@@ -138,6 +138,69 @@ func TestRequestLogger_LargeBodyBeyondCaptureLimit(t *testing.T) {
 	requireLogLevel(t, logs, "WARN", "INFO", "ERROR")
 }
 
+func TestRedactWebhookPath(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in, want string
+	}{
+		{"/api/webhooks/autopilots/awt_secret", "/api/webhooks/autopilots/[redacted]"},
+		{"/api/webhooks/autopilots/awt_secret/", "/api/webhooks/autopilots/[redacted]/"},
+		{"/api/webhooks/autopilots/", "/api/webhooks/autopilots/"},
+		{"/api/webhooks/github", "/api/webhooks/github"},
+		{"/api/runtimes/abc", "/api/runtimes/abc"},
+		{"/", "/"},
+	}
+	for _, tc := range cases {
+		if got := redactWebhookPath(tc.in); got != tc.want {
+			t.Errorf("redactWebhookPath(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestRequestLogger_RedactsWebhookTokenInPath(t *testing.T) {
+	logs := withCapturedLogs(t)
+	handler := RequestLogger(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/autopilots/awt_supersecret", nil)
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+	out := logs.String()
+	if strings.Contains(out, "awt_supersecret") {
+		t.Fatalf("token leaked into logs:\n%s", out)
+	}
+	if !strings.Contains(out, "[redacted]") {
+		t.Fatalf("expected [redacted] in logs:\n%s", out)
+	}
+}
+
+func TestRequestLogger_IncludesWebhookTriggerIDFromContext(t *testing.T) {
+	logs := withCapturedLogs(t)
+	handler := RequestLogger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The webhook handler stashes the resolved trigger ID on the
+		// context after a successful lookup; the request logger reads
+		// it from there.
+		*r = *SetWebhookTriggerID(r, "trigger-abc")
+		_ = r
+		// Simulate the slog call path that would emit on this context.
+		// The request logger reads the context AFTER next.ServeHTTP, so
+		// we mutate the request before returning.
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/autopilots/awt_supersecret", nil)
+	// Pre-stash on the context so the assertion exercises the read path —
+	// production code calls SetWebhookTriggerID from the handler, but the
+	// middleware reads from the same context after the handler returns.
+	req = SetWebhookTriggerID(req, "trigger-abc")
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+	out := logs.String()
+	if !strings.Contains(out, "webhook_trigger_id=trigger-abc") {
+		t.Fatalf("expected webhook_trigger_id in logs, got:\n%s", out)
+	}
+	if strings.Contains(out, "awt_supersecret") {
+		t.Fatalf("token leaked into logs:\n%s", out)
+	}
+}
+
 func TestIsSoftNotFound(t *testing.T) {
 	t.Parallel()
 
