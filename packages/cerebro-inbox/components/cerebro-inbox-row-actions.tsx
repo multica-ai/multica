@@ -14,7 +14,6 @@ import {
   BellRing,
   MailOpen,
   MailWarning,
-  MoreHorizontal,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -148,6 +147,10 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
       strings={strings}
       menuItems={menuItems}
       onArchive={onArchive}
+      onToggleRead={handleToggleRead}
+      onToggleMute={handleToggleMute}
+      muted={muted}
+      unread={!item.read}
     />
   );
 }
@@ -159,17 +162,28 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
 interface DesktopProps {
   menuItems: ReactNode;
   onArchive: () => void;
+  onToggleRead: () => void;
+  onToggleMute: () => void;
+  muted: boolean;
+  unread: boolean;
   strings: ReturnType<typeof useCerebroInboxStrings>;
 }
 
-function DesktopRowActions({ menuItems, onArchive, strings }: DesktopProps) {
-  // Two menus share `menuItems`:
-  //   1. Hover: the inline "..." DropdownMenuTrigger anchors against the icon.
-  //   2. Right-click: a separate DropdownMenu whose trigger is a 1×1 phantom
-  //      anchor positioned at the click coords (fixed, document-relative), so
-  //      the popover lands at the click point — Linear/Gmail style.
+function DesktopRowActions({
+  menuItems,
+  onArchive,
+  onToggleRead,
+  onToggleMute,
+  muted,
+  unread,
+  strings,
+}: DesktopProps) {
+  // JEH-663 — mark-unread + mute are surfaced as direct hover icons (next to
+  // archive) so the user reaches them in one click instead of going through
+  // a "..." sub-menu. The "..." dropdown trigger has been removed; the
+  // right-click menu stays as a quick keyboard-free fallback that anchors at
+  // the click point (Linear/Gmail style).
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const [hoverMenuOpen, setHoverMenuOpen] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [contextPos, setContextPos] = useState<{ x: number; y: number }>({
     x: 0,
@@ -191,11 +205,30 @@ function DesktopRowActions({ menuItems, onArchive, strings }: DesktopProps) {
   return (
     <div ref={wrapperRef}>
       {/* Hover-only icon group: positioned absolute over the row, only shown
-          when the parent row is hovered. */}
+          when the parent row is hovered. Three icons left-to-right: mark
+          unread/read, mute/unmute, archive. */}
       <div
         className="absolute right-2 top-1/2 -translate-y-1/2 hidden items-center gap-1 sm:group-hover:flex"
         onClick={(e) => e.stopPropagation()}
       >
+        <IconButton
+          aria-label={unread ? strings.mark_read_tooltip : strings.mark_unread_tooltip}
+          onClick={onToggleRead}
+          title={unread ? strings.mark_read_tooltip : strings.mark_unread_tooltip}
+        >
+          {unread ? (
+            <MailOpen className="size-3.5" />
+          ) : (
+            <MailWarning className="size-3.5" />
+          )}
+        </IconButton>
+        <IconButton
+          aria-label={muted ? strings.unmute_tooltip : strings.mute_tooltip}
+          onClick={onToggleMute}
+          title={muted ? strings.unmute_tooltip : strings.mute_tooltip}
+        >
+          {muted ? <BellRing className="size-3.5" /> : <BellOff className="size-3.5" />}
+        </IconButton>
         <IconButton
           aria-label={strings.archive_label}
           onClick={onArchive}
@@ -203,32 +236,6 @@ function DesktopRowActions({ menuItems, onArchive, strings }: DesktopProps) {
         >
           <Archive className="size-3.5" />
         </IconButton>
-
-        <DropdownMenu open={hoverMenuOpen} onOpenChange={setHoverMenuOpen}>
-          {/* role=button span (not <button>) so the trigger nests cleanly
-              inside the parent InboxListItemShell <button>, which otherwise
-              produces invalid HTML and unstable click delivery on mobile. */}
-          <DropdownMenuTrigger
-            render={(props) => (
-              <span
-                role="button"
-                tabIndex={-1}
-                aria-label={strings.more_actions}
-                title={strings.more_actions}
-                {...props}
-                className={cn(
-                  "flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
-                  props.className,
-                )}
-              >
-                <MoreHorizontal className="size-3.5" />
-              </span>
-            )}
-          />
-          <DropdownMenuContent align="end" className="min-w-44">
-            {menuItems}
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
 
       {/* Right-click menu: phantom 1×1 anchor at the click point lives outside

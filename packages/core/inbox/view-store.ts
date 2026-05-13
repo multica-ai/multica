@@ -14,7 +14,8 @@ export type InboxView =
   | "mentioned"
   | "issues"
   | "channels"
-  | "dms";
+  | "dms"
+  | "muted"; // CEREBRO-PATCH(inbox-muted-filter): JEH-663 — view-only filter for muted rows
 
 interface InboxViewState {
   view: InboxView;
@@ -48,4 +49,5 @@ export const INBOX_VIEW_OPTIONS: { value: InboxView; label: string }[] = [
   { value: "issues", label: "Issues only" },
   { value: "channels", label: "Channels only" },
   { value: "dms", label: "DMs only" },
+  { value: "muted", label: "Muted" }, // CEREBRO-PATCH(inbox-muted-filter): JEH-663 — view muted rows + their muted_until
 ];

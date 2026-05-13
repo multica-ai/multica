@@ -52,6 +52,7 @@ vi.mock("@multica/cerebro-inbox", () => {
     CerebroInboxRowActions: Archive,
     CerebroSwipeArchive: Archive,
     CerebroUnarchiveAction: Unarchive,
+    CerebroInboxTimestamp: ({ fallback }: { fallback: string }) => <>{fallback}</>,
   };
 });
 

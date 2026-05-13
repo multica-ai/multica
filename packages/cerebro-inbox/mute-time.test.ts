@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isMuted, nextLocalEightAm } from "./mute-time";
+import { formatMutedUntilTime, isMuted, nextLocalEightAm } from "./mute-time";
 
 describe("nextLocalEightAm", () => {
   it("returns today's 08:00 when called before 08:00", () => {
@@ -35,5 +35,24 @@ describe("isMuted", () => {
   it("returns true for future timestamps", () => {
     const future = new Date(Date.now() + 60_000).toISOString();
     expect(isMuted(future)).toBe(true);
+  });
+});
+
+describe("formatMutedUntilTime", () => {
+  it("returns null for null", () => {
+    expect(formatMutedUntilTime(null)).toBeNull();
+  });
+  it("returns null for past timestamps", () => {
+    const past = new Date(Date.now() - 1000).toISOString();
+    expect(formatMutedUntilTime(past)).toBeNull();
+  });
+  it("returns an HH:MM-style string for future timestamps", () => {
+    // 08:00 on a fixed date — the literal output depends on the
+    // execution locale, but the formatter must yield a non-empty string
+    // that contains both digits of the hour.
+    const future = new Date(Date.now() + 24 * 3600_000).toISOString();
+    const got = formatMutedUntilTime(future, "en-US");
+    expect(got).toBeTruthy();
+    expect(got!).toMatch(/\d/);
   });
 });

@@ -5,7 +5,7 @@
 import { StatusIcon } from "../../issues/components";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Hash, MessagesSquare } from "lucide-react";
-import { CerebroInboxRowActions, CerebroSwipeArchive, CerebroUnarchiveAction } from "@multica/cerebro-inbox"; // CEREBRO-PATCH(inbox-row-actions-mount) / CEREBRO-PATCH(inbox-unarchive-mount)
+import { CerebroInboxRowActions, CerebroSwipeArchive, CerebroUnarchiveAction, CerebroInboxTimestamp } from "@multica/cerebro-inbox"; // CEREBRO-PATCH(inbox-row-actions-mount) / CEREBRO-PATCH(inbox-unarchive-mount) / CEREBRO-PATCH(inbox-muted-timestamp)
 import { AvatarGroup } from "@multica/ui/components/ui/avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { Channel, ChannelMember, InboxItem } from "@multica/core/types";
@@ -137,7 +137,8 @@ export function InboxListItem({
           <span
             className={`shrink-0 text-xs ${unread ? "text-muted-foreground" : "text-muted-foreground/60"}`}
           >
-            {timeAgo(item.created_at)}
+            {/* CEREBRO-PATCH(inbox-muted-timestamp): JEH-663 — show "Muted til HH:MM" instead of relative time when row is only visible because the Muted filter is active. */}
+            <CerebroInboxTimestamp item={item} fallback={timeAgo(item.created_at)} />
           </span>
         </div>
         <p
