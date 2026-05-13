@@ -8,7 +8,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions, agentListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, agentListOptions, squadListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
   PropertyPicker,
@@ -64,6 +64,7 @@ export function AssigneePicker({
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const { data: frequency = [] } = useQuery(assigneeFrequencyOptions(wsId));
   const { getActorName } = useActorName();
 
@@ -88,6 +89,9 @@ export function AssigneePicker({
   const filteredAgents = agents
     .filter((a) => !a.archived_at && a.name.toLowerCase().includes(query))
     .sort((a, b) => getFreq("agent", b.id) - getFreq("agent", a.id));
+  const filteredSquads = squads
+    .filter((s) => !s.archived_at && s.name.toLowerCase().includes(query))
+    .sort((a, b) => getFreq("squad", b.id) - getFreq("squad", a.id));
 
   const isSelected = (type: string, id: string) =>
     assigneeType === type && assigneeId === id;
@@ -197,8 +201,32 @@ export function AssigneePicker({
         </PickerSection>
       )}
 
+      {/* Squads — group ownership; assigning to a squad routes the issue to
+          its leader agent on the backend. */}
+      {filteredSquads.length > 0 && (
+        <PickerSection label={t(($) => $.pickers.assignee.squads_group)}>
+          {filteredSquads.map((s) => (
+            <PickerItem
+              key={s.id}
+              selected={isSelected("squad", s.id)}
+              onClick={() => {
+                onUpdate({
+                  assignee_type: "squad",
+                  assignee_id: s.id,
+                });
+                setOpen(false);
+              }}
+            >
+              <ActorAvatar actorType="squad" actorId={s.id} size={18} />
+              <span>{s.name}</span>
+            </PickerItem>
+          ))}
+        </PickerSection>
+      )}
+
       {filteredMembers.length === 0 &&
         filteredAgents.length === 0 &&
+        filteredSquads.length === 0 &&
         filter && <PickerEmpty />}
     </PropertyPicker>
   );

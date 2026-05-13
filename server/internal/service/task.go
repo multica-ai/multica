@@ -1252,15 +1252,26 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 	if err != nil {
 		return nil, fmt.Errorf("load issue: %w", err)
 	}
-	if !issue.AssigneeID.Valid || issue.AssigneeType.String != "agent" {
-		return nil, fmt.Errorf("issue is not assigned to an agent")
+
+	// Determine the target agent for the rerun.
+	var agentID pgtype.UUID
+	switch {
+	case issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid:
+		agentID = issue.AssigneeID
+	case issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid:
+		squad, err := s.Queries.GetSquad(ctx, issue.AssigneeID)
+		if err != nil {
+			return nil, fmt.Errorf("issue is assigned to a squad but squad not found")
+		}
+		agentID = squad.LeaderID
+	default:
+		return nil, fmt.Errorf("issue is not assigned to an agent or squad")
 	}
-	// Cancel only the assignee's active/queued tasks on this issue. This
-	// covers both the unique-index conflict (queued/dispatched) and a
-	// stuck running task without touching other agents on the issue.
+
+	// Cancel only the target agent's active/queued tasks on this issue.
 	cancelled, err := s.Queries.CancelAgentTasksByIssueAndAgent(ctx, db.CancelAgentTasksByIssueAndAgentParams{
 		IssueID: issueID,
-		AgentID: issue.AssigneeID,
+		AgentID: agentID,
 	})
 	if err != nil {
 		slog.Warn("rerun: cancel prior tasks failed",
@@ -1275,17 +1286,27 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 
-	task, err := s.enqueueIssueTask(ctx, issue, triggerCommentID, true)
+	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID)
 	if err != nil {
 		return nil, err
 	}
 	slog.Info("issue rerun enqueued",
 		"task_id", util.UUIDToString(task.ID),
 		"issue_id", util.UUIDToString(issueID),
-		"agent_id", util.UUIDToString(issue.AssigneeID),
+		"agent_id", util.UUIDToString(agentID),
 		"cancelled_prior", len(cancelled),
 	)
 	return &task, nil
+}
+
+// enqueueRerunTask enqueues a fresh task for the given agent on the issue.
+// For agent-assigned issues it uses enqueueIssueTask (which reads AssigneeID);
+// for squad-assigned issues it uses EnqueueTaskForMention with the leader ID.
+func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	if issue.AssigneeType.String == "agent" {
+		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true)
+	}
+	return s.EnqueueTaskForMention(ctx, issue, agentID, triggerCommentID)
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of

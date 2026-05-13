@@ -224,6 +224,9 @@
     "table_output": "Salida",
     "table_cache_r": "Caché L",
     "table_cache_w": "Caché E",
-    "no_data": "Sin datos de uso todavía"
+    "no_data": "Sin datos de uso todavía",
+    "daily_metric_cost": "Coste",
+    "daily_metric_tokens": "Tokens",
+    "legend_cache_read": "Lectura de caché"
   }
 }

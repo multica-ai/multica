@@ -218,7 +218,68 @@
     "create": "Crear",
     "creating": "Creando...",
     "cancel": "Cancelar",
-    "create_failed_toast": "Error al crear el agente"
+    "create_failed_toast": "Error al crear el agente",
+    "back_aria": "Atrás",
+    "no_runtime_toast": "No hay entorno disponible. Añade un entorno primero e inténtalo de nuevo.",
+    "template_created_toast": "Agente \"{{name}}\" creado",
+    "template_created_with_reuse_toast_one": "Agente \"{{name}}\" creado. Se reutilizó {{count}} habilidad existente.",
+    "template_created_with_reuse_toast_other": "Agente \"{{name}}\" creado. Se reutilizaron {{count}} habilidades existentes.",
+    "skill_attach_failed_toast": "Agente creado, pero no se pudieron adjuntar las habilidades: {{error}}",
+    "chooser": {
+      "blank_title": "Empezar desde cero",
+      "blank_desc": "Escribe todo tú mismo.",
+      "template_title": "Desde plantilla",
+      "template_desc": "Agentes preconfigurados con habilidades seleccionadas."
+    },
+    "template_picker": {
+      "title": "Elige una plantilla",
+      "empty": "Aún no hay plantillas disponibles.",
+      "load_failed": "Error al cargar las plantillas",
+      "other_category": "Otros"
+    },
+    "template_card": {
+      "skills_one": "{{count}} habilidad",
+      "skills_other": "{{count}} habilidades"
+    },
+    "template_detail": {
+      "load_failed": "Error al cargar la plantilla",
+      "skill_count_one": "Incluye {{count}} habilidad",
+      "skill_count_other": "Incluye {{count}} habilidades",
+      "instructions_label": "Instrucciones",
+      "instructions_loading": "Cargando instrucciones…",
+      "use": "Usar esta plantilla",
+      "creating": "Creando…"
+    },
+    "template_failure": {
+      "title": "Algunas habilidades de la plantilla no están disponibles",
+      "body": "No se puede aplicar la plantilla porque una o más URLs devolvieron un error. No se realizaron cambios. Contacta al mantenedor de la plantilla con las URLs indicadas."
+    },
+    "instructions": {
+      "label": "Instrucciones",
+      "placeholder_blank": "Haz clic para escribir instrucciones…",
+      "placeholder_duplicate": "Haz clic para ver o editar las instrucciones duplicadas",
+      "collapse": "Contraer",
+      "editor_placeholder": "Escribe qué debe hacer este agente, en qué enfocarse, qué evitar…"
+    },
+    "skills_section": {
+      "label": "Habilidades",
+      "placeholder": "Añadir habilidades del espacio de trabajo",
+      "selected_one": "{{count}} seleccionada — haz clic para editar",
+      "selected_other": "{{count}} seleccionadas — haz clic para editar",
+      "collapse": "Contraer",
+      "list_empty_multi": "Aún no hay habilidades en este espacio de trabajo. Crea o importa una primero.",
+      "list_loading": "Cargando…",
+      "list_empty_default": "No hay habilidades disponibles.",
+      "list_no_match": "No hay habilidades que coincidan.",
+      "search_placeholder": "Buscar habilidades…"
+    },
+    "avatar": {
+      "change_aria": "Cambiar avatar",
+      "upload_aria": "Subir avatar",
+      "remove_aria": "Eliminar avatar",
+      "select_image_toast": "Por favor, selecciona un archivo de imagen.",
+      "upload_failed_toast": "Error al subir el avatar"
+    }
   },
   "tab_body": {
     "common": {
@@ -267,7 +328,12 @@
       "add_dialog_empty": "Todas las habilidades del espacio de trabajo ya están asignadas.",
       "add_dialog_no_match": "Ninguna habilidad coincide con tu búsqueda.",
       "add_dialog_cancel": "Cancelar",
-      "add_failed_toast": "Error al añadir la habilidad"
+      "add_failed_toast": "Error al añadir la habilidad",
+      "add_dialog_empty_partial": "No hay más habilidades que añadir — este agente ya las tiene todas.",
+      "add_dialog_saving": "Añadiendo…",
+      "add_dialog_confirm_default": "Añadir",
+      "add_dialog_confirm_one": "Añadir {{count}} habilidad",
+      "add_dialog_confirm_other": "Añadir {{count}} habilidades"
     },
     "activity": {
       "section_now": "Ahora",

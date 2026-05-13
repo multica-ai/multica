@@ -34,7 +34,13 @@
     "copy_link_failed": "Failed to copy link"
   },
   "attachment": {
-    "download_failed": "Couldn't fetch a download link. Try again in a moment."
+    "download_failed": "Couldn't fetch a download link. Try again in a moment.",
+    "preview": "Preview",
+    "preview_loading": "Loading preview…",
+    "preview_failed": "Couldn't load preview",
+    "preview_too_large": "File is too large to preview. Please download.",
+    "preview_unsupported": "This file type can't be previewed.",
+    "close": "Close"
   },
   "link_hover": {
     "copy_link": "Copy link",

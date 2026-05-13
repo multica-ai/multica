@@ -133,6 +133,27 @@ function createWindow(): void {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
       webSecurity: false,
+      // Required for the Chromium PDF viewer (PDFium) to activate inside
+      // iframes — used by the attachment preview modal for application/pdf
+      // files. Default is false in Electron; without it <iframe src=*.pdf>
+      // renders blank.
+      //
+      // Security trade-off, accepted intentionally:
+      //   1. This window already runs with `webSecurity: false` + `sandbox: false`,
+      //      so `plugins: true` does NOT meaningfully widen the renderer's
+      //      attack surface beyond what is already accepted.
+      //   2. The only PDFs that reach an iframe here are signed CloudFront URLs
+      //      we ourselves issued (see useDownloadAttachment); user-supplied URLs
+      //      are routed through `setWindowOpenHandler` → `openExternalSafely` and
+      //      cannot land in this renderer.
+      //   3. Chromium's PDFium plugin is itself sandboxed inside its own process
+      //      and only handles the `application/pdf` MIME — it does not expose
+      //      Flash, Java, or other historical plugin surfaces.
+      //
+      // If we ever tighten `webSecurity` / `sandbox`, revisit this by hosting
+      // the PDF viewer in a dedicated BrowserView with `plugins: true` scoped
+      // to that view, keeping the main renderer plugin-free.
+      plugins: true,
       additionalArguments: [`--multica-locale=${systemLocale}`],
     },
   });
@@ -212,6 +233,14 @@ const DEV_APP_NAME = process.env.DESKTOP_APP_SUFFIX
 if (is.dev) {
   app.setName(DEV_APP_NAME);
   app.setPath("userData", join(app.getPath("appData"), DEV_APP_NAME));
+} else {
+  // Pin the production app name in code. Electron's Linux WM_CLASS is set
+  // from app.getName() when the first BrowserWindow is realized; the
+  // packaged ASAR's package.json `productName` already steers app.getName()
+  // to "Multica", but anchoring it here makes WM_CLASS ↔ StartupWMClass
+  // (declared in electron-builder.yml) survive a regression in
+  // productName / the build pipeline. Must run before requestSingleInstanceLock().
+  app.setName("Multica");
 }
 
 // --- Protocol registration -----------------------------------------------

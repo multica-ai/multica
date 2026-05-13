@@ -1,0 +1,47 @@
+{
+  "page": {
+    "title": "Equipos",
+    "new_button": "Nuevo equipo",
+    "empty_no_squads": "Aún no hay equipos. Crea uno para empezar.",
+    "empty_no_match": "Ningún equipo coincide con tus filtros."
+  },
+  "inspector": {
+    "details_section": "Detalles",
+    "archive_button": "Archivar"
+  },
+  "name_editor": {
+    "cancel": "Cancelar"
+  },
+  "add_member_dialog": {
+    "title": "Añadir miembro",
+    "description": "Añade un miembro del espacio de trabajo o un agente a este equipo.",
+    "label_member": "Miembro",
+    "label_role": "Rol",
+    "label_optional": "(opcional)",
+    "placeholder_role_inline": "Añadir rol…",
+    "cancel": "Cancelar"
+  },
+  "description_dialog": {
+    "title": "Editar descripción",
+    "placeholder_empty": "Añadir una descripción",
+    "cancel": "Cancelar"
+  },
+  "discard_changes_dialog": {
+    "title": "¿Descartar cambios sin guardar?",
+    "description": "Tienes cambios sin guardar en esta pestaña. Cambiar de pestaña los descartará.",
+    "keep_editing": "Seguir editando",
+    "discard_button": "Descartar"
+  },
+  "members_tab": {
+    "section_title": "Miembros",
+    "section_count_one": "{{count}} miembro en este equipo",
+    "section_count_other": "{{count}} miembros en este equipo",
+    "add_member_button": "Añadir miembro",
+    "leader_chip": "Líder"
+  },
+  "instructions_tab": {
+    "description": "Las instrucciones del equipo se inyectan en el prompt del agente líder cada vez que trabaja en una tarea asignada a este equipo. Úsalas para dar al líder orientaciones generales del equipo, acuerdos de trabajo o contexto que debe seguir en cada tarea.",
+    "unsaved_changes": "Cambios sin guardar",
+    "save_button": "Guardar"
+  }
+}

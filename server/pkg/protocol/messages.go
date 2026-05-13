@@ -101,6 +101,16 @@ type ChatSessionDeletedPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 }
 
+// ChatSessionUpdatedPayload is broadcast when a user-editable field on a
+// chat session changes (today: title via inline rename). Other tabs/devices
+// patch the session row in their cached list so the dropdown stays in sync
+// without a full refetch.
+type ChatSessionUpdatedPayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+	Title         string `json:"title"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
 // DaemonHeartbeatRequestPayload is sent from daemon to server over WebSocket
 // to update last_seen_at and pull pending actions for a single runtime.
 // Mirrors the body of POST /api/daemon/heartbeat so both transports share

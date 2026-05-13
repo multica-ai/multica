@@ -214,7 +214,64 @@
     "create": "创建",
     "creating": "创建中...",
     "cancel": "取消",
-    "create_failed_toast": "创建智能体失败"
+    "create_failed_toast": "创建智能体失败",
+    "back_aria": "返回",
+    "no_runtime_toast": "暂无可用运行时。请先添加运行时再试。",
+    "template_created_toast": "智能体「{{name}}」已创建",
+    "template_created_with_reuse_toast_other": "智能体「{{name}}」已创建。复用了 {{count}} 个现有 skill。",
+    "skill_attach_failed_toast": "智能体已创建，但 skill 关联失败：{{error}}",
+    "chooser": {
+      "blank_title": "从零开始",
+      "blank_desc": "全部由你来填写。",
+      "template_title": "使用模板",
+      "template_desc": "预配置指令并精选 skill 的智能体。"
+    },
+    "template_picker": {
+      "title": "选择模板",
+      "empty": "暂无可用模板。",
+      "load_failed": "加载模板失败",
+      "other_category": "其他"
+    },
+    "template_card": {
+      "skills_other": "{{count}} 个 skill"
+    },
+    "template_detail": {
+      "load_failed": "加载模板失败",
+      "skill_count_other": "包含 {{count}} 个 skill",
+      "instructions_label": "指令",
+      "instructions_loading": "加载指令中…",
+      "use": "使用该模板",
+      "creating": "创建中…"
+    },
+    "template_failure": {
+      "title": "部分模板 skill 不可用",
+      "body": "因部分上游 URL 返回错误，模板无法应用。未写入任何变更。请将下方 URL 反馈给模板维护者。"
+    },
+    "instructions": {
+      "label": "指令",
+      "placeholder_blank": "点击撰写指令…",
+      "placeholder_duplicate": "点击查看或编辑复制的指令",
+      "collapse": "收起",
+      "editor_placeholder": "写下这个智能体该做什么、关注什么、要避开什么…"
+    },
+    "skills_section": {
+      "label": "Skill",
+      "placeholder": "从工作区添加 skill",
+      "selected_other": "已选 {{count}} 个 —— 点击修改",
+      "collapse": "收起",
+      "list_empty_multi": "工作区还没有 skill。请先创建或导入一个。",
+      "list_loading": "加载中…",
+      "list_empty_default": "暂无 skill。",
+      "list_no_match": "没有匹配的 skill。",
+      "search_placeholder": "搜索 skill…"
+    },
+    "avatar": {
+      "change_aria": "更换头像",
+      "upload_aria": "上传头像",
+      "remove_aria": "移除头像",
+      "select_image_toast": "请选择图片文件。",
+      "upload_failed_toast": "头像上传失败"
+    }
   },
   "tab_body": {
     "common": {
@@ -262,6 +319,10 @@
       "add_dialog_search_placeholder": "搜索 skill",
       "add_dialog_empty": "全部工作区 skill 都已分配。",
       "add_dialog_no_match": "没有匹配的 skill。",
+      "add_dialog_empty_partial": "已无可添加的 skill —— 全部都已分配给该智能体。",
+      "add_dialog_saving": "添加中…",
+      "add_dialog_confirm_default": "添加",
+      "add_dialog_confirm_other": "添加 {{count}} 个 skill",
       "add_dialog_cancel": "取消",
       "add_failed_toast": "添加 skill 失败"
     },

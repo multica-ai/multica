@@ -44,7 +44,8 @@
       "cancel": "Cancelar",
       "confirm": "Eliminar",
       "confirming": "Eliminando..."
-    }
+    },
+    "row_rename_aria": "Renombrar sesión de chat"
   },
   "window": {
     "new_chat_tooltip": "Nuevo chat",

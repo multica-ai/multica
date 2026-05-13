@@ -21,6 +21,8 @@ import enModals from "./en/modals.json";
 import enRuntimes from "./en/runtimes.json";
 import enLayout from "./en/layout.json";
 import enUsage from "./en/usage.json";
+import enUi from "./en/ui.json";
+import enSquads from "./en/squads.json";
 import enTimeTracking from "./en/time-tracking.json";
 import enWorkCalendars from "./en/work-calendars.json";
 import enRedmine from "./en/redmine.json";
@@ -47,6 +49,8 @@ import zhHansModals from "./zh-Hans/modals.json";
 import zhHansRuntimes from "./zh-Hans/runtimes.json";
 import zhHansLayout from "./zh-Hans/layout.json";
 import zhHansUsage from "./zh-Hans/usage.json";
+import zhHansUi from "./zh-Hans/ui.json";
+import zhHansSquads from "./zh-Hans/squads.json";
 import zhHansTimeTracking from "./zh-Hans/time-tracking.json";
 import zhHansWorkCalendars from "./zh-Hans/work-calendars.json";
 import zhHansRedmine from "./zh-Hans/redmine.json";
@@ -73,6 +77,8 @@ import esModals from "./es/modals.json";
 import esRuntimes from "./es/runtimes.json";
 import esLayout from "./es/layout.json";
 import esUsage from "./es/usage.json";
+import esUi from "./es/ui.json";
+import esSquads from "./es/squads.json";
 import esTimeTracking from "./es/time-tracking.json";
 import esWorkCalendars from "./es/work-calendars.json";
 import esRedmine from "./es/redmine.json";
@@ -105,6 +111,8 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     runtimes: enRuntimes,
     layout: enLayout,
     usage: enUsage,
+    ui: enUi,
+    squads: enSquads,
     "time-tracking": enTimeTracking,
     "work-calendars": enWorkCalendars,
     redmine: enRedmine,
@@ -133,6 +141,8 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     runtimes: zhHansRuntimes,
     layout: zhHansLayout,
     usage: zhHansUsage,
+    ui: zhHansUi,
+    squads: zhHansSquads,
     "time-tracking": zhHansTimeTracking,
     "work-calendars": zhHansWorkCalendars,
     redmine: zhHansRedmine,
@@ -161,6 +171,8 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     runtimes: esRuntimes,
     layout: esLayout,
     usage: esUsage,
+    ui: esUi,
+    squads: esSquads,
     "time-tracking": esTimeTracking,
     "work-calendars": esWorkCalendars,
     redmine: esRedmine,

@@ -53,7 +53,13 @@
     "uploading": "Subiendo {{filename}}"
   },
   "attachment": {
-    "download_failed": "No se pudo obtener el enlace de descarga. Inténtalo de nuevo en un momento."
+    "download_failed": "No se pudo obtener el enlace de descarga. Inténtalo de nuevo en un momento.",
+    "preview": "Vista previa",
+    "preview_loading": "Cargando vista previa…",
+    "preview_failed": "No se pudo cargar la vista previa",
+    "preview_too_large": "El archivo es demasiado grande para previsualizar. Por favor, descárgalo.",
+    "preview_unsupported": "Este tipo de archivo no se puede previsualizar.",
+    "close": "Cerrar"
   },
   "title_editor": {
     "title_aria_label": "Título"

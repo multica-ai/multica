@@ -286,7 +286,8 @@
       "trigger_unassigned": "未分配",
       "search_placeholder": "分配给...",
       "members_group": "成员",
-      "agents_group": "智能体"
+      "agents_group": "智能体",
+      "squads_group": "小队"
     },
     "due_date": {
       "trigger_label": "截止日期",

@@ -273,6 +273,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Squad trigger: if the issue is assigned to a squad, trigger the squad leader.
+	// Skip when the comment author is a squad member (prevent internal loops).
+	if h.shouldEnqueueSquadLeaderOnComment(r.Context(), issue, authorType, authorID) {
+		h.enqueueSquadLeaderTask(r.Context(), issue, comment.ID, authorType, authorID)
+	}
+
 	// Trigger @mentioned agents: parse agent mentions and enqueue tasks for each.
 	// Pass parentComment so that replies inherit mentions from the thread root.
 	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID)

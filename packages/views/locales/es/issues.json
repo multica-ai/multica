@@ -295,7 +295,8 @@
       "trigger_unassigned": "Sin asignar",
       "search_placeholder": "Asignar a...",
       "members_group": "Miembros",
-      "agents_group": "Agentes"
+      "agents_group": "Agentes",
+      "squads_group": "Equipos"
     },
     "due_date": {
       "trigger_label": "Fecha límite",

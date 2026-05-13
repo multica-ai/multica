@@ -133,5 +133,21 @@
       "error_daemon_version": "El CLI del daemon de este agente ({{current}}) es inferior al requerido {{min}}. Actualiza el daemon para usar Crear con agente.",
       "error_unknown": "Error al enviar. Inténtalo de nuevo."
     }
+  },
+  "create_squad": {
+    "title": "Crear equipo",
+    "description": "Crea un equipo colaborativo con un agente líder que coordina al equipo.",
+    "name_label": "Nombre",
+    "name_placeholder": "ej. Equipo Frontend",
+    "description_label": "Descripción",
+    "description_placeholder": "Describe de qué se encarga este equipo...",
+    "leader_label": "Agente líder",
+    "leader_hint": "El líder recibe todas las tareas asignadas a este equipo y coordina al resto.",
+    "no_agents": "No hay agentes activos disponibles. Crea un agente primero.",
+    "cancel": "Cancelar",
+    "submit": "Crear equipo",
+    "submitting": "Creando...",
+    "toast_created": "Equipo creado",
+    "toast_failed": "Error al crear el equipo"
   }
 }

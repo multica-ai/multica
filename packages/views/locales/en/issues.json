@@ -295,7 +295,8 @@
       "trigger_unassigned": "Unassigned",
       "search_placeholder": "Assign to...",
       "members_group": "Members",
-      "agents_group": "Agents"
+      "agents_group": "Agents",
+      "squads_group": "Squads"
     },
     "due_date": {
       "trigger_label": "Due date",

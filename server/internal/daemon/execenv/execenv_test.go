@@ -2043,6 +2043,371 @@ func TestReuseUpdatesCodexWorkspaceSkills(t *testing.T) {
 	}
 }
 
+// TestPrepareCodexSeedsUserSkills covers the fix for #1922: skills the user
+// installs under ~/.codex/skills/ must be discoverable by the codex CLI
+// inside a Multica task, despite the daemon redirecting CODEX_HOME to a
+// per-task directory.
+func TestPrepareCodexSeedsUserSkills(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	// Lay out two user-installed skills with both a SKILL.md and a
+	// supporting file, plus an ignored dotfile that must not be copied.
+	userSkills := filepath.Join(sharedHome, "skills")
+	if err := os.MkdirAll(filepath.Join(userSkills, "summarize", "examples"), 0o755); err != nil {
+		t.Fatalf("seed user skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userSkills, "summarize", "SKILL.md"), []byte("summarize"), 0o644); err != nil {
+		t.Fatalf("seed user SKILL.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userSkills, "summarize", "examples", "ex.md"), []byte("example"), 0o644); err != nil {
+		t.Fatalf("seed user support file: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(userSkills, "translate"), 0o755); err != nil {
+		t.Fatalf("seed second user skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userSkills, "translate", "SKILL.md"), []byte("translate"), 0o644); err != nil {
+		t.Fatalf("seed second user SKILL.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userSkills, ".DS_Store"), []byte("noise"), 0o644); err != nil {
+		t.Fatalf("seed ignored dotfile: %v", err)
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-user-skills",
+		TaskID:         "d6f7a8b9-c0d1-2345-efab-678901234567",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "user-skills-test"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if data, err := os.ReadFile(filepath.Join(env.CodexHome, "skills", "summarize", "SKILL.md")); err != nil {
+		t.Fatalf("user skill SKILL.md not seeded: %v", err)
+	} else if string(data) != "summarize" {
+		t.Errorf("summarize SKILL.md = %q, want %q", data, "summarize")
+	}
+	if data, err := os.ReadFile(filepath.Join(env.CodexHome, "skills", "summarize", "examples", "ex.md")); err != nil {
+		t.Fatalf("user skill support file not seeded: %v", err)
+	} else if string(data) != "example" {
+		t.Errorf("ex.md = %q, want %q", data, "example")
+	}
+	if data, err := os.ReadFile(filepath.Join(env.CodexHome, "skills", "translate", "SKILL.md")); err != nil {
+		t.Fatalf("second user skill not seeded: %v", err)
+	} else if string(data) != "translate" {
+		t.Errorf("translate SKILL.md = %q, want %q", data, "translate")
+	}
+	if _, err := os.Stat(filepath.Join(env.CodexHome, "skills", ".DS_Store")); !os.IsNotExist(err) {
+		t.Errorf("ignored dotfile leaked into codex-home/skills: err=%v", err)
+	}
+}
+
+// TestPrepareCodexWorkspaceSkillBeatsUserSkillOnConflict checks that when a
+// workspace-assigned skill shares a sanitized name with a user-installed
+// skill, the workspace version fully replaces the user version (rather than
+// leaving stale user files lingering).
+func TestPrepareCodexWorkspaceSkillBeatsUserSkillOnConflict(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	userSkillDir := filepath.Join(sharedHome, "skills", "writing")
+	if err := os.MkdirAll(filepath.Join(userSkillDir, "drafts"), 0o755); err != nil {
+		t.Fatalf("seed user writing skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userSkillDir, "SKILL.md"), []byte("user writing"), 0o644); err != nil {
+		t.Fatalf("seed user SKILL.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userSkillDir, "drafts", "stale.md"), []byte("stale"), 0o644); err != nil {
+		t.Fatalf("seed user stale file: %v", err)
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-skill-conflict",
+		TaskID:         "e7f8a9b0-c1d2-3456-efab-789012345678",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task: TaskContextForEnv{
+			IssueID: "skill-conflict-test",
+			AgentSkills: []SkillContextForEnv{
+				{Name: "Writing", Content: "workspace writing"},
+			},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	data, err := os.ReadFile(filepath.Join(env.CodexHome, "skills", "writing", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("workspace skill not written: %v", err)
+	}
+	if string(data) != "workspace writing" {
+		t.Errorf("SKILL.md = %q, want workspace content", data)
+	}
+	// The user's stale support file must not leak through — seeding is
+	// skipped entirely for names that workspace skills claim.
+	if _, err := os.Stat(filepath.Join(env.CodexHome, "skills", "writing", "drafts", "stale.md")); !os.IsNotExist(err) {
+		t.Errorf("user-skill stale file leaked despite workspace conflict: err=%v", err)
+	}
+}
+
+// TestPrepareCodexNoUserSkillsDir is a regression guard for the empty case —
+// when ~/.codex/skills doesn't exist, the seed step is a no-op and Prepare
+// still succeeds.
+func TestPrepareCodexNoUserSkillsDir(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-no-user-skills",
+		TaskID:         "f8a9b0c1-d2e3-4567-fabc-890123456789",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "no-user-skills-test"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+	if _, err := os.Stat(filepath.Join(env.CodexHome, "skills")); !os.IsNotExist(err) {
+		t.Errorf("skills dir should not exist when neither user nor workspace skills are present, err=%v", err)
+	}
+}
+
+// TestPrepareCodexResolvesUserSkillSymlinks covers the lark-cli /
+// shared-installer case: each user skill is a symlink into a separate
+// installer directory. The per-task home must end up with a real copy, not
+// a dangling symlink that points outside the task root.
+func TestPrepareCodexResolvesUserSkillSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows; covered by Unix path")
+	}
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	installerRoot := filepath.Join(t.TempDir(), "installer", "lark-mail")
+	if err := os.MkdirAll(installerRoot, 0o755); err != nil {
+		t.Fatalf("seed installer dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(installerRoot, "SKILL.md"), []byte("lark"), 0o644); err != nil {
+		t.Fatalf("seed installer SKILL.md: %v", err)
+	}
+
+	userSkills := filepath.Join(sharedHome, "skills")
+	if err := os.MkdirAll(userSkills, 0o755); err != nil {
+		t.Fatalf("seed user skills dir: %v", err)
+	}
+	if err := os.Symlink(installerRoot, filepath.Join(userSkills, "lark-mail")); err != nil {
+		t.Fatalf("seed user skill symlink: %v", err)
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-symlinked-skills",
+		TaskID:         "a9b0c1d2-e3f4-5678-abcd-901234567890",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "symlinked-skills-test"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	dst := filepath.Join(env.CodexHome, "skills", "lark-mail")
+	fi, err := os.Lstat(dst)
+	if err != nil {
+		t.Fatalf("seeded skill missing: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("seeded skill should be a real directory, got a symlink")
+	}
+	data, err := os.ReadFile(filepath.Join(dst, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("seeded SKILL.md missing: %v", err)
+	}
+	if string(data) != "lark" {
+		t.Errorf("seeded SKILL.md = %q, want %q", data, "lark")
+	}
+}
+
+// TestReuseSeedsUserSkillUpdates ensures that user-skill edits between two
+// runs of the same task (the Reuse path) propagate into the per-task home.
+func TestReuseSeedsUserSkillUpdates(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	userSkill := filepath.Join(sharedHome, "skills", "summarize")
+	if err := os.MkdirAll(userSkill, 0o755); err != nil {
+		t.Fatalf("seed user skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userSkill, "SKILL.md"), []byte("v1"), 0o644); err != nil {
+		t.Fatalf("seed v1 SKILL.md: %v", err)
+	}
+
+	workspacesRoot := t.TempDir()
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-user-skill-reuse",
+		TaskID:         "b0c1d2e3-f4a5-6789-abcd-012345678901",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "user-skill-reuse-test"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if err := os.WriteFile(filepath.Join(userSkill, "SKILL.md"), []byte("v2"), 0o644); err != nil {
+		t.Fatalf("update user SKILL.md: %v", err)
+	}
+
+	reused := Reuse(env.WorkDir, "codex", "", TaskContextForEnv{
+		IssueID: "user-skill-reuse-test",
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "summarize", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("user skill not refreshed on reuse: %v", err)
+	}
+	if string(data) != "v2" {
+		t.Errorf("after Reuse, user skill content = %q, want %q", data, "v2")
+	}
+}
+
+// TestReuseClearsUserSkillResidueOnWorkspaceConflict locks in the fix for
+// the GPT-Boy review on PR #2519: when round 1 seeded a user skill named
+// `writing` (including support files) and round 2 reuses the same workdir
+// with a workspace skill `Writing`, the user-version support files must not
+// linger under the workspace skill's directory.
+func TestReuseClearsUserSkillResidueOnWorkspaceConflict(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	userSkillDir := filepath.Join(sharedHome, "skills", "writing")
+	if err := os.MkdirAll(filepath.Join(userSkillDir, "drafts"), 0o755); err != nil {
+		t.Fatalf("seed user skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userSkillDir, "SKILL.md"), []byte("user writing"), 0o644); err != nil {
+		t.Fatalf("seed user SKILL.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userSkillDir, "drafts", "stale.md"), []byte("stale"), 0o644); err != nil {
+		t.Fatalf("seed user support file: %v", err)
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-reuse-conflict",
+		TaskID:         "c1d2e3f4-a5b6-7890-abcd-123456789012",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-conflict-test"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	// Round 1 had no workspace skill, so the user version should be present.
+	if _, err := os.Stat(filepath.Join(env.CodexHome, "skills", "writing", "drafts", "stale.md")); err != nil {
+		t.Fatalf("user support file should be seeded in round 1: %v", err)
+	}
+
+	reused := Reuse(env.WorkDir, "codex", "", TaskContextForEnv{
+		IssueID: "reuse-conflict-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Writing", Content: "workspace writing"},
+		},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("workspace SKILL.md missing after reuse: %v", err)
+	}
+	if string(data) != "workspace writing" {
+		t.Errorf("SKILL.md = %q, want workspace content", data)
+	}
+	if _, err := os.Stat(filepath.Join(reused.CodexHome, "skills", "writing", "drafts", "stale.md")); !os.IsNotExist(err) {
+		t.Errorf("round-1 user support file leaked into round-2 workspace skill dir, err=%v", err)
+	}
+}
+
+// TestReuseClearsRemovedUserSkill checks that uninstalling a user skill
+// between two runs (delete it from ~/.codex/skills) also drops it from the
+// per-task home on Reuse — otherwise users would still see deleted skills
+// surface to the codex CLI.
+func TestReuseClearsRemovedUserSkill(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	userSkill := filepath.Join(sharedHome, "skills", "deprecated")
+	if err := os.MkdirAll(userSkill, 0o755); err != nil {
+		t.Fatalf("seed user skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userSkill, "SKILL.md"), []byte("deprecated"), 0o644); err != nil {
+		t.Fatalf("seed user SKILL.md: %v", err)
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-reuse-remove",
+		TaskID:         "d2e3f4a5-b6c7-8901-abcd-234567890123",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-remove-test"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if _, err := os.Stat(filepath.Join(env.CodexHome, "skills", "deprecated", "SKILL.md")); err != nil {
+		t.Fatalf("user skill should be seeded in round 1: %v", err)
+	}
+
+	// Uninstall the user skill before round 2.
+	if err := os.RemoveAll(userSkill); err != nil {
+		t.Fatalf("remove user skill: %v", err)
+	}
+
+	reused := Reuse(env.WorkDir, "codex", "", TaskContextForEnv{
+		IssueID: "reuse-remove-test",
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+	if _, err := os.Stat(filepath.Join(reused.CodexHome, "skills", "deprecated")); !os.IsNotExist(err) {
+		t.Errorf("removed user skill still present in per-task home after reuse, err=%v", err)
+	}
+}
+
 func TestEnsureSymlinkRepairsBrokenLink(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
