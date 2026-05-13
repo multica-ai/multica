@@ -60,6 +60,7 @@ import { useTypeLabels } from "./inbox-detail-label";
 import {
   filterInboxItemsByReadState,
   getInboxDisplayTitle,
+  keepSelectedInboxItemVisible,
   type InboxReadFilter,
 } from "./inbox-display";
 import { useT } from "../../i18n";
@@ -87,6 +88,14 @@ export function InboxPage() {
   );
 
   const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
+  const filteredItemIds = useMemo(
+    () => new Set(filteredItems.map((item) => item.id)),
+    [filteredItems],
+  );
+  const listItems = useMemo(
+    () => keepSelectedInboxItemVisible(items, filteredItems, selected?.id),
+    [filteredItems, items, selected?.id],
+  );
 
   // Track the last key we actually resolved against the inbox list. Lets the
   // fallback effect distinguish "shared-link to a notification not in our
@@ -137,6 +146,7 @@ export function InboxPage() {
   const timeAgo = useTimeAgo();
   const typeLabels = useTypeLabels();
   const hasActiveReadFilter = readFilter !== "all";
+  const filterTooltip = t(($) => $.filter.tooltip);
 
 
   // Auto-mark-read whenever a selected item is unread — covers both click-
@@ -223,7 +233,8 @@ export function InboxPage() {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                title={t(($) => $.filter.tooltip)}
+                title={filterTooltip}
+                aria-label={filterTooltip}
                 className="relative text-muted-foreground"
               />
             }
@@ -287,7 +298,7 @@ export function InboxPage() {
     </PageHeader>
   );
 
-  const listBody = filteredItems.length === 0 ? (
+  const listBody = listItems.length === 0 ? (
     <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
       <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
       <p className="text-sm">
@@ -298,11 +309,12 @@ export function InboxPage() {
     </div>
   ) : (
     <div>
-      {filteredItems.map((item) => (
+      {listItems.map((item) => (
         <InboxListItem
           key={item.id}
           item={item}
           isSelected={(item.issue_id ?? item.id) === selectedKey}
+          isFilteredOut={!filteredItemIds.has(item.id)}
           onClick={() => handleSelect(item)}
           onArchive={() => handleArchive(item.id)}
         />

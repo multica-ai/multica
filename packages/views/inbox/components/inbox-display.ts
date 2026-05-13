@@ -58,3 +58,18 @@ export function filterInboxItemsByReadState(
   if (filter === "read") return items.filter((item) => item.read);
   return items;
 }
+
+export function keepSelectedInboxItemVisible(
+  items: InboxItem[],
+  filteredItems: InboxItem[],
+  selectedItemId: string | null | undefined,
+): InboxItem[] {
+  if (!selectedItemId) return filteredItems;
+
+  const filteredIds = new Set(filteredItems.map((item) => item.id));
+  if (filteredIds.has(selectedItemId)) return filteredItems;
+
+  return items.filter(
+    (item) => filteredIds.has(item.id) || item.id === selectedItemId,
+  );
+}

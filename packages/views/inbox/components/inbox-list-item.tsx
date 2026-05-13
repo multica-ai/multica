@@ -30,11 +30,13 @@ export function InboxListItem({
   isSelected,
   onClick,
   onArchive,
+  isFilteredOut = false,
 }: {
   item: InboxItem;
   isSelected: boolean;
   onClick: () => void;
   onArchive: () => void;
+  isFilteredOut?: boolean;
 }) {
   const { t } = useT("inbox");
   const timeAgo = useTimeAgo();
@@ -45,7 +47,7 @@ export function InboxListItem({
       onClick={onClick}
       className={`group flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
         isSelected ? "bg-accent" : "hover:bg-accent/50"
-      }`}
+      } ${isFilteredOut ? "opacity-60" : ""}`}
     >
       <ActorAvatar
         actorType={item.actor_type ?? item.recipient_type}

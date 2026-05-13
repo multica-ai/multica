@@ -4,6 +4,7 @@ import {
   filterInboxItemsByReadState,
   getInboxDisplayTitle,
   getQuickCreateFailureDetail,
+  keepSelectedInboxItemVisible,
   stripQuickCreatePrefix,
 } from "./inbox-display";
 
@@ -87,5 +88,17 @@ describe("inbox display helpers", () => {
     expect(filterInboxItemsByReadState(items, "all")).toEqual(items);
     expect(filterInboxItemsByReadState(items, "unread")).toEqual([unread]);
     expect(filterInboxItemsByReadState(items, "read")).toEqual([read]);
+  });
+
+  it("keeps the selected inbox item visible when filters hide it", () => {
+    const newest = item({ id: "newest", read: false });
+    const selected = item({ id: "selected", read: true });
+    const oldest = item({ id: "oldest", read: false });
+    const items = [newest, selected, oldest];
+    const unreadItems = [newest, oldest];
+
+    expect(
+      keepSelectedInboxItemVisible(items, unreadItems, selected.id),
+    ).toEqual(items);
   });
 });
