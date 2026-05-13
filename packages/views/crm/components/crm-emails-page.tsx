@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Archive, ArrowRight, Building2, Inbox, Link2, Mail, MailOpen, Search, Settings, Star, UserRound } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useIssueDraftStore } from "@multica/core/issues";
+import { issueKeys, useIssueDraftStore } from "@multica/core/issues";
 import { useModalStore } from "@multica/core/modals";
 import { crmAccountListOptions, crmContactListOptions, crmEmailMessageListOptions, crmEmailThreadListOptions, crmKeys } from "@multica/core/crm/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -235,7 +235,22 @@ export function CRMEmailsPage() {
       description: selectedThread.subject,
       priority: "medium",
     });
-    openModal("create-issue", { project_id: emailLinkDraft.projectId });
+    openModal("create-issue", {
+      project_id: emailLinkDraft.projectId,
+      onCreated: async (issue: Issue) => {
+        const nextIssueIds = Array.from(new Set([...emailLinkDraft.issueIds, issue.id]));
+        setEmailLinkDraft({ ...emailLinkDraft, issueIds: nextIssueIds });
+        await api.updateCRMEmailThreadAssociation(selectedThread.id, {
+          account_id: selectedThread.account_id ?? null,
+          contact_id: selectedThread.contact_id ?? null,
+          project_id: emailLinkDraft.projectId || null,
+          issue_id: nextIssueIds[0] ?? null,
+          issue_ids: nextIssueIds,
+        });
+        await queryClient.invalidateQueries({ queryKey: crmKeys.emailThreads(wsId) });
+        await queryClient.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+      },
+    });
   };
 
   const draftContacts = associationDraft?.accountId ? draftAccountContacts : [];

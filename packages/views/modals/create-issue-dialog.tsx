@@ -85,6 +85,7 @@ export function CreateIssueDialog({
             onClose={onClose}
             onSwitchMode={switchTo("agent")}
             data={panelData}
+            onCreated={typeof panelData?.onCreated === "function" ? (panelData.onCreated as (issue: import("@multica/core/types").Issue) => void | Promise<void>) : undefined}
             isExpanded={isExpanded}
             setIsExpanded={setIsExpanded}
             backlogHintIssueId={backlogHintIssueId}

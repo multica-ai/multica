@@ -61,6 +61,7 @@ export function ManualCreatePanel({
   onClose,
   onSwitchMode,
   data,
+  onCreated,
   isExpanded,
   setIsExpanded,
   backlogHintIssueId,
@@ -70,6 +71,7 @@ export function ManualCreatePanel({
   /** Called with the carry payload to seed the agent panel after switch. */
   onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
   data?: Record<string, unknown> | null;
+  onCreated?: (issue: Issue) => void | Promise<void>;
   /** Lifted to the shell so DialogContent's mode-aware className can react
    *  without the body itself having to live inside DialogContent (which would
    *  re-mount the Portal on mode swap and replay the open animation). */
@@ -208,6 +210,8 @@ export function ManualCreatePanel({
           );
         }
       }
+
+      await onCreated?.(issue);
 
       setLastAssignee(assigneeType, assigneeId);
       setLastMode("manual");

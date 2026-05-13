@@ -261,7 +261,7 @@ describe("CRMEmailsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Create follow-up issue" }));
     expect(mockClearIssueDraft).toHaveBeenCalled();
     expect(mockSetIssueDraft).toHaveBeenCalledWith(expect.objectContaining({ title: "Follow up: New quotation request", priority: "medium" }));
-    expect(mockModalOpen).toHaveBeenCalledWith("create-issue", { project_id: "project-1" });
+    expect(mockModalOpen).toHaveBeenCalledWith("create-issue", expect.objectContaining({ project_id: "project-1", onCreated: expect.any(Function) }));
   });
 
 });
