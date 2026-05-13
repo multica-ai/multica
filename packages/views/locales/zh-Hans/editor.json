@@ -34,7 +34,13 @@
     "copy_link_failed": "复制链接失败"
   },
   "attachment": {
-    "download_failed": "下载链接获取失败，请稍后重试。"
+    "download_failed": "下载链接获取失败，请稍后重试。",
+    "preview": "预览",
+    "preview_loading": "加载预览中…",
+    "preview_failed": "预览加载失败",
+    "preview_too_large": "文件太大，无法在线预览，请下载查看。",
+    "preview_unsupported": "该文件类型暂不支持预览。",
+    "close": "关闭"
   },
   "link_hover": {
     "copy_link": "复制链接",

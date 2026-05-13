@@ -113,6 +113,14 @@ vi.mock("../../editor", () => ({
   // real API singleton; tests that care about download wiring should write
   // dedicated specs against `use-download-attachment.test.tsx`.
   useDownloadAttachment: () => vi.fn(),
+  // Inert preview hook — comment-card's AttachmentList uses it to gate the
+  // Eye button. Dedicated coverage lives in attachment-preview-modal.test.tsx.
+  useAttachmentPreview: () => ({
+    open: vi.fn(),
+    tryOpen: () => false,
+    modal: null,
+  }),
+  isPreviewable: () => false,
   ReadonlyContent: ({ content }: { content: string }) => (
     <div data-testid="readonly-content">{content}</div>
   ),

@@ -3,20 +3,19 @@
 import { useCallback } from "react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
-import { openExternal } from "../platform";
 import { useT } from "../i18n";
 
 interface DesktopBridge {
-  openExternal?: (u: string) => Promise<void> | void;
+  downloadURL?: (u: string) => Promise<void> | void;
 }
 
 // Detected at call time, not module load — the bridge is injected by the
 // Electron preload after `window` exists, and reading it lazily lets the
 // same hook work in both renderers without a build-time fork.
-function hasDesktopBridge(): boolean {
+function hasDesktopDownloadBridge(): boolean {
   if (typeof window === "undefined") return false;
   const bridge = (window as unknown as { desktopAPI?: DesktopBridge }).desktopAPI;
-  return Boolean(bridge?.openExternal);
+  return Boolean(bridge?.downloadURL);
 }
 
 /**
@@ -35,11 +34,11 @@ function hasDesktopBridge(): boolean {
  *   spec (`dom-open` step 17) makes that return `null`, which would leave
  *   us nothing to navigate. We disown the opener manually after the fetch.
  *
- * - **Desktop**: `window.open` is intercepted by Electron's
- *   `setWindowOpenHandler` and routed through `openExternalSafely`, which
- *   rejects `about:blank`. So on desktop we fetch first, then hand the URL
- *   to `openExternal()` which IPCs into `shell.openExternal` and opens the
- *   system browser.
+ * - **Desktop**: uses `desktopAPI.downloadURL()` which invokes Electron's
+ *   native `webContents.downloadURL()`, showing a save dialog and saving
+ *   the file directly. This avoids the system browser entirely and fixes
+ *   the Linux/Ubuntu issue where HTML files are rendered inline instead
+ *   of being downloaded.
  */
 export function useDownloadAttachment(): (attachmentId: string) => Promise<void> {
   const { t } = useT("editor");
@@ -47,14 +46,17 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
     async (attachmentId: string) => {
       const failed = () => toast.error(t(($) => $.attachment.download_failed));
 
-      if (hasDesktopBridge()) {
+      if (hasDesktopDownloadBridge()) {
         try {
           const fresh = await api.getAttachment(attachmentId);
           if (!fresh.download_url) {
             failed();
             return;
           }
-          openExternal(fresh.download_url);
+          const bridge = (
+            window as unknown as { desktopAPI?: DesktopBridge }
+          ).desktopAPI;
+          await bridge!.downloadURL!(fresh.download_url);
         } catch {
           failed();
         }

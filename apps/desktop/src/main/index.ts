@@ -5,7 +5,7 @@ import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
-import { openExternalSafely } from "./external-url";
+import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
@@ -133,6 +133,27 @@ function createWindow(): void {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
       webSecurity: false,
+      // Required for the Chromium PDF viewer (PDFium) to activate inside
+      // iframes — used by the attachment preview modal for application/pdf
+      // files. Default is false in Electron; without it <iframe src=*.pdf>
+      // renders blank.
+      //
+      // Security trade-off, accepted intentionally:
+      //   1. This window already runs with `webSecurity: false` + `sandbox: false`,
+      //      so `plugins: true` does NOT meaningfully widen the renderer's
+      //      attack surface beyond what is already accepted.
+      //   2. The only PDFs that reach an iframe here are signed CloudFront URLs
+      //      we ourselves issued (see useDownloadAttachment); user-supplied URLs
+      //      are routed through `setWindowOpenHandler` → `openExternalSafely` and
+      //      cannot land in this renderer.
+      //   3. Chromium's PDFium plugin is itself sandboxed inside its own process
+      //      and only handles the `application/pdf` MIME — it does not expose
+      //      Flash, Java, or other historical plugin surfaces.
+      //
+      // If we ever tighten `webSecurity` / `sandbox`, revisit this by hosting
+      // the PDF viewer in a dedicated BrowserView with `plugins: true` scoped
+      // to that view, keeping the main renderer plugin-free.
+      plugins: true,
       additionalArguments: [`--multica-locale=${systemLocale}`],
     },
   });
@@ -294,6 +315,14 @@ if (!gotTheLock) {
     // false configuration.
     ipcMain.handle("shell:openExternal", (_event, url: string) => {
       return openExternalSafely(url);
+    });
+
+    ipcMain.handle("file:download-url", (_event, url: string) => {
+      if (!mainWindow) {
+        console.warn("[download] ignored file:download-url — mainWindow torn down");
+        return;
+      }
+      downloadURLSafely(mainWindow, url);
     });
 
     // Sync IPC: app version + normalized OS for preload. Sync (not invoke) so

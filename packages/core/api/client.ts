@@ -317,6 +317,27 @@ export class ApiError extends Error {
   }
 }
 
+// Thrown by getAttachmentTextContent when the server refuses to inline a
+// file because it exceeds the 2 MB cap. UI maps to a "too large, please
+// download" affordance with the Download CTA still available.
+export class PreviewTooLargeError extends Error {
+  constructor() {
+    super("attachment too large for inline preview");
+    this.name = "PreviewTooLargeError";
+  }
+}
+
+// Thrown by getAttachmentTextContent when the server's text whitelist
+// rejects the content type. Normally the client's isPreviewable() guard
+// catches this earlier, but the two whitelists can drift — surfacing the
+// 415 as a typed error makes the drift visible.
+export class PreviewUnsupportedError extends Error {
+  constructor() {
+    super("attachment type not supported for inline preview");
+    this.name = "PreviewUnsupportedError";
+  }
+}
+
 export class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
@@ -391,15 +412,23 @@ export class ApiClient {
     }
   }
 
-  private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
+  // Sends the request with the standard headers (auth, CSRF, request id,
+  // client identity) and runs the shared error path (401 → handleUnauthorized,
+  // structured ApiError, status-aware log level). Returns the raw Response so
+  // callers can decide how to decode the body — JSON for the typed `fetch<T>`
+  // path, plain text for the attachment-preview proxy, etc.
+  private async fetchRaw(
+    path: string,
+    init?: RequestInit & { extraHeaders?: Record<string, string> },
+  ): Promise<Response> {
     const rid = createRequestId();
     const start = Date.now();
     const method = init?.method ?? "GET";
 
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
       "X-Request-ID": rid,
       ...this.authHeaders(),
+      ...(init?.extraHeaders ?? {}),
       ...((init?.headers as Record<string, string>) ?? {}),
     };
 
@@ -420,12 +449,18 @@ export class ApiClient {
     }
 
     this.logger.info(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms` });
+    return res;
+  }
 
+  private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
+    const res = await this.fetchRaw(path, {
+      ...init,
+      extraHeaders: { "Content-Type": "application/json" },
+    });
     // Handle 204 No Content
     if (res.status === 204) {
       return undefined as T;
     }
-
     return res.json() as Promise<T>;
   }
 
@@ -1524,6 +1559,38 @@ export class ApiClient {
 
   async deleteAttachment(id: string): Promise<void> {
     await this.fetch(`/api/attachments/${id}`, { method: "DELETE" });
+  }
+
+  // Fetches the raw bytes of a text-previewable attachment.
+  //
+  // The endpoint sidesteps CloudFront CORS (not configured on the CDN) and
+  // bypasses Content-Disposition: attachment for the `text/*` family, both
+  // of which would otherwise prevent the renderer from getting the body.
+  // The server always replies with `text/plain; charset=utf-8` for safety;
+  // the original MIME ships back in the `X-Original-Content-Type` header so
+  // the preview dispatcher can choose between markdown / html / plain code.
+  //
+  // Routes through `fetchRaw` so it inherits the standard auth headers,
+  // 401 → handleUnauthorized recovery, request-id logging, and ApiError
+  // shape. 413 / 415 are translated to typed `Preview*Error` instances so
+  // the modal can render specific fallbacks instead of generic failure.
+  async getAttachmentTextContent(
+    id: string,
+  ): Promise<{ text: string; originalContentType: string }> {
+    let res: Response;
+    try {
+      res = await this.fetchRaw(`/api/attachments/${id}/content`);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 413) throw new PreviewTooLargeError();
+        if (err.status === 415) throw new PreviewUnsupportedError();
+      }
+      throw err;
+    }
+    return {
+      text: await res.text(),
+      originalContentType: res.headers.get("X-Original-Content-Type") ?? "",
+    };
   }
 
   // Projects
