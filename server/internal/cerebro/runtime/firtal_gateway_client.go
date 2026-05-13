@@ -13,8 +13,37 @@ import (
 )
 
 type GatewayMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string            `json:"role"`
+	Content    string            `json:"content,omitempty"`
+	ToolCalls  []GatewayToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
+}
+
+// GatewayToolDef is the OpenAI-compatible tool definition the gateway accepts
+// on `/v1/chat/completions`. Only `type: "function"` is supported today.
+type GatewayToolDef struct {
+	Type     string              `json:"type"`
+	Function GatewayToolFunction `json:"function"`
+}
+
+type GatewayToolFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+}
+
+// GatewayToolCall is the OpenAI-compatible tool invocation returned in
+// `choices[0].message.tool_calls`. Function arguments arrive as a JSON-encoded
+// string; the executor unmarshals into a map[string]any before dispatching.
+type GatewayToolCall struct {
+	ID       string                  `json:"id"`
+	Type     string                  `json:"type"`
+	Function GatewayToolCallFunction `json:"function"`
+}
+
+type GatewayToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 type GatewayUsage struct {
@@ -26,9 +55,10 @@ type GatewayUsage struct {
 }
 
 type GatewayCompletion struct {
-	Model  string
-	Output string
-	Usage  GatewayUsage
+	Model     string
+	Output    string
+	ToolCalls []GatewayToolCall
+	Usage     GatewayUsage
 }
 
 type GatewayRequestMeta struct {
@@ -51,6 +81,15 @@ func NewGatewayClient(cfg FirtalGatewayRuntimeConfig, httpClient *http.Client) *
 }
 
 func (c *GatewayClient) Complete(ctx context.Context, model string, messages []GatewayMessage, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	return c.CompleteWithTools(ctx, model, messages, nil, meta)
+}
+
+// CompleteWithTools is Complete with optional OpenAI-compatible tool
+// definitions. When tools is non-empty, the gateway may respond with
+// `tool_calls` instead of (or alongside) `content`; both branches are returned
+// in the GatewayCompletion. Callers (the executor's tool-loop) decide whether
+// to dispatch the calls and run another iteration, or treat the text as final.
+func (c *GatewayClient) CompleteWithTools(ctx context.Context, model string, messages []GatewayMessage, tools []GatewayToolDef, meta GatewayRequestMeta) (GatewayCompletion, error) {
 	model = strings.TrimSpace(model)
 	if model == "" || model == "auto" {
 		model = c.cfg.Model
@@ -71,6 +110,9 @@ func (c *GatewayClient) Complete(ctx context.Context, model string, messages []G
 	}
 	if c.cfg.Temperature != nil {
 		body["temperature"] = *c.cfg.Temperature
+	}
+	if len(tools) > 0 {
+		body["tools"] = tools
 	}
 
 	raw, err := json.Marshal(body)
@@ -116,21 +158,24 @@ func (c *GatewayClient) Complete(ctx context.Context, model string, messages []G
 	}
 
 	output := strings.TrimSpace(extractGatewayContent(parsed))
-	if output == "" {
+	toolCalls := extractGatewayToolCalls(parsed)
+	if output == "" && len(toolCalls) == 0 {
 		return GatewayCompletion{Model: model, Usage: usageFromGatewayResponse(parsed)}, fmt.Errorf("gateway returned no assistant content")
 	}
 
 	return GatewayCompletion{
-		Model:  model,
-		Output: output,
-		Usage:  usageFromGatewayResponse(parsed),
+		Model:     model,
+		Output:    output,
+		ToolCalls: toolCalls,
+		Usage:     usageFromGatewayResponse(parsed),
 	}, nil
 }
 
 type gatewayResponse struct {
 	Choices []struct {
 		Message struct {
-			Content any `json:"content"`
+			Content   any               `json:"content"`
+			ToolCalls []GatewayToolCall `json:"tool_calls"`
 		} `json:"message"`
 	} `json:"choices"`
 	Usage *struct {
@@ -149,6 +194,27 @@ type gatewayResponse struct {
 		CachedInputTokens int64 `json:"cached_input_tokens"`
 		CostCents         int64 `json:"cost_cents"`
 	} `json:"firtal"`
+}
+
+func extractGatewayToolCalls(resp gatewayResponse) []GatewayToolCall {
+	if len(resp.Choices) == 0 {
+		return nil
+	}
+	calls := resp.Choices[0].Message.ToolCalls
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]GatewayToolCall, 0, len(calls))
+	for _, c := range calls {
+		if strings.TrimSpace(c.Function.Name) == "" {
+			continue
+		}
+		if c.Type == "" {
+			c.Type = "function"
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 func extractGatewayContent(resp gatewayResponse) string {

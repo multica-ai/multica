@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/mcp"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -278,11 +279,17 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 
 	runCtx, cancel := context.WithTimeout(parent, cfg.TaskTimeout)
 	defer cancel()
-	completion, err := e.completeGateway(runCtx, cfg, agent.Model.String, messages, GatewayRequestMeta{
+	meta := GatewayRequestMeta{
 		TaskID:      taskID,
 		AgentID:     util.UUIDToString(task.AgentID),
 		WorkspaceID: util.UUIDToString(plan.workspaceID),
-	})
+	}
+	var completion GatewayCompletion
+	if cfg.ToolsEnabledForAgent(task.AgentID) {
+		completion, err = e.runToolLoop(runCtx, cfg, agent, messages, meta, task.AgentID, plan.workspaceID)
+	} else {
+		completion, err = e.completeGateway(runCtx, cfg, agent.Model.String, messages, meta)
+	}
 	if err != nil {
 		e.failTask(parent, task, err.Error(), "agent_error")
 		return
@@ -394,6 +401,146 @@ func (e *FirtalGatewayExecutor) completeGateway(ctx context.Context, cfg FirtalG
 		return e.gateway.Complete(ctx, model, messages, meta)
 	}
 	return NewGatewayClient(cfg, nil).Complete(ctx, model, messages, meta)
+}
+
+func (e *FirtalGatewayExecutor) completeGatewayWithTools(ctx context.Context, cfg FirtalGatewayRuntimeConfig, model string, messages []GatewayMessage, tools []GatewayToolDef, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	if e.gateway != nil {
+		return e.gateway.CompleteWithTools(ctx, model, messages, tools, meta)
+	}
+	return NewGatewayClient(cfg, nil).CompleteWithTools(ctx, model, messages, tools, meta)
+}
+
+// runToolLoop runs the model in a get_issue → list_comments → add_comment
+// style loop. Up to firtalGatewayMaxToolRounds rounds dispatch tools; each
+// round sends the running transcript plus tool definitions, and if the model
+// emits tool_calls they are dispatched in-process against the executor's DB,
+// results are appended as role:tool messages, and the next round runs. The
+// first round without tool_calls becomes the final output. When the cap is
+// reached after a tool dispatch, the loop makes one final gateway call with
+// tools omitted so the model is forced to produce a text answer instead of
+// failing the task. Usage is summed across all calls so budget rollups see
+// the full cost of the loop.
+func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID pgtype.UUID) (GatewayCompletion, error) {
+	toolSrv := NewFirtalGatewayToolServer(e.queries, ToolContext{
+		AgentID:     agentID,
+		WorkspaceID: workspaceID,
+	})
+	return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, toolSrv, GatewayToolDefs())
+}
+
+// runToolLoopWithServer is the testable inner form of runToolLoop. Tests can
+// register their own handlers on toolSrv so the loop's control flow can be
+// exercised without a real database.
+func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, toolSrv *mcp.Server, tools []GatewayToolDef) (GatewayCompletion, error) {
+	history := withToolUsageHint(initialMessages)
+
+	var acc GatewayCompletion
+	accumulate := func(c GatewayCompletion) {
+		acc.Model = c.Model
+		acc.Usage.InputTokens += c.Usage.InputTokens
+		acc.Usage.OutputTokens += c.Usage.OutputTokens
+		acc.Usage.CacheReadTokens += c.Usage.CacheReadTokens
+		acc.Usage.CacheWriteTokens += c.Usage.CacheWriteTokens
+		acc.Usage.CostCents += c.Usage.CostCents
+	}
+
+	for round := 0; round < firtalGatewayMaxToolRounds; round++ {
+		completion, err := e.completeGatewayWithTools(ctx, cfg, agent.Model.String, history, tools, meta)
+		if err != nil {
+			return GatewayCompletion{}, err
+		}
+		accumulate(completion)
+
+		if len(completion.ToolCalls) == 0 {
+			acc.Output = completion.Output
+			return acc, nil
+		}
+
+		history = append(history, GatewayMessage{
+			Role:      "assistant",
+			Content:   completion.Output,
+			ToolCalls: completion.ToolCalls,
+		})
+		for _, call := range completion.ToolCalls {
+			result, dur := e.dispatchTool(ctx, toolSrv, call)
+			e.logger.Info("firtal gateway tool call",
+				"task_id", meta.TaskID,
+				"agent_id", meta.AgentID,
+				"workspace_id", meta.WorkspaceID,
+				"round", round+1,
+				"tool", call.Function.Name,
+				"tool_call_id", call.ID,
+				"duration_ms", dur.Milliseconds(),
+				"is_error", result.IsError,
+			)
+			history = append(history, GatewayMessage{
+				Role:       "tool",
+				ToolCallID: call.ID,
+				Content:    toolResultText(result),
+			})
+		}
+	}
+
+	// Tool-round budget exhausted. Make one final gateway call WITHOUT tools
+	// so the model has to produce a text answer. This is what closes the
+	// `get_issue` → `list_comments` → `add_comment` acceptance flow: the
+	// three rounds dispatched the tools, and this final call lets the model
+	// emit its confirmation text. The history already carries the tool
+	// results, so the model has everything it needs to summarise.
+	e.logger.Info("firtal gateway tool loop forcing final no-tool call",
+		"task_id", meta.TaskID,
+		"agent_id", meta.AgentID,
+		"workspace_id", meta.WorkspaceID,
+		"max_tool_rounds", firtalGatewayMaxToolRounds,
+	)
+	final, err := e.completeGateway(ctx, cfg, agent.Model.String, history, meta)
+	if err != nil {
+		return GatewayCompletion{}, err
+	}
+	accumulate(final)
+	acc.Output = final.Output
+	return acc, nil
+}
+
+func (e *FirtalGatewayExecutor) dispatchTool(ctx context.Context, srv *mcp.Server, call GatewayToolCall) (mcp.CallToolResult, time.Duration) {
+	args := map[string]any{}
+	if raw := strings.TrimSpace(call.Function.Arguments); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &args); err != nil {
+			return mcp.ErrorResult(fmt.Sprintf("invalid tool arguments JSON: %v", err)), 0
+		}
+	}
+	start := time.Now()
+	result, err := srv.Call(ctx, call.Function.Name, args)
+	dur := time.Since(start)
+	if err != nil {
+		return mcp.ErrorResult(err.Error()), dur
+	}
+	return result, dur
+}
+
+// withToolUsageHint appends a brief instruction to the existing system
+// message so a tool-enabled agent stops parroting "I don't have tools" — the
+// inherited chat/issue prompts explicitly tell the model it has none. The
+// prompt rewrite stays minimal so we don't drift away from the chat-only
+// baseline; W2/W3 will introduce a proper tool-aware system prompt.
+func withToolUsageHint(messages []GatewayMessage) []GatewayMessage {
+	if len(messages) == 0 || messages[0].Role != "system" {
+		return messages
+	}
+	hint := "\n\nYou have these tools available: get_issue(issue_id), list_comments(issue_id), add_comment(issue_id, content). Use them to read the issue and post your reply as a comment when asked."
+	out := append([]GatewayMessage(nil), messages...)
+	out[0].Content = strings.TrimRight(out[0].Content, "\n") + hint
+	return out
+}
+
+func toolResultText(r mcp.CallToolResult) string {
+	var b strings.Builder
+	for _, c := range r.Content {
+		if c.Type == "text" {
+			b.WriteString(c.Text)
+		}
+	}
+	return b.String()
 }
 
 func buildGatewayMessages(agent db.Agent, history []db.ChatMessage, startedAt pgtype.Timestamptz, limit int) []GatewayMessage {

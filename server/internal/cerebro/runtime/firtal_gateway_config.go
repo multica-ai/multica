@@ -24,6 +24,14 @@ const (
 	defaultFirtalGatewayTaskTimeout    = 10 * time.Minute
 	defaultFirtalGatewayHistoryLimit   = 30
 	defaultFirtalGatewayMaxConcurrency = 4
+
+	// firtalGatewayMaxToolRounds caps how many tool-call rounds the model may
+	// use before the loop forces a final no-tool gateway call to extract the
+	// answer. Three rounds covers the POC chain (get_issue → list_comments →
+	// add_comment); the forced final call on top of that lets the model emit
+	// its confirmation text. Going higher needs the budget + transparency-log
+	// work scheduled for W2/W3.
+	firtalGatewayMaxToolRounds = 3
 )
 
 // FirtalGatewayRuntimeConfig controls the server-owned HTTPS runtime backed by
@@ -43,6 +51,26 @@ type FirtalGatewayRuntimeConfig struct {
 	HistoryLimit   int
 	MaxConcurrency int
 	WorkspaceIDs   []pgtype.UUID
+
+	// ToolsEnabledAgentIDs is the per-agent allowlist for the POC tool-loop.
+	// Populated from MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS. Agents not in
+	// this list see the unchanged chat-only behaviour — no `tools` parameter is
+	// sent and no tool_calls are dispatched.
+	ToolsEnabledAgentIDs []pgtype.UUID
+}
+
+// ToolsEnabledForAgent reports whether the per-agent allowlist includes
+// agentID. An empty list means tools are disabled for everyone.
+func (c FirtalGatewayRuntimeConfig) ToolsEnabledForAgent(agentID pgtype.UUID) bool {
+	if !agentID.Valid {
+		return false
+	}
+	for _, id := range c.ToolsEnabledAgentIDs {
+		if id.Valid && id.Bytes == agentID.Bytes {
+			return true
+		}
+	}
+	return false
 }
 
 type WorkspaceFirtalGatewaySettings struct {
@@ -144,6 +172,16 @@ func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
 				return FirtalGatewayRuntimeConfig{}, fmt.Errorf("invalid MULTICA_SERVER_FIRTAL_GATEWAY_WORKSPACE_IDS value %q: %w", part, err)
 			}
 			cfg.WorkspaceIDs = append(cfg.WorkspaceIDs, id)
+		}
+	}
+
+	if raw := strings.TrimSpace(os.Getenv("MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS")); raw != "" {
+		for _, part := range splitCSV(raw) {
+			id, err := util.ParseUUID(part)
+			if err != nil {
+				return FirtalGatewayRuntimeConfig{}, fmt.Errorf("invalid MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS value %q: %w", part, err)
+			}
+			cfg.ToolsEnabledAgentIDs = append(cfg.ToolsEnabledAgentIDs, id)
 		}
 	}
 

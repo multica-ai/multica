@@ -1,6 +1,15 @@
 package runtime
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util"
+)
+
+func uuidFromString(s string) (pgtype.UUID, error) {
+	return util.ParseUUID(s)
+}
 
 func TestLoadFirtalGatewayRuntimeConfig_AutoEnablesWithServerCredentials(t *testing.T) {
 	clearFirtalGatewayEnv(t)
@@ -82,8 +91,45 @@ func clearFirtalGatewayEnv(t *testing.T) {
 		"MULTICA_FIRTAL_GATEWAY_CLOUD_ENABLED",
 		"MULTICA_SERVER_FIRTAL_GATEWAY_MAX_CONCURRENCY",
 		"MULTICA_SERVER_FIRTAL_GATEWAY_WORKSPACE_IDS",
+		"MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS",
 	} {
 		t.Setenv(key, "")
+	}
+}
+
+func TestLoadFirtalGatewayRuntimeConfig_ParsesToolsAgentsEnv(t *testing.T) {
+	clearFirtalGatewayEnv(t)
+	t.Setenv("MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS", "6fe22e7e-6a81-4403-be26-fafd89871cf6, 43501ed6-0b4d-489b-b05e-e5d07e665d91")
+
+	cfg, err := LoadFirtalGatewayRuntimeConfig()
+	if err != nil {
+		t.Fatalf("LoadFirtalGatewayRuntimeConfig() error = %v", err)
+	}
+	if len(cfg.ToolsEnabledAgentIDs) != 2 {
+		t.Fatalf("ToolsEnabledAgentIDs = %+v", cfg.ToolsEnabledAgentIDs)
+	}
+	kristian, err := uuidFromString("6fe22e7e-6a81-4403-be26-fafd89871cf6")
+	if err != nil {
+		t.Fatalf("uuidFromString: %v", err)
+	}
+	if !cfg.ToolsEnabledForAgent(kristian) {
+		t.Fatal("expected Kristian's UUID to be on the allowlist")
+	}
+	other, err := uuidFromString("00000000-0000-0000-0000-000000000000")
+	if err != nil {
+		t.Fatalf("uuidFromString: %v", err)
+	}
+	if cfg.ToolsEnabledForAgent(other) {
+		t.Fatal("expected non-listed agent to be off the allowlist")
+	}
+}
+
+func TestLoadFirtalGatewayRuntimeConfig_RejectsInvalidToolsAgentsEnv(t *testing.T) {
+	clearFirtalGatewayEnv(t)
+	t.Setenv("MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS", "not-a-uuid")
+
+	if _, err := LoadFirtalGatewayRuntimeConfig(); err == nil {
+		t.Fatal("expected invalid UUID in tools allowlist to fail")
 	}
 }
 

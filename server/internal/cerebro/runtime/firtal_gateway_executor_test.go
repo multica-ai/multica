@@ -87,7 +87,7 @@ func TestBuildGatewayIssueMessagesIncludesIssueOpeningAndDistinguishesAuthors(t 
 		t.Fatalf("transcript len = %d, want %d: %+v", len(got), len(want), got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if got[i].Role != want[i].Role || got[i].Content != want[i].Content {
 			t.Fatalf("transcript[%d] = %+v, want %+v", i, got[i], want[i])
 		}
 	}
