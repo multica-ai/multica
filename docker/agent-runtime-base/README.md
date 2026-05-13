@@ -8,14 +8,12 @@
 > flips to a `git clone` and this directory can lift to `docker-layers`. Until
 > then, the base lives where its multica source lives.
 
-Shared base image for G2's AI-coding pipelines. Today both the
-[`agentfarm-agentrunner`](../../Dockerfile.agentrunner) and the DevEnv
-per-developer cloud IDE install the same toolchain independently and drift.
-This image bakes one copy.
+Shared base image for G2's AI-coding pipelines. DevEnv per-developer cloud
+IDE pods install the toolchain from this image so it doesn't need to be
+reinstalled independently.
 
 Downstream images layer just an entrypoint on top — see
-`docker/devenv-runtime/Dockerfile` and the refactored
-`Dockerfile.agentrunner` in the repo root for the two demonstrators.
+`docker/devenv-runtime/Dockerfile`.
 
 ## What's in it
 
@@ -115,7 +113,7 @@ MULTICA_COMMIT=$(git rev-parse --short HEAD) \
 ## Bump procedure
 
 The image is reproducible only as good as the args at bake time. When a
-downstream consumer (agentrunner, devenv-runtime) needs a new version of
+downstream consumer (devenv-runtime) needs a new version of
 one of the baked tools:
 
 1. **Identify which arg to bump.** Find the tool in the table above; the
@@ -164,7 +162,7 @@ one of the baked tools:
    `ghcr.io/g2crowd/agent-runtime-base:latest`.
 7. **Bump consumers** in a separate PR. Each downstream image FROMs
    `agent-runtime-base:<tag>` — bump `BASE_TAG` in their bake file
-   (`docker-bake.agentrunner.hcl`, `docker/devenv-runtime/docker-bake.hcl`)
+   (`docker/devenv-runtime/docker-bake.hcl`)
    to the new `<sha>`, or leave it at `latest` to ride the floating tag.
    The downstream PR is what kubechecks will diff against the gitops
    manifests — kubechecks only fires on consumers that bump their image

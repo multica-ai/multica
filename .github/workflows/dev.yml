@@ -22,21 +22,10 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  # Dev/prod image discrimination is done at the image-repo level, not via tag
-  # prefix: dev.yml passes `environment: dev` (line 56+) to the reusable bake
-  # workflow, which forwards it as the `ENVIRONMENT` env var into
-  # docker/bake-action. The three app bakefiles (docker-bake.{backend,web,
-  # agentrunner}.hcl) then compose the final image as
-  # `${APP_IMAGE_BASE}-${ENVIRONMENT}:${IMG_SHA}` so this workflow pushes to
-  # ghcr.io/g2crowd/agentfarm-{backend,web,agentrunner}-dev:<sha> while
-  # publish.yml continues pushing to the -prod repos. ArgoCD Image Updater on
-  # the agentfarm-development Application points at the -dev repos and picks
-  # newest SHA. No tag-format coordination across workflows is needed.
 
 jobs:
-  # The shared agent-runtime base must build before any image that FROMs it.
-  # Same merge-ordering rule as publish.yml — agentrunner and devenv-runtime
-  # default to BASE_TAG=latest, so the base needs to publish first.
+  # The shared agent-runtime base must build before devenv-runtime which FROMs it.
+  # devenv-runtime defaults to BASE_TAG=latest, so the base needs to publish first.
   #
   # Split into per-arch matrix legs because the base image's hermes install
   # crashes uv with SIGSEGV under QEMU x86_64 emulation on arm64 runners.
@@ -123,18 +112,6 @@ jobs:
       environment: dev
       branch: ${{ github.head_ref || github.ref_name }}
       bakefile: docker-bake.web.hcl
-      runs-on: ubicloud-standard-4-arm
-    secrets: inherit
-
-  bake-build-agentrunner:
-    if: contains(github.event.pull_request.labels.*.name, 'Development')
-    # FROMs agent-runtime-base — base must build first.
-    needs: [bake-build-agent-runtime-base]
-    uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
-    with:
-      environment: dev
-      branch: ${{ github.head_ref || github.ref_name }}
-      bakefile: docker-bake.agentrunner.hcl
       runs-on: ubicloud-standard-4-arm
     secrets: inherit
 

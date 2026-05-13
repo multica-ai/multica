@@ -3,8 +3,8 @@
 // Layered on ghcr.io/g2crowd/agent-runtime-base; pin BASE_TAG per release.
 //
 // Build context is this image's own directory (only the entrypoint script
-// needs to be COPYed in). Invoke from the agentfarm repo root via the same
-// reusable workflow that drives the agentrunner build — the workflow passes
+// needs to be COPYed in). Invoke from the agentfarm repo root via the
+// reusable g2crowd/gh-actions workflow — it passes
 // `files: docker/devenv-runtime/docker-bake.hcl` and sets the workspace as
 // the working directory, so the context path below walks from repo root.
 

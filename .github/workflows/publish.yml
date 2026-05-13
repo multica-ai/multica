@@ -24,11 +24,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The shared agent-runtime base must publish before any image that FROMs it
-  # (agentrunner and devenv-runtime). Both downstream bakes default to
-  # `BASE_TAG=latest`, so the base bake's `:latest` tag is what they pull in
-  # on a fresh build. To pin a specific base into a downstream image, bump
-  # BASE_TAG in that image's docker-bake.<image>.hcl to the IMG_SHA tag.
+  # The shared agent-runtime base must publish before devenv-runtime which FROMs it.
+  # devenv-runtime defaults to BASE_TAG=latest, so the base bake's :latest tag is
+  # what it pulls on a fresh build. To pin a specific base, bump BASE_TAG in
+  # docker/devenv-runtime/docker-bake.hcl to the IMG_SHA tag.
   #
   # Split into per-arch matrix legs because the base image's hermes install
   # crashes uv with SIGSEGV under QEMU x86_64 emulation on arm64 runners.
@@ -114,17 +113,6 @@ jobs:
       runs-on: ubicloud-standard-4-arm
     secrets: inherit
 
-  bake-build-agentrunner:
-    # FROMs agent-runtime-base:latest — base must publish first.
-    needs: [bake-build-agent-runtime-base]
-    uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
-    with:
-      environment: prod
-      branch: ${{ github.head_ref || github.ref_name }}
-      bakefile: docker-bake.agentrunner.hcl
-      runs-on: ubicloud-standard-4-arm
-    secrets: inherit
-
   bake-build-devenv-runtime:
     # FROMs agent-runtime-base:latest — base must publish first.
     needs: [bake-build-agent-runtime-base]
@@ -137,23 +125,20 @@ jobs:
     secrets: inherit
 
   extract-tags:
-    needs: [bake-build-backend, bake-build-web, bake-build-agentrunner]
+    needs: [bake-build-backend, bake-build-web]
     runs-on: ubuntu-latest
     outputs:
       backend_tag: ${{ steps.extract.outputs.backend_tag }}
       web_tag: ${{ steps.extract.outputs.web_tag }}
-      agentrunner_tag: ${{ steps.extract.outputs.agentrunner_tag }}
     steps:
       - name: Extract tags from image_name
         id: extract
         env:
           BACKEND_IMAGE: ${{ needs.bake-build-backend.outputs.image_name }}
           WEB_IMAGE: ${{ needs.bake-build-web.outputs.image_name }}
-          AGENTRUNNER_IMAGE: ${{ needs.bake-build-agentrunner.outputs.image_name }}
         run: |
           echo "backend_tag=${BACKEND_IMAGE##*:}" >> "$GITHUB_OUTPUT"
           echo "web_tag=${WEB_IMAGE##*:}" >> "$GITHUB_OUTPUT"
-          echo "agentrunner_tag=${AGENTRUNNER_IMAGE##*:}" >> "$GITHUB_OUTPUT"
 
   commit-to-gitops-backend:
     needs: [bake-build-backend, bake-build-web, extract-tags]
@@ -177,13 +162,3 @@ jobs:
       path_to_kustomization: gitops/environments/tools/kustomization.yaml
       image_yq_matcher: .images[1].newTag
 
-  commit-to-gitops-agentrunner:
-    needs: [bake-build-agentrunner, extract-tags, commit-to-gitops-web]
-    uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
-    secrets: inherit
-    with:
-      gitops_repository: g2crowd/agentfarm
-      image_tag: ${{ needs.extract-tags.outputs.agentrunner_tag }}
-      app_repo_branch: ${{ github.head_ref || github.ref_name }}
-      path_to_kustomization: gitops/environments/tools/kustomization.yaml
-      image_yq_matcher: .images[2].newTag

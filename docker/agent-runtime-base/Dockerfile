@@ -2,10 +2,9 @@
 #
 # agent-runtime-base — shared base image for G2's AI-coding pipelines.
 #
-# Both the agentfarm agent-runner and the DevEnv per-developer cloud IDE pods
-# need the same toolchain. Today they install it twice and drift. This image
-# bakes one copy. Downstream images (agentrunner, devenv-runtime) layer on top
-# with just an entrypoint.
+# Shared base image for G2's AI-coding pipelines. DevEnv per-developer cloud
+# IDE pods install the toolchain from this image. Downstream images (devenv-runtime)
+# layer on top with just an entrypoint.
 #
 # Tools baked in:
 #   * multica    — Go binary built from this repo's server/cmd/multica
@@ -86,10 +85,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Common substrate. ripgrep is required by hermes for fast file search; tini
 # is what downstream images use as PID 1 to reap zombies and forward signals.
-# The GitHub CLI (`gh`) is baked in here because:
-#   * agentrunner uses it as git's credential helper for cloning private
-#     github.com repos (docker/agentrunner/entrypoint.sh: gh auth setup-git)
-#   * devenv pods will hit the same wall once they clone private repos
+# The GitHub CLI (`gh`) is baked in here because devenv pods need it as
+# git's credential helper for cloning private github.com repos.
 # Installing from the upstream cli.github.com apt repo keeps it on a stable
 # release cadence — distro-packaged versions of `gh` lag months behind.
 RUN apt-get update \

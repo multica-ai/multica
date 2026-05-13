@@ -9,7 +9,6 @@ labels:
     includeTemplates: true
 resources:
   - ../../base/
-  - agentrunner/
 patches:
   - path: patches/service-account.yaml
     target:
@@ -27,6 +26,4 @@ images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
     newTag: "bc90fc3e"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
-    newTag: "bc90fc3e"
-  - name: ghcr.io/g2crowd/agentfarm-agentrunner-prod
     newTag: "bc90fc3e"

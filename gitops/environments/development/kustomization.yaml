@@ -10,10 +10,6 @@ labels:
 resources:
   - ../../base/
   - infra/s3-uploads-bucket.yaml
-  # Dev-only workloads (not in base/). The agentrunner pod hosts the
-  # multica daemon + Claude Code and is currently scoped to the dev cluster
-  # while we test it (see PR review on TCA-12).
-  - agentrunner/
 patchesStrategicMerge:
   # Infra patches — override env-specific values from base (VPC, subnets, OIDC, tags)
   - infra/iam-resources.yaml
@@ -35,31 +31,13 @@ patchesStrategicMerge:
   - patches/delete-hpa-pdb.yaml
   - patches/delete-cloudfront.yaml
 # Remap the base manifests' -prod image references to the -dev GHCR repos
-# that dev.yml publishes to (see docker-bake.*.hcl + .github/workflows/dev.yml,
-# both updated in #102 to discriminate dev/prod builds by image-repo suffix
-# rather than tag prefix). The `name:` value MUST match the image string in
+# that dev.yml publishes to. The `name:` value MUST match the image string in
 # the base manifests verbatim; `newName:` rewrites it, `newTag:` pins the
 # specific build.
-#
-# `newTag: 83e294dc` is the first dev.yml run after #102 merged — the same
-# commit that introduced the env-suffix scheme. All three repos
-# (agentfarm-{backend,web,agentrunner}-dev) were created by that run and
-# all three contain this tag. Verified via `ghcr.io/v2/.../tags/list`.
-#
-# This is a cold-start pin. The matching ArgoCD Image Updater config in
-# g2crowd/configuration (kustomize/DevOps/argocd-applications/Platform/
-# agentfarm/development.yaml) tracks newest-build on the -dev repos and
-# patches the live Application CR's spec.source.kustomize.images[] via the
-# ArgoCD API (write-back-method: argocd), so this `newTag` is the value the
-# dev cluster falls back to if the live override is ever cleared (e.g. the
-# Application CR is recreated).
 images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
     newName: ghcr.io/g2crowd/agentfarm-backend-dev
     newTag: "83e294dc"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "83e294dc"
-  - name: ghcr.io/g2crowd/agentfarm-agentrunner-prod
-    newName: ghcr.io/g2crowd/agentfarm-agentrunner-dev
     newTag: "83e294dc"

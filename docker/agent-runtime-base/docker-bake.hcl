@@ -1,15 +1,13 @@
 // docker-bake.hcl — multi-arch build for ghcr.io/g2crowd/agent-runtime-base.
 //
-// Follows the same target="default" + IMG_SHA conventions as
-// docker-bake.agentrunner.hcl so the reusable g2crowd/gh-actions workflow
-// can drive this build without bespoke wiring.
+// Uses the standard target="default" + IMG_SHA conventions so the reusable
+// g2crowd/gh-actions workflow can drive this build without bespoke wiring.
 //
-// Multi-arch: linux/amd64 + linux/arm64. Both DevEnv (graviton arm64 nodes)
-// and the current agentrunner (arm64) need at least arm64; amd64 is included
-// because every other piece of the tools-cluster CI runs on amd64 GH runners.
+// Multi-arch: linux/amd64 + linux/arm64. DevEnv (graviton arm64 nodes)
+// needs arm64; amd64 is included because CI runners are amd64.
 //
-// Build context: the agentfarm repo root. Invoke this bake file from the
-// repo root, the same way docker-bake.agentrunner.hcl is invoked:
+// Build context: the agentfarm repo root (the multica builder stage COPYs
+// from server/, so the context must be the repo root). Invoke from there:
 //
 //   docker buildx bake -f docker/agent-runtime-base/docker-bake.hcl default
 //
@@ -60,9 +58,8 @@ target "default" {
   platforms  = ["linux/amd64", "linux/arm64"]
   // Two tags per build:
   //   <REPO>:<IMG_SHA>  — immutable; downstream consumers can pin to this
-  //   <REPO>:latest     — mutable; what the agentrunner / devenv-runtime
-  //                       bake files FROM by default until they bump
-  //                       BASE_TAG to a specific SHA.
+  //   <REPO>:latest     — mutable; what the devenv-runtime bake file FROMs
+  //                       by default until it bumps BASE_TAG to a specific SHA.
   //
   // CI splits this into per-arch builds via the `default-amd64` /
   // `default-arm64` targets below (each pinned to one platform + an
