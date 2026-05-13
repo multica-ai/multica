@@ -1,7 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, Trash2, UserPlus, Users, Cpu, Bot } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  UserPlus,
+  Users,
+  Cpu,
+  Bot,
+  AlertTriangle,
+} from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
@@ -11,10 +19,16 @@ import {
   memberListOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
+import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -657,6 +671,12 @@ function AgentAllowlistSection({
   const wsId = useWorkspaceId();
   const { data: rows = [] } = useQuery(groupAgentsOptions(wsId, groupId));
   const { data: allAgents = [] } = useQuery(agentListOptions(wsId));
+  const { data: capabilityRows = [] } = useQuery(
+    groupCapabilitiesOptions(wsId, groupId),
+  );
+  const { data: runtimeRows = [] } = useQuery(
+    groupRuntimesOptions(wsId, groupId),
+  );
   const add = useAddCerebroGroupAgent(groupId);
   const remove = useRemoveCerebroGroupAgent(groupId);
 
@@ -668,30 +688,58 @@ function AgentAllowlistSection({
     () => allAgents.filter((a) => !a.archived_at),
     [allAgents],
   );
-  const candidates = useMemo(
-    () => liveAgents.filter((a) => !allowed.has(a.id)),
-    [liveAgents, allowed],
-  );
   const allowedAgents = useMemo(
     () => liveAgents.filter((a) => allowed.has(a.id)),
     [liveAgents, allowed],
   );
+
+  // Private agents are invisible to anyone but their owner + workspace admins,
+  // so adding them to a group's allowlist is meaningless unless the group can
+  // create its own private agents. JEH-1160: hide them from the picker (but
+  // keep existing rows visible so admins can clean up legacy entries).
+  const hasCreateAgent = useMemo(
+    () => capabilityRows.some((r) => r.capability === "create_agent"),
+    [capabilityRows],
+  );
+  const groupRuntimeIds = useMemo(
+    () => new Set(runtimeRows.map((r) => r.runtime_id)),
+    [runtimeRows],
+  );
+  const candidates = useMemo(
+    () =>
+      liveAgents
+        .filter((a) => !allowed.has(a.id))
+        .filter((a) => hasCreateAgent || a.visibility !== "private"),
+    [liveAgents, allowed, hasCreateAgent],
+  );
+
+  const toItem = (a: (typeof liveAgents)[number]) => ({
+    id: a.id,
+    primary: a.name,
+    secondary: a.description ?? null,
+    badge:
+      a.visibility === "private"
+        ? {
+            label: "Private",
+            tooltip:
+              "Private agent — only its owner and workspace admins can see it. Group members cannot trigger it through this allowlist.",
+          }
+        : undefined,
+    warning: !groupRuntimeIds.has(a.runtime_id)
+      ? {
+          tooltip:
+            "Runtime mangler i gruppens allowlist — agenten kan ikke triggers af gruppens medlemmer.",
+        }
+      : undefined,
+  });
 
   return (
     <AllowlistSection
       title="Agents"
       icon={<Bot className="size-4 text-muted-foreground" />}
       data-testid="agent-allowlist"
-      items={allowedAgents.map((a) => ({
-        id: a.id,
-        primary: a.name,
-        secondary: a.description ?? null,
-      }))}
-      candidates={candidates.map((a) => ({
-        id: a.id,
-        primary: a.name,
-        secondary: a.description ?? null,
-      }))}
+      items={allowedAgents.map(toItem)}
+      candidates={candidates.map(toItem)}
       emptyHint="No agents added. Admins can grant access from the picker below."
       pickerLabel="Add agent"
       pickerEmpty="Every active workspace agent is already in the allowlist."
@@ -722,6 +770,14 @@ function AgentAllowlistSection({
 
 // Shared list + picker shell used by runtime + agent allowlists. Keeps the
 // two sections visually identical so admins build one mental model.
+type AllowlistItem = {
+  id: string;
+  primary: string;
+  secondary: string | null;
+  badge?: { label: string; tooltip?: string };
+  warning?: { tooltip: string };
+};
+
 function AllowlistSection({
   title,
   icon,
@@ -739,8 +795,8 @@ function AllowlistSection({
 }: {
   title: string;
   icon: React.ReactNode;
-  items: Array<{ id: string; primary: string; secondary: string | null }>;
-  candidates: Array<{ id: string; primary: string; secondary: string | null }>;
+  items: Array<AllowlistItem>;
+  candidates: Array<AllowlistItem>;
   emptyHint: string;
   pickerLabel: string;
   pickerEmpty: string;
@@ -795,14 +851,7 @@ function AllowlistSection({
               key={it.id}
               className="flex items-center gap-3 px-3 py-2 text-sm"
             >
-              <span className="flex-1 min-w-0">
-                <span className="block truncate">{it.primary}</span>
-                {it.secondary && (
-                  <span className="block text-xs text-muted-foreground truncate">
-                    {it.secondary}
-                  </span>
-                )}
-              </span>
+              <AllowlistItemContent item={it} />
               {isAdmin && (
                 <Button
                   variant="ghost"
@@ -837,14 +886,7 @@ function AllowlistSection({
                 key={c.id}
                 className="flex items-center gap-3 px-1 py-2 text-sm"
               >
-                <span className="flex-1 min-w-0">
-                  <span className="block truncate">{c.primary}</span>
-                  {c.secondary && (
-                    <span className="block text-xs text-muted-foreground truncate">
-                      {c.secondary}
-                    </span>
-                  )}
-                </span>
+                <AllowlistItemContent item={c} />
                 <Button
                   size="sm"
                   variant="outline"
@@ -859,5 +901,54 @@ function AllowlistSection({
         </div>
       )}
     </div>
+  );
+}
+
+function AllowlistItemContent({ item }: { item: AllowlistItem }) {
+  return (
+    <span className="flex-1 min-w-0">
+      <span className="flex items-center gap-1.5 min-w-0">
+        <span className="truncate">{item.primary}</span>
+        {item.badge && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Badge
+                  variant="outline"
+                  className="shrink-0 text-[10px] uppercase tracking-wide"
+                  data-testid="allowlist-private-badge"
+                >
+                  {item.badge.label}
+                </Badge>
+              }
+            />
+            {item.badge.tooltip && (
+              <TooltipContent>{item.badge.tooltip}</TooltipContent>
+            )}
+          </Tooltip>
+        )}
+        {item.warning && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  className="inline-flex shrink-0"
+                  data-testid="allowlist-runtime-warning"
+                  aria-label={item.warning.tooltip}
+                >
+                  <AlertTriangle className="size-3.5 text-amber-500" />
+                </span>
+              }
+            />
+            <TooltipContent>{item.warning.tooltip}</TooltipContent>
+          </Tooltip>
+        )}
+      </span>
+      {item.secondary && (
+        <span className="block text-xs text-muted-foreground truncate">
+          {item.secondary}
+        </span>
+      )}
+    </span>
   );
 }
