@@ -34,6 +34,14 @@ type fakeIssueActions struct {
 	// Phase-2 ext (JEH-1114, route_by_domain).
 	Labels       []db.IssueLabel
 	ListLabelsErr error
+
+	// Phase-2 ext (JEH-1114, validate_evidence).
+	Comments              []db.Comment
+	ListCommentsErr       error
+	IssueAttachments      []db.Attachment
+	ListAttachmentsErr    error
+	AttachmentURLs        []string
+	ListAttachmentURLsErr error
 }
 
 func (f *fakeIssueActions) UpdateIssueStatus(_ context.Context, _ db.UpdateIssueStatusParams) (db.Issue, error) {
@@ -92,6 +100,24 @@ func (f *fakeIssueActions) ListLabels(_ context.Context, _ pgtype.UUID) ([]db.Is
 		return nil, f.ListLabelsErr
 	}
 	return f.Labels, nil
+}
+func (f *fakeIssueActions) ListCommentsForIssue(_ context.Context, _ db.ListCommentsForIssueParams) ([]db.Comment, error) {
+	if f.ListCommentsErr != nil {
+		return nil, f.ListCommentsErr
+	}
+	return f.Comments, nil
+}
+func (f *fakeIssueActions) ListAttachmentsByIssue(_ context.Context, _ db.ListAttachmentsByIssueParams) ([]db.Attachment, error) {
+	if f.ListAttachmentsErr != nil {
+		return nil, f.ListAttachmentsErr
+	}
+	return f.IssueAttachments, nil
+}
+func (f *fakeIssueActions) ListAttachmentURLsByIssueOrComments(_ context.Context, _ pgtype.UUID) ([]string, error) {
+	if f.ListAttachmentURLsErr != nil {
+		return nil, f.ListAttachmentURLsErr
+	}
+	return f.AttachmentURLs, nil
 }
 
 func mustUUID(s string) pgtype.UUID {

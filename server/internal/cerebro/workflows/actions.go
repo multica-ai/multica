@@ -30,6 +30,11 @@ import (
 //                   CreateQuickCreateTask (run_skill resolution + enqueue).
 // PR 1 (phase-2 ext, JEH-1114): + ListLabels (route_by_domain resolves the
 //                   `<prefix><domain>` label by name within the workspace).
+// PR 2 (phase-2 ext, JEH-1114): + ListCommentsForIssue,
+//                   ListAttachmentsByIssue,
+//                   ListAttachmentURLsByIssueOrComments
+//                   (evidence_present condition op scans recent comments +
+//                   attachments for a PR URL, image, or matching URL regex).
 type IssueActions interface {
 	UpdateIssueStatus(ctx context.Context, arg db.UpdateIssueStatusParams) (db.Issue, error)
 	CreateIssue(ctx context.Context, arg db.CreateIssueParams) (db.Issue, error)
@@ -43,6 +48,9 @@ type IssueActions interface {
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	CreateQuickCreateTask(ctx context.Context, arg db.CreateQuickCreateTaskParams) (db.AgentTaskQueue, error)
 	ListLabels(ctx context.Context, workspaceID pgtype.UUID) ([]db.IssueLabel, error)
+	ListCommentsForIssue(ctx context.Context, arg db.ListCommentsForIssueParams) ([]db.Comment, error)
+	ListAttachmentsByIssue(ctx context.Context, arg db.ListAttachmentsByIssueParams) ([]db.Attachment, error)
+	ListAttachmentURLsByIssueOrComments(ctx context.Context, issueID pgtype.UUID) ([]string, error)
 }
 
 // runAction dispatches on the workflow's action_type. Any non-nil error

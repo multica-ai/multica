@@ -120,7 +120,7 @@ func (s *Service) Dispatch(ctx context.Context, te TriggerEvent) error {
 		if !triggerMatches(wf, te) {
 			continue
 		}
-		if !conditionsHold(wf, te) {
+		if !s.conditionsHold(ctx, wf, te) {
 			continue
 		}
 		if err := s.Execute(ctx, wf, te); err != nil {
@@ -335,7 +335,15 @@ func triggerMatches(wf workflow, te TriggerEvent) bool {
 // conditionsHold parses and evaluates the conditions JSON. An empty array
 // or a parse error returns true (with a log) — failing closed on a parse
 // error would silently disable a workflow, which is worse than firing it.
-func conditionsHold(wf workflow, te TriggerEvent) bool {
+//
+// Phase-2 ext (JEH-1114, PR 2): the `evidence_present` op needs DB access
+// (it scans the issue's recent comments + attachments), so this is now a
+// Service method. Pure ops still flow through evaluate(); evidence_present
+// is checked separately and short-circuits the rest of the chain. DB lookup
+// failures fail CLOSED (return false) — for evidence-presence specifically,
+// firing a `set_status: done` workflow without confirmed evidence is much
+// worse than skipping a run we'll see again on the next event.
+func (s *Service) conditionsHold(ctx context.Context, wf workflow, te TriggerEvent) bool {
 	conds, err := parseConditions(wf.conditions)
 	if err != nil {
 		slog.Warn("workflow conditions: parse error",
@@ -347,7 +355,30 @@ func conditionsHold(wf workflow, te TriggerEvent) bool {
 	if len(conds) == 0 {
 		return true
 	}
-	return evaluate(conds, te.Raw)
+
+	pure := make([]Condition, 0, len(conds))
+	for _, c := range conds {
+		if c.Op == OpEvidencePresent {
+			ok, err := s.evaluateEvidence(ctx, wf, te, c)
+			if err != nil {
+				slog.Warn("workflow conditions: evidence eval failed",
+					"workflow_id", uuidString(wf.id),
+					"issue_id", te.IssueID,
+					"error", err,
+				)
+				return false
+			}
+			if !ok {
+				return false
+			}
+			continue
+		}
+		pure = append(pure, c)
+	}
+	if len(pure) == 0 {
+		return true
+	}
+	return evaluate(pure, te.Raw)
 }
 
 // envFlagEnabled returns true for the small set of values we accept as on.

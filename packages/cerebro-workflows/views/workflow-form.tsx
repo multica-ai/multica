@@ -63,6 +63,12 @@ export interface FormState {
   // Phase 2 ext (JEH-1114, route_by_domain).
   routeLabelPrefix: string;
   routeDefaultDomain: "code" | "business" | "design" | "content";
+  // Phase 2 ext (JEH-1114, validate_evidence). Conditions don't have a
+  // first-class form editor yet (pre-existing gap from phase 1) — they
+  // ride along opaquely so templates that pre-fill `evidence_present`
+  // survive a save round-trip. Power users can hand-edit the JSON here
+  // until the condition editor lands.
+  conditionsJSON: string;
 }
 
 export const EMPTY_FORM: FormState = {
@@ -88,6 +94,7 @@ export const EMPTY_FORM: FormState = {
   commentContent: "",
   routeLabelPrefix: "domain:",
   routeDefaultDomain: "business",
+  conditionsJSON: "[]",
 };
 
 interface WorkflowFormProps {
@@ -257,6 +264,26 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
               </Field>
             </>
           )}
+        </Section>
+
+        <Section title="Conditions (avanceret, valgfri)">
+          <Field label="Conditions JSON">
+            <Textarea
+              value={form.conditionsJSON}
+              onChange={(e) => setForm({ ...form, conditionsJSON: e.target.value })}
+              rows={6}
+              placeholder='[]'
+              data-testid="conditions-json"
+              className="font-mono text-[12px]"
+            />
+          </Field>
+          <p className="text-[11px] text-muted-foreground">
+            Conditions filtrerer efter trigger og før action. Skabeloner kan
+            pre-udfylde dette felt (fx <code>evidence_present</code> til at
+            gate <code>set_status: done</code>). En dedikeret editor lander
+            i en senere PR; rediger JSON direkte indtil da. Tom array
+            betyder "kør altid".
+          </p>
         </Section>
 
         <Section title="Action">
@@ -567,7 +594,21 @@ export function formStateFromInput(input: WorkflowWriteInput): FormState {
       isRouteDomain(ac.default_domain)
         ? (ac.default_domain as FormState["routeDefaultDomain"])
         : EMPTY_FORM.routeDefaultDomain,
+    conditionsJSON: stringifyConditions(input.conditions),
   };
+}
+
+function stringifyConditions(c: unknown): string {
+  if (c === undefined || c === null) return EMPTY_FORM.conditionsJSON;
+  // Accept both array and stringified array. Stringify with indent so the
+  // textarea renders readably; users editing it should still produce valid
+  // JSON, which buildPayload validates at save-time.
+  try {
+    const value = typeof c === "string" ? JSON.parse(c) : c;
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return EMPTY_FORM.conditionsJSON;
+  }
 }
 
 function isRouteDomain(v: unknown): v is FormState["routeDefaultDomain"] {
@@ -644,10 +685,25 @@ export function buildPayload(f: FormState): WorkflowWriteInput {
     enabled: f.enabled,
     trigger_type: f.triggerType,
     trigger_config: triggerConfig,
-    conditions: [],
+    conditions: parseConditionsJSON(f.conditionsJSON),
     action_type: f.actionType,
     action_config: actionConfig,
   };
+}
+
+// parseConditionsJSON returns the parsed conditions array on success, or []
+// on parse failure. Templates and the API ship arrays; the form's textarea
+// is the only edit surface that can produce invalid JSON, so failing soft
+// here keeps a half-typed value from blowing up the save click. The server
+// re-validates the shape regardless.
+function parseConditionsJSON(raw: string): unknown[] {
+  if (!raw.trim()) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
 }
 
 // safeParseJSON returns the parsed object on success, an empty object on any

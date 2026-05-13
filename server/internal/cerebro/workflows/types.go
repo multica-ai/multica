@@ -29,6 +29,45 @@ const (
 	DomainContent  = "content"
 )
 
+// Phase-2 ext (JEH-1114, PR 2) condition op. Stored on a Condition row in
+// the workflow's `conditions` JSONB column. Unlike the phase-1 ops (eq, ne,
+// in, is_null, is_not_null) this one does a DB lookup — it scans the
+// triggered issue's recent comments + attachments for evidence of work done
+// (PR URL, screenshot, or a configurable URL regex).
+//
+// Intent: gate `set_status: done` workflows so they only fire when an agent
+// has actually shipped something. Composes with phase-1: a workflow with
+// trigger `status_changed → in_review`, condition `evidence_present`, and
+// action `set_status: done` becomes "auto-done if evidence is in the
+// thread, otherwise stay in_review".
+const OpEvidencePresent = "evidence_present"
+
+// EvidenceConfig is the shape stored under Condition.Value when Op is
+// "evidence_present". All fields are optional; sensible defaults apply when
+// the field is empty:
+//
+//	Require            ["pr_url"]   any-of (match if ANY entry is found)
+//	URLRegex           ""           used only when Require contains "url_regex"
+//	LookbackComments   20           how many recent comments to scan; capped
+//	                                at 200 by the engine
+//
+// Recognised Require entries: "pr_url" | "image_attachment" | "url_regex".
+// Unknown entries are ignored (forward-compat) so adding a future signal
+// like "ci_run_url" can land without bumping config consumers.
+type EvidenceConfig struct {
+	Require          []string `json:"require,omitempty"`
+	URLRegex         string   `json:"url_regex,omitempty"`
+	LookbackComments int      `json:"lookback_comments,omitempty"`
+}
+
+// Recognised Require values for EvidenceConfig. Keep these stable — they
+// are user-facing in workflow JSON and templates pin them by name.
+const (
+	EvidenceKindPRURL           = "pr_url"
+	EvidenceKindImageAttachment = "image_attachment"
+	EvidenceKindURLRegex        = "url_regex"
+)
+
 // Editor modes for the workflow rule. Stored on cerebro_workflow.editor_mode
 // (phase 2). Form mode is the phase-1 builder; canvas mode is the xyflow-based
 // node editor introduced in PR 2.

@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 import { WORKFLOW_TEMPLATES } from "./templates";
 
 describe("WORKFLOW_TEMPLATES", () => {
-  it("ships the nine startpakke entries (5 active + 4 coming) from JEH-1047/JEH-1103/JEH-1114", () => {
+  it("ships the ten startpakke entries (6 active + 4 coming) from JEH-1047/JEH-1103/JEH-1114", () => {
     expect(WORKFLOW_TEMPLATES.map((t) => t.key)).toEqual([
       "status-change",
       "due-date-time",
       "run-skill",
       "comment-on-issue",
       "route-by-domain",
+      "validate-evidence-on-review",
       "all-children-done",
       "mention-agent",
       "cron",
@@ -16,10 +17,10 @@ describe("WORKFLOW_TEMPLATES", () => {
     ]);
   });
 
-  it("has five active templates and four coming-soon placeholders", () => {
+  it("has six active templates and four coming-soon placeholders", () => {
     const active = WORKFLOW_TEMPLATES.filter((t) => t.status === "active");
     const coming = WORKFLOW_TEMPLATES.filter((t) => t.status === "coming");
-    expect(active).toHaveLength(5);
+    expect(active).toHaveLength(6);
     expect(coming).toHaveLength(4);
   });
 
@@ -69,6 +70,24 @@ describe("WORKFLOW_TEMPLATES", () => {
     expect(cfg.skill_name).toBe("");
     expect(cfg.agent_id).toBe("");
     expect(cfg.skill_input).toMatchObject({ issue_title: "{{title}}" });
+  });
+
+  it("pins the validate-evidence-on-review template's gate shape", () => {
+    // JEH-1114 phase-2 ext PR 2: pick this template, save (no further
+    // edits required), and a transition to in_review auto-flips to done
+    // only when the issue thread carries a PR URL or image.
+    const t = WORKFLOW_TEMPLATES.find((x) => x.key === "validate-evidence-on-review");
+    expect(t).toBeDefined();
+    expect(t!.defaults!.trigger_type).toBe("status_changed");
+    expect(t!.defaults!.action_type).toBe("set_status");
+    const conds = t!.defaults!.conditions as Array<{
+      op: string;
+      value: { require: string[]; lookback_comments: number };
+    }>;
+    expect(conds).toHaveLength(1);
+    expect(conds[0]!.op).toBe("evidence_present");
+    expect(conds[0]!.value.require).toEqual(["pr_url", "image_attachment"]);
+    expect(conds[0]!.value.lookback_comments).toBe(20);
   });
 
   it("pins the route-by-domain template's classifier shape", () => {

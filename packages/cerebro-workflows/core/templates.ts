@@ -135,6 +135,38 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
     },
   },
   {
+    // Phase-2 ext (JEH-1114, PR 2). The condition op `evidence_present`
+    // gates `set_status: done` on a PR URL / image / regex match across
+    // the issue's recent comments + description + attachments. Form
+    // builder doesn't yet expose a condition editor (pre-existing gap),
+    // so this template is the canonical way to set up the workflow until
+    // a future PR adds the UI.
+    key: "validate-evidence-on-review",
+    label: "In review + evidence → Done",
+    description:
+      "Når et issue går i in_review og tråden indeholder en PR-URL eller screenshot, flyt automatisk til done. Ellers bliver det i in_review.",
+    status: "active",
+    defaults: {
+      name: "Auto-done når evidens er på plads",
+      enabled: true,
+      trigger_type: "status_changed",
+      trigger_config: { to_status: "in_review" },
+      conditions: [
+        {
+          op: "evidence_present",
+          value: {
+            require: ["pr_url", "image_attachment"],
+            lookback_comments: 20,
+          },
+        },
+      ],
+      action_type: "set_status",
+      action_config: {
+        status: "done",
+      },
+    },
+  },
+  {
     key: "all-children-done",
     label: "All children done → Update parent",
     description:
