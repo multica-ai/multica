@@ -307,9 +307,9 @@ func TestTerminalTurnCaptureExtractsVisibleAssistantText(t *testing.T) {
 	capture.Finalize()
 	reporter.Close()
 
-	messages := poster.messages()
-	if len(messages) != 1 || messages[0].Type != "final" || messages[0].Content != "Final answer" {
-		t.Fatalf("messages = %+v, want final visible answer", messages)
+	finals := finalMessages(poster.messages())
+	if len(finals) != 1 || finals[0].Content != "Final answer" {
+		t.Fatalf("finals = %+v, want final visible answer", finals)
 	}
 }
 
@@ -323,9 +323,9 @@ func TestTerminalTurnCaptureKeepsOnlyRedrawnVisibleText(t *testing.T) {
 	capture.Finalize()
 	reporter.Close()
 
-	messages := poster.messages()
-	if len(messages) != 1 || messages[0].Content != "Final answer" {
-		t.Fatalf("messages = %+v, want only final redrawn text", messages)
+	finals := finalMessages(poster.messages())
+	if len(finals) != 1 || finals[0].Content != "Final answer" {
+		t.Fatalf("finals = %+v, want only final redrawn text", finals)
 	}
 }
 
@@ -339,8 +339,8 @@ func TestTerminalTurnCaptureSkipsStatusOnlyOutput(t *testing.T) {
 	capture.Finalize()
 	reporter.Close()
 
-	if got := len(poster.messages()); got != 0 {
-		t.Fatalf("messages = %+v, want no assistant comment", poster.messages())
+	if finals := finalMessages(poster.messages()); len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no assistant comment", finals)
 	}
 }
 
@@ -369,25 +369,39 @@ func TestTerminalTurnCaptureDoesNotDuplicateStructuredFinal(t *testing.T) {
 	}
 }
 
-func TestCodexTranscriptExtractsSingleTurnAgentMessages(t *testing.T) {
+func TestCodexTranscriptExtractsFinalAnswerAndIgnoresCommentary(t *testing.T) {
 	path := writeJSONLForTest(t, []string{
 		`{"type":"event_msg","payload":{"type":"user_message","message":"please summarize"}}`,
-		`{"type":"event_msg","payload":{"type":"agent_message","message":"First paragraph."}}`,
-		`{"type":"event_msg","payload":{"type":"agent_message","message":"Second paragraph."}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"commentary","message":"I am checking files."}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"Final paragraph."}}`,
 	})
 
 	got, ok := extractCodexAnswerFromJSONL(path, "please summarize")
-	if !ok || got != "First paragraph.\n\nSecond paragraph." {
-		t.Fatalf("answer = %q, %v; want merged agent messages", got, ok)
+	if !ok || got != "Final paragraph." {
+		t.Fatalf("answer = %q, %v; want final_answer only", got, ok)
+	}
+}
+
+func TestCodexTranscriptTaskCompleteLastAgentMessageWins(t *testing.T) {
+	path := writeJSONLForTest(t, []string{
+		`{"type":"event_msg","payload":{"type":"user_message","message":"please summarize"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"Final from event."}}`,
+		`{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":"Final from task complete."}}`,
+	})
+
+	got, ok := extractCodexAnswerFromJSONL(path, "please summarize")
+	if !ok || got != "Final from task complete." {
+		t.Fatalf("answer = %q, %v; want task_complete.last_agent_message", got, ok)
 	}
 }
 
 func TestCodexTranscriptExtractsMatchingTurnOnly(t *testing.T) {
 	path := writeJSONLForTest(t, []string{
 		`{"type":"event_msg","payload":{"type":"user_message","message":"first prompt"}}`,
-		`{"type":"event_msg","payload":{"type":"agent_message","message":"first answer"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"first answer"}}`,
 		`{"type":"event_msg","payload":{"type":"user_message","message":"second prompt"}}`,
-		`{"type":"event_msg","payload":{"type":"agent_message","message":"second answer"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"commentary","message":"second progress"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"second answer"}}`,
 	})
 
 	got, ok := extractCodexAnswerFromJSONL(path, "second prompt")
@@ -403,7 +417,7 @@ func TestCodexTranscriptIgnoresNonAnswerEvents(t *testing.T) {
 		`{"type":"event_msg","payload":{"type":"reasoning","message":"hidden reasoning"}}`,
 		`{"type":"event_msg","payload":{"type":"tool_output","message":"tool output"}}`,
 		`{"type":"event_msg","payload":{"type":"status","message":"working"}}`,
-		`{"type":"event_msg","payload":{"type":"agent_message","message":"final answer"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"final answer"}}`,
 	})
 
 	got, ok := extractCodexAnswerFromJSONL(path, "question")
@@ -412,14 +426,71 @@ func TestCodexTranscriptIgnoresNonAnswerEvents(t *testing.T) {
 	}
 }
 
+func TestCodexTranscriptLegacyAgentMessageIsCompatibilityFallback(t *testing.T) {
+	path := writeJSONLForTest(t, []string{
+		`{"type":"event_msg","payload":{"type":"user_message","message":"question"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","message":"legacy answer"}}`,
+	})
+
+	got, ok := extractCodexAnswerFromJSONL(path, "question")
+	if !ok || got != "legacy answer" {
+		t.Fatalf("answer = %q, %v; want legacy agent message fallback", got, ok)
+	}
+}
+
+func TestCodexTranscriptLegacyAgentMessageDoesNotOverrideFinalAnswer(t *testing.T) {
+	path := writeJSONLForTest(t, []string{
+		`{"type":"event_msg","payload":{"type":"user_message","message":"question"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","message":"legacy answer"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"final answer"}}`,
+	})
+
+	got, ok := extractCodexAnswerFromJSONL(path, "question")
+	if !ok || got != "final answer" {
+		t.Fatalf("answer = %q, %v; want final_answer over legacy fallback", got, ok)
+	}
+}
+
+func TestCodexTranscriptOnlyCommentaryMissesProviderFinal(t *testing.T) {
+	path := writeJSONLForTest(t, []string{
+		`{"type":"event_msg","payload":{"type":"user_message","message":"question"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"commentary","message":"working"}}`,
+	})
+
+	if got, ok := extractCodexAnswerFromJSONL(path, "question"); ok || got != "" {
+		t.Fatalf("answer = %q, %v; want no provider extraction", got, ok)
+	}
+}
+
 func TestCodexTranscriptNoPromptMatch(t *testing.T) {
 	path := writeJSONLForTest(t, []string{
 		`{"type":"event_msg","payload":{"type":"user_message","message":"different prompt"}}`,
-		`{"type":"event_msg","payload":{"type":"agent_message","message":"answer"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"answer"}}`,
 	})
 
 	if got, ok := extractCodexAnswerFromJSONL(path, "question"); ok || got != "" {
 		t.Fatalf("answer = %q, %v; want no extraction", got, ok)
+	}
+}
+
+func TestCodexTranscriptExtractsUserInputForAbsolutePathPrompt(t *testing.T) {
+	path := writeJSONLForTest(t, []string{
+		`{"type":"event_msg","payload":{"type":"user_message","message":"/Users/me/project fix this bug"}}`,
+	})
+
+	got, ok := extractCodexUserInputFromJSONL(path, "/Users/me/project fix this bug")
+	if !ok || got != "/Users/me/project fix this bug" {
+		t.Fatalf("user input = %q, %v; want absolute path prompt", got, ok)
+	}
+}
+
+func TestCodexTranscriptDoesNotExtractUserInputForLocalCommand(t *testing.T) {
+	path := writeJSONLForTest(t, []string{
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"status output"}}`,
+	})
+
+	if got, ok := extractCodexUserInputFromJSONL(path, "/status"); ok || got != "" {
+		t.Fatalf("user input = %q, %v; want no session user_message match", got, ok)
 	}
 }
 
@@ -442,6 +513,119 @@ func TestStructuredFinalWinsOverProviderTranscript(t *testing.T) {
 	}
 }
 
+func TestStructuredTextDoesNotSuppressProviderFinal(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, fakeProviderTranscript{answer: "provider answer", ok: true}, 10*time.Millisecond)
+	stream := newTranscriptStream(reporter, capture)
+
+	capture.AfterUserSubmit("question")
+	_, _ = stream.Write([]byte(`{"type":"agent_message","message":"progress update"}` + "\n"))
+	stream.Flush()
+	waitForFinals(t, poster, 1)
+	capture.Finalize()
+	reporter.Close()
+
+	finals := finalMessages(poster.messages())
+	if len(finals) != 1 || finals[0].Content != "provider answer" {
+		t.Fatalf("finals = %+v, want provider final after structured text", finals)
+	}
+}
+
+func TestProviderTranscriptPollSyncsFinalWithoutNextInput(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, fakeProviderTranscript{answer: "provider answer", ok: true}, 10*time.Millisecond)
+
+	capture.AfterUserSubmit("question")
+	waitForFinals(t, poster, 1)
+	capture.Finalize()
+	reporter.Close()
+
+	finals := finalMessages(poster.messages())
+	if len(finals) != 1 || finals[0].Content != "provider answer" {
+		t.Fatalf("finals = %+v, want one provider answer", finals)
+	}
+}
+
+func TestProviderTranscriptPollDoesNotDuplicateOnNextInput(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, promptProviderTranscript{"question": "provider answer"}, 10*time.Millisecond)
+
+	capture.AfterUserSubmit("question")
+	waitForFinals(t, poster, 1)
+	capture.BeforeUserSubmit()
+	capture.AfterUserSubmit("next question")
+	capture.Finalize()
+	reporter.Close()
+
+	finals := finalMessages(poster.messages())
+	if len(finals) != 1 || finals[0].Content != "provider answer" {
+		t.Fatalf("finals = %+v, want provider answer only once", finals)
+	}
+}
+
+func TestProviderTranscriptLateOldTurnIsDiscarded(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	provider := newBlockingFirstProvider("old answer")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, provider, 10*time.Millisecond)
+
+	capture.AfterUserSubmit("first question")
+	provider.waitForFirstPrompt(t)
+	capture.AfterUserSubmit("second question")
+	provider.releaseFirst()
+	time.Sleep(30 * time.Millisecond)
+	capture.Finalize()
+	reporter.Close()
+
+	if finals := finalMessages(poster.messages()); len(finals) != 0 {
+		t.Fatalf("finals = %+v, want stale first turn discarded", finals)
+	}
+}
+
+func TestStructuredFinalSuppressesProviderPollAndTerminalFallback(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, fakeProviderTranscript{answer: "provider answer", ok: true}, 100*time.Millisecond)
+	stream := newTranscriptStream(reporter, capture)
+
+	capture.AfterUserSubmit("question")
+	_, _ = stream.Write([]byte(`{"type":"result","result":"structured done"}` + "\n"))
+	stream.Flush()
+	capture.Write([]byte("Terminal fallback\n"))
+	capture.Finalize()
+	reporter.Close()
+
+	finals := finalMessages(poster.messages())
+	if len(finals) != 1 || finals[0].Content != "structured done" {
+		t.Fatalf("finals = %+v, want structured final only", finals)
+	}
+}
+
+func TestProviderTranscriptMissWaitsForTerminalFallbackUntilNextInput(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, fakeProviderTranscript{ok: false}, 10*time.Millisecond)
+
+	capture.AfterUserSubmit("question")
+	capture.Write([]byte("Terminal fallback answer\n"))
+	time.Sleep(30 * time.Millisecond)
+	if finals := finalMessages(poster.messages()); len(finals) != 0 {
+		t.Fatalf("finals before next input = %+v, want no silent terminal fallback", finals)
+	}
+	capture.BeforeUserSubmit()
+	capture.AfterUserSubmit("next question")
+	capture.Finalize()
+	reporter.Close()
+
+	finals := finalMessages(poster.messages())
+	if len(finals) != 1 || finals[0].Content != "Terminal fallback answer" {
+		t.Fatalf("finals = %+v, want terminal fallback on next input", finals)
+	}
+}
+
 func TestProviderTranscriptWinsOverTerminalCapture(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
@@ -455,6 +639,86 @@ func TestProviderTranscriptWinsOverTerminalCapture(t *testing.T) {
 	finals := finalMessages(poster.messages())
 	if len(finals) != 1 || finals[0].Content != "provider answer" {
 		t.Fatalf("finals = %+v, want provider answer only", finals)
+	}
+}
+
+func TestSlashCommandSuppressesProviderAndTerminalFinals(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, fakeProviderTranscript{answer: "provider answer", ok: true, userMissing: true}, 10*time.Millisecond)
+
+	capture.AfterUserSubmit(" /status")
+	capture.Write([]byte("Terminal command output\n"))
+	time.Sleep(30 * time.Millisecond)
+	capture.BeforeUserSubmit()
+	capture.AfterUserSubmit("normal question")
+	capture.Write([]byte("Normal answer\n"))
+	capture.Finalize()
+	reporter.Close()
+
+	finals := finalMessages(poster.messages())
+	if len(finals) != 1 || finals[0].Content != "Normal answer" {
+		t.Fatalf("finals = %+v, want only normal prompt final", finals)
+	}
+}
+
+func TestSlashPrefixedSessionUserInputIsNotCommand(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, promptProviderTranscript{"/Users/me/project fix it": "provider answer"}, 10*time.Millisecond)
+
+	capture.AfterUserSubmit("/Users/me/project fix it")
+	waitForFinals(t, poster, 1)
+	capture.Finalize()
+	reporter.Close()
+
+	messages := poster.messages()
+	var inputs []localCLIMessage
+	for _, msg := range messages {
+		if msg.Type == "user_input" {
+			inputs = append(inputs, msg)
+		}
+	}
+	finals := finalMessages(messages)
+	if len(inputs) != 1 || inputs[0].Content != "/Users/me/project fix it" || inputs[0].Input != nil {
+		t.Fatalf("inputs = %+v, want normal absolute-path user_input", inputs)
+	}
+	if len(finals) != 1 || finals[0].Content != "provider answer" {
+		t.Fatalf("finals = %+v, want provider answer", finals)
+	}
+}
+
+func TestSlashCommandSuppressesStructuredFinal(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCapture(reporter, nil)
+	stream := newTranscriptStream(reporter, capture)
+
+	capture.AfterUserSubmit("/help")
+	_, _ = stream.Write([]byte(`{"type":"result","result":"command result"}` + "\n"))
+	stream.Flush()
+	capture.Finalize()
+	reporter.Close()
+
+	if finals := finalMessages(poster.messages()); len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no slash command structured final", finals)
+	}
+}
+
+func TestProviderBackedSlashCommandSuppressesStructuredFinalWhenSessionMisses(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, fakeProviderTranscript{userMissing: true}, 10*time.Millisecond)
+	stream := newTranscriptStream(reporter, capture)
+
+	capture.AfterUserSubmit("/help")
+	_, _ = stream.Write([]byte(`{"type":"result","result":"command result"}` + "\n"))
+	stream.Flush()
+	capture.Finalize()
+	reporter.Close()
+
+	if finals := finalMessages(poster.messages()); len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no provider-backed slash command structured final", finals)
 	}
 }
 
@@ -592,12 +856,79 @@ type fakeLocalRunPoster struct {
 }
 
 type fakeProviderTranscript struct {
-	answer string
-	ok     bool
+	answer      string
+	ok          bool
+	userMissing bool
+	user        string
+}
+
+func (f fakeProviderTranscript) ExtractUserInput(prompt string, _ time.Time) (string, bool) {
+	if f.userMissing {
+		return "", false
+	}
+	if f.user != "" {
+		return f.user, true
+	}
+	return prompt, true
 }
 
 func (f fakeProviderTranscript) Extract(string, time.Time) (string, bool) {
 	return f.answer, f.ok
+}
+
+type promptProviderTranscript map[string]string
+
+func (p promptProviderTranscript) ExtractUserInput(prompt string, _ time.Time) (string, bool) {
+	if _, ok := p[prompt]; !ok {
+		return "", false
+	}
+	return prompt, true
+}
+
+func (p promptProviderTranscript) Extract(prompt string, _ time.Time) (string, bool) {
+	answer, ok := p[prompt]
+	return answer, ok
+}
+
+type blockingFirstProvider struct {
+	answer   string
+	seen     chan struct{}
+	release  chan struct{}
+	seenOnce sync.Once
+}
+
+func newBlockingFirstProvider(answer string) *blockingFirstProvider {
+	return &blockingFirstProvider{
+		answer:  answer,
+		seen:    make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (p *blockingFirstProvider) Extract(prompt string, _ time.Time) (string, bool) {
+	if prompt != "first question" {
+		return "", false
+	}
+	p.seenOnce.Do(func() { close(p.seen) })
+	<-p.release
+	return p.answer, true
+}
+
+func (p *blockingFirstProvider) ExtractUserInput(prompt string, _ time.Time) (string, bool) {
+	return prompt, true
+}
+
+func (p *blockingFirstProvider) waitForFirstPrompt(t *testing.T) {
+	t.Helper()
+	select {
+	case <-p.seen:
+	case <-time.After(time.Second):
+		t.Fatal("provider did not receive first prompt")
+	}
+}
+
+func (p *blockingFirstProvider) releaseFirst() {
+	close(p.release)
 }
 
 type fakeContextClient map[string]any
@@ -652,6 +983,18 @@ func finalMessages(messages []localCLIMessage) []localCLIMessage {
 		}
 	}
 	return finals
+}
+
+func waitForFinals(t *testing.T, poster *fakeLocalRunPoster, want int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if len(finalMessages(poster.messages())) >= want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("finals = %+v, want at least %d", finalMessages(poster.messages()), want)
 }
 
 func containsAll(s string, needles []string) bool {

@@ -31,9 +31,10 @@ func (c *stdinCapture) Write(p []byte) (int, error) {
 		if c.turns != nil {
 			c.turns.BeforeUserSubmit()
 		}
-		c.reporter.Post(localCLIMessage{Type: "user_input", Content: content})
 		if c.turns != nil {
 			c.turns.AfterUserSubmit(content)
+		} else {
+			c.reporter.Post(localCLIMessage{Type: "user_input", Content: content, Input: commandInputMetadata(isSlashInput(content))})
 		}
 	}
 	return len(p), nil
@@ -187,15 +188,21 @@ func (e *terminalInputEditor) ctrlW() {
 }
 
 type terminalTurnCapture struct {
-	mu        sync.Mutex
-	reporter  *localRunReporter
-	screen    *terminalScreen
-	provider  providerTranscriptExtractor
-	active    bool
-	baseline  string
-	source    assistantCaptureSource
-	lastUser  string
-	turnStart time.Time
+	mu         sync.Mutex
+	stopOnce   sync.Once
+	reporter   *localRunReporter
+	screen     *terminalScreen
+	provider   providerTranscriptExtractor
+	done       chan struct{}
+	active     bool
+	baseline   string
+	source     assistantCaptureSource
+	turnSeq    uint64
+	lastUser   string
+	userInput  string
+	turnStart  time.Time
+	userSynced bool
+	suppress   bool
 }
 
 type assistantCaptureSource int
@@ -207,7 +214,15 @@ const (
 )
 
 func newTerminalTurnCapture(reporter *localRunReporter, provider providerTranscriptExtractor) *terminalTurnCapture {
-	return &terminalTurnCapture{reporter: reporter, screen: newTerminalScreen(), provider: provider}
+	return newTerminalTurnCaptureWithPollInterval(reporter, provider, 500*time.Millisecond)
+}
+
+func newTerminalTurnCaptureWithPollInterval(reporter *localRunReporter, provider providerTranscriptExtractor, interval time.Duration) *terminalTurnCapture {
+	c := &terminalTurnCapture{reporter: reporter, screen: newTerminalScreen(), provider: provider, done: make(chan struct{})}
+	if provider != nil && interval > 0 {
+		go c.pollProvider(interval)
+	}
+	return c
 }
 
 func (c *terminalTurnCapture) Write(p []byte) {
@@ -230,9 +245,45 @@ func (c *terminalTurnCapture) MarkStructuredAssistant() {
 	}
 }
 
+func (c *terminalTurnCapture) SuppressStructuredAssistant() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.active && c.suppress
+}
+
+func (c *terminalTurnCapture) PrepareStructuredFinal() bool {
+	if c == nil {
+		return true
+	}
+	seq, stdinUser, start, shouldExtractUser := c.userInputSnapshot()
+	if shouldExtractUser {
+		if content := c.extractProviderUserInput(stdinUser, start); content != "" {
+			c.completeProviderUserInput(seq, content)
+		}
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.active {
+		return true
+	}
+	if !c.userSynced {
+		c.syncStdinUserInputLocked(c.lastUser, isSlashInput(c.lastUser))
+	}
+	if c.suppress {
+		c.source = assistantCaptureStructured
+		return false
+	}
+	c.source = assistantCaptureStructured
+	return true
+}
+
 func (c *terminalTurnCapture) BeforeUserSubmit() {
 	if c != nil {
-		c.finalizeLocked()
+		c.finalize()
 	}
 }
 
@@ -245,29 +296,53 @@ func (c *terminalTurnCapture) AfterUserSubmit(content string) {
 	c.baseline = c.screen.Text()
 	c.active = true
 	c.source = assistantCaptureNone
+	c.turnSeq++
 	c.lastUser = content
+	c.userInput = ""
 	c.turnStart = time.Now()
-}
-
-func (c *terminalTurnCapture) Finalize() {
-	if c != nil {
-		c.finalizeLocked()
+	c.userSynced = false
+	c.suppress = false
+	if c.provider == nil {
+		c.syncStdinUserInputLocked(content, isSlashInput(content))
 	}
 }
 
-func (c *terminalTurnCapture) finalizeLocked() {
+func (c *terminalTurnCapture) Finalize() {
+	if c == nil {
+		return
+	}
+	c.finalize()
+	c.stopOnce.Do(func() {
+		close(c.done)
+	})
+}
+
+func (c *terminalTurnCapture) finalize() {
+	seq, stdinUser, start, shouldExtractUser := c.userInputSnapshot()
+	if shouldExtractUser {
+		if content := c.extractProviderUserInput(stdinUser, start); content != "" {
+			c.completeProviderUserInput(seq, content)
+		}
+	}
+
+	seq, user, start, shouldExtract := c.providerSnapshot()
+	if shouldExtract {
+		if content := c.extractProvider(user, start); content != "" {
+			if c.completeProviderFinal(seq, content) {
+				return
+			}
+		}
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.active {
 		return
 	}
-	if c.source == assistantCaptureNone {
-		if content := c.extractProviderLocked(); content != "" {
-			c.reporter.Post(localCLIMessage{Type: "final", Content: redact.Text(content)})
-			c.source = assistantCaptureProvider
-		}
+	if !c.userSynced {
+		c.syncStdinUserInputLocked(c.lastUser, isSlashInput(c.lastUser))
 	}
-	if c.source == assistantCaptureNone {
+	if c.source == assistantCaptureNone && !c.suppress {
 		if content := extractAssistantCandidate(c.baseline, c.screen.Text(), c.lastUser); content != "" {
 			c.reporter.Post(localCLIMessage{Type: "final", Content: redact.Text(content)})
 		}
@@ -275,15 +350,67 @@ func (c *terminalTurnCapture) finalizeLocked() {
 	c.active = false
 	c.baseline = ""
 	c.source = assistantCaptureNone
+	c.turnSeq++
 	c.lastUser = ""
+	c.userInput = ""
 	c.turnStart = time.Time{}
+	c.userSynced = false
+	c.suppress = false
 }
 
-func (c *terminalTurnCapture) extractProviderLocked() string {
-	if c.provider == nil || strings.TrimSpace(c.lastUser) == "" {
+func (c *terminalTurnCapture) pollProvider(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			seq, stdinUser, start, ok := c.userInputSnapshot()
+			if ok {
+				if content := c.extractProviderUserInput(stdinUser, start); content != "" {
+					c.completeProviderUserInput(seq, content)
+				}
+			}
+			seq, user, start, ok := c.providerSnapshot()
+			if !ok {
+				continue
+			}
+			if content := c.extractProvider(user, start); content != "" {
+				c.completeProviderFinal(seq, content)
+			}
+		case <-c.done:
+			return
+		}
+	}
+}
+
+func (c *terminalTurnCapture) userInputSnapshot() (uint64, string, time.Time, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.active || c.userSynced || c.provider == nil || strings.TrimSpace(c.lastUser) == "" {
+		return 0, "", time.Time{}, false
+	}
+	return c.turnSeq, c.lastUser, c.turnStart, true
+}
+
+func (c *terminalTurnCapture) providerSnapshot() (uint64, string, time.Time, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.active || !c.userSynced || c.source != assistantCaptureNone || c.suppress || c.provider == nil || strings.TrimSpace(c.userInput) == "" {
+		return 0, "", time.Time{}, false
+	}
+	return c.turnSeq, c.userInput, c.turnStart, true
+}
+
+func (c *terminalTurnCapture) extractProviderUserInput(stdinUser string, start time.Time) string {
+	user, ok := c.provider.ExtractUserInput(stdinUser, start)
+	if !ok {
 		return ""
 	}
-	answer, ok := c.provider.Extract(c.lastUser, c.turnStart)
+	return strings.TrimSpace(user)
+}
+
+func (c *terminalTurnCapture) extractProvider(user string, start time.Time) string {
+	answer, ok := c.provider.Extract(user, start)
 	if !ok {
 		return ""
 	}
@@ -292,6 +419,58 @@ func (c *terminalTurnCapture) extractProviderLocked() string {
 		return ""
 	}
 	return answer
+}
+
+func (c *terminalTurnCapture) completeProviderFinal(seq uint64, content string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.active || c.turnSeq != seq || c.source != assistantCaptureNone || c.suppress {
+		return false
+	}
+	c.reporter.Post(localCLIMessage{Type: "final", Content: redact.Text(content)})
+	c.source = assistantCaptureProvider
+	c.active = false
+	c.baseline = ""
+	c.lastUser = ""
+	c.userInput = ""
+	c.turnStart = time.Time{}
+	c.userSynced = false
+	c.suppress = false
+	return true
+}
+
+func (c *terminalTurnCapture) completeProviderUserInput(seq uint64, content string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.active || c.turnSeq != seq || c.userSynced || content == "" {
+		return false
+	}
+	c.reporter.Post(localCLIMessage{Type: "user_input", Content: redact.Text(content)})
+	c.userInput = content
+	c.userSynced = true
+	c.suppress = false
+	return true
+}
+
+func (c *terminalTurnCapture) syncStdinUserInputLocked(content string, command bool) {
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+	c.reporter.Post(localCLIMessage{Type: "user_input", Content: redact.Text(content), Input: commandInputMetadata(command)})
+	c.userInput = content
+	c.userSynced = true
+	c.suppress = command
+}
+
+func isSlashInput(content string) bool {
+	return strings.HasPrefix(strings.TrimSpace(content), "/")
+}
+
+func commandInputMetadata(command bool) map[string]any {
+	if !command {
+		return nil
+	}
+	return map[string]any{"command": true}
 }
 
 type terminalScreen struct {

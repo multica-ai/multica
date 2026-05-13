@@ -384,8 +384,10 @@ func (s *transcriptStream) flushLine() {
 		msg.Content = redact.Text(msg.Content)
 		msg.Output = redact.Text(msg.Output)
 		msg.Input = redactInputMap(msg.Input)
-		if s.capture != nil && (msg.Type == "final" || msg.Type == "text") {
-			s.capture.MarkStructuredAssistant()
+		if msg.Type == "final" && s.capture != nil {
+			if !s.capture.PrepareStructuredFinal() {
+				return
+			}
 		}
 		s.reporter.Post(msg)
 	}

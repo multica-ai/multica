@@ -215,7 +215,7 @@ func TestCreateLocalCLIMessage_UserInputCreatesMemberReplyOnly(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/local-runs/"+runID+"/messages", map[string]any{
 		"type":    "user_input",
-		"content": "/status",
+		"content": "/Users/me/project fix this",
 	})
 	req = withLocalRunWorkspace(req)
 	req = withURLParam(req, "runId", runID)
@@ -236,7 +236,7 @@ func TestCreateLocalCLIMessage_UserInputCreatesMemberReplyOnly(t *testing.T) {
 		t.Fatalf("decode comments: %v", err)
 	}
 	for _, c := range comments {
-		if c.Content == "/status" {
+		if c.Content == "/Users/me/project fix this" {
 			if c.AuthorDisplayName != nil {
 				t.Fatalf("user input reply should use normal member display, got %q", *c.AuthorDisplayName)
 			}
@@ -244,6 +244,60 @@ func TestCreateLocalCLIMessage_UserInputCreatesMemberReplyOnly(t *testing.T) {
 		}
 	}
 	t.Fatalf("user input reply not found: %+v", comments)
+}
+
+func TestCreateLocalCLIMessage_CommandUserInputStoresTranscriptOnly(t *testing.T) {
+	ctx := context.Background()
+	issue := createIssueForLocalRunTest(t, "in_progress")
+	run := createLocalRunForTest(t, issue.ID, map[string]any{
+		"cli_name":      "codex",
+		"work_dir":      "/tmp/project",
+		"comments_mode": "thread",
+	})
+	runID := run["id"].(string)
+	topCommentID := run["top_comment_id"].(string)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/local-runs/"+runID+"/messages", map[string]any{
+		"type":    "user_input",
+		"content": "/status",
+		"input": map[string]any{
+			"command": true,
+		},
+	})
+	req = withLocalRunWorkspace(req)
+	req = withURLParam(req, "runId", runID)
+	testHandler.CreateLocalCLIMessage(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLocalCLIMessage: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var msg map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&msg); err != nil {
+		t.Fatalf("decode message: %v", err)
+	}
+	if msg["type"] != "user_input" || msg["content"] != "/status" {
+		t.Fatalf("message = %+v, want stored user_input transcript", msg)
+	}
+
+	var replyCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM comment WHERE issue_id = $1 AND parent_id = $2
+	`, issue.ID, topCommentID).Scan(&replyCount); err != nil {
+		t.Fatalf("count replies: %v", err)
+	}
+	if replyCount != 0 {
+		t.Fatalf("reply comments = %d, want 0", replyCount)
+	}
+
+	var stored string
+	if err := testPool.QueryRow(ctx, `
+		SELECT content FROM local_cli_message WHERE run_id = $1 AND type = 'user_input'
+	`, runID).Scan(&stored); err != nil {
+		t.Fatalf("load user input transcript: %v", err)
+	}
+	if stored != "/status" {
+		t.Fatalf("stored user input = %q, want /status", stored)
+	}
 }
 
 func TestCreateLocalCLIMessage_CommentsOffDoesNotCreateReply(t *testing.T) {

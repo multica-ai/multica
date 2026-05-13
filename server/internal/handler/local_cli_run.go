@@ -216,7 +216,11 @@ func (h *Handler) CreateLocalCLIMessage(w http.ResponseWriter, r *http.Request) 
 	req.Input = redact.InputMap(req.Input)
 
 	var commentID pgtype.UUID
-	if (req.Type == "final" || req.Type == "user_input") && run.CommentsMode == "thread" && run.TopCommentID.Valid && strings.TrimSpace(req.Content) != "" {
+	createsReply := (req.Type == "final" || (req.Type == "user_input" && !localCLIMessageIsCommand(req))) &&
+		run.CommentsMode == "thread" &&
+		run.TopCommentID.Valid &&
+		strings.TrimSpace(req.Content) != ""
+	if createsReply {
 		comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
 			IssueID:     run.IssueID,
 			WorkspaceID: run.WorkspaceID,
@@ -264,6 +268,14 @@ func (h *Handler) CreateLocalCLIMessage(w http.ResponseWriter, r *http.Request) 
 	}
 	h.publishTask(protocol.EventTaskMessage, uuidToString(run.WorkspaceID), "member", uuidToString(run.OwnerID), uuidToString(run.ID), msg)
 	writeJSON(w, http.StatusCreated, msg)
+}
+
+func localCLIMessageIsCommand(req createLocalCLIMessageRequest) bool {
+	if req.Input == nil {
+		return false
+	}
+	command, _ := req.Input["command"].(bool)
+	return command
 }
 
 func (h *Handler) localCLIDisplayName(ctx context.Context, run localCLIRun) string {

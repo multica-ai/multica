@@ -10,6 +10,7 @@ import (
 )
 
 type providerTranscriptExtractor interface {
+	ExtractUserInput(stdinPrompt string, turnStart time.Time) (string, bool)
 	Extract(userPrompt string, turnStart time.Time) (string, bool)
 }
 
@@ -33,6 +34,14 @@ func (e codexTranscriptExtractor) Extract(userPrompt string, turnStart time.Time
 		return "", false
 	}
 	return extractCodexAnswerFromJSONL(path, userPrompt)
+}
+
+func (e codexTranscriptExtractor) ExtractUserInput(stdinPrompt string, turnStart time.Time) (string, bool) {
+	path, ok := e.latestSessionFile(turnStart)
+	if !ok {
+		return "", false
+	}
+	return extractCodexUserInputFromJSONL(path, stdinPrompt)
 }
 
 func (e codexTranscriptExtractor) latestSessionFile(turnStart time.Time) (string, bool) {
@@ -92,8 +101,8 @@ func extractCodexAnswerFromJSONL(path, userPrompt string) (string, bool) {
 	var (
 		collecting bool
 		matched    bool
-		answers    []string
-		lastAnswer []string
+		turn       codexAnswerCandidates
+		lastAnswer string
 	)
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -104,30 +113,108 @@ func extractCodexAnswerFromJSONL(path, userPrompt string) (string, bool) {
 		}
 		switch stringValue(payload["type"]) {
 		case "user_message":
-			if collecting && len(answers) > 0 {
-				lastAnswer = append(lastAnswer[:0], answers...)
+			if collecting {
+				if answer, ok := turn.answer(); ok {
+					lastAnswer = answer
+				}
 			}
 			collecting = promptMatches(codexPayloadText(payload), userPrompt)
 			if collecting {
 				matched = true
-				answers = answers[:0]
-				lastAnswer = nil
+				turn = codexAnswerCandidates{}
+				lastAnswer = ""
 			}
 		case "agent_message":
 			if collecting {
 				if text := strings.TrimSpace(codexPayloadText(payload)); text != "" {
-					answers = append(answers, text)
+					switch stringValue(payload["phase"]) {
+					case "final_answer":
+						turn.finalAnswers = append(turn.finalAnswers, text)
+					case "":
+						turn.legacyAnswers = append(turn.legacyAnswers, text)
+					}
+				}
+			}
+		case "task_complete":
+			if collecting {
+				if text := strings.TrimSpace(codexTaskCompleteLastAgentMessage(payload)); text != "" {
+					turn.taskCompleteAnswer = text
 				}
 			}
 		}
 	}
-	if matched && len(answers) > 0 {
-		return joinProviderMessages(answers), true
+	if matched {
+		if answer, ok := turn.answer(); ok {
+			return answer, true
+		}
 	}
-	if len(lastAnswer) > 0 {
-		return joinProviderMessages(lastAnswer), true
+	if lastAnswer != "" {
+		return lastAnswer, true
 	}
 	return "", false
+}
+
+func extractCodexUserInputFromJSONL(path, stdinPrompt string) (string, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+
+	var last string
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		payload, ok := codexEventPayload(scanner.Bytes())
+		if !ok || stringValue(payload["type"]) != "user_message" {
+			continue
+		}
+		text := strings.TrimSpace(codexPayloadText(payload))
+		if promptMatches(text, stdinPrompt) {
+			last = text
+		}
+	}
+	if last == "" {
+		return "", false
+	}
+	return last, true
+}
+
+type codexAnswerCandidates struct {
+	taskCompleteAnswer string
+	finalAnswers       []string
+	legacyAnswers      []string
+}
+
+func (c codexAnswerCandidates) answer() (string, bool) {
+	if answer := strings.TrimSpace(c.taskCompleteAnswer); answer != "" {
+		return answer, true
+	}
+	if answer := joinProviderMessages(c.finalAnswers); answer != "" {
+		return answer, true
+	}
+	if answer := joinProviderMessages(c.legacyAnswers); answer != "" {
+		return answer, true
+	}
+	return "", false
+}
+
+func codexTaskCompleteLastAgentMessage(payload map[string]any) string {
+	if text := stringValue(payload["last_agent_message"]); text != "" {
+		return text
+	}
+	if msg, ok := payload["last_agent_message"].(map[string]any); ok {
+		return codexPayloadText(msg)
+	}
+	if result, ok := payload["result"].(map[string]any); ok {
+		if text := stringValue(result["last_agent_message"]); text != "" {
+			return text
+		}
+		if msg, ok := result["last_agent_message"].(map[string]any); ok {
+			return codexPayloadText(msg)
+		}
+	}
+	return ""
 }
 
 func codexEventPayload(line []byte) (map[string]any, bool) {
