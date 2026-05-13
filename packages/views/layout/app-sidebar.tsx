@@ -858,65 +858,56 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             // CEREBRO-PATCH(nested-projects-indent): each nesting level adds 12px margin + 8px padding (v3 mockup).
                             const nestedStyle = level > 0 ? { marginLeft: level * 12, paddingLeft: level * 8 } : undefined;
                             return (
-                              <React.Fragment key={item.id}>
-                                <SidebarMenuItem>
-                                  {/* CEREBRO-PATCH(nested-projects-guide-line): subtree-spine — line on each child anchored at parent's chevron column, extending half a row up so it visually emerges from the parent. */}
-                                  <div
+                              <SidebarMenuItem key={item.id}>
+                                <div className="relative" style={nestedStyle}>
+                                  <SidebarMenuButton
+                                    isActive={isActive}
+                                    render={<AppLink href={href} />}
+                                    onClick={handleNavClick}
                                     className={cn(
-                                      "relative",
+                                      "h-7 text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground",
+                                      hasActiveChild && "bg-sidebar-accent/45 text-sidebar-accent-foreground",
                                     )}
-                                    style={nestedStyle}
                                   >
-                                    {level > 0 && (
+                                    {hasChildren ? (
                                       <span
-                                        aria-hidden="true"
-                                        className="pointer-events-none absolute -top-3.5 bottom-0 w-px bg-sidebar-border/70"
-                                        style={{ left: 8 * level - 12 }}
-                                      />
+                                        role="button"
+                                        tabIndex={0}
+                                        className="flex size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+                                        onClick={(event) => {
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                          setProjectExpanded(item.id, !isExpanded);
+                                        }}
+                                        onKeyDown={(event) => {
+                                          if (event.key !== "Enter" && event.key !== " ") return;
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                          setProjectExpanded(item.id, !isExpanded);
+                                        }}
+                                      >
+                                        <ChevronRight className={cn("!size-3 transition-transform", isExpanded && "rotate-90")} />
+                                      </span>
+                                    ) : (
+                                      <span className="size-3.5 shrink-0" />
                                     )}
-                                    <SidebarMenuButton
-                                      isActive={isActive}
-                                      render={<AppLink href={href} />}
-                                      onClick={handleNavClick}
-                                      className={cn(
-                                        "h-7 text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground",
-                                        hasActiveChild && "bg-sidebar-accent/45 text-sidebar-accent-foreground",
-                                      )}
-                                    >
-                                      {hasChildren ? (
-                                        <span
-                                          role="button"
-                                          tabIndex={0}
-                                          className="flex size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
-                                          onClick={(event) => {
-                                            event.preventDefault();
-                                            event.stopPropagation();
-                                            setProjectExpanded(item.id, !isExpanded);
-                                          }}
-                                          onKeyDown={(event) => {
-                                            if (event.key !== "Enter" && event.key !== " ") return;
-                                            event.preventDefault();
-                                            event.stopPropagation();
-                                            setProjectExpanded(item.id, !isExpanded);
-                                          }}
-                                        >
-                                          <ChevronRight className={cn("!size-3 transition-transform", isExpanded && "rotate-90")} />
-                                        </span>
-                                      ) : (
-                                        <span className="size-3.5 shrink-0" />
-                                      )}
-                                      {level === 0 && <ProjectIcon project={item} size="sm" />}
-                                      <span className="truncate">{item.title}</span>
-                                      {level === 0 && item.issue_count > 0 && (
-                                        <span className="ml-auto text-[10px] text-muted-foreground">
-                                          {item.done_count}/{item.issue_count}
-                                        </span>
-                                      )}
-                                    </SidebarMenuButton>
-                                  </div>
-                                </SidebarMenuItem>
-                                {hasChildren && isExpanded && children.map((child) => renderProject(child, level + 1))}
-                              </React.Fragment>
+                                    {level === 0 && <ProjectIcon project={item} size="sm" />}
+                                    <span className="truncate">{item.title}</span>
+                                    {level === 0 && item.issue_count > 0 && (
+                                      <span className="ml-auto text-[10px] text-muted-foreground">
+                                        {item.done_count}/{item.issue_count}
+                                      </span>
+                                    )}
+                                  </SidebarMenuButton>
+                                </div>
+                                {hasChildren && isExpanded && (
+                                  // CEREBRO-PATCH(nested-projects-guide-line): single continuous spine on children-ul, anchored at parent's chevron column (level*12 + 8 = button px-2 inset).
+                                  <ul className="relative flex w-full min-w-0 flex-col gap-0">
+                                    <span aria-hidden="true" className="pointer-events-none absolute -top-3.5 bottom-0 w-px bg-sidebar-border/70" style={{ left: level * 12 + 8 }} />
+                                    {children.map((child) => renderProject(child, level + 1))}
+                                  </ul>
+                                )}
+                              </SidebarMenuItem>
                             );
                           };
                           return renderProject(project, 0);
