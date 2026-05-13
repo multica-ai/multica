@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -63,6 +64,30 @@ type Config struct {
 	CodexSemanticInactivityTimeout time.Duration
 	ClaudeArgs                     []string
 	CodexArgs                      []string
+
+	// PUL-94 per-task worktree feature.
+	//
+	// UsePerTaskWorktree gates the new spawn flow. When false (default), tasks
+	// continue to use the per-workspace bare cache + per-task git worktree
+	// inside their env workdir (existing behavior). When true, tasks with a
+	// non-NULL TargetProjectResourceID get a dedicated worktree at
+	// WorktreesRoot/<agent>-<task[:8]>/ attached to a globally-provisioned
+	// bare repo resolved via BareRepoMap.
+	//
+	// BareRepoMap keys "owner/name" (case-insensitive at lookup time) to
+	// absolute paths of bare repos on disk (e.g. "/srv/pulse-bare.git").
+	// Loaded from MULTICA_BARE_REPO_MAP as JSON, e.g.:
+	//   '{"rabbeet/Pulse":"/srv/pulse-bare.git","rabbeet/multica":"/srv/multica-bare.git"}'
+	// Provisioning of the bares themselves lives outside the daemon (see
+	// rabbeet/multica-server scripts/14-agent-host-prep.sh).
+	//
+	// WorktreesRoot is the parent dir for per-task worktrees. Defaults to
+	// "/srv/agent-worktrees" when unset and the feature is on.
+	//
+	// See: plans://Multica/2026-05-12-pul-94-agent-worktree-per-task.md.
+	UsePerTaskWorktree bool
+	BareRepoMap        map[string]string
+	WorktreesRoot      string
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -335,6 +360,26 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	gcArtifactPatterns := patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", DefaultGCArtifactPatterns)
 
+	// PUL-94 per-task worktree feature flag + config.
+	usePerTaskWorktree := false
+	if v := os.Getenv("MULTICA_USE_PER_TASK_WORKTREE"); v == "true" || v == "1" {
+		usePerTaskWorktree = true
+	}
+	bareRepoMap, err := parseBareRepoMap(os.Getenv("MULTICA_BARE_REPO_MAP"))
+	if err != nil {
+		return Config{}, fmt.Errorf("MULTICA_BARE_REPO_MAP: %w", err)
+	}
+	worktreesRoot := strings.TrimSpace(os.Getenv("MULTICA_WORKTREES_ROOT"))
+	if worktreesRoot == "" && usePerTaskWorktree {
+		worktreesRoot = "/srv/agent-worktrees"
+	}
+	if worktreesRoot != "" {
+		worktreesRoot, err = filepath.Abs(worktreesRoot)
+		if err != nil {
+			return Config{}, fmt.Errorf("resolve absolute worktrees root: %w", err)
+		}
+	}
+
 	return Config{
 		ServerBaseURL:                  serverBaseURL,
 		DaemonID:                       daemonID,
@@ -359,7 +404,34 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
+		UsePerTaskWorktree:             usePerTaskWorktree,
+		BareRepoMap:                    bareRepoMap,
+		WorktreesRoot:                  worktreesRoot,
 	}, nil
+}
+
+// parseBareRepoMap decodes the JSON MULTICA_BARE_REPO_MAP env value into a
+// case-preserved map of "owner/name" → absolute bare repo path. Empty/unset
+// returns a nil map (feature simply unusable until configured). Validation
+// is light — keys must look like "owner/name", values must be non-empty.
+func parseBareRepoMap(raw string) (map[string]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return nil, fmt.Errorf("not valid JSON (expected {\"owner/name\":\"/srv/...\"}): %w", err)
+	}
+	for k, v := range m {
+		if !strings.Contains(k, "/") {
+			return nil, fmt.Errorf("key %q must be \"owner/name\"", k)
+		}
+		if strings.TrimSpace(v) == "" {
+			return nil, fmt.Errorf("key %q has empty bare path", k)
+		}
+	}
+	return m, nil
 }
 
 // NormalizeServerBaseURL converts a WebSocket or HTTP URL to a base HTTP URL.

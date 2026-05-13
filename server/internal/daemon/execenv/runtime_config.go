@@ -158,6 +158,22 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
 	}
 
+	// PUL-94: when a per-task worktree was provisioned at spawn, surface it
+	// so the agent knows it has a dedicated checkout outside the normal
+	// per-task workdir. The agent still uses `multica repo checkout` —
+	// the CLI plumbs MULTICA_TASK_BARE_PATH/MULTICA_TASK_WORKTREE_PATH/
+	// MULTICA_TASK_TARGET_REPO through to the daemon, which routes the
+	// worktree to PerTaskWorktreePath instead of the default workdir/repo/.
+	if ctx.PerTaskWorktreePath != "" {
+		b.WriteString("## Per-Task Worktree (PUL-94)\n\n")
+		fmt.Fprintf(&b, "A dedicated git worktree has been provisioned for this task:\n\n")
+		fmt.Fprintf(&b, "- **Target repo**: `%s`\n", ctx.PerTaskTargetRepo)
+		fmt.Fprintf(&b, "- **Worktree path**: `%s` (writable — this is where your code edits live)\n", ctx.PerTaskWorktreePath)
+		fmt.Fprintf(&b, "- **Bare repo** (read-only, do not touch): `%s`\n\n", ctx.PerTaskBarePath)
+		b.WriteString("Run `multica repo checkout " + ctx.PerTaskTargetRepo + "` (or the full URL) to materialize the worktree on first use. The daemon routes it to the path above automatically.\n\n")
+		b.WriteString("This worktree is isolated from other tasks on this agent — concurrent tasks on different issues each get their own. The worktree directory and its branch will be cleaned up after the task completes; your PR push to the remote is what survives.\n\n")
+	}
+
 	// Inject available repositories section.
 	if len(ctx.Repos) > 0 {
 		b.WriteString("## Repositories\n\n")

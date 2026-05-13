@@ -357,33 +357,203 @@ func dirSize(root string) int64 {
 const gitCmdTimeout = 30 * time.Second
 
 // pruneRepoWorktrees runs `git worktree prune` on all bare repos in the cache.
+//
+// PUL-94 extension (A6): also sweeps the global per-task worktrees dir
+// (cfg.WorktreesRoot, typically /srv/agent-worktrees/) for orphaned per-task
+// worktrees — those whose backing envRoot is no longer active and whose
+// mtime is outside the 5-minute grace period that protects in-flight spawns.
 func (d *Daemon) pruneRepoWorktrees(workspacesRoot string) {
 	reposRoot := filepath.Join(workspacesRoot, ".repos")
 	wsEntries, err := os.ReadDir(reposRoot)
+	if err == nil {
+		for _, wsEntry := range wsEntries {
+			if !wsEntry.IsDir() {
+				continue
+			}
+			wsRepoDir := filepath.Join(reposRoot, wsEntry.Name())
+			repoEntries, err := os.ReadDir(wsRepoDir)
+			if err != nil {
+				continue
+			}
+			for _, repoEntry := range repoEntries {
+				if !repoEntry.IsDir() {
+					continue
+				}
+				barePath := filepath.Join(wsRepoDir, repoEntry.Name())
+				if !isBareRepo(barePath) {
+					continue
+				}
+				d.pruneWorktree(barePath)
+			}
+		}
+	}
+
+	// PUL-94: per-task worktree sweep. Runs only if the feature is configured
+	// (WorktreesRoot set, BareRepoMap populated). Looks for per-task dirs at
+	// /srv/agent-worktrees/<name>/ that:
+	//   1. match the per-task pattern (contain at least one "-" and aren't
+	//      a known legacy "agent-N" plain dir),
+	//   2. are outside the 5-minute grace period (mtime check), and
+	//   3. have no corresponding active envRoot.
+	// Orphans matching all three get `git worktree remove --force` against
+	// their bare. The bare path comes from the GCMeta of the matching envRoot
+	// (if any) — falling back to scanning the BareRepoMap is unnecessary since
+	// orphans by definition have no active envRoot.
+	if d.cfg.WorktreesRoot != "" {
+		d.sweepPerTaskWorktrees()
+	}
+}
+
+const perTaskGracePeriod = 5 * time.Minute
+
+// sweepPerTaskWorktrees implements the PUL-94 sweeper. Scans the configured
+// WorktreesRoot for per-task worktrees, classifies each entry as active /
+// in-grace / orphan, removes orphans. Emits structured slog events for ops:
+//
+//	worktree.remove        — per orphan cleaned, with reason="sweeper"
+//	worktree.sweeper_run   — one per invocation, with duration + counters
+//
+// "Active" means the worktree's path appears in the daemon's in-memory
+// activeEnvRoots set (via the GCMeta.WtPath that runTask records at spawn).
+// "Grace" means the worktree's directory was created less than
+// perTaskGracePeriod ago — protects in-flight spawns that haven't yet
+// registered an active envRoot.
+func (d *Daemon) sweepPerTaskWorktrees() {
+	start := time.Now()
+	entries, err := os.ReadDir(d.cfg.WorktreesRoot)
 	if err != nil {
 		return
 	}
 
-	for _, wsEntry := range wsEntries {
-		if !wsEntry.IsDir() {
+	// Build the set of WtPaths owned by active envRoots — read every
+	// envRoot's .gc_meta.json and collect non-empty WtPath fields. Cheap
+	// even with hundreds of envRoots (small JSON reads).
+	activeWtPaths := d.collectActiveWtPaths()
+
+	scanned := 0
+	cleaned := 0
+	errCount := 0
+	for _, e := range entries {
+		if !e.IsDir() {
 			continue
 		}
-		wsRepoDir := filepath.Join(reposRoot, wsEntry.Name())
-		repoEntries, err := os.ReadDir(wsRepoDir)
+		name := e.Name()
+		// Skip legacy per-agent dirs (no per-task uuid suffix). The
+		// per-task pattern is "<agent-sanitized>-<short[8]>" — at least
+		// 10 chars and ending with 8 hex/alnum after the last dash.
+		if !looksLikePerTaskWorktree(name) {
+			continue
+		}
+		wtPath := filepath.Join(d.cfg.WorktreesRoot, name)
+		scanned++
+
+		// Active? Skip — task is using it.
+		if _, ok := activeWtPaths[wtPath]; ok {
+			continue
+		}
+
+		// Grace period: skip recently-created worktrees so a spawn
+		// midway through writing .gc_meta.json isn't swept.
+		info, err := e.Info()
 		if err != nil {
 			continue
 		}
-		for _, repoEntry := range repoEntries {
-			if !repoEntry.IsDir() {
+		if time.Since(info.ModTime()) < perTaskGracePeriod {
+			continue
+		}
+
+		// Orphan — remove the worktree. We do not know which bare it
+		// was attached to without reading every bare's worktree list,
+		// so fall back to deleting the directory and letting the next
+		// `git worktree prune` (above) clean up the bare's record.
+		ageSeconds := time.Since(info.ModTime()).Seconds()
+		if err := os.RemoveAll(wtPath); err != nil {
+			d.logger.Warn("worktree.sweeper_remove_failed",
+				"wt_path", wtPath, "error", err)
+			errCount++
+			continue
+		}
+		d.logger.Info("worktree.remove",
+			"wt_path", wtPath,
+			"reason", "sweeper",
+			"age_seconds", ageSeconds,
+		)
+		cleaned++
+	}
+
+	d.logger.Info("worktree.sweeper_run",
+		"duration_ms", time.Since(start).Milliseconds(),
+		"scanned", scanned,
+		"orphans_cleaned", cleaned,
+		"errors", errCount,
+	)
+}
+
+// collectActiveWtPaths walks every workspace env root and reads
+// .gc_meta.json files to build the set of WtPaths owned by currently-known
+// tasks. Used by the sweeper to distinguish "this worktree belongs to a
+// live task" from "this worktree is orphan."
+//
+// Falls back to an empty set on any walk failure — the sweeper then relies
+// on the grace period alone, which is intentionally lenient.
+func (d *Daemon) collectActiveWtPaths() map[string]struct{} {
+	active := make(map[string]struct{})
+	if d.cfg.WorkspacesRoot == "" {
+		return active
+	}
+	wsEntries, err := os.ReadDir(d.cfg.WorkspacesRoot)
+	if err != nil {
+		return active
+	}
+	for _, ws := range wsEntries {
+		if !ws.IsDir() {
+			continue
+		}
+		// Skip the bare-cache dir (".repos") and other hidden dirs.
+		if strings.HasPrefix(ws.Name(), ".") {
+			continue
+		}
+		wsDir := filepath.Join(d.cfg.WorkspacesRoot, ws.Name())
+		taskEntries, err := os.ReadDir(wsDir)
+		if err != nil {
+			continue
+		}
+		for _, te := range taskEntries {
+			if !te.IsDir() {
 				continue
 			}
-			barePath := filepath.Join(wsRepoDir, repoEntry.Name())
-			if !isBareRepo(barePath) {
+			envRoot := filepath.Join(wsDir, te.Name())
+			meta, err := execenv.ReadGCMeta(envRoot)
+			if err != nil {
 				continue
 			}
-			d.pruneWorktree(barePath)
+			if meta.WtPath != "" {
+				active[meta.WtPath] = struct{}{}
+			}
 		}
 	}
+	return active
+}
+
+// looksLikePerTaskWorktree returns true for dir names matching the per-task
+// pattern <agent>-<short_id> where short_id is the 8-char hex prefix of a
+// task UUID. Legacy <agent> dirs without the suffix return false.
+func looksLikePerTaskWorktree(name string) bool {
+	idx := strings.LastIndex(name, "-")
+	if idx < 0 {
+		return false
+	}
+	suffix := name[idx+1:]
+	if len(suffix) != 8 {
+		return false
+	}
+	for _, c := range suffix {
+		if !(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f') && !(c >= 'A' && c <= 'F') {
+			return false
+		}
+	}
+	// Must have a non-empty agent prefix before the dash.
+	return idx > 0
 }
 
 func (d *Daemon) pruneWorktree(barePath string) {
