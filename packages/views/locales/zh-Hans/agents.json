@@ -130,9 +130,31 @@
     "prop_model": "模型",
     "prop_visibility": "可见性",
     "prop_concurrency": "并发",
+    "prop_stream": "流输出",
+    "prop_approval": "审批",
     "prop_owner": "所有者",
     "prop_created": "创建时间",
     "prop_updated": "更新时间",
+    "stream_tooltip": "流输出 · {{value}}",
+    "approval_tooltip": "审批 · {{value}}",
+    "stream_value": {
+      "on": "开启",
+      "off": "关闭"
+    },
+    "stream_description": {
+      "on": "采集并显示本地智能体的执行流。",
+      "off": "运行时不显示本地执行流。"
+    },
+    "approval_value": {
+      "auto": "自动",
+      "prompt": "询问我",
+      "deny": "拒绝"
+    },
+    "approval_description": {
+      "auto": "自动批准运行时动作。",
+      "prompt": "运行命令或修改文件前先询问。",
+      "deny": "自动拒绝运行时动作。"
+    },
     "no_description_placeholder": "暂无描述",
     "change_avatar_aria": "更换头像",
     "avatar_updated_toast": "已更新头像",

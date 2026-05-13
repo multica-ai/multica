@@ -37,6 +37,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -68,6 +69,7 @@ import { IssueActionsMenuItems, dropdownPrimitives } from "../actions/issue-acti
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
+import { AgentStreamSidebar } from "./agent-stream-sidebar";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
@@ -364,6 +366,8 @@ interface IssueDetailProps {
   onDone?: () => void;
   defaultSidebarOpen?: boolean;
   layoutId?: string;
+  /** Pixel cap for the desktop right sidebar when resizing. */
+  sidebarMaxSize?: number;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
   highlightCommentId?: string;
 }
@@ -372,7 +376,15 @@ interface IssueDetailProps {
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
+export function IssueDetail({
+  issueId,
+  onDelete,
+  onDone,
+  defaultSidebarOpen = true,
+  layoutId = "multica_issue_detail_layout",
+  sidebarMaxSize = 560,
+  highlightCommentId,
+}: IssueDetailProps) {
   const { t } = useT("issues");
   // `issueId` is the raw route param — may be a UUID *or* a human-readable
   // identifier (e.g. "OPE-460") when the URL has been canonicalized.  We keep
@@ -883,7 +895,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     );
   }
 
-  const sidebarContent = (
+  const propertiesContent = (
     <div className="space-y-5">
       {/* Properties */}
       <div>
@@ -1109,6 +1121,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     );
   };
 
+  const sidebarContent = (
+    <Tabs defaultValue="stream" className="flex h-full min-h-0 flex-col">
+      <TabsList className="mb-3 grid w-full grid-cols-2">
+        <TabsTrigger value="stream">Stream</TabsTrigger>
+        <TabsTrigger value="properties">Properties</TabsTrigger>
+      </TabsList>
+      <TabsContent value="stream" keepMounted className="mt-0 min-h-0 flex-1">
+        <AgentStreamSidebar issueId={issue.id} />
+      </TabsContent>
+      <TabsContent value="properties" keepMounted className="mt-0 min-h-0 flex-1 overflow-y-auto">
+        {propertiesContent}
+      </TabsContent>
+    </Tabs>
+  );
   const detailContent = (
     <div className="flex h-full min-w-0 flex-1 flex-col">
         <PageHeader className="gap-2 bg-background text-sm">
@@ -1612,7 +1638,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         id="sidebar"
         defaultSize={defaultSidebarOpen ? 320 : 0}
         minSize={260}
-        maxSize={420}
+        maxSize={sidebarMaxSize}
         collapsible
         groupResizeBehavior="preserve-pixel-size"
         panelRef={sidebarRef}

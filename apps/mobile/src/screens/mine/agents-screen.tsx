@@ -23,6 +23,7 @@ import { useCoreQuery, useCoreQueryClient } from "@multica/core/provider";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import type {
   Agent,
+  AgentSkillSummary,
   AgentRuntimeMode,
   AgentStatus,
   AgentTask,

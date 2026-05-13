@@ -253,6 +253,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/messages", h.ReportTaskMessages)
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
 
+		// Interaction endpoints — daemon side (report + poll result)
+		r.Post("/tasks/{taskId}/interactions", h.ReportInteraction)
+		r.Get("/tasks/{taskId}/interactions/{interactionId}", h.GetInteractionResult)
+
+
+
 		r.Get("/issues/{issueId}/gc-check", h.GetIssueGCCheck)
 		r.Get("/chat-sessions/{sessionId}/gc-check", h.GetChatSessionGCCheck)
 		r.Get("/autopilot-runs/{runId}/gc-check", h.GetAutopilotRunGCCheck)
@@ -401,6 +407,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
+
+			// Interaction endpoints — user side (list + respond)
+			r.Get("/api/tasks/{taskId}/interactions", h.ListTaskInteractions)
+			r.Post("/api/tasks/{taskId}/interactions/{interactionId}/respond", h.RespondInteraction)
 
 			// Labels
 			r.Route("/api/labels", func(r chi.Router) {

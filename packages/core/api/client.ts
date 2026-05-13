@@ -13,6 +13,8 @@ import type {
   CreateAgentRequest,
   UpdateAgentRequest,
   AgentTask,
+  TaskInteraction,
+  TaskTraceResponse,
   AgentActivityBucket,
   AgentRunCount,
   AgentRuntime,
@@ -907,6 +909,36 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/activity`);
   }
 
+  async getLocalTaskTrace(
+    healthPort: number,
+    taskId: string,
+    params?: { run_id?: string; after_seq?: number; tail?: number },
+  ): Promise<TaskTraceResponse> {
+    const search = new URLSearchParams();
+    if (params?.run_id) search.set("run_id", params.run_id);
+    if (params?.after_seq !== undefined) search.set("after_seq", String(params.after_seq));
+    if (params?.tail !== undefined) search.set("tail", String(params.tail));
+    const suffix = search.toString() ? `?${search}` : "";
+    const res = await fetch(`http://127.0.0.1:${healthPort}/traces/tasks/${taskId}${suffix}`);
+    if (!res.ok) {
+      throw new ApiError(await this.parseErrorMessage(res, "Failed to load local task trace"), res.status, res.statusText);
+    }
+    return res.json() as Promise<TaskTraceResponse>;
+  }
+
+  getLocalTaskTraceStreamUrl(
+    healthPort: number,
+    taskId: string,
+    params?: { run_id?: string; after_seq?: number; tail?: number },
+  ): string {
+    const search = new URLSearchParams();
+    if (params?.run_id) search.set("run_id", params.run_id);
+    if (params?.after_seq !== undefined) search.set("after_seq", String(params.after_seq));
+    if (params?.tail !== undefined) search.set("tail", String(params.tail));
+    const suffix = search.toString() ? `?${search}` : "";
+    return `http://127.0.0.1:${healthPort}/traces/tasks/${taskId}/stream${suffix}`;
+  }
+
   async getRuntimeUsageByAgent(
     runtimeId: string,
     params?: { days?: number },
@@ -1098,6 +1130,19 @@ export class ApiClient {
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
+    });
+  }
+
+  // Interactions (approval requests)
+  async listTaskInteractions(taskId: string, status?: string): Promise<TaskInteraction[]> {
+    const qs = status ? `?status=${status}` : "";
+    return this.fetch(`/api/tasks/${taskId}/interactions${qs}`);
+  }
+
+  async respondInteraction(taskId: string, interactionId: string, chosenOption: string, responseMessage?: string): Promise<TaskInteraction> {
+    return this.fetch(`/api/tasks/${taskId}/interactions/${interactionId}/respond`, {
+      method: "POST",
+      body: JSON.stringify({ chosen_option: chosenOption, response_message: responseMessage }),
     });
   }
 

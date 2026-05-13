@@ -153,7 +153,8 @@ type DaemonRegisterRequest struct {
 	// UI, the upsert query preserves that override on subsequent
 	// daemon reconnects (see UpsertAgentRuntime in runtime.sql).
 	Timezone string `json:"timezone"`
-	Runtimes []struct {
+	HealthPort      int      `json:"health_port"` // local daemon health/trace port
+	Runtimes        []struct {
 		Name    string `json:"name"`
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
@@ -321,6 +322,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			"version":     runtime.Version,
 			"cli_version": req.CLIVersion,
 			"launched_by": req.LaunchedBy,
+			"health_port": req.HealthPort,
 		})
 
 		row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
@@ -1139,6 +1141,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			CustomArgs:   merged.CustomArgs,
 			McpConfig:    mcpConfig,
 			Model:        agent.Model.String,
+			RuntimeConfig: agent.RuntimeConfig,
 		}
 	}
 
@@ -1228,18 +1231,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}
-			}
-		}
-
-		// Look up the prior session for this (agent, issue) pair so the daemon
-		// can resume the Claude Code conversation context.
-		//
-		// Resolve the trigger actor's owner when the trigger came from an
-		// agent. The daemon's private-agent gate needs this to allow
-		// same-owner agent-to-agent invocations.
-		if task.TriggerActorType.Valid && task.TriggerActorType.String == "agent" && task.TriggerActorID.Valid {
-			if triggerAgent, err := h.Queries.GetAgent(r.Context(), task.TriggerActorID); err == nil {
-				resp.TriggerActorOwnerID = uuidToString(triggerAgent.OwnerID)
 			}
 		}
 

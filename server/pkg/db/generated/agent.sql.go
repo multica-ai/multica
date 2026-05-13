@@ -709,15 +709,15 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 
 const createAgentTask = `-- name: CreateAgentTask :one
 INSERT INTO agent_task_queue (
-    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
+    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id, context,
     trigger_source, trigger_actor_type, trigger_actor_id,
     trigger_summary, force_fresh_session
 )
 VALUES (
-    $1, $2, $3, 'queued', $4, $8,
-    $5, $6, $7,
-    $9,
-    COALESCE($10::boolean, FALSE)
+    $1, $2, $3, 'queued', $4, $5, $6,
+    $7, $8, $9,
+    $10,
+    COALESCE($11::boolean, FALSE)
 )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_source, trigger_actor_type, trigger_actor_id, trigger_summary, force_fresh_session
 `
@@ -727,10 +727,11 @@ type CreateAgentTaskParams struct {
 	RuntimeID         pgtype.UUID `json:"runtime_id"`
 	IssueID           pgtype.UUID `json:"issue_id"`
 	Priority          int32       `json:"priority"`
+	TriggerCommentID  pgtype.UUID `json:"trigger_comment_id"`
+	Context           []byte      `json:"context"`
 	TriggerSource     pgtype.Text `json:"trigger_source"`
 	TriggerActorType  pgtype.Text `json:"trigger_actor_type"`
 	TriggerActorID    pgtype.UUID `json:"trigger_actor_id"`
-	TriggerCommentID  pgtype.UUID `json:"trigger_comment_id"`
 	TriggerSummary    pgtype.Text `json:"trigger_summary"`
 	ForceFreshSession pgtype.Bool `json:"force_fresh_session"`
 }
@@ -741,10 +742,11 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.RuntimeID,
 		arg.IssueID,
 		arg.Priority,
+		arg.TriggerCommentID,
+		arg.Context,
 		arg.TriggerSource,
 		arg.TriggerActorType,
 		arg.TriggerActorID,
-		arg.TriggerCommentID,
 		arg.TriggerSummary,
 		arg.ForceFreshSession,
 	)

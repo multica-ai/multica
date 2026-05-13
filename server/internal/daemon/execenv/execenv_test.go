@@ -1839,6 +1839,34 @@ func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
 	}
 }
 
+func TestPrepareCodexHomePromptModeForcesWorkspaceWriteOnDarwin(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{
+		GOOS:                 "darwin",
+		CodexVersion:         "0.121.0",
+		PreferWorkspaceWrite: true,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("prepareCodexHomeWithOpts failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("config.toml not created: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `sandbox_mode = "workspace-write"`) {
+		t.Errorf("prompt mode should force workspace-write on darwin, got:\n%s", s)
+	}
+	if !strings.Contains(s, "sandbox_workspace_write.network_access = true") {
+		t.Errorf("prompt mode should retain network_access hint, got:\n%s", s)
+	}
+}
+
 func TestSyncCodexSkillsMirrorsSharedLocalSkills(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 

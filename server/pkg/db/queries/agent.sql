@@ -90,12 +90,12 @@ ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
 INSERT INTO agent_task_queue (
-    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
+    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id, context,
     trigger_source, trigger_actor_type, trigger_actor_id,
     trigger_summary, force_fresh_session
 )
 VALUES (
-    $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
+    $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id), sqlc.narg(context),
     $5, $6, $7,
     sqlc.narg(trigger_summary),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE)

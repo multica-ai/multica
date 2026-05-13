@@ -17,10 +17,12 @@ import (
 
 // mockRow implements pgx.Row, returning either a scanned task or pgx.ErrNoRows.
 type mockRow struct {
-	task  *db.AgentTaskQueue
-	issue *db.Issue
-	ws    *db.Workspace
-	err   error
+	task    *db.AgentTaskQueue
+	issue   *db.Issue
+	comment *db.Comment
+	ws      *db.Workspace
+	agent   *db.Agent
+	err     error
 }
 
 func (r *mockRow) Scan(dest ...any) error {
@@ -45,6 +47,21 @@ func (r *mockRow) Scan(dest ...any) error {
 		}
 		return nil
 	}
+	if r.comment != nil {
+		c := r.comment
+		ptrs := []any{
+			&c.ID, &c.IssueID, &c.AuthorType, &c.AuthorID, &c.Content,
+			&c.Type, &c.CreatedAt, &c.UpdatedAt, &c.ParentID, &c.WorkspaceID,
+			&c.DeletedAt, &c.ResolvedAt, &c.ResolvedByType, &c.ResolvedByID,
+		}
+		for i, p := range ptrs {
+			if i >= len(dest) {
+				break
+			}
+			assignScannedValue(dest[i], p)
+		}
+		return nil
+	}
 	if r.ws != nil {
 		w := r.ws
 		ptrs := []any{
@@ -60,13 +77,33 @@ func (r *mockRow) Scan(dest ...any) error {
 		}
 		return nil
 	}
+	if r.agent != nil {
+		a := r.agent
+		ptrs := []any{
+			&a.ID, &a.WorkspaceID, &a.Name, &a.AvatarUrl, &a.RuntimeMode,
+			&a.RuntimeConfig, &a.Visibility, &a.Status, &a.MaxConcurrentTasks,
+			&a.OwnerID, &a.CreatedAt, &a.UpdatedAt, &a.Description, &a.RuntimeID,
+			&a.Instructions, &a.ArchivedAt, &a.ArchivedBy, &a.CustomEnv,
+			&a.CustomArgs, &a.McpConfig, &a.Model, &a.CustomEnvCopiedPending,
+		}
+		for i, p := range ptrs {
+			if i >= len(dest) {
+				break
+			}
+			assignScannedValue(dest[i], p)
+		}
+		return nil
+	}
 	t := r.task
 	ptrs := []any{
 		&t.ID, &t.AgentID, &t.IssueID, &t.Status, &t.Priority,
 		&t.DispatchedAt, &t.StartedAt, &t.CompletedAt, &t.Result,
 		&t.Error, &t.CreatedAt, &t.Context, &t.RuntimeID,
 		&t.SessionID, &t.WorkDir, &t.TriggerCommentID,
-		&t.ChatSessionID, &t.AutopilotRunID,
+		&t.ChatSessionID, &t.AutopilotRunID, &t.Attempt,
+		&t.MaxAttempts, &t.ParentTaskID, &t.FailureReason,
+		&t.TriggerSource, &t.TriggerActorType, &t.TriggerActorID,
+		&t.TriggerSummary, &t.ForceFreshSession,
 	}
 	for i, p := range ptrs {
 		if i >= len(dest) {
@@ -104,6 +141,7 @@ func assignScannedValue(dest, src any) {
 type mockDBTX struct {
 	task              db.AgentTaskQueue
 	issue             db.Issue
+	agent             db.Agent
 	updateIssueStatus int
 	comments          []db.Comment
 	commentedSince    bool
@@ -126,8 +164,35 @@ func (m *mockDBTX) QueryRow(_ context.Context, sql string, args ...interface{}) 
 	if strings.Contains(sql, "-- name: GetIssue") {
 		return &mockRow{issue: &m.issue}
 	}
-	if strings.Contains(sql, "-- name: GetWorkspace") {
+	if strings.Contains(sql, "-- name: GetComment :one") {
+		for i := range m.comments {
+			if m.comments[i].ID == args[0].(pgtype.UUID) {
+				comment := m.comments[i]
+				return &mockRow{comment: &comment}
+			}
+		}
+		comment := db.Comment{
+			ID:          args[0].(pgtype.UUID),
+			IssueID:     m.issue.ID,
+			WorkspaceID: m.issue.WorkspaceID,
+		}
+		return &mockRow{comment: &comment}
+	}
+	if strings.Contains(sql, "-- name: GetWorkspace :one") {
 		return &mockRow{ws: &db.Workspace{ID: m.issue.WorkspaceID, IssuePrefix: "OPE"}}
+	}
+	if strings.Contains(sql, "-- name: GetAgent :one") {
+		agent := m.agent
+		if !agent.ID.Valid {
+			agent.ID = m.task.AgentID
+		}
+		if !agent.WorkspaceID.Valid {
+			agent.WorkspaceID = m.issue.WorkspaceID
+		}
+		if agent.Name == "" {
+			agent.Name = "Test Agent"
+		}
+		return &mockRow{agent: &agent}
 	}
 	if strings.Contains(sql, "-- name: RefreshAgentStatusFromTasks") {
 		return &mockRow{err: pgx.ErrNoRows}
@@ -413,8 +478,8 @@ func TestCompleteTask_FallbackCommentIsTopLevel(t *testing.T) {
 	if len(mock.comments) != 1 {
 		t.Fatalf("expected 1 fallback comment, got %d", len(mock.comments))
 	}
-	if mock.comments[0].ParentID.Valid {
-		t.Fatalf("expected fallback completion comment to be top-level, got parent_id=%v", mock.comments[0].ParentID)
+	if !mock.comments[0].ParentID.Valid || mock.comments[0].ParentID != triggerCommentID {
+		t.Fatalf("expected fallback completion comment parent_id=%v, got %v", triggerCommentID, mock.comments[0].ParentID)
 	}
 	if mock.comments[0].Type != "comment" {
 		t.Fatalf("expected comment type 'comment', got %q", mock.comments[0].Type)
@@ -458,8 +523,8 @@ func TestFailTask_FallbackCommentIsTopLevel(t *testing.T) {
 	if len(mock.comments) != 1 {
 		t.Fatalf("expected 1 failure comment, got %d", len(mock.comments))
 	}
-	if mock.comments[0].ParentID.Valid {
-		t.Fatalf("expected fallback failure comment to be top-level, got parent_id=%v", mock.comments[0].ParentID)
+	if !mock.comments[0].ParentID.Valid || mock.comments[0].ParentID != triggerCommentID {
+		t.Fatalf("expected fallback failure comment parent_id=%v, got %v", triggerCommentID, mock.comments[0].ParentID)
 	}
 	if mock.comments[0].Type != "system" {
 		t.Fatalf("expected comment type 'system', got %q", mock.comments[0].Type)

@@ -171,6 +171,7 @@ type AgentTaskResponse struct {
 	CompletedAt             *string               `json:"completed_at"`
 	Result                  any                   `json:"result"`
 	Error                   *string               `json:"error"`
+	Context                 any                   `json:"context,omitempty"`
 	FailureReason           string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
 	Attempt                 int32                 `json:"attempt"`
 	MaxAttempts             int32                 `json:"max_attempts"`
@@ -186,10 +187,6 @@ type AgentTaskResponse struct {
 	WorkDir                 string                `json:"work_dir,omitempty"`                // local working directory pinned for this task; populated once the daemon reports it
 	TriggerCommentID        *string               `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
 	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"` // content of the triggering comment
-	TriggerSource           string                `json:"trigger_source,omitempty"`
-	TriggerActorType        string                `json:"trigger_actor_type,omitempty"`
-	TriggerActorID          string                `json:"trigger_actor_id,omitempty"`
-	TriggerActorOwnerID     string                `json:"trigger_actor_owner_id,omitempty"`
 	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
@@ -231,12 +228,17 @@ type TaskAgentData struct {
 	CustomArgs   []string                 `json:"custom_args,omitempty"`
 	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
 	Model        string                   `json:"model,omitempty"`
+	RuntimeConfig json.RawMessage         `json:"runtime_config,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 	var result any
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
+	}
+	var context any
+	if t.Context != nil {
+		json.Unmarshal(t.Context, &context)
 	}
 	failureReason := ""
 	if t.FailureReason.Valid {
@@ -258,15 +260,13 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		CompletedAt:      timestampToPtr(t.CompletedAt),
 		Result:           result,
 		Error:            textToPtr(t.Error),
+		Context:          context,
 		FailureReason:    failureReason,
 		Attempt:          t.Attempt,
 		MaxAttempts:      t.MaxAttempts,
 		ParentTaskID:     uuidToPtr(t.ParentTaskID),
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
-		TriggerSource:    t.TriggerSource.String,
-		TriggerActorType: t.TriggerActorType.String,
-		TriggerActorID:   uuidToString(t.TriggerActorID),
 		TriggerSummary:   textToPtr(t.TriggerSummary),
 		WorkDir:          workDir,
 		// Surface task source so the UI can distinguish issue-linked tasks

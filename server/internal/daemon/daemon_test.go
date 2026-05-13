@@ -237,6 +237,7 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 	for _, want := range []string{
 		issueID,
 		"multica issue get",
+		"same language as the user's request",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q", want)
@@ -321,6 +322,7 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 		commentID,
 		"multica issue comment add " + issueID + " --parent " + commentID,
 		"do NOT reuse --parent values from previous turns",
+		"same language as the user's request",
 		// Silence-as-valid-exit for agent-to-agent loops depends on the
 		// reply command being framed conditionally rather than as a hard
 		// requirement. Guard the phrasing so the conflict with the new
@@ -335,6 +337,52 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 	// Should still contain CLI hint for fetching issue context.
 	if !strings.Contains(prompt, "multica issue get") {
 		t.Fatal("prompt missing CLI hint for issue context")
+	}
+}
+
+func TestBuildPromptPlanMode(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildPrompt(Task{
+		IssueID:               "issue-id",
+		TriggerCommentID:      "comment-id",
+		TriggerCommentContent: "先给方案",
+		Context:               []byte(`{"run_mode":"plan"}`),
+		Agent:                 &AgentData{Name: "Test"},
+	})
+
+	for _, want := range []string{
+		"Run mode: PLAN ONLY.",
+		"Do not modify files",
+		"Produce a clear, actionable plan",
+		"wait for a later user confirmation",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("plan prompt missing %q\n---\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "Plan first") {
+		t.Fatalf("plan prompt should not expose the old UI control text\n---\n%s", prompt)
+	}
+}
+
+func TestBuildPromptWithRunModeNormalIgnoresPlanContext(t *testing.T) {
+	t.Parallel()
+
+	task := Task{
+		IssueID:               "issue-id",
+		TriggerCommentID:      "comment-id",
+		TriggerCommentContent: "先给方案",
+		Context:               []byte(`{"run_mode":"plan"}`),
+		Agent:                 &AgentData{Name: "Test"},
+	}
+	prompt := BuildPromptWithRunMode(task, "normal")
+
+	if strings.Contains(prompt, "Run mode: PLAN ONLY.") {
+		t.Fatalf("normal effective run should not include plan-only prompt\n---\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Start by running `multica issue get") {
+		t.Fatalf("normal effective run should keep regular task instructions\n---\n%s", prompt)
 	}
 }
 
@@ -445,113 +493,6 @@ func TestBuildPromptCommentTriggeredNoContent(t *testing.T) {
 
 	if !strings.Contains(prompt, "multica issue get") {
 		t.Fatal("prompt missing CLI hint")
-	}
-}
-
-func TestPreflightPrivateAgentGate(t *testing.T) {
-	t.Parallel()
-
-	ownerID := "11111111-1111-1111-1111-111111111111"
-	otherID := "22222222-2222-2222-2222-222222222222"
-
-	tests := []struct {
-		name    string
-		task    Task
-		wantErr string
-	}{
-		{
-			name: "no agent data allows execution",
-			task: Task{},
-		},
-		{
-			name: "workspace agent allows execution",
-			task: Task{
-				Agent: &AgentData{Visibility: "workspace", OwnerID: ownerID},
-			},
-		},
-		{
-			name: "private agent with owner actor allows execution",
-			task: Task{
-				TriggerActorType: "member",
-				TriggerActorID:   ownerID,
-				Agent:            &AgentData{Visibility: "private", OwnerID: ownerID},
-			},
-		},
-		{
-			name: "private agent with missing actor is rejected",
-			task: Task{
-				TriggerActorType: "member",
-				Agent:            &AgentData{Visibility: "private", OwnerID: ownerID},
-			},
-			wantErr: "private agent execution denied: task dispatch actor is missing or not owner",
-		},
-		{
-			name: "private agent with non member actor is rejected",
-			task: Task{
-				TriggerActorType: "system",
-				TriggerActorID:   ownerID,
-				Agent:            &AgentData{Visibility: "private", OwnerID: ownerID},
-			},
-			wantErr: "private agent execution denied: task dispatch actor is missing or not owner",
-		},
-		{
-			name: "private agent with non owner actor is rejected",
-			task: Task{
-				TriggerActorType: "member",
-				TriggerActorID:   otherID,
-				Agent:            &AgentData{Visibility: "private", OwnerID: ownerID},
-			},
-			wantErr: "private agent execution denied: only the agent owner can run this task",
-		},
-		{
-			name: "same-owner agent trigger allows execution",
-			task: Task{
-				TriggerActorType:    "agent",
-				TriggerActorID:      otherID,
-				TriggerActorOwnerID: ownerID,
-				Agent:               &AgentData{Visibility: "private", OwnerID: ownerID},
-			},
-		},
-		{
-			name: "different-owner agent trigger is rejected",
-			task: Task{
-				TriggerActorType:    "agent",
-				TriggerActorID:      otherID,
-				TriggerActorOwnerID: otherID,
-				Agent:               &AgentData{Visibility: "private", OwnerID: ownerID},
-			},
-			wantErr: "private agent execution denied: only the agent owner can run this task",
-		},
-		{
-			name: "agent trigger without owner ID is rejected",
-			task: Task{
-				TriggerActorType: "agent",
-				TriggerActorID:   otherID,
-				Agent:            &AgentData{Visibility: "private", OwnerID: ownerID},
-			},
-			wantErr: "private agent execution denied: only the agent owner can run this task",
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			err := preflightPrivateAgentGate(tt.task)
-			if tt.wantErr == "" {
-				if err != nil {
-					t.Fatalf("expected no error, got %v", err)
-				}
-				return
-			}
-			if err == nil {
-				t.Fatalf("expected error %q, got nil", tt.wantErr)
-			}
-			if err.Error() != tt.wantErr {
-				t.Fatalf("expected error %q, got %q", tt.wantErr, err.Error())
-			}
-		})
 	}
 }
 
@@ -1179,70 +1120,6 @@ func TestExecuteAndDrain_NoRetryWhenSessionEstablished(t *testing.T) {
 	}
 	if int(fb.idx.Load()) != 1 {
 		t.Fatalf("expected 1 call, got %d", fb.idx.Load())
-	}
-}
-
-func TestHandleTask_PrivateGateRejectsBeforeStartOrExecute(t *testing.T) {
-	t.Parallel()
-
-	var startCalls atomic.Int32
-	var failCalls atomic.Int32
-	var failBody string
-
-	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/start"):
-			startCalls.Add(1)
-			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/fail"):
-			failCalls.Add(1)
-			body, _ := io.ReadAll(r.Body)
-			failBody = string(body)
-			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":"queued"}`))
-		default:
-			w.WriteHeader(http.StatusOK)
-		}
-	})
-
-	d.runtimeIndex["rt-1"] = Runtime{ID: "rt-1", Provider: "codex"}
-	d.cfg = Config{
-		Agents: map[string]AgentEntry{
-			"codex": {Path: "/does/not/matter"},
-		},
-	}
-
-	task := Task{
-		ID:               "task-1",
-		RuntimeID:        "rt-1",
-		TriggerActorType: "member",
-		TriggerActorID:   "not-owner",
-		Agent: &AgentData{
-			ID:         "agent-1",
-			Name:       "Private Agent",
-			Visibility: "private",
-			OwnerID:    "owner-1",
-		},
-	}
-
-	d.handleTask(context.Background(), task, 0)
-
-	if startCalls.Load() != 0 {
-		t.Fatalf("expected StartTask not to be called, got %d", startCalls.Load())
-	}
-	if failCalls.Load() != 1 {
-		t.Fatalf("expected FailTask to be called once, got %d", failCalls.Load())
-	}
-	if strings.Contains(failBody, "\"session_id\"") {
-		t.Fatalf("expected preflight fail body not to include session_id, got %s", failBody)
-	}
-	if strings.Contains(failBody, "\"work_dir\"") {
-		t.Fatalf("expected preflight fail body not to include work_dir, got %s", failBody)
-	}
-	if !strings.Contains(failBody, "private agent execution denied: only the agent owner can run this task") {
-		t.Fatalf("expected fail body to contain owner gate message, got %s", failBody)
 	}
 }
 

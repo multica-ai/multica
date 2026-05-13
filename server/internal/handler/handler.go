@@ -84,6 +84,7 @@ type Handler struct {
 	ModelListStore        ModelListStore
 	LocalSkillListStore   LocalSkillListStore
 	LocalSkillImportStore LocalSkillImportStore
+	InteractionStore      *InteractionStore
 	LivenessStore         LivenessStore
 	HeartbeatScheduler    HeartbeatScheduler
 	Storage               storage.Storage
@@ -125,6 +126,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		ModelListStore:        NewInMemoryModelListStore(),
 		LocalSkillListStore:   NewInMemoryLocalSkillListStore(),
 		LocalSkillImportStore: NewInMemoryLocalSkillImportStore(),
+		InteractionStore:      NewInteractionStore(),
 		LivenessStore:         NewNoopLivenessStore(),
 		HeartbeatScheduler:    NewPassthroughHeartbeatScheduler(queries),
 		Storage:               store,
@@ -165,6 +167,20 @@ func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToStr
 func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
 func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
 func int8ToPtr(v pgtype.Int8) *int64                { return util.Int8ToPtr(v) }
+
+func buildTriggerActor(source, actorType, actorID string) service.TriggerActor {
+	var id pgtype.UUID
+	if actorID != "" {
+		if parsed, err := util.ParseUUID(actorID); err == nil {
+			id = parsed
+		}
+	}
+	return service.TriggerActor{
+		Source:    source,
+		ActorType: actorType,
+		ActorID:   id,
+	}
+}
 
 // parseUUIDOrBadRequest validates a UUID string sourced from user input
 // (URL params, request body, headers). On invalid input it writes a 400
@@ -243,14 +259,6 @@ func isUniqueViolation(err error) bool {
 
 func requestUserID(r *http.Request) string {
 	return r.Header.Get("X-User-ID")
-}
-
-func buildTriggerActor(source, actorType, actorID string) service.TriggerActor {
-	return service.TriggerActor{
-		Source:    source,
-		ActorType: actorType,
-		ActorID:   parseUUID(actorID),
-	}
 }
 
 // resolveActor determines whether the request is from an agent or a human member.
