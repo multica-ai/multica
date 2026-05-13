@@ -271,11 +271,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			b.cfg.Logger.Info("hermes session model set", "model", opts.Model)
 		}
 
-		// 4. Build the prompt content. If we have a system prompt, prepend it.
+		// 4. Build the prompt content.
+		//
+		// Do NOT prepend opts.SystemPrompt here. Hermes ACP loads project/context
+		// files from cwd (AGENTS.md, .agent_context, etc.) itself; duplicating the
+		// full runtime brief in the user prompt makes the request much larger and
+		// has triggered upstream safety filters on otherwise ordinary tasks.
 		userText := prompt
-		if opts.SystemPrompt != "" {
-			userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
-		}
 
 		// 5. Send the prompt and wait for PromptResponse. Flip the gate
 		// just before the request so any history replay flushed during

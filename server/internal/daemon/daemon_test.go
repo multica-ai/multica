@@ -185,7 +185,10 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		want     bool
 	}{
 		{provider: "openclaw", want: true},
-		{provider: "hermes", want: true},
+		// Hermes ACP starts in the task cwd and loads AGENTS.md / .agent_context
+		// directly. Inlining the full runtime brief duplicates that context and
+		// can trip upstream provider safety filters on otherwise harmless tasks.
+		{provider: "hermes", want: false},
 		{provider: "kiro", want: true},
 		{provider: "kimi", want: true},
 		{provider: "codex", want: false},
