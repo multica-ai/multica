@@ -492,9 +492,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(feature-flags-routes): per-user feature-flag overrides
 					r.Get("/feature-flags", featureFlagsHandler.List)
 					r.Put("/feature-flags/{key}", featureFlagsHandler.Upsert)
-					// CEREBRO-PATCH(cerebro-groups-routes): workspace group CRUD entrypoint.
+					// CEREBRO-PATCH(cerebro-groups-routes): workspace group list (member-level).
 					r.Get("/groups", cerebroGroupsHandler.List)
-					r.Post("/groups", cerebroGroupsHandler.Create)
 					// CEREBRO-PATCH(cerebro-account-routes): workspace accounts CRUD + JEH-998 controls patch.
 					r.Get("/accounts", cerebroAccountHandler.List)
 					r.Post("/accounts", cerebroAccountHandler.Create)
@@ -523,6 +522,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Get("/projects", h.ListMemberProjects)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
+					// CEREBRO-PATCH(cerebro-groups-routes): group create requires admin/owner (JEH-1172).
+					r.Post("/groups", cerebroGroupsHandler.Create)
 				})
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
@@ -550,22 +551,28 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// CEREBRO-PATCH(cerebro-groups-routes): group CRUD and membership endpoints.
 			r.Route("/api/groups", func(r chi.Router) {
+				// Read-only: any workspace member.
 				r.Get("/{id}", cerebroGroupsHandler.Get)
-				r.Patch("/{id}", cerebroGroupsHandler.Update)
-				r.Delete("/{id}", cerebroGroupsHandler.Delete)
 				r.Get("/{id}/members", cerebroGroupsHandler.ListMembers)
-				r.Post("/{id}/members", cerebroGroupsHandler.AddMember)
-				r.Delete("/{id}/members/{userId}", cerebroGroupsHandler.RemoveMember)
-				// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 permission endpoints.
+				// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 permission read endpoints.
 				r.Get("/{id}/capabilities", cerebroGroupPermissionsHandler.ListCapabilities)
-				r.Post("/{id}/capabilities", cerebroGroupPermissionsHandler.SetCapability)
-				r.Delete("/{id}/capabilities/{capability}", cerebroGroupPermissionsHandler.RemoveCapability)
 				r.Get("/{id}/runtimes", cerebroGroupPermissionsHandler.ListRuntimes)
-				r.Post("/{id}/runtimes", cerebroGroupPermissionsHandler.AddRuntime)
-				r.Delete("/{id}/runtimes/{runtimeId}", cerebroGroupPermissionsHandler.RemoveRuntime)
 				r.Get("/{id}/agents", cerebroGroupPermissionsHandler.ListAgents)
-				r.Post("/{id}/agents", cerebroGroupPermissionsHandler.AddAgent)
-				r.Delete("/{id}/agents/{agentId}", cerebroGroupPermissionsHandler.RemoveAgent)
+				// Writes: admin/owner only (JEH-1172).
+				r.Group(func(r chi.Router) {
+					// CEREBRO-PATCH(cerebro-groups-admin-gate): JEH-1172 group writes require admin/owner.
+					r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
+					r.Patch("/{id}", cerebroGroupsHandler.Update)
+					r.Delete("/{id}", cerebroGroupsHandler.Delete)
+					r.Post("/{id}/members", cerebroGroupsHandler.AddMember)
+					r.Delete("/{id}/members/{userId}", cerebroGroupsHandler.RemoveMember)
+					r.Post("/{id}/capabilities", cerebroGroupPermissionsHandler.SetCapability)
+					r.Delete("/{id}/capabilities/{capability}", cerebroGroupPermissionsHandler.RemoveCapability)
+					r.Post("/{id}/runtimes", cerebroGroupPermissionsHandler.AddRuntime)
+					r.Delete("/{id}/runtimes/{runtimeId}", cerebroGroupPermissionsHandler.RemoveRuntime)
+					r.Post("/{id}/agents", cerebroGroupPermissionsHandler.AddAgent)
+					r.Delete("/{id}/agents/{agentId}", cerebroGroupPermissionsHandler.RemoveAgent)
+				})
 			})
 
 			// Issues
