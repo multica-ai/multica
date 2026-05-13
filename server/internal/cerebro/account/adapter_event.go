@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
 )
 
 // AdapterEvent is what the daemon emits to the server when it observes an
@@ -38,10 +36,8 @@ func (e AdapterEvent) HasSignal() bool {
 //
 // Two signal families:
 //
-//  1. 429 → ThrottledUntil. Delegated to the existing rate-limit-reset
-//     parser in cerebro/runtime so the daemon picks up the same shapes
-//     the server-side pause/unpause logic already handles (epoch,
-//     ISO-8601, wall-clock with TZ hint, relative "try again in 5m").
+//  1. 429 → ThrottledUntil. Uses ParseRateLimitReset (epoch, ISO-8601,
+//     wall-clock with TZ hint, relative "try again in 5m").
 //
 //  2. Usage percent → UsageWindowPct. Matches:
 //     - Anthropic-style `limits.x_tokens_pct=NN` / `pct: NN` / `NN%`
@@ -60,7 +56,7 @@ func ParseAdapterOutput(output string, now time.Time) AdapterEvent {
 		return ev
 	}
 
-	if reset, ok := cerebroruntime.ParseRateLimitReset(output, now); ok {
+	if reset, ok := ParseRateLimitReset(output, now); ok {
 		ev.ThrottledUntil = &reset
 	}
 	if pct, ok := parseUsagePct(output); ok {

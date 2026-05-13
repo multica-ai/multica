@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/account"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -68,5 +69,5 @@ func shouldAutoPause(task db.AgentTaskQueue, now time.Time) (time.Time, bool) {
 	if !task.Error.Valid || task.Error.String == "" {
 		return time.Time{}, false
 	}
-	return ParseRateLimitReset(task.Error.String, now)
+	return account.ParseRateLimitReset(task.Error.String, now)
 }
