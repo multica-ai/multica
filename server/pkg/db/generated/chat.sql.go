@@ -164,6 +164,35 @@ func (q *Queries) DeleteChatSession(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const getAssistantChatMessageByTaskID = `-- name: GetAssistantChatMessageByTaskID :one
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, responded_at FROM chat_message
+WHERE task_id = $1 AND role = 'assistant'
+ORDER BY created_at ASC
+LIMIT 1
+`
+
+// CEREBRO-PATCH(sqlc-chat-assistant-by-task): JEH-1083 — backs the
+// pre-created assistant chat_message lifecycle. The claim path inserts an
+// empty assistant row so the agent can attach files to it mid-turn; the
+// complete/cancel/fail paths look it up by task_id and update its content
+// in place so we keep exactly one assistant row per task.
+func (q *Queries) GetAssistantChatMessageByTaskID(ctx context.Context, taskID pgtype.UUID) (ChatMessage, error) {
+	row := q.db.QueryRow(ctx, getAssistantChatMessageByTaskID, taskID)
+	var i ChatMessage
+	err := row.Scan(
+		&i.ID,
+		&i.ChatSessionID,
+		&i.Role,
+		&i.Content,
+		&i.TaskID,
+		&i.CreatedAt,
+		&i.FailureReason,
+		&i.ElapsedMs,
+		&i.RespondedAt,
+	)
+	return i, err
+}
+
 const getChatMessage = `-- name: GetChatMessage :one
 SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, responded_at FROM chat_message
 WHERE id = $1
@@ -748,6 +777,45 @@ WHERE id = $1
 func (q *Queries) TouchChatSession(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, touchChatSession, id)
 	return err
+}
+
+const updateAssistantChatMessageContent = `-- name: UpdateAssistantChatMessageContent :one
+UPDATE chat_message
+SET content = $2,
+    failure_reason = COALESCE($3, failure_reason),
+    elapsed_ms = COALESCE($4, elapsed_ms)
+WHERE id = $1 AND role = 'assistant'
+RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, responded_at
+`
+
+type UpdateAssistantChatMessageContentParams struct {
+	ID            pgtype.UUID `json:"id"`
+	Content       string      `json:"content"`
+	FailureReason pgtype.Text `json:"failure_reason"`
+	ElapsedMs     pgtype.Int8 `json:"elapsed_ms"`
+}
+
+// CEREBRO-PATCH(sqlc-chat-assistant-by-task): JEH-1083 — see above.
+func (q *Queries) UpdateAssistantChatMessageContent(ctx context.Context, arg UpdateAssistantChatMessageContentParams) (ChatMessage, error) {
+	row := q.db.QueryRow(ctx, updateAssistantChatMessageContent,
+		arg.ID,
+		arg.Content,
+		arg.FailureReason,
+		arg.ElapsedMs,
+	)
+	var i ChatMessage
+	err := row.Scan(
+		&i.ID,
+		&i.ChatSessionID,
+		&i.Role,
+		&i.Content,
+		&i.TaskID,
+		&i.CreatedAt,
+		&i.FailureReason,
+		&i.ElapsedMs,
+		&i.RespondedAt,
+	)
+	return i, err
 }
 
 const updateChatSessionSession = `-- name: UpdateChatSessionSession :exec

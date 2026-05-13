@@ -64,9 +64,23 @@ export function ChatMessageList({
   // messages list, AssistantMessage owns its rendering — suppress the live
   // timeline (and pill) to avoid rendering the same content in two places
   // during the invalidate → refetch window.
-  const pendingAlreadyPersisted = !!pendingTaskId && messages.some(
-    (m) => m.role === "assistant" && m.task_id === pendingTaskId,
-  );
+  // CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — the assistant row is
+  // now pre-created at claim time (so the agent can attach files mid-turn
+  // via MULTICA_CHAT_MESSAGE_ID), which means the row exists from the very
+  // first moment of the run. The bubble's own taskMessagesOptions query
+  // renders the live timeline inside the bubble, so we still hide the
+  // separate live-timeline block at the bottom (it would duplicate). But
+  // we keep the StatusPill visible until the row signals completion via
+  // elapsed_ms / failure_reason — without that gate the "agent is working"
+  // pill would disappear the instant the task was claimed.
+  const pendingAssistantMessage = !!pendingTaskId
+    ? messages.find((m) => m.role === "assistant" && m.task_id === pendingTaskId)
+    : undefined;
+  const pendingAlreadyPersisted = !!pendingAssistantMessage;
+  const pendingAssistantFinalized =
+    !!pendingAssistantMessage &&
+    (pendingAssistantMessage.elapsed_ms != null ||
+      pendingAssistantMessage.failure_reason != null);
 
   // Live timeline for the in-flight task. useRealtimeSync keeps this cache
   // current via setQueryData on task:message events.
@@ -77,7 +91,8 @@ export function ChatMessageList({
   });
   const liveTimeline: ChatTimelineItem[] = (liveTaskMessages ?? []).map(toTimelineItem);
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
-  const showStatusPill = !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
+  // CEREBRO-PATCH(chat-message-id-claim): pill stays visible until the row finalizes; the bubble's own timeline already covers the streaming view.
+  const showStatusPill = !!pendingTaskId && !pendingAssistantFinalized && !!pendingTask;
 
   return (
     <div className="relative flex-1 min-h-0">

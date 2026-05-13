@@ -181,6 +181,8 @@ type AgentTaskResponse struct {
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
+	// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — pre-created assistant chat_message row exposed to the agent as MULTICA_CHAT_MESSAGE_ID so it can attach files mid-turn.
+	ChatMessageID           string                `json:"chat_message_id,omitempty"`           // pre-created assistant chat_message for this chat task
 	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks (also: legacy single-message field for daemons pre-JEH-330)
 	// CEREBRO-PATCH(agent-task-cerebro-fields): cerebro-only daemon fields.
 	ChatHistory       []ChatHistoryMessage `json:"chat_history,omitempty"`        // capped chat transcript for stateless managed HTTP runtimes

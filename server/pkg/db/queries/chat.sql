@@ -95,6 +95,26 @@ INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reaso
 VALUES ($1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms))
 RETURNING *;
 
+-- CEREBRO-PATCH(sqlc-chat-assistant-by-task): JEH-1083 — backs the
+-- pre-created assistant chat_message lifecycle. The claim path inserts an
+-- empty assistant row so the agent can attach files to it mid-turn; the
+-- complete/cancel/fail paths look it up by task_id and update its content
+-- in place so we keep exactly one assistant row per task.
+-- name: GetAssistantChatMessageByTaskID :one
+SELECT * FROM chat_message
+WHERE task_id = $1 AND role = 'assistant'
+ORDER BY created_at ASC
+LIMIT 1;
+
+-- CEREBRO-PATCH(sqlc-chat-assistant-by-task): JEH-1083 — see above.
+-- name: UpdateAssistantChatMessageContent :one
+UPDATE chat_message
+SET content = $2,
+    failure_reason = COALESCE(sqlc.narg(failure_reason), failure_reason),
+    elapsed_ms = COALESCE(sqlc.narg(elapsed_ms), elapsed_ms)
+WHERE id = $1 AND role = 'assistant'
+RETURNING *;
+
 -- name: ListChatMessages :many
 SELECT * FROM chat_message
 WHERE chat_session_id = $1
