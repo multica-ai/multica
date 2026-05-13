@@ -81,12 +81,10 @@ ORDER BY created_at DESC;
 -- name: CreateAgentTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
-    trigger_source, trigger_actor_type, trigger_actor_id,
     trigger_summary, force_fresh_session
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
-    $5, $6, $7,
     sqlc.narg(trigger_summary),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE)
 )
@@ -119,14 +117,12 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
-    trigger_source, trigger_actor_type, trigger_actor_id,
     attempt, max_attempts, parent_task_id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
     'queued', p.priority, p.trigger_comment_id, p.trigger_summary, p.context,
     p.session_id, p.work_dir,
-    p.trigger_source, p.trigger_actor_type, p.trigger_actor_id,
     p.attempt + 1, p.max_attempts, p.id
 FROM agent_task_queue p
 WHERE p.id = $1

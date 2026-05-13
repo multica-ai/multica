@@ -91,10 +91,9 @@ DELETE FROM chat_message WHERE id = $1;
 
 -- name: CreateChatTask :one
 INSERT INTO agent_task_queue (
-    agent_id, runtime_id, issue_id, status, priority, chat_session_id,
-    trigger_source, trigger_actor_type, trigger_actor_id
+    agent_id, runtime_id, issue_id, status, priority, chat_session_id
 )
-VALUES ($1, $2, NULL, 'queued', $3, $4, $5, $6, $7)
+VALUES ($1, $2, NULL, 'queued', $3, $4)
 RETURNING *;
 
 -- name: GetLastChatTaskSession :one
