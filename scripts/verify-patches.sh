@@ -136,6 +136,24 @@ check "5.2 desktop: Fraunces fontsource import" \
 
 echo ""
 
+# ── 6. Slack Integration ──────────────────────────────────────────────────────
+echo "[ 6 ] Slack Integration"
+
+check "6.1 Slack integration package exists" \
+  "test -f server/internal/integrations/slack/notify.go"
+
+check "6.2 Slack hook wired in notification_listeners" \
+  "grep -q 'slack.NotifyStatusChange' server/cmd/server/notification_listeners.go"
+
+check "6.3 Slack routes have admin RBAC gate in router" \
+  "grep -q 'integrations/slack' server/cmd/server/router.go && \
+   grep -q 'RequireWorkspaceRole' server/cmd/server/router.go"
+
+check "6.4 Slack DB migration exists" \
+  "ls server/migrations/*_workspace_slack_integrations.up.sql > /dev/null 2>&1"
+
+echo ""
+
 # ── 7. Brand Audit (B1-B10) ───────────────────────────────────────────────────
 echo "[ 7 ] Brand Audit (B1-B10)"
 

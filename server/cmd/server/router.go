@@ -582,6 +582,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.GetNotificationPreferences)
 				r.Put("/", h.UpdateNotificationPreferences)
 			})
+
+			// Slack integration (admin/owner only)
+			r.Route("/api/integrations/slack", func(r chi.Router) {
+				r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
+				r.Get("/", h.GetSlackIntegration)
+				r.Put("/", h.PutSlackIntegration)
+				r.Delete("/", h.DeleteSlackIntegration)
+				r.Post("/test", h.TestSlackIntegration)
+			})
 		})
 	})
 

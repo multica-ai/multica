@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -669,6 +670,14 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			if terminalStatusForTaskFailedDismiss[issue.Status] {
 				archiveStaleTaskFailedInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
 			}
+
+			// Forward to Slack integration (async, fire-and-forget, panic-isolated).
+			slack.NotifyStatusChange(ctx, queries, slack.IssueEvent{
+				WorkspaceID: e.WorkspaceID,
+				Identifier:  issue.Identifier,
+				Title:       issue.Title,
+				Status:      issue.Status,
+			}, prevStatus, e.ActorID)
 		}
 
 		if priorityChanged, _ := payload["priority_changed"].(bool); priorityChanged {

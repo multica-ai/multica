@@ -613,3 +613,17 @@ type WorkspaceInvitation struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
 }
+
+type WorkspaceSlackIntegration struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Enabled         bool               `json:"enabled"`
+	WebhookUrl      string             `json:"webhook_url"`
+	Label           string             `json:"label"`
+	TriggerStatuses []byte             `json:"trigger_statuses"`
+	LastSentAt      pgtype.Timestamptz `json:"last_sent_at"`
+	LastError       pgtype.Text        `json:"last_error"`
+	CreatedBy       pgtype.UUID        `json:"created_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
