@@ -21,8 +21,7 @@ export async function loginAsDefault(page: Page): Promise<string> {
   );
 
   const token = api.getToken();
-  await page.goto("/login");
-  await page.evaluate((t) => {
+  await page.addInitScript((t) => {
     localStorage.setItem("multica_token", t);
   }, token);
   await page.goto(`/${workspace.slug}/issues`);

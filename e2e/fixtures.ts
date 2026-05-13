@@ -123,6 +123,13 @@ export class TestApiClient {
     throw new Error(`Failed to ensure workspace ${slug}: ${res.status} ${res.statusText}`);
   }
 
+  async dismissStarterContent(workspaceId?: string) {
+    await this.authedFetch("/api/me/starter-content/dismiss", {
+      method: "POST",
+      body: workspaceId ? JSON.stringify({ workspace_id: workspaceId }) : undefined,
+    });
+  }
+
   async createIssue(title: string, opts?: Record<string, unknown>) {
     const res = await this.authedFetch("/api/issues", {
       method: "POST",
