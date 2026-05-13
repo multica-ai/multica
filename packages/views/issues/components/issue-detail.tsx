@@ -224,6 +224,8 @@ interface IssueDetailProps {
   onDone?: () => void;
   defaultSidebarOpen?: boolean;
   layoutId?: string;
+  /** Pixel cap for the desktop right sidebar when resizing. */
+  sidebarMaxSize?: number;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
   highlightCommentId?: string;
 }
@@ -267,7 +269,15 @@ class TimelineErrorBoundary extends Component<TimelineErrorBoundaryProps, Timeli
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
+export function IssueDetail({
+  issueId,
+  onDelete,
+  onDone,
+  defaultSidebarOpen = true,
+  layoutId = "multica_issue_detail_layout",
+  sidebarMaxSize = 560,
+  highlightCommentId,
+}: IssueDetailProps) {
   const { t } = useT("issues");
   // `issueId` is the raw route param — may be a UUID *or* a human-readable
   // identifier (e.g. "OPE-460") when the URL has been canonicalized.  We keep
@@ -1400,7 +1410,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         id="sidebar"
         defaultSize={defaultSidebarOpen ? 320 : 0}
         minSize={260}
-        maxSize={420}
+        maxSize={sidebarMaxSize}
         collapsible
         groupResizeBehavior="preserve-pixel-size"
         panelRef={sidebarRef}
