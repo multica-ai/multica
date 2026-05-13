@@ -203,7 +203,7 @@ export interface ImportStarterContentResponse {
   welcome_issue_id: string | null;
 }
 
-// CEREBRO-PATCH(cerebro-account-client): JEH-921 workspace account types.
+// CEREBRO-PATCH(cerebro-account-client): JEH-921 workspace account types. JEH-881 adds availability fields.
 export interface CerebroAccount {
   id: string;
   workspace_id: string;
@@ -211,6 +211,11 @@ export interface CerebroAccount {
   login_identity: string;
   created_at: string;
   updated_at: string;
+  // CEREBRO-PATCH(cerebro-account-availability): JEH-881 runtime availability fields.
+  runtime_count: number;
+  available_runtime_count: number;
+  nearest_unpause_at: string | null;
+  status: "available" | "throttled" | "paused" | "no_runtime";
 }
 export interface CreateCerebroAccountRequest {
   provider: string;

@@ -34,15 +34,15 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	accounts, err := h.Service.List(r.Context(), workspaceID)
+	rows, err := h.Service.ListWithAvailability(r.Context(), workspaceID)
 	if err != nil {
 		slog.Error("list cerebro accounts failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to list accounts")
 		return
 	}
-	resp := make([]accountResponse, len(accounts))
-	for i, a := range accounts {
-		resp[i] = accountResponseFromModel(a)
+	resp := make([]accountResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = accountResponseFromAvailabilityRow(row)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

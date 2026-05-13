@@ -83,6 +83,10 @@ const acc1: CerebroAccount = {
   login_identity: "user-a@example.com",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
+  runtime_count: 1,
+  available_runtime_count: 1,
+  nearest_unpause_at: null,
+  status: "available",
 };
 const acc2: CerebroAccount = { ...acc1, id: "acc-2", login_identity: "user-b@example.com" };
 
