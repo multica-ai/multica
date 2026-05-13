@@ -81,6 +81,12 @@ export type WSEventType =
   | "invitation:revoked"
   | "pull_request:synced"
   | "pull_request:state_changed"
+  // Upstream GitHub App integration events — issue-to-PR linkage.
+  | "pull_request:linked"
+  | "pull_request:updated"
+  | "pull_request:unlinked"
+  | "github_installation:created"
+  | "github_installation:deleted"
   | "deploy:started"
   | "deploy:progress"
   | "deploy:completed"

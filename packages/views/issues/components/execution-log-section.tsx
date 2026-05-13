@@ -17,6 +17,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
+import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 
 // Mask gradient that fades the trigger-summary text into transparency at
 // the right edge. Mirrors the pattern used by the desktop tab bar
@@ -255,6 +256,7 @@ function useStatusLabel(status: AgentTask["status"]): string {
 function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
   const [cancelling, setCancelling] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
@@ -273,6 +275,11 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
       toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.cancel_failed));
       setCancelling(false);
     }
+  };
+
+  const requestCancel = () => {
+    if (cancelling) return;
+    setConfirmOpen(true);
   };
 
   return (
@@ -298,7 +305,7 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
             render={
               <button
                 type="button"
-                onClick={handleCancel}
+                onClick={requestCancel}
                 disabled={cancelling}
                 aria-label={t(($) => $.execution_log.cancel_task_aria)}
               />
@@ -314,6 +321,12 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
           <TooltipContent>{t(($) => $.execution_log.cancel_task_tooltip)}</TooltipContent>
         </Tooltip>
       </RowActions>
+      <TerminateTaskConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        onConfirm={() => void handleCancel()}
+        showRunningNote={task.status === "running" || task.status === "dispatched"}
+      />
     </RowShell>
   );
 }

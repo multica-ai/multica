@@ -285,6 +285,32 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.31",
+        date: "2026-05-12",
+        title: "GitHub Integration, Chat Attachments & Safer Issue Navigation",
+        changes: [],
+        features: [
+          "Connect GitHub so linked pull requests appear on Multica issues, sync their status, and close the Multica issue automatically when the PR closes",
+          "Chat messages can include file attachments and image previews",
+          "Agents and runtimes can now be kept public or private for clearer team access",
+          "Stopping a single agent task now asks for confirmation before it is terminated",
+          "New GitHub integration docs cover both hosted and self-hosted setup",
+        ],
+        improvements: [
+          "Issue links land more reliably on the exact comment or activity you opened",
+          "Long issue timelines scroll more smoothly",
+          "The feedback dialog now points contributors toward GitHub discussions and issues",
+          "Self-hosted Caddy guidance now calls out real-time connection requirements",
+          "Linux desktop packages show the Multica app icon again",
+        ],
+        fixes: [
+          "Downloaded attachments keep their original filenames",
+          "Local attachments are served more reliably, and upload controls stay disabled until files are ready",
+          "Issue creation dialogs keep their text fields at the correct height",
+          "Runtime documentation links point to the correct page",
+        ],
+      },
+      {
         version: "0.2.30",
         date: "2026-05-11",
         title: "Mermaid in Issues, Per-Runtime Timezone & Workspace-Leave Runtime Revocation",

@@ -31,6 +31,8 @@
     "---Ship Hub---",
     "ship-mcp",
     "auto-deploy-cd",
+    "---Integrations---",
+    "github-integration",
     "---Self-hosting & ops---",
     "environment-variables",
     "auth-setup",

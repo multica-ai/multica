@@ -20,6 +20,7 @@ import {
   agentRunCountsKeys,
   agentTasksKeys,
 } from "../agents/queries";
+import { githubKeys } from "../github/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
@@ -183,9 +184,23 @@ export function useRealtimeSync(
       // "refresh the workspace's ship surface" semantics. The specific
       // handlers below also do per-project / per-environment invalidation
       // for the inner caches (per-project PR list, per-env deploy list).
+      //
+      // Note: upstream added a `pull_request:*` handler that invalidates
+      // `["github", "pull-requests"]` (the issue-detail PR list from the
+      // GitHub App integration). Both surfaces want the same event, so
+      // this combined handler invalidates BOTH our ship keys AND
+      // upstream's github keys.
       pull_request: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: shipKeys.all(wsId) });
+        qc.invalidateQueries({ queryKey: ["github", "pull-requests"] });
+      },
+      // Upstream GitHub App integration — workspace-scoped installation
+      // list lives in `githubKeys.installations(wsId)`. Any
+      // github_installation:* event flushes it.
+      github_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: githubKeys.installations(wsId) });
       },
       deploy: () => {
         const wsId = getCurrentWsId();

@@ -1,0 +1,26 @@
+import { queryOptions } from "@tanstack/react-query";
+import { api } from "../api";
+
+export const githubKeys = {
+  all: (wsId: string) => ["github", wsId] as const,
+  installations: (wsId: string) => [...githubKeys.all(wsId), "installations"] as const,
+  pullRequests: (issueId: string) => ["github", "pull-requests", issueId] as const,
+};
+
+export const githubInstallationsOptions = (wsId: string) =>
+  queryOptions({
+    queryKey: githubKeys.installations(wsId),
+    queryFn: () => api.listGitHubInstallations(wsId),
+    enabled: !!wsId,
+  });
+
+export const issuePullRequestsOptions = (issueId: string) =>
+  queryOptions({
+    queryKey: githubKeys.pullRequests(issueId),
+    // GitHub App linked PRs (renamed from listIssuePullRequests during
+    // the 2026-05-12 upstream sync to disambiguate from Ship Hub's
+    // own listIssuePullRequests, which returns Multica originating-
+    // issue PRs).
+    queryFn: () => api.listGitHubIssuePullRequests(issueId),
+    enabled: !!issueId,
+  });

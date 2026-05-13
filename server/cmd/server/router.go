@@ -238,13 +238,26 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// middleware because GitHub never sends an X-Workspace-ID and we
 	// don't want the requests bouncing off auth before the signature is
 	// checked.
-	r.Post("/api/integrations/github/webhook", h.HandleGitHubWebhook)
+	//
+	// Renamed handler (HandleShipHubGitHubWebhook) to avoid name
+	// collision with upstream's GitHub App webhook handler below.
+	r.Post("/api/integrations/github/webhook", h.HandleShipHubGitHubWebhook)
 
 	// Ship Hub Phase 6: multi-adapter deploy webhook receiver. Same
 	// unauthenticated stance as the GitHub one (signature verifies who
 	// the sender is), but routed by adapter kind so adding a 6th
 	// adapter doesn't require a new endpoint.
 	r.Post("/api/integrations/deploy/{adapter}/webhook", h.HandleDeployAdapterWebhook)
+
+	// Upstream GitHub App webhook (no Multica auth — requests are
+	// authenticated via HMAC-SHA256 signature in the handler) and
+	// post-install setup callback. Coexists with the Ship Hub Phase 2
+	// webhook above; the two serve different installations (Ship Hub
+	// workspace-scoped tokens vs GitHub App installation IDs) and
+	// different feature surfaces (Ship Hub PR Kanban vs issue ↔ PR
+	// linking).
+	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
+	r.Get("/api/github/setup", h.GitHubSetupCallback)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -329,6 +342,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// the *_set boolean on the workspace response.
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).
 					Post("/ship_hub/regenerate_webhook_secret", h.RegenerateShipHubWebhookSecret)
+
+				// Upstream GitHub App integration — admin-only operations
+				// (connect, list installations, delete installation).
+				// Independent of the Ship Hub webhook secret above.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Get("/github/connect", h.GitHubConnect)
+					r.Get("/github/installations", h.ListGitHubInstallations)
+					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
+				})
 			})
 		})
 
@@ -390,6 +413,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/labels", h.ListLabelsForIssue)
 					r.Post("/labels", h.AttachLabel)
 					r.Delete("/labels/{labelId}", h.DetachLabel)
+					r.Get("/pull-requests", h.ListPullRequestsForIssue)
 				})
 			})
 
@@ -817,6 +841,18 @@ func (pr *patResolver) ResolveToken(ctx context.Context, token string) (string, 
 // internal round-trips of DB-sourced UUIDs (e.g. issue.ID, e.ActorID), so an
 // invalid value indicates a programming error and should panic loudly.
 func parseUUID(s string) pgtype.UUID {
+	return util.MustParseUUID(s)
+}
+
+// optionalUUID returns a NULL pgtype.UUID for an empty string and otherwise
+// behaves like parseUUID. Use this for actor IDs on events where the producer
+// may legitimately be a "system" actor with no member/agent attribution
+// (e.g. GitHub webhook auto-status sync) — the activity_log and inbox_item
+// tables both allow actor_id to be NULL.
+func optionalUUID(s string) pgtype.UUID {
+	if s == "" {
+		return pgtype.UUID{}
+	}
 	return util.MustParseUUID(s)
 }
 

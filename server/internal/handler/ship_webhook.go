@@ -26,7 +26,14 @@ import (
 // before we burn memory verifying the signature on a malicious sender.
 const maxWebhookBody = 5 * 1024 * 1024
 
-// HandleGitHubWebhook is the public, unauthenticated webhook receiver.
+// HandleShipHubGitHubWebhook is the Ship Hub Phase 2 webhook receiver,
+// public + unauthenticated (verified by per-workspace HMAC). Renamed
+// from HandleGitHubWebhook to avoid colliding with upstream's GitHub
+// App webhook handler (server/internal/handler/github.go), which uses
+// a different per-installation HMAC scheme and lives at a different
+// URL (/api/webhooks/github). Both handlers coexist — Ship Hub's
+// path stays /api/integrations/github/webhook for back-compat with
+// every workspace that already pointed GitHub there.
 //
 // Flow:
 //   1. Read body (capped) + envelope headers.
@@ -42,7 +49,7 @@ const maxWebhookBody = 5 * 1024 * 1024
 // processed-with-error rather than retrying — GitHub's at-least-once
 // delivery already covers transient failures. A hot retry loop here
 // would risk a feedback storm under bad config.
-func (h *Handler) HandleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleShipHubGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookBody+1))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to read body")
