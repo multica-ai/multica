@@ -1,7 +1,7 @@
 "use client";
 
-import { WorkflowForm } from "@multica/cerebro-workflows";
+import { WorkflowEditorPage } from "@multica/cerebro-workflows";
 
 export default function NewWorkflowRoute() {
-  return <WorkflowForm />;
+  return <WorkflowEditorPage />;
 }

@@ -1,7 +1,8 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { PageHeader } from "@multica/views/layout/page-header";
@@ -37,7 +38,7 @@ const ISSUE_STATUSES = [
   "cancelled",
 ];
 
-interface FormState {
+export interface FormState {
   name: string;
   enabled: boolean;
   triggerType: CerebroWorkflowTriggerType;
@@ -47,12 +48,21 @@ interface FormState {
   setStatus: string;
   subIssueTitle: string;
   subIssueDescription: string;
+  subIssueAssigneeId: string;
+  subIssueAssigneeType: "member" | "agent";
+  subIssueLabelIDs: string; // comma-separated; parsed at save-time
   reminderRecipientId: string;
   reminderRecipientType: "member" | "agent";
   reminderMessage: string;
+  // Phase 2.
+  skillName: string;
+  skillAgentId: string;
+  skillInputJSON: string;
+  commentTarget: "self" | "parent";
+  commentContent: string;
 }
 
-const EMPTY: FormState = {
+export const EMPTY_FORM: FormState = {
   name: "",
   enabled: true,
   triggerType: "status_changed",
@@ -62,21 +72,37 @@ const EMPTY: FormState = {
   setStatus: "todo",
   subIssueTitle: "",
   subIssueDescription: "",
+  subIssueAssigneeId: "",
+  subIssueAssigneeType: "agent",
+  subIssueLabelIDs: "",
   reminderRecipientId: "",
   reminderRecipientType: "member",
   reminderMessage: "",
+  skillName: "",
+  skillAgentId: "",
+  skillInputJSON: "{}",
+  commentTarget: "self",
+  commentContent: "",
 };
 
 interface WorkflowFormProps {
   workflowId?: string;
+  /** Optional content rendered inside the page header (e.g. mode toggle). */
+  headerSlot?: ReactNode;
+  /**
+   * If false, the component skips its own PageHeader and renders only the
+   * form body. Useful when the wrapping editor-page already owns the chrome.
+   */
+  embedded?: boolean;
 }
 
-// Form-based workflow builder (JEH-1047 phase 1). Node-canvas is deferred to
-// phase 2 — this form covers the same data model. When workflowId is set
-// the form pre-fills from the workflow detail query and POSTs to PUT
-// instead of POST.
-export function WorkflowForm({ workflowId }: WorkflowFormProps) {
-  const enabled = useFeatureFlag("cerebro_workflows");
+// Form-based workflow builder. Owns its own state. The mode toggle in the
+// editor-page wrapper is responsible for switching between this and the
+// node-canvas builder; switching loses unsaved edits by design (workflows
+// are small enough that round-tripping through buildPayload would obscure
+// the user's intent more than it'd help).
+export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormProps) {
+  const featureEnabled = useFeatureFlag("cerebro_workflows");
   const workspace = useCurrentWorkspace();
   const navigation = useNavigation();
   const queryClient = useQueryClient();
@@ -88,33 +114,20 @@ export function WorkflowForm({ workflowId }: WorkflowFormProps) {
     enabled: !!workflowId && !!wsId,
   });
 
-  const [form, setForm] = useState<FormState>(EMPTY);
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!detail.data) return;
-    const w = detail.data;
-    const tc = (w.trigger_config as { from_status?: string; to_status?: string } | null) ?? {};
-    const ac = w.action_config as Record<string, unknown> | null;
-    setForm({
-      name: w.name,
-      enabled: w.enabled,
-      triggerType: w.trigger_type,
-      fromStatus: tc.from_status ?? "",
-      toStatus: tc.to_status ?? "",
-      actionType: w.action_type,
-      setStatus: (ac?.status as string) ?? "todo",
-      subIssueTitle: (ac?.title as string) ?? "",
-      subIssueDescription: (ac?.description as string) ?? "",
-      reminderRecipientId: (ac?.recipient_id as string) ?? "",
-      reminderRecipientType: ((ac?.recipient_type as "member" | "agent") ?? "member"),
-      reminderMessage: (ac?.message as string) ?? "",
-    });
+    setForm(formStateFromWorkflow(detail.data));
   }, [detail.data]);
 
   const save = useMutation({
     mutationFn: async () => {
-      const payload = buildPayload(form);
+      const payload: WorkflowWriteInput = {
+        ...buildPayload(form),
+        editor_mode: "form",
+      };
       if (workflowId) return updateWorkflow(workflowId, payload);
       return createWorkflow(payload);
     },
@@ -127,7 +140,7 @@ export function WorkflowForm({ workflowId }: WorkflowFormProps) {
     },
   });
 
-  if (!enabled) return null;
+  if (!featureEnabled) return null;
   if (!workspace) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -136,144 +149,99 @@ export function WorkflowForm({ workflowId }: WorkflowFormProps) {
     );
   }
 
-  const heading = workflowId ? "Rediger workflow" : "Nyt workflow";
-
-  return (
-    <div className="flex h-full flex-col">
-      <PageHeader className="justify-between gap-3">
-        <div className="flex min-w-0 flex-col">
-          <h1 className="text-sm font-semibold">{heading}</h1>
-          <p className="truncate text-[11px] text-muted-foreground">
-            Trigger → conditions → action. Form-based; node-canvas følger i fase 2.
-          </p>
-        </div>
-      </PageHeader>
-
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        <form
-          className="mx-auto flex max-w-2xl flex-col gap-6 p-6"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setError(null);
-            save.mutate();
-          }}
-        >
-          {!workflowId && (
-            <Section title="Start fra en skabelon (valgfri)">
-              <ul className="flex flex-col divide-y">
-                {WORKFLOW_TEMPLATES.map((tpl) => (
-                  <li
-                    key={tpl.key}
-                    className="flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0"
+  const body = (
+    <div className="flex-1 min-h-0 overflow-y-auto">
+      <form
+        className="mx-auto flex max-w-2xl flex-col gap-6 p-6"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setError(null);
+          save.mutate();
+        }}
+      >
+        {!workflowId && (
+          <Section title="Start fra en skabelon (valgfri)">
+            <ul className="flex flex-col divide-y">
+              {WORKFLOW_TEMPLATES.map((tpl) => (
+                <li
+                  key={tpl.key}
+                  className="flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{tpl.label}</div>
+                    <div className="text-[11px] text-muted-foreground">{tpl.description}</div>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={tpl.status !== "active"}
+                    data-testid={`template-use-${tpl.key}`}
+                    onClick={() => {
+                      if (tpl.status === "active" && tpl.defaults) {
+                        setForm(formStateFromInput(tpl.defaults));
+                      }
+                    }}
                   >
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium">{tpl.label}</div>
-                      <div className="text-[11px] text-muted-foreground">{tpl.description}</div>
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={tpl.status !== "active"}
-                      data-testid={`template-use-${tpl.key}`}
-                      onClick={() => {
-                        if (tpl.status === "active" && tpl.defaults) {
-                          setForm(formStateFromInput(tpl.defaults));
-                        }
-                      }}
-                    >
-                      {tpl.status === "active" ? "Brug" : "Kommer i fase 2"}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            </Section>
-          )}
-
-          <Section title="Grundlæggende">
-            <Field label="Navn">
-              <Input
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-                placeholder='F.eks. "Når in_review → opret QA sub-issue"'
-              />
-            </Field>
-            <Field label="Aktiv">
-              <Switch
-                checked={form.enabled}
-                onCheckedChange={(v) => setForm({ ...form, enabled: v === true })}
-              />
-            </Field>
+                    {tpl.status === "active" ? "Brug" : "Kommer i fase 3"}
+                  </Button>
+                </li>
+              ))}
+            </ul>
           </Section>
+        )}
 
-          <Section title="Trigger">
-            <Field label="Type">
-              <NativeSelect
-                value={form.triggerType}
-                onChange={(e) =>
-                  setForm({ ...form, triggerType: e.target.value as CerebroWorkflowTriggerType })
-                }
-              >
-                {TRIGGER_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </NativeSelect>
-            </Field>
-            {form.triggerType === "status_changed" && (
-              <>
-                <Field label="Fra status (tom = alle)">
-                  <NativeSelect
-                    value={form.fromStatus}
-                    onChange={(e) => setForm({ ...form, fromStatus: e.target.value })}
-                  >
-                    <option value="">(alle)</option>
-                    {ISSUE_STATUSES.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </Field>
-                <Field label="Til status">
-                  <NativeSelect
-                    value={form.toStatus}
-                    onChange={(e) => setForm({ ...form, toStatus: e.target.value })}
-                  >
-                    {ISSUE_STATUSES.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </Field>
-              </>
-            )}
-          </Section>
+        <Section title="Grundlæggende">
+          <Field label="Navn">
+            <Input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              required
+              placeholder='F.eks. "Når in_review → opret QA sub-issue"'
+            />
+          </Field>
+          <Field label="Aktiv">
+            <Switch
+              checked={form.enabled}
+              onCheckedChange={(v) => setForm({ ...form, enabled: v === true })}
+            />
+          </Field>
+        </Section>
 
-          <Section title="Action">
-            <Field label="Type">
-              <NativeSelect
-                value={form.actionType}
-                onChange={(e) =>
-                  setForm({ ...form, actionType: e.target.value as CerebroWorkflowActionType })
-                }
-              >
-                {ACTION_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </NativeSelect>
-            </Field>
-
-            {form.actionType === "set_status" && (
-              <Field label="Sæt status til">
+        <Section title="Trigger">
+          <Field label="Type">
+            <NativeSelect
+              value={form.triggerType}
+              onChange={(e) =>
+                setForm({ ...form, triggerType: e.target.value as CerebroWorkflowTriggerType })
+              }
+            >
+              {TRIGGER_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+          {form.triggerType === "status_changed" && (
+            <>
+              <Field label="Fra status (tom = alle)">
                 <NativeSelect
-                  value={form.setStatus}
-                  onChange={(e) => setForm({ ...form, setStatus: e.target.value })}
+                  value={form.fromStatus}
+                  onChange={(e) => setForm({ ...form, fromStatus: e.target.value })}
+                >
+                  <option value="">(alle)</option>
+                  {ISSUE_STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+              <Field label="Til status">
+                <NativeSelect
+                  value={form.toStatus}
+                  onChange={(e) => setForm({ ...form, toStatus: e.target.value })}
                 >
                   {ISSUE_STATUSES.map((s) => (
                     <option key={s} value={s}>
@@ -282,84 +250,217 @@ export function WorkflowForm({ workflowId }: WorkflowFormProps) {
                   ))}
                 </NativeSelect>
               </Field>
-            )}
+            </>
+          )}
+        </Section>
 
-            {form.actionType === "create_sub_issue" && (
-              <>
-                <Field label="Sub-issue titel">
-                  <Input
-                    value={form.subIssueTitle}
-                    onChange={(e) => setForm({ ...form, subIssueTitle: e.target.value })}
-                    required
-                    placeholder="F.eks. QA: {{title}}"
-                  />
-                </Field>
-                <Field label="Sub-issue beskrivelse (valgfri)">
-                  <Textarea
-                    value={form.subIssueDescription}
-                    onChange={(e) => setForm({ ...form, subIssueDescription: e.target.value })}
-                    rows={3}
-                  />
-                </Field>
-              </>
-            )}
+        <Section title="Action">
+          <Field label="Type">
+            <NativeSelect
+              value={form.actionType}
+              onChange={(e) =>
+                setForm({ ...form, actionType: e.target.value as CerebroWorkflowActionType })
+              }
+            >
+              {ACTION_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
 
-            {form.actionType === "send_reminder" && (
-              <>
-                <Field label="Modtagertype">
-                  <NativeSelect
-                    value={form.reminderRecipientType}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        reminderRecipientType: e.target.value as "member" | "agent",
-                      })
-                    }
-                  >
-                    <option value="member">Member</option>
-                    <option value="agent">Agent</option>
-                  </NativeSelect>
-                </Field>
-                <Field label="Modtager-ID (UUID)">
-                  <Input
-                    value={form.reminderRecipientId}
-                    onChange={(e) => setForm({ ...form, reminderRecipientId: e.target.value })}
-                    required
-                    placeholder="<uuid>"
-                  />
-                </Field>
-                <Field label="Besked">
-                  <Textarea
-                    value={form.reminderMessage}
-                    onChange={(e) => setForm({ ...form, reminderMessage: e.target.value })}
-                    rows={3}
-                    required
-                  />
-                </Field>
-              </>
-            )}
-          </Section>
-
-          {error && (
-            <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-              {error}
-            </div>
+          {form.actionType === "set_status" && (
+            <Field label="Sæt status til">
+              <NativeSelect
+                value={form.setStatus}
+                onChange={(e) => setForm({ ...form, setStatus: e.target.value })}
+              >
+                {ISSUE_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
           )}
 
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => navigation.push(`/${workspace.slug}/workflows`)}
-            >
-              Annullér
-            </Button>
-            <Button type="submit" disabled={save.isPending}>
-              {save.isPending ? "Gemmer…" : "Gem"}
-            </Button>
+          {form.actionType === "create_sub_issue" && (
+            <>
+              <Field label="Sub-issue titel">
+                <Input
+                  value={form.subIssueTitle}
+                  onChange={(e) => setForm({ ...form, subIssueTitle: e.target.value })}
+                  required
+                  placeholder="F.eks. QA: {{title}}"
+                />
+              </Field>
+              <Field label="Sub-issue beskrivelse (valgfri)">
+                <Textarea
+                  value={form.subIssueDescription}
+                  onChange={(e) => setForm({ ...form, subIssueDescription: e.target.value })}
+                  rows={3}
+                />
+              </Field>
+              <Field label="Assignee-type (valgfri)">
+                <NativeSelect
+                  value={form.subIssueAssigneeType}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      subIssueAssigneeType: e.target.value as "member" | "agent",
+                    })
+                  }
+                >
+                  <option value="agent">Agent</option>
+                  <option value="member">Member</option>
+                </NativeSelect>
+              </Field>
+              <Field label="Assignee-ID (UUID, valgfri)">
+                <Input
+                  value={form.subIssueAssigneeId}
+                  onChange={(e) => setForm({ ...form, subIssueAssigneeId: e.target.value })}
+                  placeholder="<uuid>"
+                />
+              </Field>
+              <Field label="Label-IDs (komma-separeret UUIDs, valgfri)">
+                <Input
+                  value={form.subIssueLabelIDs}
+                  onChange={(e) => setForm({ ...form, subIssueLabelIDs: e.target.value })}
+                  placeholder="<uuid>,<uuid>"
+                />
+              </Field>
+            </>
+          )}
+
+          {form.actionType === "send_reminder" && (
+            <>
+              <Field label="Modtagertype">
+                <NativeSelect
+                  value={form.reminderRecipientType}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      reminderRecipientType: e.target.value as "member" | "agent",
+                    })
+                  }
+                >
+                  <option value="member">Member</option>
+                  <option value="agent">Agent</option>
+                </NativeSelect>
+              </Field>
+              <Field label="Modtager-ID (UUID)">
+                <Input
+                  value={form.reminderRecipientId}
+                  onChange={(e) => setForm({ ...form, reminderRecipientId: e.target.value })}
+                  required
+                  placeholder="<uuid>"
+                />
+              </Field>
+              <Field label="Besked">
+                <Textarea
+                  value={form.reminderMessage}
+                  onChange={(e) => setForm({ ...form, reminderMessage: e.target.value })}
+                  rows={3}
+                  required
+                />
+              </Field>
+            </>
+          )}
+
+          {form.actionType === "run_skill" && (
+            <>
+              <Field label="Skill (navn fra workspace)">
+                <Input
+                  value={form.skillName}
+                  onChange={(e) => setForm({ ...form, skillName: e.target.value })}
+                  required
+                  placeholder="firtal-data-evaluate"
+                />
+              </Field>
+              <Field label="Agent-ID (skal have skillen attached)">
+                <Input
+                  value={form.skillAgentId}
+                  onChange={(e) => setForm({ ...form, skillAgentId: e.target.value })}
+                  required
+                  placeholder="<uuid>"
+                />
+              </Field>
+              <Field label="Skill-input (JSON)">
+                <Textarea
+                  value={form.skillInputJSON}
+                  onChange={(e) => setForm({ ...form, skillInputJSON: e.target.value })}
+                  rows={4}
+                  placeholder='{"query": "..."}'
+                  data-testid="run-skill-input"
+                />
+              </Field>
+            </>
+          )}
+
+          {form.actionType === "comment_on_issue" && (
+            <>
+              <Field label="Target">
+                <NativeSelect
+                  value={form.commentTarget}
+                  onChange={(e) =>
+                    setForm({ ...form, commentTarget: e.target.value as "self" | "parent" })
+                  }
+                >
+                  <option value="self">Triggerede issue</option>
+                  <option value="parent">Parent-issue</option>
+                </NativeSelect>
+              </Field>
+              <Field label="Indhold (template-felter understøttes)">
+                <Textarea
+                  value={form.commentContent}
+                  onChange={(e) => setForm({ ...form, commentContent: e.target.value })}
+                  rows={4}
+                  required
+                  placeholder="Opdatering på {{title}}: ..."
+                />
+              </Field>
+            </>
+          )}
+        </Section>
+
+        {error && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+            {error}
           </div>
-        </form>
-      </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => navigation.push(`/${workspace.slug}/workflows`)}
+          >
+            Annullér
+          </Button>
+          <Button type="submit" disabled={save.isPending}>
+            {save.isPending ? "Gemmer…" : "Gem"}
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+
+  if (embedded) return body;
+
+  const heading = workflowId ? "Rediger workflow" : "Nyt workflow";
+  return (
+    <div className="flex h-full flex-col">
+      <PageHeader className="justify-between gap-3">
+        <div className="flex min-w-0 flex-col">
+          <h1 className="text-sm font-semibold">{heading}</h1>
+          <p className="truncate text-[11px] text-muted-foreground">
+            Trigger → conditions → action. Form-mode (skift til canvas øverst for node-graf).
+          </p>
+        </div>
+        {headerSlot}
+      </PageHeader>
+      {body}
     </div>
   );
 }
@@ -384,31 +485,63 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-// formStateFromInput unfolds the flat WorkflowWriteInput stored on a
-// template back into the (looser, UI-only) FormState shape. Inverse of
-// buildPayload below. Unknown fields default to EMPTY so a template doesn't
-// have to specify every action_config slot.
-function formStateFromInput(input: WorkflowWriteInput): FormState {
+// formStateFromInput unfolds the flat WorkflowWriteInput stored on a template
+// back into the (looser, UI-only) FormState shape. Inverse of buildPayload.
+// Unknown fields default to EMPTY_FORM so a template doesn't have to specify
+// every action_config slot.
+export function formStateFromInput(input: WorkflowWriteInput): FormState {
   const tc = (input.trigger_config as { from_status?: string; to_status?: string } | null) ?? {};
   const ac = (input.action_config as Record<string, unknown> | null) ?? {};
+  const labelIDs = Array.isArray(ac.label_ids) ? (ac.label_ids as string[]).join(",") : "";
   return {
-    ...EMPTY,
+    ...EMPTY_FORM,
     name: input.name ?? "",
     enabled: input.enabled ?? true,
     triggerType: input.trigger_type,
     fromStatus: tc.from_status ?? "",
-    toStatus: tc.to_status ?? EMPTY.toStatus,
+    toStatus: tc.to_status ?? EMPTY_FORM.toStatus,
     actionType: input.action_type,
-    setStatus: (ac.status as string) ?? EMPTY.setStatus,
+    setStatus: (ac.status as string) ?? EMPTY_FORM.setStatus,
     subIssueTitle: (ac.title as string) ?? "",
     subIssueDescription: (ac.description as string) ?? "",
+    subIssueAssigneeId: (ac.assignee_id as string) ?? "",
+    subIssueAssigneeType: (ac.assignee_type as "member" | "agent") ?? EMPTY_FORM.subIssueAssigneeType,
+    subIssueLabelIDs: labelIDs,
     reminderRecipientId: (ac.recipient_id as string) ?? "",
     reminderRecipientType: ((ac.recipient_type as "member" | "agent") ?? "member"),
     reminderMessage: (ac.message as string) ?? "",
+    skillName: (ac.skill_name as string) ?? "",
+    skillAgentId: (ac.agent_id as string) ?? "",
+    skillInputJSON:
+      ac.skill_input === undefined
+        ? EMPTY_FORM.skillInputJSON
+        : safeStringifyJSON(ac.skill_input),
+    commentTarget: (ac.target as "self" | "parent") ?? EMPTY_FORM.commentTarget,
+    commentContent: (ac.content as string) ?? "",
   };
 }
 
-function buildPayload(f: FormState): WorkflowWriteInput {
+// formStateFromWorkflow accepts a CerebroWorkflow row (subset of WriteInput
+// fields). Tiny adapter so the detail-query result can pre-fill the form.
+function formStateFromWorkflow(row: {
+  name: string;
+  enabled: boolean;
+  trigger_type: WorkflowWriteInput["trigger_type"];
+  trigger_config: unknown;
+  action_type: WorkflowWriteInput["action_type"];
+  action_config: unknown;
+}): FormState {
+  return formStateFromInput({
+    name: row.name,
+    enabled: row.enabled,
+    trigger_type: row.trigger_type,
+    trigger_config: row.trigger_config,
+    action_type: row.action_type,
+    action_config: row.action_config,
+  });
+}
+
+export function buildPayload(f: FormState): WorkflowWriteInput {
   const triggerConfig =
     f.triggerType === "status_changed"
       ? { from_status: f.fromStatus || undefined, to_status: f.toStatus || undefined }
@@ -418,15 +551,33 @@ function buildPayload(f: FormState): WorkflowWriteInput {
   if (f.actionType === "set_status") {
     actionConfig = { status: f.setStatus };
   } else if (f.actionType === "create_sub_issue") {
+    const labelIDs = f.subIssueLabelIDs
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
     actionConfig = {
       title: f.subIssueTitle,
       description: f.subIssueDescription || undefined,
+      assignee_id: f.subIssueAssigneeId || undefined,
+      assignee_type: f.subIssueAssigneeId ? f.subIssueAssigneeType : undefined,
+      label_ids: labelIDs.length > 0 ? labelIDs : undefined,
     };
   } else if (f.actionType === "send_reminder") {
     actionConfig = {
       recipient_id: f.reminderRecipientId,
       recipient_type: f.reminderRecipientType,
       message: f.reminderMessage,
+    };
+  } else if (f.actionType === "run_skill") {
+    actionConfig = {
+      skill_name: f.skillName,
+      agent_id: f.skillAgentId,
+      skill_input: safeParseJSON(f.skillInputJSON),
+    };
+  } else if (f.actionType === "comment_on_issue") {
+    actionConfig = {
+      target: f.commentTarget,
+      content: f.commentContent,
     };
   }
 
@@ -439,4 +590,25 @@ function buildPayload(f: FormState): WorkflowWriteInput {
     action_type: f.actionType,
     action_config: actionConfig,
   };
+}
+
+// safeParseJSON returns the parsed object on success, an empty object on any
+// parse failure. The server-side validator pins the strict shape; this side
+// just shouldn't crash on a mistyped trailing comma during edit.
+function safeParseJSON(raw: string): Record<string, unknown> {
+  if (!raw.trim()) return {};
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function safeStringifyJSON(v: unknown): string {
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return "{}";
+  }
 }

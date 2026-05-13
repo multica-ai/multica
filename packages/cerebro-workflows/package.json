@@ -13,7 +13,9 @@
     "./core/queries": "./core/queries.ts",
     "./views": "./views/index.ts",
     "./views/workflows-page": "./views/workflows-page.tsx",
+    "./views/workflow-editor-page": "./views/workflow-editor-page.tsx",
     "./views/workflow-form": "./views/workflow-form.tsx",
+    "./views/workflow-canvas": "./views/workflow-canvas.tsx",
     "./views/workflow-runs-page": "./views/workflow-runs-page.tsx",
     "./views/workflows-nav-item": "./views/workflows-nav-item.tsx"
   },
@@ -21,7 +23,8 @@
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
-    "@multica/views": "workspace:*"
+    "@multica/views": "workspace:*",
+    "@xyflow/react": "catalog:"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:",

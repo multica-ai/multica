@@ -37,6 +37,10 @@ catalog:
   # Icons
   lucide-react: "^1.0.1"
 
+  # Node-canvas editor (cerebro workflows phase 2). MIT-licensed React Flow
+  # fork; pinned via catalog so the chunk is shared across packages.
+  "@xyflow/react": "^12.4.0"
+
   # i18n
   i18next: "^26.0.8"
   react-i18next: "^17.0.6"

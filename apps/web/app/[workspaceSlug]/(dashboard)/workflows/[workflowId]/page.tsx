@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { WorkflowForm } from "@multica/cerebro-workflows";
+import { WorkflowEditorPage } from "@multica/cerebro-workflows";
 
 export default function WorkflowEditRoute({
   params,
@@ -9,5 +9,5 @@ export default function WorkflowEditRoute({
   params: Promise<{ workflowId: string }>;
 }) {
   const { workflowId } = use(params);
-  return <WorkflowForm workflowId={workflowId} />;
+  return <WorkflowEditorPage workflowId={workflowId} />;
 }

@@ -6,7 +6,9 @@ export type CerebroWorkflowTriggerType =
 export type CerebroWorkflowActionType =
   | "set_status"
   | "create_sub_issue"
-  | "send_reminder";
+  | "send_reminder"
+  | "run_skill"
+  | "comment_on_issue";
 
 export type CerebroWorkflowRunStatus =
   | "queued"
@@ -14,6 +16,8 @@ export type CerebroWorkflowRunStatus =
   | "success"
   | "failed"
   | "escalated";
+
+export type CerebroWorkflowEditorMode = "form" | "canvas";
 
 export interface CerebroWorkflow {
   id: string;
@@ -26,6 +30,11 @@ export interface CerebroWorkflow {
   conditions: unknown;
   action_type: CerebroWorkflowActionType;
   action_config: unknown;
+  // Phase 2 (JEH-1103). New rows default to "form" on the server when
+  // omitted, so older clients that don't send these fields keep getting
+  // the form editor. editor_layout is null for form-mode rows.
+  editor_mode: CerebroWorkflowEditorMode;
+  editor_layout?: unknown;
   created_by_id: string;
   created_by_type: "member" | "agent";
   created_at: string;
@@ -68,6 +77,10 @@ export interface WorkflowWriteInput {
   conditions?: unknown;
   action_type: CerebroWorkflowActionType;
   action_config?: unknown;
+  // Phase 2: optional. Omitting editor_mode keeps the server-side default of
+  // "form" — form-mode workflows therefore don't need to send these fields.
+  editor_mode?: CerebroWorkflowEditorMode;
+  editor_layout?: unknown;
 }
 
 // Display metadata for the form builder. Order here is the order shown in
@@ -113,6 +126,16 @@ export const ACTION_OPTIONS: ReadonlyArray<{
     value: "send_reminder",
     label: "Send reminder",
     description: "Write an inbox notification to a member or agent.",
+  },
+  {
+    value: "run_skill",
+    label: "Run skill",
+    description: "Enqueue an agent task that runs a named skill with input.",
+  },
+  {
+    value: "comment_on_issue",
+    label: "Comment on issue",
+    description: "Post a comment on the triggered issue or its parent.",
   },
 ];
 
