@@ -105,7 +105,7 @@ pnpm --filter @multica/views exec vitest run auth/login-page.test.tsx
 pnpm --filter @multica/core exec vitest run runtimes/version.test.ts
 pnpm --filter @multica/web exec vitest run app/\(auth\)/login/page.test.tsx
 
-# Run Go tests safely on shared servers
+# Run Go tests safely on shared servers (Docker-isolated by default)
 bash scripts/go-test-safe.sh ./internal/handler/ -run TestName -v
 make test-go-safe GO_TEST_ARGS='./internal/handler/ -run TestName -v'
 
@@ -313,7 +313,7 @@ bash scripts/go-test-safe.sh ./internal/handler -run TestName -v
 make test-go-safe GO_TEST_ARGS='./internal/handler -run TestName -v'
 ```
 
-The wrapper sets `GOMAXPROCS=1`, `GOFLAGS=-p=1`, `-parallel=1`, a short timeout, and leaves `REDIS_TEST_URL` empty by default to avoid accidental Redis `FlushDB` on shared services. Tests should create their own fixture data in a test database.
+The wrapper runs tests in a resource-limited Docker container by default (`--cpus=1`, `--memory=2g`, `--pids-limit=256`, `GOMAXPROCS=1`, `GOFLAGS=-p=1`, `-parallel=1`, short timeout) and leaves `REDIS_TEST_URL` empty to avoid accidental Redis `FlushDB` on shared services. Use `GO_TEST_MODE=host` only for tiny non-DB focused tests. Tests should create their own fixture data in a test database.
 
 ### E2E tests
 
