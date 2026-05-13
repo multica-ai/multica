@@ -98,6 +98,8 @@ func optBool(args map[string]any, key string, defaultVal bool) bool {
 
 func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionState, workspaceID, projectID, gitRoot string) {
 	registerArtifactTools(srv, client)
+	// CEREBRO-PATCH(cerebro-groups-mcp): JEH-1172 register group MCP tools.
+	registerCerebroGroupTools(srv, client)
 
 	// -----------------------------------------------------------------------
 	// list_issues
