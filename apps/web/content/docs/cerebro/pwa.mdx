@@ -1,0 +1,123 @@
+---
+title: Installer Cerebro som app på din mobil
+description: Sådan installerer du Cerebro som en PWA på iPhone og Android, og hvordan du slår push-notifikationer til. Inkluderer en oversigt over hvad de to platforme kan.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Cerebro kan installeres som en app på din telefon — en såkaldt PWA (Progressive Web App). Når den er installeret, ligger den som et ikon på hjemmeskærmen, åbner i fuld skærm uden browser-bjælke og kan sende push-notifikationer på samme måde som en almindelig app. Der er ingen App Store eller Google Play involveret — alt går gennem browseren.
+
+Guiden her dækker iPhone (Safari) og Android (Chrome). Reglerne er forskellige på de to platforme, så læs det afsnit der gælder for din telefon.
+
+## Hvad de to platforme kan
+
+| Funktion | iPhone (iOS 16.4+) | Android (Chrome) |
+| --- | --- | --- |
+| Installer som app | Ja — via Del → Føj til hjemmeskærm | Ja — via "Installer app"-banner eller menu |
+| Push-notifikationer | Ja, men **kun** når appen er åbnet fra hjemmeskærmen | Ja, både fra browser og installeret app |
+| App-ikon-badge (uread-count) | iOS 16.4+ kun | Ja |
+| Del til Cerebro fra andre apps | Ja (via systemets dele-ark) | Ja |
+| Cerebro-links åbner automatisk i appen | Nej — Safari kan ikke. Vi viser en "Åbn i app"-bjælke i stedet | Ja — Chrome dirigerer links ind i den installerede app |
+
+<Callout type="warn">
+**iPhone kræver iOS 16.4 eller nyere** for push-notifikationer. På ældre versioner kan du installere appen, men ikke modtage notifikationer.
+</Callout>
+
+## iPhone — installer og slå notifikationer til
+
+### 1. Åbn Cerebro i Safari
+
+Push-notifikationer virker **ikke** i Chrome eller andre browsere på iPhone — kun Safari. Det er en begrænsning i iOS, ikke noget vi kan ændre.
+
+Åbn `https://sara.tailbde0.ts.net` i Safari og log ind som normalt.
+
+### 2. Føj til hjemmeskærm
+
+1. Tryk på **Del**-knappen i bunden af Safari (kvadratet med pilen op).
+2. Rul ned og vælg **Føj til hjemmeskærm**.
+3. Tryk **Tilføj** øverst til højre.
+
+Appens ikon ligger nu på din hjemmeskærm.
+
+### 3. Åbn appen fra hjemmeskærmen
+
+**Dette trin er kritisk.** Push virker kun når Cerebro kører som standalone PWA — altså når du har åbnet den fra ikonet på hjemmeskærmen, ikke inde fra Safari. Hvis du springer det over, virker "Slå til"-knappen i næste trin ikke.
+
+### 4. Slå push til
+
+1. I appen, gå til **Settings → Notifications**.
+2. Find sektionen **Push notifications — On this device**.
+3. Tryk **Turn on**.
+4. iOS spørger om lov til at sende notifikationer — vælg **Tillad**.
+
+Sektionen viser nu "Push is on for this device". Du modtager notifikationer når du bliver tildelt et issue, @-nævnt, eller når noget du følger ændrer sig.
+
+<Callout type="info">
+Hvis du senere blokerer notifikationer i iOS (Indstillinger → Notifikationer → Multica → Tillad notifikationer = fra), viser sektionen "You've blocked notifications for this site". Slå dem til igen i iOS-indstillingerne — Cerebro kan ikke gøre det for dig.
+</Callout>
+
+## Android — installer og slå notifikationer til
+
+### 1. Åbn Cerebro i Chrome
+
+På Android virker push også i andre Chromium-baserede browsere (Edge, Brave), men vi tester primært i Chrome. Åbn `https://sara.tailbde0.ts.net` og log ind.
+
+### 2. Installer appen
+
+Du har to muligheder:
+
+- **Banner i bunden:** Chrome viser typisk "Installer app" eller "Føj til startskærm" som et banner. Tryk og bekræft.
+- **Via menuen:** Tryk på de tre prikker øverst til højre → **Installer app** (eller **Føj til startskærm**).
+
+Ikonet ligger nu på din hjemmeskærm.
+
+### 3. Slå push til
+
+1. Åbn appen — det er ligegyldigt om du åbner den fra hjemmeskærms-ikonet eller fra Chrome-fanen, push virker begge steder på Android.
+2. Gå til **Settings → Notifications**.
+3. Find sektionen **Push notifications — On this device**.
+4. Tryk **Turn on**.
+5. Android spørger om lov — vælg **Tillad**.
+
+Sektionen viser "Push is on for this device".
+
+## Styr hvilke notifikationer du får
+
+Når push er slået til på enheden, kan du styre **hvilke** events der udløser en notifikation under **Settings → Notifications**:
+
+- **Assignments** — når du tildeles et issue
+- **Status changes** — når status ændres på noget du følger
+- **Comments** — nye kommentarer på noget du følger
+- **Updates** — andre opdateringer
+- **Agent activity** — når agenter rapporterer fremskridt
+- **System notifications** — system-events (workspace-invitationer m.m.)
+
+Slå dem fra hver for sig hvis du kun vil have de vigtigste.
+
+## "Åbn i app"-bjælken
+
+Når du besøger Cerebro i mobil-browseren *uden* at have installeret appen — eller hvis du klikker på et Cerebro-link fra en mail på iPhone — viser vi en bjælke øverst med et "Open"-link. Det åbner siden i den installerede PWA på Android, og minder dig om at installere den hvis du er på iPhone.
+
+Tryk på X for at skjule bjælken i 7 dage.
+
+## Fejlsøgning
+
+**"Push notifications are not configured on the server"**
+Server-administratoren har ikke sat `VAPID_PUBLIC_KEY` og `VAPID_PRIVATE_KEY` op. Spørg Jesper.
+
+**Knappen står på "Checking…" i lang tid**
+Service workeren kunne ikke starte. Genindlæs siden (træk ned i toppen, eller luk og åbn appen). Hvis det ikke hjælper, prøv at afinstallere appen og installere den igen.
+
+**På iPhone: knappen virker ikke selvom jeg har installeret appen**
+Du åbnede sandsynligvis Cerebro inde fra Safari i stedet for fra hjemmeskærms-ikonet. Luk Safari-fanen, gå til hjemmeskærmen, og tryk på Cerebro-ikonet derfra.
+
+**Jeg får ikke notifikationer selvom alt ser rigtigt ud**
+Tjek tre ting:
+1. Notifikationer er tilladt for Multica i telefonens systemindstillinger.
+2. Den specifikke event-type er slået til i **Settings → Notifications**.
+3. Du er faktisk subscriber/assignee på det issue der ændrer sig — push sendes ikke for alle events i workspacet.
+
+## Næste skridt
+
+- [Tilslut din maskine til Cerebro](/docs/cerebro/daemon-setup) — hvis du også vil have agenter til at køre opgaver på din computer.
+- [Multica-grundbegreber](/docs) — issues, agenter, autopilots og resten af platformen.
