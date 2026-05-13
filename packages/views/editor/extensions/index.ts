@@ -133,6 +133,7 @@ export function createEditorExtensions(
       : [
           BaseMentionExtension.configure({
             HTMLAttributes: { class: "mention" },
+            char: "@",
             ...(options.queryClient
               ? { suggestion: createMentionSuggestion(options.queryClient) }
               : {}),
