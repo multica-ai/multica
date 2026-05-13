@@ -5,7 +5,7 @@
 // Renders at the top of the Ship Hub landing page above the
 // per-project Kanban sections. Lists every active release in the
 // workspace as a small card with title + project + stage + PR count.
-// Clicking "View" navigates to the release detail page.
+// Clicking anywhere on the card navigates to the release detail page.
 
 import { ChevronRight, Train } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
@@ -34,6 +34,29 @@ function formatDeployedAt(iso: string): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+/** Returns Tailwind classes for the stage badge background + text.
+ *  Mirrors the progress-bar icon colors on the release detail page. */
+function releaseStageColorClass(stage: string): string {
+  switch (stage) {
+    case "merging":
+      return "bg-amber-500/20 text-amber-700 dark:text-amber-400";
+    case "in_staging":
+      return "bg-blue-500/20 text-blue-700 dark:text-blue-400";
+    case "verifying":
+      return "bg-purple-500/20 text-purple-700 dark:text-purple-400";
+    case "promoting":
+      return "bg-orange-500/20 text-orange-700 dark:text-orange-400";
+    case "in_production":
+      return "bg-emerald-500/20 text-emerald-700 dark:text-emerald-400";
+    case "done":
+      return "bg-emerald-500/20 text-emerald-700 dark:text-emerald-400";
+    case "rolled_back":
+      return "bg-destructive/20 text-destructive";
+    default:
+      return "bg-muted text-muted-foreground";
+  }
 }
 
 export function ShipActiveReleasesRail() {
@@ -99,45 +122,87 @@ export function ShipActiveReleasesRail() {
           ) : (
             <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {releases.map((release) => (
-                <li
-                  key={release.id}
-                  className="rounded border bg-background p-2.5 text-sm"
-                  data-testid="ship-active-release-card"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="truncate font-medium" title={release.title}>
-                      {release.title}
-                    </span>
-                    <span className="ml-auto text-[10px] uppercase tracking-wide text-muted-foreground">
-                      {t(
-                        ($) =>
-                          $.releases.stage[
-                            release.stage as keyof typeof $.releases.stage
-                          ] ?? $.releases.stage.assembling,
-                      )}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>
-                      {release.pr_count} PR{release.pr_count === 1 ? "" : "s"}
-                    </span>
-                    <span aria-hidden>·</span>
-                    <span className="capitalize">{release.risk_level}</span>
-                  </div>
-                  <time
-                    dateTime={releaseDeployedAt(release)}
-                    className="mt-0.5 block text-xs text-muted-foreground"
-                  >
-                    {formatDeployedAt(releaseDeployedAt(release))}
-                  </time>
-                  {slug && (
+                <li key={release.id} data-testid="ship-active-release-card">
+                  {slug ? (
                     <AppLink
                       href={`/${slug}/ship/release/${release.id}`}
-                      className="mt-2 inline-block text-xs text-primary hover:underline"
+                      className="block rounded border bg-background p-2.5 text-sm transition-colors hover:bg-muted/50"
                       data-testid="ship-active-release-view"
                     >
-                      {t(($) => $.releases.view_release)} →
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="truncate font-medium"
+                          title={release.title}
+                        >
+                          {release.title}
+                        </span>
+                        <span
+                          className={cn(
+                            "ml-auto rounded px-1 py-0.5 text-[10px] uppercase tracking-wide",
+                            releaseStageColorClass(release.stage),
+                          )}
+                        >
+                          {t(
+                            ($) =>
+                              ($.releases.stage as Record<string, string>)[
+                                release.stage
+                              ] ?? $.releases.stage.assembling,
+                          )}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>
+                          {release.pr_count} PR
+                          {release.pr_count === 1 ? "" : "s"}
+                        </span>
+                        <span aria-hidden>·</span>
+                        <span className="capitalize">{release.risk_level}</span>
+                      </div>
+                      <time
+                        dateTime={releaseDeployedAt(release)}
+                        className="mt-0.5 block text-xs text-muted-foreground"
+                      >
+                        {formatDeployedAt(releaseDeployedAt(release))}
+                      </time>
                     </AppLink>
+                  ) : (
+                    <div className="rounded border bg-background p-2.5 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="truncate font-medium"
+                          title={release.title}
+                        >
+                          {release.title}
+                        </span>
+                        <span
+                          className={cn(
+                            "ml-auto rounded px-1 py-0.5 text-[10px] uppercase tracking-wide",
+                            releaseStageColorClass(release.stage),
+                          )}
+                        >
+                          {t(
+                            ($) =>
+                              ($.releases.stage as Record<string, string>)[
+                                release.stage
+                              ] ?? $.releases.stage.assembling,
+                          )}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>
+                          {release.pr_count} PR
+                          {release.pr_count === 1 ? "" : "s"}
+                        </span>
+                        <span aria-hidden>·</span>
+                        <span className="capitalize">{release.risk_level}</span>
+                      </div>
+                      <time
+                        dateTime={releaseDeployedAt(release)}
+                        className="mt-0.5 block text-xs text-muted-foreground"
+                      >
+                        {formatDeployedAt(releaseDeployedAt(release))}
+                      </time>
+                    </div>
                   )}
                 </li>
               ))}

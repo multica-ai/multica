@@ -2,7 +2,7 @@
 //
 // Verifies the rail's two states: empty (returns null so the page
 // chrome doesn't show an awkward empty card) and populated (renders
-// one card per release with a "View" link).
+// one clickable card per release).
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -106,7 +106,7 @@ describe("ShipActiveReleasesRail", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("renders one card per release with a workspace-scoped View link", () => {
+  it("renders one card per release as a clickable workspace-scoped link", () => {
     activeReleasesFixture = {
       releases: [makeRelease({ id: "rel-1", title: "May rollout", pr_count: 3 })],
     };
@@ -115,6 +115,21 @@ describe("ShipActiveReleasesRail", () => {
     expect(screen.getByText(/3 PRs/)).toBeInTheDocument();
     const link = screen.getByTestId("ship-active-release-view");
     expect(link).toHaveAttribute("href", "/acme/ship/release/rel-1");
+  });
+
+  it("applies a stage color class to the stage badge", () => {
+    activeReleasesFixture = {
+      releases: [
+        makeRelease({
+          id: "rel-1",
+          title: "Prod release",
+          stage: "in_production",
+        }),
+      ],
+    };
+    render(<ShipActiveReleasesRail />, { wrapper: Wrapper });
+    const card = screen.getByTestId("ship-active-release-card");
+    expect(card).toHaveTextContent("In production");
   });
 
   it("shows promoted_at as the deployment timestamp when set", () => {
