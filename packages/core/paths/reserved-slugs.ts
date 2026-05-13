@@ -89,9 +89,10 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "teams",
 
   // Cerebro routes
-  // CEREBRO-PATCH(cerebro-reserved-slugs): JEH-900 cerebro-only top-level routes
-  // that live alongside the upstream workspace segments. Kept in their own group
-  // so the upstream-zone diff stays clean against multica-ai/multica.
+  // CEREBRO-PATCH(cerebro-reserved-slugs): JEH-900 / JEH-1180 cerebro-only
+  // top-level routes (`/tasks`, `/permissions`) that live alongside the upstream
+  // workspace segments. Kept in their own group so the upstream-zone diff stays
+  // clean against multica-ai/multica.
   "tasks",
   "permissions",
 
