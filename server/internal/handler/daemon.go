@@ -1631,6 +1631,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 							resp.TriggerAuthorName = u.Name
 						}
 					case "agent":
+						triggerAuthorAgentID = cm.AuthorID
 						if a, err := h.Queries.GetAgent(r.Context(), authorUUID); err == nil {
 							resp.TriggerAuthorName = a.Name
 						}
