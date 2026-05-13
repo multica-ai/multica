@@ -54,7 +54,7 @@ func releaseAssetCandidates(targetVersion, goos, goarch string) []string {
 	// `multica_{os}_{arch}` name for releases that still ship it.
 	return []string{
 		fmt.Sprintf("forge-cli-%s-%s-%s.%s", version, goos, goarch, ext),
-		fmt.Sprintf("forge_%s_%s.%s", goos, goarch, ext),
+		fmt.Sprintf("forge-cli-%s-%s.%s", goos, goarch, ext),
 	}
 }
 
