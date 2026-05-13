@@ -355,12 +355,30 @@ func setFetchRefspec(barePath, refspec string) error {
 // WorktreeParams holds inputs for creating a worktree from a cached bare clone.
 type WorktreeParams struct {
 	WorkspaceID         string // workspace that owns the repo
-	RepoURL             string // remote URL to look up in the cache
-	WorkDir             string // parent directory for the worktree (e.g. task workdir)
+	RepoURL             string // remote URL to look up in the cache (ignored if BarePathOverride is set)
+	WorkDir             string // parent directory for the worktree (e.g. task workdir; ignored if WorktreePathOverride is set)
 	Ref                 string // optional branch, tag, or commit to base the worktree on
 	AgentName           string // for branch naming
 	TaskID              string // for branch naming uniqueness
 	CoAuthoredByEnabled bool   // install prepare-commit-msg hook for Co-authored-by trailer
+
+	// PUL-94: optional overrides for the per-task worktree path.
+	//
+	// BarePathOverride: when set, use this absolute path as the bare repo
+	// instead of looking up via c.Lookup(WorkspaceID, RepoURL). Used when the
+	// daemon has pre-resolved the bare via a global path map (e.g.,
+	// /srv/multica-bare.git from multica-server's host-prep script). The
+	// caller is responsible for ensuring the path exists and points at a
+	// valid bare repo.
+	//
+	// WorktreePathOverride: when set, this absolute path is used as the
+	// worktree location instead of computing <WorkDir>/<repoNameFromURL>.
+	// PUL-94 places per-task worktrees at /srv/agent-worktrees/<agent>-<task[:8]>/,
+	// which is outside any task's WorkDir.
+	//
+	// Both nil → existing per-workspace, per-WorkDir behavior.
+	BarePathOverride     string
+	WorktreePathOverride string
 }
 
 // WorktreeResult describes a successfully created worktree.
@@ -374,9 +392,17 @@ type WorktreeResult struct {
 // at the target path (reused environment), it updates the existing worktree to
 // the latest remote default branch instead of failing.
 func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
-	barePath := c.Lookup(params.WorkspaceID, params.RepoURL)
+	// PUL-94: prefer caller-provided bare path when set (per-task worktrees
+	// against a globally-provisioned bare like /srv/<slug>-bare.git). Fall
+	// back to workspace-scoped lookup for legacy callers.
+	barePath := params.BarePathOverride
 	if barePath == "" {
-		return nil, fmt.Errorf("repo not found in cache: %s (workspace: %s)", params.RepoURL, params.WorkspaceID)
+		barePath = c.Lookup(params.WorkspaceID, params.RepoURL)
+		if barePath == "" {
+			return nil, fmt.Errorf("repo not found in cache: %s (workspace: %s)", params.RepoURL, params.WorkspaceID)
+		}
+	} else if !isBareRepo(barePath) {
+		return nil, fmt.Errorf("bare path override is not a bare repo: %s", barePath)
 	}
 
 	// Serialize concurrent CreateWorktree calls on the same bare repo. Git's
@@ -425,9 +451,15 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 	// Build branch name: agent/{sanitized-name}/{short-task-id}
 	branchName := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), shortID(params.TaskID))
 
-	// Derive directory name from repo URL.
-	dirName := repoNameFromURL(params.RepoURL)
-	worktreePath := filepath.Join(params.WorkDir, dirName)
+	// PUL-94: prefer caller-provided worktree path when set (per-task
+	// worktrees live at /srv/agent-worktrees/<agent>-<task[:8]>/, outside
+	// any task WorkDir). Fall back to <WorkDir>/<repoNameFromURL> for legacy
+	// callers.
+	worktreePath := params.WorktreePathOverride
+	if worktreePath == "" {
+		dirName := repoNameFromURL(params.RepoURL)
+		worktreePath = filepath.Join(params.WorkDir, dirName)
+	}
 
 	// If worktree already exists (reused environment from a prior task),
 	// update it to the latest remote code instead of creating a new one.
