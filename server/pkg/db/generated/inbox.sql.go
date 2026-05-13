@@ -62,6 +62,14 @@ type ArchiveAllReadInboxParams struct {
 	RecipientID pgtype.UUID `json:"recipient_id"`
 }
 
+// Archive all inbox items belonging to "representatives" whose newest non-archived item
+// is read. A group is an issue (when issue_id is set) or a single standalone
+// item (when issue_id is NULL). This matches the inbox UI's dedup-by-issue
+// semantic: the list shows one row per issue keyed on the newest non-archived
+// inbox_item, so "Archive all read" should archive entire issues that the user
+// sees as read. Per-row archiving (the previous behavior) hid the read row but
+// exposed older unread siblings, flipping the issue from "read" to "unread"
+// in the list (PUL-39).
 func (q *Queries) ArchiveAllReadInbox(ctx context.Context, arg ArchiveAllReadInboxParams) (int64, error) {
 	result, err := q.db.Exec(ctx, archiveAllReadInbox, arg.WorkspaceID, arg.RecipientID)
 	if err != nil {

@@ -43,6 +43,7 @@ type Task struct {
 	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
 	ProjectTitle            string                `json:"project_title,omitempty"`     // human-readable project title for context injection
 	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // project-scoped resources to expose to the agent
+	TargetProjectResourceID string                `json:"target_project_resource_id,omitempty"` // PUL-94: explicit github_repo project_resource that the daemon should use for the per-task worktree's bare. Empty → legacy fallback (shared per-agent worktree).
 	PriorSessionID          string          `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
 	PriorWorkDir            string          `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
 	TriggerCommentID        string          `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
