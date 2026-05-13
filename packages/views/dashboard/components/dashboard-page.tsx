@@ -23,6 +23,10 @@ import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-sto
 import { PageHeader } from "../../layout/page-header";
 import { KpiCard } from "../../runtimes/components/shared";
 import { DailyCostChart } from "../../runtimes/components/charts";
+import {
+  TimezoneSelect,
+  browserTimezone,
+} from "../../runtimes/components/timezone-select";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { formatTokens } from "../../runtimes/utils";
@@ -109,6 +113,10 @@ export function DashboardPage() {
   const wsId = useWorkspaceId();
   const [days, setDays] = useState<TimeRange>(30);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
+  // Local-only timezone selection. The shared TimezoneSelect lists the
+  // browser tz first; we default to it so the picker matches what the user
+  // currently sees on their clock.
+  const [timezone, setTimezone] = useState<string>(() => browserTimezone());
 
   // The user can save model prices from the runtimes page; re-render when
   // they do so the dashboard reflects the new rates.
@@ -191,6 +199,11 @@ export function DashboardPage() {
             value={days}
             onChange={setDays}
             options={TIME_RANGES.map((r) => ({ label: r.label, value: r.days }))}
+          />
+          <TimezoneSelect
+            value={timezone}
+            onValueChange={setTimezone}
+            triggerClassName="min-w-[180px]"
           />
         </div>
       </PageHeader>
