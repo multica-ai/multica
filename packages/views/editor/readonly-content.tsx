@@ -34,6 +34,7 @@ import { toHtml } from "hast-util-to-html";
 import { Maximize2, Download, Link as LinkIcon, FileText, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import type { Attachment } from "@multica/core/types";
 import { isViewableAttachment } from "@multica/cerebro-attachments/core/viewable";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
@@ -104,19 +105,29 @@ function urlTransform(url: string): string {
 // path, so href resolves against the current origin (sara.local / app.multica.io /
 // localhost) instead of hard-coding `appUrl` — which defaulted to multica.ai
 // on desktop and made the link visibly wrong for cerebro deployments (JEH-1048).
+// JEH-1112: on mobile the PWA renders in `display: standalone` (no tab UI), so
+// `target="_blank"` / `window.open(_, "_blank")` either navigates the current
+// window or breaks out into the system browser — both lose thread context.
+// Use SPA push so the browser back-button restores scroll + tiptap draft via
+// the Next.js router cache, matching mobile-native patterns.
 function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
-  const { openInNewTab } = useNavigation();
+  const { openInNewTab, push } = useNavigation();
+  const isMobile = useIsMobile();
   const p = useWorkspacePaths();
   const path = p.issueDetail(issueId);
   return (
     <a
       href={path}
-      target="_blank"
-      rel="noopener noreferrer"
+      target={isMobile ? undefined : "_blank"}
+      rel={isMobile ? undefined : "noopener noreferrer"}
       className="issue-mention not-prose inline-flex"
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
+        if (isMobile) {
+          push(path);
+          return;
+        }
         if (openInNewTab) openInNewTab(path, label);
         else window.open(path, "_blank", "noopener,noreferrer");
       }}
