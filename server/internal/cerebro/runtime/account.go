@@ -102,7 +102,7 @@ func (s *AccountService) RecordAccount(
 	}, nil
 }
 
-func (s *AccountService) publishRuntimeAccountChanged(workspaceID, runtimeID pgtype.UUID, acc cerebrodb.CerebroAccount) {
+func (s *AccountService) publishRuntimeAccountChanged(workspaceID, runtimeID pgtype.UUID, acc account.Account) {
 	if s.Bus == nil {
 		return
 	}

@@ -1,7 +1,7 @@
 // Package runtime contains cerebro-only runtime pause / unpause
 // service code, including the rate-limit reset parser used to schedule
 // auto-unpause for 429 responses.
-package runtime
+package account
 
 import (
 	"regexp"
