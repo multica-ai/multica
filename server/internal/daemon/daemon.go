@@ -1505,9 +1505,19 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// Write GC metadata after the task finishes so the periodic GC loop
 	// can look up the issue later. Written last so that a mid-task crash
 	// leaves the directory as an orphan (cleaned up by GCOrphanTTL).
+	//
+	// PUL-94: per-task spawn already wrote GCMeta with WtPath/BarePath/etc
+	// via WriteSpawnMeta. Try to update CompletedAt in place first so we
+	// preserve those fields; fall back to a fresh WriteGCMeta for legacy
+	// tasks that have no spawn meta.
 	if result.EnvRoot != "" {
-		if err := execenv.WriteGCMeta(result.EnvRoot, task.IssueID, task.WorkspaceID, taskLog); err != nil {
-			taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
+		if err := execenv.UpdateGCMetaCompletion(result.EnvRoot, taskLog); err != nil {
+			if !os.IsNotExist(err) {
+				taskLog.Warn("update gc meta completion failed, falling back to fresh write", "error", err)
+			}
+			if err := execenv.WriteGCMeta(result.EnvRoot, task.IssueID, task.WorkspaceID, taskLog); err != nil {
+				taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
+			}
 		}
 	}
 }
@@ -1546,6 +1556,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		instructions = task.Agent.Instructions
 	}
 
+	// PUL-94 per-task worktree resolution. Runs early so failures abort the
+	// task before any filesystem work, and so the resolved (target_repo,
+	// bare, wt_path) flow into taskCtx → CLAUDE.md template + GCMeta +
+	// agentEnv. Empty assignment → feature off or no target → legacy path.
+	perTask, perTaskErr := d.resolvePerTaskWorktree(&task, agentName, taskLog)
+	if perTaskErr != nil {
+		taskLog.Error("worktree.spawn_failed",
+			"agent", agentName,
+			"task_uuid", task.ID,
+			"target_project_resource_id", task.TargetProjectResourceID,
+			"error_class", errorClassOf(perTaskErr),
+			"error_msg", perTaskErr.Error(),
+		)
+		return TaskResult{}, fmt.Errorf("per-task worktree resolve: %w", perTaskErr)
+	}
+
 	// Prepare isolated execution environment.
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
@@ -1557,6 +1583,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentInstructions:       instructions,
 		AgentSkills:             convertSkillsForEnv(skills),
 		Repos:                   convertReposForEnv(task.Repos),
+		PerTaskWorktreePath:     perTask.WtPath,
+		PerTaskBarePath:         perTask.BarePath,
+		PerTaskTargetRepo:       perTask.TargetRepo,
 		ProjectID:               task.ProjectID,
 		ProjectTitle:            task.ProjectTitle,
 		ProjectResources:        convertProjectResourcesForEnv(task.ProjectResources),
@@ -1663,6 +1692,35 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
+	}
+
+	// PUL-94 per-task worktree env vars + spawn-time GCMeta. perTask was
+	// resolved earlier (before envRoot creation); now wire it into the
+	// agent's environment so `multica repo checkout` routes to the per-task
+	// worktree at /srv/agent-worktrees/<agent>-<task[:8]>/.
+	if perTask.WtPath != "" {
+		agentEnv["MULTICA_TASK_BARE_PATH"] = perTask.BarePath
+		agentEnv["MULTICA_TASK_WORKTREE_PATH"] = perTask.WtPath
+		agentEnv["MULTICA_TASK_TARGET_REPO"] = perTask.TargetRepo
+		spawnMeta := execenv.GCMeta{
+			IssueID:                 task.IssueID,
+			WorkspaceID:             task.WorkspaceID,
+			FeatureFlagState:        true,
+			WtPath:                  perTask.WtPath,
+			BarePath:                perTask.BarePath,
+			TargetProjectResourceID: perTask.TargetProjectResourceID,
+			TargetRepo:              perTask.TargetRepo,
+		}
+		if err := execenv.WriteSpawnMeta(env.RootDir, spawnMeta, taskLog); err != nil {
+			taskLog.Warn("write spawn meta failed (non-fatal)", "error", err)
+		}
+		taskLog.Info("worktree.spawn_resolved",
+			"agent", agentName,
+			"task_uuid", task.ID,
+			"target_repo", perTask.TargetRepo,
+			"bare_path", perTask.BarePath,
+			"wt_path", perTask.WtPath,
+		)
 	}
 	// Inject user-configured custom environment variables (e.g. ANTHROPIC_API_KEY,
 	// ANTHROPIC_BASE_URL for router/proxy mode, or CLAUDE_CODE_USE_BEDROCK for

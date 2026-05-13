@@ -59,6 +59,20 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 		"task_id":      taskID,
 	}
 
+	// PUL-94: pass through per-task worktree env vars when the daemon set
+	// them at fork time. The daemon then routes the checkout to its
+	// pre-resolved bare + worktree path. Empty values are forwarded as-is
+	// so the handler can distinguish "not set" from "explicit empty."
+	if v := os.Getenv("MULTICA_TASK_BARE_PATH"); v != "" {
+		reqBody["bare_path"] = v
+	}
+	if v := os.Getenv("MULTICA_TASK_WORKTREE_PATH"); v != "" {
+		reqBody["worktree_path"] = v
+	}
+	if v := os.Getenv("MULTICA_TASK_TARGET_REPO"); v != "" {
+		reqBody["target_repo"] = v
+	}
+
 	data, err := json.Marshal(reqBody)
 	if err != nil {
 		return fmt.Errorf("encode request: %w", err)

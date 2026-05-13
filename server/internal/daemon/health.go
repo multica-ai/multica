@@ -44,13 +44,21 @@ func (d *Daemon) listenHealth() (net.Listener, error) {
 }
 
 // repoCheckoutRequest is the body of a POST /repo/checkout request.
+//
+// PUL-94: BarePath, WorktreePath, and TargetRepo are set by the CLI when
+// the daemon spawned the agent with MULTICA_TASK_* env vars (per-task
+// worktree mode). When all three are empty, the handler falls back to the
+// existing per-workspace cache lookup.
 type repoCheckoutRequest struct {
-	URL         string `json:"url"`
-	WorkspaceID string `json:"workspace_id"`
-	WorkDir     string `json:"workdir"`
-	Ref         string `json:"ref,omitempty"`
-	AgentName   string `json:"agent_name"`
-	TaskID      string `json:"task_id"`
+	URL          string `json:"url"`
+	WorkspaceID  string `json:"workspace_id"`
+	WorkDir      string `json:"workdir"`
+	Ref          string `json:"ref,omitempty"`
+	AgentName    string `json:"agent_name"`
+	TaskID       string `json:"task_id"`
+	BarePath     string `json:"bare_path,omitempty"`
+	WorktreePath string `json:"worktree_path,omitempty"`
+	TargetRepo   string `json:"target_repo,omitempty"`
 }
 
 // healthHandler returns the /health HTTP handler. Extracted from serveHealth
@@ -148,24 +156,32 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 			return
 		}
 
-		if err := d.ensureRepoReady(r.Context(), req.WorkspaceID, req.URL); err != nil {
-			statusCode := http.StatusInternalServerError
-			if errors.Is(err, ErrRepoNotConfigured) {
-				statusCode = http.StatusBadRequest
+		// PUL-94: when the CLI passes a pre-resolved BarePath, the daemon
+		// already validated it at task spawn (ensureRepoReady's
+		// per-workspace cache check would reject the global bare). Skip the
+		// readiness probe and rely on CreateWorktree's own check.
+		if req.BarePath == "" {
+			if err := d.ensureRepoReady(r.Context(), req.WorkspaceID, req.URL); err != nil {
+				statusCode := http.StatusInternalServerError
+				if errors.Is(err, ErrRepoNotConfigured) {
+					statusCode = http.StatusBadRequest
+				}
+				d.logger.Error("repo checkout readiness failed", "workspace_id", req.WorkspaceID, "url", req.URL, "error", err)
+				http.Error(w, err.Error(), statusCode)
+				return
 			}
-			d.logger.Error("repo checkout readiness failed", "workspace_id", req.WorkspaceID, "url", req.URL, "error", err)
-			http.Error(w, err.Error(), statusCode)
-			return
 		}
 
 		result, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
-			WorkspaceID:         req.WorkspaceID,
-			RepoURL:             req.URL,
-			WorkDir:             req.WorkDir,
-			Ref:                 req.Ref,
-			AgentName:           req.AgentName,
-			TaskID:              req.TaskID,
-			CoAuthoredByEnabled: d.workspaceCoAuthoredByEnabled(req.WorkspaceID),
+			WorkspaceID:          req.WorkspaceID,
+			RepoURL:              req.URL,
+			WorkDir:              req.WorkDir,
+			Ref:                  req.Ref,
+			AgentName:            req.AgentName,
+			TaskID:               req.TaskID,
+			CoAuthoredByEnabled:  d.workspaceCoAuthoredByEnabled(req.WorkspaceID),
+			BarePathOverride:     req.BarePath,
+			WorktreePathOverride: req.WorktreePath,
 		})
 		if err != nil {
 			d.logger.Error("repo checkout failed", "url", req.URL, "error", err)

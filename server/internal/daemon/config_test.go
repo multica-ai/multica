@@ -27,3 +27,38 @@ func TestPatternsFromEnv_DropsSeparatorBearingEntries(t *testing.T) {
 		t.Fatalf("expected %v, got %v", want, got)
 	}
 }
+
+func TestParseBareRepoMap(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string
+		wantLen int
+		wantErr bool
+	}{
+		{"empty → nil map, no error", "", 0, false},
+		{"whitespace-only → nil map, no error", "   ", 0, false},
+		{"happy path", `{"rabbeet/Pulse":"/srv/pulse-bare.git","rabbeet/multica":"/srv/multica-bare.git"}`, 2, false},
+		{"single entry", `{"rabbeet/Pulse":"/srv/pulse-bare.git"}`, 1, false},
+		{"malformed JSON", `not-json`, 0, true},
+		{"key without slash", `{"justname":"/srv/x.git"}`, 0, true},
+		{"empty value", `{"rabbeet/Pulse":"   "}`, 0, true},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			got, err := parseBareRepoMap(c.input)
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got map=%v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(got) != c.wantLen {
+				t.Fatalf("got len=%d want=%d (map=%v)", len(got), c.wantLen, got)
+			}
+		})
+	}
+}

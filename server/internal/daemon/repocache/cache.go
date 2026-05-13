@@ -153,6 +153,39 @@ func (c *Cache) Fetch(barePath string) error {
 	return gitFetch(barePath)
 }
 
+// FetchIfStale runs gitFetch on a bare repo only if its last successful
+// fetch (marked by .multica_last_fetch inside the bare) is older than
+// maxAge, or if the marker is missing. On successful fetch the marker is
+// touched. Errors are returned verbatim; callers wrap with sentinels.
+//
+// PUL-94: the per-task spawn path calls this against globally-provisioned
+// bares that are also refreshed by an out-of-band mirror cron. Skipping the
+// fetch when the bare is fresh saves ~100ms-2s p99 per spawn under load.
+// (Eng review Issue 2.)
+func (c *Cache) FetchIfStale(barePath string, maxAge time.Duration) error {
+	marker := filepath.Join(barePath, ".multica_last_fetch")
+	if info, err := os.Stat(marker); err == nil && time.Since(info.ModTime()) < maxAge {
+		return nil
+	}
+	// Serialize against concurrent fetches on the same bare. The plan and
+	// CreateWorktree both hold this lock; reuse the same mutex for clean
+	// behavior in races.
+	lock := c.lockForRepo(barePath)
+	lock.Lock()
+	defer lock.Unlock()
+	// Re-check under lock: another goroutine may have just fetched.
+	if info, err := os.Stat(marker); err == nil && time.Since(info.ModTime()) < maxAge {
+		return nil
+	}
+	if err := gitFetch(barePath); err != nil {
+		return err
+	}
+	// Best-effort touch — the next call's staleness check is the only
+	// consumer, and a failure here just means we'll fetch again sooner.
+	_ = os.WriteFile(marker, nil, 0o644)
+	return nil
+}
+
 // bareDirName returns a filesystem-safe, collision-free directory name for
 // the bare clone of rawURL. The name is built from the host plus each
 // path segment, joined by '+'. '+' is disallowed in GitHub and GitLab
