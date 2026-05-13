@@ -391,6 +391,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Post("/notes", h.CreateCRMCommunicationNote)
 						r.Post("/projects", h.LinkCRMAccountProject)
 						r.Post("/follow-up-issues", h.CreateCRMFollowUpIssue)
+						r.Get("/profile", h.GetCRMAccountProfile)
 						r.Put("/profile", h.UpsertCRMAccountProfile)
 					})
 				})

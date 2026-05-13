@@ -1218,6 +1218,10 @@ export class ApiClient {
     });
   }
 
+  async getCRMAccountProfile(accountId: string): Promise<CRMAccountProfile | null> {
+    return this.fetch(`/api/crm/accounts/${accountId}/profile`);
+  }
+
   async upsertCRMAccountProfile(
     accountId: string,
     data: UpsertCRMAccountProfileRequest,

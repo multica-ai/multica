@@ -9,7 +9,8 @@
     "cancel": "取消",
     "save": "保存",
     "edit": "编辑",
-    "delete": "删除"
+    "delete": "删除",
+    "add": "添加"
   },
   "tabs": {
     "overview": "概览",
@@ -90,7 +91,21 @@
   "profile": {
     "title": "客户画像",
     "summary_title": "画像摘要",
-    "metadata_title": "客户详情"
+    "metadata_title": "客户详情",
+    "help": "记录客户业务背景、采购需求、风险点和沟通偏好，方便后续跟进。",
+    "empty": "暂无客户画像。添加画像后，后续跟进会更清晰。",
+    "add": "添加画像",
+    "edit": "编辑画像",
+    "edit_title": "编辑客户画像",
+    "save_error": "保存客户画像失败。",
+    "business_model": "业务模式",
+    "main_products": "主营/采购产品",
+    "procurement_needs": "采购需求",
+    "pain_points": "痛点",
+    "decision_process": "决策流程",
+    "communication_preference": "沟通偏好",
+    "risk_notes": "风险备注",
+    "cooperation_history": "合作历史"
   },
   "projects": {
     "title": "项目跟进",
@@ -124,7 +139,12 @@
     "placeholder": "添加手动客户备注",
     "add": "添加备注",
     "create_error": "添加备注失败。",
-    "empty": "暂无备注。"
+    "empty": "暂无备注。",
+    "channel": "渠道",
+    "direction": "方向",
+    "subject": "主题",
+    "subject_placeholder": "可选主题",
+    "untitled": "未命名记录"
   },
   "account_types": {
     "prospect": "潜在客户",
@@ -164,5 +184,10 @@
     "technical": "技术",
     "gatekeeper": "把关人",
     "other": "其他"
+  },
+  "directions": {
+    "inbound": "客户来信/来电",
+    "outbound": "我方外发",
+    "note": "内部备注"
   }
 }

@@ -1356,6 +1356,43 @@ func (h *Handler) CreateCRMEmailMessage(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusCreated, crmEmailMessageToResponse(message))
 }
 
+func (h *Handler) GetCRMAccountProfile(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	accountID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "accountId"), "account id")
+	if !ok {
+		return
+	}
+	if _, ok := h.getCRMAccount(w, r, accountID, workspaceID); !ok {
+		return
+	}
+	var id pgtype.UUID
+	var summary pgtype.Text
+	var updatedBy pgtype.UUID
+	var createdAt, updatedAt pgtype.Timestamptz
+	var rawProfile []byte
+	err := h.DB.QueryRow(r.Context(), `
+		SELECT id, summary, profile_json, updated_by, created_at, updated_at
+		FROM crm_account_profile
+		WHERE workspace_id = $1 AND account_id = $2
+	`, workspaceID, accountID).Scan(&id, &summary, &rawProfile, &updatedBy, &createdAt, &updatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusOK, nil)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get CRM account profile")
+		return
+	}
+	writeJSON(w, http.StatusOK, CRMAccountProfileResponse{
+		ID: uuidToString(id), WorkspaceID: uuidToString(workspaceID), AccountID: uuidToString(accountID),
+		Summary: textToPtr(summary), ProfileJSON: json.RawMessage(rawProfile), UpdatedBy: uuidToPtr(updatedBy),
+		CreatedAt: timestampToString(createdAt), UpdatedAt: timestampToString(updatedAt),
+	})
+}
+
 func (h *Handler) UpsertCRMAccountProfile(w http.ResponseWriter, r *http.Request) {
 	workspaceID, ok := h.crmWorkspaceUUID(w, r)
 	if !ok {

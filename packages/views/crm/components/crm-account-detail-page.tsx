@@ -7,6 +7,7 @@ import { api } from "@multica/core/api";
 import { useProjectDraftStore } from "@multica/core/projects";
 import {
   crmAccountDetailOptions,
+  crmAccountProfileOptions,
   crmCommunicationNoteListOptions,
   crmContactListOptions,
   crmEmailThreadListOptions,
@@ -25,6 +26,8 @@ import type {
   CRMAccountSource,
   CRMAccountStatus,
   CRMAccountType,
+  CRMCommunicationChannel,
+  CRMCommunicationDirection,
   CRMContact,
   CRMContactDecisionRole,
   CreateCRMContactRequest,
@@ -43,6 +46,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Input } from "@multica/ui/components/ui/input";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -104,6 +108,75 @@ type ContactFormState = {
   notes: string;
 };
 
+type ProfileFormState = {
+  summary: string;
+  businessModel: string;
+  mainProducts: string;
+  procurementNeeds: string;
+  painPoints: string;
+  decisionProcess: string;
+  communicationPreference: string;
+  riskNotes: string;
+  cooperationHistory: string;
+};
+
+type NoteFormState = {
+  channel: CRMCommunicationChannel;
+  direction: CRMCommunicationDirection;
+  subject: string;
+  body: string;
+};
+
+const PROFILE_FIELD_KEYS = [
+  "business_model",
+  "main_products",
+  "procurement_needs",
+  "pain_points",
+  "decision_process",
+  "communication_preference",
+  "risk_notes",
+  "cooperation_history",
+] as const;
+
+function profileText(profileJson: Record<string, unknown> | undefined, key: (typeof PROFILE_FIELD_KEYS)[number]) {
+  const value = profileJson?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+function profileToForm(profile: { summary?: string | null; profile_json?: Record<string, unknown> } | null | undefined): ProfileFormState {
+  return {
+    summary: profile?.summary ?? "",
+    businessModel: profileText(profile?.profile_json, "business_model"),
+    mainProducts: profileText(profile?.profile_json, "main_products"),
+    procurementNeeds: profileText(profile?.profile_json, "procurement_needs"),
+    painPoints: profileText(profile?.profile_json, "pain_points"),
+    decisionProcess: profileText(profile?.profile_json, "decision_process"),
+    communicationPreference: profileText(profile?.profile_json, "communication_preference"),
+    riskNotes: profileText(profile?.profile_json, "risk_notes"),
+    cooperationHistory: profileText(profile?.profile_json, "cooperation_history"),
+  };
+}
+
+function profilePayload(form: ProfileFormState) {
+  return {
+    summary: form.summary || null,
+    profile_json: {
+      business_model: form.businessModel,
+      main_products: form.mainProducts,
+      procurement_needs: form.procurementNeeds,
+      pain_points: form.painPoints,
+      decision_process: form.decisionProcess,
+      communication_preference: form.communicationPreference,
+      risk_notes: form.riskNotes,
+      cooperation_history: form.cooperationHistory,
+    },
+  };
+}
+
+function blankNoteForm(): NoteFormState {
+  return { channel: "manual", direction: "note", subject: "", body: "" };
+}
+
 const toDateTimeLocal = (value?: string | null) => value ? value.slice(0, 16) : "";
 const fromDateTimeLocal = (value: string) => value ? new Date(value).toISOString() : null;
 
@@ -112,6 +185,16 @@ const tagSuggestions = (account?: CRMAccount | null) => account?.tags?.filter(Bo
 function countryName(codeOrName: string | null | undefined, locale: Locale) {
   const country = countryByCode(codeOrName);
   return country ? localizedName(country.name, locale) : codeOrName || "";
+}
+
+
+function ProfileTextarea({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="space-y-1 text-sm">
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      <Textarea className="min-h-20" value={value} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
 }
 
 function accountToForm(account: CRMAccount): AccountFormState {
@@ -360,14 +443,16 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
   const locale = normalizeLocale(i18n.language);
 
   const { data: account, isLoading: accountLoading } = useQuery(crmAccountDetailOptions(wsId, accountId));
+  const { data: profile, isLoading: profileLoading } = useQuery(crmAccountProfileOptions(wsId, accountId));
   const { data: contacts = [], isLoading: contactsLoading } = useQuery(crmContactListOptions(wsId, accountId));
   const { data: notes = [], isLoading: notesLoading } = useQuery(crmCommunicationNoteListOptions(wsId, accountId));
   const { data: emailThreads = [], isLoading: emailThreadsLoading } = useQuery(crmEmailThreadListOptions(wsId, accountId));
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
 
   const [accountForm, setAccountForm] = useState<AccountFormState | null>(null);
+  const [profileForm, setProfileForm] = useState<ProfileFormState | null>(null);
   const [contactForm, setContactForm] = useState<ContactFormState | null>(null);
-  const [noteBody, setNoteBody] = useState("");
+  const [noteForm, setNoteForm] = useState<NoteFormState>(() => blankNoteForm());
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [selectedFollowUpProjectId, setSelectedFollowUpProjectId] = useState("");
   const [createLinkedProjectOpen, setCreateLinkedProjectOpen] = useState(false);
@@ -474,10 +559,26 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
     },
   });
 
-  const createNote = useMutation({
-    mutationFn: () => api.createCRMCommunicationNote(accountId, { body: noteBody, channel: "manual", direction: "note" }),
+  const saveProfile = useMutation({
+    mutationFn: () => {
+      if (!profileForm) throw new Error("missing profile form");
+      return api.upsertCRMAccountProfile(accountId, profilePayload(profileForm));
+    },
     onSuccess: async () => {
-      setNoteBody("");
+      setProfileForm(null);
+      await queryClient.invalidateQueries({ queryKey: crmKeys.profile(wsId, accountId) });
+    },
+  });
+
+  const createNote = useMutation({
+    mutationFn: () => api.createCRMCommunicationNote(accountId, {
+      body: noteForm.body,
+      channel: noteForm.channel,
+      direction: noteForm.direction,
+      subject: noteForm.subject || null,
+    }),
+    onSuccess: async () => {
+      setNoteForm(blankNoteForm());
       await queryClient.invalidateQueries({ queryKey: crmKeys.notes(wsId, accountId) });
     },
   });
@@ -670,12 +771,34 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
 
           <TabsContent value="profile" className="space-y-6">
             <section className="rounded-lg border bg-card p-4">
-              <FieldRow label={t(($) => $.profile.summary_title)} value={account.notes} />
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <FieldRow label={t(($) => $.profile.metadata_title)} value={[countryName(account.country_code || account.country_name || account.country, locale), account.region, account.city, account.industry].filter(Boolean).join(" · ")} />
-                <FieldRow label={t(($) => $.customers.source)} value={account.source ? t(($) => $.sources[account.source!]) : null} />
-                <FieldRow label={t(($) => $.customers.tags)} value={account.tags?.join(", ")} />
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-medium">{t(($) => $.profile.title)}</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">{t(($) => $.profile.help)}</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => setProfileForm(profileToForm(profile))}>
+                  <Pencil className="mr-1 size-4" /> {profile ? t(($) => $.profile.edit) : t(($) => $.profile.add)}
+                </Button>
               </div>
+              {profileLoading ? (
+                <div className="mt-4 space-y-2"><Skeleton className="h-16 w-full" /><Skeleton className="h-16 w-full" /></div>
+              ) : profile ? (
+                <div className="mt-4 space-y-4">
+                  <FieldRow label={t(($) => $.profile.summary_title)} value={profile.summary} />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <FieldRow label={t(($) => $.profile.business_model)} value={profileText(profile.profile_json, "business_model")} />
+                    <FieldRow label={t(($) => $.profile.main_products)} value={profileText(profile.profile_json, "main_products")} />
+                    <FieldRow label={t(($) => $.profile.procurement_needs)} value={profileText(profile.profile_json, "procurement_needs")} />
+                    <FieldRow label={t(($) => $.profile.pain_points)} value={profileText(profile.profile_json, "pain_points")} />
+                    <FieldRow label={t(($) => $.profile.decision_process)} value={profileText(profile.profile_json, "decision_process")} />
+                    <FieldRow label={t(($) => $.profile.communication_preference)} value={profileText(profile.profile_json, "communication_preference")} />
+                    <FieldRow label={t(($) => $.profile.risk_notes)} value={profileText(profile.profile_json, "risk_notes")} />
+                    <FieldRow label={t(($) => $.profile.cooperation_history)} value={profileText(profile.profile_json, "cooperation_history")} />
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">{t(($) => $.profile.empty)}</div>
+              )}
             </section>
           </TabsContent>
 
@@ -741,10 +864,28 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
           <TabsContent value="notes" className="space-y-6">
             <section className="rounded-lg border bg-card">
               <div className="border-b p-4">
-                <textarea className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm" value={noteBody} onChange={(e) => setNoteBody(e.target.value)} placeholder={t(($) => $.notes.placeholder)} />
-                <div className="mt-2 flex justify-end"><Button size="sm" disabled={!noteBody.trim() || createNote.isPending} onClick={() => createNote.mutate()}><Plus className="mr-1 size-4" /> {t(($) => $.notes.add)}</Button></div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className="space-y-1 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">{t(($) => $.notes.channel)}</span>
+                    <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={noteForm.channel} onChange={(event) => setNoteForm((current) => ({ ...current, channel: event.target.value as CRMCommunicationChannel }))}>
+                      {(["manual", "email", "whatsapp", "phone", "meeting", "other"] as CRMCommunicationChannel[]).map((channel) => <option key={channel} value={channel}>{t(($) => $.channels[channel])}</option>)}
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">{t(($) => $.notes.direction)}</span>
+                    <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={noteForm.direction} onChange={(event) => setNoteForm((current) => ({ ...current, direction: event.target.value as CRMCommunicationDirection }))}>
+                      {(["note", "inbound", "outbound"] as CRMCommunicationDirection[]).map((direction) => <option key={direction} value={direction}>{t(($) => $.directions[direction])}</option>)}
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-sm">
+                    <span className="text-xs font-medium text-muted-foreground">{t(($) => $.notes.subject)}</span>
+                    <Input value={noteForm.subject} onChange={(event) => setNoteForm((current) => ({ ...current, subject: event.target.value }))} placeholder={t(($) => $.notes.subject_placeholder)} />
+                  </label>
+                </div>
+                <Textarea className="mt-3 min-h-24" value={noteForm.body} onChange={(event) => setNoteForm((current) => ({ ...current, body: event.target.value }))} placeholder={t(($) => $.notes.placeholder)} />
+                <div className="mt-2 flex justify-end"><Button size="sm" disabled={!noteForm.body.trim() || createNote.isPending} onClick={() => createNote.mutate()}><Plus className="mr-1 size-4" /> {t(($) => $.notes.add)}</Button></div>
               </div>
-              {notesLoading ? <div className="space-y-2 p-4"><Skeleton className="h-16 w-full" /><Skeleton className="h-16 w-full" /></div> : notes.length === 0 ? <div className="p-8 text-center text-sm text-muted-foreground">{t(($) => $.notes.empty)}</div> : <div className="divide-y">{notes.map((note) => <div key={note.id} className="px-4 py-3 text-sm"><div className="whitespace-pre-wrap">{note.body}</div><div className="mt-2 text-xs text-muted-foreground"><ChannelLabel channel={note.channel} t={t} /> · {new Date(note.occurred_at).toLocaleString()}</div></div>)}</div>}
+              {notesLoading ? <div className="space-y-2 p-4"><Skeleton className="h-16 w-full" /><Skeleton className="h-16 w-full" /></div> : notes.length === 0 ? <div className="p-8 text-center text-sm text-muted-foreground">{t(($) => $.notes.empty)}</div> : <div className="divide-y">{notes.map((note) => <div key={note.id} className="px-4 py-3 text-sm"><div className="font-medium">{note.subject || t(($) => $.notes.untitled)}</div><div className="mt-1 whitespace-pre-wrap">{note.body}</div><div className="mt-2 text-xs text-muted-foreground"><ChannelLabel channel={note.channel} t={t} /> · {t(($) => $.directions[note.direction])} · {new Date(note.occurred_at).toLocaleString()}</div></div>)}</div>}
             </section>
           </TabsContent>
         </div>
@@ -756,6 +897,29 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
           {accountForm && <AccountForm form={accountForm} setForm={setAccountForm} t={t} locale={locale} suggestedTags={tagSuggestions(account)} />}
           {updateAccount.isError && <p className="text-xs text-destructive">{t(($) => $.customers.create_error)}</p>}
           <DialogFooter><Button variant="outline" onClick={() => setAccountForm(null)}>{t(($) => $.actions.cancel)}</Button><Button disabled={!accountForm?.name.trim() || updateAccount.isPending} onClick={() => updateAccount.mutate()}>{t(($) => $.actions.save)}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={profileForm !== null} onOpenChange={(open) => !open && setProfileForm(null)}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader><DialogTitle>{t(($) => $.profile.edit_title)}</DialogTitle><DialogDescription>{account.name}</DialogDescription></DialogHeader>
+          {profileForm && (
+            <div className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
+              <ProfileTextarea label={t(($) => $.profile.summary_title)} value={profileForm.summary} onChange={(value) => setProfileForm((current) => current && ({ ...current, summary: value }))} />
+              <div className="grid gap-4 sm:grid-cols-2">
+                <ProfileTextarea label={t(($) => $.profile.business_model)} value={profileForm.businessModel} onChange={(value) => setProfileForm((current) => current && ({ ...current, businessModel: value }))} />
+                <ProfileTextarea label={t(($) => $.profile.main_products)} value={profileForm.mainProducts} onChange={(value) => setProfileForm((current) => current && ({ ...current, mainProducts: value }))} />
+                <ProfileTextarea label={t(($) => $.profile.procurement_needs)} value={profileForm.procurementNeeds} onChange={(value) => setProfileForm((current) => current && ({ ...current, procurementNeeds: value }))} />
+                <ProfileTextarea label={t(($) => $.profile.pain_points)} value={profileForm.painPoints} onChange={(value) => setProfileForm((current) => current && ({ ...current, painPoints: value }))} />
+                <ProfileTextarea label={t(($) => $.profile.decision_process)} value={profileForm.decisionProcess} onChange={(value) => setProfileForm((current) => current && ({ ...current, decisionProcess: value }))} />
+                <ProfileTextarea label={t(($) => $.profile.communication_preference)} value={profileForm.communicationPreference} onChange={(value) => setProfileForm((current) => current && ({ ...current, communicationPreference: value }))} />
+                <ProfileTextarea label={t(($) => $.profile.risk_notes)} value={profileForm.riskNotes} onChange={(value) => setProfileForm((current) => current && ({ ...current, riskNotes: value }))} />
+                <ProfileTextarea label={t(($) => $.profile.cooperation_history)} value={profileForm.cooperationHistory} onChange={(value) => setProfileForm((current) => current && ({ ...current, cooperationHistory: value }))} />
+              </div>
+            </div>
+          )}
+          {saveProfile.isError && <p className="text-xs text-destructive">{t(($) => $.profile.save_error)}</p>}
+          <DialogFooter><Button variant="outline" onClick={() => setProfileForm(null)}>{t(($) => $.actions.cancel)}</Button><Button disabled={saveProfile.isPending} onClick={() => saveProfile.mutate()}>{t(($) => $.actions.save)}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

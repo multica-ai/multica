@@ -85,6 +85,8 @@ const mockIssueDraftStore = vi.hoisted(() => ({
 
 const mockApi = vi.hoisted(() => ({
   getCRMAccount: vi.fn(),
+  getCRMAccountProfile: vi.fn(),
+  upsertCRMAccountProfile: vi.fn(),
   listCRMContacts: vi.fn(),
   listCRMCommunicationNotes: vi.fn(),
   listCRMEmailThreads: vi.fn(),
@@ -184,6 +186,8 @@ function renderDetail() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockApi.getCRMAccount.mockResolvedValue(mockAccount);
+  mockApi.getCRMAccountProfile.mockResolvedValue(null);
+  mockApi.upsertCRMAccountProfile.mockResolvedValue({ id: "profile-1", workspace_id: "ws-1", account_id: "account-1", summary: "Updated profile", profile_json: {}, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" });
   mockApi.listCRMContacts.mockResolvedValue({ contacts: [], total: 0 });
   mockApi.listCRMCommunicationNotes.mockResolvedValue({ notes: [], total: 0 });
   mockApi.listCRMEmailThreads.mockResolvedValue({ threads: [], total: 0 });
@@ -309,5 +313,75 @@ describe("CRMAccountDetailPage", () => {
     expect(screen.getByRole("textbox", { name: "Project title" })).toHaveValue("CRM:Olrid Customer");
     expect(screen.getByTestId("initial-resources")).toHaveTextContent("account-1");
     expect(mockApi.createProject).not.toHaveBeenCalled();
+  });
+
+  it("edits a structured customer profile", async () => {
+    mockApi.getCRMAccountProfile.mockResolvedValue({
+      id: "profile-1",
+      workspace_id: "ws-1",
+      account_id: "account-1",
+      summary: "Imports smart home devices",
+      profile_json: {
+        business_model: "Distributor",
+        main_products: "LED strips",
+      },
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    renderDetail();
+
+    await userEvent.click(await screen.findByRole("tab", { name: "Customer Profile" }));
+    expect(await screen.findByText("Imports smart home devices")).toBeInTheDocument();
+    expect(screen.getByText("Distributor")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /Edit profile/i }));
+    const summary = await screen.findByLabelText("Profile summary");
+    await userEvent.clear(summary);
+    await userEvent.type(summary, "High intent buyer");
+    await userEvent.type(screen.getByLabelText("Procurement needs"), "Needs monthly shipments");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(mockApi.upsertCRMAccountProfile).toHaveBeenCalledWith("account-1", expect.objectContaining({
+      summary: "High intent buyer",
+      profile_json: expect.objectContaining({
+        business_model: "Distributor",
+        procurement_needs: "Needs monthly shipments",
+      }),
+    }));
+  });
+
+  it("creates a communication note with channel, direction, and subject", async () => {
+    mockApi.listCRMCommunicationNotes.mockResolvedValue({
+      notes: [{
+        id: "note-1",
+        workspace_id: "ws-1",
+        account_id: "account-1",
+        contact_id: null,
+        channel: "whatsapp",
+        direction: "outbound",
+        occurred_at: "2026-01-02T00:00:00Z",
+        subject: "Sample follow-up",
+        body: "Sent catalog",
+        created_at: "2026-01-02T00:00:00Z",
+        updated_at: "2026-01-02T00:00:00Z",
+      }],
+      total: 1,
+    });
+    renderDetail();
+
+    await userEvent.click(await screen.findByRole("tab", { name: "Notes" }));
+    expect(await screen.findByText("Sample follow-up")).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Channel"), "whatsapp");
+    await userEvent.selectOptions(screen.getByLabelText("Direction"), "outbound");
+    await userEvent.type(screen.getByLabelText("Subject"), "Next quote");
+    await userEvent.type(screen.getByPlaceholderText("Add a manual customer note"), "Send updated price list");
+    await userEvent.click(screen.getByRole("button", { name: "Add note" }));
+
+    expect(mockApi.createCRMCommunicationNote).toHaveBeenCalledWith("account-1", {
+      body: "Send updated price list",
+      channel: "whatsapp",
+      direction: "outbound",
+      subject: "Next quote",
+    });
   });
 });

@@ -10,6 +10,8 @@ export const crmKeys = {
     [...crmKeys.accounts(wsId), "detail", id] as const,
   contacts: (wsId: string, accountId: string) =>
     [...crmKeys.accountDetail(wsId, accountId), "contacts"] as const,
+  profile: (wsId: string, accountId: string) =>
+    [...crmKeys.accountDetail(wsId, accountId), "profile"] as const,
   notes: (wsId: string, accountId: string) =>
     [...crmKeys.accountDetail(wsId, accountId), "notes"] as const,
   emailThreads: (wsId: string, accountId = "") =>
@@ -38,6 +40,13 @@ export function crmContactListOptions(wsId: string, accountId: string) {
     queryKey: crmKeys.contacts(wsId, accountId),
     queryFn: () => api.listCRMContacts(accountId),
     select: (data) => data.contacts,
+  });
+}
+
+export function crmAccountProfileOptions(wsId: string, accountId: string) {
+  return queryOptions({
+    queryKey: crmKeys.profile(wsId, accountId),
+    queryFn: () => api.getCRMAccountProfile(accountId),
   });
 }
 

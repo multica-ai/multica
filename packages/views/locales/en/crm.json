@@ -9,7 +9,8 @@
     "cancel": "Cancel",
     "save": "Save",
     "edit": "Edit",
-    "delete": "Delete"
+    "delete": "Delete",
+    "add": "Add"
   },
   "tabs": {
     "overview": "Overview",
@@ -90,7 +91,21 @@
   "profile": {
     "title": "Customer profile",
     "summary_title": "Profile summary",
-    "metadata_title": "Account details"
+    "metadata_title": "Account details",
+    "help": "Capture business context, buying needs, risks, and communication preferences for this customer.",
+    "empty": "No customer profile yet. Add one to make follow-up easier.",
+    "add": "Add profile",
+    "edit": "Edit profile",
+    "edit_title": "Edit customer profile",
+    "save_error": "Failed to save customer profile.",
+    "business_model": "Business model",
+    "main_products": "Main / purchased products",
+    "procurement_needs": "Procurement needs",
+    "pain_points": "Pain points",
+    "decision_process": "Decision process",
+    "communication_preference": "Communication preference",
+    "risk_notes": "Risk notes",
+    "cooperation_history": "Cooperation history"
   },
   "projects": {
     "title": "Projects",
@@ -124,7 +139,12 @@
     "placeholder": "Add a manual customer note",
     "add": "Add note",
     "create_error": "Failed to add note.",
-    "empty": "No notes yet."
+    "empty": "No notes yet.",
+    "channel": "Channel",
+    "direction": "Direction",
+    "subject": "Subject",
+    "subject_placeholder": "Optional subject",
+    "untitled": "Untitled note"
   },
   "account_types": {
     "prospect": "Prospect",
@@ -164,5 +184,10 @@
     "technical": "Technical",
     "gatekeeper": "Gatekeeper",
     "other": "Other"
+  },
+  "directions": {
+    "inbound": "Inbound",
+    "outbound": "Outbound",
+    "note": "Note"
   }
 }
