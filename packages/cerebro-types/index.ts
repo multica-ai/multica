@@ -1,6 +1,10 @@
 export type CerebroNamespace = "cerebro";
 
-export type { Account, CreateAccountRequest } from "./account";
+export type {
+  Account,
+  CreateAccountRequest,
+  UpdateAccountControlsRequest,
+} from "./account";
 
 // Side-effect import — runs the module-augmentation declarations in
 // augment.ts. Any package that wants the augmented upstream interfaces in
