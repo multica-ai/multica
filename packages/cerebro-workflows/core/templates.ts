@@ -1,11 +1,11 @@
 import type { WorkflowWriteInput } from "./types";
 
 /**
- * Default-trigger startpakke fra [JEH-1047](https://multica.io). Seks templates
- * der dækker de mest brugte cases. To er aktive i fase 1 (status-change og
- * due-date/time); de øvrige er placeholders for fase-2 triggers, vist i
- * pickeren med en "kommer snart"-disabled state så listen matcher spec'en
- * og brugerne ved hvad der er på vej.
+ * Default-trigger startpakke fra [JEH-1047](https://multica.io). Phase 1 shipped
+ * the first two active templates (status-change, due-date-time); phase 2
+ * ([JEH-1103]) adds run-skill and comment-on-issue. The remaining four are
+ * still "coming" — they need triggers that don't exist yet (all_children_done,
+ * comment_mention, cron, sub_issue_created) and land in a future phase.
  *
  * Templates er kun *defaults* — formularen pre-udfylder felter ud fra
  * `defaults`, og brugeren skal trykke Gem for at oprette en aktiv regel.
@@ -67,31 +67,76 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
     },
   },
   {
+    key: "run-skill",
+    label: "Status changed → Run skill",
+    description:
+      "Når et issue går i in_review, kør en navngiven skill på den valgte agent med issue-konteksten som input.",
+    status: "active",
+    defaults: {
+      name: "Auto skill on in_review",
+      enabled: true,
+      trigger_type: "status_changed",
+      trigger_config: { to_status: "in_review" },
+      conditions: [],
+      action_type: "run_skill",
+      action_config: {
+        // skill_name and agent_id are intentionally blank — the user picks
+        // the skill name (must already exist in the workspace) and the agent
+        // that owns the skill bundle before saving.
+        skill_name: "",
+        agent_id: "",
+        skill_input: {
+          issue_title: "{{title}}",
+          issue_status: "{{status}}",
+        },
+      },
+    },
+  },
+  {
+    key: "comment-on-issue",
+    label: "Status changed → Comment on issue",
+    description:
+      "Når et issue ændrer status, post en workflow-forfattet kommentar på issuet eller dets parent.",
+    status: "active",
+    defaults: {
+      name: "Status announcement",
+      enabled: true,
+      trigger_type: "status_changed",
+      trigger_config: { to_status: "in_review" },
+      conditions: [],
+      action_type: "comment_on_issue",
+      action_config: {
+        target: "self",
+        content: "Workflow: {{title}} er nu klar til review.",
+      },
+    },
+  },
+  {
     key: "all-children-done",
     label: "All children done → Update parent",
     description:
-      "Når alle sub-issues er done, flyt parent til in_review. Kommer i fase 2 sammen med all_children_done-triggeren.",
+      "Når alle sub-issues er done, flyt parent til in_review. Kommer i fase 3 sammen med all_children_done-triggeren.",
     status: "coming",
   },
   {
     key: "mention-agent",
     label: "Mention agent in comment → Run agent",
     description:
-      "@mention en agent i en kommentar for at sætte den i gang. Kommer i fase 2 med comment-trigger.",
+      "@mention en agent i en kommentar for at sætte den i gang. Kommer i fase 3 med comment-trigger.",
     status: "coming",
   },
   {
     key: "cron",
     label: "Run on schedule",
     description:
-      "Kør et workflow på cron-skema (fx hver morgen). Kommer i fase 2 med cron-trigger.",
+      "Kør et workflow på cron-skema (fx hver morgen). Kommer i fase 3 med cron-trigger.",
     status: "coming",
   },
   {
     key: "sub-issue-created",
     label: "Sub-issue created → Notify parent owner",
     description:
-      "Notificér parent-issuets ejer når der oprettes et nyt sub-issue. Kommer i fase 2 med sub-issue-trigger.",
+      "Notificér parent-issuets ejer når der oprettes et nyt sub-issue. Kommer i fase 3 med sub-issue-trigger.",
     status: "coming",
   },
 ];
