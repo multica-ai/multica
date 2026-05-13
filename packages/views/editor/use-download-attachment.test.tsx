@@ -101,4 +101,21 @@ describe("useDownloadAttachment (desktop)", () => {
     expect(openSpy).not.toHaveBeenCalled();
     expect(downloadURL).toHaveBeenCalledWith(SIGNED_URL);
   });
+
+  it("shows a toast when the API rejects on desktop", async () => {
+    const downloadURL = vi.fn();
+    (window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }).desktopAPI = {
+      downloadURL,
+    };
+    getAttachmentMock.mockRejectedValueOnce(new Error("network failure"));
+
+    const { result } = renderHook(() => useDownloadAttachment());
+
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    expect(downloadURL).not.toHaveBeenCalled();
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  });
 });

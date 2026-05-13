@@ -6,7 +6,6 @@ import { api } from "@multica/core/api";
 import { useT } from "../i18n";
 
 interface DesktopBridge {
-  openExternal?: (u: string) => Promise<void> | void;
   downloadURL?: (u: string) => Promise<void> | void;
 }
 
