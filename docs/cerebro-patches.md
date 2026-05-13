@@ -110,6 +110,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `autopilot-scope-trigger` | server/internal/handler/autopilot.go | 4 | Trigger-permission check on TriggerAutopilot — JEH-724 |
 | `autopilot-scope-update` | server/internal/handler/autopilot.go | 4 | Edit-permission check on Update — JEH-724 |
 | `autopilots-autopilot-detail-page` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | Autopilots cerebro additions |
+| `autopilot-detail-header-shrink` | packages/views/autopilots/components/autopilot-detail-page.tsx | 4 | JEH-1144 — flex-1 + min-w-0 on the breadcrumb wrapper and shrink-0 on the status toggle + action buttons so they keep natural width when the header has to scroll horizontally on mobile |
 | `batch-action-toolbar-cerebro` | packages/views/issues/components/batch-action-toolbar.tsx | 1 | Issues board/list view cerebro additions |
 | `board-column-cerebro` | packages/views/issues/components/board-column.tsx | 4 | Issues board/list view cerebro additions |
 | `board-view-cerebro` | packages/views/issues/components/board-view.tsx | 4 | Issues board/list view cerebro additions |
@@ -386,6 +387,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `orphan-task-test` | server/internal/handler/daemon_test.go | 0 | Cerebro orphan-task test additions |
 | `page-header-cerebro` | packages/views/layout/page-header.tsx | 1 | Layout cerebro additions |
 | `page-header-sticky` | packages/views/layout/page-header.tsx | 2 | JEH-821 — keep dashboard headers visible while mobile keyboard focus changes the visual viewport |
+| `page-header-overflow-scroll` | packages/views/layout/page-header.tsx | 2 | JEH-1144 — overflow-x-auto + hidden scrollbar so page headers scroll horizontally when title + actions exceed the viewport on mobile |
 | `pricing-pricing` | server/pkg/pricing/pricing.go | 108 | Pricing additions (token cost calc) |
 | `pricing-pricing-test` | server/pkg/pricing/pricing_test.go | 90 | Pricing additions (token cost calc) |
 | `pricing-anthropic-rates-2026-05` | server/pkg/pricing/pricing.go | 1 | Correct Opus 4.5+ rates to actual Anthropic pricing (was 3× over-charging, JEH-996); add Opus 4 / 4.1 / Sonnet 4 / Haiku 3.5 rows + date-suffix stripping in lookup |

@@ -388,14 +388,15 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
+      {/* CEREBRO-PATCH(autopilot-detail-header-shrink): JEH-1144 — give the title room to truncate (flex-1 min-w-0) while pinning the status toggle and action buttons at natural width (shrink-0) so "Active" and "Run now" stay readable on narrow viewports; remaining overflow scrolls via PageHeader. */}
       <PageHeader className="justify-between px-5">
-        <div className="flex items-center gap-2">
-          <AppLink href={wsPaths.autopilots()} className="text-muted-foreground hover:text-foreground transition-colors">
+        <div className="flex flex-1 min-w-0 items-center gap-2">
+          <AppLink href={wsPaths.autopilots()} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
             <Zap className="h-4 w-4" />
           </AppLink>
-          <span className="text-muted-foreground">/</span>
+          <span className="text-muted-foreground shrink-0">/</span>
           <h1 className="text-sm font-medium truncate">{autopilot.title}</h1>
-          <div className="ml-1 flex items-center gap-1.5">
+          <div className="ml-1 flex items-center gap-1.5 shrink-0">
             <Switch
               size="sm"
               checked={autopilot.status === "active"}
@@ -417,7 +418,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)}>
             <Pencil className="h-3.5 w-3.5 mr-1" />
             {t(($) => $.detail.edit)}
