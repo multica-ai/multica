@@ -24,7 +24,9 @@
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",
-    "@xyflow/react": "catalog:"
+    "@xyflow/react": "catalog:",
+    "cron-parser": "catalog:",
+    "zod": "catalog:"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:",

@@ -744,6 +744,20 @@ export class ApiClient {
       : `/api/cerebro/workflows/runs`;
     return this.fetch<T>(qs ? `${base}?${qs}` : base);
   }
+  // CEREBRO-PATCH(cerebro-workflows-client): JEH-1108 phase-3 regenerate endpoints.
+  async regenerateCerebroInboundToken<T = unknown>(id: string): Promise<T> {
+    return this.fetch<T>(`/api/cerebro/workflows/${id}/regenerate-token`, { method: "POST" });
+  }
+  async regenerateCerebroInboundSigningSecret<T = unknown>(id: string): Promise<T> {
+    return this.fetch<T>(`/api/cerebro/workflows/${id}/regenerate-signing-secret`, {
+      method: "POST",
+    });
+  }
+  async regenerateCerebroOutboundSecret<T = unknown>(id: string): Promise<T> {
+    return this.fetch<T>(`/api/cerebro/workflows/${id}/regenerate-outbound-secret`, {
+      method: "POST",
+    });
+  }
 
   // Web Push (per-device subscriptions). The server returns enabled=false
   // when VAPID keys aren't configured — callers should hide the subscribe UI

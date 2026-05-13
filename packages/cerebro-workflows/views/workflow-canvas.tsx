@@ -44,6 +44,15 @@ import type {
   WorkflowWriteInput,
 } from "../core/types";
 import { EMPTY_FORM, buildPayload, formStateFromInput, type FormState } from "./workflow-form";
+import {
+  AllChildrenDoneFields,
+  CommentMentionFields,
+  CronTriggerFields,
+  ReassignIssueFields,
+  SubIssueCreatedFields,
+  WebhookInboundFields,
+  WebhookOutboundFields,
+} from "./workflow-fields";
 
 const ISSUE_STATUSES = [
   "backlog",
@@ -225,6 +234,8 @@ function WorkflowCanvasInner({ workflowId, headerSlot, embedded }: WorkflowCanva
             form={form}
             setForm={setForm}
             statuses={ISSUE_STATUSES}
+            workflowId={workflowId}
+            wsId={wsId}
           />
         </div>
         {error && (
@@ -284,11 +295,15 @@ function Inspector({
   form,
   setForm,
   statuses,
+  workflowId,
+  wsId,
 }: {
   selected: CanvasNodeKind;
   form: FormState;
   setForm: (f: FormState) => void;
   statuses: string[];
+  workflowId?: string;
+  wsId: string;
 }) {
   if (selected === "trigger") {
     return (
@@ -350,6 +365,39 @@ function Inspector({
               </NativeSelect>
             </Field>
           </>
+        )}
+        {form.triggerType === "cron" && (
+          <CronTriggerFields
+            schedule={form.cronSchedule}
+            timezone={form.cronTimezone}
+            onChangeSchedule={(v) => setForm({ ...form, cronSchedule: v })}
+            onChangeTimezone={(v) => setForm({ ...form, cronTimezone: v })}
+          />
+        )}
+        {form.triggerType === "webhook_inbound" && (
+          <WebhookInboundFields
+            workflowId={workflowId}
+            wsId={wsId}
+            hmacToggled={form.inboundHmacToggled}
+            onChangeHmacToggled={(v) => setForm({ ...form, inboundHmacToggled: v })}
+            oneTimeSecret={form.inboundOneTimeSecret}
+            onChangeOneTimeSecret={(v) => setForm({ ...form, inboundOneTimeSecret: v })}
+          />
+        )}
+        {form.triggerType === "comment_mention" && (
+          <CommentMentionFields
+            matchMode={form.commentMatchMode}
+            matchTarget={form.commentMatchTarget}
+            onChangeMatchMode={(v) => setForm({ ...form, commentMatchMode: v })}
+            onChangeMatchTarget={(v) => setForm({ ...form, commentMatchTarget: v })}
+          />
+        )}
+        {form.triggerType === "all_children_done" && <AllChildrenDoneFields />}
+        {form.triggerType === "sub_issue_created" && (
+          <SubIssueCreatedFields
+            parentIssueId={form.subIssueCreatedParentId}
+            onChangeParentIssueId={(v) => setForm({ ...form, subIssueCreatedParentId: v })}
+          />
         )}
       </div>
     );
@@ -564,6 +612,30 @@ function Inspector({
             titel + beskrivelse.
           </p>
         </>
+      )}
+
+      {form.actionType === "webhook_outbound" && (
+        <WebhookOutboundFields
+          workflowId={workflowId}
+          wsId={wsId}
+          url={form.webhookOutboundUrl}
+          headers={form.webhookOutboundHeaders}
+          includeIssueSnapshot={form.webhookOutboundIncludeIssueSnapshot}
+          onChangeUrl={(v) => setForm({ ...form, webhookOutboundUrl: v })}
+          onChangeHeaders={(h) => setForm({ ...form, webhookOutboundHeaders: h })}
+          onChangeIncludeIssueSnapshot={(v) =>
+            setForm({ ...form, webhookOutboundIncludeIssueSnapshot: v })
+          }
+        />
+      )}
+
+      {form.actionType === "reassign_issue" && (
+        <ReassignIssueFields
+          assigneeType={form.reassignAssigneeType}
+          assigneeId={form.reassignAssigneeId}
+          onChangeAssigneeType={(v) => setForm({ ...form, reassignAssigneeType: v })}
+          onChangeAssigneeId={(v) => setForm({ ...form, reassignAssigneeId: v })}
+        />
       )}
     </div>
   );

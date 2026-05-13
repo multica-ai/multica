@@ -218,8 +218,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.RuntimeAccount = cerebroruntime.NewAccountService(cerebroQueries, cerebroAccountHandler.Service, bus)
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
-	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance — runtime service is owned by main.go; this handler is CRUD-only.
-	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries)
+	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
+	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).WithService(opts.WorkflowService)
 
 	r := chi.NewRouter()
 
@@ -861,10 +861,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/{id}", cerebroWorkflowsHandler.Delete)
 				r.Post("/{id}/toggle", cerebroWorkflowsHandler.Toggle)
 				r.Get("/{id}/runs", cerebroWorkflowsHandler.Runs)
-				// CEREBRO-PATCH(cerebro-workflows-regenerate-token): JEH-1108 PR 2 token/secret regeneration endpoints. Each rotates one column and returns the freshly-minted value exactly once; subsequent GETs mask the secret via the _set boolean.
+				// CEREBRO-PATCH(cerebro-workflows-regenerate-token): JEH-1108 PR 2 token/secret regeneration endpoints + PR 3 test-only cron sweep hook (env-gated).
 				r.Post("/{id}/regenerate-token", cerebroWorkflowsHandler.RegenerateInboundToken)
 				r.Post("/{id}/regenerate-signing-secret", cerebroWorkflowsHandler.RegenerateInboundSigningSecret)
 				r.Post("/{id}/regenerate-outbound-secret", cerebroWorkflowsHandler.RegenerateOutboundSecret)
+				r.Post("/_test/cron-sweep", cerebroWorkflowsHandler.TestSweepCron)
 			})
 		})
 	})

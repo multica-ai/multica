@@ -471,7 +471,27 @@ func (s *Service) actionCommentOnIssue(ctx context.Context, wf workflow, te Trig
 		commentIssueID = parent.ParentIssueID
 	}
 
-	content := renderTemplate(cfg.Content, te.Raw)
+	// For comment_mention triggers, project trigger_config into te.Raw under
+	// "trigger" so the rendered content can reference {{trigger.target}} or
+	// the shorthand {{agent_id}} (the mention-agent startpakke uses the
+	// shorthand to inline a working mention://agent/<uuid> link).
+	raw := te.Raw
+	if wf.triggerType == TriggerCommentMention {
+		var tc TriggerConfigCommentMention
+		if jerr := json.Unmarshal(wf.triggerConfig, &tc); jerr == nil {
+			cloned := make(map[string]any, len(raw)+2)
+			for k, v := range raw {
+				cloned[k] = v
+			}
+			cloned["trigger"] = map[string]any{
+				"target":     tc.Target,
+				"match_mode": tc.MatchMode,
+			}
+			cloned["agent_id"] = tc.Target
+			raw = cloned
+		}
+	}
+	content := renderCommentTemplate(cfg.Content, raw)
 	if _, err := s.issues.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     commentIssueID,
 		WorkspaceID: wsID,
@@ -486,30 +506,125 @@ func (s *Service) actionCommentOnIssue(ctx context.Context, wf workflow, te Trig
 	return nil
 }
 
-// renderTemplate substitutes {{title}}, {{status}}, {{priority}} (the legacy
-// phase-1 set), and additionally every top-level string field on the issue
-// payload via {{issue.<field>}} syntax. The full path lookup lets phase-2
-// templates reference fields that weren't promoted to bare placeholders.
+// renderTemplate substitutes templated placeholders against the trigger
+// event's Raw map. Supported syntaxes:
+//
+//   - {{title}}, {{status}}, {{priority}} — phase-1 shorthand for the
+//     corresponding issue field.
+//   - {{issue.<field>}} — phase-2, any top-level string field of
+//     raw["issue"].
+//   - {{payload.<path>...}} — phase-3, dotted-path lookup against
+//     raw["payload"] (the parsed webhook body for webhook_inbound triggers).
+//   - {{trigger.<path>...}} — phase-3, dotted-path lookup against
+//     raw["trigger"] (the workflow's trigger_config, when the action runner
+//     injected it before rendering).
+//
+// Missing keys at any level render as the empty string — a slightly off
+// payload shape degrades gracefully without crashing the action.
 func renderTemplate(tpl string, raw map[string]any) string {
 	if tpl == "" || raw == nil {
 		return tpl
 	}
-	issue, _ := raw["issue"].(map[string]any)
-	if issue == nil {
+	out := tpl
+	if issue, ok := raw["issue"].(map[string]any); ok {
+		for _, key := range []string{"title", "status", "priority"} {
+			if v, ok := issue[key].(string); ok {
+				out = strings.ReplaceAll(out, "{{"+key+"}}", v)
+			}
+		}
+		for key, val := range issue {
+			s, ok := val.(string)
+			if !ok {
+				continue
+			}
+			out = strings.ReplaceAll(out, "{{issue."+key+"}}", s)
+		}
+	}
+	out = renderDottedPaths(out, "payload", raw)
+	out = renderDottedPaths(out, "trigger", raw)
+	return out
+}
+
+// renderDottedPaths scans tpl for {{<root>.a.b.c}} placeholders and replaces
+// each with the string value at raw[root][a][b][c]. Non-string leaf values
+// (numbers, bools) are stringified via fmt.Sprintf("%v"); missing keys yield
+// empty strings.
+//
+// Note: this is intentionally minimal — no array indexing, no fallback
+// expression syntax. Webhook payloads we expect (GitHub, Stripe, etc.) are
+// object-shaped trees of strings, so the simple recursion covers the common
+// case without dragging in a full template engine.
+func renderDottedPaths(tpl, root string, raw map[string]any) string {
+	prefix := "{{" + root + "."
+	if !strings.Contains(tpl, prefix) {
 		return tpl
 	}
+	rootMap, _ := raw[root].(map[string]any)
+	if rootMap == nil {
+		rootMap = map[string]any{}
+	}
 	out := tpl
-	for _, key := range []string{"title", "status", "priority"} {
-		if v, ok := issue[key].(string); ok {
-			out = strings.ReplaceAll(out, "{{"+key+"}}", v)
+	for {
+		i := strings.Index(out, prefix)
+		if i < 0 {
+			break
+		}
+		j := strings.Index(out[i:], "}}")
+		if j < 0 {
+			break
+		}
+		j += i
+		path := out[i+len(prefix) : j]
+		val := lookupDotted(rootMap, strings.Split(path, "."))
+		out = out[:i] + val + out[j+2:]
+	}
+	return out
+}
+
+func lookupDotted(node map[string]any, parts []string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	cur, ok := node[parts[0]]
+	if !ok {
+		return ""
+	}
+	if len(parts) == 1 {
+		switch v := cur.(type) {
+		case string:
+			return v
+		case nil:
+			return ""
+		default:
+			return fmt.Sprintf("%v", v)
 		}
 	}
-	for key, val := range issue {
-		s, ok := val.(string)
-		if !ok {
-			continue
-		}
-		out = strings.ReplaceAll(out, "{{issue."+key+"}}", s)
+	next, ok := cur.(map[string]any)
+	if !ok {
+		return ""
+	}
+	return lookupDotted(next, parts[1:])
+}
+
+// renderCommentTemplate extends renderTemplate with two phase-3 shorthands
+// that only make sense for comment_on_issue actions fired from comment_mention
+// triggers:
+//
+//   - {{agent_id}} → the trigger_config.target UUID (commonly the agent the
+//     comment mentioned), so the startpakke can post a working mention link
+//     back to that agent without users hand-writing the URL.
+//   - {{trigger.<key>}} — already handled by renderTemplate, but listed here
+//     so callers know both forms work.
+//
+// The substitution layers are applied in order: renderTemplate first (which
+// is also where {{trigger.target}} is resolved), then the bare {{agent_id}}
+// shorthand. If raw["agent_id"] is missing, the placeholder is left intact
+// rather than silently emptied — the mention link without a UUID looks worse
+// in a comment thread than the literal placeholder.
+func renderCommentTemplate(tpl string, raw map[string]any) string {
+	out := renderTemplate(tpl, raw)
+	if id, ok := raw["agent_id"].(string); ok && id != "" {
+		out = strings.ReplaceAll(out, "{{agent_id}}", id)
 	}
 	return out
 }

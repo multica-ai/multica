@@ -82,6 +82,16 @@ func (s *Service) RunCronSweeper(ctx context.Context, tick time.Duration) {
 	}
 }
 
+// SweepCronOnce runs one iteration of the cron sweep synchronously. Exported
+// so tests / debug endpoints can advance the engine deterministically without
+// waiting for the 1-minute ticker. The implementation is identical to a
+// natural sweep tick — same idempotency claim, same state advancement — so
+// invoking this in production is harmless beyond the operational cost of an
+// extra DB round-trip.
+func (s *Service) SweepCronOnce(ctx context.Context) error {
+	return s.sweepCron(ctx)
+}
+
 // sweepCron is one iteration of the loop, split out so tests can invoke it
 // deterministically without driving a ticker.
 func (s *Service) sweepCron(ctx context.Context) error {

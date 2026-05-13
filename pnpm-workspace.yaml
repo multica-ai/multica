@@ -41,6 +41,11 @@ catalog:
   # fork; pinned via catalog so the chunk is shared across packages.
   "@xyflow/react": "^12.4.0"
 
+  # Cron-expression preview for workflow-form (cerebro workflows phase 3).
+  # Used only client-side to render the next-fire-times list; the server
+  # validates with robfig/cron/v3.
+  "cron-parser": "^4.9.0"
+
   # i18n
   i18next: "^26.0.8"
   react-i18next: "^17.0.6"

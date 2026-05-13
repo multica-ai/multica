@@ -23,10 +23,23 @@ import {
   updateWorkflow,
 } from "../core";
 import type {
+  CerebroAssigneeType,
+  CerebroCommentMatchMode,
   CerebroWorkflowActionType,
   CerebroWorkflowTriggerType,
   WorkflowWriteInput,
 } from "../core/types";
+import {
+  AllChildrenDoneFields,
+  CommentMentionFields,
+  CronTriggerFields,
+  PHASE3_EMPTY,
+  ReassignIssueFields,
+  SubIssueCreatedFields,
+  WebhookInboundFields,
+  WebhookOutboundFields,
+  type WorkflowPhase3FormFields,
+} from "./workflow-fields";
 
 const ISSUE_STATUSES = [
   "backlog",
@@ -38,7 +51,7 @@ const ISSUE_STATUSES = [
   "cancelled",
 ];
 
-export interface FormState {
+export interface FormState extends WorkflowPhase3FormFields {
   name: string;
   enabled: boolean;
   triggerType: CerebroWorkflowTriggerType;
@@ -72,6 +85,7 @@ export interface FormState {
 }
 
 export const EMPTY_FORM: FormState = {
+  ...PHASE3_EMPTY,
   name: "",
   enabled: true,
   triggerType: "status_changed",
@@ -195,7 +209,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
                       }
                     }}
                   >
-                    {tpl.status === "active" ? "Brug" : "Kommer i fase 3"}
+                    {tpl.status === "active" ? "Brug" : "Kommer i fase 4"}
                   </Button>
                 </li>
               ))}
@@ -263,6 +277,39 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
                 </NativeSelect>
               </Field>
             </>
+          )}
+          {form.triggerType === "cron" && (
+            <CronTriggerFields
+              schedule={form.cronSchedule}
+              timezone={form.cronTimezone}
+              onChangeSchedule={(v) => setForm({ ...form, cronSchedule: v })}
+              onChangeTimezone={(v) => setForm({ ...form, cronTimezone: v })}
+            />
+          )}
+          {form.triggerType === "webhook_inbound" && (
+            <WebhookInboundFields
+              workflowId={workflowId}
+              wsId={wsId}
+              hmacToggled={form.inboundHmacToggled}
+              onChangeHmacToggled={(v) => setForm({ ...form, inboundHmacToggled: v })}
+              oneTimeSecret={form.inboundOneTimeSecret}
+              onChangeOneTimeSecret={(v) => setForm({ ...form, inboundOneTimeSecret: v })}
+            />
+          )}
+          {form.triggerType === "comment_mention" && (
+            <CommentMentionFields
+              matchMode={form.commentMatchMode}
+              matchTarget={form.commentMatchTarget}
+              onChangeMatchMode={(v) => setForm({ ...form, commentMatchMode: v })}
+              onChangeMatchTarget={(v) => setForm({ ...form, commentMatchTarget: v })}
+            />
+          )}
+          {form.triggerType === "all_children_done" && <AllChildrenDoneFields />}
+          {form.triggerType === "sub_issue_created" && (
+            <SubIssueCreatedFields
+              parentIssueId={form.subIssueCreatedParentId}
+              onChangeParentIssueId={(v) => setForm({ ...form, subIssueCreatedParentId: v })}
+            />
           )}
         </Section>
 
@@ -492,6 +539,30 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
               </p>
             </>
           )}
+
+          {form.actionType === "webhook_outbound" && (
+            <WebhookOutboundFields
+              workflowId={workflowId}
+              wsId={wsId}
+              url={form.webhookOutboundUrl}
+              headers={form.webhookOutboundHeaders}
+              includeIssueSnapshot={form.webhookOutboundIncludeIssueSnapshot}
+              onChangeUrl={(v) => setForm({ ...form, webhookOutboundUrl: v })}
+              onChangeHeaders={(h) => setForm({ ...form, webhookOutboundHeaders: h })}
+              onChangeIncludeIssueSnapshot={(v) =>
+                setForm({ ...form, webhookOutboundIncludeIssueSnapshot: v })
+              }
+            />
+          )}
+
+          {form.actionType === "reassign_issue" && (
+            <ReassignIssueFields
+              assigneeType={form.reassignAssigneeType}
+              assigneeId={form.reassignAssigneeId}
+              onChangeAssigneeType={(v) => setForm({ ...form, reassignAssigneeType: v })}
+              onChangeAssigneeId={(v) => setForm({ ...form, reassignAssigneeId: v })}
+            />
+          )}
         </Section>
 
         {error && (
@@ -560,7 +631,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 // Unknown fields default to EMPTY_FORM so a template doesn't have to specify
 // every action_config slot.
 export function formStateFromInput(input: WorkflowWriteInput): FormState {
-  const tc = (input.trigger_config as { from_status?: string; to_status?: string } | null) ?? {};
+  const tc = (input.trigger_config as Record<string, unknown> | null) ?? {};
   const ac = (input.action_config as Record<string, unknown> | null) ?? {};
   const labelIDs = Array.isArray(ac.label_ids) ? (ac.label_ids as string[]).join(",") : "";
   return {
@@ -568,8 +639,8 @@ export function formStateFromInput(input: WorkflowWriteInput): FormState {
     name: input.name ?? "",
     enabled: input.enabled ?? true,
     triggerType: input.trigger_type,
-    fromStatus: tc.from_status ?? "",
-    toStatus: tc.to_status ?? EMPTY_FORM.toStatus,
+    fromStatus: (tc.from_status as string) ?? "",
+    toStatus: (tc.to_status as string) ?? EMPTY_FORM.toStatus,
     actionType: input.action_type,
     setStatus: (ac.status as string) ?? EMPTY_FORM.setStatus,
     subIssueTitle: (ac.title as string) ?? "",
@@ -595,6 +666,23 @@ export function formStateFromInput(input: WorkflowWriteInput): FormState {
         ? (ac.default_domain as FormState["routeDefaultDomain"])
         : EMPTY_FORM.routeDefaultDomain,
     conditionsJSON: stringifyConditions(input.conditions),
+    // Phase 3.
+    cronSchedule: (tc.schedule_expr as string) ?? EMPTY_FORM.cronSchedule,
+    cronTimezone: (tc.timezone as string) ?? EMPTY_FORM.cronTimezone,
+    commentMatchMode: (tc.match_mode as CerebroCommentMatchMode) ?? EMPTY_FORM.commentMatchMode,
+    commentMatchTarget: (tc.target as string) ?? "",
+    subIssueCreatedParentId: (tc.parent_issue_id as string) ?? "",
+    webhookOutboundUrl: (ac.url as string) ?? "",
+    webhookOutboundHeaders: headersFromAC(ac.headers),
+    webhookOutboundIncludeIssueSnapshot:
+      typeof ac.include_issue_snapshot === "boolean"
+        ? (ac.include_issue_snapshot as boolean)
+        : EMPTY_FORM.webhookOutboundIncludeIssueSnapshot,
+    reassignAssigneeType: (ac.assignee_type as CerebroAssigneeType) ?? EMPTY_FORM.reassignAssigneeType,
+    reassignAssigneeId:
+      typeof ac.assignee_id === "string" && input.action_type === "reassign_issue"
+        ? (ac.assignee_id as string)
+        : EMPTY_FORM.reassignAssigneeId,
   };
 }
 
@@ -613,6 +701,17 @@ function stringifyConditions(c: unknown): string {
 
 function isRouteDomain(v: unknown): v is FormState["routeDefaultDomain"] {
   return v === "code" || v === "business" || v === "design" || v === "content";
+}
+
+function headersFromAC(raw: unknown): Array<{ key: string; value: string }> {
+  if (!raw || typeof raw !== "object") return [];
+  const out: Array<{ key: string; value: string }> = [];
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof k === "string" && typeof v === "string") {
+      out.push({ key: k, value: v });
+    }
+  }
+  return out;
 }
 
 // formStateFromWorkflow accepts a CerebroWorkflow row (subset of WriteInput
@@ -636,10 +735,28 @@ function formStateFromWorkflow(row: {
 }
 
 export function buildPayload(f: FormState): WorkflowWriteInput {
-  const triggerConfig =
-    f.triggerType === "status_changed"
-      ? { from_status: f.fromStatus || undefined, to_status: f.toStatus || undefined }
-      : {};
+  let triggerConfig: Record<string, unknown> = {};
+  if (f.triggerType === "status_changed") {
+    triggerConfig = {
+      from_status: f.fromStatus || undefined,
+      to_status: f.toStatus || undefined,
+    };
+  } else if (f.triggerType === "cron") {
+    triggerConfig = {
+      schedule_expr: f.cronSchedule,
+      timezone: f.cronTimezone || undefined,
+    };
+  } else if (f.triggerType === "comment_mention") {
+    triggerConfig = {
+      match_mode: f.commentMatchMode,
+      target: f.commentMatchTarget,
+    };
+  } else if (f.triggerType === "sub_issue_created") {
+    triggerConfig = {
+      parent_issue_id: f.subIssueCreatedParentId || undefined,
+    };
+  }
+  // all_children_done + webhook_inbound + due_* triggers have no trigger_config.
 
   let actionConfig: Record<string, unknown> = {};
   if (f.actionType === "set_status") {
@@ -677,6 +794,21 @@ export function buildPayload(f: FormState): WorkflowWriteInput {
     actionConfig = {
       label_prefix: f.routeLabelPrefix || undefined,
       default_domain: f.routeDefaultDomain,
+    };
+  } else if (f.actionType === "webhook_outbound") {
+    const headers: Record<string, string> = {};
+    for (const { key, value } of f.webhookOutboundHeaders) {
+      if (key.trim()) headers[key.trim()] = value;
+    }
+    actionConfig = {
+      url: f.webhookOutboundUrl,
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
+      include_issue_snapshot: f.webhookOutboundIncludeIssueSnapshot,
+    };
+  } else if (f.actionType === "reassign_issue") {
+    actionConfig = {
+      assignee_id: f.reassignAssigneeId,
+      assignee_type: f.reassignAssigneeType,
     };
   }
 

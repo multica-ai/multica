@@ -28,10 +28,23 @@ import (
 // scope every read/write through the workspace ID in context.
 type Handler struct {
 	Cerebro *cerebrodb.Queries
+	// Service is an optional reference to the engine used by the test-only
+	// /api/cerebro/workflows/_test/cron-sweep endpoint (phase-3, JEH-1108).
+	// In production this is nil and the test endpoint returns 404. The e2e
+	// suite gates the endpoint with CEREBRO_WORKFLOWS_TEST_ENDPOINTS=1.
+	Service *Service
 }
 
 func NewHandler(cerebro *cerebrodb.Queries) *Handler {
 	return &Handler{Cerebro: cerebro}
+}
+
+// WithService wires the engine reference used by the test-only cron-sweep
+// hook. Callers in main.go (or test setup) invoke this after constructing
+// the Service. Returns the receiver for chainable initialisation.
+func (h *Handler) WithService(svc *Service) *Handler {
+	h.Service = svc
+	return h
 }
 
 const (
@@ -592,6 +605,33 @@ func (h *Handler) RegenerateOutboundSecret(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]string{
 		"outbound_webhook_secret": secret,
 	})
+}
+
+// TestSweepCron is a build-time-stable but env-gated debug endpoint that
+// fires one synchronous iteration of the cron sweeper. Used by the phase-3
+// e2e tests so they don't have to wait for the 60-second ticker. Returns 404
+// unless CEREBRO_WORKFLOWS_TEST_ENDPOINTS=1 is set on the backend — in any
+// other configuration the endpoint behaves as if it doesn't exist.
+//
+// We gate on env rather than a Go build tag because Playwright drives the
+// same binary CI uses for unit tests, and a separate build target would
+// double the CI matrix without buying isolation we don't have anyway (the
+// endpoint is harmless in production — same Service.sweepCron call the
+// in-process ticker makes).
+func (h *Handler) TestSweepCron(w http.ResponseWriter, r *http.Request) {
+	if os.Getenv("CEREBRO_WORKFLOWS_TEST_ENDPOINTS") != "1" {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if h.Service == nil {
+		writeError(w, http.StatusServiceUnavailable, "engine not wired")
+		return
+	}
+	if err := h.Service.SweepCronOnce(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("sweep failed: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // loadWorkflowForWrite is the auth + workspace-scope check shared by the

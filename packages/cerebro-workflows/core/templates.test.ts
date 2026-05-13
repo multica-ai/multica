@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { WORKFLOW_TEMPLATES } from "./templates";
 
 describe("WORKFLOW_TEMPLATES", () => {
-  it("ships the ten startpakke entries (6 active + 4 coming) from JEH-1047/JEH-1103/JEH-1114", () => {
+  it("ships the twelve startpakke entries (all active after phase 3) from JEH-1047/JEH-1103/JEH-1114/JEH-1108", () => {
     expect(WORKFLOW_TEMPLATES.map((t) => t.key)).toEqual([
       "status-change",
       "due-date-time",
@@ -14,14 +14,16 @@ describe("WORKFLOW_TEMPLATES", () => {
       "mention-agent",
       "cron",
       "sub-issue-created",
+      "cron-daily-standup",
+      "webhook-github-pr",
     ]);
   });
 
-  it("has six active templates and four coming-soon placeholders", () => {
+  it("has twelve active templates and zero remaining placeholders after phase 3", () => {
     const active = WORKFLOW_TEMPLATES.filter((t) => t.status === "active");
     const coming = WORKFLOW_TEMPLATES.filter((t) => t.status === "coming");
-    expect(active).toHaveLength(6);
-    expect(coming).toHaveLength(4);
+    expect(active).toHaveLength(12);
+    expect(coming).toHaveLength(0);
   });
 
   it("attaches defaults to every active template (and never to coming ones)", () => {
@@ -117,5 +119,91 @@ describe("WORKFLOW_TEMPLATES", () => {
     };
     expect(cfg.target).toBe("self");
     expect(cfg.content).toContain("{{title}}");
+  });
+
+  // --- Phase 3 (JEH-1108) ---
+
+  it("pins the all-children-done template's set_status shape", () => {
+    const t = WORKFLOW_TEMPLATES.find((x) => x.key === "all-children-done");
+    expect(t).toBeDefined();
+    expect(t!.defaults!.trigger_type).toBe("all_children_done");
+    expect(t!.defaults!.action_type).toBe("set_status");
+    const cfg = t!.defaults!.action_config as { status: string };
+    expect(cfg.status).toBe("in_review");
+  });
+
+  it("pins the mention-agent template's comment_mention → auto-reply shape", () => {
+    const t = WORKFLOW_TEMPLATES.find((x) => x.key === "mention-agent");
+    expect(t).toBeDefined();
+    expect(t!.defaults!.trigger_type).toBe("comment_mention");
+    // Action: post a comment back on the same issue that mentions the
+    // configured agent so it gets queued. The mention link uses the phase-3
+    // {{agent_id}} shorthand (substituted from trigger_config.target by
+    // actionCommentOnIssue).
+    expect(t!.defaults!.action_type).toBe("comment_on_issue");
+    const tc = t!.defaults!.trigger_config as { match_mode: string; target: string };
+    expect(tc.match_mode).toBe("agent");
+    expect(tc.target).toBe("");
+    const cfg = t!.defaults!.action_config as { target: string; content: string };
+    expect(cfg.target).toBe("self");
+    expect(cfg.content).toContain("mention://agent");
+    expect(cfg.content).toContain("{{agent_id}}");
+  });
+
+  it("pins the cron template's 09:00 Europe/Copenhagen schedule", () => {
+    // RFC notes either "0 9 * * *" (daily) or "0 9 * * 1-5" (hverdage) is
+    // acceptable for this template — assertion accepts both so a future
+    // tweak doesn't break the pin.
+    const t = WORKFLOW_TEMPLATES.find((x) => x.key === "cron");
+    expect(t).toBeDefined();
+    expect(t!.defaults!.trigger_type).toBe("cron");
+    const tc = t!.defaults!.trigger_config as {
+      schedule_expr: string;
+      timezone: string;
+    };
+    expect(["0 9 * * *", "0 9 * * 1-5"]).toContain(tc.schedule_expr);
+    expect(tc.timezone).toBe("Europe/Copenhagen");
+  });
+
+  it("pins the sub-issue-created template's comment_on_issue → parent shape", () => {
+    const t = WORKFLOW_TEMPLATES.find((x) => x.key === "sub-issue-created");
+    expect(t).toBeDefined();
+    expect(t!.defaults!.trigger_type).toBe("sub_issue_created");
+    expect(t!.defaults!.action_type).toBe("comment_on_issue");
+    const cfg = t!.defaults!.action_config as { target: string; content: string };
+    expect(cfg.target).toBe("parent");
+    expect(cfg.content).toContain("{{title}}");
+  });
+
+  it("pins the cron-daily-standup template's hverdag 09:00 schedule", () => {
+    const t = WORKFLOW_TEMPLATES.find((x) => x.key === "cron-daily-standup");
+    expect(t).toBeDefined();
+    expect(t!.defaults!.trigger_type).toBe("cron");
+    const tc = t!.defaults!.trigger_config as {
+      schedule_expr: string;
+      timezone: string;
+    };
+    // Mandag–fredag kl. 09:00.
+    expect(tc.schedule_expr).toBe("0 9 * * 1-5");
+    expect(tc.timezone).toBe("Europe/Copenhagen");
+    expect(t!.defaults!.action_type).toBe("run_skill");
+    const cfg = t!.defaults!.action_config as { skill_name: string; agent_id: string };
+    // skill_name pre-udfyldt — agent_id stadig blank (brugeren vælger ejer-agent).
+    expect(cfg.skill_name).toBe("daily-standup-summary");
+    expect(cfg.agent_id).toBe("");
+  });
+
+  it("pins the webhook-github-pr template's webhook_inbound → create_sub_issue shape", () => {
+    const t = WORKFLOW_TEMPLATES.find((x) => x.key === "webhook-github-pr");
+    expect(t).toBeDefined();
+    expect(t!.defaults!.trigger_type).toBe("webhook_inbound");
+    expect(t!.defaults!.action_type).toBe("create_sub_issue");
+    const cfg = t!.defaults!.action_config as { title: string; description: string };
+    // Title can be either a literal (RFC option a, no engine extension) or
+    // a {{payload.x}} placeholder if engine is extended. Both forms count
+    // as "valid" — the assertion just pins that *some* title and a
+    // description are present.
+    expect(cfg.title.length).toBeGreaterThan(0);
+    expect(cfg.description.length).toBeGreaterThan(0);
   });
 });

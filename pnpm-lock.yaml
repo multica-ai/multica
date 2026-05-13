@@ -42,6 +42,9 @@ catalogs:
     clsx:
       specifier: ^2.1.1
       version: 2.1.1
+    cron-parser:
+      specifier: ^4.9.0
+      version: 4.9.0
     eslint-plugin-i18next:
       specifier: ^6.1.4
       version: 6.1.4
@@ -1520,12 +1523,18 @@ importers:
       '@xyflow/react':
         specifier: 'catalog:'
         version: 12.10.2(@types/react@19.2.14)(immer@11.1.8)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      cron-parser:
+        specifier: 'catalog:'
+        version: 4.9.0
       lucide-react:
         specifier: 'catalog:'
         version: 1.14.0(react@19.2.3)
       react:
         specifier: 'catalog:'
         version: 19.2.3
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
       zustand:
         specifier: 'catalog:'
         version: 5.0.13(@types/react@19.2.14)(immer@11.1.8)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
@@ -4991,6 +5000,10 @@ packages:
   crc@3.8.0:
     resolution: {integrity: sha512-iX3mfgcTMIq3ZKLIsVFAbv7+Mc10kxabAGQb8HvjA1o3T1PIYprbakQ65d3I+2HGHt6nSKkM9PYjgoJO2KcFBQ==}
 
+  cron-parser@4.9.0:
+    resolution: {integrity: sha512-p0SaNjrHOnQeR8/VnfGbmg9te2kfyYSQ7Sc/j/6DtPL3JQvKxmjO9TSjNFpujqV3vEYYBvNNvXSxzyksBWAx1Q==}
+    engines: {node: '>=12.0.0'}
+
   cross-dirname@0.1.0:
     resolution: {integrity: sha512-+R08/oI0nl3vfPcqftZRpytksBXDzOUveBq/NBVx0sUp1axwzPQrKinNx5yd5sxPu8j1wIy8AfnVQ+5eFdha6Q==}
 
@@ -6673,6 +6686,10 @@ packages:
     resolution: {integrity: sha512-+1mdWcfSJVUsaTIjN9zoezmUhfXo5l0vP7ekBMPo3jcS/aIkxHnXqAPsByszMZx/Y8oQBRJxJx5xg+RH3urzxA==}
     peerDependencies:
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
+  luxon@3.7.2:
+    resolution: {integrity: sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew==}
+    engines: {node: '>=12'}
 
   lz-string@1.5.0:
     resolution: {integrity: sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==}
@@ -11753,6 +11770,10 @@ snapshots:
       buffer: 5.7.1
     optional: true
 
+  cron-parser@4.9.0:
+    dependencies:
+      luxon: 3.7.2
+
   cross-dirname@0.1.0:
     optional: true
 
@@ -13775,6 +13796,8 @@ snapshots:
   lucide-react@1.14.0(react@19.2.3):
     dependencies:
       react: 19.2.3
+
+  luxon@3.7.2: {}
 
   lz-string@1.5.0: {}
 

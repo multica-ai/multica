@@ -1,7 +1,13 @@
 export type CerebroWorkflowTriggerType =
   | "status_changed"
   | "due_date_reached"
-  | "due_time_reached";
+  | "due_time_reached"
+  // Phase 3 (JEH-1108).
+  | "cron"
+  | "webhook_inbound"
+  | "comment_mention"
+  | "all_children_done"
+  | "sub_issue_created";
 
 export type CerebroWorkflowActionType =
   | "set_status"
@@ -9,7 +15,10 @@ export type CerebroWorkflowActionType =
   | "send_reminder"
   | "run_skill"
   | "comment_on_issue"
-  | "route_by_domain";
+  | "route_by_domain"
+  // Phase 3 (JEH-1108).
+  | "webhook_outbound"
+  | "reassign_issue";
 
 export type CerebroWorkflowRunStatus =
   | "queued"
@@ -19,6 +28,37 @@ export type CerebroWorkflowRunStatus =
   | "escalated";
 
 export type CerebroWorkflowEditorMode = "form" | "canvas";
+
+// Phase-3 trigger config shapes (mirrors server/internal/cerebro/workflows/types.go).
+export interface TriggerConfigCron {
+  schedule_expr: string;
+  timezone?: string;
+}
+
+export type CerebroCommentMatchMode = "agent" | "member" | "keyword" | "regex";
+
+export interface TriggerConfigCommentMention {
+  match_mode: CerebroCommentMatchMode;
+  target: string;
+}
+
+export interface TriggerConfigSubIssueCreated {
+  parent_issue_id?: string;
+}
+
+// Phase-3 action config shapes.
+export interface ActionConfigWebhookOutbound {
+  url: string;
+  headers?: Record<string, string>;
+  include_issue_snapshot?: boolean;
+}
+
+export type CerebroAssigneeType = "member" | "agent";
+
+export interface ActionConfigReassignIssue {
+  assignee_id: string;
+  assignee_type: CerebroAssigneeType;
+}
 
 export interface CerebroWorkflow {
   id: string;
@@ -40,6 +80,14 @@ export interface CerebroWorkflow {
   created_by_type: "member" | "agent";
   created_at: string;
   updated_at: string;
+  // Phase 3 (JEH-1108). The inbound token is part of the integration URL
+  // and is intentionally visible after creation. The two secrets are
+  // mask-on-read — only the presence-bool is returned. Server omits the
+  // token field entirely (omitempty) until RegenerateInboundToken runs,
+  // so default to undefined here too.
+  inbound_webhook_token?: string;
+  inbound_signing_secret_set?: boolean;
+  outbound_webhook_secret_set?: boolean;
 }
 
 export interface CerebroWorkflowRun {
@@ -65,6 +113,22 @@ export interface WorkflowRunsListResponse {
   runs: CerebroWorkflowRun[];
   limit: number;
   offset: number;
+}
+
+// Phase-3 regenerate-endpoint responses (JEH-1108). The plaintext secret /
+// token leaves the server exactly once, on the regenerate response; the
+// UI is responsible for showing it to the user before navigating away.
+export interface RegenerateInboundTokenResponse {
+  inbound_webhook_token: string;
+  inbound_webhook_url: string;
+}
+
+export interface RegenerateInboundSigningSecretResponse {
+  inbound_signing_secret: string;
+}
+
+export interface RegenerateOutboundSecretResponse {
+  outbound_webhook_secret: string;
 }
 
 // Form input shape used by the workflow-form view. Maps 1:1 onto the
@@ -106,6 +170,31 @@ export const TRIGGER_OPTIONS: ReadonlyArray<{
     label: "Due time reached",
     description: "Fires at a specific clock time on the due date.",
   },
+  {
+    value: "cron",
+    label: "Cron schedule",
+    description: "Fires on a cron-style schedule (e.g. every weekday at 09:00).",
+  },
+  {
+    value: "webhook_inbound",
+    label: "Inbound webhook",
+    description: "Fires when an external system POSTs to this workflow's webhook URL.",
+  },
+  {
+    value: "comment_mention",
+    label: "Comment mention",
+    description: "Fires when a new comment matches an agent/member/keyword/regex.",
+  },
+  {
+    value: "all_children_done",
+    label: "All children done",
+    description: "Fires when every sub-issue of a parent reaches done.",
+  },
+  {
+    value: "sub_issue_created",
+    label: "Sub-issue created",
+    description: "Fires when a new sub-issue is added under any (or a specific) parent.",
+  },
 ];
 
 export const ACTION_OPTIONS: ReadonlyArray<{
@@ -144,6 +233,16 @@ export const ACTION_OPTIONS: ReadonlyArray<{
     description:
       "Klassificér issuet (kode/business/design/indhold) og attach et `<prefix><domain>` label.",
   },
+  {
+    value: "webhook_outbound",
+    label: "Outbound webhook",
+    description: "POST the trigger event (and optional issue snapshot) to an external URL.",
+  },
+  {
+    value: "reassign_issue",
+    label: "Reassign issue",
+    description: "Re-point the triggered issue's assignee to a member or agent.",
+  },
 ];
 
 export const RUN_STATUS_BADGE: Record<CerebroWorkflowRunStatus, string> = {
@@ -153,3 +252,17 @@ export const RUN_STATUS_BADGE: Record<CerebroWorkflowRunStatus, string> = {
   failed: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   escalated: "bg-red-500/10 text-red-600 dark:text-red-400",
 };
+
+// Outbound webhook headers — the server-side guard rejects anything that
+// doesn't match this allow-ish list. Kept in sync so the UI can show
+// inline errors before the user clicks save.
+export const FORBIDDEN_OUTBOUND_HEADERS: ReadonlyArray<string> = [
+  "authorization",
+  "cookie",
+];
+
+export const FORBIDDEN_OUTBOUND_HEADER_PREFIXES: ReadonlyArray<string> = [
+  "x-multica-",
+];
+
+export const HEADER_NAME_RE = /^[A-Za-z0-9-]+$/;

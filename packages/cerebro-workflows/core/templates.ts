@@ -3,9 +3,11 @@ import type { WorkflowWriteInput } from "./types";
 /**
  * Default-trigger startpakke fra [JEH-1047](https://multica.io). Phase 1 shipped
  * the first two active templates (status-change, due-date-time); phase 2
- * ([JEH-1103]) adds run-skill and comment-on-issue. The remaining four are
- * still "coming" — they need triggers that don't exist yet (all_children_done,
- * comment_mention, cron, sub_issue_created) and land in a future phase.
+ * ([JEH-1103]) added run-skill and comment-on-issue. Phase 3 ([JEH-1108])
+ * activates the four "coming" placeholders (all-children-done,
+ * mention-agent, cron, sub-issue-created) and adds two new entries
+ * (cron-daily-standup, webhook-github-pr) — for a total of 10 active
+ * templates with no remaining "coming" placeholders.
  *
  * Templates er kun *defaults* — formularen pre-udfylder felter ud fra
  * `defaults`, og brugeren skal trykke Gem for at oprette en aktiv regel.
@@ -169,29 +171,143 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
   {
     key: "all-children-done",
     label: "All children done → Update parent",
-    description:
-      "Når alle sub-issues er done, flyt parent til in_review. Kommer i fase 3 sammen med all_children_done-triggeren.",
-    status: "coming",
+    description: "Når alle children er done, flyt parent til in_review.",
+    status: "active",
+    defaults: {
+      name: "Auto promote parent when all children done",
+      enabled: true,
+      trigger_type: "all_children_done",
+      // No trigger_config fields — the listener already scopes by the
+      // triggered issue's parent so workspace-wide misfires aren't possible.
+      trigger_config: {},
+      conditions: [],
+      action_type: "set_status",
+      action_config: {
+        status: "in_review",
+      },
+    },
   },
   {
     key: "mention-agent",
-    label: "Mention agent in comment → Run agent",
-    description:
-      "@mention en agent i en kommentar for at sætte den i gang. Kommer i fase 3 med comment-trigger.",
-    status: "coming",
+    label: "Mention agent in comment → Auto-reply",
+    description: "Når en agent @mentiones i en kommentar, re-route issue til den.",
+    status: "active",
+    defaults: {
+      name: "Mention → auto-reply",
+      enabled: true,
+      trigger_type: "comment_mention",
+      trigger_config: {
+        // Mode "agent" matches a comment that @mentions the agent referenced
+        // by target. Target stays blank until the user picks the agent UUID.
+        match_mode: "agent",
+        target: "",
+      },
+      conditions: [],
+      action_type: "comment_on_issue",
+      action_config: {
+        target: "self",
+        // Posts a mention link back to the configured agent so it gets
+        // queued. {{agent_id}} is substituted from trigger_config.target by
+        // the comment-on-issue action helper (phase-3 extension).
+        content: "[@<agent>](mention://agent/{{agent_id}})",
+      },
+    },
   },
   {
     key: "cron",
     label: "Run on schedule",
-    description:
-      "Kør et workflow på cron-skema (fx hver morgen). Kommer i fase 3 med cron-trigger.",
-    status: "coming",
+    description: "Kør en navngivet skill på et fast skema.",
+    status: "active",
+    defaults: {
+      name: "Run skill on schedule",
+      enabled: true,
+      trigger_type: "cron",
+      trigger_config: {
+        // Hver dag kl. 09:00 Europe/Copenhagen — server-side sweeper bruger
+        // robfig/cron/v3 til at parse udtrykket. cron-daily-standup nedenfor
+        // har en mere snæver "kun hverdage" variant.
+        schedule_expr: "0 9 * * *",
+        timezone: "Europe/Copenhagen",
+      },
+      conditions: [],
+      action_type: "run_skill",
+      action_config: {
+        // Blank — user picks skill_name + agent_id before saving.
+        skill_name: "",
+        agent_id: "",
+        skill_input: {},
+      },
+    },
   },
   {
     key: "sub-issue-created",
-    label: "Sub-issue created → Notify parent owner",
-    description:
-      "Notificér parent-issuets ejer når der oprettes et nyt sub-issue. Kommer i fase 3 med sub-issue-trigger.",
-    status: "coming",
+    label: "Sub-issue created → Comment on parent",
+    description: "Notificér parent når der oprettes nye sub-issues.",
+    status: "active",
+    defaults: {
+      name: "Nyt sub-issue → kommentar på parent",
+      enabled: true,
+      trigger_type: "sub_issue_created",
+      trigger_config: {
+        // Empty parent_issue_id matches any sub-issue in the workspace.
+        // User can pin to a specific parent UUID before saving.
+        parent_issue_id: "",
+      },
+      conditions: [],
+      action_type: "comment_on_issue",
+      action_config: {
+        target: "parent",
+        content: "Nyt sub-issue oprettet: {{title}}",
+      },
+    },
+  },
+  {
+    key: "cron-daily-standup",
+    label: "Daily stand-up → Run skill",
+    description: "Daglig standup-summary på hverdage kl. 9.",
+    status: "active",
+    defaults: {
+      name: "Daily stand-up skill",
+      enabled: true,
+      trigger_type: "cron",
+      trigger_config: {
+        // Mandag–fredag kl. 09:00 Europe/Copenhagen.
+        schedule_expr: "0 9 * * 1-5",
+        timezone: "Europe/Copenhagen",
+      },
+      conditions: [],
+      action_type: "run_skill",
+      action_config: {
+        // skill_name pre-fyldt med spec'ens navne-suggestion; agent_id blank
+        // så brugeren vælger den agent der ejer skillen før gem.
+        skill_name: "daily-standup-summary",
+        agent_id: "",
+        skill_input: {},
+      },
+    },
+  },
+  {
+    key: "webhook-github-pr",
+    label: "GitHub PR webhook → Create sub-issue",
+    description: "Inbound webhook fra GitHub PR-event → opret sub-issue.",
+    status: "active",
+    defaults: {
+      name: "GitHub PR webhook → sub-issue",
+      enabled: true,
+      trigger_type: "webhook_inbound",
+      // No trigger_config for inbound webhooks — the token + secret live on
+      // the workflow row (regenerate-token endpoint mints them).
+      trigger_config: {},
+      conditions: [],
+      action_type: "create_sub_issue",
+      action_config: {
+        // Phase-3 renderTemplate extension allows arbitrary {{payload.x.y}}
+        // dotted-path lookups against te.Raw["payload"] (the parsed webhook
+        // body). Missing keys render as empty strings, so a slightly off
+        // payload shape degrades gracefully instead of crashing the action.
+        title: "GitHub PR: {{payload.pull_request.title}}",
+        description: "Ny webhook fra GitHub PR. Se workflow-loggen for payload.",
+      },
+    },
   },
 ];

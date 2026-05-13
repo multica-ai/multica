@@ -197,6 +197,163 @@ test.describe("Cerebro workflows (JEH-1047)", () => {
 
     await deleteWorkflow(token, workflowId);
   });
+
+  // --- Phase 3 (JEH-1108) acceptance paths ---
+
+  test("phase 3: cron → run_skill enqueues a quick_create task after test-sweep", async () => {
+    // The cron path drives the engine via the test-only sweep endpoint,
+    // which is itself gated by an env var on the backend. Skip cleanly when
+    // the hook isn't wired so the result is "skipped", not "flaky failure".
+    test.skip(
+      process.env.CEREBRO_WORKFLOWS_TEST_ENDPOINTS !== "1",
+      "CEREBRO_WORKFLOWS_TEST_ENDPOINTS not set — cron sweep hook unavailable.",
+    );
+    // Seed fixtures + a workspace-scoped skill the agent owns.
+    const wsId = await getDefaultWorkspaceId(token);
+    const skillName = `wf-e2e-cron-skill-${Date.now()}`;
+    const fixtures = await seedSkillAgentFixture(wsId, skillName);
+
+    // Create the cron workflow via API. We pick a "fires every minute"
+    // schedule so the first SQL-nudge below crosses next_fire_at.
+    const workflowId = await createWorkflowViaAPI(token, {
+      name: `WF E2E cron ${Date.now()}`,
+      trigger_type: "cron",
+      trigger_config: {
+        schedule_expr: "* * * * *",
+        timezone: "Europe/Copenhagen",
+      },
+      action_type: "run_skill",
+      action_config: {
+        skill_name: skillName,
+        agent_id: fixtures.agentId,
+        skill_input: {},
+      },
+    });
+
+    // First sweep: anchors cron_state, no fire.
+    await callTestSweep(token);
+    // SQL-nudge: backdate next_fire_at so the next sweep crosses it.
+    await nudgeCronNextFire(workflowId);
+    await callTestSweep(token);
+
+    const enqueued = await pollForQuickCreateTask(fixtures.agentId);
+    expect(enqueued, "expected the cron sweep to enqueue a quick_create task").toBeDefined();
+    expect(enqueued!.workflowId).toBe(workflowId);
+    expect(enqueued!.skillName).toBe(skillName);
+
+    const runs = await listWorkflowRuns(token);
+    const matching = runs.find((r) => r.status === "success");
+    expect(matching, "expected at least one success cron run").toBeDefined();
+
+    await deleteWorkflow(token, workflowId);
+    await deleteAgentTaskAndFixture(enqueued!.taskId, fixtures);
+  });
+
+  test("phase 3: webhook_inbound → create_sub_issue on signed POST", async () => {
+    const parentIssue = await api.createIssue(`WF E2E webhook parent ${Date.now()}`, {
+      status: "todo",
+    });
+
+    const workflowId = await createWorkflowViaAPI(token, {
+      name: `WF E2E webhook ${Date.now()}`,
+      trigger_type: "webhook_inbound",
+      trigger_config: {},
+      action_type: "create_sub_issue",
+      action_config: {
+        title: "Webhook child: {{payload.pull_request.title}}",
+        description: "Auto-genereret fra webhook.",
+      },
+    });
+
+    // Mint a token via the regenerate endpoint.
+    const tokenRes = await fetch(
+      `${API_BASE}/api/cerebro/workflows/${workflowId}/regenerate-token`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    expect(tokenRes.ok, `regenerate-token failed: ${tokenRes.status}`).toBe(true);
+    const { inbound_webhook_token: hookToken } = (await tokenRes.json()) as {
+      inbound_webhook_token: string;
+    };
+    expect(hookToken).toBeTruthy();
+
+    // POST a webhook body that carries issue_id and a GitHub-shaped payload.
+    const body = JSON.stringify({
+      issue_id: parentIssue.id,
+      pull_request: { title: "Fix login bug" },
+    });
+    const ts = String(Math.floor(Date.now() / 1000));
+    const ingressRes = await fetch(
+      `${API_BASE}/api/cerebro/workflows/webhook/${hookToken}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Multica-Timestamp": ts,
+        },
+        body,
+      },
+    );
+    expect(ingressRes.ok, `webhook ingress failed: ${ingressRes.status}`).toBe(true);
+
+    const child = await pollForChild(token, parentIssue.id);
+    expect(child, "expected a sub-issue created by the webhook").toBeDefined();
+    // Verify {{payload.pull_request.title}} substituted via renderTemplate.
+    expect(child!.title).toContain("Fix login bug");
+
+    const runs = await listWorkflowRuns(token);
+    const matching = runs.find(
+      (r) => r.target_issue_id === parentIssue.id && r.status === "success",
+    );
+    expect(matching, "expected a success run for the webhook workflow").toBeDefined();
+
+    await deleteWorkflow(token, workflowId);
+    await deleteIssue(token, child!.id);
+  });
+
+  test("phase 3: all_children_done → set_status promotes parent", async () => {
+    const parent = await api.createIssue(`WF E2E parent ${Date.now()}`, {
+      status: "todo",
+    });
+    const child1 = await api.createIssue(`WF E2E child 1 ${Date.now()}`, {
+      status: "todo",
+      parent_issue_id: parent.id,
+    });
+    const child2 = await api.createIssue(`WF E2E child 2 ${Date.now()}`, {
+      status: "todo",
+      parent_issue_id: parent.id,
+    });
+
+    const workflowId = await createWorkflowViaAPI(token, {
+      name: `WF E2E all_children_done ${Date.now()}`,
+      trigger_type: "all_children_done",
+      trigger_config: {},
+      action_type: "set_status",
+      action_config: { status: "in_review" },
+    });
+
+    // Mark only one child done — parent must NOT flip yet.
+    await updateIssueStatus(token, child1.id, "done");
+    await new Promise((r) => setTimeout(r, 200));
+    const stillTodo = await fetchIssue(token, parent.id);
+    expect(stillTodo.status).toBe("todo");
+
+    // Mark the second child done — listener fires all_children_done.
+    await updateIssueStatus(token, child2.id, "done");
+
+    const promoted = await pollForStatus(token, parent.id, "in_review");
+    expect(promoted, `expected parent ${parent.id} to flip to in_review`).toBe(true);
+
+    const runs = await listWorkflowRuns(token);
+    const matching = runs.find(
+      (r) => r.target_issue_id === parent.id && r.status === "success",
+    );
+    expect(matching, "expected a success run for the all_children_done workflow").toBeDefined();
+
+    await deleteWorkflow(token, workflowId);
+  });
 });
 
 // ---- helpers (local to this spec — no need to bloat TestApiClient) ----
@@ -466,5 +623,68 @@ async function deleteAgentTaskAndFixture(
   } finally {
     await client.end();
   }
+}
+
+// ---- phase-3 helpers ----
+
+// callTestSweep hits the build-time-stable, env-gated cron-sweep debug
+// endpoint. The endpoint returns 404 when CEREBRO_WORKFLOWS_TEST_ENDPOINTS
+// isn't set on the backend — we surface that as a thrown error so the test
+// fails loudly rather than waiting for a sweep that never fires.
+async function callTestSweep(token: string) {
+  const res = await fetch(
+    `${API_BASE}/api/cerebro/workflows/_test/cron-sweep`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  if (!res.ok) {
+    throw new Error(
+      `cron-sweep failed (CEREBRO_WORKFLOWS_TEST_ENDPOINTS=1 required): ${res.status} ${await res.text()}`,
+    );
+  }
+}
+
+// nudgeCronNextFire backdates next_fire_at on the cron_state row so the next
+// sweep iteration crosses the "fire now" threshold without waiting for the
+// real wall-clock interval. Mirrors the spec's SQL-nudge fallback.
+async function nudgeCronNextFire(workflowId: string) {
+  const client = new pg.Client(DATABASE_URL);
+  await client.connect();
+  try {
+    await client.query(
+      `UPDATE cerebro_workflow_cron_state
+         SET next_fire_at = NOW() - INTERVAL '1 second'
+       WHERE workflow_id = $1`,
+      [workflowId],
+    );
+  } finally {
+    await client.end();
+  }
+}
+
+async function fetchIssue(
+  token: string,
+  id: string,
+): Promise<{ id: string; status: string; title: string }> {
+  const res = await fetch(`${API_BASE}/api/issues/${id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`fetchIssue failed: ${res.status}`);
+  return (await res.json()) as { id: string; status: string; title: string };
+}
+
+async function pollForStatus(
+  token: string,
+  id: string,
+  want: string,
+): Promise<boolean> {
+  for (let i = 0; i < 30; i++) {
+    const issue = await fetchIssue(token, id);
+    if (issue.status === want) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return false;
 }
 
