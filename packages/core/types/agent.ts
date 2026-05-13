@@ -138,6 +138,13 @@ export interface Agent {
   archived_by: string | null;
 }
 
+export interface AgentTag {
+  id: string;
+  workspace_id: string;
+  name: string;
+  created_at: string;
+}
+
 /**
  * Minimal skill shape embedded in an Agent payload (`GET /api/agents`,
  * `GET /api/agents/:id`). Only id/name/description are populated — the

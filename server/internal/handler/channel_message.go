@@ -678,6 +678,102 @@ func (h *Handler) triggerMentionedAgentTasks(ctx context.Context, workspaceID pg
 			)
 		}
 	}
+
+	allMentions := util.ParseMentions(msg.Content)
+	for _, m := range allMentions {
+		if !m.IsBroadcast() {
+			continue
+		}
+		h.enqueueChannelBroadcastMention(ctx, workspaceID, ch, msg, m.BroadcastTag(), author)
+	}
+}
+
+// enqueueChannelBroadcastMention handles @@ and @@tagname mentions in
+// channels. It is scoped to channel agent members, preserving the same
+// membership guard as direct @agent mentions.
+func (h *Handler) enqueueChannelBroadcastMention(ctx context.Context, workspaceID pgtype.UUID, ch db.Channel, msg db.ChannelMessage, tagName string, author channel.Actor) {
+	const maxAgents = 10
+
+	members, err := h.Queries.ListChannelMembers(ctx, ch.ID)
+	if err != nil {
+		slog.Warn("channel broadcast mention: list channel members failed",
+			"channel_id", uuidToString(ch.ID),
+			"error", err,
+		)
+		return
+	}
+
+	var taggedSet map[string]struct{}
+	if tagName != "" {
+		taggedAgents, err := h.Queries.ListAgentsByTag(ctx, db.ListAgentsByTagParams{
+			WorkspaceID: workspaceID,
+			TagName:     tagName,
+		})
+		if err != nil {
+			slog.Warn("channel broadcast mention: list agents by tag failed",
+				"channel_id", uuidToString(ch.ID),
+				"tag", tagName,
+				"error", err,
+			)
+			return
+		}
+		taggedSet = make(map[string]struct{}, len(taggedAgents))
+		for _, a := range taggedAgents {
+			taggedSet[uuidToString(a.ID)] = struct{}{}
+		}
+	}
+
+	count := 0
+	for _, m := range members {
+		if count >= maxAgents {
+			break
+		}
+		if m.MemberType != channel.ActorAgent {
+			continue
+		}
+		agentIDStr := uuidToString(m.MemberID)
+		if author.Type == channel.ActorAgent && agentIDStr == uuidToString(author.ID) {
+			continue
+		}
+		if taggedSet != nil {
+			if _, ok := taggedSet[agentIDStr]; !ok {
+				continue
+			}
+		}
+		agent, err := h.Queries.GetAgent(ctx, m.MemberID)
+		if err != nil || agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+			continue
+		}
+		hasPending, err := h.Queries.HasPendingChannelMentionForAgent(ctx, db.HasPendingChannelMentionForAgentParams{
+			AgentID:       m.MemberID,
+			ChannelID:     uuidToString(ch.ID),
+			WindowSeconds: channelAgentDedupWindow(),
+		})
+		if err != nil || hasPending {
+			continue
+		}
+		_, err = h.TaskService.EnqueueTaskForChannelMention(ctx, service.EnqueueTaskForChannelMentionParams{
+			WorkspaceID:     workspaceID,
+			AgentID:         m.MemberID,
+			ChannelID:       ch.ID,
+			ChannelName:     ch.Name,
+			ChannelKind:     ch.Kind,
+			MessageID:       msg.ID,
+			MessageContent:  msg.Content,
+			AuthorType:      author.Type,
+			AuthorID:        uuidToString(author.ID),
+			ParentMessageID: msg.ParentMessageID,
+		})
+		if err != nil {
+			slog.Warn("channel broadcast mention: enqueue failed",
+				"agent_id", agentIDStr,
+				"channel_id", uuidToString(ch.ID),
+				"error", err,
+			)
+			continue
+		}
+		count++
+	}
 }
 
 // fanOutChannelMentions writes inbox_item rows for every @member mention in

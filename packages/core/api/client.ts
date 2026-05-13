@@ -10,6 +10,7 @@ import type {
   UpdateMemberRequest,
   ListIssuesParams,
   Agent,
+  AgentTag,
   CreateAgentRequest,
   UpdateAgentRequest,
   AgentTask,
@@ -739,6 +740,10 @@ export class ApiClient {
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.include_archived) search.set("include_archived", "true");
     return this.fetch(`/api/agents?${search}`);
+  }
+
+  async listAgentTags(): Promise<AgentTag[]> {
+    return this.fetch("/api/agent-tags");
   }
 
   async getAgent(id: string): Promise<Agent> {

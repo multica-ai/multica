@@ -61,11 +61,13 @@ function fakeQc(data: {
     visibility?: "workspace" | "private";
     owner_id?: string | null;
   }>;
+  agentTags?: Array<{ id: string; workspace_id: string; name: string; created_at: string }>;
   issues?: Array<{ id: string; identifier: string; title: string; status: string }>;
 }): QueryClient {
   const map = new Map<string, unknown>();
   map.set(JSON.stringify(workspaceKeys.members("ws-1")), data.members ?? []);
   map.set(JSON.stringify(workspaceKeys.agents("ws-1")), data.agents ?? []);
+  map.set(JSON.stringify(workspaceKeys.agentTags("ws-1")), data.agentTags ?? []);
   const byStatus: ListIssuesCache["byStatus"] = {};
   for (const status of PAGINATED_STATUSES) {
     const bucket = (data.issues ?? []).filter((i) => i.status === status);
@@ -243,5 +245,29 @@ describe("createMentionSuggestion", () => {
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "issue" && i.id === "i1")).toBe(true);
+  });
+
+  it("returns broadcast items when the query starts with @", () => {
+    const qc = fakeQc({
+      agentTags: [
+        { id: "tag-1", workspace_id: "ws-1", name: "coding", created_at: "2026-05-13T00:00:00Z" },
+        { id: "tag-2", workspace_id: "ws-1", name: "research", created_at: "2026-05-13T00:00:00Z" },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const allResult = config.items!({ query: "@", editor: {} as never }) as MentionItem[];
+    const filteredResult = config.items!({ query: "@co", editor: {} as never }) as MentionItem[];
+
+    expect(allResult).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "broadcast", id: "all", label: "@" }),
+        expect.objectContaining({ type: "broadcast", id: "coding", label: "@coding" }),
+      ]),
+    );
+    expect(filteredResult).toEqual([
+      expect.objectContaining({ type: "broadcast", id: "coding", label: "@coding" }),
+    ]);
   });
 });

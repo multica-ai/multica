@@ -9,6 +9,7 @@ import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import {
+  agentTagListOptions,
   agentListOptions,
   memberListOptions,
 } from "@multica/core/workspace/queries";
@@ -88,6 +89,10 @@ export function ChannelComposer({ channel, disabled }: ChannelComposerProps) {
   const [isEmpty, setIsEmpty] = useState(!inputDraft.trim());
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const placeholder = useComposerPlaceholder(channel);
+  const wsId = useWorkspaceId();
+
+  // Prefetch agent tags so @@ suggestions can read them synchronously.
+  useQuery(agentTagListOptions(wsId));
 
   // Block send while any attachment is still uploading. The send button
   // reflects this so the user understands why it's grayed out.

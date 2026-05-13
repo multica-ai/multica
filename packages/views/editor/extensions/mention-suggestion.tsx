@@ -24,6 +24,7 @@ import type {
   ListIssuesCache,
   MemberWithUser,
   Agent,
+  AgentTag,
 } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { StatusIcon } from "../../issues/components/status-icon";
@@ -44,7 +45,7 @@ import {
 export interface MentionItem {
   id: string;
   label: string;
-  type: "member" | "agent" | "issue" | "all";
+  type: "member" | "agent" | "issue" | "all" | "broadcast";
   /** Secondary text shown beside the label (e.g. issue title) */
   description?: string;
   /** Issue status for StatusIcon rendering */
@@ -322,6 +323,26 @@ function MentionRow({
     );
   }
 
+  if (item.type === "broadcast") {
+    return (
+      <button
+        ref={buttonRef}
+        className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
+          selected ? "bg-accent" : "hover:bg-accent/50"
+        }`}
+        onClick={onSelect}
+      >
+        <span className="shrink-0 font-mono text-muted-foreground">@@</span>
+        <span className="truncate font-medium">
+          {item.id === "all" ? t(($) => $.mention.broadcast_all) : item.id}
+        </span>
+        {/* "Broadcast" names the mention mode in the picker. */}
+        {/* eslint-disable-next-line i18next/no-literal-string */}
+        <Badge variant="outline" className="ml-auto text-[10px] h-4 px-1.5">Broadcast</Badge>
+      </button>
+    );
+  }
+
   return (
     <button
       ref={buttonRef}
@@ -438,10 +459,40 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
     return [...allItem, ...userItems, ...issueItems];
   }
 
+  function buildBroadcastItems(query: string): MentionItem[] {
+    const wsId = getCurrentWsId();
+    if (!wsId) return [];
+
+    // For @@, TipTap's @ trigger gives query "@"; for @@coding it gives "@coding".
+    const tagFilter = query.slice(1).toLowerCase();
+
+    const allItem: MentionItem = {
+      id: "all",
+      label: "@",
+      type: "broadcast",
+    };
+
+    const tags: AgentTag[] = qc.getQueryData(workspaceKeys.agentTags(wsId)) ?? [];
+    const tagItems: MentionItem[] = tags
+      .filter((t) => !tagFilter || t.name.toLowerCase().includes(tagFilter))
+      .map((t) => ({
+        id: t.name,
+        label: `@${t.name}`,
+        type: "broadcast" as const,
+      }));
+
+    if (!tagFilter || "all".includes(tagFilter)) {
+      return [allItem, ...tagItems];
+    }
+    return tagItems.length > 0 ? tagItems : [allItem];
+  }
+
   return {
     items: ({ query }) => {
-      const syncItems = buildSyncItems(query);
-      return syncItems;
+      if (query.startsWith("@")) {
+        return buildBroadcastItems(query);
+      }
+      return buildSyncItems(query);
     },
 
     render: () => {
