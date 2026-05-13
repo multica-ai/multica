@@ -1386,6 +1386,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		// comment author's kind and display name so the agent knows whether it
 		// was triggered by a human or by another agent — a signal used by the
 		// harness instructions to avoid mention loops between agents.
+		var triggerAuthorAgentID string // set below when author is an agent; used for self-wake suppression
 		if task.TriggerCommentID.Valid {
 			if comment, err := h.Queries.GetComment(r.Context(), task.TriggerCommentID); err == nil {
 				resp.TriggerCommentContent = comment.Content
@@ -1393,6 +1394,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				switch comment.AuthorType {
 				case "agent":
 					if comment.AuthorID.Valid {
+						triggerAuthorAgentID = uuidToString(comment.AuthorID)
 						if a, err := h.Queries.GetAgent(r.Context(), comment.AuthorID); err == nil {
 							resp.TriggerAuthorName = a.Name
 						}
@@ -1818,13 +1820,17 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 		// Decide whether this claim is an orchestrator wake: the claiming
 		// agent IS the workspace's configured orchestrator AND the
-		// triggering comment was authored by another agent. Best-effort —
-		// a workspace fetch failure or a missing orchestrator pointer just
-		// leaves the flag false (no behavior change).
+		// triggering comment was authored by another agent (not the
+		// orchestrator itself). Self-wake is suppressed: when the orchestrator
+		// posts a "waiting for human" comment, that comment must not re-trigger
+		// the orchestrator, or it loops indefinitely posting identical comments.
+		// Best-effort — a workspace fetch failure or a missing orchestrator
+		// pointer just leaves the flag false (no behavior change).
 		if ws, err := h.Queries.GetWorkspace(r.Context(), workspaceUUID); err == nil &&
 			ws.OrchestratorAgentID.Valid &&
 			uuidToString(ws.OrchestratorAgentID) == uuidToString(task.AgentID) &&
-			resp.TriggerAuthorType == "agent" {
+			resp.TriggerAuthorType == "agent" &&
+			triggerAuthorAgentID != uuidToString(ws.OrchestratorAgentID) {
 			resp.IsOrchestratorWake = true
 		}
 	}
