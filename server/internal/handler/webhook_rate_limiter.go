@@ -23,6 +23,15 @@ func DefaultWebhookRateLimit() WebhookRateLimit {
 	return WebhookRateLimit{Limit: 60, Window: time.Minute}
 }
 
+// DefaultWebhookIPRateLimit is the per-IP coarse budget applied BEFORE the
+// trigger lookup. Set lower than the per-token budget on purpose: a single
+// IP should rarely sustain more than 30 webhook deliveries / minute across
+// all its tokens, while a malicious IP spraying random tokens hits this
+// gate before it can probe Postgres.
+func DefaultWebhookIPRateLimit() WebhookRateLimit {
+	return WebhookRateLimit{Limit: 30, Window: time.Minute}
+}
+
 // WebhookRateLimiter is the contract implemented by both the in-memory and
 // Redis-backed limiters.
 //
@@ -81,9 +90,12 @@ func (l *memoryWebhookRateLimiter) Allow(_ context.Context, key string) bool {
 // nanosecond timestamps as strings. Score = same value, so ZREMRANGEBYSCORE
 // can drop everything older than the cutoff, then ZCARD tells us the
 // remaining count.
-const webhookLimiterKeyPrefix = "mul:webhook:rate:"
+const (
+	webhookLimiterKeyPrefix   = "mul:webhook:rate:"
+	webhookIPLimiterKeyPrefix = "mul:webhook:ip:"
+)
 
-// allowScript runs the slide-window check atomically on Redis:
+// webhookLimiterAllowSrc runs the slide-window check atomically on Redis:
 //
 //	KEYS[1] = ZSET key
 //	ARGV[1] = now (unix nanos as string)
@@ -96,7 +108,7 @@ const webhookLimiterKeyPrefix = "mul:webhook:rate:"
 // We trim first, then count, then optionally insert. Doing all three in a
 // single Lua call avoids the classic "two pods both see count=limit-1 and
 // both insert" race.
-var webhookLimiterAllowScript = redis.NewScript(`
+const webhookLimiterAllowSrc = `
 local key = KEYS[1]
 local now = tonumber(ARGV[1])
 local cutoff = tonumber(ARGV[2])
@@ -110,15 +122,37 @@ end
 redis.call('ZADD', key, now, tostring(now))
 redis.call('EXPIRE', key, ttl)
 return 1
-`)
+`
+
+var webhookLimiterAllowScript = redis.NewScript(webhookLimiterAllowSrc)
+
+// webhookLimiterAllowSource exposes the script body for tests that want to
+// assert structural invariants (e.g. trim before count before insert)
+// without spinning up a real Redis. Lower-cased "Source" makes the
+// test-only intent explicit.
+func webhookLimiterAllowSource() string { return webhookLimiterAllowSrc }
 
 type redisWebhookRateLimiter struct {
-	cfg WebhookRateLimit
-	rdb *redis.Client
+	cfg       WebhookRateLimit
+	rdb       *redis.Client
+	keyPrefix string
 }
 
 func NewRedisWebhookRateLimiter(rdb *redis.Client, cfg WebhookRateLimit) WebhookRateLimiter {
-	return &redisWebhookRateLimiter{cfg: cfg, rdb: rdb}
+	return &redisWebhookRateLimiter{cfg: cfg, rdb: rdb, keyPrefix: webhookLimiterKeyPrefix}
+}
+
+// NewRedisWebhookIPRateLimiter is the per-IP variant: same sliding-window
+// Lua script, different key namespace so the two budgets don't interfere.
+func NewRedisWebhookIPRateLimiter(rdb *redis.Client, cfg WebhookRateLimit) WebhookRateLimiter {
+	return &redisWebhookRateLimiter{cfg: cfg, rdb: rdb, keyPrefix: webhookIPLimiterKeyPrefix}
+}
+
+// NewMemoryWebhookIPRateLimiter is the in-memory per-IP variant used when no
+// Redis client is configured. Same per-key semantics as the per-token memory
+// limiter — single-node only.
+func NewMemoryWebhookIPRateLimiter(cfg WebhookRateLimit) WebhookRateLimiter {
+	return NewMemoryWebhookRateLimiter(cfg)
 }
 
 func (l *redisWebhookRateLimiter) Allow(ctx context.Context, key string) bool {
@@ -131,10 +165,14 @@ func (l *redisWebhookRateLimiter) Allow(ctx context.Context, key string) bool {
 	if ttlSeconds < 1 {
 		ttlSeconds = 1
 	}
+	prefix := l.keyPrefix
+	if prefix == "" {
+		prefix = webhookLimiterKeyPrefix
+	}
 	res, err := webhookLimiterAllowScript.Run(
 		ctx,
 		l.rdb,
-		[]string{webhookLimiterKeyPrefix + key},
+		[]string{prefix + key},
 		now, cutoff, l.cfg.Limit, ttlSeconds,
 	).Int()
 	if err != nil {

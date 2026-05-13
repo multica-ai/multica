@@ -102,6 +102,7 @@ type Handler struct {
 	PATCache              *auth.PATCache
 	DaemonTokenCache      *auth.DaemonTokenCache
 	WebhookRateLimiter    WebhookRateLimiter
+	WebhookIPRateLimiter  WebhookRateLimiter
 	cfg                   Config
 }
 
@@ -142,6 +143,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		CFSigner:              cfSigner,
 		Analytics:             analyticsClient,
 		WebhookRateLimiter:    NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
+		WebhookIPRateLimiter:  NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
 		cfg:                   cfg,
 	}
 }

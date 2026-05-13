@@ -13,7 +13,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
 // maxWebhookBodyBytes is the request body size cap for webhook ingress.
@@ -200,18 +203,41 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 1. Look up the trigger by token. We resolve before applying the rate
-	//    limit so a single bad-token flood is bounded by DB-side caching;
-	//    a per-IP coarse limiter is left for follow-up.
+	// 1. Per-IP rate limit BEFORE we hit Postgres. Bounds the DB-probe blast
+	//    radius for an attacker spraying random tokens: each token gets a
+	//    fresh per-token bucket, so without this gate a spray turns the
+	//    handler into an unauthenticated index probe.
+	if h.WebhookIPRateLimiter != nil {
+		if ip := clientIPForRateLimit(r); ip != "" {
+			if !h.WebhookIPRateLimiter.Allow(r.Context(), ip) {
+				writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+				return
+			}
+		}
+	}
+
+	// 2. Look up the trigger by token. Distinguish "no row" from "DB error":
+	//    collapsing both to 404 means a transient DB blip silently drops real
+	//    deliveries (providers like GitHub don't retry on 404). For the no-row
+	//    case we still return a generic "webhook not found" so we don't leak
+	//    which tokens existed at some point.
 	trigRow, err := h.Queries.GetWebhookTriggerByToken(r.Context(), pgtype.Text{String: token, Valid: true})
 	if err != nil {
-		// Don't distinguish "no row" from "DB error" so we don't leak
-		// timing signal about which tokens exist.
-		writeError(w, http.StatusNotFound, "webhook not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "webhook not found")
+			return
+		}
+		slog.Error("webhook: token lookup failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	// 2. Per-token rate limit.
+	// Stash the resolved trigger ID on the request context so the request
+	// logger can include it in the audit line without revealing the bearer
+	// token in the URL path.
+	r = middleware.SetWebhookTriggerID(r, uuidToString(trigRow.ID))
+
+	// 3. Per-token rate limit.
 	if h.WebhookRateLimiter != nil {
 		if !h.WebhookRateLimiter.Allow(r.Context(), token) {
 			writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
@@ -219,7 +245,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// 3. Disabled trigger → ignored. We deliberately return 200 so the
+	// 4. Disabled trigger → ignored. We deliberately return 200 so the
 	//    sender's webhook-retry machinery doesn't keep hammering us; the
 	//    "ignored" status makes the no-op visible if the operator inspects
 	//    delivery logs.
@@ -228,7 +254,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 4. Load Autopilot and cross-check workspace consistency.
+	// 5. Load Autopilot and cross-check workspace consistency.
 	autopilot, err := h.Queries.GetAutopilot(r.Context(), trigRow.AutopilotID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "webhook not found")
@@ -255,7 +281,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 5. Body size cap + JSON validation. http.MaxBytesReader stops the
+	// 6. Body size cap + JSON validation. http.MaxBytesReader stops the
 	//    read mid-stream once the cap is exceeded so an oversized payload
 	//    is rejected before being fully buffered.
 	r.Body = http.MaxBytesReader(w, r.Body, maxWebhookBodyBytes)
@@ -282,7 +308,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 6. Dispatch. DispatchAutopilot already publishes the workspace-scoped
+	// 7. Dispatch. DispatchAutopilot already publishes the workspace-scoped
 	//    EventAutopilotRunStart, persists the payload, runs the admission
 	//    check (offline runtime → records a `skipped` run), and bumps
 	//    last_run_at. We don't add a second WS publish.
@@ -303,7 +329,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 7. Bump last_fired_at (separate from autopilot.last_run_at). Done
+	// 8. Bump last_fired_at (separate from autopilot.last_run_at). Done
 	//    after dispatch returns — including the skipped path — so paused
 	//    early-return arms above don't corrupt the meaning of "last fired".
 	if err := h.Queries.TouchAutopilotTriggerFiredAt(r.Context(), trigRow.ID); err != nil {
@@ -313,7 +339,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		)
 	}
 
-	// 8. Response shape mirrors PLAN.md: skipped runs surface their reason
+	// 9. Response shape: skipped runs surface their reason
 	//    so providers can log it without parsing free-form text.
 	if run.Status == "skipped" {
 		reason := ""
@@ -336,3 +362,30 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+// clientIPForRateLimit returns the IP used as a rate-limit bucket key.
+// Order: X-Forwarded-For's first entry (the original client when the
+// reverse proxy appends downstream hops), then X-Real-IP, then
+// RemoteAddr's host portion. Returns "" if nothing usable is found so
+// the caller can decide to fail-open rather than rate-limit "".
+//
+// We trust X-Forwarded-For here because the public webhook ingress is
+// expected to sit behind a known reverse proxy (Cloudflare, ALB, Caddy).
+// If an attacker controls XFF directly, they can already pick any IP —
+// but the IP limiter is a safety net, not a security boundary; the
+// per-token limiter and token-secrecy are.
+func clientIPForRateLimit(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.IndexByte(xff, ','); i >= 0 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return strings.TrimSpace(xri)
+	}
+	remote := r.RemoteAddr
+	if i := strings.LastIndexByte(remote, ':'); i >= 0 {
+		return remote[:i]
+	}
+	return remote
+}
