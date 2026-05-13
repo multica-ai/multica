@@ -113,6 +113,32 @@ func (h *Handler) MarkInboxUnread(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toResponse(item))
 }
 
+// UnarchiveInboxItem restores an archived inbox item to the active inbox.
+// Mirror of the upstream POST /api/inbox/{id}/archive. Lives in the cerebro
+// package so the route stays cerebro-only and upstream merges don't touch it.
+// Issue-level: if the item has an issue_id we unarchive every sibling row for
+// the same recipient + issue, mirroring ArchiveInboxByIssue.
+func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
+	itemID, ok := h.loadItemID(w, r)
+	if !ok {
+		return
+	}
+	item, err := h.Cerebro.UnarchiveInboxItem(r.Context(), itemID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to unarchive inbox item")
+		return
+	}
+	if item.IssueID.Valid {
+		_, _ = h.Cerebro.UnarchiveInboxByIssue(r.Context(), cerebrodb.UnarchiveInboxByIssueParams{
+			WorkspaceID:   item.WorkspaceID,
+			RecipientType: item.RecipientType,
+			RecipientID:   item.RecipientID,
+			IssueID:       item.IssueID,
+		})
+	}
+	writeJSON(w, http.StatusOK, toResponse(item))
+}
+
 func toResponse(i cerebrodb.InboxItem) inboxItemResponse {
 	resp := inboxItemResponse{
 		ID:       util.UUIDToString(i.ID),

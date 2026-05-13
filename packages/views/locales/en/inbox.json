@@ -25,7 +25,9 @@
     "empty": "Your inbox is empty",
     "original_input": "Original input",
     "edit_advanced": "Edit as advanced form",
-    "archive": "Archive"
+    "archive": "Archive",
+    "_comment_unarchive": "CEREBRO-PATCH(inbox-unarchive-locale): JEH-1166 — unarchive action from archived view",
+    "unarchive": "Unarchive"
   },
   "types": {
     "issue_assigned": "Assigned",
@@ -59,6 +61,8 @@
   "errors": {
     "mark_read_failed": "Failed to mark as read",
     "archive_failed": "Failed to archive",
+    "_comment_unarchive_failed": "CEREBRO-PATCH(inbox-unarchive-locale): JEH-1166 — error toast for unarchive failure",
+    "unarchive_failed": "Failed to unarchive",
     "mark_done_failed": "Failed to mark as done",
     "mark_all_read_failed": "Failed to mark all as read",
     "archive_all_failed": "Failed to archive all",

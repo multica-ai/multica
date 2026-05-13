@@ -123,6 +123,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `cerebro-inbox-fields` | server/internal/handler/inbox.go<br>server/internal/handler/notifications.go | 0 | Cerebro modification (see file for details) — adds Route, ProjectID, MutedUntil response fields |
 | `cerebro-inbox-folders` | server/internal/handler/inbox.go | 0 | Cerebro modification (see file for details) |
 | `cerebro-inbox-routes` | server/cmd/server/router.go | 0 | Mounts cerebro inbox routes (active-issue-tasks; mute / unmute / mark-unread) |
+| `cerebro-inbox-unarchive` | server/cmd/server/router.go<br>packages/core/api/client.ts | 2 + 4 | JEH-1166 — unarchive action surface: POST /api/inbox/{id}/unarchive route + `api.unarchiveInbox` client method. Mirrors archive, lives behind a cerebro handler so upstream merges stay clean. |
+| `inbox-unarchive-mount` | packages/views/inbox/components/inbox-list-item.tsx<br>packages/views/inbox/components/inbox-page.tsx | 4 + 5 | JEH-1166 — wires the unarchive action through the upstream inbox list. Adds `onUnarchive` prop to InboxListItemShell / InboxListItem / ChannelListItem; archived view passes a real callback that the cerebro row-actions surface uses to swap the archive icon + swipe-right gesture for an unarchive variant. |
 | `cerebro-listeners` | server/cmd/server/notification_listeners.go<br>server/cmd/server/notification_routing.go | 0 | Cerebro modification (see file for details) |
 | `channel-listen-mode` | server/internal/handler/comment.go | 4 | JEH-699 — invoke cerebro channel listen-mode service so non-mentioned, non-assignee agents subscribed to a channel are triggered when their listen_mode is 'always' |
 | `channel-listen-routes` | server/cmd/server/router.go | 3 | JEH-699 — channel listen-mode list/upsert HTTP routes |

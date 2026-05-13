@@ -5,7 +5,7 @@
 import { StatusIcon } from "../../issues/components";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Hash, MessagesSquare } from "lucide-react";
-import { CerebroInboxRowActions, CerebroSwipeArchive } from "@multica/cerebro-inbox"; // CEREBRO-PATCH(inbox-row-actions-mount)
+import { CerebroInboxRowActions, CerebroSwipeArchive, CerebroUnarchiveAction } from "@multica/cerebro-inbox"; // CEREBRO-PATCH(inbox-row-actions-mount) / CEREBRO-PATCH(inbox-unarchive-mount)
 import { AvatarGroup } from "@multica/ui/components/ui/avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { Channel, ChannelMember, InboxItem } from "@multica/core/types";
@@ -39,6 +39,7 @@ interface InboxListItemBaseProps {
   onArchive: () => void;
   children: React.ReactNode;
   cerebroItem?: InboxItem; // CEREBRO-PATCH(inbox-row-actions-mount)
+  onUnarchive?: () => void; // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
 }
 
 /**
@@ -54,6 +55,7 @@ function InboxListItemShell({
   onArchive,
   children,
   cerebroItem, // CEREBRO-PATCH(inbox-row-actions-mount)
+  onUnarchive, // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
 }: InboxListItemBaseProps) {
   return (
     <button
@@ -69,11 +71,15 @@ function InboxListItemShell({
         />
       )}
       {children}
-      {/* CEREBRO-PATCH(inbox-row-actions-mount): full row-actions surface
-          (mute / mark-unread, hover menu, mobile swipe + long-press) for
-          issue inbox rows; swipe-archive-only variant for channel/DM rows
-          (no per-row mute/unread state, but the archive gesture applies). */}
-      {cerebroItem ? (
+      {/* CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166 — archived view swaps
+          the archive action for an unarchive action (icon + swipe). */}
+      {onUnarchive ? (
+        <CerebroUnarchiveAction onUnarchive={onUnarchive} />
+      ) : cerebroItem ? (
+        /* CEREBRO-PATCH(inbox-row-actions-mount): full row-actions surface
+           (mute / mark-unread, hover menu, mobile swipe + long-press) for
+           issue inbox rows; swipe-archive-only variant for channel/DM rows
+           (no per-row mute/unread state, but the archive gesture applies). */
         <CerebroInboxRowActions item={cerebroItem} onArchive={onArchive} />
       ) : (
         <CerebroSwipeArchive onArchive={onArchive} />
@@ -88,12 +94,14 @@ export function InboxListItem({
   isAgentActive,
   onClick,
   onArchive,
+  onUnarchive, // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
 }: {
   item: InboxItem;
   isSelected: boolean;
   isAgentActive?: boolean;
   onClick: () => void;
   onArchive: () => void;
+  onUnarchive?: () => void; // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
 }) {
   const unread = !item.read;
   const mentioned = item.type === "mentioned" && unread;
@@ -107,6 +115,7 @@ export function InboxListItem({
       onClick={onClick}
       onArchive={onArchive}
       cerebroItem={item} // CEREBRO-PATCH(inbox-row-actions-mount)
+      onUnarchive={onUnarchive} // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
     >
       <ActorAvatar
         actorType={item.actor_type ?? item.recipient_type}
@@ -159,6 +168,7 @@ export function ChannelListItem({
   isSelected,
   onClick,
   onArchive,
+  onUnarchive, // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
 }: {
   channel: Channel;
   /** Last message snippet shown under the title. */
@@ -168,6 +178,7 @@ export function ChannelListItem({
   isSelected: boolean;
   onClick: () => void;
   onArchive: () => void;
+  onUnarchive?: () => void; // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
 }) {
   const display = useChannelDisplay(channel);
   const unread = channel.unread_count > 0;
@@ -181,6 +192,7 @@ export function ChannelListItem({
       unread={unread}
       onClick={onClick}
       onArchive={onArchive}
+      onUnarchive={onUnarchive} // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
     >
       <ChannelAvatarStack channel={channel} />
       <div className="min-w-0 flex-1">

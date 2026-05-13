@@ -27,3 +27,20 @@ UPDATE inbox_item
 SET read = false
 WHERE id = $1
 RETURNING *;
+
+-- name: UnarchiveInboxItem :one
+-- Restore an archived inbox item to the active inbox. Mirror of upstream
+-- ArchiveInboxItem; lives in cerebrodb so we can ship the cerebro
+-- archived-view unarchive action without touching upstream SQL.
+UPDATE inbox_item
+SET archived = false
+WHERE id = $1
+RETURNING *;
+
+-- name: UnarchiveInboxByIssue :execrows
+-- Restore every archived inbox_item for (recipient, issue) — mirrors
+-- ArchiveInboxByIssue so issue-level unarchive surfaces every notification
+-- the user had for that issue, not only the one row they clicked.
+UPDATE inbox_item
+SET archived = false
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = true;

@@ -825,6 +825,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/mute", cerebroInboxHandler.MuteInboxItem)
 				r.Delete("/{id}/mute", cerebroInboxHandler.UnmuteInboxItem)
 				r.Post("/{id}/unread", cerebroInboxHandler.MarkInboxUnread)
+				// CEREBRO-PATCH(cerebro-inbox-unarchive): JEH-1166 — unarchive action from archived view.
+				r.Post("/{id}/unarchive", cerebroInboxHandler.UnarchiveInboxItem)
 
 				// Notifications (route='notifications'). Single-item operations
 				// (mark-read, archive) reuse the inbox endpoints above; only the

@@ -35,9 +35,23 @@ vi.mock("@multica/cerebro-inbox", () => {
       archive
     </span>
   );
+  const Unarchive = ({ onUnarchive }: { onUnarchive: () => void }) => (
+    <span
+      role="button"
+      tabIndex={-1}
+      title="Unarchive"
+      onClick={(e) => {
+        e.stopPropagation();
+        onUnarchive();
+      }}
+    >
+      unarchive
+    </span>
+  );
   return {
     CerebroInboxRowActions: Archive,
     CerebroSwipeArchive: Archive,
+    CerebroUnarchiveAction: Unarchive,
   };
 });
 

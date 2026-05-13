@@ -25,7 +25,8 @@ import {
 // CEREBRO-PATCH(channels-flag-gate): hide channel/dm view options + new-message when feature is disabled
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 // CEREBRO-PATCH(inbox-keyboard-shortcuts): cerebro keyboard shortcuts (e = archive)
-import { useInboxKeyboardShortcuts, CerebroSwipeArchive } from "@multica/cerebro-inbox";
+// CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166 — useUnarchiveInbox for archived view
+import { useInboxKeyboardShortcuts, CerebroSwipeArchive, useUnarchiveInbox } from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(inbox-channel-archive-import): JEH-851 — per-user channel archive mutation.
 import { useArchiveChannel } from "@multica/cerebro-channels";
 import { useInboxViewStore, INBOX_VIEW_OPTIONS, type InboxView } from "@multica/core/inbox";
@@ -333,6 +334,8 @@ export function InboxPage() {
 
   const markReadMutation = useMarkInboxRead();
   const archiveMutation = useArchiveInbox();
+  // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166 — unarchive mutation for archived view.
+  const unarchiveMutation = useUnarchiveInbox();
   // CEREBRO-PATCH(inbox-channel-archive-mut): JEH-851 — per-user channel archive.
   const archiveChannelMutation = useArchiveChannel();
   const markAllReadMutation = useMarkAllInboxRead();
@@ -376,6 +379,24 @@ export function InboxPage() {
     }
     archiveMutation.mutate(id, {
       onError: () => toast.error(t(($) => $.errors.archive_failed)),
+    });
+  };
+  // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166 — restore an archived inbox
+  // item to the active inbox. Mirrors handleArchive's selection-advance so the
+  // archived view stays usable when the user unarchives the currently-selected
+  // row. Optimistic update lives in the mutation; the row drops out of the
+  // archived list immediately and resurfaces in the active list on settle.
+  const handleUnarchive = (id: string) => {
+    const idx = items.findIndex((i) => i.id === id);
+    const target = idx >= 0 ? items[idx] : null;
+    const wasSelected =
+      !!target && (target.issue_id ?? target.id) === selectedKey;
+    if (wasSelected) {
+      const next = items[idx + 1] ?? items[idx - 1] ?? null;
+      setSelectedKey(next ? "issue" : null, next ? (next.issue_id ?? next.id) : "");
+    }
+    unarchiveMutation.mutate(id, {
+      onError: () => toast.error(t(($) => $.errors.unarchive_failed)),
     });
   };
   // CEREBRO-PATCH(inbox-keyboard-shortcuts): wires `e` = archive selection.
@@ -749,6 +770,10 @@ export function InboxPage() {
         isAgentActive={isAgentActive}
         onClick={() => handleSelect(item)}
         onArchive={() => handleArchive(item.id)}
+        // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166 — archived view wires
+        // an unarchive action in place of archive; passing onUnarchive flips
+        // the cerebro row chrome to the unarchive icon + swipe gesture.
+        onUnarchive={isArchivedView ? () => handleUnarchive(item.id) : undefined}
       />
     );
   };
@@ -1018,14 +1043,27 @@ export function InboxPage() {
             {t(($) => $.detail.edit_advanced)}
           </Button>
         )}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => handleArchive(selected.id)}
-        >
-          <Archive className="mr-1.5 h-3.5 w-3.5" />
-          {t(($) => $.detail.archive)}
-        </Button>
+        {/* CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166 — archived view swaps
+            the detail-panel archive button for an unarchive button. */}
+        {isArchivedView ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleUnarchive(selected.id)}
+          >
+            <Archive className="mr-1.5 h-3.5 w-3.5" />
+            {t(($) => $.detail.unarchive)}
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleArchive(selected.id)}
+          >
+            <Archive className="mr-1.5 h-3.5 w-3.5" />
+            {t(($) => $.detail.archive)}
+          </Button>
+        )}
       </div>
     </div>
   ) : null;

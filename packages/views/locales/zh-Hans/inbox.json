@@ -25,7 +25,9 @@
     "empty": "收件箱为空",
     "original_input": "原始输入",
     "edit_advanced": "在完整表单中编辑",
-    "archive": "归档"
+    "archive": "归档",
+    "_comment_unarchive": "CEREBRO-PATCH(inbox-unarchive-locale): JEH-1166 — unarchive action from archived view",
+    "unarchive": "取消归档"
   },
   "types": {
     "issue_assigned": "已分配",
@@ -59,6 +61,8 @@
   "errors": {
     "mark_read_failed": "标为已读失败",
     "archive_failed": "归档失败",
+    "_comment_unarchive_failed": "CEREBRO-PATCH(inbox-unarchive-locale): JEH-1166 — error toast for unarchive failure",
+    "unarchive_failed": "取消归档失败",
     "mark_done_failed": "标为已完成失败",
     "mark_all_read_failed": "全部标为已读失败",
     "archive_all_failed": "归档全部失败",

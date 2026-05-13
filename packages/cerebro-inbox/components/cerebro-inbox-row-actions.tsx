@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   Archive,
+  ArchiveRestore,
   BellOff,
   BellRing,
   MailOpen,
@@ -912,5 +913,206 @@ function SimpleArchiveButton({ onArchive }: { onArchive: () => void }) {
     >
       <Archive className="h-3.5 w-3.5" />
     </span>
+  );
+}
+
+/**
+ * Spejlvendt variant af {@link CerebroSwipeArchive} til archived-view (JEH-1166).
+ *
+ * Renders:
+ * - Desktop: hover-only `ArchiveRestore` icon, click → onUnarchive.
+ * - Mobile: full-row touch overlay; swipe-right past the same commit
+ *   threshold as archive fires onUnarchive on release. The reveal background
+ *   uses the brand color (not destructive) so the gesture reads as
+ *   "restore", not "delete again".
+ *
+ * Kept as a sibling component to CerebroSwipeArchive rather than a flag on
+ * the existing one — archived rows don't carry mute/mark-unread actions, so
+ * the long-press drawer + swipe-left panel from CerebroInboxRowActions are
+ * irrelevant here. A dedicated component keeps the surface honest.
+ */
+export function CerebroUnarchiveAction({
+  onUnarchive,
+}: {
+  onUnarchive: () => void;
+}) {
+  const enabled = useFeatureFlag("cerebro_inbox_row_actions");
+  const isMobile = useIsMobile();
+  const strings = useCerebroInboxStrings();
+
+  if (!enabled || !isMobile) {
+    return <SimpleUnarchiveButton onUnarchive={onUnarchive} />;
+  }
+
+  return <SwipeUnarchiveOnly onUnarchive={onUnarchive} strings={strings} />;
+}
+
+function SimpleUnarchiveButton({ onUnarchive }: { onUnarchive: () => void }) {
+  const strings = useCerebroInboxStrings();
+  return (
+    <span
+      role="button"
+      tabIndex={-1}
+      title={strings.unarchive_label}
+      aria-label={strings.unarchive_label}
+      onClick={(e) => {
+        e.stopPropagation();
+        onUnarchive();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.stopPropagation();
+          onUnarchive();
+        }
+      }}
+      className="absolute right-2 top-1/2 -translate-y-1/2 hidden h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground sm:group-hover:inline-flex"
+    >
+      <ArchiveRestore className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+function SwipeUnarchiveOnly({
+  onUnarchive,
+  strings,
+}: {
+  onUnarchive: () => void;
+  strings: ReturnType<typeof useCerebroInboxStrings>;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const offsetXRef = useRef(0);
+  const [offsetX, setOffsetXState] = useState(0);
+  const setOffsetX = useCallback((v: number) => {
+    offsetXRef.current = v;
+    setOffsetXState(v);
+  }, []);
+  const gestureActiveRef = useRef(false);
+  const swipeEndedAtRef = useRef(0);
+
+  const onUnarchiveRef = useRef(onUnarchive);
+  useEffect(() => {
+    onUnarchiveRef.current = onUnarchive;
+  });
+
+  useEffect(() => {
+    const row = containerRef.current?.parentElement;
+    if (!row) return;
+    if (offsetX === 0) {
+      row.style.transform = "";
+    } else {
+      row.style.transform = `translateX(${offsetX}px)`;
+    }
+    row.style.transition = gestureActiveRef.current ? "" : "transform 200ms";
+  }, [offsetX]);
+
+  useEffect(() => {
+    const node = containerRef.current?.parentElement;
+    if (!node) return;
+    const handler = (e: MouseEvent) => {
+      if (Date.now() - swipeEndedAtRef.current < POST_SWIPE_CLICK_SUPPRESS_MS) {
+        swipeEndedAtRef.current = 0;
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    };
+    node.addEventListener("click", handler, true);
+    return () => node.removeEventListener("click", handler, true);
+  }, []);
+
+  useEffect(() => {
+    const overlay = containerRef.current;
+    if (!overlay) return;
+
+    let startX = 0;
+    let startY = 0;
+    let direction: "horizontal" | "vertical" | null = null;
+    let active = false;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0]!;
+      startX = t.clientX;
+      startY = t.clientY;
+      direction = null;
+      active = true;
+      gestureActiveRef.current = true;
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!active || e.touches.length !== 1) return;
+      const t = e.touches[0]!;
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      const adx = Math.abs(dx);
+      const ady = Math.abs(dy);
+
+      if (direction === null) {
+        if (adx < DIRECTION_DECIDE_PX && ady < DIRECTION_DECIDE_PX) return;
+        direction = adx > ady ? "horizontal" : "vertical";
+        if (direction === "vertical") {
+          active = false;
+          gestureActiveRef.current = false;
+          return;
+        }
+      }
+      if (direction !== "horizontal") return;
+
+      e.preventDefault();
+      // Mirror of archive: swipe-right reveals the unarchive cue.
+      const live = Math.max(0, dx);
+      offsetXRef.current = live;
+      setOffsetX(live);
+    };
+
+    const onTouchEnd = () => {
+      const wasHorizontal = direction === "horizontal";
+      direction = null;
+      active = false;
+      gestureActiveRef.current = false;
+      if (!wasHorizontal) return;
+
+      const live = offsetXRef.current;
+      const rowWidth = overlay.parentElement?.clientWidth ?? 360;
+      if (live > SWIPE_INTENT_PX) {
+        swipeEndedAtRef.current = Date.now();
+      }
+      if (live >= commitThresholdPx(rowWidth)) {
+        setOffsetX(0);
+        onUnarchiveRef.current();
+      } else {
+        setOffsetX(0);
+      }
+    };
+
+    overlay.addEventListener("touchstart", onTouchStart, { passive: false });
+    overlay.addEventListener("touchmove", onTouchMove, { passive: false });
+    overlay.addEventListener("touchend", onTouchEnd);
+    overlay.addEventListener("touchcancel", onTouchEnd);
+    return () => {
+      overlay.removeEventListener("touchstart", onTouchStart);
+      overlay.removeEventListener("touchmove", onTouchMove);
+      overlay.removeEventListener("touchend", onTouchEnd);
+      overlay.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, [setOffsetX]);
+
+  return (
+    <>
+      <div
+        ref={containerRef}
+        className="absolute inset-0 sm:hidden"
+        style={{ touchAction: "pan-y" }}
+      />
+      {offsetX > 0 && (
+        <div
+          className="absolute inset-y-0 left-0 flex items-center justify-start gap-2 bg-brand px-4 text-brand-foreground"
+          style={{ width: Math.max(offsetX, 0) }}
+          aria-hidden
+        >
+          <ArchiveRestore className="size-4" />
+          <span className="text-xs font-medium">{strings.swipe_unarchive}</span>
+        </div>
+      )}
+    </>
   );
 }

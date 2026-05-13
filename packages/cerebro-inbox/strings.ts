@@ -15,6 +15,9 @@ import { useTranslation } from "react-i18next";
 type StringTable = {
   archive_tooltip: string;
   archive_label: string;
+  unarchive_tooltip: string;
+  unarchive_label: string;
+  swipe_unarchive: string;
   more_actions: string;
   mark_read: string;
   mark_unread: string;
@@ -27,6 +30,9 @@ type StringTable = {
 const en: StringTable = {
   archive_tooltip: "Archive (e)",
   archive_label: "Archive",
+  unarchive_tooltip: "Unarchive",
+  unarchive_label: "Unarchive",
+  swipe_unarchive: "Unarchive",
   more_actions: "More actions",
   mark_read: "Mark as read",
   mark_unread: "Mark as unread",
@@ -39,6 +45,9 @@ const en: StringTable = {
 const da: StringTable = {
   archive_tooltip: "Arkivér (e)",
   archive_label: "Arkivér",
+  unarchive_tooltip: "Gendan",
+  unarchive_label: "Gendan",
+  swipe_unarchive: "Gendan",
   more_actions: "Flere handlinger",
   mark_read: "Marker som læst",
   mark_unread: "Marker som ulæst",

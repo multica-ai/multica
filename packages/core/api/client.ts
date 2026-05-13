@@ -1312,6 +1312,11 @@ export class ApiClient {
     return this.fetch(`/api/inbox/${id}/archive`, { method: "POST" });
   }
 
+  // CEREBRO-PATCH(cerebro-inbox-unarchive): JEH-1166 — unarchive from archived view.
+  async unarchiveInbox(id: string): Promise<InboxItem> {
+    return this.fetch(`/api/inbox/${id}/unarchive`, { method: "POST" });
+  }
+
   // CEREBRO-PATCH(cerebro-inbox-actions): per-item mute / unmute / mark-unread.
   // Server returns the partial item (id + flags) — clients merge it into the
   // cached row optimistically and re-fetch on settle.

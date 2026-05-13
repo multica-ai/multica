@@ -8,11 +8,13 @@
 export {
   CerebroInboxRowActions,
   CerebroSwipeArchive,
+  CerebroUnarchiveAction,
 } from "./components/cerebro-inbox-row-actions";
 export { useInboxKeyboardShortcuts } from "./use-inbox-keyboard-shortcuts";
 export {
   useMuteInbox,
   useUnmuteInbox,
   useMarkInboxUnread,
+  useUnarchiveInbox,
 } from "./mutations";
 export { isMuted, nextLocalEightAm } from "./mute-time";

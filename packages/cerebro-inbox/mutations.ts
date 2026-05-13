@@ -63,6 +63,42 @@ export function useUnmuteInbox() {
 }
 
 /**
+ * Restore an archived inbox row to the active inbox. Mirror of the upstream
+ * `useArchiveInbox` — optimistically flips `archived` back to `false` so the
+ * row disappears from the archived view immediately, then invalidates both
+ * the active and archived list caches so the row resurfaces in the active
+ * inbox without a manual reload.
+ */
+export function useUnarchiveInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.unarchiveInbox(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.archivedList(wsId) });
+      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.archivedList(wsId));
+      const target = prev?.find((i) => i.id === id);
+      const issueId = target?.issue_id;
+      qc.setQueryData<InboxItem[]>(inboxKeys.archivedList(wsId), (old) =>
+        old?.filter((item) =>
+          item.id === id || (issueId && item.issue_id === issueId) ? false : true,
+        ),
+      );
+      return { prev };
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.archivedList(wsId), ctx.prev);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: inboxKeys.archivedList(wsId) });
+      // Active inbox query must refetch too — the unarchived row needs to
+      // resurface there without a manual reload.
+      void qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+    },
+  });
+}
+
+/**
  * Force an inbox row back to unread. Counterpart to the existing
  * `useMarkInboxRead` from `@multica/core/inbox/mutations`.
  */

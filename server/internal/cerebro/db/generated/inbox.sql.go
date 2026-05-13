@@ -123,3 +123,67 @@ func (q *Queries) SetInboxUnread(ctx context.Context, id pgtype.UUID) (InboxItem
 	)
 	return i, err
 }
+
+const unarchiveInboxByIssue = `-- name: UnarchiveInboxByIssue :execrows
+UPDATE inbox_item
+SET archived = false
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = true
+`
+
+type UnarchiveInboxByIssueParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+}
+
+// Restore every archived inbox_item for (recipient, issue) — mirrors
+// ArchiveInboxByIssue so issue-level unarchive surfaces every notification
+// the user had for that issue, not only the one row they clicked.
+func (q *Queries) UnarchiveInboxByIssue(ctx context.Context, arg UnarchiveInboxByIssueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, unarchiveInboxByIssue,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.IssueID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const unarchiveInboxItem = `-- name: UnarchiveInboxItem :one
+UPDATE inbox_item
+SET archived = false
+WHERE id = $1
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+`
+
+// Restore an archived inbox item to the active inbox. Mirror of upstream
+// ArchiveInboxItem; lives in cerebrodb so we can ship the cerebro
+// archived-view unarchive action without touching upstream SQL.
+func (q *Queries) UnarchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, unarchiveInboxItem, id)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+		&i.Route,
+		&i.MutedUntil,
+	)
+	return i, err
+}
