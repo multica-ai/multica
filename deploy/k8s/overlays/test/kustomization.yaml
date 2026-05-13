@@ -1,0 +1,138 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Pre-prod environment. CI auto-rolls every push here; humans manually promote
+# a passing image tag into overlays/prod/. See README.md in this directory for
+# the manual prerequisites that have to land before the first `kubectl apply`.
+namespace: multica-test
+
+resources:
+  - ../../base
+
+commonAnnotations:
+  multica.lilithgames.com/environment: "test"
+
+# CI overrides newTag on every successful build. Keep `latest` here as the
+# bootstrap default so the first apply works without CI plumbing. The
+# imagePullPolicy patch below pairs with floating tags — switch to a SHA-pinned
+# tag (e.g. main-<sha>) once CI is wired and you can drop the Always patch.
+images:
+  - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-server
+    newTag: 0.0.4
+  - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-web
+    newTag: 0.0.4
+
+# Test runs at 1/1 — single web pod is enough for smoke testing and matches
+# the server's single-replica constraint (in-memory WS hub).
+replicas:
+  - name: multica-server
+    # 2 replicas validates the Redis-backed sharded stream relay
+    # (REDIS_URL is set on test → main.go enables sharded relay). Prod
+    # stays at 1 until we're confident the relay can carry prod traffic.
+    count: 2
+  - name: multica-web
+    count: 1
+
+patches:
+  # The Namespace resource carries its own metadata.name; kustomize's top-level
+  # `namespace:` field above retargets namespaced resources but does NOT rename
+  # the Namespace CR itself. Patch it explicitly.
+  - target:
+      kind: Namespace
+      name: multica
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: multica-test
+
+  # AlbConfig + IngressClass are cluster-scoped, so both prod and test live in
+  # the same global namespace. We rename them here to provision a separate ALB
+  # instance for test (the call: ALB独立, separate billing + blast radius).
+  # The listener-level ACL id swaps to a test-only policy with identical CIDR
+  # content — create it via Aliyun console or tofu first, then paste the id.
+  - target:
+      kind: AlbConfig
+      name: multica
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: multica-test
+      - op: replace
+        path: /spec/config/name
+        value: multica-test
+      - op: replace
+        path: /spec/config/deletionProtectionEnabled
+        value: false
+      # AlbConfig.spec.listeners[*].aclConfig schema (per Aliyun docs):
+      #   aclConfig:
+      #     aclType: White|Black
+      #     aclIds:           # bare string list, NOT [{aclId: ...}]
+      #       - acl-xxxx
+      # Earlier this overlay (and base/albconfig.yaml) used .aclRelations
+      # which the controller silently dropped because the CRD's aclConfig
+      # field is openAPISchema {}. Replace the whole aclConfig block to be
+      # explicit about the correct shape and overwrite whatever base had.
+      - op: replace
+        path: /spec/listeners/1/aclConfig
+        value:
+          aclType: White
+          aclIds:
+            - acl-67yx6c3vuo5qjcdpyl
+
+  - target:
+      kind: IngressClass
+      name: multica-alb
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: multica-test-alb
+      - op: replace
+        path: /spec/parameters/name
+        value: multica-test
+
+  # ConfigMap: swap public-facing URLs to the test host. Email-from address
+  # stays on the production sender domain — running a separate verified domain
+  # for test mail is more cost than it's worth.
+  - target:
+      kind: ConfigMap
+      name: multica-config
+    patch: |-
+      - op: replace
+        path: /data/MULTICA_APP_URL
+        value: https://multica-test.lilithgames.com
+      - op: replace
+        path: /data/FRONTEND_ORIGIN
+        value: https://multica-test.lilithgames.com
+      - op: replace
+        path: /data/CORS_ALLOWED_ORIGINS
+        value: https://multica-test.lilithgames.com,https://project.feishu.cn,https://projectplg.feishupkg.com
+      - op: replace
+        path: /data/FEISHU_REDIRECT_URI
+        value: https://multica-test.lilithgames.com/auth/feishu/callback
+      - op: replace
+        path: /data/GOOGLE_REDIRECT_URI
+        value: https://multica-test.lilithgames.com/auth/callback
+
+  # Ingress: re-author host + tls + rules from scratch (drop the ship→multica
+  # redirect alias — test has no legacy alias to honor), point at the test
+  # IngressClass, and bind the test ACL annotation.
+  - path: ingress-patch.yaml
+    target:
+      kind: Ingress
+      name: multica
+
+  # Floating `:latest` tag needs Always so a rollout actually re-pulls instead
+  # of reusing whatever the node has cached. Drop these patches once CI pins
+  # SHA tags.
+  - path: server-deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: multica-server
+  - path: web-deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: multica-web
+  - path: migrate-job-patch.yaml
+    target:
+      kind: Job
+      name: multica-migrate

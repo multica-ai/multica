@@ -1,0 +1,10 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: multica-migrate
+spec:
+  template:
+    spec:
+      containers:
+        - name: migrate
+          imagePullPolicy: Always

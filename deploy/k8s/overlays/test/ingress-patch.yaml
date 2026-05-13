@@ -1,0 +1,102 @@
+# JSON 6902 patch — kustomize's strategic-merge $patch: replace directive
+# leaks into the rendered YAML for Ingress arrays under kustomize v5, so we
+# replace the host list / tls list / IngressClass / ACL annotation explicitly.
+
+# Re-author the rule set from scratch — drops the prod ship→multica 301
+# redirect host (test has no legacy alias) and rebinds every backend to the
+# multica-test ingress paths.
+- op: replace
+  path: /spec/rules
+  value:
+    - host: multica-test.lilithgames.com
+      http:
+        paths:
+          - path: /auth/callback
+            pathType: Exact
+            backend:
+              service:
+                name: multica-web
+                port:
+                  number: 3000
+          - path: /auth/feishu/callback
+            pathType: Exact
+            backend:
+              service:
+                name: multica-web
+                port:
+                  number: 3000
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: multica-server
+                port:
+                  number: 8080
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: multica-server
+                port:
+                  number: 8080
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: multica-server
+                port:
+                  number: 8080
+          - path: /uploads
+            pathType: Prefix
+            backend:
+              service:
+                name: multica-server
+                port:
+                  number: 8080
+          - path: /webhook/meego
+            pathType: Prefix
+            backend:
+              service:
+                name: multica-feishu-bridge
+                port:
+                  number: 8080
+          # /doc/install.md (agent-facing install guide) served by the bridge.
+          # Kept in sync with base/ingress.yaml — see the comment there.
+          - path: /doc
+            pathType: Prefix
+            backend:
+              service:
+                name: multica-feishu-bridge
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: multica-web
+                port:
+                  number: 3000
+
+- op: replace
+  path: /spec/tls
+  value:
+    - hosts:
+        - multica-test.lilithgames.com
+      secretName: multica-tls
+
+- op: replace
+  path: /spec/ingressClassName
+  value: multica-test-alb
+
+# Test ACL — same CIDR content as prod's acl-ry04o6lyky6tmscnfu, but a
+# separate policy so test admin edits never leak into prod. Pre-create the
+# ACL (Aliyun console or tofu) and paste the id here AND in
+# kustomization.yaml's AlbConfig patch.
+- op: replace
+  path: /metadata/annotations/alb.ingress.kubernetes.io~1acl-id
+  value: acl-67yx6c3vuo5qjcdpyl
+
+# Drop the ship→multica redirect annotation (prod-only). `~1` is the JSON
+# pointer escape for `/`.
+- op: remove
+  path: /metadata/annotations/alb.ingress.kubernetes.io~1actions.ship-to-multica-redirect

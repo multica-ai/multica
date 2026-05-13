@@ -16,9 +16,23 @@ deploy/k8s/
 │   ├── ingress.yaml         ← ALB Ingress for multica.lilithgames.com (+ ship 301 alias)
 │   └── kustomization.yaml
 └── overlays/
+    ├── test/                ← pre-prod overlay (multica-test namespace, separate ALB + ACL + DB)
+    │   ├── kustomization.yaml
+    │   ├── ingress-patch.yaml
+    │   ├── server-deployment-patch.yaml
+    │   ├── web-deployment-patch.yaml
+    │   ├── migrate-job-patch.yaml
+    │   └── README.md        ← one-time prereqs + promote-to-prod workflow
     └── prod/                ← production overlay (image tag, replicas)
         └── kustomization.yaml
 ```
+
+## Release flow
+
+Test first, prod second. CI auto-rolls every successful build into the
+`multica-test` namespace; a human then manually promotes the same image tag
+into `overlays/prod/`. See `overlays/test/README.md` for the test
+prerequisites and the exact promote-to-prod commands.
 
 ## One-time cluster setup
 
@@ -49,6 +63,10 @@ the first deploy, replace it with real values via one of:
 
 ```bash
 kubectl create namespace multica
+kubectl create secret docker-registry regcred --namespace=multica \
+  --docker-server=lilith-registry.cn-shanghai.cr.aliyuncs.com \
+  --docker-username='REPLACE_ME' \
+  --docker-password='REPLACE_ME'
 kubectl create secret generic multica-secrets --namespace=multica \
   --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
   --from-literal=DATABASE_URL='postgres://USER:PASS@HOST:5432/multica?sslmode=require' \
@@ -140,7 +158,9 @@ docker push lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-web:$TAG
 ```
 
 ACK worker nodes in the same Aliyun account as the ACR Enterprise Edition
-instance auto-authenticate via RAM role — no `imagePullSecret` required.
+instance may auto-authenticate via RAM role, but these manifests currently
+reference `imagePullSecrets: regcred`, so create that Secret (or remove the
+reference in your own overlay).
 
 ## What's NOT in here (by design)
 
