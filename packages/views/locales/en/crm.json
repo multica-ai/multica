@@ -186,7 +186,17 @@
     "imap_security_note": "Credentials are not saved by this UI yet. The backend settings API will store only a secret reference, never return raw passwords, and keep sync disabled by default.",
     "test_connection": "Test connection",
     "no_project_link": "No project link",
-    "no_issue_link": "No issue link"
+    "no_issue_link": "No issue link",
+    "link_project_issue": "Link project / issue",
+    "email_link_help": "Link this email thread to a project and an open follow-up issue. Project and issue links are independent from customer/contact links.",
+    "default_project_hint": "Default project: {title}. If missing, it is created automatically.",
+    "save_email_link": "Save email link",
+    "create_follow_up_issue": "Create follow-up issue",
+    "create_follow_up_issue_help": "Create a new unresolved follow-up issue under the selected project and link this email thread to it.",
+    "follow_up_issue_prefix": "Follow up:",
+    "issue_title": "Issue title",
+    "issue_description": "Issue description",
+    "create_button": "Create"
   },
   "notes": {
     "title": "Notes & activity",

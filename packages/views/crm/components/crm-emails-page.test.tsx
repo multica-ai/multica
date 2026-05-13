@@ -15,6 +15,10 @@ const mockApi = vi.hoisted(() => ({
   listCRMEmailMessages: vi.fn(),
   updateCRMEmailThreadAssociation: vi.fn(),
   createCRMContact: vi.fn(),
+  listProjects: vi.fn(),
+  createProject: vi.fn(),
+  listIssues: vi.fn(),
+  createIssue: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -101,6 +105,14 @@ const contact = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
+const project = {
+  id: "project-1", workspace_id: "ws-1", title: "CRM:Acme Buyer", description: null, icon: null, status: "in_progress", priority: "medium", lead_type: null, lead_id: null, issue_count: 1, done_count: 0, resource_count: 1, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+};
+
+const issue = {
+  id: "issue-1", workspace_id: "ws-1", number: 1, identifier: "ACME-1", title: "Follow up quotation", description: null, status: "todo", priority: "medium", assignee_type: null, assignee_id: null, creator_type: "member", creator_id: "member-1", parent_issue_id: null, project_id: "project-1", position: 1, due_date: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   navigation.push.mockClear();
@@ -113,6 +125,11 @@ beforeEach(() => {
   });
   mockApi.updateCRMEmailThreadAssociation.mockResolvedValue(linkedThread);
   mockApi.createCRMContact.mockResolvedValue({ ...contact, id: "contact-2", name: "Bob", email: "bob@example.com" });
+  mockApi.listProjects.mockResolvedValue({ projects: [project], total: 1 });
+  mockApi.createProject.mockResolvedValue(project);
+  mockApi.listIssues.mockResolvedValue({ issues: [issue], total: 1 });
+  mockApi.createIssue.mockResolvedValue({ ...issue, id: "issue-2", identifier: "ACME-2", title: "Follow up: New quotation request" });
+
 });
 
 describe("CRMEmailsPage", () => {
@@ -125,8 +142,6 @@ describe("CRMEmailsPage", () => {
     expect(screen.getByRole("button", { name: /Mailbox settings/ })).toBeInTheDocument();
     expect((await screen.findAllByText("New quotation request")).length).toBeGreaterThan(0);
     expect(screen.queryByText("CRM context")).not.toBeInTheDocument();
-    expect(screen.queryByText("Related project")).not.toBeInTheDocument();
-    expect(screen.queryByText("Related issue")).not.toBeInTheDocument();
     expect(screen.getAllByText(/sales@example.com/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/inbound/).length).toBeGreaterThan(0);
     expect(screen.getByText(/2 messages/)).toBeInTheDocument();
@@ -204,8 +219,35 @@ describe("CRMEmailsPage", () => {
     expect(mockApi.updateCRMEmailThreadAssociation).toHaveBeenCalledWith("thread-2", {
       account_id: "account-1",
       contact_id: "contact-2",
-      project_id: null,
-      issue_id: null,
     });
   });
+  it("links project and issue as email thread links and can create default project and follow-up issue", async () => {
+    mockApi.listProjects.mockResolvedValueOnce({ projects: [], total: 0 }).mockResolvedValue({ projects: [project], total: 1 });
+    renderEmailsPage();
+
+    await screen.findByText("Please quote 500 units.");
+    await userEvent.click(screen.getByRole("button", { name: /Link project \/ issue/ }));
+
+    expect(mockApi.createProject).toHaveBeenCalledWith(expect.objectContaining({
+      title: "CRM:Acme Buyer",
+      resources: [expect.objectContaining({ resource_type: "crm_account", resource_ref: { account_id: "account-1" }, label: "Acme Buyer" })],
+    }));
+
+    const linkDialog = screen.getByRole("dialog");
+    expect(within(linkDialog).getByLabelText("Related project")).toHaveValue("project-1");
+    expect(within(linkDialog).getByLabelText("Related issue")).toHaveValue("");
+    expect(within(linkDialog).getByText("ACME-1 · Follow up quotation")).toBeInTheDocument();
+
+    await userEvent.selectOptions(within(linkDialog).getByLabelText("Related issue"), "issue-1");
+    await userEvent.click(within(linkDialog).getByRole("button", { name: "Save email link" }));
+    expect(mockApi.updateCRMEmailThreadAssociation).toHaveBeenCalledWith("thread-1", expect.objectContaining({ project_id: "project-1", issue_id: "issue-1" }));
+
+    await userEvent.click(screen.getByRole("button", { name: /Link project \/ issue/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Create follow-up issue" }));
+    const issueDialog = screen.getByRole("dialog", { name: "Create follow-up issue" });
+    expect(within(issueDialog).getByLabelText("Issue title")).toHaveValue("Follow up: New quotation request");
+    await userEvent.click(within(issueDialog).getByRole("button", { name: "Create" }));
+    expect(mockApi.createIssue).toHaveBeenCalledWith(expect.objectContaining({ project_id: "project-1", status: "todo", priority: "medium" }));
+  });
+
 });

@@ -186,7 +186,17 @@
     "imap_security_note": "当前 UI 暂不保存凭证。后端配置接口只保存密钥引用，不返回原始密码，并默认关闭同步。",
     "test_connection": "测试连接",
     "no_project_link": "不关联项目",
-    "no_issue_link": "不关联 Issue"
+    "no_issue_link": "不关联 Issue",
+    "link_project_issue": "关联项目 / Issue",
+    "email_link_help": "把这封邮件线程关联到项目和未解决跟进 Issue。项目/Issue 关联独立于客户/联系人关联。",
+    "default_project_hint": "默认项目：{title}。不存在时自动创建。",
+    "save_email_link": "保存邮件关联",
+    "create_follow_up_issue": "创建跟进 Issue",
+    "create_follow_up_issue_help": "在选中项目下创建新的未解决跟进 Issue，并把这封邮件线程关联过去。",
+    "follow_up_issue_prefix": "跟进：",
+    "issue_title": "Issue 标题",
+    "issue_description": "Issue 描述",
+    "create_button": "创建"
   },
   "notes": {
     "title": "备注与动态",

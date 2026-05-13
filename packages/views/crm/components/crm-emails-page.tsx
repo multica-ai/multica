@@ -29,9 +29,10 @@ type AssociationDraft = {
   contactId: string;
   contactName: string;
   contactEmail: string;
-  projectId: string;
-  issueId: string;
 };
+
+type EmailLinkDraft = { projectId: string; issueId: string };
+type FollowUpIssueDraft = { title: string; description: string };
 
 function messageTime(value?: string | null) {
   return value ? new Date(value).toLocaleString() : "—";
@@ -82,6 +83,8 @@ export function CRMEmailsPage() {
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [detailDialog, setDetailDialog] = useState<{ type: "account"; account: CRMAccount } | { type: "contact"; contact: CRMContact } | null>(null);
   const [associationDraft, setAssociationDraft] = useState<AssociationDraft | null>(null);
+  const [emailLinkDraft, setEmailLinkDraft] = useState<EmailLinkDraft | null>(null);
+  const [followUpIssueDraft, setFollowUpIssueDraft] = useState<FollowUpIssueDraft | null>(null);
   const { data: threads = [], isLoading } = useQuery(crmEmailThreadListOptions(wsId));
   const { data: accounts = [] } = useQuery(crmAccountListOptions(wsId, { sort: "name" }));
 
@@ -137,12 +140,17 @@ export function CRMEmailsPage() {
     queryFn: async () => (await api.listProjects()).projects,
   });
   const { data: issues = [] } = useQuery({
-    queryKey: ["issues", wsId, "crm-email-link-picker", associationDraft?.projectId ?? ""],
-    queryFn: async () => (await api.listIssues({ project_id: associationDraft?.projectId || undefined, limit: 100 })).issues,
+    queryKey: ["issues", wsId, "crm-email-link-picker", emailLinkDraft?.projectId ?? selectedThread?.project_id ?? ""],
+    queryFn: async () => (await api.listIssues({ project_id: emailLinkDraft?.projectId || selectedThread?.project_id || undefined, open_only: true, limit: 100 })).issues,
   });
 
   const selectedAccount = accounts.find((account) => account.id === linkedAccountId) ?? null;
   const selectedContact = contacts.find((contact) => contact.id === (selectedThread?.contact_id ?? "")) ?? null;
+  const selectedProject = projects.find((project) => project.id === (selectedThread?.project_id ?? "")) ?? null;
+  const selectedIssue = issues.find((issue) => issue.id === (selectedThread?.issue_id ?? "")) ?? null;
+  const defaultProjectTitle = selectedAccount ? `CRM:${selectedAccount.name}` : "";
+  const crmNamedProject = selectedAccount ? projects.find((project) => project.title === defaultProjectTitle) : null;
+
 
   const openAssociationDialog = () => {
     const inferred = inferContactDraft(messages);
@@ -151,8 +159,6 @@ export function CRMEmailsPage() {
       contactId: selectedThread?.contact_id ?? "",
       contactName: selectedContact?.name ?? inferred.contactName,
       contactEmail: selectedContact?.email ?? inferred.contactEmail,
-      projectId: selectedThread?.project_id ?? "",
-      issueId: selectedThread?.issue_id ?? "",
     });
   };
 
@@ -173,8 +179,6 @@ export function CRMEmailsPage() {
       return api.updateCRMEmailThreadAssociation(selectedThread.id, {
         account_id: associationDraft.accountId || null,
         contact_id: contactId,
-        project_id: associationDraft.projectId || null,
-        issue_id: associationDraft.issueId || null,
       });
     },
     onSuccess: async (thread) => {
@@ -182,6 +186,65 @@ export function CRMEmailsPage() {
       await queryClient.invalidateQueries({ queryKey: crmKeys.emailThreads(wsId) });
       await queryClient.invalidateQueries({ queryKey: crmKeys.emailThread(wsId, thread.id) });
       if (thread.account_id) await queryClient.invalidateQueries({ queryKey: crmKeys.contacts(wsId, thread.account_id) });
+    },
+  });
+
+  const openEmailLinkDialog = async () => {
+    if (!selectedThread || !selectedAccount) return;
+    let projectId = selectedThread.project_id ?? crmNamedProject?.id ?? "";
+    if (!projectId) {
+      const project = await api.createProject({
+        title: defaultProjectTitle,
+        status: "in_progress",
+        priority: "medium",
+        resources: [{ resource_type: "crm_account", resource_ref: { account_id: selectedAccount.id }, label: selectedAccount.name }],
+      });
+      projectId = project.id;
+      await queryClient.invalidateQueries({ queryKey: ["projects", wsId, "crm-email-link-picker"] });
+    }
+    setEmailLinkDraft({ projectId, issueId: selectedThread.issue_id ?? "" });
+  };
+
+  const updateEmailLinks = useMutation({
+    mutationFn: async () => {
+      if (!selectedThread || !emailLinkDraft) throw new Error("No email link draft selected");
+      return api.updateCRMEmailThreadAssociation(selectedThread.id, {
+        account_id: selectedThread.account_id ?? null,
+        contact_id: selectedThread.contact_id ?? null,
+        project_id: emailLinkDraft.projectId || null,
+        issue_id: emailLinkDraft.issueId || null,
+      });
+    },
+    onSuccess: async (thread) => {
+      setEmailLinkDraft(null);
+      await queryClient.invalidateQueries({ queryKey: crmKeys.emailThreads(wsId) });
+      await queryClient.invalidateQueries({ queryKey: crmKeys.emailThread(wsId, thread.id) });
+    },
+  });
+
+  const createFollowUpIssue = useMutation({
+    mutationFn: async () => {
+      if (!selectedThread || !emailLinkDraft || !followUpIssueDraft) throw new Error("No follow-up issue draft selected");
+      const issue = await api.createIssue({
+        title: followUpIssueDraft.title.trim(),
+        description: followUpIssueDraft.description.trim() || selectedThread.subject,
+        status: "todo",
+        priority: "medium",
+        project_id: emailLinkDraft.projectId,
+      });
+      await api.updateCRMEmailThreadAssociation(selectedThread.id, {
+        account_id: selectedThread.account_id ?? null,
+        contact_id: selectedThread.contact_id ?? null,
+        project_id: emailLinkDraft.projectId,
+        issue_id: issue.id,
+      });
+      return issue;
+    },
+    onSuccess: async (issue) => {
+      setFollowUpIssueDraft(null);
+      setEmailLinkDraft((prev) => prev ? { ...prev, issueId: issue.id } : prev);
+      await queryClient.invalidateQueries({ queryKey: ["issues", wsId, "crm-email-link-picker", emailLinkDraft?.projectId ?? ""] });
+      await queryClient.invalidateQueries({ queryKey: crmKeys.emailThreads(wsId) });
     },
   });
 
@@ -294,10 +357,13 @@ export function CRMEmailsPage() {
                   <Button variant="outline" size="sm"><MailOpen className="mr-1 size-3" />{t(($) => $.emails.mark_read)}</Button>
                   <Button variant="outline" size="sm"><Archive className="mr-1 size-3" />{t(($) => $.emails.archive)}</Button>
                   <Button variant="outline" size="sm"><Star className="mr-1 size-3" />{t(($) => $.emails.star)}</Button>
+                  <Button variant="outline" size="sm" disabled={!selectedAccount} onClick={openEmailLinkDialog}><Link2 className="mr-1 size-3" />{t(($) => $.emails.link_project_issue)}</Button>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <AssociationChip icon={<Building2 className="size-4" />} label={t(($) => $.emails.linked_customer)} value={selectedAccount?.name ?? t(($) => $.emails.no_customer)} onClick={selectedAccount ? () => setDetailDialog({ type: "account", account: selectedAccount }) : undefined} />
                   <AssociationChip icon={<UserRound className="size-4" />} label={t(($) => $.emails.linked_contact)} value={selectedContact?.name ?? t(($) => $.emails.no_contact)} onClick={selectedContact ? () => setDetailDialog({ type: "contact", contact: selectedContact }) : undefined} />
+                  <AssociationChip icon={<Building2 className="size-4" />} label={t(($) => $.emails.related_project)} value={selectedProject?.title ?? t(($) => $.emails.no_project_link)} />
+                  <AssociationChip icon={<Link2 className="size-4" />} label={t(($) => $.emails.related_issue)} value={selectedIssue ? `${selectedIssue.identifier} · ${selectedIssue.title}` : t(($) => $.emails.no_issue_link)} />
                   {selectedAccount && (
                     <Button variant="ghost" size="sm" onClick={() => navigation.push(paths.crmCustomerDetail(selectedAccount.id))}>
                       {t(($) => $.emails.open_customer)} <ArrowRight className="ml-1 size-3" />
@@ -401,22 +467,6 @@ export function CRMEmailsPage() {
                   </select>
                 </label>
               )}
-              <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-2">
-                <label className="space-y-1 text-sm">
-                  <span className="text-xs font-medium text-muted-foreground">{t(($) => $.emails.related_project)}</span>
-                  <select aria-label={t(($) => $.emails.related_project)} className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={associationDraft.projectId} onChange={(event) => setAssociationDraft({ ...associationDraft, projectId: event.target.value, issueId: "" })}>
-                    <option value="">{t(($) => $.emails.no_project_link)}</option>
-                    {projects.map((project: Project) => <option key={project.id} value={project.id}>{project.title}</option>)}
-                  </select>
-                </label>
-                <label className="space-y-1 text-sm">
-                  <span className="text-xs font-medium text-muted-foreground">{t(($) => $.emails.related_issue)}</span>
-                  <select aria-label={t(($) => $.emails.related_issue)} className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={associationDraft.issueId} onChange={(event) => setAssociationDraft({ ...associationDraft, issueId: event.target.value })}>
-                    <option value="">{t(($) => $.emails.no_issue_link)}</option>
-                    {issues.map((issue: Issue) => <option key={issue.id} value={issue.id}>{issue.identifier} · {issue.title}</option>)}
-                  </select>
-                </label>
-              </div>
               {associationDraft.accountId && !associationDraft.contactId && (
                 <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-2">
                   <div className="sm:col-span-2 text-xs font-medium text-muted-foreground">{t(($) => $.emails.new_contact_title)}</div>
@@ -430,6 +480,57 @@ export function CRMEmailsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setAssociationDraft(null)}>{t(($) => $.actions.cancel)}</Button>
             <Button disabled={!associationDraft?.accountId || updateAssociation.isPending} onClick={() => updateAssociation.mutate()}>{t(($) => $.emails.save_association)}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={emailLinkDraft !== null} onOpenChange={(open) => !open && setEmailLinkDraft(null)}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.emails.link_project_issue)}</DialogTitle>
+            <DialogDescription>{t(($) => $.emails.email_link_help)}</DialogDescription>
+          </DialogHeader>
+          {emailLinkDraft && (
+            <div className="space-y-4">
+              <label className="space-y-1 text-sm">
+                <span className="text-xs font-medium text-muted-foreground">{t(($) => $.emails.related_project)}</span>
+                <select aria-label={t(($) => $.emails.related_project)} className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={emailLinkDraft.projectId} onChange={(event) => setEmailLinkDraft({ projectId: event.target.value, issueId: "" })}>
+                  {projects.map((project: Project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+                </select>
+                <p className="text-xs text-muted-foreground">{t(($) => $.emails.default_project_hint, { title: defaultProjectTitle })}</p>
+              </label>
+              <label className="space-y-1 text-sm">
+                <span className="text-xs font-medium text-muted-foreground">{t(($) => $.emails.related_issue)}</span>
+                <select aria-label={t(($) => $.emails.related_issue)} className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={emailLinkDraft.issueId} onChange={(event) => setEmailLinkDraft({ ...emailLinkDraft, issueId: event.target.value })}>
+                  <option value="">{t(($) => $.emails.no_issue_link)}</option>
+                  {issues.filter((issue: Issue) => !["done", "cancelled"].includes(issue.status)).map((issue: Issue) => <option key={issue.id} value={issue.id}>{issue.identifier} · {issue.title}</option>)}
+                </select>
+              </label>
+              <Button variant="outline" type="button" onClick={() => setFollowUpIssueDraft({ title: `${t(($) => $.emails.follow_up_issue_prefix)} ${selectedThread?.subject ?? ""}`.trim(), description: selectedThread?.subject ?? "" })}>{t(($) => $.emails.create_follow_up_issue)}</Button>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEmailLinkDraft(null)}>{t(($) => $.actions.cancel)}</Button>
+            <Button disabled={!emailLinkDraft?.projectId || updateEmailLinks.isPending} onClick={() => updateEmailLinks.mutate()}>{t(($) => $.emails.save_email_link)}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={followUpIssueDraft !== null} onOpenChange={(open) => !open && setFollowUpIssueDraft(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.emails.create_follow_up_issue)}</DialogTitle>
+            <DialogDescription>{t(($) => $.emails.create_follow_up_issue_help)}</DialogDescription>
+          </DialogHeader>
+          {followUpIssueDraft && (
+            <div className="space-y-3">
+              <Input aria-label={t(($) => $.emails.issue_title)} value={followUpIssueDraft.title} onChange={(event) => setFollowUpIssueDraft({ ...followUpIssueDraft, title: event.target.value })} />
+              <Input aria-label={t(($) => $.emails.issue_description)} value={followUpIssueDraft.description} onChange={(event) => setFollowUpIssueDraft({ ...followUpIssueDraft, description: event.target.value })} />
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFollowUpIssueDraft(null)}>{t(($) => $.actions.cancel)}</Button>
+            <Button disabled={!followUpIssueDraft?.title.trim() || createFollowUpIssue.isPending} onClick={() => createFollowUpIssue.mutate()}>{t(($) => $.emails.create_button)}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
