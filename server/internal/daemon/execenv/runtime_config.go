@@ -81,6 +81,23 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 
 // buildMetaSkillContent generates the meta skill markdown that teaches the agent
 // about the Multica runtime environment and available CLI tools.
+//
+// Section ordering is tuned for prompt-cache prefix matching. Three variability
+// classes, all stable classes first:
+//   - Globally / per-agent stable: Header, Agent Identity, Available Commands,
+//     Skills, Codex notes, Mentions, Attachments, Important, Output. These
+//     bytes never depend on the issue.
+//   - Per-issue dynamic suffix: Repositories, Project Context, Workflow.
+//     Repositories is dynamic because handler/daemon.go lifts the issue's
+//     project github_repo resources into task.Repos when the project has any
+//     attached, overriding workspace-level repos (see daemon.go ~line 1013).
+//     Project Context renders only when the issue has a project. Workflow
+//     embeds the issue ID and trigger comment ID.
+//
+// The first dynamic header acts as the cache boundary; everything before it
+// is byte-identical for the same agent regardless of which issue is claimed.
+// Adding a new section: classify it correctly — never insert per-issue values
+// into the stable prefix, and never put a stable section after a dynamic one.
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 
@@ -168,6 +185,31 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica autopilot trigger <id>` — Manually trigger an autopilot to run once\n")
 	b.WriteString("- `multica autopilot delete <id>` — Delete an autopilot\n\n")
 
+	// Skills are stable per-agent (same agent always renders the same skill
+	// list). Place them in the stable prefix so the cache hit extends past
+	// the CLI command listing.
+	if len(ctx.AgentSkills) > 0 {
+		b.WriteString("## Skills\n\n")
+		switch provider {
+		case "claude":
+			// Claude discovers skills natively from .claude/skills/ — just list names.
+			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
+		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro":
+			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, and Kiro discover skills natively from their respective paths — just list names.
+			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
+		case "gemini", "hermes":
+			// Gemini reads GEMINI.md directly; Hermes has no native skills discovery path
+			// wired up in resolveSkillsDir, so both fall back to .agent_context/skills/.
+			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
+		default:
+			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
+		}
+		for _, skill := range ctx.AgentSkills {
+			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+		}
+		b.WriteString("\n")
+	}
+
 	if provider == "codex" {
 		b.WriteString("## Codex-Specific Comment Formatting\n\n")
 		if runtimeGOOS == "windows" {
@@ -181,7 +223,61 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		}
 	}
 
-	// Inject available repositories section.
+	b.WriteString("## Mentions\n\n")
+	b.WriteString("Mention links are **side-effecting actions**, not just formatting:\n\n")
+	b.WriteString("- `[MUL-123](mention://issue/<issue-id>)` — clickable link to an issue (safe, no side effect)\n")
+	b.WriteString("- `[@Name](mention://member/<user-id>)` — **sends a notification to a human**\n")
+	b.WriteString("- `[@Name](mention://agent/<agent-id>)` — **enqueues a new run for that agent**\n\n")
+	b.WriteString("### When NOT to use a mention link\n\n")
+	b.WriteString("- Referring to someone in prose (e.g. \"GPT-Boy is right\") — write the plain name, no link.\n")
+	b.WriteString("- **Replying to another agent that just spoke to you.** By default, do NOT put a `mention://agent/...` link anywhere in your reply. The platform already shows your comment to everyone on the issue; re-mentioning the other agent will make them run again, and if they reply with a mention back, you will be triggered again. That is a loop and it costs the user money.\n")
+	b.WriteString("- Thanking, acknowledging, wrapping up, or signing off. These are exactly the moments where an accidental `@mention` causes the other agent to reply \"you're welcome\" and restart the loop. If the work is done, **end with no mention at all**.\n\n")
+	b.WriteString("### When a mention IS appropriate\n\n")
+	b.WriteString("- Escalating to a human owner who is not yet involved.\n")
+	b.WriteString("- Delegating a concrete sub-task to another agent for the first time, with a clear request.\n")
+	b.WriteString("- The user explicitly asked you to loop someone in.\n\n")
+	b.WriteString("If you are unsure whether a mention is warranted, **don't mention**. Silence ends conversations; `@` restarts them.\n\n")
+	b.WriteString("Use `multica issue list --output json` to look up issue IDs, and `multica workspace members --output json` for member IDs.\n\n")
+
+	b.WriteString("## Attachments\n\n")
+	b.WriteString("Issues and comments may include file attachments (images, documents, etc.).\n")
+	b.WriteString("Use the download command to fetch attachment files locally:\n\n")
+	b.WriteString("```\nmultica attachment download <attachment-id>\n```\n\n")
+	b.WriteString("This downloads the file to the current directory and prints the local path. Use `-o <dir>` to save elsewhere.\n")
+	b.WriteString("After downloading, you can read the file directly (e.g. view an image, read a document).\n\n")
+
+	b.WriteString("## Important: Always Use the `multica` CLI\n\n")
+	b.WriteString("All interactions with Multica platform resources — including issues, comments, attachments, images, files, and any other platform data — **must** go through the `multica` CLI. ")
+	b.WriteString("Do NOT use `curl`, `wget`, or any other HTTP client to access Multica URLs or APIs directly. ")
+	b.WriteString("Multica resource URLs require authenticated access that only the `multica` CLI can provide.\n\n")
+	b.WriteString("If you need to perform an operation that is not covered by any existing `multica` command, ")
+	b.WriteString("do NOT attempt to work around it. Instead, post a comment mentioning the workspace owner to request the missing functionality.\n\n")
+
+	b.WriteString("## Output\n\n")
+	switch {
+	case ctx.AutopilotRunID != "":
+		b.WriteString("This is a run-only autopilot task, so there may be no issue comment to post. Your final assistant output is captured automatically as the autopilot run result. Keep it concise and state the outcome.\n\n")
+	case ctx.QuickCreatePrompt != "":
+		b.WriteString("This is a quick-create task. There is NO existing issue to comment on. Your final stdout is captured automatically and the platform writes the user's success/failure inbox notification based on whether `multica issue create` succeeded.\n\n")
+		b.WriteString("- Do NOT call `multica issue comment add` — the issue you just created has no conversation context for this run.\n")
+		b.WriteString("- Print exactly one final line: `Created MUL-<n>: <title>` after a successful `multica issue create`.\n")
+		b.WriteString("- On CLI failure, exit with the CLI error as the only output. The platform translates that into a `quick_create_failed` inbox item carrying the original prompt for the user.\n\n")
+	default:
+		b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
+		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
+		b.WriteString("Good: \"Fixed the login redirect. PR: https://...\"\n")
+		b.WriteString("Bad: \"1. Read the issue 2. Found the bug in auth.go 3. Created branch 4. ...\"\n")
+		b.WriteString("When referencing an issue in a comment, use the issue mention format `[MUL-123](mention://issue/<issue-id>)` so it renders as a clickable link. (Issue mentions have no side effect; only member/agent mentions do — see the Mentions section above.)\n\n")
+	}
+
+	// === Per-issue dynamic suffix begins here. ===
+	//
+	// Repositories is workspace-scoped most of the time, but
+	// handler/daemon.go overrides task.Repos with the issue's project
+	// github_repo resources when the project has any attached. So the
+	// rendered list can vary per issue. Keep this section in the dynamic
+	// suffix so the stable prefix above is never invalidated by a project
+	// switch.
 	if len(ctx.Repos) > 0 {
 		b.WriteString("## Repositories\n\n")
 		b.WriteString("The following code repositories are available in this workspace.\n")
@@ -194,7 +290,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	// Inject project-scoped context (resources attached to the issue's project).
 	// The full structured payload is also available at .multica/project/resources.json
-	// so skills can consume it programmatically.
+	// so skills can consume it programmatically. Per-issue: kept in the
+	// dynamic suffix so it doesn't break prefix cache for project-less issues.
 	if ctx.ProjectID != "" || len(ctx.ProjectResources) > 0 {
 		b.WriteString("## Project Context\n\n")
 		if ctx.ProjectTitle != "" {
@@ -212,6 +309,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		}
 	}
 
+	// Workflow contains the issue ID and other per-task identifiers and is
+	// the most variable section in this file. It must come last so all the
+	// stable content above can hit the prompt prefix cache.
 	b.WriteString("### Workflow\n\n")
 
 	if ctx.ChatSessionID != "" {
@@ -287,75 +387,6 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		fmt.Fprintf(&b, "5. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
 		fmt.Fprintf(&b, "6. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
 		fmt.Fprintf(&b, "7. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
-	}
-
-	if len(ctx.AgentSkills) > 0 {
-		b.WriteString("## Skills\n\n")
-		switch provider {
-		case "claude":
-			// Claude discovers skills natively from .claude/skills/ — just list names.
-			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro":
-			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, and Kiro discover skills natively from their respective paths — just list names.
-			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "gemini", "hermes":
-			// Gemini reads GEMINI.md directly; Hermes has no native skills discovery path
-			// wired up in resolveSkillsDir, so both fall back to .agent_context/skills/.
-			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
-		default:
-			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
-		}
-		for _, skill := range ctx.AgentSkills {
-			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
-		}
-		b.WriteString("\n")
-	}
-
-	b.WriteString("## Mentions\n\n")
-	b.WriteString("Mention links are **side-effecting actions**, not just formatting:\n\n")
-	b.WriteString("- `[MUL-123](mention://issue/<issue-id>)` — clickable link to an issue (safe, no side effect)\n")
-	b.WriteString("- `[@Name](mention://member/<user-id>)` — **sends a notification to a human**\n")
-	b.WriteString("- `[@Name](mention://agent/<agent-id>)` — **enqueues a new run for that agent**\n\n")
-	b.WriteString("### When NOT to use a mention link\n\n")
-	b.WriteString("- Referring to someone in prose (e.g. \"GPT-Boy is right\") — write the plain name, no link.\n")
-	b.WriteString("- **Replying to another agent that just spoke to you.** By default, do NOT put a `mention://agent/...` link anywhere in your reply. The platform already shows your comment to everyone on the issue; re-mentioning the other agent will make them run again, and if they reply with a mention back, you will be triggered again. That is a loop and it costs the user money.\n")
-	b.WriteString("- Thanking, acknowledging, wrapping up, or signing off. These are exactly the moments where an accidental `@mention` causes the other agent to reply \"you're welcome\" and restart the loop. If the work is done, **end with no mention at all**.\n\n")
-	b.WriteString("### When a mention IS appropriate\n\n")
-	b.WriteString("- Escalating to a human owner who is not yet involved.\n")
-	b.WriteString("- Delegating a concrete sub-task to another agent for the first time, with a clear request.\n")
-	b.WriteString("- The user explicitly asked you to loop someone in.\n\n")
-	b.WriteString("If you are unsure whether a mention is warranted, **don't mention**. Silence ends conversations; `@` restarts them.\n\n")
-	b.WriteString("Use `multica issue list --output json` to look up issue IDs, and `multica workspace members --output json` for member IDs.\n\n")
-
-	b.WriteString("## Attachments\n\n")
-	b.WriteString("Issues and comments may include file attachments (images, documents, etc.).\n")
-	b.WriteString("Use the download command to fetch attachment files locally:\n\n")
-	b.WriteString("```\nmultica attachment download <attachment-id>\n```\n\n")
-	b.WriteString("This downloads the file to the current directory and prints the local path. Use `-o <dir>` to save elsewhere.\n")
-	b.WriteString("After downloading, you can read the file directly (e.g. view an image, read a document).\n\n")
-
-	b.WriteString("## Important: Always Use the `multica` CLI\n\n")
-	b.WriteString("All interactions with Multica platform resources — including issues, comments, attachments, images, files, and any other platform data — **must** go through the `multica` CLI. ")
-	b.WriteString("Do NOT use `curl`, `wget`, or any other HTTP client to access Multica URLs or APIs directly. ")
-	b.WriteString("Multica resource URLs require authenticated access that only the `multica` CLI can provide.\n\n")
-	b.WriteString("If you need to perform an operation that is not covered by any existing `multica` command, ")
-	b.WriteString("do NOT attempt to work around it. Instead, post a comment mentioning the workspace owner to request the missing functionality.\n\n")
-
-	b.WriteString("## Output\n\n")
-	switch {
-	case ctx.AutopilotRunID != "":
-		b.WriteString("This is a run-only autopilot task, so there may be no issue comment to post. Your final assistant output is captured automatically as the autopilot run result. Keep it concise and state the outcome.\n")
-	case ctx.QuickCreatePrompt != "":
-		b.WriteString("This is a quick-create task. There is NO existing issue to comment on. Your final stdout is captured automatically and the platform writes the user's success/failure inbox notification based on whether `multica issue create` succeeded.\n\n")
-		b.WriteString("- Do NOT call `multica issue comment add` — the issue you just created has no conversation context for this run.\n")
-		b.WriteString("- Print exactly one final line: `Created MUL-<n>: <title>` after a successful `multica issue create`.\n")
-		b.WriteString("- On CLI failure, exit with the CLI error as the only output. The platform translates that into a `quick_create_failed` inbox item carrying the original prompt for the user.\n")
-	default:
-		b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
-		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
-		b.WriteString("Good: \"Fixed the login redirect. PR: https://...\"\n")
-		b.WriteString("Bad: \"1. Read the issue 2. Found the bug in auth.go 3. Created branch 4. ...\"\n")
-		b.WriteString("When referencing an issue in a comment, use the issue mention format `[MUL-123](mention://issue/<issue-id>)` so it renders as a clickable link. (Issue mentions have no side effect; only member/agent mentions do — see the Mentions section above.)\n")
 	}
 
 	return b.String()

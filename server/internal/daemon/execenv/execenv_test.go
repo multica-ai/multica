@@ -2263,3 +2263,213 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		}
 	})
 }
+
+// firstDynamicSectionOffset returns the offset of the first per-issue dynamic
+// header in CLAUDE.md content. The stable prefix is everything before this
+// offset; everything from this offset on may vary per issue (Repositories
+// because of project repo override, Project Context because some issues have a
+// project, Workflow because it carries the issue ID).
+func firstDynamicSectionOffset(t *testing.T, s string) int {
+	t.Helper()
+	min := -1
+	for _, marker := range []string{"## Repositories", "## Project Context", "### Workflow"} {
+		pos := strings.Index(s, marker)
+		if pos < 0 {
+			continue
+		}
+		if min < 0 || pos < min {
+			min = pos
+		}
+	}
+	if min < 0 {
+		t.Fatalf("no dynamic section found (Repositories / Project Context / Workflow)\n---\n%s", s)
+	}
+	return min
+}
+
+// TestInjectRuntimeConfigStablePrefixOrdering pins the prompt-cache-friendly
+// section ordering: every section that is stable across issues for the same
+// agent must appear before the first per-issue dynamic section. Without this
+// ordering the prompt prefix cache misses on every issue switch because a
+// dynamic block is buried in the middle of the prompt. See MUL-1824.
+func TestInjectRuntimeConfigStablePrefixOrdering(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ctx := TaskContextForEnv{
+		AgentName: "Lambda",
+		AgentID:   "agent-uuid",
+		IssueID:   "ISSUE-UUID-MARKER",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Coding", Content: "Write good code."},
+		},
+		Repos: []RepoContextForEnv{
+			{URL: "https://github.com/org/repo"},
+		},
+		ProjectID:    "project-uuid",
+		ProjectTitle: "Project A",
+	}
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(data)
+
+	dynamicStart := firstDynamicSectionOffset(t, s)
+
+	workflowPos := strings.Index(s, "### Workflow")
+	if workflowPos < 0 {
+		t.Fatalf("Workflow section missing")
+	}
+	issueIDPos := strings.Index(s, "ISSUE-UUID-MARKER")
+	if issueIDPos < 0 {
+		t.Fatalf("issue ID marker not found in CLAUDE.md")
+	}
+	if issueIDPos < workflowPos {
+		t.Fatalf("issue ID appears before Workflow header — Workflow must be the only section that contains the issue ID")
+	}
+
+	// Stable prefix sections must come before the first dynamic section.
+	stablePrefix := []string{
+		"## Available Commands",
+		"## Skills",
+		"## Mentions",
+		"## Attachments",
+		"## Important: Always Use the `multica` CLI",
+		"## Output",
+	}
+	for _, section := range stablePrefix {
+		pos := strings.Index(s, section)
+		if pos < 0 {
+			t.Errorf("missing section %q", section)
+			continue
+		}
+		if pos > dynamicStart {
+			t.Errorf("stable section %q at offset %d appears after the first dynamic section at offset %d — must come before per-issue content for prompt-cache friendliness", section, pos, dynamicStart)
+		}
+	}
+
+	// Within the dynamic suffix the order must be Repositories → Project
+	// Context → Workflow so Workflow stays the very last section.
+	reposPos := strings.Index(s, "## Repositories")
+	projectPos := strings.Index(s, "## Project Context")
+	if reposPos < 0 {
+		t.Errorf("missing Repositories section")
+	}
+	if projectPos < 0 {
+		t.Errorf("missing Project Context section")
+	}
+	if reposPos > projectPos {
+		t.Errorf("Repositories (%d) must precede Project Context (%d)", reposPos, projectPos)
+	}
+	if projectPos > workflowPos {
+		t.Errorf("Project Context (%d) must precede Workflow (%d)", projectPos, workflowPos)
+	}
+}
+
+// TestInjectRuntimeConfigStablePrefixIsByteAligned validates the core
+// prompt-cache property: for the same agent, the bytes up to the first
+// dynamic section header are byte-identical regardless of which issue (or
+// which project repos, or which project) is rendered. If this regresses,
+// prompt-prefix caches on the provider side miss on every issue switch.
+func TestInjectRuntimeConfigStablePrefixIsByteAligned(t *testing.T) {
+	t.Parallel()
+
+	render := func(t *testing.T, ctx TaskContextForEnv) string {
+		t.Helper()
+		dir := t.TempDir()
+		if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+			t.Fatalf("InjectRuntimeConfig: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+		if err != nil {
+			t.Fatalf("read CLAUDE.md: %v", err)
+		}
+		return string(data)
+	}
+
+	baseCtx := func(issueID string) TaskContextForEnv {
+		return TaskContextForEnv{
+			AgentName: "Lambda",
+			AgentID:   "agent-uuid-1",
+			IssueID:   issueID,
+			AgentSkills: []SkillContextForEnv{
+				{Name: "Coding", Content: "Write good code."},
+			},
+		}
+	}
+
+	t.Run("issue-id-only-changes", func(t *testing.T) {
+		t.Parallel()
+		a := baseCtx("issue-aaaaaaaa")
+		a.Repos = []RepoContextForEnv{{URL: "https://github.com/org/repo"}}
+		b := baseCtx("issue-bbbbbbbb")
+		b.Repos = []RepoContextForEnv{{URL: "https://github.com/org/repo"}}
+
+		sa := render(t, a)
+		sb := render(t, b)
+
+		da := firstDynamicSectionOffset(t, sa)
+		db := firstDynamicSectionOffset(t, sb)
+		if da != db {
+			t.Fatalf("dynamic-section offset differs: %d vs %d", da, db)
+		}
+		if sa[:da] != sb[:db] {
+			t.Errorf("stable prefix differs across issue IDs — prompt prefix cache cannot hit")
+		}
+		if sa == sb {
+			t.Errorf("CLAUDE.md identical for two different issues — issue ID should appear in dynamic suffix")
+		}
+	})
+
+	t.Run("project-repos-and-project-context-change", func(t *testing.T) {
+		t.Parallel()
+		// handler/daemon.go overrides task.Repos with the issue's project
+		// github_repo resources, so two issues in the same workspace can
+		// legitimately render different Repositories blocks. The stable
+		// prefix above the dynamic suffix must still be byte-identical.
+		a := baseCtx("issue-aaaaaaaa")
+		a.Repos = []RepoContextForEnv{{URL: "https://github.com/org/project-a-repo"}}
+		a.ProjectID = "project-a"
+		a.ProjectTitle = "Project A"
+		a.ProjectResources = []ProjectResourceForEnv{
+			{ID: "res-a", ResourceType: "github_repo", ResourceRef: []byte(`{"url":"https://github.com/org/project-a-repo"}`)},
+		}
+
+		b := baseCtx("issue-bbbbbbbb")
+		b.Repos = []RepoContextForEnv{{URL: "https://github.com/org/project-b-repo"}}
+		b.ProjectID = "project-b"
+		b.ProjectTitle = "Project B"
+		b.ProjectResources = []ProjectResourceForEnv{
+			{ID: "res-b", ResourceType: "github_repo", ResourceRef: []byte(`{"url":"https://github.com/org/project-b-repo"}`)},
+		}
+
+		sa := render(t, a)
+		sb := render(t, b)
+
+		da := firstDynamicSectionOffset(t, sa)
+		db := firstDynamicSectionOffset(t, sb)
+		if da != db {
+			t.Fatalf("dynamic-section offset differs: %d vs %d", da, db)
+		}
+		if sa[:da] != sb[:db] {
+			t.Errorf("stable prefix differs when projects differ — prompt prefix cache cannot hit")
+		}
+
+		// Sanity: per-issue values must NOT leak into the stable prefix.
+		for _, leaked := range []string{
+			"project-a-repo", "project-b-repo",
+			"Project A", "Project B",
+			"issue-aaaaaaaa", "issue-bbbbbbbb",
+		} {
+			if strings.Contains(sa[:da], leaked) {
+				t.Errorf("per-issue value %q leaked into stable prefix of CLAUDE.md (a)", leaked)
+			}
+			if strings.Contains(sb[:db], leaked) {
+				t.Errorf("per-issue value %q leaked into stable prefix of CLAUDE.md (b)", leaked)
+			}
+		}
+	})
+}
