@@ -21,10 +21,16 @@ type StringTable = {
   more_actions: string;
   mark_read: string;
   mark_unread: string;
+  mark_read_tooltip: string;
+  mark_unread_tooltip: string;
   mute: string;
   unmute: string;
+  mute_tooltip: string;
+  unmute_tooltip: string;
   swipe_archive: string;
   drawer_title: string;
+  /** Prefix shown on a row in the Muted filter, e.g. "Muted til 08:00". */
+  muted_until_prefix: string;
 };
 
 const en: StringTable = {
@@ -36,10 +42,15 @@ const en: StringTable = {
   more_actions: "More actions",
   mark_read: "Mark as read",
   mark_unread: "Mark as unread",
+  mark_read_tooltip: "Mark as read",
+  mark_unread_tooltip: "Mark as unread",
   mute: "Mute until 8 AM",
   unmute: "Unmute",
+  mute_tooltip: "Mute until 8 AM",
+  unmute_tooltip: "Unmute",
   swipe_archive: "Archive",
   drawer_title: "Actions",
+  muted_until_prefix: "Muted until",
 };
 
 const da: StringTable = {
@@ -51,10 +62,15 @@ const da: StringTable = {
   more_actions: "Flere handlinger",
   mark_read: "Marker som læst",
   mark_unread: "Marker som ulæst",
+  mark_read_tooltip: "Marker som læst",
+  mark_unread_tooltip: "Marker som ulæst",
   mute: "Mute til kl. 08",
   unmute: "Unmute",
+  mute_tooltip: "Mute til kl. 08",
+  unmute_tooltip: "Unmute",
   swipe_archive: "Arkivér",
   drawer_title: "Handlinger",
+  muted_until_prefix: "Muted til",
 };
 
 /**

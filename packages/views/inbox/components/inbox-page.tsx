@@ -26,7 +26,8 @@ import {
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 // CEREBRO-PATCH(inbox-keyboard-shortcuts): cerebro keyboard shortcuts (e = archive)
 // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166 — useUnarchiveInbox for archived view
-import { useInboxKeyboardShortcuts, CerebroSwipeArchive, useUnarchiveInbox } from "@multica/cerebro-inbox";
+// CEREBRO-PATCH(inbox-muted-filter): JEH-663 — `isMuted` powers the muted/non-muted view filter
+import { useInboxKeyboardShortcuts, CerebroSwipeArchive, useUnarchiveInbox, isMuted } from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(inbox-channel-archive-import): JEH-851 — per-user channel archive mutation.
 import { useArchiveChannel } from "@multica/cerebro-channels";
 import { useInboxViewStore, INBOX_VIEW_OPTIONS, type InboxView } from "@multica/core/inbox";
@@ -1223,6 +1224,12 @@ function matchesView(
     | { kind: "channel"; channel: Channel },
   view: InboxView,
 ): boolean {
+  // CEREBRO-PATCH(inbox-muted-filter): JEH-663 — hide muted notifs from every
+  // view except the dedicated "muted" filter. Muted rows auto-resurface once
+  // muted_until passes, no client cache invalidation needed (re-evaluated on
+  // each render via Date.now()).
+  if (view !== "muted" && entry.kind === "notif" && isMuted(entry.item.muted_until))
+    return false;
   switch (view) {
     case "all":
       return true;
@@ -1241,6 +1248,9 @@ function matchesView(
       // mentally the user's "DM" view is "every 1:1 thread I have".
       if (entry.kind === "chat") return true;
       return entry.kind === "channel" && entry.channel.kind === "dm";
+    case "muted":
+      // CEREBRO-PATCH(inbox-muted-filter): JEH-663 — only notifs have muted_until.
+      return entry.kind === "notif" && isMuted(entry.item.muted_until);
   }
 }
 
