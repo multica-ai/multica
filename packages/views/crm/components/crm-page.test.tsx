@@ -104,12 +104,13 @@ vi.mock("../geo", async () => {
       { code: "Adelanto", name: { en: "Adelanto", zh: "Adelanto" } },
     ] : []),
   };
+
 });
 
 function renderCRMPage(locale: "en" | "zh-Hans" = "en") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const navigation = { push: vi.fn(), replace: vi.fn(), back: vi.fn(), pathname: "/acme/crm/customers", searchParams: new URLSearchParams() };
-  return render(
+  const result = render(
     <I18nProvider locale={locale} resources={{ en: { crm: enCrm }, "zh-Hans": { crm: zhCrm } }}>
       <QueryClientProvider client={queryClient}>
         <WorkspaceSlugProvider slug="acme">
@@ -120,6 +121,7 @@ function renderCRMPage(locale: "en" | "zh-Hans" = "en") {
       </QueryClientProvider>
     </I18nProvider>,
   );
+  return { ...result, navigation };
 }
 
 beforeEach(() => {
@@ -128,10 +130,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockApi.listCRMAccounts.mockResolvedValue({ accounts: [...mockAccounts], total: mockAccounts.length });
   mockApi.createCRMAccount.mockResolvedValue({ ...mockAccounts[0], id: "account-3", name: "Created Customer" });
+
 });
 
 afterEach(() => {
   vi.useRealTimers();
+
 });
 
 describe("CRMPage", () => {
@@ -182,5 +186,15 @@ describe("CRMPage", () => {
 
     expect(await screen.findByRole("option", { name: "家居园艺" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Home & Garden" })).not.toBeInTheDocument();
+  });
+
+  it("opens the newly created customer detail in the same app shell", async () => {
+    const { navigation } = renderCRMPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: /Add customer/i }));
+    await userEvent.type(screen.getByPlaceholderText("New customer name"), "Created Customer");
+    await userEvent.click(screen.getByRole("button", { name: /^Add customer$/i }));
+
+    expect(navigation.push).toHaveBeenCalledWith("/acme/crm/customers/account-3");
   });
 });

@@ -263,7 +263,7 @@ export function CRMPage() {
       setForm(blankAccountForm());
       setCreateOpen(false);
       await queryClient.invalidateQueries({ queryKey: crmKeys.accounts(wsId) });
-      window.open(`./customers/${account.id}`, "_blank", "noopener,noreferrer");
+      navigation.push(paths.crmCustomerDetail(account.id));
     },
   });
 
