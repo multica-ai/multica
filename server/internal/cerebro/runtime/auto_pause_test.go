@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/cerebro/account"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -48,19 +49,19 @@ func TestShouldAutoPause(t *testing.T) {
 			name:      "anthropic monthly cap — pause for 5min default",
 			task:      mkTask(validRuntime, "You've hit your org's monthly usage limit"),
 			wantPause: true,
-			wantAt:    now.Add(DefaultRateLimitBackoff),
+			wantAt:    now.Add(account.DefaultRateLimitBackoff),
 		},
 		{
 			name:      "401 invalid auth — pause for 5min default",
 			task:      mkTask(validRuntime, "Failed to authenticate. API Error: 401 Invalid authentication credentials"),
 			wantPause: true,
-			wantAt:    now.Add(DefaultRateLimitBackoff),
+			wantAt:    now.Add(account.DefaultRateLimitBackoff),
 		},
 		{
 			name:      "openai insufficient_quota — pause for 5min default",
 			task:      mkTask(validRuntime, `{"error":{"code":"insufficient_quota"}}`),
 			wantPause: true,
-			wantAt:    now.Add(DefaultRateLimitBackoff),
+			wantAt:    now.Add(account.DefaultRateLimitBackoff),
 		},
 		{
 			name:      "explicit retry-after wins over default",
@@ -72,7 +73,7 @@ func TestShouldAutoPause(t *testing.T) {
 			name:      "http 429 — pause for 5min default",
 			task:      mkTask(validRuntime, "Request failed: HTTP 429 Too Many Requests"),
 			wantPause: true,
-			wantAt:    now.Add(DefaultRateLimitBackoff),
+			wantAt:    now.Add(account.DefaultRateLimitBackoff),
 		},
 	}
 
