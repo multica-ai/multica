@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
@@ -146,6 +146,8 @@ describe("CRMPage", () => {
     expect(screen.getByRole("button", { name: /Add customer/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Search customers")).toBeInTheDocument();
     expect(screen.getByLabelText("Rating")).toBeInTheDocument();
+    expect(screen.getByLabelText("Country")).toBeInTheDocument();
+    expect(screen.getByLabelText("Industry")).toBeInTheDocument();
     expect(screen.getByLabelText("Follow-up")).toBeInTheDocument();
     expect(await screen.findByText("High Frequency")).toBeInTheDocument();
   });
@@ -156,11 +158,15 @@ describe("CRMPage", () => {
     await screen.findByText("High Frequency");
     await userEvent.selectOptions(screen.getByLabelText("Rating"), "hot");
     await userEvent.selectOptions(screen.getByLabelText("Priority"), "high");
+    await userEvent.selectOptions(screen.getByLabelText("Country"), "CN");
+    await userEvent.selectOptions(screen.getByLabelText("Industry"), "Consumer Goods");
     await userEvent.selectOptions(screen.getByLabelText("Follow-up"), "overdue");
 
     expect(mockApi.listCRMAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
       rating: "hot",
       priority: "high",
+      country_code: "CN",
+      industry: "Consumer Goods",
       follow_up_bucket: "overdue",
     }));
   });
@@ -169,13 +175,14 @@ describe("CRMPage", () => {
     renderCRMPage();
 
     await userEvent.click(await screen.findByRole("button", { name: /Add customer/i }));
-    await userEvent.selectOptions(screen.getByLabelText("Country"), "US");
+    const dialog = screen.getByRole("dialog");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Country"), "US");
 
-    expect(await screen.findByRole("option", { name: "California" })).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText("Region"), "CA");
+    expect(await within(dialog).findByRole("option", { name: "California" })).toBeInTheDocument();
+    await userEvent.selectOptions(within(dialog).getByLabelText("Region"), "CA");
 
-    expect(await screen.findByRole("option", { name: "Acalanes Ridge" })).toBeInTheDocument();
-    expect(screen.getByLabelText("City")).toBeEnabled();
+    expect(await within(dialog).findByRole("option", { name: "Acalanes Ridge" })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("City")).toBeEnabled();
   });
 
   it("uses linked industry and sub-industry dropdowns, tag frequency suggestions, and current datetime defaults", async () => {
@@ -183,34 +190,37 @@ describe("CRMPage", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: /Add customer/i }));
 
-    expect(screen.getByLabelText("Next follow-up")).toHaveValue("2026-05-12T10:47");
-    expect(screen.getByRole("button", { name: "VIP" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Distributor" })).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByLabelText("Next follow-up")).toHaveValue("2026-05-12T10:47");
+    expect(within(dialog).getByRole("button", { name: "VIP" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Distributor" })).toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText("Industry"), "Consumer Goods");
-    expect(await screen.findByRole("option", { name: "Home & Garden" })).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText("Sub-industry"), "Home & Garden");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Industry"), "Consumer Goods");
+    expect(await within(dialog).findByRole("option", { name: "Home & Garden" })).toBeInTheDocument();
+    await userEvent.selectOptions(within(dialog).getByLabelText("Sub-industry"), "Home & Garden");
 
-    await userEvent.click(screen.getByRole("button", { name: "VIP" }));
-    expect(screen.getByLabelText("Tags")).toHaveValue("VIP");
+    await userEvent.click(within(dialog).getByRole("button", { name: "VIP" }));
+    expect(within(dialog).getByLabelText("Tags")).toHaveValue("VIP");
   });
 
   it("localizes sub-industry options with the system language", async () => {
     renderCRMPage("zh-Hans");
 
     await userEvent.click(await screen.findByRole("button", { name: /添加客户/i }));
-    await userEvent.selectOptions(screen.getByLabelText("行业"), "Consumer Goods");
+    const dialog = screen.getByRole("dialog");
+    await userEvent.selectOptions(within(dialog).getByLabelText("行业"), "Consumer Goods");
 
-    expect(await screen.findByRole("option", { name: "家居园艺" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "Home & Garden" })).not.toBeInTheDocument();
+    expect(await within(dialog).findByRole("option", { name: "家居园艺" })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("option", { name: "Home & Garden" })).not.toBeInTheDocument();
   });
 
   it("opens the newly created customer detail in the same app shell", async () => {
     const { navigation } = renderCRMPage();
 
     await userEvent.click(await screen.findByRole("button", { name: /Add customer/i }));
-    await userEvent.type(screen.getByPlaceholderText("New customer name"), "Created Customer");
-    await userEvent.click(screen.getByRole("button", { name: /^Add customer$/i }));
+    const dialog = screen.getByRole("dialog");
+    await userEvent.type(within(dialog).getByPlaceholderText("New customer name"), "Created Customer");
+    await userEvent.click(within(dialog).getByRole("button", { name: /^Add customer$/i }));
 
     expect(navigation.push).toHaveBeenCalledWith("/acme/crm/customers/account-3");
   });

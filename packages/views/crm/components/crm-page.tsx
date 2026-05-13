@@ -223,6 +223,8 @@ export function CRMPage() {
   const [statusFilter, setStatusFilter] = useState<CRMAccountStatus | "">("");
   const [ratingFilter, setRatingFilter] = useState<CRMAccountRating | "">("");
   const [priorityFilter, setPriorityFilter] = useState<CRMAccountPriority | "">("");
+  const [countryFilter, setCountryFilter] = useState("");
+  const [industryFilter, setIndustryFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState<CRMAccountSource | "">("");
   const [followUpBucket, setFollowUpBucket] = useState<CRMAccountFollowUpBucket | "">("");
   const [sort, setSort] = useState<CRMAccountSort>("name");
@@ -234,10 +236,12 @@ export function CRMPage() {
     status: statusFilter,
     rating: ratingFilter,
     priority: priorityFilter,
+    country_code: countryFilter,
+    industry: industryFilter,
     source: sourceFilter,
     follow_up_bucket: followUpBucket,
     sort,
-  }), [followUpBucket, priorityFilter, ratingFilter, search, sort, sourceFilter, statusFilter]);
+  }), [countryFilter, followUpBucket, industryFilter, priorityFilter, ratingFilter, search, sort, sourceFilter, statusFilter]);
   const { data: accounts = [], isLoading } = useQuery(crmAccountListOptions(wsId, accountListParams));
   const sortedAccounts = useMemo(
     () => sort === "name" ? [...accounts].sort((a, b) => a.name.localeCompare(b.name)) : accounts,
@@ -296,7 +300,7 @@ export function CRMPage() {
       </PageHeader>
 
       <div className="space-y-4 p-5">
-        <div className="grid gap-2 lg:grid-cols-[minmax(220px,1fr)_repeat(6,minmax(130px,160px))]">
+        <div className="grid gap-2 lg:grid-cols-[minmax(220px,1fr)_repeat(8,minmax(130px,160px))]">
           <div className="relative">
             <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
             <Input className="pl-8" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t(($) => $.customers.search_placeholder)} />
@@ -320,6 +324,14 @@ export function CRMPage() {
             <option value="high">{t(($) => $.priorities.high)}</option>
             <option value="medium">{t(($) => $.priorities.medium)}</option>
             <option value="low">{t(($) => $.priorities.low)}</option>
+          </select>
+          <select aria-label={t(($) => $.filters.country)} className="h-9 rounded-md border bg-background px-3 text-sm" value={countryFilter} onChange={(e) => setCountryFilter(e.target.value)}>
+            <option value="">{t(($) => $.filters.all_countries)}</option>
+            {COUNTRY_OPTIONS.map((country) => <option key={country.code} value={country.code}>{localizedName(country.name, locale)}</option>)}
+          </select>
+          <select aria-label={t(($) => $.filters.industry)} className="h-9 rounded-md border bg-background px-3 text-sm" value={industryFilter} onChange={(e) => setIndustryFilter(e.target.value)}>
+            <option value="">{t(($) => $.filters.all_industries)}</option>
+            {CRM_INDUSTRY_OPTIONS.map((industry) => <option key={industry.value} value={industry.value}>{industryLabel(industry.value, locale)}</option>)}
           </select>
           <select aria-label={t(($) => $.filters.source)} className="h-9 rounded-md border bg-background px-3 text-sm" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as CRMAccountSource | "")}>
             <option value="">{t(($) => $.filters.all_sources)}</option>

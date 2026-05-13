@@ -229,6 +229,25 @@
     "sort_name": "Name",
     "sort_updated": "Recently updated",
     "sort_next_follow_up": "Next follow-up",
-    "sort_priority_rating": "Priority + rating"
+    "sort_priority_rating": "Priority + rating",
+    "country": "Country",
+    "industry": "Industry",
+    "all_countries": "All countries",
+    "all_industries": "All industries"
+  },
+  "dashboard": {
+    "title": "CRM Dashboard",
+    "total_customers": "Customers",
+    "overdue_followups": "Overdue follow-ups",
+    "hot_customers": "Hot customers",
+    "email_threads": "Email threads",
+    "followups_title": "Needs follow-up",
+    "hot_title": "Hot customers",
+    "recent_customers_title": "Recent customers",
+    "recent_emails_title": "Recent emails",
+    "no_followups": "No overdue follow-ups.",
+    "no_hot": "No hot customers yet.",
+    "no_customers": "No customers yet.",
+    "no_emails": "No email threads yet."
   }
 }

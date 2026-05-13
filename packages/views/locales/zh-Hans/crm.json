@@ -229,6 +229,25 @@
     "sort_name": "客户名称",
     "sort_updated": "最近更新",
     "sort_next_follow_up": "下次跟进",
-    "sort_priority_rating": "优先级 + 评级"
+    "sort_priority_rating": "优先级 + 评级",
+    "country": "国家",
+    "industry": "行业",
+    "all_countries": "全部国家",
+    "all_industries": "全部行业"
+  },
+  "dashboard": {
+    "title": "CRM 仪表盘",
+    "total_customers": "客户数",
+    "overdue_followups": "逾期跟进",
+    "hot_customers": "高意向客户",
+    "email_threads": "邮件线程",
+    "followups_title": "需要跟进",
+    "hot_title": "高意向客户",
+    "recent_customers_title": "最近客户",
+    "recent_emails_title": "最近邮件",
+    "no_followups": "暂无逾期跟进。",
+    "no_hot": "暂无高意向客户。",
+    "no_customers": "暂无客户。",
+    "no_emails": "暂无邮件线程。"
   }
 }
