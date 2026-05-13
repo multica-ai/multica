@@ -285,6 +285,30 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.32",
+        date: "2026-05-13",
+        title: "Usage Insights, Chat Renaming & Smoother Desktop Flows",
+        changes: [],
+        features: [
+          "Usage now shows workspace and project token activity, runtime trends, and per-agent rankings in one place",
+          "Chat sessions can be renamed directly from the chat header",
+          "Feedback reports can include screenshots or files so teams have the context they need",
+        ],
+        improvements: [
+          "The Usage page has clearer naming and a more dynamic agent leaderboard",
+          "New chats and completed chat responses update more smoothly with fewer loading flashes",
+          "Self-hosted GitHub setup is easier to configure and the setup docs point to the right cloud URL",
+          "User-installed Codex skills are available automatically when new tasks run",
+        ],
+        fixes: [
+          "Empty successful agent responses are marked completed instead of blocked",
+          "Pasted mentions in instruction editors keep their mention links",
+          "Desktop attachment downloads use the native Linux flow and tab closing no longer loops",
+          "Gemini and Windows runtime startup checks are more reliable in unattended runs",
+          "Long GitHub repository lists stay usable when adding project resources",
+        ],
+      },
+      {
         version: "0.2.31",
         date: "2026-05-12",
         title: "GitHub Integration, Chat Attachments & Safer Issue Navigation",
