@@ -8,6 +8,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import enCrm from "../../locales/en/crm.json";
 import { CRMEmailsPage } from "./crm-emails-page";
 
+const mockModalOpen = vi.hoisted(() => vi.fn());
+const mockSetIssueDraft = vi.hoisted(() => vi.fn());
+const mockClearIssueDraft = vi.hoisted(() => vi.fn());
+
 const mockApi = vi.hoisted(() => ({
   listCRMEmailThreads: vi.fn(),
   listCRMAccounts: vi.fn(),
@@ -28,6 +32,18 @@ vi.mock("@multica/core/api", () => ({
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
+
+vi.mock("@multica/core/modals", () => ({
+  useModalStore: (selector: (state: { open: typeof mockModalOpen }) => unknown) => selector({ open: mockModalOpen }),
+}));
+
+vi.mock("@multica/core/issues", async () => {
+  const actual = await vi.importActual<typeof import("@multica/core/issues")>("@multica/core/issues");
+  return {
+    ...actual,
+    useIssueDraftStore: (selector: (state: { setDraft: typeof mockSetIssueDraft; clearDraft: typeof mockClearIssueDraft }) => unknown) => selector({ setDraft: mockSetIssueDraft, clearDraft: mockClearIssueDraft }),
+  };
+});
 
 const navigation = { push: vi.fn(), replace: vi.fn(), back: vi.fn(), pathname: "/acme/crm/emails", searchParams: new URLSearchParams() };
 
@@ -235,19 +251,17 @@ describe("CRMEmailsPage", () => {
 
     const linkDialog = screen.getByRole("dialog");
     expect(within(linkDialog).getByLabelText("Related project")).toHaveValue("project-1");
-    expect(within(linkDialog).getByLabelText("Related issue")).toHaveValue("");
     expect(within(linkDialog).getByText("ACME-1 · Follow up quotation")).toBeInTheDocument();
 
-    await userEvent.selectOptions(within(linkDialog).getByLabelText("Related issue"), "issue-1");
+    await userEvent.click(within(linkDialog).getByLabelText("Related issue ACME-1"));
     await userEvent.click(within(linkDialog).getByRole("button", { name: "Save email link" }));
-    expect(mockApi.updateCRMEmailThreadAssociation).toHaveBeenCalledWith("thread-1", expect.objectContaining({ project_id: "project-1", issue_id: "issue-1" }));
+    expect(mockApi.updateCRMEmailThreadAssociation).toHaveBeenCalledWith("thread-1", expect.objectContaining({ project_id: "project-1", issue_id: "issue-1", issue_ids: ["issue-1"] }));
 
     await userEvent.click(screen.getByRole("button", { name: /Link project \/ issue/ }));
     await userEvent.click(screen.getByRole("button", { name: "Create follow-up issue" }));
-    const issueDialog = screen.getByRole("dialog", { name: "Create follow-up issue" });
-    expect(within(issueDialog).getByLabelText("Issue title")).toHaveValue("Follow up: New quotation request");
-    await userEvent.click(within(issueDialog).getByRole("button", { name: "Create" }));
-    expect(mockApi.createIssue).toHaveBeenCalledWith(expect.objectContaining({ project_id: "project-1", status: "todo", priority: "medium" }));
+    expect(mockClearIssueDraft).toHaveBeenCalled();
+    expect(mockSetIssueDraft).toHaveBeenCalledWith(expect.objectContaining({ title: "Follow up: New quotation request", priority: "medium" }));
+    expect(mockModalOpen).toHaveBeenCalledWith("create-issue", { project_id: "project-1" });
   });
 
 });

@@ -205,6 +205,7 @@ export interface CRMEmailThread {
   contact_id?: string | null;
   project_id?: string | null;
   issue_id?: string | null;
+  issue_ids?: string[];
   subject: string;
   external_thread_id?: string | null;
   mailbox?: string | null;
@@ -254,6 +255,7 @@ export interface UpdateCRMEmailThreadAssociationRequest {
   contact_id?: string | null;
   project_id?: string | null;
   issue_id?: string | null;
+  issue_ids?: string[];
 }
 
 export interface CreateCRMEmailThreadRequest {

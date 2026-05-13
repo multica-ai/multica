@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -258,21 +259,22 @@ type CreateCRMContactRequest struct {
 type UpdateCRMContactRequest = CreateCRMContactRequest
 
 type CRMEmailThreadResponse struct {
-	ID               string  `json:"id"`
-	WorkspaceID      string  `json:"workspace_id"`
-	AccountID        *string `json:"account_id"`
-	ContactID        *string `json:"contact_id"`
-	ProjectID        *string `json:"project_id"`
-	IssueID          *string `json:"issue_id"`
-	Subject          string  `json:"subject"`
-	ExternalThreadID *string `json:"external_thread_id"`
-	Mailbox          *string `json:"mailbox"`
-	Direction        string  `json:"direction"`
-	Status           string  `json:"status"`
-	LastMessageAt    *string `json:"last_message_at"`
-	MessageCount     int64   `json:"message_count"`
-	CreatedAt        string  `json:"created_at"`
-	UpdatedAt        string  `json:"updated_at"`
+	ID               string   `json:"id"`
+	WorkspaceID      string   `json:"workspace_id"`
+	AccountID        *string  `json:"account_id"`
+	ContactID        *string  `json:"contact_id"`
+	ProjectID        *string  `json:"project_id"`
+	IssueID          *string  `json:"issue_id"`
+	IssueIDs         []string `json:"issue_ids"`
+	Subject          string   `json:"subject"`
+	ExternalThreadID *string  `json:"external_thread_id"`
+	Mailbox          *string  `json:"mailbox"`
+	Direction        string   `json:"direction"`
+	Status           string   `json:"status"`
+	LastMessageAt    *string  `json:"last_message_at"`
+	MessageCount     int64    `json:"message_count"`
+	CreatedAt        string   `json:"created_at"`
+	UpdatedAt        string   `json:"updated_at"`
 }
 
 type crmEmailThreadRow struct {
@@ -282,6 +284,7 @@ type crmEmailThreadRow struct {
 	ContactID        pgtype.UUID
 	ProjectID        pgtype.UUID
 	IssueID          pgtype.UUID
+	IssueIDs         []pgtype.UUID
 	Subject          string
 	ExternalThreadID pgtype.Text
 	Mailbox          pgtype.Text
@@ -351,10 +354,11 @@ type CreateCRMEmailThreadRequest struct {
 }
 
 type UpdateCRMEmailThreadAssociationRequest struct {
-	AccountID *string `json:"account_id"`
-	ContactID *string `json:"contact_id"`
-	ProjectID *string `json:"project_id"`
-	IssueID   *string `json:"issue_id"`
+	AccountID *string  `json:"account_id"`
+	ContactID *string  `json:"contact_id"`
+	ProjectID *string  `json:"project_id"`
+	IssueID   *string  `json:"issue_id"`
+	IssueIDs  []string `json:"issue_ids"`
 }
 
 type CreateCRMEmailMessageRequest struct {
@@ -375,6 +379,35 @@ type CreateCRMEmailMessageRequest struct {
 	Direction         string   `json:"direction"`
 }
 
+func uuidSliceToStrings(values []pgtype.UUID) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value.Valid {
+			out = append(out, uuidToString(value))
+		}
+	}
+	return out
+}
+
+func (h *Handler) loadCRMEmailThreadIssueIDs(ctx context.Context, threadID pgtype.UUID) []pgtype.UUID {
+	rows, err := h.DB.Query(ctx, `SELECT issue_id FROM crm_email_thread_issue_link WHERE thread_id = $1 ORDER BY created_at ASC`, threadID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var ids []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
 func crmEmailThreadToResponse(row crmEmailThreadRow) CRMEmailThreadResponse {
 	return CRMEmailThreadResponse{
 		ID:               uuidToString(row.ID),
@@ -383,6 +416,7 @@ func crmEmailThreadToResponse(row crmEmailThreadRow) CRMEmailThreadResponse {
 		ContactID:        uuidToPtr(row.ContactID),
 		ProjectID:        uuidToPtr(row.ProjectID),
 		IssueID:          uuidToPtr(row.IssueID),
+		IssueIDs:         uuidSliceToStrings(row.IssueIDs),
 		Subject:          row.Subject,
 		ExternalThreadID: textToPtr(row.ExternalThreadID),
 		Mailbox:          textToPtr(row.Mailbox),
@@ -1300,6 +1334,7 @@ func (h *Handler) ListCRMEmailThreads(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to scan CRM email thread")
 			return
 		}
+		thread.IssueIDs = h.loadCRMEmailThreadIssueIDs(r.Context(), thread.ID)
 		threads = append(threads, crmEmailThreadToResponse(thread))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"threads": threads, "total": len(threads)})
@@ -1360,8 +1395,19 @@ func (h *Handler) UpdateCRMEmailThreadAssociation(w http.ResponseWriter, r *http
 	if !ok {
 		return
 	}
-	if issueID.Valid {
-		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: issueID, WorkspaceID: workspaceID})
+	issueIDs := make([]pgtype.UUID, 0, len(req.IssueIDs))
+	if len(req.IssueIDs) == 0 && issueID.Valid {
+		issueIDs = append(issueIDs, issueID)
+	}
+	for _, rawIssueID := range req.IssueIDs {
+		parsed, ok := parseUUIDOrBadRequest(w, rawIssueID, "issue_id")
+		if !ok {
+			return
+		}
+		issueIDs = append(issueIDs, parsed)
+	}
+	for _, linkedIssueID := range issueIDs {
+		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: linkedIssueID, WorkspaceID: workspaceID})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "issue not found in this workspace")
 			return
@@ -1371,16 +1417,31 @@ func (h *Handler) UpdateCRMEmailThreadAssociation(w http.ResponseWriter, r *http
 			return
 		}
 	}
+	primaryIssueID := issueID
+	if len(issueIDs) > 0 {
+		primaryIssueID = issueIDs[0]
+	}
 	thread, err := h.scanCRMEmailThread(h.DB.QueryRow(r.Context(), `
 		UPDATE crm_email_thread
 		SET account_id = $3, contact_id = $4, project_id = $5, issue_id = $6, updated_at = now()
 		WHERE id = $1 AND workspace_id = $2
 		RETURNING id, workspace_id, account_id, contact_id, project_id, issue_id, subject, external_thread_id, mailbox, direction, status, last_message_at, created_at, updated_at,
 		          (SELECT COUNT(*)::bigint FROM crm_email_message m WHERE m.thread_id = crm_email_thread.id AND m.workspace_id = crm_email_thread.workspace_id)
-	`, threadID, workspaceID, accountID, contactID, projectID, issueID))
+	`, threadID, workspaceID, accountID, contactID, projectID, primaryIssueID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update CRM email thread association")
 		return
+	}
+	thread.IssueIDs = issueIDs
+	if _, err := h.DB.Exec(r.Context(), `DELETE FROM crm_email_thread_issue_link WHERE thread_id = $1`, threadID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update CRM email issue links")
+		return
+	}
+	for _, linkedIssueID := range issueIDs {
+		if _, err := h.DB.Exec(r.Context(), `INSERT INTO crm_email_thread_issue_link (thread_id, issue_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, threadID, linkedIssueID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update CRM email issue links")
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, crmEmailThreadToResponse(thread))
 }
