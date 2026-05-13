@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"net/url"
@@ -156,6 +157,7 @@ func init() {
 
 	// trigger-rotate-url — webhook only
 	autopilotTriggerRotateURLCmd.Flags().String("output", "json", "Output format: table or json")
+	autopilotTriggerRotateURLCmd.Flags().BoolP("yes", "y", false, "Skip the interactive confirmation prompt")
 
 	// trigger-update
 	autopilotTriggerUpdateCmd.Flags().Bool("enabled", true, "Enable or disable the trigger")
@@ -525,6 +527,14 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 	if kind == "schedule" && cron == "" {
 		return fmt.Errorf("--cron is required for --kind schedule")
 	}
+	if kind == "webhook" {
+		if v, _ := cmd.Flags().GetString("timezone"); v != "" {
+			return fmt.Errorf("--timezone is only valid with --kind schedule")
+		}
+		if cron != "" {
+			return fmt.Errorf("--cron is only valid with --kind schedule")
+		}
+	}
 
 	body := map[string]any{"kind": kind}
 	if kind == "schedule" {
@@ -591,6 +601,22 @@ func runAutopilotTriggerRotateURL(cmd *cobra.Command, args []string) error {
 	triggerRef, err := resolveAutopilotTriggerID(ctx, client, autopilotRef.ID, args[1])
 	if err != nil {
 		return fmt.Errorf("resolve trigger: %w", err)
+	}
+
+	// Confirmation: rotation invalidates the current URL immediately. The UI
+	// version uses an AlertDialog; the CLI mirrors that with a y/N prompt
+	// unless --yes was passed for scripted use. Style matches confirmOverwrite
+	// in cmd_setup.go.
+	yes, _ := cmd.Flags().GetBool("yes")
+	if !yes {
+		fmt.Fprintln(os.Stderr, "This will invalidate the current webhook URL immediately. Continue? [y/N] ")
+		reader := bufio.NewReader(os.Stdin)
+		answer, _ := reader.ReadString('\n')
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer != "y" && answer != "yes" {
+			fmt.Fprintln(os.Stderr, "Aborted.")
+			return nil
+		}
 	}
 
 	var result map[string]any

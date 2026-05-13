@@ -158,6 +158,17 @@ func runToResponse(r db.AutopilotRun) AutopilotRunResponse {
 	}
 }
 
+// runToResponseSlim mirrors runToResponse but omits TriggerPayload, intended
+// for list endpoints where echoing the full webhook envelope (up to
+// 256 KiB × N rows) would dominate response size. Clients fetch the full
+// payload via GET /api/autopilots/{id}/runs/{runId} when the user opens
+// the run detail dialog.
+func runToResponseSlim(r db.AutopilotRun) AutopilotRunResponse {
+	resp := runToResponse(r)
+	resp.TriggerPayload = nil
+	return resp
+}
+
 // ── Request types ───────────────────────────────────────────────────────────
 
 type CreateAutopilotRequest struct {
@@ -465,12 +476,24 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "kind is required")
 		return
 	}
-	if req.Kind != "schedule" && req.Kind != "webhook" && req.Kind != "api" {
-		writeError(w, http.StatusBadRequest, "kind must be schedule, webhook, or api")
+	if req.Kind != "schedule" && req.Kind != "webhook" {
+		// "api" kind is deprecated: it was reserved-but-inert (no scheduler,
+		// no ingress route), and the only way to actually fire one was via
+		// the manual /trigger endpoint — which already works regardless of
+		// trigger kind. Surface stragglers with 400 so callers move to
+		// schedule or webhook.
+		writeError(w, http.StatusBadRequest, "kind must be schedule or webhook")
 		return
 	}
 	if req.Kind == "schedule" && (req.CronExpression == nil || *req.CronExpression == "") {
 		writeError(w, http.StatusBadRequest, "cron_expression is required for schedule triggers")
+		return
+	}
+	if req.Kind == "webhook" && req.Timezone != nil && *req.Timezone != "" {
+		// Webhook triggers fire on demand from external POSTs — they have no
+		// next_run_at to compute, so a timezone is meaningless. Reject loudly
+		// instead of silently dropping the field.
+		writeError(w, http.StatusBadRequest, "timezone is not valid for webhook triggers")
 		return
 	}
 
@@ -482,13 +505,12 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	}
 
 	// kind-specific normalization. Webhook triggers ignore cron/timezone/
-	// next_run_at; api triggers are accepted-but-inert (kept for
-	// compatibility per PLAN.md — flip to 400 once we confirm no
-	// caller relies on api-kind creation).
+	// next_run_at — they're fired on demand.
 	var (
-		nextRunAt pgtype.Timestamptz
-		cronText  pgtype.Text
-		tzText    pgtype.Text
+		nextRunAt    pgtype.Timestamptz
+		cronText     pgtype.Text
+		tzText       pgtype.Text
+		webhookToken pgtype.Text
 	)
 	switch req.Kind {
 	case "schedule":
@@ -505,12 +527,25 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		}
 		nextRunAt = pgtype.Timestamptz{Time: t, Valid: true}
 	case "webhook":
-		// cron/timezone/next_run_at left zero; webhook is fired on demand.
-	case "api":
-		// "api" is reserved-but-inert: the row is persisted, but the
-		// scheduler queries already filter on kind='schedule', and no
-		// public ingress route exists for kind='api'. Keep this branch so
-		// existing callers (if any) don't break.
+		// Mint the token BEFORE the INSERT so the row never exists in a
+		// half-written kind=webhook + webhook_token=NULL state. If the
+		// random token happens to collide with an existing unique-index
+		// entry (vanishingly unlikely with 256 bits but the retry keeps
+		// the failure mode obvious if RNG is degraded), we re-generate
+		// and re-INSERT — never UPDATE.
+		trigger, err := h.createWebhookTriggerWithMintedToken(r, ap.ID, ptrToText(req.Label))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create trigger")
+			return
+		}
+		resp := h.triggerToResponse(trigger)
+		userID, _ := requireUserID(w, r)
+		h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
+			"autopilot_id": uuidToString(ap.ID),
+			"trigger":      resp,
+		})
+		writeJSON(w, http.StatusCreated, resp)
+		return
 	}
 
 	trigger, err := h.Queries.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
@@ -521,24 +556,11 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		Timezone:       tzText,
 		NextRunAt:      nextRunAt,
 		Label:          ptrToText(req.Label),
+		WebhookToken:   webhookToken,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create trigger")
 		return
-	}
-
-	// For webhook triggers, mint a token and persist it via a follow-up
-	// UPDATE. We retry on the (rare) case where the generated token
-	// collides with an existing webhook_token unique-index entry — a
-	// 256-bit random value will not collide in practice, but the retry
-	// keeps the failure mode obvious if RNG is somehow degraded.
-	if req.Kind == "webhook" {
-		updated, terr := h.attachFreshWebhookToken(r, trigger.ID)
-		if terr != nil {
-			writeError(w, http.StatusInternalServerError, "failed to mint webhook token")
-			return
-		}
-		trigger = updated
 	}
 
 	resp := h.triggerToResponse(trigger)
@@ -550,21 +572,33 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// attachFreshWebhookToken generates a token and writes it to the trigger.
-// Splits the create + token-write so existing CreateAutopilotTrigger callers
-// (e.g. CLI tests) can keep using the original 8-arg query.
-func (h *Handler) attachFreshWebhookToken(r *http.Request, triggerID pgtype.UUID) (db.AutopilotTrigger, error) {
+// createWebhookTriggerWithMintedToken atomically creates a webhook trigger
+// with a freshly minted bearer token in the same INSERT. Avoids the older
+// two-step (INSERT then UPDATE webhook_token) pattern which could leave a
+// kind=webhook row with NULL webhook_token visible in the UI if the second
+// statement failed.
+//
+// Retries on the unique-index collision case so a vanishingly-rare RNG
+// collision turns into a clean retry rather than a 500.
+func (h *Handler) createWebhookTriggerWithMintedToken(
+	r *http.Request,
+	autopilotID pgtype.UUID,
+	label pgtype.Text,
+) (db.AutopilotTrigger, error) {
 	for attempt := 0; attempt < 3; attempt++ {
 		token, err := generateWebhookToken()
 		if err != nil {
 			return db.AutopilotTrigger{}, err
 		}
-		updated, err := h.Queries.SetAutopilotTriggerWebhookToken(r.Context(), db.SetAutopilotTriggerWebhookTokenParams{
-			ID:           triggerID,
+		trigger, err := h.Queries.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
+			AutopilotID:  autopilotID,
+			Kind:         "webhook",
+			Enabled:      true,
+			Label:        label,
 			WebhookToken: pgtype.Text{String: token, Valid: true},
 		})
 		if err == nil {
-			return updated, nil
+			return trigger, nil
 		}
 		if !isUniqueViolation(err) {
 			return db.AutopilotTrigger{}, err
@@ -811,9 +845,48 @@ func (h *Handler) ListAutopilotRuns(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]AutopilotRunResponse, len(runs))
 	for i, run := range runs {
-		resp[i] = runToResponse(run)
+		// Omit trigger_payload in the list response — a webhook envelope
+		// can be up to 256 KiB and `limit` defaults to 20, so the full
+		// list would be a ~5 MB worst case. Detail dialog fetches the
+		// full payload from GetAutopilotRun.
+		resp[i] = runToResponseSlim(run)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"runs": resp, "total": len(resp)})
+}
+
+// GetAutopilotRun returns a single run including its full trigger_payload.
+// Workspace scoping is enforced via loadAutopilotInWorkspace; the run is
+// then re-checked to belong to that autopilot so a guessed runId from
+// another workspace cannot leak data.
+func (h *Handler) GetAutopilotRun(w http.ResponseWriter, r *http.Request) {
+	autopilotID := chi.URLParam(r, "id")
+	runID := chi.URLParam(r, "runId")
+	workspaceID := h.resolveWorkspaceID(r)
+
+	autopilot, ok := h.loadAutopilotInWorkspace(w, r, autopilotID, workspaceID)
+	if !ok {
+		return
+	}
+
+	runUUID, ok := parseUUIDOrBadRequest(w, runID, "run id")
+	if !ok {
+		return
+	}
+
+	run, err := h.Queries.GetAutopilotRun(r.Context(), runUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+	if uuidToString(run.AutopilotID) != uuidToString(autopilot.ID) {
+		// Guard against a runId from another autopilot being requested via
+		// this autopilot's URL — fail closed with 404 so the response shape
+		// matches the "not found" case and no information is leaked.
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, runToResponse(run))
 }
 
 // ── Manual trigger ──────────────────────────────────────────────────────────
