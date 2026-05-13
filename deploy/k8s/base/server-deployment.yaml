@@ -6,11 +6,12 @@ metadata:
     app.kubernetes.io/name: multica
     app.kubernetes.io/component: server
 spec:
-  # Single replica: the realtime.Hub is an in-memory Go map with no cross-pod
-  # fanout (no Redis pubsub, no PG LISTEN/NOTIFY). Running >1 replica would
-  # split WebSocket rooms across pods and silently drop events for every user
-  # not connected to the originating pod. Scale vertically via resources below
-  # until Hub is pubsub-backed; then this can go horizontal.
+  # Default 1 replica because the in-memory realtime.Hub is the only safe
+  # fanout when REDIS_URL is unset. Once REDIS_URL is wired to a Tair / Redis
+  # Streams backend, server/cmd/server/main.go enables the sharded stream
+  # relay (server/internal/realtime/sharded_stream_relay.go) and the
+  # deployment can be scaled horizontally — see overlays/prod for the
+  # multi-replica override.
   replicas: 1
   selector:
     matchLabels:

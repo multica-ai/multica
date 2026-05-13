@@ -13,12 +13,16 @@ commonAnnotations:
 #     lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-web=...:${GIT_SHA}
 images:
   - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-server
-    newTag: 0.0.1
+    newTag: 0.0.4
   - name: lilith-registry.cn-shanghai.cr.aliyuncs.com/devops/multica-web
-    newTag: 0.0.1
+    newTag: 0.0.4
 
 replicas:
   - name: multica-server
-    count: 1   # single replica — WS hub has no cross-pod fanout yet
+    # 2 replicas now that REDIS_URL is wired to the prod Tair
+    # (alicloud_kvstore_instance.tair_prod, see deploy/tofu/prod.tf). The
+    # sharded stream relay handles cross-pod WS fanout via XADD/XREAD on
+    # Redis Streams. Bump further once relay health metrics stay clean.
+    count: 2
   - name: multica-web
     count: 3   # stateless SSR, scale out freely
