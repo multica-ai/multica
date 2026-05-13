@@ -545,15 +545,26 @@ func mergeEnv(base []string, extra map[string]string) []string {
 	env := make([]string, 0, len(base)+len(extra))
 	for _, entry := range base {
 		key, _, _ := strings.Cut(entry, "=")
-		if isFilteredChildEnvKey(key) {
+		if isFilteredChildEnvKey(key) || isStrippedClaudeAuth(key) { // CEREBRO-PATCH(claude-oauth-strips-api-key)
 			continue
 		}
 		env = append(env, entry)
 	}
 	for k, v := range extra {
+		if isStrippedClaudeAuth(k) { // CEREBRO-PATCH(claude-oauth-strips-api-key)
+			continue
+		}
 		env = append(env, k+"="+v)
 	}
 	return env
+}
+
+// isStrippedClaudeAuth — CEREBRO-PATCH(claude-oauth-strips-api-key): Cerebro Claude-agenter
+// kører altid OAuth via CLAUDE_CONFIG_DIR. ANTHROPIC_API_KEY/AUTH_TOKEN må aldrig
+// arves fra host-env eller injiceres via CustomEnv — det ville få Claude Code til
+// at bruge API-key i stedet for OAuth.
+func isStrippedClaudeAuth(key string) bool {
+	return key == "ANTHROPIC_API_KEY" || key == "ANTHROPIC_AUTH_TOKEN"
 }
 
 func isFilteredChildEnvKey(key string) bool {
