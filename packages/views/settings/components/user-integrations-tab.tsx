@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { KeyRound, Save, Trash2 } from "lucide-react";
+import { ExternalLink, KeyRound, Save, Trash2 } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -13,7 +13,7 @@ import { useUpsertMyCredential, useDeleteMyCredential } from "@multica/core/inte
 import type { IntegrationProvider } from "@multica/core/types";
 import { useT } from "../../i18n";
 
-function CredentialRow({ provider, label }: { provider: IntegrationProvider; label: string }) {
+function CredentialRow({ provider, label, instanceUrl }: { provider: IntegrationProvider; label: string; instanceUrl?: string }) {
   const wsId = useWorkspaceId();
   const { data: credential } = useQuery(myCredentialOptions(wsId, provider));
   const [apiKey, setApiKey] = useState("");
@@ -61,6 +61,23 @@ function CredentialRow({ provider, label }: { provider: IntegrationProvider; lab
           <label className="text-xs text-muted-foreground">
             {credential?.has_key ? "Replace API key" : "API key"}
           </label>
+          {instanceUrl && (
+            <div className="rounded-md border border-border bg-muted/40 px-3 py-2 space-y-1.5">
+              <p
+                className="text-xs text-muted-foreground"
+                dangerouslySetInnerHTML={{ __html: t($ => $.redmine_api_key_guide) }}
+              />
+              <a
+                href={`${instanceUrl.replace(/\/$/, "")}/my/account`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              >
+                <ExternalLink className="h-3 w-3" />
+                {t($ => $.redmine_open_profile)}
+              </a>
+            </div>
+          )}
           <Input
             type="password"
             placeholder={credential?.has_key ? "Enter new key to replace" : "Your API key"}
@@ -130,6 +147,7 @@ export function UserIntegrationsTab() {
             key={integration.provider}
             provider={integration.provider}
             label={integration.provider === "redmine" ? "Redmine" : integration.provider}
+            instanceUrl={integration.instance_url}
           />
         ))}
       </section>
