@@ -89,6 +89,23 @@ claude --model <model> --max-turns 100 --append-system-prompt "always respond in
 `custom_env` 和 `custom_args` 没有硬限制，但**实际使用建议控制在 10 条以内**。太多会让命令行变长、启动变慢，也更难维护。
 </Callout>
 
+## MCP 配置（mcp_config）
+
+**MCP 配置**（`mcp_config`）让智能体把 Claude Code 连到 Model Context Protocol server。在智能体详情页的 **MCP** tab 里添加一个 JSON object：
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"]
+    }
+  }
+}
+```
+
+目前只有 Claude Code 会消费这个字段。其他运行时会接收已保存的配置，但执行时会忽略它；如果智能体依赖 MCP server，请使用 Claude Code 运行时。详见 [AI 编程工具对照 → MCP 配置](/providers#mcp-配置只有-claude-code-真的读)。
+
 ## 可见性
 
 - **工作区可见**（`workspace`）—— 工作区里任何成员都能分配
