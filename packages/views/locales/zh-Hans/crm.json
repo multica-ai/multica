@@ -132,7 +132,17 @@
     "search_placeholder": "搜索客户邮件",
     "empty_title": "客户邮件尚未接入",
     "empty_description": "这个 CRM 独立邮件板块已预留给客户邮件线程。路由继续绑定 workspace 以保证客户隔离，但布局上作为独立 CRM 模块呈现。",
-    "account_empty": "暂无关联邮件。"
+    "account_empty": "暂无关联邮件。",
+    "select_thread": "请选择一个邮件线程查看详情。",
+    "linked_customer": "关联客户",
+    "linked_contact": "关联联系人",
+    "no_customer": "未关联客户",
+    "no_contact": "未关联联系人",
+    "save_association": "保存关联",
+    "association_error": "保存邮件关联失败。",
+    "open_customer": "打开客户",
+    "no_messages": "该线程暂无邮件内容。",
+    "no_body": "暂无邮件正文。"
   },
   "notes": {
     "title": "备注与动态",
@@ -189,5 +199,26 @@
     "inbound": "客户来信/来电",
     "outbound": "我方外发",
     "note": "内部备注"
+  },
+  "filters": {
+    "status": "状态",
+    "rating": "评级",
+    "priority": "优先级",
+    "source": "来源",
+    "follow_up": "跟进",
+    "sort": "排序",
+    "all_statuses": "全部状态",
+    "all_ratings": "全部评级",
+    "all_priorities": "全部优先级",
+    "all_sources": "全部来源",
+    "any_follow_up": "任意跟进",
+    "follow_up_today": "今天跟进",
+    "follow_up_next_7_days": "7天内跟进",
+    "follow_up_overdue": "逾期未跟进",
+    "follow_up_none": "无计划",
+    "sort_name": "客户名称",
+    "sort_updated": "最近更新",
+    "sort_next_follow_up": "下次跟进",
+    "sort_priority_rating": "优先级 + 评级"
   }
 }

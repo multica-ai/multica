@@ -1,11 +1,12 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
+import type { ListCRMAccountsParams } from "../types";
 
 export const crmKeys = {
   all: (wsId: string) => ["crm", wsId] as const,
   accounts: (wsId: string) => [...crmKeys.all(wsId), "accounts"] as const,
-  accountList: (wsId: string, search = "") =>
-    [...crmKeys.accounts(wsId), "list", search] as const,
+  accountList: (wsId: string, params: ListCRMAccountsParams = {}) =>
+    [...crmKeys.accounts(wsId), "list", params] as const,
   accountDetail: (wsId: string, id: string) =>
     [...crmKeys.accounts(wsId), "detail", id] as const,
   contacts: (wsId: string, accountId: string) =>
@@ -16,14 +17,16 @@ export const crmKeys = {
     [...crmKeys.accountDetail(wsId, accountId), "notes"] as const,
   emailThreads: (wsId: string, accountId = "") =>
     [...crmKeys.all(wsId), "email-threads", accountId] as const,
+  emailThread: (wsId: string, threadId: string) =>
+    [...crmKeys.all(wsId), "email-threads", threadId] as const,
   emailMessages: (wsId: string, threadId: string) =>
-    [...crmKeys.all(wsId), "email-threads", threadId, "messages"] as const,
+    [...crmKeys.emailThread(wsId, threadId), "messages"] as const,
 };
 
-export function crmAccountListOptions(wsId: string, search = "") {
+export function crmAccountListOptions(wsId: string, params: ListCRMAccountsParams = {}) {
   return queryOptions({
-    queryKey: crmKeys.accountList(wsId, search),
-    queryFn: () => api.listCRMAccounts({ search }),
+    queryKey: crmKeys.accountList(wsId, params),
+    queryFn: () => api.listCRMAccounts(params),
     select: (data) => data.accounts,
   });
 }
@@ -63,6 +66,14 @@ export function crmEmailThreadListOptions(wsId: string, accountId = "") {
     queryKey: crmKeys.emailThreads(wsId, accountId),
     queryFn: () => api.listCRMEmailThreads(accountId ? { account_id: accountId } : undefined),
     select: (data) => data.threads,
+  });
+}
+
+export function crmEmailThreadDetailOptions(wsId: string, threadId: string) {
+  return queryOptions({
+    queryKey: crmKeys.emailThread(wsId, threadId),
+    queryFn: () => api.getCRMEmailThread(threadId),
+    enabled: Boolean(threadId),
   });
 }
 

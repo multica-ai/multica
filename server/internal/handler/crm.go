@@ -346,6 +346,11 @@ type CreateCRMEmailThreadRequest struct {
 	LastMessageAt    *string `json:"last_message_at"`
 }
 
+type UpdateCRMEmailThreadAssociationRequest struct {
+	AccountID *string `json:"account_id"`
+	ContactID *string `json:"contact_id"`
+}
+
 type CreateCRMEmailMessageRequest struct {
 	AccountID         *string  `json:"account_id"`
 	ContactID         *string  `json:"contact_id"`
@@ -560,6 +565,51 @@ func validCRMAccountStatus(value string) bool {
 	}
 }
 
+func validCRMAccountRating(value string) bool {
+	switch value {
+	case "hot", "warm", "cold", "unknown":
+		return true
+	default:
+		return false
+	}
+}
+
+func validCRMAccountPriority(value string) bool {
+	switch value {
+	case "high", "medium", "low":
+		return true
+	default:
+		return false
+	}
+}
+
+func validCRMAccountSource(value string) bool {
+	switch value {
+	case "manual", "email", "whatsapp", "website", "referral", "trade_show", "linkedin", "other":
+		return true
+	default:
+		return false
+	}
+}
+
+func validCRMFollowUpBucket(value string) bool {
+	switch value {
+	case "today", "next_7_days", "overdue", "none":
+		return true
+	default:
+		return false
+	}
+}
+
+func validCRMAccountSort(value string) bool {
+	switch value {
+	case "updated", "name", "next_follow_up", "priority_rating":
+		return true
+	default:
+		return false
+	}
+}
+
 func optionalUUID(w http.ResponseWriter, value *string, fieldName string) (pgtype.UUID, bool) {
 	var zero pgtype.UUID
 	if value == nil || strings.TrimSpace(*value) == "" {
@@ -738,15 +788,61 @@ func (h *Handler) ListCRMAccounts(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	search := strings.TrimSpace(r.URL.Query().Get("search"))
-	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	query := r.URL.Query()
+	search := strings.TrimSpace(query.Get("search"))
+	status := strings.TrimSpace(query.Get("status"))
+	rating := strings.TrimSpace(query.Get("rating"))
+	priority := strings.TrimSpace(query.Get("priority"))
+	countryCode := strings.TrimSpace(query.Get("country_code"))
+	industry := strings.TrimSpace(query.Get("industry"))
+	source := strings.TrimSpace(query.Get("source"))
+	followUpBucket := strings.TrimSpace(query.Get("follow_up_bucket"))
+	sort := strings.TrimSpace(query.Get("sort"))
+	if sort == "" {
+		sort = "updated"
+	}
+	if status != "" && !validCRMAccountStatus(status) {
+		writeError(w, http.StatusBadRequest, "invalid account status")
+		return
+	}
+	if rating != "" && !validCRMAccountRating(rating) {
+		writeError(w, http.StatusBadRequest, "invalid account rating")
+		return
+	}
+	if priority != "" && !validCRMAccountPriority(priority) {
+		writeError(w, http.StatusBadRequest, "invalid account priority")
+		return
+	}
+	if source != "" && !validCRMAccountSource(source) {
+		writeError(w, http.StatusBadRequest, "invalid account source")
+		return
+	}
+	if followUpBucket != "" && !validCRMFollowUpBucket(followUpBucket) {
+		writeError(w, http.StatusBadRequest, "invalid follow up bucket")
+		return
+	}
+	if !validCRMAccountSort(sort) {
+		writeError(w, http.StatusBadRequest, "invalid account sort")
+		return
+	}
 	var searchArg pgtype.Text
 	if search != "" {
 		searchArg = pgtype.Text{String: normalizedCRMKey(search), Valid: true}
 	}
-	var statusArg pgtype.Text
-	if status != "" {
-		statusArg = pgtype.Text{String: status, Valid: true}
+	textArg := func(value string) pgtype.Text {
+		if value == "" {
+			return pgtype.Text{}
+		}
+		return pgtype.Text{String: value, Valid: true}
+	}
+	orderBy := "a.updated_at DESC, a.created_at DESC"
+	switch sort {
+	case "name":
+		orderBy = "a.normalized_name ASC, a.name ASC"
+	case "next_follow_up":
+		orderBy = "a.next_follow_up_at ASC NULLS LAST, a.updated_at DESC"
+	case "priority_rating":
+		orderBy = "CASE a.priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END ASC, CASE a.rating WHEN 'hot' THEN 1 WHEN 'warm' THEN 2 WHEN 'cold' THEN 3 ELSE 4 END ASC, a.updated_at DESC"
 	}
 	rows, err := h.DB.Query(r.Context(), `
 		SELECT a.id, a.workspace_id, a.name, a.normalized_name, a.account_code, a.account_type,
@@ -760,10 +856,22 @@ func (h *Handler) ListCRMAccounts(w http.ResponseWriter, r *http.Request) {
 		WHERE a.workspace_id = $1
 		  AND ($2::text IS NULL OR a.status = $2::text)
 		  AND ($3::text IS NULL OR a.normalized_name LIKE '%' || $3::text || '%')
+		  AND ($4::text IS NULL OR a.rating = $4::text)
+		  AND ($5::text IS NULL OR a.priority = $5::text)
+		  AND ($6::text IS NULL OR a.country_code = $6::text OR a.country = $6::text)
+		  AND ($7::text IS NULL OR a.industry = $7::text)
+		  AND ($8::text IS NULL OR a.source = $8::text)
+		  AND (
+		    $9::text IS NULL
+		    OR ($9::text = 'today' AND a.next_follow_up_at >= date_trunc('day', now()) AND a.next_follow_up_at < date_trunc('day', now()) + interval '1 day')
+		    OR ($9::text = 'next_7_days' AND a.next_follow_up_at >= now() AND a.next_follow_up_at < now() + interval '7 days')
+		    OR ($9::text = 'overdue' AND a.next_follow_up_at < now())
+		    OR ($9::text = 'none' AND a.next_follow_up_at IS NULL)
+		  )
 		GROUP BY a.id
-		ORDER BY a.updated_at DESC, a.created_at DESC
+		ORDER BY `+orderBy+`
 		LIMIT 100
-	`, workspaceID, statusArg, searchArg)
+	`, workspaceID, textArg(status), searchArg, textArg(rating), textArg(priority), textArg(countryCode), textArg(industry), textArg(source), textArg(followUpBucket))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list CRM accounts")
 		return
@@ -771,17 +879,8 @@ func (h *Handler) ListCRMAccounts(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	accounts := []CRMAccountResponse{}
 	for rows.Next() {
-		var account crmAccountRow
-		if err := rows.Scan(
-			&account.ID, &account.WorkspaceID, &account.Name, &account.NormalizedName,
-			&account.AccountCode, &account.AccountType, &account.Website, &account.Country,
-			&account.CountryCode, &account.CountryName, &account.Region, &account.City,
-			&account.Industry, &account.SubIndustry, &account.Status, &account.OwnerID,
-			&account.OwnerMemberID, &account.Source, &account.Rating, &account.Priority,
-			&account.AnnualRevenue, &account.EmployeeCount, &account.Tags, &account.Notes,
-			&account.LastContactedAt, &account.NextFollowUpAt, &account.CreatedAt, &account.UpdatedAt,
-			&account.ContactCount,
-		); err != nil {
+		account, err := h.scanCRMAccount(rows)
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to scan CRM account")
 			return
 		}
@@ -1196,6 +1295,61 @@ func (h *Handler) ListCRMEmailThreads(w http.ResponseWriter, r *http.Request) {
 		threads = append(threads, crmEmailThreadToResponse(thread))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"threads": threads, "total": len(threads)})
+}
+
+func (h *Handler) GetCRMEmailThread(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	threadID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "threadId"), "thread id")
+	if !ok {
+		return
+	}
+	thread, ok := h.getCRMEmailThread(w, r, threadID, workspaceID)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, crmEmailThreadToResponse(thread))
+}
+
+func (h *Handler) UpdateCRMEmailThreadAssociation(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.crmWorkspaceUUID(w, r)
+	if !ok {
+		return
+	}
+	threadID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "threadId"), "thread id")
+	if !ok {
+		return
+	}
+	if _, ok := h.getCRMEmailThread(w, r, threadID, workspaceID); !ok {
+		return
+	}
+	var req UpdateCRMEmailThreadAssociationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	accountID, ok := optionalUUID(w, req.AccountID, "account_id")
+	if !ok {
+		return
+	}
+	contactID, ok := optionalUUID(w, req.ContactID, "contact_id")
+	if !ok {
+		return
+	}
+	thread, err := h.scanCRMEmailThread(h.DB.QueryRow(r.Context(), `
+		UPDATE crm_email_thread
+		SET account_id = $3, contact_id = $4, updated_at = now()
+		WHERE id = $1 AND workspace_id = $2
+		RETURNING id, workspace_id, account_id, contact_id, subject, external_thread_id, mailbox, direction, status, last_message_at, created_at, updated_at,
+		          (SELECT COUNT(*)::bigint FROM crm_email_message m WHERE m.thread_id = crm_email_thread.id AND m.workspace_id = crm_email_thread.workspace_id)
+	`, threadID, workspaceID, accountID, contactID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update CRM email thread association")
+		return
+	}
+	writeJSON(w, http.StatusOK, crmEmailThreadToResponse(thread))
 }
 
 func optionalStringFromQuery(r *http.Request, key string) *string {

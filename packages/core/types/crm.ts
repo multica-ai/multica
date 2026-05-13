@@ -37,6 +37,21 @@ export interface CRMAccount {
   updated_at: string;
 }
 
+export type CRMAccountFollowUpBucket = "today" | "next_7_days" | "overdue" | "none";
+export type CRMAccountSort = "updated" | "name" | "next_follow_up" | "priority_rating";
+
+export interface ListCRMAccountsParams {
+  search?: string;
+  status?: CRMAccountStatus | "";
+  rating?: CRMAccountRating | "";
+  priority?: CRMAccountPriority | "";
+  country_code?: string;
+  industry?: string;
+  source?: CRMAccountSource | "";
+  follow_up_bucket?: CRMAccountFollowUpBucket | "";
+  sort?: CRMAccountSort;
+}
+
 export interface ListCRMAccountsResponse {
   accounts: CRMAccount[];
   total: number;
@@ -230,6 +245,11 @@ export interface ListCRMEmailThreadsResponse {
 export interface ListCRMEmailMessagesResponse {
   messages: CRMEmailMessage[];
   total: number;
+}
+
+export interface UpdateCRMEmailThreadAssociationRequest {
+  account_id?: string | null;
+  contact_id?: string | null;
 }
 
 export interface CreateCRMEmailThreadRequest {

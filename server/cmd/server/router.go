@@ -399,6 +399,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.ListCRMEmailThreads)
 					r.Post("/", h.CreateCRMEmailThread)
 					r.Route("/{threadId}", func(r chi.Router) {
+						r.Get("/", h.GetCRMEmailThread)
+						r.Patch("/association", h.UpdateCRMEmailThreadAssociation)
 						r.Get("/messages", h.ListCRMEmailMessages)
 						r.Post("/messages", h.CreateCRMEmailMessage)
 					})

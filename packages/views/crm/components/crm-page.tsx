@@ -8,7 +8,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { crmAccountListOptions, crmKeys } from "@multica/core/crm/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
-import type { CRMAccountPriority, CRMAccountRating, CRMAccountSource, CRMAccountStatus, CRMAccountType } from "@multica/core/types";
+import type { CRMAccountFollowUpBucket, CRMAccountPriority, CRMAccountRating, CRMAccountSort, CRMAccountSource, CRMAccountStatus, CRMAccountType, ListCRMAccountsParams } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -220,13 +220,28 @@ export function CRMPage() {
   const t = rawT as Translation;
   const locale = normalizeLocale(i18n.language);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<CRMAccountStatus | "">("");
+  const [ratingFilter, setRatingFilter] = useState<CRMAccountRating | "">("");
+  const [priorityFilter, setPriorityFilter] = useState<CRMAccountPriority | "">("");
+  const [sourceFilter, setSourceFilter] = useState<CRMAccountSource | "">("");
+  const [followUpBucket, setFollowUpBucket] = useState<CRMAccountFollowUpBucket | "">("");
+  const [sort, setSort] = useState<CRMAccountSort>("name");
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState<AccountFormState>(() => blankAccountForm());
 
-  const { data: accounts = [], isLoading } = useQuery(crmAccountListOptions(wsId, search));
+  const accountListParams = useMemo<ListCRMAccountsParams>(() => ({
+    search,
+    status: statusFilter,
+    rating: ratingFilter,
+    priority: priorityFilter,
+    source: sourceFilter,
+    follow_up_bucket: followUpBucket,
+    sort,
+  }), [followUpBucket, priorityFilter, ratingFilter, search, sort, sourceFilter, statusFilter]);
+  const { data: accounts = [], isLoading } = useQuery(crmAccountListOptions(wsId, accountListParams));
   const sortedAccounts = useMemo(
-    () => [...accounts].sort((a, b) => a.name.localeCompare(b.name)),
-    [accounts],
+    () => sort === "name" ? [...accounts].sort((a, b) => a.name.localeCompare(b.name)) : accounts,
+    [accounts, sort],
   );
   const suggestedTags = useMemo(() => tagSuggestions(accounts), [accounts]);
 
@@ -281,9 +296,55 @@ export function CRMPage() {
       </PageHeader>
 
       <div className="space-y-4 p-5">
-        <div className="relative max-w-md">
-          <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-          <Input className="pl-8" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t(($) => $.customers.search_placeholder)} />
+        <div className="grid gap-2 lg:grid-cols-[minmax(220px,1fr)_repeat(6,minmax(130px,160px))]">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+            <Input className="pl-8" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t(($) => $.customers.search_placeholder)} />
+          </div>
+          <select aria-label={t(($) => $.filters.status)} className="h-9 rounded-md border bg-background px-3 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as CRMAccountStatus | "")}>
+            <option value="">{t(($) => $.filters.all_statuses)}</option>
+            <option value="active">{t(($) => $.statuses.active)}</option>
+            <option value="prospect">{t(($) => $.statuses.prospect)}</option>
+            <option value="inactive">{t(($) => $.statuses.inactive)}</option>
+            <option value="archived">{t(($) => $.statuses.archived)}</option>
+          </select>
+          <select aria-label={t(($) => $.filters.rating)} className="h-9 rounded-md border bg-background px-3 text-sm" value={ratingFilter} onChange={(e) => setRatingFilter(e.target.value as CRMAccountRating | "")}>
+            <option value="">{t(($) => $.filters.all_ratings)}</option>
+            <option value="hot">{t(($) => $.ratings.hot)}</option>
+            <option value="warm">{t(($) => $.ratings.warm)}</option>
+            <option value="cold">{t(($) => $.ratings.cold)}</option>
+            <option value="unknown">{t(($) => $.ratings.unknown)}</option>
+          </select>
+          <select aria-label={t(($) => $.filters.priority)} className="h-9 rounded-md border bg-background px-3 text-sm" value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value as CRMAccountPriority | "")}>
+            <option value="">{t(($) => $.filters.all_priorities)}</option>
+            <option value="high">{t(($) => $.priorities.high)}</option>
+            <option value="medium">{t(($) => $.priorities.medium)}</option>
+            <option value="low">{t(($) => $.priorities.low)}</option>
+          </select>
+          <select aria-label={t(($) => $.filters.source)} className="h-9 rounded-md border bg-background px-3 text-sm" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as CRMAccountSource | "")}>
+            <option value="">{t(($) => $.filters.all_sources)}</option>
+            <option value="manual">{t(($) => $.sources.manual)}</option>
+            <option value="email">{t(($) => $.sources.email)}</option>
+            <option value="whatsapp">{t(($) => $.sources.whatsapp)}</option>
+            <option value="website">{t(($) => $.sources.website)}</option>
+            <option value="referral">{t(($) => $.sources.referral)}</option>
+            <option value="trade_show">{t(($) => $.sources.trade_show)}</option>
+            <option value="linkedin">{t(($) => $.sources.linkedin)}</option>
+            <option value="other">{t(($) => $.sources.other)}</option>
+          </select>
+          <select aria-label={t(($) => $.filters.follow_up)} className="h-9 rounded-md border bg-background px-3 text-sm" value={followUpBucket} onChange={(e) => setFollowUpBucket(e.target.value as CRMAccountFollowUpBucket | "")}>
+            <option value="">{t(($) => $.filters.any_follow_up)}</option>
+            <option value="today">{t(($) => $.filters.follow_up_today)}</option>
+            <option value="next_7_days">{t(($) => $.filters.follow_up_next_7_days)}</option>
+            <option value="overdue">{t(($) => $.filters.follow_up_overdue)}</option>
+            <option value="none">{t(($) => $.filters.follow_up_none)}</option>
+          </select>
+          <select aria-label={t(($) => $.filters.sort)} className="h-9 rounded-md border bg-background px-3 text-sm" value={sort} onChange={(e) => setSort(e.target.value as CRMAccountSort)}>
+            <option value="name">{t(($) => $.filters.sort_name)}</option>
+            <option value="updated">{t(($) => $.filters.sort_updated)}</option>
+            <option value="next_follow_up">{t(($) => $.filters.sort_next_follow_up)}</option>
+            <option value="priority_rating">{t(($) => $.filters.sort_priority_rating)}</option>
+          </select>
         </div>
 
         <section className="rounded-lg border bg-card">

@@ -132,7 +132,17 @@
     "search_placeholder": "Search customer emails",
     "empty_title": "Customer emails are not connected yet",
     "empty_description": "This CRM-owned section is ready for linked email threads. It keeps the route workspace-scoped for customer isolation while presenting email work as part of the standalone CRM module.",
-    "account_empty": "No linked emails yet."
+    "account_empty": "No linked emails yet.",
+    "select_thread": "Select an email thread to view details.",
+    "linked_customer": "Linked customer",
+    "linked_contact": "Linked contact",
+    "no_customer": "No linked customer",
+    "no_contact": "No linked contact",
+    "save_association": "Save link",
+    "association_error": "Failed to save email association.",
+    "open_customer": "Open customer",
+    "no_messages": "No messages in this thread yet.",
+    "no_body": "No message body."
   },
   "notes": {
     "title": "Notes & activity",
@@ -189,5 +199,26 @@
     "inbound": "Inbound",
     "outbound": "Outbound",
     "note": "Note"
+  },
+  "filters": {
+    "status": "Status",
+    "rating": "Rating",
+    "priority": "Priority",
+    "source": "Source",
+    "follow_up": "Follow-up",
+    "sort": "Sort",
+    "all_statuses": "All statuses",
+    "all_ratings": "All ratings",
+    "all_priorities": "All priorities",
+    "all_sources": "All sources",
+    "any_follow_up": "Any follow-up",
+    "follow_up_today": "Today",
+    "follow_up_next_7_days": "Next 7 days",
+    "follow_up_overdue": "Overdue",
+    "follow_up_none": "No plan",
+    "sort_name": "Name",
+    "sort_updated": "Recently updated",
+    "sort_next_follow_up": "Next follow-up",
+    "sort_priority_rating": "Priority + rating"
   }
 }

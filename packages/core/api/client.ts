@@ -75,6 +75,7 @@ import type {
   CreateCRMEmailMessageRequest,
   CreateCRMCommunicationNoteRequest,
   UpsertCRMAccountProfileRequest,
+  UpdateCRMEmailThreadAssociationRequest,
   ListCRMAccountsResponse,
   ListCRMContactsResponse,
   ListCRMEmailThreadsResponse,
@@ -1163,11 +1164,29 @@ export class ApiClient {
   }
 
   // CRM
-  async listCRMAccounts(params?: { status?: string; search?: string }): Promise<ListCRMAccountsResponse> {
+  async listCRMAccounts(params?: {
+    status?: string;
+    search?: string;
+    rating?: string;
+    priority?: string;
+    country_code?: string;
+    industry?: string;
+    source?: string;
+    follow_up_bucket?: string;
+    sort?: string;
+  }): Promise<ListCRMAccountsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
     if (params?.search) search.set("search", params.search);
-    return this.fetch(`/api/crm/accounts?${search}`);
+    if (params?.rating) search.set("rating", params.rating);
+    if (params?.priority) search.set("priority", params.priority);
+    if (params?.country_code) search.set("country_code", params.country_code);
+    if (params?.industry) search.set("industry", params.industry);
+    if (params?.source) search.set("source", params.source);
+    if (params?.follow_up_bucket) search.set("follow_up_bucket", params.follow_up_bucket);
+    if (params?.sort) search.set("sort", params.sort);
+    const qs = search.toString();
+    return this.fetch(`/api/crm/accounts${qs ? `?${qs}` : ""}`);
   }
 
   async getCRMAccount(id: string): Promise<CRMAccount> {
@@ -1242,6 +1261,20 @@ export class ApiClient {
   async createCRMEmailThread(data: CreateCRMEmailThreadRequest): Promise<CRMEmailThread> {
     return this.fetch("/api/crm/email-threads", {
       method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getCRMEmailThread(threadId: string): Promise<CRMEmailThread> {
+    return this.fetch(`/api/crm/email-threads/${threadId}`);
+  }
+
+  async updateCRMEmailThreadAssociation(
+    threadId: string,
+    data: UpdateCRMEmailThreadAssociationRequest,
+  ): Promise<CRMEmailThread> {
+    return this.fetch(`/api/crm/email-threads/${threadId}/association`, {
+      method: "PATCH",
       body: JSON.stringify(data),
     });
   }

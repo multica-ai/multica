@@ -139,13 +139,30 @@ afterEach(() => {
 });
 
 describe("CRMPage", () => {
-  it("renders translated customer text instead of blank chrome", async () => {
+  it("renders translated customer text and advanced filters", async () => {
     renderCRMPage();
 
     expect(await screen.findByRole("heading", { name: "Customers" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Add customer/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Search customers")).toBeInTheDocument();
+    expect(screen.getByLabelText("Rating")).toBeInTheDocument();
+    expect(screen.getByLabelText("Follow-up")).toBeInTheDocument();
     expect(await screen.findByText("High Frequency")).toBeInTheDocument();
+  });
+
+  it("passes advanced filter params to the CRM account API", async () => {
+    renderCRMPage();
+
+    await screen.findByText("High Frequency");
+    await userEvent.selectOptions(screen.getByLabelText("Rating"), "hot");
+    await userEvent.selectOptions(screen.getByLabelText("Priority"), "high");
+    await userEvent.selectOptions(screen.getByLabelText("Follow-up"), "overdue");
+
+    expect(mockApi.listCRMAccounts).toHaveBeenLastCalledWith(expect.objectContaining({
+      rating: "hot",
+      priority: "high",
+      follow_up_bucket: "overdue",
+    }));
   });
 
   it("cascades country, region, and city selectors in the add customer dialog", async () => {
