@@ -759,6 +759,103 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(cerebro-persona-grants-client): JEH-1180 Persona grant
+  // control plane UI. Endpoints mirror the JEH-1179 description:
+  //   GET    /api/workspaces/{id}/grants[?subject_type=…&subject_id=…&resource_type=…&status=…&classification=…]
+  //   POST   /api/workspaces/{id}/grants
+  //   GET    /api/workspaces/{id}/grants/{grantId}
+  //   PATCH  /api/workspaces/{id}/grants/{grantId}
+  //   DELETE /api/workspaces/{id}/grants/{grantId}
+  //   GET    /api/workspaces/{id}/grants/audit[?subject_id=…&grant_id=…&since=…&limit=…]
+  // Bodies are `unknown` so the cerebro-permissions package owns the
+  // schema; parseWithFallback handles drift if Fætta's final API-shape
+  // lands different.
+  async listPersonaGrants<T = unknown>(
+    wsId: string,
+    filter: {
+      subject_type?: string | null;
+      subject_id?: string | null;
+      resource_type?: string | null;
+      status?: string | null;
+      classification?: string | null;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): Promise<T> {
+    const params = new URLSearchParams();
+    if (filter.subject_type) params.set("subject_type", filter.subject_type);
+    if (filter.subject_id) params.set("subject_id", filter.subject_id);
+    if (filter.resource_type) params.set("resource_type", filter.resource_type);
+    if (filter.status) params.set("status", filter.status);
+    if (filter.classification) params.set("classification", filter.classification);
+    if (filter.limit !== undefined) params.set("limit", String(filter.limit));
+    if (filter.offset !== undefined) params.set("offset", String(filter.offset));
+    const qs = params.toString();
+    return this.fetch<T>(
+      qs
+        ? `/api/workspaces/${wsId}/grants?${qs}`
+        : `/api/workspaces/${wsId}/grants`,
+    );
+  }
+
+  async getPersonaGrant<T = unknown>(
+    wsId: string,
+    grantId: string,
+  ): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/grants/${grantId}`);
+  }
+
+  async createPersonaGrant<T = unknown>(
+    wsId: string,
+    body: unknown,
+  ): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/grants`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async updatePersonaGrant<T = unknown>(
+    wsId: string,
+    grantId: string,
+    body: unknown,
+  ): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/grants/${grantId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deletePersonaGrant(wsId: string, grantId: string): Promise<void> {
+    await this.fetch<void>(`/api/workspaces/${wsId}/grants/${grantId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listPersonaGrantAudit<T = unknown>(
+    wsId: string,
+    filter: {
+      subject_id?: string | null;
+      grant_id?: string | null;
+      since?: string | null;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): Promise<T> {
+    const params = new URLSearchParams();
+    if (filter.subject_id) params.set("subject_id", filter.subject_id);
+    if (filter.grant_id) params.set("grant_id", filter.grant_id);
+    if (filter.since) params.set("since", filter.since);
+    if (filter.limit !== undefined) params.set("limit", String(filter.limit));
+    if (filter.offset !== undefined) params.set("offset", String(filter.offset));
+    const qs = params.toString();
+    return this.fetch<T>(
+      qs
+        ? `/api/workspaces/${wsId}/grants/audit?${qs}`
+        : `/api/workspaces/${wsId}/grants/audit`,
+    );
+  }
+
   // Web Push (per-device subscriptions). The server returns enabled=false
   // when VAPID keys aren't configured — callers should hide the subscribe UI
   // in that case.

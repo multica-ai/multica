@@ -29,6 +29,8 @@ describe("paths.workspace() shape", () => {
         "runtimes",
         "skills",
         "settings",
+        // CEREBRO-PATCH(cerebro-paths-permissions): JEH-1180
+        "permissions",
       ]),
     );
   });
@@ -50,6 +52,8 @@ describe("paths.workspace() shape", () => {
       ["runtimes", "runtimes"],
       ["skills", "skills"],
       ["settings", "settings"],
+      // CEREBRO-PATCH(cerebro-paths-permissions): JEH-1180
+      ["permissions", "permissions"],
     ];
     const wsAsAny = ws as unknown as Record<string, () => string>;
     for (const [method, segment] of expectedSegments) {

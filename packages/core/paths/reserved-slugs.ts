@@ -93,6 +93,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   // that live alongside the upstream workspace segments. Kept in their own group
   // so the upstream-zone diff stays clean against multica-ai/multica.
   "tasks",
+  "permissions",
 
   // API / integration prefixes
   // `api` above already covers `/api/*`; these guard against future top-level
