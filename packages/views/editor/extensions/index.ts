@@ -33,10 +33,11 @@ import TableCell from "@tiptap/extension-table-cell";
 import { Table } from "@tiptap/extension-table";
 import { Markdown } from "@tiptap/markdown";
 import { ReactNodeViewRenderer } from "@tiptap/react";
-import type { AnyExtension } from "@tiptap/core";
+import { Extension, type AnyExtension } from "@tiptap/core";
+import { Suggestion } from "@tiptap/suggestion";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { BaseMentionExtension } from "./mention-extension";
-import { createMentionSuggestion } from "./mention-suggestion";
+import { createMentionSuggestion, createBroadcastSuggestion } from "./mention-suggestion";
 import { CodeBlockView } from "./code-block-view";
 import { createMarkdownPasteExtension } from "./markdown-paste";
 import { createMarkdownCopyExtension } from "./markdown-copy";
@@ -129,14 +130,34 @@ export function createEditorExtensions(
     // so users can copy rich content out as the original Markdown.
     createMarkdownCopyExtension(),
     FileCardExtension,
-    BaseMentionExtension.configure({
-      HTMLAttributes: { class: "mention" },
-      ...(options.disableMentions
-        ? { suggestion: { allow: () => false } }
-        : options.queryClient
-          ? { suggestion: createMentionSuggestion(options.queryClient) }
-          : {}),
-    }),
+    ...(options.disableMentions
+      ? []
+      : [
+          BaseMentionExtension.configure({
+            HTMLAttributes: { class: "mention" },
+            ...(options.queryClient
+              ? { suggestion: createMentionSuggestion(options.queryClient) }
+              : {}),
+          }),
+          // @@ broadcast suggestion — fires on double-@, inserts a mention
+          // node with type="broadcast" that the server fans out to all agents.
+          // Only active when the editor has a queryClient (interactive mode).
+          ...(options.queryClient
+            ? [
+                Extension.create({
+                  name: "broadcast-suggestion",
+                  addProseMirrorPlugins() {
+                    return [
+                      Suggestion({
+                        editor: this.editor,
+                        ...createBroadcastSuggestion(),
+                      }),
+                    ];
+                  },
+                }),
+              ]
+            : []),
+        ]),
     Typography,
     Placeholder.configure({ placeholder: placeholderText }),
     createMarkdownPasteExtension(),

@@ -318,6 +318,7 @@ function MentionRow({
     );
   }
 
+
   if (item.type === "issue") {
     // Visually dim closed issues (done/cancelled) so they're distinguishable
     // from active ones in the suggestion list — they're still selectable.
@@ -372,6 +373,82 @@ function MentionRow({
 }
 
 // ---------------------------------------------------------------------------
+// Shared popup renderer factory
+// ---------------------------------------------------------------------------
+
+function createSuggestionRender(): () => {
+  onStart: (props: SuggestionProps<MentionItem>) => void;
+  onUpdate: (props: SuggestionProps<MentionItem>) => void;
+  onKeyDown: (props: { event: KeyboardEvent }) => boolean;
+  onExit: () => void;
+} {
+  return () => {
+    let renderer: ReactRenderer<MentionListRef> | null = null;
+    let popup: HTMLDivElement | null = null;
+
+    function positionPopup(
+      el: HTMLDivElement,
+      clientRect: (() => DOMRect | null) | null | undefined,
+    ) {
+      if (!clientRect) return;
+      const virtualEl = {
+        getBoundingClientRect: () => clientRect() ?? new DOMRect(),
+      };
+      computePosition(virtualEl, el, {
+        placement: "bottom-start",
+        strategy: "fixed",
+        middleware: [offset(4), flip(), shift({ padding: 8 })],
+      }).then(({ x, y }) => {
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+      });
+    }
+
+    function cleanup() {
+      renderer?.destroy();
+      renderer = null;
+      popup?.remove();
+      popup = null;
+    }
+
+    return {
+      onStart: (props: SuggestionProps<MentionItem>) => {
+        renderer = new ReactRenderer(MentionList, {
+          props: {
+            items: props.items,
+            query: props.query,
+            command: props.command,
+          },
+          editor: props.editor,
+        });
+        popup = document.createElement("div");
+        popup.style.position = "fixed";
+        popup.style.zIndex = "50";
+        popup.appendChild(renderer.element);
+        document.body.appendChild(popup);
+        positionPopup(popup, props.clientRect);
+      },
+      onUpdate: (props: SuggestionProps<MentionItem>) => {
+        renderer?.updateProps({
+          items: props.items,
+          query: props.query,
+          command: props.command,
+        });
+        if (popup) positionPopup(popup, props.clientRect);
+      },
+      onKeyDown: ({ event }: { event: KeyboardEvent }) => {
+        if (event.key === "Escape") {
+          cleanup();
+          return true;
+        }
+        return renderer?.ref?.onKeyDown({ event }) ?? false;
+      },
+      onExit: cleanup,
+    };
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Suggestion config factory
 // ---------------------------------------------------------------------------
 
@@ -389,11 +466,6 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
   SuggestionOptions<MentionItem>,
   "editor"
 > {
-  // Renderer/popup instances live in this closure so each ContentEditor owns
-  // its own TipTap suggestion popup lifecycle.
-  let renderer: ReactRenderer<MentionListRef> | null = null;
-  let popup: HTMLDivElement | null = null;
-
   function buildSyncItems(query: string): MentionItem[] {
     // Read workspace id imperatively because this runs in TipTap factory scope
     // (outside React render). getCurrentWsId() is the non-React singleton set
@@ -482,109 +554,76 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
     return [...allItem, ...userItems, ...issueItems];
   }
 
-  function buildBroadcastItems(query: string): MentionItem[] {
-    const wsId = getCurrentWsId();
-    if (!wsId) return [];
-
-    // For @@, TipTap's @ trigger gives query "@"; for @@coding it gives "@coding".
-    const tagFilter = query.slice(1).toLowerCase();
-
-    const allItem: MentionItem = {
-      id: "all",
-      label: "@",
-      type: "broadcast",
-    };
-
-    const tags: AgentTag[] = qc.getQueryData(workspaceKeys.agentTags(wsId)) ?? [];
-    const tagItems: MentionItem[] = tags
-      .filter((t) => !tagFilter || t.name.toLowerCase().includes(tagFilter))
-      .map((t) => ({
-        id: t.name,
-        label: `@${t.name}`,
-        type: "broadcast" as const,
-      }));
-
-    if (!tagFilter || "all".includes(tagFilter)) {
-      return [allItem, ...tagItems];
-    }
-    return tagItems.length > 0 ? tagItems : [allItem];
-  }
+  // NOTE: buildBroadcastItems (agent-tag-aware broadcast items) was removed
+  // during the #78 @@ broadcast rebase — the dedicated `createBroadcastSuggestion`
+  // below now owns the @@ trigger but currently only emits the
+  // `{id: "all"}` item. If/when agent-tag broadcasts (`@@coding`,
+  // `@@frontend`) need to come back, re-add the tag-fetch + tag-item
+  // mapping inside `createBroadcastSuggestion.items` rather than
+  // re-introducing this helper here. See PRs #74/#75 for the
+  // server-side support that's already in place.
 
   return {
+    // Prevent the single-@ suggestion from activating when the user is
+    // typing @@. The @@ broadcast suggestion handles that case separately.
+    allow: ({ state, range }) => {
+      const text = state.doc.textBetween(range.from, range.to);
+      return !text.startsWith("@@");
+    },
+
+    items: ({ query }) => buildSyncItems(query),
+
+    render: createSuggestionRender(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Broadcast suggestion config (@@)
+// ---------------------------------------------------------------------------
+
+// The broadcast suggestion triggers on @@ and inserts a mention node with
+// type="broadcast". The backend parses [@@](mention://broadcast/all) and
+// fans out to all agents in the channel. The label "@" paired with the
+// mention extension's "@" prefix produces "@@" in the rendered output.
+
+export function createBroadcastSuggestion(): Omit<
+  SuggestionOptions<MentionItem>,
+  "editor"
+> {
+  return {
+    char: "@@",
+
     items: ({ query }) => {
-      if (query.startsWith("@")) {
-        return buildBroadcastItems(query);
+      const q = query.trim().toLowerCase();
+      if (q === "" || "all".includes(q) || "all agents".includes(q)) {
+        // label "@" + the mention extension's "@" prefix = renders as "@@"
+        return [{ id: "all", label: "@", type: "broadcast" as const }];
       }
-      return buildSyncItems(query);
+      return [];
     },
 
-    render: () => {
-      return {
-        onStart: (props: SuggestionProps<MentionItem>) => {
-          renderer = new ReactRenderer(MentionList, {
-            props: {
-              items: props.items,
-              query: props.query,
-              command: props.command,
-            },
-            editor: props.editor,
-          });
-
-          popup = document.createElement("div");
-          popup.style.position = "fixed";
-          popup.style.zIndex = "50";
-          popup.appendChild(renderer.element);
-          document.body.appendChild(popup);
-
-          updatePosition(popup, props.clientRect);
-        },
-
-        onUpdate: (props: SuggestionProps<MentionItem>) => {
-          renderer?.updateProps({
-            items: props.items,
-            query: props.query,
-            command: props.command,
-          });
-          if (popup) updatePosition(popup, props.clientRect);
-        },
-
-        onKeyDown: (props: { event: KeyboardEvent }) => {
-          if (props.event.key === "Escape") {
-            cleanup();
-            return true;
-          }
-          return renderer?.ref?.onKeyDown(props) ?? false;
-        },
-
-        onExit: () => {
-          cleanup();
-        },
-      };
-
-      function updatePosition(
-        el: HTMLDivElement,
-        clientRect: (() => DOMRect | null) | null | undefined,
-      ) {
-        if (!clientRect) return;
-        const virtualEl = {
-          getBoundingClientRect: () => clientRect() ?? new DOMRect(),
-        };
-        computePosition(virtualEl, el, {
-          placement: "bottom-start",
-          strategy: "fixed",
-          middleware: [offset(4), flip(), shift({ padding: 8 })],
-        }).then(({ x, y }) => {
-          el.style.left = `${x}px`;
-          el.style.top = `${y}px`;
-        });
+    // command must be provided explicitly when using the raw Suggestion plugin
+    // (the Mention extension normally supplies this default).
+    command: ({ editor, range, props }) => {
+      const nodeAfter = editor.view.state.selection.$to.nodeAfter;
+      const overrideSpace = nodeAfter?.text?.startsWith(" ");
+      if (overrideSpace) {
+        range.to += 1;
       }
-
-      function cleanup() {
-        renderer?.destroy();
-        renderer = null;
-        popup?.remove();
-        popup = null;
-      }
+      editor
+        .chain()
+        .focus()
+        .insertContentAt(range, [
+          {
+            type: "mention",
+            attrs: { id: props.id, label: props.label, type: "broadcast" },
+          },
+          { type: "text", text: " " },
+        ])
+        .run();
+      window.getSelection()?.collapseToEnd();
     },
+
+    render: createSuggestionRender(),
   };
 }
