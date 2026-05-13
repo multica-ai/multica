@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"os"
 	"reflect"
 	"testing"
 )
@@ -25,5 +26,30 @@ func TestPatternsFromEnv_DropsSeparatorBearingEntries(t *testing.T) {
 	want := []string{"node_modules", ".next", "target"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("expected %v, got %v", want, got)
+	}
+}
+
+func TestLoadConfigAoneRuntimeOverridesLocalAgents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_AONE_RUNTIME_URL", "http://127.0.0.1:3211")
+	t.Setenv("MULTICA_AONE_RUNTIME_TOKEN", "secret")
+	t.Setenv("MULTICA_AONE_RUNTIME_PROFILE", "smoke")
+	t.Setenv("MULTICA_AONE_RUNTIME_MODEL", "default")
+	t.Setenv("PATH", os.Getenv("PATH"))
+
+	cfg, err := LoadConfig(Overrides{DaemonID: "daemon-test"})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if len(cfg.Agents) != 1 {
+		t.Fatalf("agents = %#v, want exactly one aone runtime", cfg.Agents)
+	}
+	entry, ok := cfg.Agents["aone_cloud_cli"]
+	if !ok {
+		t.Fatalf("agents = %#v, missing aone_cloud_cli", cfg.Agents)
+	}
+	if entry.Path != "http://127.0.0.1:3211" || entry.Token != "secret" || entry.Profile != "smoke" || entry.Model != "default" {
+		t.Fatalf("entry = %+v", entry)
 	}
 }

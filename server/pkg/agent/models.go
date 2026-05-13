@@ -81,6 +81,8 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKiroModels(ctx, executablePath)
 		})
+	case AoneCloudCLIProvider:
+		return aoneCloudCLIStaticModels(), nil
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -135,6 +137,12 @@ func cachedDiscovery(key string, fn func() ([]Model, error)) ([]Model, error) {
 }
 
 // ── Static catalogs ──
+
+func aoneCloudCLIStaticModels() []Model {
+	return []Model{
+		{ID: "default", Label: "Aone Cloud CLI default", Provider: "aone-cloud-cli", Default: true},
+	}
+}
 
 // claudeStaticModels reflects the Claude Code CLI's accepted --model
 // values. Keep this list short and current; stale entries here

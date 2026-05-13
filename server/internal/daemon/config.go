@@ -46,7 +46,7 @@ type Config struct {
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, aone_cloud_cli
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
@@ -95,87 +95,96 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, err
 	}
 
-	// Probe available agent CLIs
 	agents := map[string]AgentEntry{}
-	claudePath := envOrDefault("MULTICA_CLAUDE_PATH", "claude")
-	if _, err := exec.LookPath(claudePath); err == nil {
-		agents["claude"] = AgentEntry{
-			Path:  claudePath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_CLAUDE_MODEL")),
+	if aoneRuntimeURL := strings.TrimSpace(os.Getenv("MULTICA_AONE_RUNTIME_URL")); aoneRuntimeURL != "" {
+		agents["aone_cloud_cli"] = AgentEntry{
+			Path:    aoneRuntimeURL,
+			Model:   strings.TrimSpace(os.Getenv("MULTICA_AONE_RUNTIME_MODEL")),
+			Token:   strings.TrimSpace(os.Getenv("MULTICA_AONE_RUNTIME_TOKEN")),
+			Profile: strings.TrimSpace(os.Getenv("MULTICA_AONE_RUNTIME_PROFILE")),
 		}
-	}
-	codexPath := envOrDefault("MULTICA_CODEX_PATH", "codex")
-	if _, err := exec.LookPath(codexPath); err == nil {
-		agents["codex"] = AgentEntry{
-			Path:  codexPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_CODEX_MODEL")),
+	} else {
+		// Probe available agent CLIs.
+		claudePath := envOrDefault("MULTICA_CLAUDE_PATH", "claude")
+		if _, err := exec.LookPath(claudePath); err == nil {
+			agents["claude"] = AgentEntry{
+				Path:  claudePath,
+				Model: strings.TrimSpace(os.Getenv("MULTICA_CLAUDE_MODEL")),
+			}
 		}
-	}
-	opencodePath := envOrDefault("MULTICA_OPENCODE_PATH", "opencode")
-	if _, err := exec.LookPath(opencodePath); err == nil {
-		agents["opencode"] = AgentEntry{
-			Path:  opencodePath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_OPENCODE_MODEL")),
+		codexPath := envOrDefault("MULTICA_CODEX_PATH", "codex")
+		if _, err := exec.LookPath(codexPath); err == nil {
+			agents["codex"] = AgentEntry{
+				Path:  codexPath,
+				Model: strings.TrimSpace(os.Getenv("MULTICA_CODEX_MODEL")),
+			}
 		}
-	}
-	openclawPath := envOrDefault("MULTICA_OPENCLAW_PATH", "openclaw")
-	if _, err := exec.LookPath(openclawPath); err == nil {
-		agents["openclaw"] = AgentEntry{
-			Path:  openclawPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_OPENCLAW_MODEL")),
+		opencodePath := envOrDefault("MULTICA_OPENCODE_PATH", "opencode")
+		if _, err := exec.LookPath(opencodePath); err == nil {
+			agents["opencode"] = AgentEntry{
+				Path:  opencodePath,
+				Model: strings.TrimSpace(os.Getenv("MULTICA_OPENCODE_MODEL")),
+			}
 		}
-	}
-	hermesPath := envOrDefault("MULTICA_HERMES_PATH", "hermes")
-	if _, err := exec.LookPath(hermesPath); err == nil {
-		agents["hermes"] = AgentEntry{
-			Path:  hermesPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_HERMES_MODEL")),
+		openclawPath := envOrDefault("MULTICA_OPENCLAW_PATH", "openclaw")
+		if _, err := exec.LookPath(openclawPath); err == nil {
+			agents["openclaw"] = AgentEntry{
+				Path:  openclawPath,
+				Model: strings.TrimSpace(os.Getenv("MULTICA_OPENCLAW_MODEL")),
+			}
 		}
-	}
-	geminiPath := envOrDefault("MULTICA_GEMINI_PATH", "gemini")
-	if _, err := exec.LookPath(geminiPath); err == nil {
-		agents["gemini"] = AgentEntry{
-			Path:  geminiPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_GEMINI_MODEL")),
+		hermesPath := envOrDefault("MULTICA_HERMES_PATH", "hermes")
+		if _, err := exec.LookPath(hermesPath); err == nil {
+			agents["hermes"] = AgentEntry{
+				Path:  hermesPath,
+				Model: strings.TrimSpace(os.Getenv("MULTICA_HERMES_MODEL")),
+			}
 		}
-	}
-	piPath := envOrDefault("MULTICA_PI_PATH", "pi")
-	if _, err := exec.LookPath(piPath); err == nil {
-		agents["pi"] = AgentEntry{
-			Path:  piPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_PI_MODEL")),
+		geminiPath := envOrDefault("MULTICA_GEMINI_PATH", "gemini")
+		if _, err := exec.LookPath(geminiPath); err == nil {
+			agents["gemini"] = AgentEntry{
+				Path:  geminiPath,
+				Model: strings.TrimSpace(os.Getenv("MULTICA_GEMINI_MODEL")),
+			}
 		}
-	}
-	cursorPath := envOrDefault("MULTICA_CURSOR_PATH", "cursor-agent")
-	if _, err := exec.LookPath(cursorPath); err == nil {
-		agents["cursor"] = AgentEntry{
-			Path:  cursorPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_CURSOR_MODEL")),
+		piPath := envOrDefault("MULTICA_PI_PATH", "pi")
+		if _, err := exec.LookPath(piPath); err == nil {
+			agents["pi"] = AgentEntry{
+				Path:  piPath,
+				Model: strings.TrimSpace(os.Getenv("MULTICA_PI_MODEL")),
+			}
 		}
-	}
-	copilotPath := envOrDefault("MULTICA_COPILOT_PATH", "copilot")
-	if _, err := exec.LookPath(copilotPath); err == nil {
-		agents["copilot"] = AgentEntry{
-			Path:  copilotPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_COPILOT_MODEL")),
+		cursorPath := envOrDefault("MULTICA_CURSOR_PATH", "cursor-agent")
+		if _, err := exec.LookPath(cursorPath); err == nil {
+			agents["cursor"] = AgentEntry{
+				Path:  cursorPath,
+				Model: strings.TrimSpace(os.Getenv("MULTICA_CURSOR_MODEL")),
+			}
 		}
-	}
-	kimiPath := envOrDefault("MULTICA_KIMI_PATH", "kimi")
-	if _, err := exec.LookPath(kimiPath); err == nil {
-		agents["kimi"] = AgentEntry{
-			Path:  kimiPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_KIMI_MODEL")),
+		copilotPath := envOrDefault("MULTICA_COPILOT_PATH", "copilot")
+		if _, err := exec.LookPath(copilotPath); err == nil {
+			agents["copilot"] = AgentEntry{
+				Path:  copilotPath,
+				Model: strings.TrimSpace(os.Getenv("MULTICA_COPILOT_MODEL")),
+			}
 		}
-	}
-	kiroPath := envOrDefault("MULTICA_KIRO_PATH", "kiro-cli")
-	if _, err := exec.LookPath(kiroPath); err == nil {
-		agents["kiro"] = AgentEntry{
-			Path:  kiroPath,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_KIRO_MODEL")),
+		kimiPath := envOrDefault("MULTICA_KIMI_PATH", "kimi")
+		if _, err := exec.LookPath(kimiPath); err == nil {
+			agents["kimi"] = AgentEntry{
+				Path:  kimiPath,
+				Model: strings.TrimSpace(os.Getenv("MULTICA_KIMI_MODEL")),
+			}
+		}
+		kiroPath := envOrDefault("MULTICA_KIRO_PATH", "kiro-cli")
+		if _, err := exec.LookPath(kiroPath); err == nil {
+			agents["kiro"] = AgentEntry{
+				Path:  kiroPath,
+				Model: strings.TrimSpace(os.Getenv("MULTICA_KIRO_MODEL")),
+			}
 		}
 	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: set MULTICA_AONE_RUNTIME_URL or install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")

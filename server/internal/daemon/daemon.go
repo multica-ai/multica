@@ -35,8 +35,9 @@ var (
 	// real agent helpers so tests can run the registration path without
 	// shelling out to a real CLI. Mirrors the pattern used for the brew
 	// helpers above.
-	detectAgentVersion   = agent.DetectVersion
-	checkAgentMinVersion = agent.CheckMinVersion
+	detectAgentVersion       = agent.DetectVersion
+	detectAoneRuntimeVersion = agent.DetectAoneRuntimeVersion
+	checkAgentMinVersion     = agent.CheckMinVersion
 )
 
 // workspaceState tracks registered runtimes for a single workspace.
@@ -598,7 +599,13 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
 	var runtimes []map[string]string
 	for name, entry := range d.cfg.Agents {
-		version, err := detectAgentVersion(ctx, entry.Path)
+		var version string
+		var err error
+		if name == agent.AoneCloudCLIProvider {
+			version, err = detectAoneRuntimeVersion(ctx, entry.Path, entry.Token)
+		} else {
+			version, err = detectAgentVersion(ctx, entry.Path)
+		}
 		if err != nil {
 			d.logger.Warn("skip registering runtime", "name", name, "error", err)
 			continue
@@ -609,6 +616,9 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		}
 		d.setAgentVersion(name, version)
 		displayName := strings.ToUpper(name[:1]) + name[1:]
+		if name == agent.AoneCloudCLIProvider {
+			displayName = "Aone Cloud CLI"
+		}
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
@@ -2106,6 +2116,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 			agentEnv[k] = v
 		}
+	}
+	if provider == agent.AoneCloudCLIProvider {
+		if entry.Token != "" {
+			agentEnv["AONE_RUNTIME_TOKEN"] = entry.Token
+		}
+		if entry.Profile != "" {
+			agentEnv["AONE_RUNTIME_PROFILE"] = entry.Profile
+		}
+		agentEnv["AONE_RUNTIME_URL"] = entry.Path
 	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
