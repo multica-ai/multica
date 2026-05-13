@@ -55,12 +55,13 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
   }
 
   return (
-    <span className={cls}>
+    // CEREBRO-PATCH(issue-chip-readable): wrap long titles + tooltip instead of single-line truncate (JEH-1113)
+    <span className={cls} title={issue.title}>
       <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
       <span className="font-medium text-muted-foreground shrink-0">
         {issue.identifier}
       </span>
-      <span className="text-foreground truncate">{issue.title}</span>
+      <span className="text-foreground break-words">{issue.title}</span>
     </span>
   );
 }
