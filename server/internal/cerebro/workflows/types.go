@@ -25,7 +25,8 @@ const (
 	ActionCommentOnIssue = "comment_on_issue"
 
 	// Phase-2 extension actions (JEH-1114).
-	ActionRouteByDomain = "route_by_domain"
+	ActionRouteByDomain   = "route_by_domain"
+	ActionEscalateToOwner = "escalate_to_owner"
 
 	// Phase-3 actions (JEH-1108). webhook_outbound is whitelisted by the
 	// CHECK constraint and the handler validator in this PR, but the action
@@ -97,6 +98,33 @@ const (
 	AssigneeTypeMember = "member"
 	AssigneeTypeAgent  = "agent"
 )
+
+// ActionConfigEscalateToOwner — walk the triggered issue's parent chain
+// up to the first ancestor with a non-null assignee and post a backlinked
+// comment there. Threshold is per-workflow: only escalate if the triggered
+// issue hasn't seen an updated_at change in the last MaxAgeHours.
+//
+// Defaults applied when the corresponding field is empty:
+//
+//	MaxAgeHours      12        only fire when issue.updated_at is older
+//	                            than this many hours
+//	ContentTemplate  ""        when empty, the engine builds a sensible
+//	                            default mentioning the stalled issue's
+//	                            title + reason. When set, the template is
+//	                            rendered through renderTemplate so the
+//	                            usual {{title}} / {{issue.<field>}} keys
+//	                            work.
+//
+// The "no ancestor with assignee" case falls through to the workflow's own
+// creator (createdBy) so the escalation never silently disappears.
+//
+// Future thresholds (max_failed_validations, max_failed_runs) are tracked
+// in the issue but not implemented in PR 3 — they need a workflow_run
+// query path that doesn't exist yet for evidence-missing skips.
+type ActionConfigEscalateToOwner struct {
+	MaxAgeHours     int    `json:"max_age_hours,omitempty"`
+	ContentTemplate string `json:"content_template,omitempty"`
+}
 
 // Editor modes for the workflow rule. Stored on cerebro_workflow.editor_mode
 // (phase 2). Form mode is the phase-1 builder; canvas mode is the xyflow-based

@@ -614,6 +614,38 @@ function Inspector({
         </>
       )}
 
+      {form.actionType === "escalate_to_owner" && (
+        <>
+          <Field label="Max alder (timer)">
+            <Input
+              type="number"
+              min={1}
+              value={form.escalateMaxAgeHours}
+              onChange={(e) =>
+                setForm({ ...form, escalateMaxAgeHours: e.target.value })
+              }
+              data-testid="canvas-escalate-max-age"
+            />
+          </Field>
+          <Field label="Custom template (valgfri)">
+            <Textarea
+              value={form.escalateContentTemplate}
+              onChange={(e) =>
+                setForm({ ...form, escalateContentTemplate: e.target.value })
+              }
+              rows={4}
+              placeholder="Heads up — {{title}} ({{escalation.age_hours}}h)"
+              data-testid="canvas-escalate-template"
+            />
+          </Field>
+          <p className="text-[11px] text-muted-foreground">
+            Walker parent-kæden op fra det stallede issue og poster på
+            første ancestor med assignee. Tomt template → standard
+            backlinket besked.
+          </p>
+        </>
+      )}
+
       {form.actionType === "webhook_outbound" && (
         <WebhookOutboundFields
           workflowId={workflowId}

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { WORKFLOW_TEMPLATES } from "./templates";
 
 describe("WORKFLOW_TEMPLATES", () => {
-  it("ships the twelve startpakke entries (all active after phase 3) from JEH-1047/JEH-1103/JEH-1114/JEH-1108", () => {
+  it("ships the thirteen startpakke entries (all active after phase 3) from JEH-1047/JEH-1103/JEH-1114/JEH-1108", () => {
     expect(WORKFLOW_TEMPLATES.map((t) => t.key)).toEqual([
       "status-change",
       "due-date-time",
@@ -10,6 +10,7 @@ describe("WORKFLOW_TEMPLATES", () => {
       "comment-on-issue",
       "route-by-domain",
       "validate-evidence-on-review",
+      "escalate-stalled-to-owner",
       "all-children-done",
       "mention-agent",
       "cron",
@@ -19,10 +20,10 @@ describe("WORKFLOW_TEMPLATES", () => {
     ]);
   });
 
-  it("has twelve active templates and zero remaining placeholders after phase 3", () => {
+  it("has thirteen active templates and zero remaining placeholders after phase 3", () => {
     const active = WORKFLOW_TEMPLATES.filter((t) => t.status === "active");
     const coming = WORKFLOW_TEMPLATES.filter((t) => t.status === "coming");
-    expect(active).toHaveLength(12);
+    expect(active).toHaveLength(13);
     expect(coming).toHaveLength(0);
   });
 
@@ -90,6 +91,18 @@ describe("WORKFLOW_TEMPLATES", () => {
     expect(conds[0]!.op).toBe("evidence_present");
     expect(conds[0]!.value.require).toEqual(["pr_url", "image_attachment"]);
     expect(conds[0]!.value.lookback_comments).toBe(20);
+  });
+
+  it("pins the escalate-stalled-to-owner template's threshold shape", () => {
+    // JEH-1114 phase-2 ext PR 3: pick this template, save (no required
+    // fields), and the engine walks the parent_issue_id chain on
+    // due_date_reached when the issue hasn't moved in 12h.
+    const t = WORKFLOW_TEMPLATES.find((x) => x.key === "escalate-stalled-to-owner");
+    expect(t).toBeDefined();
+    expect(t!.defaults!.trigger_type).toBe("due_date_reached");
+    expect(t!.defaults!.action_type).toBe("escalate_to_owner");
+    const cfg = t!.defaults!.action_config as { max_age_hours: number };
+    expect(cfg.max_age_hours).toBe(12);
   });
 
   it("pins the route-by-domain template's classifier shape", () => {

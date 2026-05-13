@@ -269,7 +269,7 @@ func knownAction(a string) bool {
 	switch a {
 	case ActionSetStatus, ActionCreateSubIssue, ActionSendReminder,
 		ActionRunSkill, ActionCommentOnIssue,
-		ActionRouteByDomain,
+		ActionRouteByDomain, ActionEscalateToOwner,
 		ActionWebhookOutbound, ActionReassignIssue:
 		return true
 	}

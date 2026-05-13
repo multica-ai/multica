@@ -82,6 +82,9 @@ export interface FormState extends WorkflowPhase3FormFields {
   // survive a save round-trip. Power users can hand-edit the JSON here
   // until the condition editor lands.
   conditionsJSON: string;
+  // Phase 2 ext (JEH-1114, escalate_to_owner).
+  escalateMaxAgeHours: string; // textbox value; parsed as int at save-time
+  escalateContentTemplate: string;
 }
 
 export const EMPTY_FORM: FormState = {
@@ -109,6 +112,8 @@ export const EMPTY_FORM: FormState = {
   routeLabelPrefix: "domain:",
   routeDefaultDomain: "business",
   conditionsJSON: "[]",
+  escalateMaxAgeHours: "12",
+  escalateContentTemplate: "",
 };
 
 interface WorkflowFormProps {
@@ -540,6 +545,39 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
             </>
           )}
 
+          {form.actionType === "escalate_to_owner" && (
+            <>
+              <Field label="Max alder uden status-skift (timer)">
+                <Input
+                  type="number"
+                  min={1}
+                  value={form.escalateMaxAgeHours}
+                  onChange={(e) =>
+                    setForm({ ...form, escalateMaxAgeHours: e.target.value })
+                  }
+                  data-testid="escalate-max-age"
+                />
+              </Field>
+              <Field label="Custom kommentar-template (valgfri)">
+                <Textarea
+                  value={form.escalateContentTemplate}
+                  onChange={(e) =>
+                    setForm({ ...form, escalateContentTemplate: e.target.value })
+                  }
+                  rows={4}
+                  placeholder="Heads up — {{title}} ({{escalation.age_hours}}h)"
+                  data-testid="escalate-content-template"
+                />
+              </Field>
+              <p className="text-[11px] text-muted-foreground">
+                Engine walker <code>parent_issue_id</code>-kæden op fra det
+                stallede issue og poster en kommentar på første ancestor
+                med assignee. Tomt template → standard backlinket besked
+                med #-nummer + alder + tærskel.
+              </p>
+            </>
+          )}
+
           {form.actionType === "webhook_outbound" && (
             <WebhookOutboundFields
               workflowId={workflowId}
@@ -666,6 +704,13 @@ export function formStateFromInput(input: WorkflowWriteInput): FormState {
         ? (ac.default_domain as FormState["routeDefaultDomain"])
         : EMPTY_FORM.routeDefaultDomain,
     conditionsJSON: stringifyConditions(input.conditions),
+    // Phase 2 ext (JEH-1114, escalate_to_owner).
+    escalateMaxAgeHours:
+      typeof ac.max_age_hours === "number"
+        ? String(ac.max_age_hours)
+        : EMPTY_FORM.escalateMaxAgeHours,
+    escalateContentTemplate:
+      (ac.content_template as string) ?? EMPTY_FORM.escalateContentTemplate,
     // Phase 3.
     cronSchedule: (tc.schedule_expr as string) ?? EMPTY_FORM.cronSchedule,
     cronTimezone: (tc.timezone as string) ?? EMPTY_FORM.cronTimezone,
@@ -794,6 +839,12 @@ export function buildPayload(f: FormState): WorkflowWriteInput {
     actionConfig = {
       label_prefix: f.routeLabelPrefix || undefined,
       default_domain: f.routeDefaultDomain,
+    };
+  } else if (f.actionType === "escalate_to_owner") {
+    const parsedAge = parseInt(f.escalateMaxAgeHours, 10);
+    actionConfig = {
+      max_age_hours: Number.isFinite(parsedAge) && parsedAge > 0 ? parsedAge : undefined,
+      content_template: f.escalateContentTemplate || undefined,
     };
   } else if (f.actionType === "webhook_outbound") {
     const headers: Record<string, string> = {};

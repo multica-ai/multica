@@ -169,6 +169,28 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
     },
   },
   {
+    // Phase-2 ext (JEH-1114, PR 3). Walker parent-kæden op og poster på
+    // første ancestor med assignee. Bruges typisk sammen med en
+    // due_date_reached-trigger så stallede sub-issues får fingers
+    // peget på dem efter X timer uden status-skift.
+    key: "escalate-stalled-to-owner",
+    label: "Due date reached → Escalate to owner",
+    description:
+      "Når et issues due date passerer, walker workflow'et parent-kæden op og poster på første ancestor med assignee — hvis sub-issuet ikke har set status-skift de seneste 12 timer.",
+    status: "active",
+    defaults: {
+      name: "Escalate stalled sub-issues",
+      enabled: true,
+      trigger_type: "due_date_reached",
+      trigger_config: {},
+      conditions: [],
+      action_type: "escalate_to_owner",
+      action_config: {
+        max_age_hours: 12,
+      },
+    },
+  },
+  {
     key: "all-children-done",
     label: "All children done → Update parent",
     description: "Når alle children er done, flyt parent til in_review.",

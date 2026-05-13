@@ -16,6 +16,7 @@ export type CerebroWorkflowActionType =
   | "run_skill"
   | "comment_on_issue"
   | "route_by_domain"
+  | "escalate_to_owner"
   // Phase 3 (JEH-1108).
   | "webhook_outbound"
   | "reassign_issue";
@@ -232,6 +233,12 @@ export const ACTION_OPTIONS: ReadonlyArray<{
     label: "Route by domain",
     description:
       "Klassificér issuet (kode/business/design/indhold) og attach et `<prefix><domain>` label.",
+  },
+  {
+    value: "escalate_to_owner",
+    label: "Escalate to owner",
+    description:
+      "Walker parent-issue-kæden op og poster en kommentar på første ancestor med assignee, hvis det stallede issue er ældre end tærsklen.",
   },
   {
     value: "webhook_outbound",

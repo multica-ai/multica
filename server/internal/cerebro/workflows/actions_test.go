@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -47,6 +48,11 @@ type fakeIssueActions struct {
 	UpdatedAssignee    db.UpdateIssueAssigneeParams
 	UpdateAssigneeErr  error
 	UpdateAssigneeUsed bool
+
+	// Phase-2 ext (JEH-1114, escalate_to_owner). When IssuesByID is non-nil
+	// GetIssue does map lookup first (lets tests model a parent chain),
+	// falling back to ParentIssue otherwise.
+	IssuesByID map[string]db.Issue
 }
 
 func (f *fakeIssueActions) UpdateIssueStatus(_ context.Context, _ db.UpdateIssueStatusParams) (db.Issue, error) {
@@ -61,9 +67,14 @@ func (f *fakeIssueActions) CreateIssue(_ context.Context, p db.CreateIssueParams
 func (f *fakeIssueActions) IncrementIssueCounter(_ context.Context, _ pgtype.UUID) (int32, error) {
 	return 42, nil
 }
-func (f *fakeIssueActions) GetIssue(_ context.Context, _ pgtype.UUID) (db.Issue, error) {
+func (f *fakeIssueActions) GetIssue(_ context.Context, id pgtype.UUID) (db.Issue, error) {
 	if f.GetIssueErr != nil {
 		return db.Issue{}, f.GetIssueErr
+	}
+	if f.IssuesByID != nil {
+		if got, ok := f.IssuesByID[uuidString(id)]; ok {
+			return got, nil
+		}
 	}
 	return f.ParentIssue, nil
 }
@@ -697,5 +708,224 @@ func TestActionRunSkill_PropagatesTaskQueueError(t *testing.T) {
 	err := svc.actionRunSkill(context.Background(), wf, testTriggerEvent())
 	if err == nil || !strings.Contains(err.Error(), "enqueue task") {
 		t.Fatalf("expected enqueue error, got %v", err)
+	}
+}
+
+// --- escalate_to_owner tests ---
+
+// stallTimeFixture pins nowFunc to a known instant for the escalation tests
+// so age math is deterministic. Returns a cleanup that restores nowFunc.
+func stallTimeFixture(t *testing.T, frozen time.Time) func() {
+	t.Helper()
+	prev := nowFunc
+	nowFunc = func() time.Time { return frozen }
+	return func() { nowFunc = prev }
+}
+
+func TestActionEscalateToOwner_StallNotReached(t *testing.T) {
+	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
+	defer stallTimeFixture(t, now)()
+
+	stalledID := mustUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	fake := &fakeIssueActions{
+		IssuesByID: map[string]db.Issue{
+			uuidString(stalledID): {
+				ID:        stalledID,
+				Title:     "Slow ticket",
+				UpdatedAt: pgtype.Timestamptz{Time: now.Add(-2 * time.Hour), Valid: true}, // 2h old
+			},
+		},
+	}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionEscalateToOwner, ActionConfigEscalateToOwner{MaxAgeHours: 12})
+
+	if err := svc.actionEscalateToOwner(context.Background(), wf, testTriggerEvent()); err != nil {
+		t.Fatalf("actionEscalateToOwner returned %v", err)
+	}
+	if fake.CreatedComment.IssueID.Valid {
+		t.Fatalf("expected no comment to be posted under threshold, got %+v", fake.CreatedComment)
+	}
+}
+
+func TestActionEscalateToOwner_WalksToFirstAncestorWithAssignee(t *testing.T) {
+	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
+	defer stallTimeFixture(t, now)()
+
+	stalledID := mustUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	parentNoAssigneeID := mustUUID("11111111-1111-1111-1111-111111111111")
+	grandparentWithAssigneeID := mustUUID("22222222-2222-2222-2222-222222222222")
+
+	fake := &fakeIssueActions{
+		IssuesByID: map[string]db.Issue{
+			uuidString(stalledID): {
+				ID:            stalledID,
+				Title:         "Stalled ticket",
+				Number:        42,
+				ParentIssueID: parentNoAssigneeID,
+				UpdatedAt:     pgtype.Timestamptz{Time: now.Add(-24 * time.Hour), Valid: true},
+			},
+			uuidString(parentNoAssigneeID): {
+				ID:            parentNoAssigneeID,
+				Title:         "Mid-level parent (unassigned)",
+				ParentIssueID: grandparentWithAssigneeID,
+			},
+			uuidString(grandparentWithAssigneeID): {
+				ID:           grandparentWithAssigneeID,
+				Title:        "Grand-parent owner",
+				AssigneeID:   mustUUID("88888888-8888-8888-8888-888888888888"),
+				AssigneeType: pgtype.Text{String: "agent", Valid: true},
+			},
+		},
+	}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionEscalateToOwner, ActionConfigEscalateToOwner{})
+
+	if err := svc.actionEscalateToOwner(context.Background(), wf, testTriggerEvent()); err != nil {
+		t.Fatalf("actionEscalateToOwner returned %v", err)
+	}
+	if fake.CreatedComment.IssueID != grandparentWithAssigneeID {
+		t.Errorf("expected comment on grandparent (first ancestor with assignee), got %v", fake.CreatedComment.IssueID)
+	}
+	body := fake.CreatedComment.Content
+	if !strings.Contains(body, "Stalled sub-issue") {
+		t.Errorf("expected default 'Stalled sub-issue' body, got %q", body)
+	}
+	if !strings.Contains(body, "#42") {
+		t.Errorf("expected backlink to mention #42, got %q", body)
+	}
+	if !strings.Contains(body, "mention://issue/"+uuidString(stalledID)) {
+		t.Errorf("expected mention link to stalled issue uuid, got %q", body)
+	}
+	if !strings.Contains(body, "24h") {
+		t.Errorf("expected age-hours in body, got %q", body)
+	}
+}
+
+func TestActionEscalateToOwner_FallsBackToStalledIssueWhenNoAncestorAssignee(t *testing.T) {
+	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
+	defer stallTimeFixture(t, now)()
+
+	stalledID := mustUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	parentID := mustUUID("11111111-1111-1111-1111-111111111111")
+
+	fake := &fakeIssueActions{
+		IssuesByID: map[string]db.Issue{
+			uuidString(stalledID): {
+				ID:            stalledID,
+				Title:         "Ticket",
+				ParentIssueID: parentID,
+				UpdatedAt:     pgtype.Timestamptz{Time: now.Add(-50 * time.Hour), Valid: true},
+			},
+			uuidString(parentID): {
+				ID:    parentID,
+				Title: "Root no assignee",
+				// No AssigneeID, no ParentIssueID — chain ends.
+			},
+		},
+	}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionEscalateToOwner, ActionConfigEscalateToOwner{})
+
+	if err := svc.actionEscalateToOwner(context.Background(), wf, testTriggerEvent()); err != nil {
+		t.Fatalf("actionEscalateToOwner returned %v", err)
+	}
+	if fake.CreatedComment.IssueID != stalledID {
+		t.Errorf("expected fallback to stalled issue when no ancestor has assignee, got %v", fake.CreatedComment.IssueID)
+	}
+}
+
+func TestActionEscalateToOwner_HonoursCustomTemplate(t *testing.T) {
+	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
+	defer stallTimeFixture(t, now)()
+
+	stalledID := mustUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	parentID := mustUUID("11111111-1111-1111-1111-111111111111")
+
+	fake := &fakeIssueActions{
+		IssuesByID: map[string]db.Issue{
+			uuidString(stalledID): {
+				ID:            stalledID,
+				Title:         "Login retry crash",
+				Number:        7,
+				ParentIssueID: parentID,
+				UpdatedAt:     pgtype.Timestamptz{Time: now.Add(-15 * time.Hour), Valid: true},
+			},
+			uuidString(parentID): {
+				ID:           parentID,
+				AssigneeID:   mustUUID("99999999-9999-9999-9999-999999999999"),
+				AssigneeType: pgtype.Text{String: "member", Valid: true},
+			},
+		},
+	}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionEscalateToOwner, ActionConfigEscalateToOwner{
+		MaxAgeHours:     12,
+		ContentTemplate: "Heads up — {{title}} ({{escalation.age_hours}}h / max {{escalation.threshold_hours}}h)",
+	})
+
+	if err := svc.actionEscalateToOwner(context.Background(), wf, testTriggerEvent()); err != nil {
+		t.Fatalf("actionEscalateToOwner returned %v", err)
+	}
+	want := "Heads up — Login retry crash (15h / max 12h)"
+	if fake.CreatedComment.Content != want {
+		t.Errorf("custom template render mismatch:\n got: %q\nwant: %q", fake.CreatedComment.Content, want)
+	}
+}
+
+func TestActionEscalateToOwner_CapsParentWalk(t *testing.T) {
+	now := time.Date(2026, 5, 13, 8, 0, 0, 0, time.UTC)
+	defer stallTimeFixture(t, now)()
+
+	// Build a self-referential cycle (issue A -> A). The fake's IssuesByID
+	// will keep returning A, and findEscalationTarget must bail at
+	// maxParentHops instead of looping forever.
+	stalledID := mustUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	cycleID := mustUUID("ddddddd1-dddd-dddd-dddd-dddddddddddd")
+	fake := &fakeIssueActions{
+		IssuesByID: map[string]db.Issue{
+			uuidString(stalledID): {
+				ID:            stalledID,
+				ParentIssueID: cycleID,
+				UpdatedAt:     pgtype.Timestamptz{Time: now.Add(-48 * time.Hour), Valid: true},
+			},
+			uuidString(cycleID): {
+				ID:            cycleID,
+				ParentIssueID: cycleID, // self-loop
+			},
+		},
+	}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionEscalateToOwner, ActionConfigEscalateToOwner{})
+
+	if err := svc.actionEscalateToOwner(context.Background(), wf, testTriggerEvent()); err != nil {
+		t.Fatalf("actionEscalateToOwner returned %v", err)
+	}
+	// After walking the cycle without finding an assignee, fallback is the
+	// stalled issue itself.
+	if fake.CreatedComment.IssueID != stalledID {
+		t.Errorf("expected fallback to stalled issue after cycle walk, got %v", fake.CreatedComment.IssueID)
+	}
+}
+
+func TestActionEscalateToOwner_MissingIssueIDFails(t *testing.T) {
+	svc := newServiceWithFake(&fakeIssueActions{})
+	wf := testWorkflow(ActionEscalateToOwner, ActionConfigEscalateToOwner{})
+	te := testTriggerEvent()
+	te.IssueID = ""
+
+	err := svc.actionEscalateToOwner(context.Background(), wf, te)
+	if err == nil || !strings.Contains(err.Error(), "no issue_id") {
+		t.Fatalf("expected no-issue-id error, got %v", err)
+	}
+}
+
+func TestActionEscalateToOwner_PropagatesIssueLookupError(t *testing.T) {
+	fake := &fakeIssueActions{GetIssueErr: errors.New("boom")}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionEscalateToOwner, ActionConfigEscalateToOwner{})
+
+	err := svc.actionEscalateToOwner(context.Background(), wf, testTriggerEvent())
+	if err == nil || !strings.Contains(err.Error(), "load issue") {
+		t.Fatalf("expected load-issue error, got %v", err)
 	}
 }

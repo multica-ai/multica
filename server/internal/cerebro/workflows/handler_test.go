@@ -81,7 +81,7 @@ func TestKnownEnums(t *testing.T) {
 	for _, a := range []string{
 		ActionSetStatus, ActionCreateSubIssue, ActionSendReminder,
 		ActionRunSkill, ActionCommentOnIssue,
-		ActionRouteByDomain,
+		ActionRouteByDomain, ActionEscalateToOwner,
 		ActionWebhookOutbound, ActionReassignIssue,
 	} {
 		if !knownAction(a) {
@@ -119,7 +119,7 @@ func TestValidateWriteRequest_AcceptsPhase2Actions(t *testing.T) {
 }
 
 func TestValidateWriteRequest_AcceptsPhase2ExtActions(t *testing.T) {
-	for _, a := range []string{ActionRouteByDomain} {
+	for _, a := range []string{ActionRouteByDomain, ActionEscalateToOwner} {
 		err := validateWriteRequest(writeWorkflowRequest{
 			Name:        "x",
 			TriggerType: TriggerStatusChanged,

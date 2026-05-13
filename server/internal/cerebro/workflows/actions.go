@@ -72,6 +72,8 @@ func (s *Service) runAction(ctx context.Context, wf workflow, te TriggerEvent) e
 		return s.actionCommentOnIssue(ctx, wf, te)
 	case ActionRouteByDomain:
 		return s.actionRouteByDomain(ctx, wf, te)
+	case ActionEscalateToOwner:
+		return s.actionEscalateToOwner(ctx, wf, te)
 	case ActionReassignIssue:
 		return s.actionReassignIssue(ctx, wf, te)
 	case ActionWebhookOutbound:
@@ -817,6 +819,184 @@ func isKnownDomain(d string) bool {
 		return true
 	}
 	return false
+}
+
+// actionEscalateToOwner (JEH-1114, phase-2 ext PR 3) walks the triggered
+// issue's parent_issue_id chain up to the first ancestor that has a
+// non-null assignee, and posts a backlinked comment there. The escalation
+// only fires when the triggered issue has been stalled (no updated_at
+// change) longer than MaxAgeHours — so a workflow listening on
+// `due_date_reached` can attach this action without firing every five
+// minutes during a healthy sprint.
+//
+// Lookup fallback order (each step checked, first hit wins):
+//   1. Walk parent_issue_id up to maxParentHops, return first issue with
+//      a non-null assignee.
+//   2. If no ancestor has an assignee, fall back to the workflow creator
+//      (createdBy) so the escalation never silently disappears.
+//
+// If the workflow itself isn't bound to an issue (no te.IssueID), the
+// action errors — escalation has no anchor to walk from. Same goes for
+// loading the triggered issue.
+//
+// The default comment template auto-builds:
+//
+//   ⚠️ Stalled sub-issue: [#<number>: <title>](mention://issue/<uuid>)
+//   Reason: no status change for <hours>h (threshold: <max>h).
+//
+// A custom ContentTemplate is rendered through renderTemplate so {{title}}
+// / {{issue.<field>}} keep working. The trigger event raw map gets two
+// new keys for templates that want to reference them: `escalation.age_hours`
+// and `escalation.threshold_hours`.
+func (s *Service) actionEscalateToOwner(ctx context.Context, wf workflow, te TriggerEvent) error {
+	if te.IssueID == "" {
+		return errors.New("escalate_to_owner: trigger event has no issue_id")
+	}
+	var cfg ActionConfigEscalateToOwner
+	if len(wf.actionConfig) > 0 {
+		if err := json.Unmarshal(wf.actionConfig, &cfg); err != nil {
+			return fmt.Errorf("escalate_to_owner: parse config: %w", err)
+		}
+	}
+	maxAge := cfg.MaxAgeHours
+	if maxAge <= 0 {
+		maxAge = 12
+	}
+
+	issueID, err := parseUUID(te.IssueID)
+	if err != nil {
+		return fmt.Errorf("escalate_to_owner: %w", err)
+	}
+	wsID, err := parseUUID(te.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("escalate_to_owner: %w", err)
+	}
+
+	stalled, err := s.issues.GetIssue(ctx, issueID)
+	if err != nil {
+		return fmt.Errorf("escalate_to_owner: load issue: %w", err)
+	}
+
+	// Threshold check. UpdatedAt is set on every status / field change
+	// upstream, so "no movement in N hours" is the right freshness signal.
+	// Use nowFunc so retry-backoff tests can pin time deterministically.
+	if stalled.UpdatedAt.Valid {
+		ageHours := nowFunc().Sub(stalled.UpdatedAt.Time).Hours()
+		if ageHours < float64(maxAge) {
+			slog.Debug("escalate_to_owner: under threshold",
+				"workflow_id", uuidString(wf.id),
+				"issue_id", te.IssueID,
+				"age_hours", ageHours,
+				"max_age_hours", maxAge,
+			)
+			return nil
+		}
+	}
+
+	target, err := s.findEscalationTarget(ctx, stalled, wf)
+	if err != nil {
+		return fmt.Errorf("escalate_to_owner: %w", err)
+	}
+
+	ageHours := 0
+	if stalled.UpdatedAt.Valid {
+		ageHours = int(nowFunc().Sub(stalled.UpdatedAt.Time).Hours())
+	}
+
+	content := renderEscalationContent(cfg.ContentTemplate, stalled, ageHours, maxAge, te.Raw)
+	if _, err := s.issues.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     target,
+		WorkspaceID: wsID,
+		AuthorType:  wf.createdByType,
+		AuthorID:    wf.createdByID,
+		Content:     content,
+		Type:        "comment",
+		ParentID:    pgtype.UUID{},
+	}); err != nil {
+		return fmt.Errorf("escalate_to_owner: insert comment: %w", err)
+	}
+	slog.Debug("escalate_to_owner posted",
+		"workflow_id", uuidString(wf.id),
+		"stalled_issue_id", te.IssueID,
+		"escalated_to_issue_id", uuidString(target),
+		"age_hours", ageHours,
+	)
+	return nil
+}
+
+// maxParentHops bounds the parent walk so a malformed cycle in the issue
+// tree (shouldn't exist; the schema doesn't prevent it explicitly) can't
+// pin the action in an infinite loop. 16 is many more levels than any
+// realistic project tree we've seen.
+const maxParentHops = 16
+
+// findEscalationTarget walks parent_issue_id from the stalled issue until
+// it finds an ancestor with a non-null assignee. Returns that ancestor's
+// id. Falls back to the workflow's creator-issue (the one being escalated
+// from) if no ancestor has an assignee — better to comment on the stalled
+// issue itself than to drop the escalation silently.
+func (s *Service) findEscalationTarget(ctx context.Context, stalled db.Issue, wf workflow) (pgtype.UUID, error) {
+	current := stalled
+	for i := 0; i < maxParentHops; i++ {
+		if !current.ParentIssueID.Valid {
+			break
+		}
+		parent, err := s.issues.GetIssue(ctx, current.ParentIssueID)
+		if err != nil {
+			return pgtype.UUID{}, fmt.Errorf("walk parent: %w", err)
+		}
+		if parent.AssigneeID.Valid {
+			return parent.ID, nil
+		}
+		current = parent
+	}
+	// No ancestor has an assignee — escalate on the stalled issue itself
+	// so the workflow creator (createdBy) sees a comment they can act on.
+	// The CreatedByID lives on the workflow, but the comment's IssueID
+	// must be a valid issue, so target the stalled one.
+	_ = wf
+	return stalled.ID, nil
+}
+
+// renderEscalationContent builds the comment body. When tpl is empty,
+// uses a sensible default with the backlink + threshold reason. When tpl
+// is set, runs it through the existing renderTemplate so {{title}} keys
+// work, then appends two extra placeholders unique to this action:
+// {{escalation.age_hours}} and {{escalation.threshold_hours}}.
+func renderEscalationContent(tpl string, stalled db.Issue, ageHours, maxHours int, raw map[string]any) string {
+	body := tpl
+	if body == "" {
+		body = "⚠️ Stalled sub-issue: [#{{issue.number}}: {{issue.title}}](mention://issue/{{issue.id}})\n" +
+			"Reason: no status change for {{escalation.age_hours}}h (threshold: {{escalation.threshold_hours}}h)."
+	}
+
+	// Augment the raw map with the issue id + number + escalation
+	// details so the template lookup picks them up.
+	augmented := map[string]any{}
+	if raw != nil {
+		for k, v := range raw {
+			augmented[k] = v
+		}
+	}
+	issue, _ := augmented["issue"].(map[string]any)
+	if issue == nil {
+		issue = map[string]any{}
+	}
+	// Always overwrite from the freshly-loaded row, in case the trigger
+	// payload was stale or missing fields.
+	if uuidString(stalled.ID) != "" {
+		issue["id"] = uuidString(stalled.ID)
+	}
+	if stalled.Title != "" {
+		issue["title"] = stalled.Title
+	}
+	issue["number"] = fmt.Sprintf("%d", stalled.Number)
+	augmented["issue"] = issue
+
+	body = renderTemplate(body, augmented)
+	body = strings.ReplaceAll(body, "{{escalation.age_hours}}", fmt.Sprintf("%d", ageHours))
+	body = strings.ReplaceAll(body, "{{escalation.threshold_hours}}", fmt.Sprintf("%d", maxHours))
+	return body
 }
 
 // Heuristic vocabularies. Tuned for the firtal stack — file extensions
