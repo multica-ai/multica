@@ -223,3 +223,16 @@ export type {
   DrawerCardAction,
   PullRequestDetailsResponse,
 } from "./ship";
+export type {
+  Squad,
+  SquadMember,
+  SquadMemberType,
+  SquadActivityLog,
+  SquadActivityOutcome,
+  CreateSquadRequest,
+  UpdateSquadRequest,
+  AddSquadMemberRequest,
+  RemoveSquadMemberRequest,
+  UpdateSquadMemberRoleRequest,
+  CreateSquadActivityLogRequest,
+} from "./squad";

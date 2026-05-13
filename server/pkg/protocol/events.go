@@ -212,6 +212,11 @@ const (
 	EventReleaseRollbackInitiated = "release:rollback_initiated"
 	EventReleaseHealthUpdated     = "release:health_updated"
 
+	// Squad events
+	EventSquadCreated = "squad:created"
+	EventSquadUpdated = "squad:updated"
+	EventSquadDeleted = "squad:deleted"
+
 	// Daemon events
 	EventDaemonHeartbeat     = "daemon:heartbeat"
 	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"

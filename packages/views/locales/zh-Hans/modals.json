@@ -53,6 +53,22 @@
   "backlog_hint": {
     "toast_status_failed": "更新状态失败"
   },
+  "create_squad": {
+    "title": "创建 Squad",
+    "description": "创建一个由 Leader Agent 协调团队的协作小队。",
+    "name_label": "名称",
+    "name_placeholder": "例如 前端团队",
+    "description_label": "描述",
+    "description_placeholder": "描述这个 Squad 负责什么...",
+    "leader_label": "Leader Agent",
+    "leader_hint": "Leader 接收分配给此 Squad 的所有任务并协调团队。",
+    "no_agents": "没有可用的 Agent。请先创建一个 Agent。",
+    "cancel": "取消",
+    "submit": "创建 Squad",
+    "submitting": "创建中...",
+    "toast_created": "Squad 已创建",
+    "toast_failed": "创建 Squad 失败"
+  },
   "create_project": {
     "title": "新建项目",
     "title_breadcrumb": "新建项目",

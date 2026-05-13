@@ -48,6 +48,7 @@ func init() {
 	channelCmd.GroupID = groupCore
 	memoryCmd.GroupID = groupCore
 	mentionCmd.GroupID = groupCore
+	squadCmd.GroupID = groupCore
 
 	// Runtime commands
 	daemonCmd.GroupID = groupRuntime
@@ -73,6 +74,7 @@ func init() {
 	rootCmd.AddCommand(channelCmd)
 	rootCmd.AddCommand(memoryCmd)
 	rootCmd.AddCommand(mentionCmd)
+	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(runtimeCmd)
 	rootCmd.AddCommand(authCmd)

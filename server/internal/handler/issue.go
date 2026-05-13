@@ -1347,6 +1347,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 		}
+		// Squad assigned at creation: trigger the squad leader (skipping
+		// backlog, same parking-lot semantics as agent assignment).
+		if h.shouldEnqueueSquadLeaderOnAssign(r.Context(), issue) {
+			h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, creatorType, actualCreatorID)
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, resp)
@@ -1561,6 +1566,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 		}
+
+		// Squad assign: trigger the squad leader, respecting the backlog
+		// parking-lot rule used by agent assignment.
+		if h.shouldEnqueueSquadLeaderOnAssign(r.Context(), issue) {
+			h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
+		}
 	}
 
 	// Trigger the assigned agent when a member moves an issue out of backlog.
@@ -1570,6 +1581,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 		if h.isAgentAssigneeReady(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+		}
+		if h.isSquadLeaderReady(r.Context(), issue) {
+			h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
 		}
 	}
 
@@ -1631,8 +1645,24 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 			return http.StatusForbidden, "cannot assign to private agent"
 		}
 		return 0, ""
+	case "squad":
+		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID:          assigneeID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			return http.StatusBadRequest, "assignee_id does not refer to a squad in this workspace"
+		}
+		if squad.ArchivedAt.Valid {
+			return http.StatusBadRequest, "cannot assign to an archived squad"
+		}
+		leader, err := h.Queries.GetAgent(ctx, squad.LeaderID)
+		if err != nil || leader.ArchivedAt.Valid {
+			return http.StatusBadRequest, "squad leader is archived; cannot assign to this squad"
+		}
+		return 0, ""
 	default:
-		return http.StatusBadRequest, "assignee_type must be 'member' or 'agent'"
+		return http.StatusBadRequest, "assignee_type must be 'member', 'agent', or 'squad'"
 	}
 }
 
@@ -1943,6 +1973,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if h.shouldEnqueueAgentTask(r.Context(), issue) {
 				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 			}
+			if h.shouldEnqueueSquadLeaderOnAssign(r.Context(), issue) {
+				h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
+			}
 		}
 
 		// Trigger agent when moving out of backlog (batch).
@@ -1950,6 +1983,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 			if h.isAgentAssigneeReady(r.Context(), issue) {
 				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			}
+			if h.isSquadLeaderReady(r.Context(), issue) {
+				h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
 			}
 		}
 

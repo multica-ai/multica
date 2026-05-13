@@ -36,6 +36,7 @@ import {
   X,
   Zap,
   Rocket,
+  Users,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -115,6 +116,7 @@ type NavKey =
   | "channels"
   | "ship"
   | "agents"
+  | "squads"
   | "usage"
   | "runtimes"
   | "skills"
@@ -131,6 +133,7 @@ type NavLabelKey =
   | "channels"
   | "ship"
   | "agents"
+  | "squads"
   | "usage"
   | "runtimes"
   | "skills"
@@ -151,6 +154,7 @@ const workspaceNav: NavItem[] = [
   { key: "channels", labelKey: "channels", icon: MessageCircle },
   { key: "ship", labelKey: "ship", icon: Rocket },
   { key: "agents", labelKey: "agents", icon: Bot },
+  { key: "squads", labelKey: "squads", icon: Users },
   { key: "usage", labelKey: "usage", icon: BarChart3 },
 ];
 
