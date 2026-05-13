@@ -52,11 +52,9 @@ jobs:
       contents: read
       deployments: write
     env:
-      # Docker Desktop's credential helper lives in this path; the
-      # default shell PATH on a non-login ssh / runner shell omits it
-      # and `docker compose build` then fails with
-      # "docker-credential-desktop: executable not found".
-      DOCKER_PATH_EXTRAS: /usr/local/bin:/Applications/Docker.app/Contents/Resources/bin
+      # OrbStack symlinks its docker CLI to /usr/local/bin; ensure it's
+      # on PATH for non-login runner shells.
+      DOCKER_PATH_EXTRAS: /usr/local/bin
       # Note: project name (`multica-prod`) is set authoritatively in
       # docker-compose.selfhost.yml via its top-level `name:` field, so
       # there's no need to set COMPOSE_PROJECT_NAME here. (The legacy
