@@ -1,0 +1,120 @@
+---
+title: Forbind din maskine til Cerebro
+description: Sådan installerer du multica-CLI'en, peger den på vores eget hostede Cerebro, accepterer din invitation til Firtal-workspacet og starter den lokale agent-daemon.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Cerebro kører på vores egen Mac mini, ikke på Multica Cloud. For at agenterne kan udføre opgaver på din maskine, skal du installere `multica`-CLI'en, pege den på vores server, og starte daemonen.
+
+Du skal **ikke** oprette dit eget workspace. Du bliver tilføjet til det eksisterende **Firtal**-workspace via en invitation — så snart du har accepteret den, springer du workspace-opretningen over.
+
+<Callout type="info">
+Du har brug for en invitation fra Jesper, før du kan logge ind. Bed ham sende et invite-link (Settings → Members → Invite) inden du går i gang.
+</Callout>
+
+## 1. Installér CLI'en
+
+På macOS og Linux:
+
+```bash
+brew install multica-ai/tap/multica
+```
+
+Bekræft at den er installeret:
+
+```bash
+multica --version
+```
+
+## 2. Konfigurér CLI'en til Cerebro
+
+Vores Cerebro-instans kører på `https://sara.tailbde0.ts.net` (frontend, backend og daemon-API ligger alle på samme host). Kør:
+
+```bash
+multica setup self-host \
+  --server-url https://sara.tailbde0.ts.net \
+  --app-url https://sara.tailbde0.ts.net
+```
+
+Hvad kommandoen gør:
+
+1. Gemmer URL'erne i `~/.multica/config.json`.
+2. Åbner din browser til Cerebro, så du kan logge ind via OAuth.
+3. Starter daemonen i baggrunden.
+
+<Callout type="warn">
+Du vil se en advarsel som `⚠ Server at https://sara.tailbde0.ts.net is not reachable.` Det er kosmetisk — vores reverse proxy eksponerer ikke `/health` på roden. Fortsæt med næste trin; loginnet virker stadig.
+</Callout>
+
+Hvis advarslen forhindrer browseren i at åbne, kør login manuelt bagefter:
+
+```bash
+multica login
+```
+
+## 3. Acceptér invitationen til Firtal-workspacet
+
+Når browseren åbner og du er logget ind:
+
+1. Åbn invite-linket fra Jesper i **samme browser**.
+2. Klik **Acceptér invitation**.
+3. Du lander direkte i Firtal-workspacet — ingen onboarding-flow, ingen "create workspace"-skærm.
+
+Hvis du allerede har klikket på linket før login, så loggede du ind først og er måske blevet vist en "opret workspace"-skærm. Luk fanen, åbn invite-linket igen, og acceptér derfra — det springer skærmen over.
+
+<Callout type="warn">
+Opretter du dit eget workspace ved en fejl, så fortæl Jesper med det samme. Han kan slette det og sende en ny invitation, så du lander det rigtige sted.
+</Callout>
+
+## 4. Verificér at daemonen kører
+
+```bash
+multica daemon status
+```
+
+Du skulle gerne se PID, uptime og at `Firtal`-workspacet er watched. Hvis ikke:
+
+```bash
+multica daemon start
+multica workspace list
+```
+
+`multica workspace list` markerer watched workspaces med `*`. Hvis Firtal ikke har en stjerne:
+
+```bash
+multica workspace watch <workspace-id>
+```
+
+## 5. Tjek hvilke agent-CLI'er daemonen har fundet
+
+Daemonen kører kun de AI-CLI'er, du allerede har installeret. Kør:
+
+```bash
+multica daemon status --output json
+```
+
+Kig under `runtimes`. Mangler den agent, du forventer, så installér den lokalt (fx `claude`, `codex`, `gemini`) og genstart daemonen:
+
+```bash
+multica daemon stop
+multica daemon start
+```
+
+## Færdig
+
+Du kan nu blive tildelt issues i Cerebro, og agenterne kører på din maskine. Logs ligger i `~/.multica/daemon.log` — eller stream dem live:
+
+```bash
+multica daemon logs -f
+```
+
+## Almindelige problemer
+
+**"Server at … is not reachable" — men loginnet virker.** Kosmetisk. Vores reverse proxy svarer ikke på `/health`. Ignorér.
+
+**Login åbner `multica.ai` i stedet for Cerebro.** Du har en gammel cloud-konfiguration. Kør `multica setup self-host …` igen, og svar `y` til at overskrive.
+
+**Daemonen starter ikke fordi porten er optaget.** En anden daemon-instans kører allerede. `multica daemon stop` og prøv igen, eller tjek `~/.multica/daemon.log`.
+
+**Jeg har klikket Opret workspace og lavet et "Mit Workspace".** Bed Jesper slette det og sende en ny invitation. Du vil ikke have to workspaces — alt arbejde foregår i Firtal.
