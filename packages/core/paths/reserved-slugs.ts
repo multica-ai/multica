@@ -70,7 +70,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "search",
   "members",
 
-  // Dashboard / workspace route segments
+  // Workspace route segments
   // Reserving each segment name prevents `/{slug}/{view}` from being visually
   // ambiguous (e.g. a workspace named `issues` would make `/issues/abc` mean two
   // things). `workspaces` covers the global `/workspaces/new` workspace-creation
@@ -81,6 +81,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "agents",
   "inbox",
   "my-issues",
+  "usage",
   "runtimes",
   "skills",
   "settings",

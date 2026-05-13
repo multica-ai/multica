@@ -32,6 +32,7 @@ import {
   SquarePen,
   CircleUser,
   FolderKanban,
+  BarChart3,
   X,
   Zap,
   Rocket,
@@ -114,6 +115,7 @@ type NavKey =
   | "channels"
   | "ship"
   | "agents"
+  | "usage"
   | "runtimes"
   | "skills"
   | "settings";
@@ -129,6 +131,7 @@ type NavLabelKey =
   | "channels"
   | "ship"
   | "agents"
+  | "usage"
   | "runtimes"
   | "skills"
   | "settings";
@@ -148,6 +151,7 @@ const workspaceNav: NavItem[] = [
   { key: "channels", labelKey: "channels", icon: MessageCircle },
   { key: "ship", labelKey: "ship", icon: Rocket },
   { key: "agents", labelKey: "agents", icon: Bot },
+  { key: "usage", labelKey: "usage", icon: BarChart3 },
 ];
 
 // Items in workspaceNav that are gated on a workspace flag and hidden when

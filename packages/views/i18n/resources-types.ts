@@ -27,6 +27,7 @@ import type layout from "../locales/en/layout.json";
 import type channels from "../locales/en/channels.json";
 import type memory from "../locales/en/memory.json";
 import type ship from "../locales/en/ship.json";
+import type usage from "../locales/en/usage.json";
 
 // Module augmentation enables i18next v26 selector API across the monorepo:
 // `t($ => $.signin.title)` resolves to the value in en/auth.json.
@@ -68,6 +69,7 @@ declare global {
     channels: typeof channels;
     memory: typeof memory;
     ship: typeof ship;
+    usage: typeof usage;
   }
 }
 
