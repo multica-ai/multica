@@ -42,7 +42,11 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// The overall budget is generous because kernel-dump attachments can
+	// be multi-GB and the chengdu internal network routinely does
+	// 60 MB/s — so 30 min covers 100 GB. Signed URLs themselves expire
+	// in 30 min; we don't want to outlast the signature.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	// Fetch attachment metadata (includes signed download_url).
@@ -61,18 +65,16 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 		filename = args[0]
 	}
 
-	// Download the file content.
-	data, err := client.DownloadFile(ctx, downloadURL)
-	if err != nil {
-		return fmt.Errorf("download file: %w", err)
-	}
-
 	// Write to the output directory.
 	outputDir, _ := cmd.Flags().GetString("output-dir")
 	destPath := filepath.Join(outputDir, filename)
 
-	if err := os.WriteFile(destPath, data, 0o644); err != nil {
-		return fmt.Errorf("write file: %w", err)
+	// Stream directly to disk. DownloadFile (in-memory) was capped at
+	// 100 MB and silently truncated anything bigger — catastrophic for
+	// kernel dumps which routinely exceed 1 GB.
+	n, err := client.DownloadFileToPath(ctx, downloadURL, destPath)
+	if err != nil {
+		return fmt.Errorf("download file: %w", err)
 	}
 
 	// Print the absolute path so agents can reference the file.
@@ -80,13 +82,13 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		abs = destPath
 	}
-	fmt.Fprintln(os.Stderr, "Downloaded:", abs)
+	fmt.Fprintf(os.Stderr, "Downloaded %d bytes to %s\n", n, abs)
 
 	// Also print as JSON for --output json compatibility.
 	return cli.PrintJSON(os.Stdout, map[string]any{
 		"id":       strVal(att, "id"),
 		"filename": filename,
 		"path":     abs,
-		"size":     strVal(att, "size_bytes"),
+		"size":     n,
 	})
 }
