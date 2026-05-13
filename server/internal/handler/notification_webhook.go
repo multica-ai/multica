@@ -119,9 +119,13 @@ func (h *Handler) CreateMyNotificationWebhook(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, "failed to encrypt webhook url")
 		return
 	}
+	workspaceID, ok := parseOptionalUUIDOrBadRequest(w, req.Workspace, "workspace_id")
+	if !ok {
+		return
+	}
 	endpoint, err := h.Queries.CreateNotificationWebhookEndpoint(r.Context(), db.CreateNotificationWebhookEndpointParams{
 		UserID:          parseUUID(userID),
-		WorkspaceID:     parseUUID(strings.TrimSpace(req.Workspace)),
+		WorkspaceID:     workspaceID,
 		Name:            name,
 		UrlEncrypted:    urlEncrypted,
 		SecretEncrypted: pgtype.Text{},
@@ -135,6 +139,14 @@ func (h *Handler) CreateMyNotificationWebhook(w http.ResponseWriter, r *http.Req
 	}
 
 	writeJSON(w, http.StatusCreated, notificationWebhookToResponse(endpoint))
+}
+
+func parseOptionalUUIDOrBadRequest(w http.ResponseWriter, s, fieldName string) (pgtype.UUID, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return pgtype.UUID{}, true
+	}
+	return parseUUIDOrBadRequest(w, s, fieldName)
 }
 
 func (h *Handler) UpdateMyNotificationWebhook(w http.ResponseWriter, r *http.Request) {
