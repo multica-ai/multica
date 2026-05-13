@@ -290,6 +290,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("kimi session/prompt failed: %v", err)
+				if opts.ResumeSessionID != "" {
+					sessionID = ""
+				}
 			}
 		} else {
 			select {

@@ -1179,6 +1179,71 @@ func TestHermesBackendPromotesProviderErrorWithNonEmptyOutput(t *testing.T) {
 	}
 }
 
+func fakeHermesACPPromptFailureOnResumeScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_stale"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Internal error","data":"No session found with id"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+func TestHermesBackendPromptFailureOnResumeClearsSessionID(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeHermesACPPromptFailureOnResumeScript()))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		ResumeSessionID: "ses_stale",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q", result.Status)
+		}
+		if result.SessionID != "" {
+			t.Fatalf("expected failed resume prompt to clear session id, got %q", result.SessionID)
+		}
+		if !strings.Contains(result.Error, "No session found") {
+			t.Errorf("expected prompt failure error to be preserved, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 // fakeHermesACPTransientRetryScript emits a single retryable per-
 // attempt warning to stderr and then completes with a normal agent
 // text turn — the situation where the upstream LLM blipped on
