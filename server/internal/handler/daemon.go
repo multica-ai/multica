@@ -1628,6 +1628,35 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						resp.Repos = repos
 					}
 				}
+
+				// Squad-leader briefing injection for quick-create tasks. When
+				// the user picked a squad in the modal, the task runs on the
+				// squad's leader agent (resolved by the handler). Surface the
+				// same Operating Protocol + Roster + user Instructions that
+				// issue-bound squad tasks see, so the leader can decide to
+				// delegate before opening the issue.
+				if resp.Agent != nil && qc.SquadID != "" {
+					wsUUID, wsErr := util.ParseUUID(qc.WorkspaceID)
+					squadUUID, sqErr := util.ParseUUID(qc.SquadID)
+					if wsErr == nil && sqErr == nil {
+						if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+							ID:          squadUUID,
+							WorkspaceID: wsUUID,
+						}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
+							briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+							if strings.TrimSpace(resp.Agent.Instructions) == "" {
+								resp.Agent.Instructions = briefing
+							} else {
+								resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
+							}
+							slog.Debug("injected squad leader briefing for quick-create",
+								"squad_id", uuidToString(squad.ID),
+								"squad_name", squad.Name,
+								"leader_agent_id", resp.Agent.ID,
+							)
+						}
+					}
+				}
 			}
 		case service.ChannelMentionContextType:
 			// Phase 3b: hydrate channel-mention fields onto the wire so
@@ -1782,35 +1811,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					anchors,
 					maxArtifactsPerAnchor,
 				)
-			}
-
-			// Squad-leader briefing injection for quick-create tasks. When
-			// the user picked a squad in the modal, the task runs on the
-			// squad's leader agent (resolved by the handler). Surface the
-			// same Operating Protocol + Roster + user Instructions that
-			// issue-bound squad tasks see, so the leader can decide to
-			// delegate before opening the issue.
-			if resp.Agent != nil && qc.SquadID != "" {
-				wsUUID, wsErr := util.ParseUUID(qc.WorkspaceID)
-				squadUUID, sqErr := util.ParseUUID(qc.SquadID)
-				if wsErr == nil && sqErr == nil {
-					if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-						ID:          squadUUID,
-						WorkspaceID: wsUUID,
-					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
-						if strings.TrimSpace(resp.Agent.Instructions) == "" {
-							resp.Agent.Instructions = briefing
-						} else {
-							resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
-						}
-						slog.Debug("injected squad leader briefing for quick-create",
-							"squad_id", uuidToString(squad.ID),
-							"squad_name", squad.Name,
-							"leader_agent_id", resp.Agent.ID,
-						)
-					}
-				}
 			}
 		}
 	}
