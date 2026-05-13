@@ -1,3 +1,10 @@
+# ============================================================================
+# UPSTREAM-SYNC CAUTION: Aliyun-specific, no upstream counterpart. All fields
+# here are Lilith patches. When merging multica-ai/main, conflicts on this
+# file should resolve as "keep ours". Same applies to base/ingress.yaml,
+# base/configmap.yaml.
+# ============================================================================
+#
 # Declares the ALB instance (and its listeners) that the ACK ALB Ingress
 # Controller will create and manage. The Ingress below references this
 # AlbConfig via its own IngressClass.
@@ -7,9 +14,14 @@
 # vSwitches are pinned to 2 AZs of the ACK cluster's VPC. TLS cert is fed in
 # via a K8s Secret referenced by Ingress.spec.tls — the ALB Ingress Controller
 # uploads it to Aliyun SSL Certificate Service and binds it to the 443 listener
-# automatically. HTTP→HTTPS redirect and IP whitelist live on the Ingress as
-# annotations, not at the AlbConfig listener level (controller v2 ignores
-# listener-level redirectConfig / aclConfig for those cases).
+# automatically. HTTP→HTTPS redirect lives on the Ingress as an annotation.
+#
+# IP whitelist (ACL) IS honored at the listener level — use the documented
+# schema `aclConfig: { aclType, aclIds: [<id>] }` (bare string list). The
+# `aclRelations: [{aclId: ...}]` shape that the GetListenerAttribute response
+# returns is NOT what the CRD spec wants; controller silently no-ops on it.
+# Past incident: schema mismatch left prod listener with AclConfig=null for
+# weeks; fixed 2026-05-13.
 apiVersion: alibabacloud.com/v1
 kind: AlbConfig
 metadata:
@@ -36,10 +48,15 @@ spec:
       # deploy/tofu/alb_acl.tf). Changes to entries flow through tofu;
       # AlbConfig only references the ACL by id so ACK doesn't try to
       # manage entries (it would clobber our list otherwise).
+      #
+      # Schema note: ACK ALB Ingress Controller reads `aclIds` (bare string
+      # list), NOT `aclRelations: [{aclId: ...}]`. The CRD has open schema
+      # so wrong forms silently no-op; see
+      #   https://help.aliyun.com/.../configure-acl-access-control-through-albconfig
       aclConfig:
         aclType: White
-        aclRelations:
-          - aclId: acl-ry04o6lyky6tmscnfu
+        aclIds:
+          - acl-npallrf9upa0rtioyv
 ---
 # Our own IngressClass that points at the AlbConfig above. Separate from the
 # default "alb" IngressClass the controller registers at install time, so

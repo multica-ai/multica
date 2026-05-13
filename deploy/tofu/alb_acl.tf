@@ -1,12 +1,39 @@
 # ALB ACL — fully IaC managed (resource + entries).
-# The previous out-of-band ACL acl-0vcyku5jmg7b7r3l0q was deleted manually
-# in the Aliyun console, leaving the ALB listener without any ACL (open).
-# This file recreates the ACL via OpenTofu so future drift is detectable.
 #
-# After `tofu apply`, the ACL ID will be `alicloud_alb_acl.multica.id`.
-# That value must be set on the ingress annotation:
-#   alb.ingress.kubernetes.io/acl-id: <new id>
-# (See deploy/k8s/base/ingress.yaml in this repo.)
+# Drift history (each entry = an incident we want NOT to repeat):
+#
+#   2026-04-21: First ACL acl-0vcyku5jmg7b7r3l0q deleted out-of-band via the
+#               Aliyun console, leaving the ALB listener open. Recreated as
+#               acl-ry04o6lyky6tmscnfu under tofu management.
+#
+#   ~2026-05-?? Someone again deleted acl-ry04o6lyky6tmscnfu out-of-band and
+#               made TWO manual copies (acl-0vcyku5jmg7b7r3l0q recreated +
+#               acl-8v7mfi1i215zizjqj5) — both stale (85 entries, missing the
+#               4 Meego IPs added 2026-04-30) and never bound to the listener.
+#               Result: prod listener AclConfig=null silently for weeks.
+#
+#   2026-05-13: Recreated as acl-npallrf9upa0rtioyv via tofu (this file,
+#               89 entries). Bound to the live listener AFTER fixing a
+#               separate schema bug in base/albconfig.yaml:
+#                 wrong   aclConfig: { aclRelations: [{aclId: <id>}] }
+#                 right   aclConfig: { aclIds: [<id>] }
+#               The CRD's aclConfig is an open schema {}, so the wrong shape
+#               passed kubectl validate but the controller silently dropped
+#               it. See https://help.aliyun.com/zh/ack/.../configure-acl-access-control-through-albconfig
+#               Cleaned up acl-0vcyku5jmg7b7r3l0q + acl-8v7mfi1i215zizjqj5
+#               in the same session.
+#
+# Defense against the next out-of-band delete:
+#   * prevent_destroy on the resource block below blocks `tofu destroy` from
+#     dropping the ACL.
+#   * Doesn't block console deletion. If it happens again, the next plan
+#     after a `tofu apply -refresh-only` will surface "has been deleted".
+#     Re-import would be preferred over recreate (preserves the ID).
+#
+# After `tofu apply`, the ACL ID is `alicloud_alb_acl.multica.id`. Plumbing:
+#   * deploy/k8s/base/albconfig.yaml — listener-level aclConfig.aclIds
+#   * deploy/k8s/base/ingress.yaml   — annotation alb.ingress.kubernetes.io/acl-id
+# Both spots must match; tools don't enforce that today.
 
 resource "alicloud_alb_acl" "multica" {
   acl_name      = "multica-prod-whitelist"

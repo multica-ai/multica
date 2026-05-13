@@ -1,3 +1,11 @@
+# ============================================================================
+# UPSTREAM-SYNC CAUTION: Lilith-specific values (multica.lilithgames.com URLs,
+# FEISHU_APP_ID, CORS origins, Resend sender domain). Upstream has a different
+# baseline. On `git merge multica-ai/main` conflicts here resolve as "keep
+# ours" by default — DO NOT replace these values with upstream's defaults or
+# Feishu/email/CORS will break. Same applies to base/ingress.yaml,
+# base/albconfig.yaml.
+# ============================================================================
 apiVersion: v1
 kind: ConfigMap
 metadata:
