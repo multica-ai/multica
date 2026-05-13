@@ -69,7 +69,7 @@ const (
 // hot heartbeat path; the DB is allowed to lag up to runtimeHeartbeatDBFlushInterval).
 // When liveness is unavailable or errors, we fall back to trusting the DB
 // stale window — that is the original behavior.
-func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus) {
+func runRuntimeSweeper(ctx context.Context, dbtx db.DBTX, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus) {
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
 
@@ -81,6 +81,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
+			sweepStaleLocalCLIRuns(ctx, dbtx, bus)
 			gcRuntimes(ctx, queries, bus)
 		}
 	}
@@ -277,6 +278,68 @@ func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *
 
 	slog.Info("task sweeper: expired stale queued tasks", "count", len(failedTasks))
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
+}
+
+type staleLocalCLIRun struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	IssueID     pgtype.UUID
+	OwnerID     pgtype.UUID
+	Status      string
+}
+
+func sweepStaleLocalCLIRuns(ctx context.Context, dbtx db.DBTX, bus *events.Bus) {
+	rows, err := dbtx.Query(ctx, `
+		UPDATE local_cli_run
+		SET status = 'failed',
+		    completed_at = COALESCE(completed_at, now()),
+		    error = COALESCE(NULLIF(error, ''), 'local CLI heartbeat timed out'),
+		    updated_at = now()
+		WHERE status = 'running'
+		  AND updated_at < now() - ($1 * interval '1 second')
+		RETURNING id, workspace_id, issue_id, owner_id, status
+	`, staleThresholdSeconds)
+	if err != nil {
+		slog.Warn("local CLI sweeper: failed to clean up stale runs", "error", err)
+		return
+	}
+	defer rows.Close()
+
+	var failed []staleLocalCLIRun
+	for rows.Next() {
+		var run staleLocalCLIRun
+		if err := rows.Scan(&run.ID, &run.WorkspaceID, &run.IssueID, &run.OwnerID, &run.Status); err != nil {
+			slog.Warn("local CLI sweeper: failed to read stale run", "error", err)
+			return
+		}
+		failed = append(failed, run)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("local CLI sweeper: failed to iterate stale runs", "error", err)
+		return
+	}
+	if len(failed) == 0 {
+		return
+	}
+
+	slog.Info("local CLI sweeper: failed stale runs", "count", len(failed))
+	for _, run := range failed {
+		runID := util.UUIDToString(run.ID)
+		bus.Publish(events.Event{
+			Type:        protocol.EventTaskFailed,
+			WorkspaceID: util.UUIDToString(run.WorkspaceID),
+			ActorType:   "member",
+			ActorID:     util.UUIDToString(run.OwnerID),
+			TaskID:      runID,
+			Payload: map[string]any{
+				"task_id":    runID,
+				"agent_id":   "",
+				"issue_id":   util.UUIDToString(run.IssueID),
+				"runtime_id": "",
+				"status":     run.Status,
+			},
+		})
+	}
 }
 
 // broadcastFailedTasks is preserved as a thin shim for the integration tests

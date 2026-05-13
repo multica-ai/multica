@@ -393,6 +393,7 @@ function ActiveRow({
   // Transcript only meaningful once messages exist — pure-queued tasks
   // have nothing to show yet.
   const showTranscript = task.status !== "queued";
+  const showCancel = task.kind !== "local_cli";
 
   const handleCancel = async () => {
     if (cancelling) return;
@@ -428,26 +429,28 @@ function ActiveRow({
             title={t(($) => $.execution_log.transcript_tooltip)}
           />
         )}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                onClick={handleCancel}
-                disabled={cancelling}
-                aria-label={t(($) => $.execution_log.cancel_task_aria)}
-              />
-            }
-            className="flex items-center justify-center rounded p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {cancelling ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Square className="h-3.5 w-3.5" />
-            )}
-          </TooltipTrigger>
-          <TooltipContent>{t(($) => $.execution_log.cancel_task_tooltip)}</TooltipContent>
-        </Tooltip>
+        {showCancel && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  disabled={cancelling}
+                  aria-label={t(($) => $.execution_log.cancel_task_aria)}
+                />
+              }
+              className="flex items-center justify-center rounded p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {cancelling ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Square className="h-3.5 w-3.5" />
+              )}
+            </TooltipTrigger>
+            <TooltipContent>{t(($) => $.execution_log.cancel_task_tooltip)}</TooltipContent>
+          </Tooltip>
+        )}
       </RowActions>
     </RowShell>
   );

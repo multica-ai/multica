@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,20 +46,6 @@ func TestRunLocalCLIEndToEndWithFakeAPI(t *testing.T) {
 				"cli_name":    "sh",
 				"context_dir": "",
 			})
-		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/issue-1":
-			json.NewEncoder(w).Encode(map[string]any{
-				"id":           "issue-1",
-				"identifier":   "MUL-1",
-				"title":        "Fake issue",
-				"status":       "todo",
-				"priority":     "medium",
-				"description":  "Do it",
-				"workspace_id": "ws-1",
-			})
-		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/issue-1/comments":
-			json.NewEncoder(w).Encode([]map[string]any{{"author_type": "member", "author_id": "user-1", "content": "start"}})
-		case r.Method == http.MethodGet && r.URL.Path == "/api/workspaces/ws-1":
-			json.NewEncoder(w).Encode(map[string]any{"id": "ws-1", "name": "Workspace"})
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/local-runs/run-1":
 			var body map[string]any
 			json.NewDecoder(r.Body).Decode(&body)
@@ -104,11 +89,13 @@ func TestRunLocalCLIEndToEndWithFakeAPI(t *testing.T) {
 		t.Fatalf("unexpected create body: %+v", createBody)
 	}
 	if len(patches) < 2 {
-		t.Fatalf("patches = %+v, want context and terminal status updates", patches)
+		t.Fatalf("patches = %+v, want running and terminal status updates", patches)
 	}
-	contextDir := filepath.Join(tmp, ".multica", "runs", "run-1")
-	if patches[0]["status"] != "running" || patches[0]["context_dir"] != contextDir {
-		t.Fatalf("first patch = %+v, want running context update", patches[0])
+	if patches[0]["status"] != "running" {
+		t.Fatalf("first patch = %+v, want running status update", patches[0])
+	}
+	if _, ok := patches[0]["context_dir"]; ok {
+		t.Fatalf("first patch = %+v, did not want context_dir", patches[0])
 	}
 	lastPatch := patches[len(patches)-1]
 	if lastPatch["status"] != "completed" || int(lastPatch["exit_code"].(float64)) != 0 {
@@ -117,12 +104,11 @@ func TestRunLocalCLIEndToEndWithFakeAPI(t *testing.T) {
 	if len(messages) == 0 {
 		t.Fatalf("expected streamed messages")
 	}
-	lastMsg := messages[len(messages)-1]
-	if lastMsg["type"] != "final" || lastMsg["content"] != "done" {
-		t.Fatalf("last message = %+v, want final done", lastMsg)
+	if finals := mapMessagesByType(messages, "final"); len(finals) != 0 {
+		t.Fatalf("final messages = %+v, want no bootstrap final", finals)
 	}
-	if _, err := os.Stat(filepath.Join(contextDir, "issue.md")); err != nil {
-		t.Fatalf("issue context not written: %v", err)
+	if _, err := os.Stat(filepath.Join(tmp, ".multica", "runs", "run-1", "issue.md")); !os.IsNotExist(err) {
+		t.Fatalf("issue context file exists or stat failed unexpectedly: %v", err)
 	}
 }
 
@@ -155,11 +141,33 @@ func TestInferCLIName(t *testing.T) {
 	}
 }
 
-func TestInitialLocalRunPromptIncludesContextDir(t *testing.T) {
-	dir := "/tmp/project/.multica/runs/run-1"
-	got := initialLocalRunPrompt(dir)
-	if got == "" || !containsAll(got, []string{"Multica issue context", dir}) {
-		t.Fatalf("prompt %q does not include context directory", got)
+func TestLocalRunPromptUsesPlatformContextCommandsAndSilence(t *testing.T) {
+	got := localRunPrompt("issue-1")
+	if got == "" || !containsAll(got, []string{
+		"Multica issue issue-1",
+		"Assigned issue ID: issue-1",
+		"`multica issue get issue-1 --output json`",
+		"`multica issue comment list issue-1 --output json`",
+		"Do not use any other `multica` command during bootstrap",
+		"read the assigned issue and its comments only",
+		"Do not proactively fetch parent issues, child issues, or issues mentioned in text",
+		"After loading context, produce no output",
+		"Wait silently for the user's next input",
+	}) {
+		t.Fatalf("prompt %q does not include platform context command instructions", got)
+	}
+	for _, forbidden := range []string{
+		".multica",
+		"runs",
+		"context directory",
+		"Issue JSON:",
+		"Comments JSON:",
+		`"title": "Fake issue"`,
+		`"content": "Prior decision"`,
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("prompt %q contains forbidden reference %q", got, forbidden)
+		}
 	}
 }
 
@@ -207,6 +215,74 @@ func TestTranscriptStreamReportsRawAndStructuredMessages(t *testing.T) {
 	last := messages[len(messages)-1]
 	if last.Type != "final" || last.Content != "done" {
 		t.Fatalf("last message = %+v, want final done", last)
+	}
+}
+
+func TestTranscriptStreamCleansANSIRawOutput(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	stream := newTranscriptStream(reporter, nil)
+
+	_, _ = stream.Write([]byte("\x1b[31mred text\x1b[0m\n"))
+	stream.Flush()
+	reporter.Close()
+
+	raw := rawMessageContent(poster.messages())
+	if raw != "red text" {
+		t.Fatalf("raw = %q, want visible text only", raw)
+	}
+	if strings.Contains(raw, "\x1b") {
+		t.Fatalf("raw contains escape sequence: %q", raw)
+	}
+}
+
+func TestTranscriptStreamKeepsOnlyVisibleRedraw(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	stream := newTranscriptStream(reporter, nil)
+
+	_, _ = stream.Write([]byte("Working 10%\r\x1b[KFinal answer\n"))
+	stream.Flush()
+	reporter.Close()
+
+	raw := rawMessageContent(poster.messages())
+	if raw != "Final answer" {
+		t.Fatalf("raw = %q, want final visible redraw", raw)
+	}
+}
+
+func TestTranscriptStreamSkipsPureControlAndStatusRawOutput(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	stream := newTranscriptStream(reporter, nil)
+
+	_, _ = stream.Write([]byte("\x1b[31m\x1b[0m\r\x1b[KThinking...\r\x1b[K"))
+	stream.Flush()
+	reporter.Close()
+
+	if raw := rawMessageContent(poster.messages()); raw != "" {
+		t.Fatalf("raw = %q, want no pure control/status message", raw)
+	}
+}
+
+func TestTranscriptStreamDoesNotDuplicateStructuredAsRaw(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	stream := newTranscriptStream(reporter, nil)
+
+	_, _ = stream.Write([]byte("plain output\n"))
+	_, _ = stream.Write([]byte(`{"type":"result","result":"done"}` + "\n"))
+	stream.Flush()
+	reporter.Close()
+
+	messages := poster.messages()
+	raw := rawMessageContent(messages)
+	if raw != "plain output" {
+		t.Fatalf("raw = %q, want only plain output", raw)
+	}
+	finals := finalMessages(messages)
+	if len(finals) != 1 || finals[0].Content != "done" {
+		t.Fatalf("finals = %+v, want structured final", finals)
 	}
 }
 
@@ -366,6 +442,83 @@ func TestTerminalTurnCaptureDoesNotDuplicateStructuredFinal(t *testing.T) {
 	}
 	if len(finals) != 1 || finals[0].Content != "structured done" {
 		t.Fatalf("finals = %+v, want only structured final", finals)
+	}
+}
+
+func TestTerminalTurnCaptureInitialPromptProviderFinalIsSilent(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCapture(reporter, fakeProviderTranscript{answer: "provider answer", ok: true})
+
+	capture.StartInitialPrompt("issue context prompt")
+	capture.Finalize()
+	reporter.Close()
+
+	messages := poster.messages()
+	if inputs := userInputMessages(messages); len(inputs) != 0 {
+		t.Fatalf("inputs = %+v, want no initial prompt user_input", inputs)
+	}
+	if finals := finalMessages(messages); len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no bootstrap final", finals)
+	}
+}
+
+func TestTerminalTurnCaptureInitialPromptTerminalFallbackIsSilent(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCapture(reporter, nil)
+
+	capture.StartInitialPrompt("issue context prompt")
+	capture.Write([]byte("Initial answer\n"))
+	capture.Finalize()
+	reporter.Close()
+
+	messages := poster.messages()
+	if inputs := userInputMessages(messages); len(inputs) != 0 {
+		t.Fatalf("inputs = %+v, want no initial prompt user_input", inputs)
+	}
+	if finals := finalMessages(messages); len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no bootstrap final", finals)
+	}
+}
+
+func TestTerminalTurnCaptureInitialPromptStructuredFinalIsSilent(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCapture(reporter, nil)
+	stream := newTranscriptStream(reporter, capture)
+
+	capture.StartInitialPrompt("issue context prompt")
+	_, _ = stream.Write([]byte(`{"type":"result","result":"structured bootstrap"}` + "\n"))
+	stream.Flush()
+	capture.Finalize()
+	reporter.Close()
+
+	if finals := finalMessages(poster.messages()); len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no bootstrap final", finals)
+	}
+}
+
+func TestTerminalTurnCaptureAfterInitialPromptCapturesNextUserTurn(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCapture(reporter, nil)
+
+	capture.StartInitialPrompt("issue context prompt")
+	capture.BeforeUserSubmit()
+	capture.AfterUserSubmit("real question")
+	capture.Write([]byte("Real answer\n"))
+	capture.Finalize()
+	reporter.Close()
+
+	messages := poster.messages()
+	inputs := userInputMessages(messages)
+	finals := finalMessages(messages)
+	if len(inputs) != 1 || inputs[0].Content != "real question" {
+		t.Fatalf("inputs = %+v, want real user input", inputs)
+	}
+	if len(finals) != 1 || finals[0].Content != "Real answer" {
+		t.Fatalf("finals = %+v, want real answer", finals)
 	}
 }
 
@@ -749,6 +902,30 @@ func TestReporterIgnoresPostsAfterClose(t *testing.T) {
 	}
 }
 
+func TestLocalRunHeartbeatPatchesRunningUntilStopped(t *testing.T) {
+	patcher := &fakeLocalRunPatcher{}
+	stop := startLocalRunHeartbeat(patcher, "run-1", 10*time.Millisecond)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if patcher.count() > 0 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	stop()
+	got := patcher.count()
+	if got == 0 {
+		t.Fatalf("heartbeat did not patch running status")
+	}
+	time.Sleep(30 * time.Millisecond)
+	if after := patcher.count(); after != got {
+		t.Fatalf("heartbeat patched after stop: before=%d after=%d", got, after)
+	}
+	if path, status := patcher.last(); path != "/api/local-runs/run-1" || status != "running" {
+		t.Fatalf("last patch = %q/%q, want local run running", path, status)
+	}
+}
+
 func TestExecuteLocalCLIReportsPTYOutputAndExitCode(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("/bin/sh unavailable")
@@ -761,10 +938,11 @@ func TestExecuteLocalCLIReportsPTYOutputAndExitCode(t *testing.T) {
 		[]string{"/bin/sh", "-c", `printf '{"type":"result","result":"done"}\n'; exit 7`},
 		tmp,
 		"sh",
-		"run-1",
-		"issue-1",
-		filepath.Join(tmp, ".multica", "runs", "run-1"),
-		"http://127.0.0.1:8080",
+		localCLIEnv{
+			RunID:     "run-1",
+			IssueID:   "issue-1",
+			ServerURL: "http://127.0.0.1:8080",
+		},
 		"",
 		reporter,
 	)
@@ -785,74 +963,131 @@ func TestExecuteLocalCLIReportsPTYOutputAndExitCode(t *testing.T) {
 	}
 }
 
-func TestWriteLocalRunContextWritesExpectedFiles(t *testing.T) {
+func TestExecuteLocalCLIPassesPromptAsCodexArg(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh unavailable")
+	}
 	tmp := t.TempDir()
-	contextDir := filepath.Join(tmp, ".multica", "runs", "run-1")
-	client := fakeContextClient{
-		"/api/issues/issue-1": map[string]any{
-			"id":           "issue-1",
-			"identifier":   "MUL-1",
-			"title":        "Test issue",
-			"status":       "todo",
-			"priority":     "medium",
-			"description":  "Do the work",
-			"workspace_id": "workspace-1",
-			"project_id":   "project-1",
-		},
-		"/api/issues/issue-1/comments": []map[string]any{
-			{"author_type": "member", "author_id": "user-1", "content": "hello", "created_at": "2026-01-01T00:00:00Z"},
-		},
-		"/api/workspaces/workspace-1": map[string]any{"id": "workspace-1", "name": "Workspace"},
-		"/api/projects/project-1":     map[string]any{"id": "project-1", "name": "Project"},
-		"/api/projects/project-1/resources": map[string]any{
-			"items": []any{"resource"},
-		},
-	}
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	prompt := "embedded issue context prompt"
 
-	if err := writeLocalRunContext(context.Background(), client, "issue-1", "run-1", "codex", tmp, contextDir); err != nil {
-		t.Fatalf("writeLocalRunContext: %v", err)
-	}
+	exitCode, err := executeLocalCLI(
+		[]string{"/bin/sh", "-c", `printf 'arg:%s\n' "$0"`},
+		tmp,
+		"codex",
+		localCLIEnv{RunID: "run-1", IssueID: "issue-1"},
+		prompt,
+		reporter,
+	)
+	reporter.Close()
 
-	runJSON := readFileForTest(t, filepath.Join(contextDir, "run.json"))
-	if !containsAll(runJSON, []string{`"id": "run-1"`, `"cli_name": "codex"`, tmp}) {
-		t.Fatalf("run.json missing expected fields:\n%s", runJSON)
+	if exitCode != 0 || err != nil {
+		t.Fatalf("executeLocalCLI exitCode=%d err=%v", exitCode, err)
 	}
-	issueMD := readFileForTest(t, filepath.Join(contextDir, "issue.md"))
-	if !containsAll(issueMD, []string{"# Test issue", "- Identifier: `MUL-1`", "Do the work"}) {
-		t.Fatalf("issue.md missing expected fields:\n%s", issueMD)
+	messages := poster.messages()
+	if len(messages) == 0 {
+		t.Fatalf("expected transcript messages")
 	}
-	commentsMD := readFileForTest(t, filepath.Join(contextDir, "comments.md"))
-	if !containsAll(commentsMD, []string{"# Comments", "hello"}) {
-		t.Fatalf("comments.md missing expected fields:\n%s", commentsMD)
+	if inputs := userInputMessages(messages); len(inputs) != 0 {
+		t.Fatalf("inputs = %+v, want no initial prompt user_input", inputs)
 	}
-	resourcesJSON := readFileForTest(t, filepath.Join(contextDir, "resources.json"))
-	if !containsAll(resourcesJSON, []string{`"workspace"`, `"project"`, `"project_resources"`}) {
-		t.Fatalf("resources.json missing expected fields:\n%s", resourcesJSON)
+	if finals := finalMessages(messages); len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no bootstrap final", finals)
+	}
+	if raw := rawMessageContent(messages); !strings.Contains(raw, "arg:"+prompt) {
+		t.Fatalf("raw messages = %q, want prompt as argv", raw)
 	}
 }
 
-func TestAddMulticaToGitExcludeIsIdempotent(t *testing.T) {
+func TestExecuteLocalCLIInitialPromptTerminalFallbackIsSilent(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh unavailable")
+	}
 	tmp := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(tmp, ".git", "info"), 0o755); err != nil {
-		t.Fatalf("mkdir git info: %v", err)
-	}
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
 
-	if err := addMulticaToGitExclude(tmp); err != nil {
-		t.Fatalf("addMulticaToGitExclude first: %v", err)
-	}
-	if err := addMulticaToGitExclude(tmp); err != nil {
-		t.Fatalf("addMulticaToGitExclude second: %v", err)
-	}
+	exitCode, err := executeLocalCLI(
+		[]string{"/bin/sh", "-c", `printf 'Initial result\n'`},
+		tmp,
+		"sh",
+		localCLIEnv{RunID: "run-1", IssueID: "issue-1"},
+		"embedded issue context prompt\n",
+		reporter,
+	)
+	reporter.Close()
 
-	exclude := readFileForTest(t, filepath.Join(tmp, ".git", "info", "exclude"))
-	if got := strings.Count(exclude, ".multica/"); got != 1 {
-		t.Fatalf(".multica/ entries = %d, want 1 in:\n%s", got, exclude)
+	if exitCode != 0 || err != nil {
+		t.Fatalf("executeLocalCLI exitCode=%d err=%v", exitCode, err)
+	}
+	messages := poster.messages()
+	if inputs := userInputMessages(messages); len(inputs) != 0 {
+		t.Fatalf("inputs = %+v, want no initial prompt user_input", inputs)
+	}
+	if finals := finalMessages(messages); len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no bootstrap final", finals)
+	}
+}
+
+func TestLocalCLIProcessEnvInjectsRunMetadataAndToken(t *testing.T) {
+	got := localCLIProcessEnv([]string{
+		"MULTICA_SERVER_URL=http://old.example",
+		"MULTICA_WORKSPACE_ID=old-ws",
+		"MULTICA_TOKEN=old-token",
+		"OTHER=value",
+	}, localCLIEnv{
+		RunID:     "run-1",
+		IssueID:   "issue-1",
+		ServerURL: "http://127.0.0.1:8080",
+		Token:     "token-1",
+	})
+	joined := "\n" + strings.Join(got, "\n") + "\n"
+	if !containsAll(joined, []string{
+		"\nMULTICA_RUN_ID=run-1\n",
+		"\nMULTICA_ISSUE_ID=issue-1\n",
+		"\nMULTICA_SERVER_URL=http://127.0.0.1:8080\n",
+		"\nMULTICA_TOKEN=token-1\n",
+		"\nOTHER=value\n",
+	}) {
+		t.Fatalf("env missing resolved values: %v", got)
+	}
+	if strings.Contains(joined, "\nMULTICA_WORKSPACE_ID=") || strings.Contains(joined, "old-token") {
+		t.Fatalf("env leaked workspace or real token: %v", got)
+	}
+}
+
+func TestLocalCLIProcessEnvRemovesParentWorkspaceAndToken(t *testing.T) {
+	got := localCLIProcessEnv([]string{
+		"MULTICA_SERVER_URL=http://parent.example",
+		"MULTICA_WORKSPACE_ID=parent-ws",
+		"MULTICA_TOKEN=parent-token",
+	}, localCLIEnv{})
+	joined := "\n" + strings.Join(got, "\n") + "\n"
+	if !containsAll(joined, []string{
+		"\nMULTICA_SERVER_URL=http://parent.example\n",
+		"\nMULTICA_TOKEN=" + invalidLocalRunMulticaToken + "\n",
+	}) {
+		t.Fatalf("env missing expected values: %v", got)
+	}
+	if strings.Contains(joined, "\nMULTICA_WORKSPACE_ID=") || strings.Contains(joined, "parent-token") {
+		t.Fatalf("env leaked parent workspace or token: %v", got)
 	}
 }
 
 type fakeLocalRunPoster struct {
 	mu   sync.Mutex
 	msgs []localCLIMessage
+}
+
+type fakeLocalRunPatcher struct {
+	mu      sync.Mutex
+	patches []localRunPatch
+}
+
+type localRunPatch struct {
+	path   string
+	status string
 }
 
 type fakeProviderTranscript struct {
@@ -931,28 +1166,6 @@ func (p *blockingFirstProvider) releaseFirst() {
 	close(p.release)
 }
 
-type fakeContextClient map[string]any
-
-func (f fakeContextClient) GetJSON(_ context.Context, path string, out any) error {
-	if decoded, err := url.PathUnescape(path); err == nil {
-		path = decoded
-	}
-	data, err := json.Marshal(f[path])
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, out)
-}
-
-func readFileForTest(t *testing.T, path string) string {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	return string(data)
-}
-
 func (f *fakeLocalRunPoster) PostJSON(_ context.Context, _ string, body any, _ any) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -964,6 +1177,30 @@ func (f *fakeLocalRunPoster) messages() []localCLIMessage {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]localCLIMessage(nil), f.msgs...)
+}
+
+func (f *fakeLocalRunPatcher) PatchJSON(_ context.Context, path string, body any, _ any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	status, _ := body.(map[string]any)["status"].(string)
+	f.patches = append(f.patches, localRunPatch{path: path, status: status})
+	return nil
+}
+
+func (f *fakeLocalRunPatcher) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.patches)
+}
+
+func (f *fakeLocalRunPatcher) last() (string, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.patches) == 0 {
+		return "", ""
+	}
+	last := f.patches[len(f.patches)-1]
+	return last.path, last.status
 }
 
 func writeJSONLForTest(t *testing.T, lines []string) string {
@@ -983,6 +1220,36 @@ func finalMessages(messages []localCLIMessage) []localCLIMessage {
 		}
 	}
 	return finals
+}
+
+func rawMessageContent(messages []localCLIMessage) string {
+	var parts []string
+	for _, msg := range messages {
+		if msg.Type == "raw" {
+			parts = append(parts, msg.Content)
+		}
+	}
+	return strings.Join(parts, "")
+}
+
+func userInputMessages(messages []localCLIMessage) []localCLIMessage {
+	var inputs []localCLIMessage
+	for _, msg := range messages {
+		if msg.Type == "user_input" {
+			inputs = append(inputs, msg)
+		}
+	}
+	return inputs
+}
+
+func mapMessagesByType(messages []map[string]any, msgType string) []map[string]any {
+	var out []map[string]any
+	for _, msg := range messages {
+		if msg["type"] == msgType {
+			out = append(out, msg)
+		}
+	}
+	return out
 }
 
 func waitForFinals(t *testing.T, poster *fakeLocalRunPoster, want int) {

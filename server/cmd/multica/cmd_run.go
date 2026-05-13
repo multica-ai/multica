@@ -49,6 +49,9 @@ type localCLIMessage struct {
 	Output  string         `json:"output,omitempty"`
 }
 
+const invalidLocalRunMulticaToken = "multica-local-run-token-disabled"
+const localRunHeartbeatInterval = 30 * time.Second
+
 func runLocalCLI(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -98,23 +101,23 @@ func runLocalCLI(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("create local run: %w", err)
 	}
 
-	contextDir := filepath.Join(cwd, ".multica", "runs", run.ID)
-	if err := writeLocalRunContext(ctx, client, issueRef.ID, run.ID, cliName, cwd, contextDir); err != nil {
-		return err
-	}
-	_ = addMulticaToGitExclude(cwd)
-
 	if err := client.PatchJSON(context.Background(), "/api/local-runs/"+url.PathEscape(run.ID), map[string]any{
-		"status":      "running",
-		"context_dir": contextDir,
+		"status": "running",
 	}, nil); err != nil {
-		return fmt.Errorf("update local run context: %w", err)
+		return fmt.Errorf("update local run status: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Multica local run %s started. Context: %s\n", run.ID, contextDir)
+	fmt.Fprintf(os.Stderr, "Multica local run %s started.\n", run.ID)
 	reporter := newLocalRunReporter(client, run.ID)
-	exitCode, runErr := executeLocalCLI(childArgs, cwd, cliName, run.ID, issueRef.ID, contextDir, resolveServerURL(cmd), initialLocalRunPrompt(contextDir), reporter)
+	stopHeartbeat := startLocalRunHeartbeat(client, run.ID, localRunHeartbeatInterval)
+	exitCode, runErr := executeLocalCLI(childArgs, cwd, cliName, localCLIEnv{
+		RunID:     run.ID,
+		IssueID:   issueRef.ID,
+		ServerURL: resolveServerURL(cmd),
+		Token:     resolveToken(cmd),
+	}, localRunPrompt(issueRef.ID), reporter)
 	reporter.Close()
+	stopHeartbeat()
 	status := "completed"
 	errText := ""
 	if runErr != nil || exitCode != 0 {
@@ -149,104 +152,6 @@ func inferCLIName(command string) string {
 	return strings.TrimSpace(base)
 }
 
-func writeLocalRunContext(ctx context.Context, client jsonGetter, issueID, runID, cliName, cwd, contextDir string) error {
-	if err := os.MkdirAll(contextDir, 0o755); err != nil {
-		return fmt.Errorf("create context dir: %w", err)
-	}
-
-	var issue map[string]any
-	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueID), &issue); err != nil {
-		return fmt.Errorf("fetch issue context: %w", err)
-	}
-	var comments []map[string]any
-	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueID)+"/comments", &comments); err != nil {
-		return fmt.Errorf("fetch issue comments: %w", err)
-	}
-	resources := map[string]any{"issue": issue}
-	if workspaceID := stringValue(issue["workspace_id"]); workspaceID != "" {
-		var workspace map[string]any
-		if err := client.GetJSON(ctx, "/api/workspaces/"+url.PathEscape(workspaceID), &workspace); err == nil {
-			resources["workspace"] = workspace
-		}
-	}
-	if projectID := stringValue(issue["project_id"]); projectID != "" {
-		var project map[string]any
-		if err := client.GetJSON(ctx, "/api/projects/"+url.PathEscape(projectID), &project); err == nil {
-			resources["project"] = project
-		}
-		var projectResources map[string]any
-		if err := client.GetJSON(ctx, "/api/projects/"+url.PathEscape(projectID)+"/resources", &projectResources); err == nil {
-			resources["project_resources"] = projectResources
-		}
-	}
-
-	if err := writeJSONFile(filepath.Join(contextDir, "run.json"), map[string]any{
-		"id":          runID,
-		"issue_id":    issueID,
-		"cli_name":    cliName,
-		"work_dir":    cwd,
-		"context_dir": contextDir,
-		"started_at":  time.Now().Format(time.RFC3339),
-	}); err != nil {
-		return err
-	}
-	if err := writeJSONFile(filepath.Join(contextDir, "resources.json"), resources); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(contextDir, "issue.md"), []byte(formatIssueMarkdown(issue)), 0o644); err != nil {
-		return fmt.Errorf("write issue.md: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(contextDir, "comments.md"), []byte(formatCommentsMarkdown(comments)), 0o644); err != nil {
-		return fmt.Errorf("write comments.md: %w", err)
-	}
-	return nil
-}
-
-type jsonGetter interface {
-	GetJSON(ctx context.Context, path string, out any) error
-}
-
-func writeJSONFile(path string, value any) error {
-	data, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
-	}
-	return nil
-}
-
-func formatIssueMarkdown(issue map[string]any) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "# %s\n\n", stringValue(issue["title"]))
-	fmt.Fprintf(&b, "- ID: `%s`\n", stringValue(issue["id"]))
-	fmt.Fprintf(&b, "- Identifier: `%s`\n", stringValue(issue["identifier"]))
-	fmt.Fprintf(&b, "- Status: `%s`\n", stringValue(issue["status"]))
-	fmt.Fprintf(&b, "- Priority: `%s`\n\n", stringValue(issue["priority"]))
-	if desc := stringValue(issue["description"]); desc != "" {
-		b.WriteString("## Description\n\n")
-		b.WriteString(desc)
-		b.WriteString("\n")
-	}
-	return b.String()
-}
-
-func formatCommentsMarkdown(comments []map[string]any) string {
-	var b strings.Builder
-	b.WriteString("# Comments\n\n")
-	for _, c := range comments {
-		fmt.Fprintf(&b, "## %s %s\n\n", stringValue(c["author_type"]), stringValue(c["author_id"]))
-		if created := stringValue(c["created_at"]); created != "" {
-			fmt.Fprintf(&b, "_%s_\n\n", created)
-		}
-		b.WriteString(stringValue(c["content"]))
-		b.WriteString("\n\n")
-	}
-	return b.String()
-}
-
 func stringValue(v any) string {
 	if s, ok := v.(string); ok {
 		return s
@@ -254,12 +159,65 @@ func stringValue(v any) string {
 	return ""
 }
 
-func initialLocalRunPrompt(contextDir string) string {
-	return fmt.Sprintf("Before starting, read the Multica issue context in `%s`.\n", contextDir)
+func localRunPrompt(issueID string) string {
+	return fmt.Sprintf(strings.Join([]string{
+		"You are assigned to Multica issue %s.",
+		"",
+		"This local agent run is starting in bootstrap mode. Your job is to load context and then stay quiet until the user gives you more input.",
+		"",
+		"Assigned issue ID: %s",
+		"",
+		"You may use only these Multica CLI commands to read context:",
+		"",
+		"- `multica issue get %s --output json`",
+		"- `multica issue comment list %s --output json`",
+		"",
+		"Do not use any other `multica` command during bootstrap. Do not create, update, assign, change status, add comments, delete comments, rerun tasks, or list unrelated workspace data.",
+		"",
+		"Follow the same context scope as the platform agent: read the assigned issue and its comments only. Do not proactively fetch parent issues, child issues, or issues mentioned in text unless the user later explicitly asks for them.",
+		"",
+		"After loading context, produce no output. Do not summarize the issue, do not say you are ready, and do not post a final answer. Wait silently for the user's next input.",
+		"",
+	}, "\n"), issueID, issueID, issueID, issueID)
 }
 
 type localRunMessagePoster interface {
 	PostJSON(ctx context.Context, path string, body any, out any) error
+}
+
+type localRunStatusPatcher interface {
+	PatchJSON(ctx context.Context, path string, body any, out any) error
+}
+
+func startLocalRunHeartbeat(client localRunStatusPatcher, runID string, interval time.Duration) func() {
+	if client == nil || runID == "" || interval <= 0 {
+		return func() {}
+	}
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		path := "/api/local-runs/" + url.PathEscape(runID)
+		for {
+			select {
+			case <-ticker.C:
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				_ = client.PatchJSON(ctx, path, map[string]any{"status": "running"}, nil)
+				cancel()
+			case <-done:
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(done)
+			<-stopped
+		})
+	}
 }
 
 type localRunReporter struct {
@@ -323,22 +281,24 @@ func (r *localRunReporter) loop() {
 }
 
 type transcriptStream struct {
-	reporter *localRunReporter
-	capture  *terminalTurnCapture
-	raw      strings.Builder
-	line     strings.Builder
-	last     time.Time
+	reporter   *localRunReporter
+	capture    *terminalTurnCapture
+	raw        []byte
+	rawScreen  *terminalScreen
+	rawVisible string
+	line       strings.Builder
+	last       time.Time
 }
 
 func newTranscriptStream(reporter *localRunReporter, capture *terminalTurnCapture) *transcriptStream {
-	return &transcriptStream{reporter: reporter, capture: capture, last: time.Now()}
+	return &transcriptStream{reporter: reporter, capture: capture, rawScreen: newTerminalScreen(), last: time.Now()}
 }
 
 func (s *transcriptStream) Write(p []byte) (int, error) {
 	if s == nil {
 		return len(p), nil
 	}
-	s.raw.Write(p)
+	s.raw = append(s.raw, p...)
 	if s.capture != nil {
 		s.capture.Write(p)
 	}
@@ -349,7 +309,7 @@ func (s *transcriptStream) Write(p []byte) (int, error) {
 		}
 		s.line.WriteByte(b)
 	}
-	if s.raw.Len() >= 4096 || time.Since(s.last) >= time.Second {
+	if (len(s.raw) >= 4096 || time.Since(s.last) >= time.Second) && !looksLikePotentialStructuredLine(s.line.String()) {
 		s.FlushRaw()
 	}
 	return len(p), nil
@@ -364,23 +324,23 @@ func (s *transcriptStream) Flush() {
 }
 
 func (s *transcriptStream) FlushRaw() {
-	if s == nil || s.raw.Len() == 0 {
+	if s == nil || len(s.raw) == 0 {
 		return
 	}
-	content := redact.Text(s.raw.String())
-	s.raw.Reset()
+	s.flushRawBytes(s.raw)
+	s.raw = s.raw[:0]
 	s.last = time.Now()
-	s.reporter.Post(localCLIMessage{Type: "raw", Content: content})
 }
 
 func (s *transcriptStream) flushLine() {
 	if s == nil || s.line.Len() == 0 {
 		return
 	}
-	line := strings.TrimSpace(strings.TrimRight(s.line.String(), "\r"))
+	rawLine := s.line.String()
+	line := strings.TrimSpace(strings.TrimRight(rawLine, "\r"))
 	s.line.Reset()
 	if msg, ok := parseStructuredMessage(line); ok {
-		s.FlushRaw()
+		s.flushRawBeforeStructuredLine(rawLine)
 		msg.Content = redact.Text(msg.Content)
 		msg.Output = redact.Text(msg.Output)
 		msg.Input = redactInputMap(msg.Input)
@@ -391,6 +351,61 @@ func (s *transcriptStream) flushLine() {
 		}
 		s.reporter.Post(msg)
 	}
+}
+
+func (s *transcriptStream) flushRawBeforeStructuredLine(rawLine string) {
+	if s == nil || len(s.raw) == 0 {
+		return
+	}
+	lineBytes := len([]byte(rawLine)) + 1
+	if lineBytes > len(s.raw) {
+		s.FlushRaw()
+		return
+	}
+	prior := s.raw[:len(s.raw)-lineBytes]
+	if len(prior) > 0 {
+		s.flushRawBytes(prior)
+	}
+	s.raw = s.raw[:0]
+	s.last = time.Now()
+}
+
+func (s *transcriptStream) flushRawBytes(raw []byte) {
+	if s == nil || len(raw) == 0 {
+		return
+	}
+	if s.rawScreen == nil {
+		s.rawScreen = newTerminalScreen()
+	}
+	s.rawScreen.Write(raw)
+	visible := s.rawScreen.Text()
+	delta := visibleTextDelta(s.rawVisible, visible)
+	s.rawVisible = visible
+	content := strings.TrimSpace(delta)
+	if content == "" || isStatusOnly(content) {
+		return
+	}
+	content = redact.Text(content)
+	if content == "" {
+		return
+	}
+	s.reporter.Post(localCLIMessage{Type: "raw", Content: content})
+}
+
+func visibleTextDelta(prev, next string) string {
+	prev = strings.TrimSpace(prev)
+	next = strings.TrimSpace(next)
+	if next == "" || next == prev {
+		return ""
+	}
+	if prev != "" && strings.HasPrefix(next, prev) {
+		return strings.TrimSpace(strings.TrimPrefix(next, prev))
+	}
+	return next
+}
+
+func looksLikePotentialStructuredLine(line string) bool {
+	return strings.HasPrefix(strings.TrimSpace(line), "{")
 }
 
 func redactInputMap(m map[string]any) map[string]any {
@@ -408,16 +423,24 @@ func redactInputMap(m map[string]any) map[string]any {
 	return out
 }
 
-func executeLocalCLI(args []string, cwd, cliName, runID, issueID, contextDir, serverURL, initialPrompt string, reporter *localRunReporter) (int, error) {
+type localCLIEnv struct {
+	RunID     string
+	IssueID   string
+	ServerURL string
+	Token     string
+}
+
+func executeLocalCLI(args []string, cwd, cliName string, env localCLIEnv, initialPrompt string, reporter *localRunReporter) (int, error) {
 	startTime := time.Now()
-	child := exec.Command(args[0], args[1:]...)
+	childArgs := args[1:]
+	writePromptToPTY := initialPrompt
+	if cliName == "codex" && initialPrompt != "" {
+		childArgs = append(childArgs, initialPrompt)
+		writePromptToPTY = ""
+	}
+	child := exec.Command(args[0], childArgs...)
 	child.Dir = cwd
-	child.Env = append(os.Environ(),
-		"MULTICA_RUN_ID="+runID,
-		"MULTICA_ISSUE_ID="+issueID,
-		"MULTICA_RUN_CONTEXT_DIR="+contextDir,
-		"MULTICA_SERVER_URL="+serverURL,
-	)
+	child.Env = localCLIProcessEnv(os.Environ(), env)
 
 	ptmx, err := pty.Start(child)
 	if err != nil {
@@ -435,10 +458,11 @@ func executeLocalCLI(args []string, cwd, cliName, runID, issueID, contextDir, se
 	defer stopSignalForward()
 
 	turnCapture := newTerminalTurnCapture(reporter, newProviderTranscriptExtractor(cliName, cwd, startTime))
+	turnCapture.StartInitialPrompt(initialPrompt)
 	transcript := newTranscriptStream(reporter, turnCapture)
 	go func() {
-		if initialPrompt != "" {
-			_, _ = io.WriteString(ptmx, initialPrompt)
+		if writePromptToPTY != "" {
+			_, _ = io.WriteString(ptmx, writePromptToPTY)
 		}
 		_, _ = io.Copy(ptmx, io.TeeReader(os.Stdin, &stdinCapture{reporter: reporter, turns: turnCapture}))
 	}()
@@ -452,6 +476,38 @@ func executeLocalCLI(args []string, cwd, cliName, runID, issueID, contextDir, se
 		exitCode = child.ProcessState.ExitCode()
 	}
 	return exitCode, err
+}
+
+func localCLIProcessEnv(base []string, env localCLIEnv) []string {
+	out := make([]string, 0, len(base)+4)
+	for _, entry := range base {
+		if strings.HasPrefix(entry, "MULTICA_WORKSPACE_ID=") || strings.HasPrefix(entry, "MULTICA_TOKEN=") {
+			continue
+		}
+		out = append(out, entry)
+	}
+	set := func(key, value string) {
+		if value == "" {
+			return
+		}
+		prefix := key + "="
+		for i, entry := range out {
+			if strings.HasPrefix(entry, prefix) {
+				out[i] = prefix + value
+				return
+			}
+		}
+		out = append(out, prefix+value)
+	}
+	set("MULTICA_RUN_ID", env.RunID)
+	set("MULTICA_ISSUE_ID", env.IssueID)
+	set("MULTICA_SERVER_URL", env.ServerURL)
+	token := env.Token
+	if token == "" {
+		token = invalidLocalRunMulticaToken
+	}
+	set("MULTICA_TOKEN", token)
+	return out
 }
 
 func watchTerminalResize(ptmx *os.File) func() {
@@ -572,30 +628,6 @@ func firstString(obj map[string]any, keys ...string) string {
 	return ""
 }
 
-func addMulticaToGitExclude(cwd string) error {
-	gitDir := filepath.Join(cwd, ".git")
-	if st, err := os.Stat(gitDir); err != nil || !st.IsDir() {
-		return nil
-	}
-	excludePath := filepath.Join(gitDir, "info", "exclude")
-	data, _ := os.ReadFile(excludePath)
-	if strings.Contains(string(data), ".multica/") {
-		return nil
-	}
-	f, err := os.OpenFile(excludePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
-		if _, err := f.WriteString("\n"); err != nil {
-			return err
-		}
-	}
-	_, err = f.WriteString(".multica/\n")
-	return err
-}
-
 func makeStdinRaw() (func(), error) {
 	fd := int(os.Stdin.Fd())
 	if !isTerminal(fd) {
@@ -626,8 +658,8 @@ func isTerminal(fd int) bool {
 }
 
 func forwardSignals(proc *os.Process) func() {
-	ch := make(chan os.Signal, 2)
-	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	ch := make(chan os.Signal, 3)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	done := make(chan struct{})
 	go func() {
 		for {

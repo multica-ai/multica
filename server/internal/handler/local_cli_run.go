@@ -147,6 +147,7 @@ func (h *Handler) CreateLocalCLIRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishLocalCLIRunEvent(protocol.EventTaskDispatch, run)
 	writeJSON(w, http.StatusCreated, localCLIRunToResponse(run))
 }
 
@@ -163,6 +164,10 @@ func (h *Handler) UpdateLocalCLIRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Status != "running" && req.Status != "completed" && req.Status != "failed" && req.Status != "cancelled" {
 		writeError(w, http.StatusBadRequest, "invalid status")
+		return
+	}
+	if isTerminalLocalCLIStatus(run.Status) {
+		writeJSON(w, http.StatusOK, localCLIRunToResponse(run))
 		return
 	}
 
@@ -194,7 +199,36 @@ func (h *Handler) UpdateLocalCLIRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isTerminalLocalCLIStatus(updated.Status) && updated.Status != run.Status {
+		h.publishLocalCLIRunEvent(localCLITerminalEvent(updated.Status), updated)
+	}
 	writeJSON(w, http.StatusOK, localCLIRunToResponse(updated))
+}
+
+func (h *Handler) publishLocalCLIRunEvent(eventType string, run localCLIRun) {
+	payload := map[string]any{
+		"task_id":    uuidToString(run.ID),
+		"agent_id":   "",
+		"issue_id":   uuidToString(run.IssueID),
+		"runtime_id": "",
+		"status":     run.Status,
+	}
+	h.publishTask(eventType, uuidToString(run.WorkspaceID), "member", uuidToString(run.OwnerID), uuidToString(run.ID), payload)
+}
+
+func isTerminalLocalCLIStatus(status string) bool {
+	return status == "completed" || status == "failed" || status == "cancelled"
+}
+
+func localCLITerminalEvent(status string) string {
+	switch status {
+	case "completed":
+		return protocol.EventTaskCompleted
+	case "cancelled":
+		return protocol.EventTaskCancelled
+	default:
+		return protocol.EventTaskFailed
+	}
 }
 
 func (h *Handler) CreateLocalCLIMessage(w http.ResponseWriter, r *http.Request) {

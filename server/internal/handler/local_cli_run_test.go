@@ -7,9 +7,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func createIssueForLocalRunTest(t *testing.T, status string) IssueResponse {
@@ -60,6 +63,7 @@ func withLocalRunWorkspace(req *http.Request) *http.Request {
 func TestCreateLocalCLIRun_CreatesThreadAndMarksIssueInProgress(t *testing.T) {
 	ctx := context.Background()
 	issue := createIssueForLocalRunTest(t, "todo")
+	eventsCh := captureLocalRunEvents(protocol.EventTaskDispatch)
 
 	run := createLocalRunForTest(t, issue.ID, map[string]any{
 		"cli_name":      "codex",
@@ -91,6 +95,14 @@ func TestCreateLocalCLIRun_CreatesThreadAndMarksIssueInProgress(t *testing.T) {
 	}
 	if commentType != "system" || !strings.Contains(content, "Started local `codex` run") {
 		t.Fatalf("top comment type/content = %q/%q", commentType, content)
+	}
+	event := waitForLocalRunEvent(t, eventsCh, run["id"].(string))
+	if event.WorkspaceID != testWorkspaceID || event.TaskID != run["id"].(string) {
+		t.Fatalf("dispatch event = %+v, want workspace/task IDs", event)
+	}
+	payload := event.Payload.(map[string]any)
+	if payload["status"] != "running" || payload["issue_id"] != issue.ID || payload["agent_id"] != "" || payload["runtime_id"] != "" {
+		t.Fatalf("dispatch payload = %+v", payload)
 	}
 }
 
@@ -332,6 +344,7 @@ func TestUpdateLocalCLIRunStoresTerminalStatusAndExitCode(t *testing.T) {
 	issue := createIssueForLocalRunTest(t, "in_progress")
 	run := createLocalRunForTest(t, issue.ID, map[string]any{"cli_name": "codex"})
 	runID := run["id"].(string)
+	eventsCh := captureLocalRunEvents(protocol.EventTaskFailed)
 
 	w := httptest.NewRecorder()
 	req := newRequest("PATCH", "/api/local-runs/"+runID, map[string]any{
@@ -354,5 +367,111 @@ func TestUpdateLocalCLIRunStoresTerminalStatusAndExitCode(t *testing.T) {
 	}
 	if resp["completed_at"] == nil {
 		t.Fatalf("completed_at missing for failed run: %+v", resp)
+	}
+	event := waitForLocalRunEvent(t, eventsCh, runID)
+	if event.Type != protocol.EventTaskFailed || event.WorkspaceID != testWorkspaceID || event.TaskID != runID {
+		t.Fatalf("failed event = %+v", event)
+	}
+	payload := event.Payload.(map[string]any)
+	if payload["status"] != "failed" || payload["issue_id"] != issue.ID {
+		t.Fatalf("failed payload = %+v", payload)
+	}
+}
+
+func TestUpdateLocalCLIRunRunningHeartbeatDoesNotBroadcast(t *testing.T) {
+	issue := createIssueForLocalRunTest(t, "in_progress")
+	eventsCh := captureAllLocalRunEvents()
+	run := createLocalRunForTest(t, issue.ID, map[string]any{"cli_name": "codex"})
+	runID := run["id"].(string)
+	_ = waitForLocalRunEvent(t, eventsCh, runID)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/local-runs/"+runID, map[string]any{"status": "running"})
+	req = withLocalRunWorkspace(req)
+	req = withURLParam(req, "runId", runID)
+	testHandler.UpdateLocalCLIRun(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateLocalCLIRun heartbeat: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if event, ok := nextMatchingLocalRunEvent(eventsCh, runID, 20*time.Millisecond); ok {
+		t.Fatalf("heartbeat unexpectedly broadcast event: %+v", event)
+	}
+}
+
+func TestUpdateLocalCLIRunTerminalStatusIgnoresLateHeartbeat(t *testing.T) {
+	issue := createIssueForLocalRunTest(t, "in_progress")
+	run := createLocalRunForTest(t, issue.ID, map[string]any{"cli_name": "codex"})
+	runID := run["id"].(string)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/local-runs/"+runID, map[string]any{"status": "failed"})
+	req = withLocalRunWorkspace(req)
+	req = withURLParam(req, "runId", runID)
+	testHandler.UpdateLocalCLIRun(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateLocalCLIRun failed: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PATCH", "/api/local-runs/"+runID, map[string]any{"status": "running"})
+	req = withLocalRunWorkspace(req)
+	req = withURLParam(req, "runId", runID)
+	testHandler.UpdateLocalCLIRun(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateLocalCLIRun late heartbeat: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode run: %v", err)
+	}
+	if resp["status"] != "failed" {
+		t.Fatalf("late heartbeat changed terminal status: %+v", resp)
+	}
+}
+
+func captureLocalRunEvents(eventType string) chan events.Event {
+	ch := make(chan events.Event, 16)
+	testHandler.Bus.Subscribe(eventType, func(e events.Event) {
+		select {
+		case ch <- e:
+		default:
+		}
+	})
+	return ch
+}
+
+func captureAllLocalRunEvents() chan events.Event {
+	ch := make(chan events.Event, 16)
+	testHandler.Bus.SubscribeAll(func(e events.Event) {
+		select {
+		case ch <- e:
+		default:
+		}
+	})
+	return ch
+}
+
+func waitForLocalRunEvent(t *testing.T, ch <-chan events.Event, runID string) events.Event {
+	t.Helper()
+	if event, ok := nextMatchingLocalRunEvent(ch, runID, time.Second); ok {
+		return event
+	}
+	t.Fatalf("expected event for local run %s", runID)
+	return events.Event{}
+}
+
+func nextMatchingLocalRunEvent(ch <-chan events.Event, runID string, timeout time.Duration) (events.Event, bool) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case event := <-ch:
+			payload, _ := event.Payload.(map[string]any)
+			if payload["task_id"] == runID {
+				return event, true
+			}
+		case <-timer.C:
+			return events.Event{}, false
+		}
 	}
 }

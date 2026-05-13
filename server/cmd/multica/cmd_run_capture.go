@@ -203,6 +203,7 @@ type terminalTurnCapture struct {
 	turnStart  time.Time
 	userSynced bool
 	suppress   bool
+	bootstrap  bool
 }
 
 type assistantCaptureSource int
@@ -270,6 +271,10 @@ func (c *terminalTurnCapture) PrepareStructuredFinal() bool {
 	if !c.active {
 		return true
 	}
+	if c.bootstrap {
+		c.source = assistantCaptureStructured
+		return false
+	}
 	if !c.userSynced {
 		c.syncStdinUserInputLocked(c.lastUser, isSlashInput(c.lastUser))
 	}
@@ -287,6 +292,28 @@ func (c *terminalTurnCapture) BeforeUserSubmit() {
 	}
 }
 
+func (c *terminalTurnCapture) StartInitialPrompt(content string) {
+	if c == nil {
+		return
+	}
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.baseline = c.screen.Text()
+	c.active = true
+	c.source = assistantCaptureNone
+	c.turnSeq++
+	c.lastUser = content
+	c.userInput = content
+	c.turnStart = time.Now()
+	c.userSynced = true
+	c.suppress = false
+	c.bootstrap = true
+}
+
 func (c *terminalTurnCapture) AfterUserSubmit(content string) {
 	if c == nil {
 		return
@@ -302,6 +329,7 @@ func (c *terminalTurnCapture) AfterUserSubmit(content string) {
 	c.turnStart = time.Now()
 	c.userSynced = false
 	c.suppress = false
+	c.bootstrap = false
 	if c.provider == nil {
 		c.syncStdinUserInputLocked(content, isSlashInput(content))
 	}
@@ -342,7 +370,7 @@ func (c *terminalTurnCapture) finalize() {
 	if !c.userSynced {
 		c.syncStdinUserInputLocked(c.lastUser, isSlashInput(c.lastUser))
 	}
-	if c.source == assistantCaptureNone && !c.suppress {
+	if c.source == assistantCaptureNone && !c.suppress && !c.bootstrap {
 		if content := extractAssistantCandidate(c.baseline, c.screen.Text(), c.lastUser); content != "" {
 			c.reporter.Post(localCLIMessage{Type: "final", Content: redact.Text(content)})
 		}
@@ -356,6 +384,7 @@ func (c *terminalTurnCapture) finalize() {
 	c.turnStart = time.Time{}
 	c.userSynced = false
 	c.suppress = false
+	c.bootstrap = false
 }
 
 func (c *terminalTurnCapture) pollProvider(interval time.Duration) {
@@ -395,7 +424,7 @@ func (c *terminalTurnCapture) userInputSnapshot() (uint64, string, time.Time, bo
 func (c *terminalTurnCapture) providerSnapshot() (uint64, string, time.Time, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.active || !c.userSynced || c.source != assistantCaptureNone || c.suppress || c.provider == nil || strings.TrimSpace(c.userInput) == "" {
+	if !c.active || c.bootstrap || !c.userSynced || c.source != assistantCaptureNone || c.suppress || c.provider == nil || strings.TrimSpace(c.userInput) == "" {
 		return 0, "", time.Time{}, false
 	}
 	return c.turnSeq, c.userInput, c.turnStart, true
@@ -436,6 +465,7 @@ func (c *terminalTurnCapture) completeProviderFinal(seq uint64, content string) 
 	c.turnStart = time.Time{}
 	c.userSynced = false
 	c.suppress = false
+	c.bootstrap = false
 	return true
 }
 
@@ -577,24 +607,28 @@ func (s *terminalScreen) handleEscapeByte(b byte) {
 }
 
 func (s *terminalScreen) applyCSI(final byte, params string) {
-	n := firstCSIParam(params, 1)
 	switch final {
 	case 'A':
+		n := firstCSIParam(params, 1)
 		s.row -= n
 		if s.row < 0 {
 			s.row = 0
 		}
 	case 'B':
+		n := firstCSIParam(params, 1)
 		s.row += n
 		s.ensureLine()
 	case 'C':
+		n := firstCSIParam(params, 1)
 		s.col += n
 	case 'D':
+		n := firstCSIParam(params, 1)
 		s.col -= n
 		if s.col < 0 {
 			s.col = 0
 		}
 	case 'G':
+		n := firstCSIParam(params, 1)
 		if n > 0 {
 			s.col = n - 1
 		}
@@ -604,12 +638,14 @@ func (s *terminalScreen) applyCSI(final byte, params string) {
 		s.col = col
 		s.ensureLine()
 	case 'J':
+		n := firstCSIParam(params, 0)
 		if n == 2 || n == 3 {
 			s.lines = [][]rune{{}}
 			s.row = 0
 			s.col = 0
 		}
 	case 'K':
+		n := firstCSIParam(params, 0)
 		s.ensureLine()
 		line := s.lines[s.row]
 		switch n {
@@ -715,6 +751,9 @@ func extractAssistantCandidate(before, after, lastUser string) string {
 	candidate := after
 	if before != "" && strings.HasPrefix(after, before) {
 		candidate = strings.TrimSpace(strings.TrimPrefix(after, before))
+	}
+	if lastUser = strings.TrimSpace(lastUser); lastUser != "" && strings.HasPrefix(strings.TrimSpace(candidate), lastUser) {
+		candidate = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(candidate), lastUser))
 	}
 	lines := filterAssistantLines(strings.Split(candidate, "\n"), lastUser)
 	if len(lines) == 0 {

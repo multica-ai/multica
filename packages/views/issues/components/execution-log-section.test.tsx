@@ -104,4 +104,45 @@ describe("ExecutionLogSection local CLI rows", () => {
     expect(screen.getByText("exit 7")).toBeInTheDocument();
     expect(screen.getByTestId("transcript-button")).toBeInTheDocument();
   });
+
+  it("hides cancel for a running local CLI row but keeps transcript visible", async () => {
+    mockApi.listTasksByIssue.mockResolvedValue([
+      makeTask({
+        id: "run-1",
+        agent_id: "",
+        runtime_id: "",
+        kind: "local_cli",
+        status: "running",
+        owner_id: "user-1",
+        cli_name: "codex",
+        work_dir: "/Users/ada/project",
+        completed_at: null,
+      }),
+    ]);
+
+    renderSection();
+
+    await waitFor(() => expect(screen.getByText("Execution log")).toBeInTheDocument());
+
+    expect(screen.getByText("codex · Ada Lovelace · project")).toBeInTheDocument();
+    expect(screen.getByTestId("transcript-button")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel task" })).not.toBeInTheDocument();
+  });
+
+  it("keeps cancel visible for a running agent task", async () => {
+    mockApi.listTasksByIssue.mockResolvedValue([
+      makeTask({
+        id: "task-1",
+        status: "running",
+        trigger_summary: "Implement the feature",
+        completed_at: null,
+      }),
+    ]);
+
+    renderSection();
+
+    await waitFor(() => expect(screen.getByText("Execution log")).toBeInTheDocument());
+
+    expect(screen.getByRole("button", { name: "Cancel task" })).toBeInTheDocument();
+  });
 });
