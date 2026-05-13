@@ -116,8 +116,12 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false }
         <div
           {...dropZoneProps}
           data-testid="comment-input"
+          // CEREBRO-PATCH(comment-input-min-height): JEH-1065 — minimum 2 lines
+          // tall so the placeholder + icon row don't get crammed into one
+          // line at the bottom of the issue page (was visibly squashed on
+          // mobile — see Jesper's IMG_9779).
           className={cn(
-            "relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border",
+            "relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border min-h-20",
             isPinned && "ring-emerald-500/40 shadow-lg",
             isExpanded ? "h-[70vh]" : "max-h-56",
           )}

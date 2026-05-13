@@ -144,12 +144,15 @@ function ReplyInput({
           />
           <div
             {...dropZoneProps}
+            // CEREBRO-PATCH(reply-input-min-height): JEH-1065 — minimum 2 lines
+            // tall + always reserve bottom padding for the action row, so the
+            // placeholder + icons never have to share a single cramped row on
+            // mobile (was visibly squashed on iPhone — see Jesper's IMG_9779).
             className={cn(
-              "relative min-w-0 flex-1 flex flex-col rounded-md bg-card",
+              "relative min-w-0 flex-1 flex flex-col rounded-md bg-card pb-7 min-h-20",
               isExpanded
                 ? "h-[60vh]"
                 : size === "sm" ? "max-h-40" : "max-h-56",
-              (!isEmpty || isExpanded) && "pb-7",
             )}
           >
             <div className="flex-1 min-h-0 overflow-y-auto pr-14 pl-8 sm:pl-0">
