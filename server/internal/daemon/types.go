@@ -41,13 +41,13 @@ type Task struct {
 	Agent                   *AgentData            `json:"agent,omitempty"`
 	Context                 json.RawMessage       `json:"context,omitempty"`
 	Repos                   []RepoData            `json:"repos,omitempty"`
-	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
-	ProjectTitle            string                `json:"project_title,omitempty"`     // human-readable project title for context injection
-	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // project-scoped resources to expose to the agent
-	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
-	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
-	TriggerCommentID        string                `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
-	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
+	ProjectID               string                `json:"project_id,omitempty"`              // issue's project, when present
+	ProjectTitle            string                `json:"project_title,omitempty"`           // human-readable project title for context injection
+	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"`       // project-scoped resources to expose to the agent
+	PriorSessionID          string                `json:"prior_session_id,omitempty"`        // Claude session ID from a previous task on this issue
+	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on this issue
+	TriggerCommentID        string                `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
+	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"` // content of the triggering comment
 	TriggerSource           string                `json:"trigger_source,omitempty"`
 	TriggerActorType        string                `json:"trigger_actor_type,omitempty"`
 	TriggerActorID          string                `json:"trigger_actor_id,omitempty"`
@@ -67,17 +67,17 @@ type Task struct {
 
 // AgentData holds agent details returned by the claim endpoint.
 type AgentData struct {
-	ID           string            `json:"id"`
-	Name         string            `json:"name"`
-	Visibility   string            `json:"visibility"`
-	OwnerID      string            `json:"owner_id"`
-	Instructions string            `json:"instructions"`
-	Skills       []SkillData       `json:"skills"`
-	CustomEnv    map[string]string `json:"custom_env,omitempty"`
-	CustomArgs   []string          `json:"custom_args,omitempty"`
-	McpConfig    json.RawMessage   `json:"mcp_config,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	RuntimeConfig json.RawMessage  `json:"runtime_config,omitempty"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	Visibility    string            `json:"visibility"`
+	OwnerID       string            `json:"owner_id"`
+	Instructions  string            `json:"instructions"`
+	Skills        []SkillData       `json:"skills"`
+	CustomEnv     map[string]string `json:"custom_env,omitempty"`
+	CustomArgs    []string          `json:"custom_args,omitempty"`
+	McpConfig     json.RawMessage   `json:"mcp_config,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	RuntimeConfig json.RawMessage   `json:"runtime_config,omitempty"`
 }
 
 // SkillData represents a structured skill for task execution.

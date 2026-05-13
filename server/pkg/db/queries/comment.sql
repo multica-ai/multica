@@ -3,7 +3,7 @@
 -- net). Issue p99 is ~30 comments, max ever observed in prod is ~1.1k, so
 -- the handler-side cap of 2000 is purely defensive.
 SELECT * FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
+WHERE issue_id = $1 AND workspace_id = $2 AND deleted_at IS NULL
 ORDER BY created_at ASC, id ASC
 LIMIT $3;
 
@@ -11,7 +11,7 @@ LIMIT $3;
 -- Comments created strictly after $3 in chronological order, capped at $4.
 -- Powers the CLI's `--since` agent-polling flow.
 SELECT * FROM comment
-WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
+WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3 AND deleted_at IS NULL
 ORDER BY created_at ASC, id ASC
 LIMIT $4;
 

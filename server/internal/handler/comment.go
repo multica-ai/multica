@@ -980,16 +980,16 @@ func (h *Handler) RetryAgentComment(w http.ResponseWriter, r *http.Request) {
 
 	if isAssigneeAgent {
 		if triggerID.Valid {
-			_, err = h.TaskService.EnqueueTaskForIssue(r.Context(), issue, buildTriggerActor("retry", "member", userID), triggerID)
+			_, err = h.TaskService.EnqueueTaskForIssue(r.Context(), issue, triggerID)
 		} else {
-			_, err = h.TaskService.EnqueueTaskForIssue(r.Context(), issue, buildTriggerActor("retry", "member", userID))
+			_, err = h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 		}
 	} else {
 		if !triggerID.Valid {
 			writeError(w, http.StatusBadRequest, "cannot retry: no member message in thread to use as context")
 			return
 		}
-		_, err = h.TaskService.EnqueueTaskForMention(r.Context(), issue, comment.AuthorID, buildTriggerActor("retry", "member", userID), triggerID)
+		_, err = h.TaskService.EnqueueTaskForMention(r.Context(), issue, comment.AuthorID, triggerID)
 	}
 	if err != nil {
 		slog.Warn("retry agent comment: enqueue failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentID)...)
