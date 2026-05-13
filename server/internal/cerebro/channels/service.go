@@ -349,3 +349,236 @@ func (s *Service) MaybeUnarchiveForUser(
 		AudienceUserIDs: []string{userIDStr},
 	})
 }
+
+// SubscriberReasonMentionPromote is the issue_subscriber.reason stamped on
+// participants added by the DM-to-channel promotion path. We reuse the
+// existing 'mentioned' enum value (see migrations/015_issue_subscriber.up.sql)
+// to avoid widening the CHECK constraint for a single new code path —
+// semantically the entity joined the channel because they were mentioned.
+const SubscriberReasonMentionPromote = "mentioned"
+
+// PromoteDMOnMention promotes a DM to a multi-party channel when a comment
+// mentions a member or agent that is not already a participant (JEH-1131).
+// Once promoted, the DM peer's "is this still a DM" semantics no longer
+// hold — `GetDMByMembers` requires exactly two member subscribers, so the
+// next attempt to reopen the DM with the same peer will create a fresh DM
+// instead of returning this (now-channel) row, which matches the intuition
+// that "1:1 with Sara" and "Sara + Mia + a question" are different threads.
+//
+// Best-effort: every failure path logs and returns. The promotion is a UX
+// nicety on top of the existing mention-enqueue flow and must not block
+// comment creation if something downstream is unavailable.
+//
+// Mention parsing mirrors enqueueMentionedAgentTasks: a reply with no
+// explicit mentions inherits the thread root's mentions when both author
+// and parent author are members (see shouldInheritParentMentions). @all is
+// skipped — broadcasting to "everyone" is not a request to expand the
+// participant set. Self-mentions (the author mentioning themselves, somehow)
+// are filtered the same way.
+func (s *Service) PromoteDMOnMention(
+	ctx context.Context,
+	issue db.Issue,
+	comment db.Comment,
+	parentComment *db.Comment,
+	workspaceID, actorType, actorID string,
+) {
+	if issue.Kind != "dm" {
+		return
+	}
+	if s.Bus == nil {
+		return
+	}
+
+	mentions := util.ParseMentions(comment.Content)
+	// Mirror the comment-handler inheritance rule: replies with no explicit
+	// mentions, authored by a member in a thread started by a member, inherit
+	// the root's mentions. We only need to inherit when there are no own
+	// mentions and the parent is a member-authored comment.
+	if len(mentions) == 0 && parentComment != nil &&
+		parentComment.AuthorType == "member" && comment.AuthorType == "member" {
+		mentions = util.ParseMentions(parentComment.Content)
+	}
+	if len(mentions) == 0 || util.HasMentionAll(mentions) {
+		return
+	}
+
+	// Pull the current participant list once — we use it both to decide
+	// which mentions are "new" and (post-add) to build the title.
+	subs, err := s.Queries.ListIssueSubscribers(ctx, issue.ID)
+	if err != nil {
+		slog.Warn("dm-promote: list subscribers failed",
+			"channel_id", util.UUIDToString(issue.ID), "error", err)
+		return
+	}
+	current := make(map[string]bool, len(subs))
+	for _, sub := range subs {
+		current[sub.UserType+":"+util.UUIDToString(sub.UserID)] = true
+	}
+
+	type newSub struct {
+		userType string
+		userID   pgtype.UUID
+	}
+	var toAdd []newSub
+	for _, m := range mentions {
+		if m.Type != "agent" && m.Type != "member" {
+			continue // skip @all and issue refs
+		}
+		// Filter self-mentions: a member mentioning themselves shouldn't
+		// expand the participant set.
+		if m.Type == comment.AuthorType && m.ID == util.UUIDToString(comment.AuthorID) {
+			continue
+		}
+		userUUID, err := util.ParseUUID(m.ID)
+		if err != nil {
+			continue
+		}
+		key := m.Type + ":" + m.ID
+		if current[key] {
+			continue
+		}
+		// Dedupe within this comment so two mentions of the same agent in
+		// one message don't try to insert twice (AddIssueSubscriber is
+		// idempotent, but the broadcast loop below would over-publish).
+		current[key] = true
+		toAdd = append(toAdd, newSub{userType: m.Type, userID: userUUID})
+	}
+	if len(toAdd) == 0 {
+		return
+	}
+
+	// Subscribe the new participants first so the channel state is coherent
+	// the moment kind flips: every subscriber the frontend resolves from
+	// participants[] is already in the row. AddIssueSubscriber is idempotent
+	// (INSERT ... ON CONFLICT DO NOTHING) so this is safe to retry on a
+	// partial earlier promotion.
+	for _, ns := range toAdd {
+		if err := s.Queries.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
+			IssueID:  issue.ID,
+			UserType: ns.userType,
+			UserID:   ns.userID,
+			Reason:   SubscriberReasonMentionPromote,
+		}); err != nil {
+			slog.Warn("dm-promote: add subscriber failed",
+				"channel_id", util.UUIDToString(issue.ID),
+				"user_type", ns.userType,
+				"user_id", util.UUIDToString(ns.userID),
+				"error", err)
+		}
+	}
+
+	// Build the auto-generated title from the full (post-add) participant
+	// list. Names are joined with ", " in subscribed-at order so the title
+	// is stable across calls and reads like "Jesper, Mia, Fætta". Empty
+	// list (shouldn't happen — we just added rows) falls back to a generic
+	// label so the channel isn't anonymous in the inbox.
+	titleArg := pgtype.Text{}
+	if issue.Title == "" {
+		names, err := s.Queries.ListChannelParticipantNames(ctx, db.ListChannelParticipantNamesParams{
+			IssueID:     issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			slog.Warn("dm-promote: list participant names failed",
+				"channel_id", util.UUIDToString(issue.ID), "error", err)
+		} else {
+			joined := joinNames(names)
+			if joined != "" {
+				titleArg = pgtype.Text{String: joined, Valid: true}
+			}
+		}
+	}
+
+	promoted, err := s.Queries.PromoteDMToChannel(ctx, db.PromoteDMToChannelParams{
+		ID:    issue.ID,
+		Title: titleArg,
+	})
+	if err != nil {
+		// ErrNoRows = already promoted (kind != 'dm' before our UPDATE).
+		// Still publish subscriber:added events below so the late-arriving
+		// participants are visible in the inbox.
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("dm-promote: promote failed",
+				"channel_id", util.UUIDToString(issue.ID), "error", err)
+			return
+		}
+		promoted = issue
+		promoted.Kind = "channel"
+	}
+
+	// Audience: every member subscriber (now includes any freshly-added
+	// members). Agent subscribers don't receive WS events.
+	audience := s.memberSubscriberIDs(ctx, promoted.ID)
+
+	// channel:updated tells every connected member-client to refetch the
+	// channel list — the prefix handler in use-realtime-sync.ts invalidates
+	// channelKeys.list, so the inbox swaps "DM with Sara" for the new
+	// channel title and the side panel re-renders kind-specific UI.
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventChannelUpdated,
+		WorkspaceID: workspaceID,
+		ActorType:   actorType,
+		ActorID:     actorID,
+		Payload: map[string]any{
+			"channel_id":    util.UUIDToString(promoted.ID),
+			"kind":          promoted.Kind,
+			"title":         promoted.Title,
+			"promoted_from": "dm",
+		},
+		AudienceUserIDs: audience,
+	})
+
+	// subscriber:added for each new participant — let the participants
+	// panel and any other subscriber-aware UI react without a separate
+	// channel-list refetch. Member additions get the same audience; agents
+	// just need the listen-mode panel to know they're in.
+	for _, ns := range toAdd {
+		s.Bus.Publish(events.Event{
+			Type:        protocol.EventSubscriberAdded,
+			WorkspaceID: workspaceID,
+			ActorType:   actorType,
+			ActorID:     actorID,
+			Payload: map[string]any{
+				"issue_id":  util.UUIDToString(promoted.ID),
+				"user_type": ns.userType,
+				"user_id":   util.UUIDToString(ns.userID),
+				"reason":    SubscriberReasonMentionPromote,
+			},
+			AudienceUserIDs: audience,
+		})
+	}
+}
+
+// memberSubscriberIDs returns the user-id strings of every member subscriber
+// of an issue. Used as the WS audience when a channel event must reach the
+// participants (and only the participants).
+func (s *Service) memberSubscriberIDs(ctx context.Context, issueID pgtype.UUID) []string {
+	subs, err := s.Queries.ListIssueSubscribers(ctx, issueID)
+	if err != nil {
+		return []string{}
+	}
+	out := make([]string, 0, len(subs))
+	for _, sub := range subs {
+		if sub.UserType == "member" {
+			out = append(out, util.UUIDToString(sub.UserID))
+		}
+	}
+	return out
+}
+
+// joinNames formats a participant-name list as "A, B, C". Trims empty
+// names so a missing display name doesn't produce ", , B".
+func joinNames(rows []db.ListChannelParticipantNamesRow) string {
+	out := ""
+	for _, r := range rows {
+		if r.DisplayName == "" {
+			continue
+		}
+		if out == "" {
+			out = r.DisplayName
+		} else {
+			out += ", " + r.DisplayName
+		}
+	}
+	return out
+}

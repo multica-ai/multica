@@ -140,6 +140,9 @@ type ChannelListenInvoker interface {
 	EnqueueChannelListenerTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string)
 	FilterArchivedChannels(ctx context.Context, userID pgtype.UUID, rows []db.ListChannelsForUserRow, includeArchived bool) []db.ListChannelsForUserRow
 	MaybeUnarchiveForUser(ctx context.Context, channelID, userID pgtype.UUID, workspaceID, actorType, actorID string)
+	// CEREBRO-PATCH(handler-dm-promote-iface): JEH-1131 — seam for the
+	// DM-to-channel promotion that runs after mention dispatch.
+	PromoteDMOnMention(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, workspaceID, actorType, actorID string)
 }
 
 // New constructs a Handler. The pushService argument is cerebro-specific

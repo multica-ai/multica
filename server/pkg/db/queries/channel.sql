@@ -62,3 +62,40 @@ WHERE recipient_type = 'member'
   AND issue_id = $2
   AND read = FALSE
   AND archived = FALSE;
+
+-- CEREBRO-PATCH(sqlc-channel-dm-promote): JEH-1131 — DM auto-promotion
+-- on third-party mention. The PromoteDMToChannel and
+-- ListChannelParticipantNames queries below are cerebro-only; upstream
+-- never needs to flip kind on an existing channel-table row.
+-- name: PromoteDMToChannel :one
+-- JEH-1131. Flips a DM-kind issue to channel kind in one statement. The
+-- WHERE clause makes it idempotent: a second call (or a call on an issue
+-- that was already a channel) returns no row, which the service treats as
+-- a no-op. Title is only filled when it's currently empty so a user-renamed
+-- channel (shouldn't happen on a DM today, but cheap to defend) is preserved.
+UPDATE issue
+SET kind = 'channel',
+    title = CASE WHEN title = '' THEN COALESCE(sqlc.narg('title'), '') ELSE title END,
+    updated_at = now()
+WHERE id = $1
+  AND kind = 'dm'
+RETURNING *;
+
+-- name: ListChannelParticipantNames :many
+-- Returns display names of every (member or agent) subscriber of a channel/dm
+-- in subscribed-at order. Used to auto-generate a channel title on DM
+-- promotion (JEH-1131); harmless for any other caller that just wants a
+-- one-shot name list keyed off issue_subscriber. Workspace ID is required
+-- to scope the member-row join — agents are workspace-scoped by their own
+-- table.
+SELECT u.name AS display_name, s.created_at AS subscribed_at
+FROM issue_subscriber s
+JOIN member m ON m.user_id = s.user_id AND m.workspace_id = $2
+JOIN "user" u ON u.id = m.user_id
+WHERE s.issue_id = $1 AND s.user_type = 'member'
+UNION ALL
+SELECT a.name AS display_name, s.created_at AS subscribed_at
+FROM issue_subscriber s
+JOIN agent a ON a.id = s.user_id AND a.workspace_id = $2
+WHERE s.issue_id = $1 AND s.user_type = 'agent'
+ORDER BY subscribed_at ASC;

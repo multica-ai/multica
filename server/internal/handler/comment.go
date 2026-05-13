@@ -285,6 +285,16 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		h.ChannelListen.EnqueueChannelListenerTasks(r.Context(), issue, comment, parentComment, authorType, authorID)
 	}
 
+	// CEREBRO-PATCH(dm-promote-on-mention): JEH-1131. When a DM gets a comment
+	// that mentions a third party (member or agent), the conversation is no
+	// longer 1:1 — flip kind to 'channel', subscribe the mentioned entity,
+	// and broadcast channel:updated so the inbox swaps the DM row for the
+	// new channel. Runs after the mention-enqueue so the mentioned agent's
+	// task is already queued against the (about-to-be) channel.
+	if h.ChannelListen != nil {
+		h.ChannelListen.PromoteDMOnMention(r.Context(), issue, comment, parentComment, uuidToString(issue.WorkspaceID), authorType, authorID)
+	}
+
 	writeJSON(w, http.StatusCreated, resp)
 }
 

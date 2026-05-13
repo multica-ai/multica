@@ -97,6 +97,56 @@ func (q *Queries) GetDMByMembers(ctx context.Context, arg GetDMByMembersParams) 
 	return i, err
 }
 
+const listChannelParticipantNames = `-- name: ListChannelParticipantNames :many
+SELECT u.name AS display_name, s.created_at AS subscribed_at
+FROM issue_subscriber s
+JOIN member m ON m.user_id = s.user_id AND m.workspace_id = $2
+JOIN "user" u ON u.id = m.user_id
+WHERE s.issue_id = $1 AND s.user_type = 'member'
+UNION ALL
+SELECT a.name AS display_name, s.created_at AS subscribed_at
+FROM issue_subscriber s
+JOIN agent a ON a.id = s.user_id AND a.workspace_id = $2
+WHERE s.issue_id = $1 AND s.user_type = 'agent'
+ORDER BY subscribed_at ASC
+`
+
+type ListChannelParticipantNamesParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type ListChannelParticipantNamesRow struct {
+	DisplayName  string             `json:"display_name"`
+	SubscribedAt pgtype.Timestamptz `json:"subscribed_at"`
+}
+
+// Returns display names of every (member or agent) subscriber of a channel/dm
+// in subscribed-at order. Used to auto-generate a channel title on DM
+// promotion (JEH-1131); harmless for any other caller that just wants a
+// one-shot name list keyed off issue_subscriber. Workspace ID is required
+// to scope the member-row join — agents are workspace-scoped by their own
+// table.
+func (q *Queries) ListChannelParticipantNames(ctx context.Context, arg ListChannelParticipantNamesParams) ([]ListChannelParticipantNamesRow, error) {
+	rows, err := q.db.Query(ctx, listChannelParticipantNames, arg.IssueID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelParticipantNamesRow{}
+	for rows.Next() {
+		var i ListChannelParticipantNamesRow
+		if err := rows.Scan(&i.DisplayName, &i.SubscribedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannelsForUser = `-- name: ListChannelsForUser :many
 
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
@@ -221,4 +271,60 @@ func (q *Queries) ListLatestCommentsForIssues(ctx context.Context, dollar_1 []pg
 		return nil, err
 	}
 	return items, nil
+}
+
+const promoteDMToChannel = `-- name: PromoteDMToChannel :one
+UPDATE issue
+SET kind = 'channel',
+    title = CASE WHEN title = '' THEN COALESCE($2, '') ELSE title END,
+    updated_at = now()
+WHERE id = $1
+  AND kind = 'dm'
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, kind, is_private
+`
+
+type PromoteDMToChannelParams struct {
+	ID    pgtype.UUID `json:"id"`
+	Title pgtype.Text `json:"title"`
+}
+
+// CEREBRO-PATCH(sqlc-channel-dm-promote): JEH-1131 — DM auto-promotion
+// on third-party mention. The PromoteDMToChannel and
+// ListChannelParticipantNames queries below are cerebro-only; upstream
+// never needs to flip kind on an existing channel-table row.
+// JEH-1131. Flips a DM-kind issue to channel kind in one statement. The
+// WHERE clause makes it idempotent: a second call (or a call on an issue
+// that was already a channel) returns no row, which the service treats as
+// a no-op. Title is only filled when it's currently empty so a user-renamed
+// channel (shouldn't happen on a DM today, but cheap to defend) is preserved.
+func (q *Queries) PromoteDMToChannel(ctx context.Context, arg PromoteDMToChannelParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, promoteDMToChannel, arg.ID, arg.Title)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.Kind,
+		&i.IsPrivate,
+	)
+	return i, err
 }
