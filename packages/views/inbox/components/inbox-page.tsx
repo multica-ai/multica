@@ -601,10 +601,14 @@ export function InboxPage() {
     const entries: MergedEntry[] = [];
     // Channels first so we know which inbox items to swallow.
     for (const channel of channels) {
+      // Sort by the latest message rather than the issue-level updated_at —
+      // the underlying issue row isn't touched when a comment lands, so
+      // updated_at reflects channel creation, not chat activity.
+      const lastActivity = channel.last_message?.created_at ?? channel.updated_at;
       entries.push({
         kind: "channel",
         id: channel.id,
-        time: new Date(channel.updated_at).getTime(),
+        time: new Date(lastActivity).getTime(),
         channel,
       });
     }
