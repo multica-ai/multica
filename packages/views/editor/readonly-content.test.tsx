@@ -8,8 +8,19 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspaceSlug: () => "test",
 }));
 
+const navigation = {
+  push: vi.fn(),
+  openInNewTab: vi.fn(),
+};
+
 vi.mock("../navigation", () => ({
-  useNavigation: () => ({ push: vi.fn(), openInNewTab: vi.fn() }),
+  useNavigation: () => navigation,
+}));
+
+const useIsMobileMock = vi.fn(() => false);
+
+vi.mock("@multica/ui/hooks/use-mobile", () => ({
+  useIsMobile: () => useIsMobileMock(),
 }));
 
 vi.mock("../issues/components/issue-chip", () => ({
@@ -54,6 +65,7 @@ import { ReadonlyContent } from "./readonly-content";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useIsMobileMock.mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -110,6 +122,42 @@ describe("ReadonlyContent line breaks", () => {
   it("renders a blank-line gap as separate paragraphs", () => {
     const { container } = render(<ReadonlyContent content={"para one\n\npara two"} />);
     expect(container.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("ReadonlyContent issue mention chip", () => {
+  // JEH-874: on desktop / wide web, the chip opens the referenced issue in a new
+  // tab so the comment thread stays put. JEH-1112: on mobile the PWA is
+  // `display: standalone` with no tab UI — `target="_blank"` either navigates
+  // the current window (iOS) or breaks out into the system browser (Android),
+  // both of which drop the thread context. Fall back to SPA push so the browser
+  // back-button restores scroll + draft state via the router cache.
+  const chipMarkdown = "Reference: [JEH-9](mention://issue/issue-9)";
+
+  it("opens in a new tab when not on mobile", () => {
+    useIsMobileMock.mockReturnValue(false);
+    const { getByTestId } = render(<ReadonlyContent content={chipMarkdown} />);
+    const chip = getByTestId("issue-chip");
+    const anchor = chip.closest("a");
+    expect(anchor?.getAttribute("target")).toBe("_blank");
+    fireEvent.click(anchor!);
+    expect(navigation.openInNewTab).toHaveBeenCalledWith(
+      "/test/issues/issue-9",
+      "JEH-9",
+    );
+    expect(navigation.push).not.toHaveBeenCalled();
+  });
+
+  it("uses SPA push (same window) when on mobile", () => {
+    useIsMobileMock.mockReturnValue(true);
+    const { getByTestId } = render(<ReadonlyContent content={chipMarkdown} />);
+    const chip = getByTestId("issue-chip");
+    const anchor = chip.closest("a");
+    expect(anchor?.getAttribute("target")).toBeNull();
+    expect(anchor?.getAttribute("rel")).toBeNull();
+    fireEvent.click(anchor!);
+    expect(navigation.push).toHaveBeenCalledWith("/test/issues/issue-9");
+    expect(navigation.openInNewTab).not.toHaveBeenCalled();
   });
 });
 
