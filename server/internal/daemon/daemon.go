@@ -2229,12 +2229,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	switch result.Status {
 	case "completed":
 		if result.Output == "" {
-			// Even an empty-output completion may have established a real
-			// session — surface it through the blocked path so the next chat
-			// turn can still resume from where this one left off.
+			// The agent completed successfully but produced no text output.
+			// This is valid — the agent may have done all its work via tool
+			// calls (e.g. posting comments via CLI, pushing code). Treat as
+			// a normal completion so the task is not incorrectly marked as
+			// blocked.
 			return TaskResult{
-				Status:    "blocked",
-				Comment:   fmt.Sprintf("%s returned empty output", provider),
+				Status:    "completed",
+				Comment:   "",
 				SessionID: result.SessionID,
 				WorkDir:   env.WorkDir,
 				EnvRoot:   env.RootDir,

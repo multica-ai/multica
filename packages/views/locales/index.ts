@@ -20,6 +20,7 @@ import enChat from "./en/chat.json";
 import enModals from "./en/modals.json";
 import enRuntimes from "./en/runtimes.json";
 import enLayout from "./en/layout.json";
+import enUsage from "./en/usage.json";
 import enTimeTracking from "./en/time-tracking.json";
 import enWorkCalendars from "./en/work-calendars.json";
 import enRedmine from "./en/redmine.json";
@@ -45,6 +46,7 @@ import zhHansChat from "./zh-Hans/chat.json";
 import zhHansModals from "./zh-Hans/modals.json";
 import zhHansRuntimes from "./zh-Hans/runtimes.json";
 import zhHansLayout from "./zh-Hans/layout.json";
+import zhHansUsage from "./zh-Hans/usage.json";
 import zhHansTimeTracking from "./zh-Hans/time-tracking.json";
 import zhHansWorkCalendars from "./zh-Hans/work-calendars.json";
 import zhHansRedmine from "./zh-Hans/redmine.json";
@@ -101,6 +103,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     modals: enModals,
     runtimes: enRuntimes,
     layout: enLayout,
+    usage: enUsage,
     "time-tracking": enTimeTracking,
     "work-calendars": enWorkCalendars,
     redmine: enRedmine,
@@ -128,6 +131,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     modals: zhHansModals,
     runtimes: zhHansRuntimes,
     layout: zhHansLayout,
+    usage: zhHansUsage,
     "time-tracking": zhHansTimeTracking,
     "work-calendars": zhHansWorkCalendars,
     redmine: zhHansRedmine,

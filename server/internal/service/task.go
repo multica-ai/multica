@@ -991,21 +991,24 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// For chat tasks, save assistant reply and broadcast chat:done. The
 	// resume pointer was already persisted inside the transaction above.
 	if task.ChatSessionID.Valid {
+		var assistantMsg *db.ChatMessage
 		var payload protocol.TaskCompletedPayload
 		if err := json.Unmarshal(result, &payload); err == nil && payload.Output != "" {
 			// Same unescape as the issue-comment path above: literal `\n` from
 			// agent stdout becomes a real newline so the chat panel renders
 			// paragraph breaks instead of one wall of prose.
 			body := util.UnescapeBackslashEscapes(payload.Output)
-			if _, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+			row, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
 				ChatSessionID: task.ChatSessionID,
 				Role:          "assistant",
 				Content:       redact.Text(body),
 				TaskID:        task.ID,
 				ElapsedMs:     computeChatElapsedMs(task),
-			}); err != nil {
+			})
+			if err != nil {
 				slog.Error("failed to save assistant chat message", "task_id", util.UUIDToString(task.ID), "error", err)
 			} else {
+				assistantMsg = &row
 				// Event-driven unread: stamp unread_since on the first unread
 				// assistant message. No-op if the session already has unread.
 				// If the user is actively viewing the session, the frontend's
@@ -1015,7 +1018,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 				}
 			}
 		}
-		s.broadcastChatDone(ctx, task)
+		s.broadcastChatDone(ctx, task, assistantMsg)
 	}
 
 	// Reconcile agent status
@@ -1630,10 +1633,24 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 	return ""
 }
 
-func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQueue) {
+func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQueue, msg *db.ChatMessage) {
 	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
 	if workspaceID == "" {
 		return
+	}
+	payload := protocol.ChatDonePayload{
+		ChatSessionID: util.UUIDToString(task.ChatSessionID),
+		TaskID:        util.UUIDToString(task.ID),
+	}
+	if msg != nil {
+		payload.MessageID = util.UUIDToString(msg.ID)
+		payload.Content = msg.Content
+		if msg.CreatedAt.Valid {
+			payload.CreatedAt = msg.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+		}
+		if msg.ElapsedMs.Valid {
+			payload.ElapsedMs = msg.ElapsedMs.Int64
+		}
 	}
 	s.Bus.Publish(events.Event{
 		Type:          protocol.EventChatDone,
@@ -1641,10 +1658,7 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 		ActorType:     "system",
 		ActorID:       "",
 		ChatSessionID: util.UUIDToString(task.ChatSessionID),
-		Payload: protocol.ChatDonePayload{
-			ChatSessionID: util.UUIDToString(task.ChatSessionID),
-			TaskID:        util.UUIDToString(task.ID),
-		},
+		Payload:       payload,
 	})
 }
 

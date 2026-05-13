@@ -20,6 +20,7 @@ import type chat from "../locales/en/chat.json";
 import type modals from "../locales/en/modals.json";
 import type runtimes from "../locales/en/runtimes.json";
 import type layout from "../locales/en/layout.json";
+import type usage from "../locales/en/usage.json";
 import type timeTracking from "../locales/en/time-tracking.json";
 import type workCalendars from "../locales/en/work-calendars.json";
 import type redmine from "../locales/en/redmine.json";
@@ -58,6 +59,7 @@ declare module "i18next" {
       modals: typeof modals;
       runtimes: typeof runtimes;
       layout: typeof layout;
+      usage: typeof usage;
       "time-tracking": typeof timeTracking;
       "work-calendars": typeof workCalendars;
       redmine: typeof redmine;

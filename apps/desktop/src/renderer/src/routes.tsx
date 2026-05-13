@@ -14,6 +14,7 @@ import { AgentDetailPage } from "./pages/agent-detail-page";
 import { RuntimeDetailPage } from "./pages/runtime-detail-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
+import { DashboardPage } from "@multica/views/dashboard";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { TimeTrackingDashboard } from "@multica/views/time-tracking/dashboard";
@@ -166,6 +167,11 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Agent" },
           },
           { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
+          {
+            path: "usage",
+            element: <DashboardPage />,
+            handle: { title: "Usage" },
+          },
           {
             path: "settings",
             element: (

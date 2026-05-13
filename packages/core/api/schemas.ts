@@ -169,3 +169,46 @@ export const SubscribersListSchema = z.array(SubscriberSchema);
 export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
 }).loose();
+
+// ---------------------------------------------------------------------------
+// Workspace dashboard schemas
+//
+// The dashboard hits three independent rollup endpoints. Each returns a flat
+// array, and every field is consumed by chart / KPI math — a missing number
+// silently degrades to NaN downstream, so we coerce missing numbers to 0.
+// String fields stay lenient (no enum narrowing) to survive future model /
+// agent ID drift.
+// ---------------------------------------------------------------------------
+
+const DashboardUsageDailySchema = z.object({
+  date: z.string(),
+  model: z.string(),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  task_count: z.number().default(0),
+}).loose();
+
+export const DashboardUsageDailyListSchema = z.array(DashboardUsageDailySchema);
+
+const DashboardUsageByAgentSchema = z.object({
+  agent_id: z.string(),
+  model: z.string(),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  task_count: z.number().default(0),
+}).loose();
+
+export const DashboardUsageByAgentListSchema = z.array(DashboardUsageByAgentSchema);
+
+const DashboardAgentRunTimeSchema = z.object({
+  agent_id: z.string(),
+  total_seconds: z.number().default(0),
+  task_count: z.number().default(0),
+  failed_count: z.number().default(0),
+}).loose();
+
+export const DashboardAgentRunTimeListSchema = z.array(DashboardAgentRunTimeSchema);

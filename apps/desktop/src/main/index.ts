@@ -5,7 +5,7 @@ import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
-import { openExternalSafely } from "./external-url";
+import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
@@ -286,6 +286,14 @@ if (!gotTheLock) {
     // false configuration.
     ipcMain.handle("shell:openExternal", (_event, url: string) => {
       return openExternalSafely(url);
+    });
+
+    ipcMain.handle("file:download-url", (_event, url: string) => {
+      if (!mainWindow) {
+        console.warn("[download] ignored file:download-url — mainWindow torn down");
+        return;
+      }
+      downloadURLSafely(mainWindow, url);
     });
 
     // Sync IPC: app version + normalized OS for preload. Sync (not invoke) so

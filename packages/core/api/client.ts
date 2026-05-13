@@ -38,6 +38,9 @@ import type {
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
+  DashboardUsageDaily,
+  DashboardUsageByAgent,
+  DashboardAgentRunTime,
   RuntimeUpdate,
   RuntimeModelListRequest,
   RuntimeLocalSkillListRequest,
@@ -112,6 +115,9 @@ import {
   AttachmentResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
+  DashboardAgentRunTimeListSchema,
+  DashboardUsageByAgentListSchema,
+  DashboardUsageDailyListSchema,
   EMPTY_ATTACHMENT,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_TIMELINE_ENTRIES,
@@ -811,6 +817,58 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));
     return this.fetch(`/api/runtimes/${runtimeId}/usage/by-hour?${search}`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Workspace dashboard — three independent rollups for `/{slug}/dashboard`.
+  // Each accepts an optional `project_id` to narrow the scope to one project.
+  // Cost is computed client-side from the model pricing table (same contract
+  // as the per-runtime endpoints above).
+  // ---------------------------------------------------------------------------
+
+  async getDashboardUsageDaily(
+    params: { days?: number; project_id?: string | null },
+  ): Promise<DashboardUsageDaily[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    const raw = await this.fetch<unknown>(`/api/dashboard/usage/daily?${search}`);
+    return parseWithFallback<DashboardUsageDaily[]>(
+      raw,
+      DashboardUsageDailyListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/usage/daily" },
+    );
+  }
+
+  async getDashboardUsageByAgent(
+    params: { days?: number; project_id?: string | null },
+  ): Promise<DashboardUsageByAgent[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-agent?${search}`);
+    return parseWithFallback<DashboardUsageByAgent[]>(
+      raw,
+      DashboardUsageByAgentListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/usage/by-agent" },
+    );
+  }
+
+  async getDashboardAgentRunTime(
+    params: { days?: number; project_id?: string | null },
+  ): Promise<DashboardAgentRunTime[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    const raw = await this.fetch<unknown>(`/api/dashboard/agent-runtime?${search}`);
+    return parseWithFallback<DashboardAgentRunTime[]>(
+      raw,
+      DashboardAgentRunTimeListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/agent-runtime" },
+    );
   }
 
   async initiateUpdate(

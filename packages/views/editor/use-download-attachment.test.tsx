@@ -9,10 +9,6 @@ vi.mock("@multica/core/api", () => ({
   api: { getAttachment: getAttachmentMock },
 }));
 
-vi.mock("../platform", () => ({
-  openExternal: vi.fn(),
-}));
-
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
@@ -22,7 +18,6 @@ vi.mock("../i18n", () => ({
 }));
 
 import { useDownloadAttachment } from "./use-download-attachment";
-import { openExternal } from "../platform";
 import { toast } from "sonner";
 
 const SIGNED_URL =
@@ -82,9 +77,10 @@ describe("useDownloadAttachment (web)", () => {
 });
 
 describe("useDownloadAttachment (desktop)", () => {
-  it("skips the placeholder tab and hands the signed URL to openExternal", async () => {
-    (window as unknown as { desktopAPI: { openExternal: () => void } }).desktopAPI = {
-      openExternal: vi.fn(),
+  it("skips the placeholder tab and hands the signed URL to the desktop download bridge", async () => {
+    const downloadURL = vi.fn();
+    (window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }).desktopAPI = {
+      downloadURL,
     };
     getAttachmentMock.mockResolvedValueOnce({
       id: "att-1",
@@ -103,6 +99,23 @@ describe("useDownloadAttachment (desktop)", () => {
     // No placeholder — Electron's setWindowOpenHandler would reject
     // about:blank, so we go straight to the platform's IPC bridge.
     expect(openSpy).not.toHaveBeenCalled();
-    expect(openExternal).toHaveBeenCalledWith(SIGNED_URL);
+    expect(downloadURL).toHaveBeenCalledWith(SIGNED_URL);
+  });
+
+  it("shows a toast when the API rejects on desktop", async () => {
+    const downloadURL = vi.fn();
+    (window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }).desktopAPI = {
+      downloadURL,
+    };
+    getAttachmentMock.mockRejectedValueOnce(new Error("network failure"));
+
+    const { result } = renderHook(() => useDownloadAttachment());
+
+    await act(async () => {
+      await result.current("att-1");
+    });
+
+    expect(downloadURL).not.toHaveBeenCalled();
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
   });
 });

@@ -74,11 +74,18 @@ type ChatMessagePayload struct {
 	CreatedAt     string `json:"created_at"`
 }
 
-// ChatDonePayload is broadcast when an agent finishes responding to a chat message.
+// ChatDonePayload is broadcast when an agent finishes responding to a chat
+// message. Carries the freshly-persisted assistant ChatMessage so the client
+// can write it into the messages cache inline — avoids a refetch round-trip
+// during the live-timeline → AssistantMessage handoff that previously caused
+// a visible flicker (#2123).
 type ChatDonePayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 	TaskID        string `json:"task_id"`
-	Content       string `json:"content"`
+	MessageID     string `json:"message_id,omitempty"`
+	Content       string `json:"content,omitempty"`
+	ElapsedMs     int64  `json:"elapsed_ms,omitempty"`
+	CreatedAt     string `json:"created_at,omitempty"`
 }
 
 // ChatSessionReadPayload is broadcast when the creator marks a session as read.
