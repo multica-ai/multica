@@ -1,0 +1,151 @@
+name: Build Docker Images
+
+on:
+  workflow_call:
+    inputs:
+      image_tag:
+        description: "Docker image tag to publish"
+        required: false
+        default: "crm-latest"
+        type: string
+      image:
+        description: "Image to build"
+        required: false
+        default: "all"
+        type: string
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to publish"
+        required: false
+        default: "crm-stage3"
+      image:
+        description: "Image to build"
+        required: false
+        type: choice
+        default: "all"
+        options:
+          - all
+          - web
+          - backend
+  push:
+    branches:
+      - multica-with-crm
+    paths:
+      - "Dockerfile"
+      - "Dockerfile.web"
+      - "apps/**"
+      - "packages/**"
+      - "server/**"
+      - "docker/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - "turbo.json"
+      - ".github/workflows/build-docker-images.yml"
+      - ".github/workflows/build-web-image.yml"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-docker-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-web:
+    if: ${{ github.event_name == 'push' || github.event.inputs.image == 'all' || github.event.inputs.image == 'web' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute web image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/multica-web
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=${{ github.event.inputs.image_tag || 'crm-latest' }}
+            type=sha,prefix=crm-sha-
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.web
+          pull: true
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=crm-web-amd64
+          cache-to: type=gha,mode=max,scope=crm-web-amd64
+          build-args: |
+            REMOTE_API_URL=http://backend:8080
+            NEXT_PUBLIC_APP_VERSION=${{ github.sha }}
+
+      - name: Inspect pushed web image
+        run: |
+          docker buildx imagetools inspect ghcr.io/${{ github.repository_owner }}/multica-web:${{ github.event.inputs.image_tag || 'crm-latest' }}
+
+  build-backend:
+    if: ${{ github.event_name == 'push' || github.event.inputs.image == 'all' || github.event.inputs.image == 'backend' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute backend image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/multica-backend
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=${{ github.event.inputs.image_tag || 'crm-latest' }}
+            type=sha,prefix=crm-sha-
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          pull: true
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=crm-backend-amd64
+          cache-to: type=gha,mode=max,scope=crm-backend-amd64
+          build-args: |
+            VERSION=${{ github.event.inputs.image_tag || 'crm-latest' }}
+            COMMIT=${{ github.sha }}
+
+      - name: Inspect pushed backend image
+        run: |
+          docker buildx imagetools inspect ghcr.io/${{ github.repository_owner }}/multica-backend:${{ github.event.inputs.image_tag || 'crm-latest' }}
