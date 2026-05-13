@@ -170,7 +170,13 @@ func (h *Handler) cerebroRequireCapability(w http.ResponseWriter, r *http.Reques
 //
 // nil-invoker fails open for the same reason as cerebroRequireCapability:
 // upstream-only test fixtures must keep working.
-func (h *Handler) cerebroRequireRuntimeAccess(w http.ResponseWriter, r *http.Request, workspaceID string, runtimeID pgtype.UUID) bool {
+//
+// JEH-1152: agentName is the proposed agent name from the request body —
+// surfaced into the auto-created approval issue's description so the admin
+// sees what the user was trying to build. Empty string is fine (gate may be
+// called from non-CreateAgent paths in the future); the description simply
+// omits the agent line in that case.
+func (h *Handler) cerebroRequireRuntimeAccess(w http.ResponseWriter, r *http.Request, workspaceID string, runtimeID pgtype.UUID, agentName string) bool {
 	if h.GroupPermissions == nil {
 		return true
 	}
@@ -184,7 +190,10 @@ func (h *Handler) cerebroRequireRuntimeAccess(w http.ResponseWriter, r *http.Req
 		return false
 	}
 	if !allowed {
-		writeError(w, http.StatusForbidden, "no group grants access to this runtime — ask a workspace admin")
+		// CEREBRO-PATCH(runtime-approval-issue): JEH-1152 — auto-create / reuse
+		// an "Approve runtime" issue and return a structured 403 so the UI can
+		// show the new copy + link to the issue.
+		h.runtimeAccessGateDeny(r.Context(), w, workspaceID, runtimeID, requestUserID(r), agentName)
 		return false
 	}
 	return true

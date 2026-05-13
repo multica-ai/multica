@@ -37,6 +37,10 @@ import {
 } from "@multica/core/agents";
 import { CharCounter } from "./char-counter";
 import { useT } from "../../i18n";
+// CEREBRO-PATCH(runtime-approval-toast): JEH-1152 — surface auto-created approval issue link.
+import { useWorkspacePaths } from "@multica/core/paths";
+import { useNavigation } from "../../navigation";
+import { showRuntimeApprovalToastIfApplicable } from "@multica/cerebro-groups/views";
 
 type RuntimeFilter = "mine" | "all";
 
@@ -65,6 +69,9 @@ export function CreateAgentDialog({
   onCreate: (data: CreateAgentRequest) => Promise<void>;
 }) {
   const { t } = useT("agents");
+  // CEREBRO-PATCH(runtime-approval-toast): JEH-1152 — needed by approval-issue toast.
+  const paths = useWorkspacePaths();
+  const navigation = useNavigation();
   const isDuplicate = !!template;
   const [name, setName] = useState(
     template ? `${template.name}${t(($) => $.create_dialog.duplicate_copy_suffix)}` : "",
@@ -144,6 +151,11 @@ export function CreateAgentDialog({
       await onCreate(data);
       onClose();
     } catch (err) {
+      // CEREBRO-PATCH(runtime-approval-toast): JEH-1152 — structured 403 handling.
+      if (showRuntimeApprovalToastIfApplicable(err, { issuePath: paths.issueDetail, push: navigation.push })) {
+        setCreating(false);
+        return;
+      }
       toast.error(err instanceof Error ? err.message : t(($) => $.create_dialog.create_failed_toast));
       setCreating(false);
     }

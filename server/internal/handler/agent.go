@@ -482,8 +482,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// CEREBRO-PATCH(create-agent-runtime-allowlist): JEH-1009 require runtime allowlist
-	if !h.cerebroRequireRuntimeAccess(w, r, workspaceID, runtimeUUID) {
+	// CEREBRO-PATCH(create-agent-runtime-allowlist): JEH-1009 / JEH-1152 — gate + approval issue
+	if !h.cerebroRequireRuntimeAccess(w, r, workspaceID, runtimeUUID, req.Name) {
 		return
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
