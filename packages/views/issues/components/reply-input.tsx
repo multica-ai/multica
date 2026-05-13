@@ -135,27 +135,31 @@ function ReplyInput({
         style={floatStyle}
         className={cn(isFloating && "rounded-lg border border-border bg-background p-2 shadow-lg")}
       >
+        {/* CEREBRO-PATCH(reply-input-mobile-full-width): JEH-1143 — drop the
+            avatar on mobile (already visible in the comment metadata above)
+            and put the action row in normal flow BELOW the editor (Slack /
+            Linear / iMessage pattern), so the text input spans the card's
+            full width instead of getting wrapped into a 3-words-per-line
+            column. Desktop keeps the avatar; the action row sits below the
+            editor on both viewports — less duplication, no absolute-position
+            overlay fighting the editor for horizontal space. */}
         <div className="group/editor flex items-start gap-2.5">
           <ActorAvatar
             actorType={avatarType}
             actorId={avatarId}
             size={avatarSize}
-            className="mt-0.5 shrink-0"
+            className="mt-0.5 shrink-0 hidden sm:block"
           />
           <div
             {...dropZoneProps}
-            // CEREBRO-PATCH(reply-input-min-height): JEH-1065 — minimum 2 lines
-            // tall + always reserve bottom padding for the action row, so the
-            // placeholder + icons never have to share a single cramped row on
-            // mobile (was visibly squashed on iPhone — see Jesper's IMG_9779).
             className={cn(
-              "relative min-w-0 flex-1 flex flex-col rounded-md bg-card pb-7 min-h-20",
+              "relative min-w-0 flex-1 flex flex-col rounded-md bg-card min-h-20",
               isExpanded
                 ? "h-[60vh]"
                 : size === "sm" ? "max-h-40" : "max-h-56",
             )}
           >
-            <div className="flex-1 min-h-0 overflow-y-auto pr-14 pl-8 sm:pl-0">
+            <div className="flex-1 min-h-0 overflow-y-auto">
               <div ref={measureRef}>
                 <ContentEditor
                   ref={editorRef}
@@ -169,63 +173,53 @@ function ReplyInput({
                 />
               </div>
             </div>
-            {/* CEREBRO-PATCH(reply-input-mobile-paperclip): JEH-1065 — on
-                mobile, mirror CommentInput by moving the paperclip to the left
-                side, so pin + expand + send aren't cramped together on touch
-                screens. Desktop keeps the original right-aligned grouping. */}
-            <div className="absolute bottom-0 left-0 flex items-center sm:hidden">
+            <div className="flex items-center justify-between gap-1 pt-1">
               <FileUploadButton
                 size="sm"
                 onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
                 onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
               />
-            </div>
-            <div className="absolute bottom-0 right-0 flex items-center gap-4 sm:gap-1">
-              {pinEnabled && (
-                <PinButton
-                  isPinned={isPinned}
-                  onToggle={togglePin}
-                  pinLabel={t(($) => $.reply.pin_tooltip)}
-                  unpinLabel={t(($) => $.reply.unpin_tooltip)}
-                />
-              )}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsExpanded((v) => !v);
-                        editorRef.current?.focus();
-                      }}
-                      className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-                    >
-                      {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-                    </button>
-                  }
-                />
-                <TooltipContent side="top">{isExpanded ? t(($) => $.reply.collapse_tooltip) : t(($) => $.reply.expand_tooltip)}</TooltipContent>
-              </Tooltip>
-              <div className="hidden sm:inline-flex">
-                <FileUploadButton
-                  size="sm"
-                  onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
-                  onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
-                />
-              </div>
-              <button
-                type="button"
-                disabled={isEmpty || submitting}
-                onClick={handleSubmit}
-                aria-label="Send"
-                className="inline-flex h-9 w-9 sm:h-7 sm:w-7 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:bg-muted disabled:text-muted-foreground disabled:pointer-events-none"
-              >
-                {submitting ? (
-                  <Loader2 className="h-4 w-4 sm:h-3.5 sm:w-3.5 animate-spin" />
-                ) : (
-                  <ArrowUp className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+              <div className="flex items-center gap-1">
+                {pinEnabled && (
+                  <PinButton
+                    isPinned={isPinned}
+                    onToggle={togglePin}
+                    pinLabel={t(($) => $.reply.pin_tooltip)}
+                    unpinLabel={t(($) => $.reply.unpin_tooltip)}
+                  />
                 )}
-              </button>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsExpanded((v) => !v);
+                          editorRef.current?.focus();
+                        }}
+                        aria-label={isExpanded ? t(($) => $.reply.collapse_tooltip) : t(($) => $.reply.expand_tooltip)}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                      >
+                        {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                      </button>
+                    }
+                  />
+                  <TooltipContent side="top">{isExpanded ? t(($) => $.reply.collapse_tooltip) : t(($) => $.reply.expand_tooltip)}</TooltipContent>
+                </Tooltip>
+                <button
+                  type="button"
+                  disabled={isEmpty || submitting}
+                  onClick={handleSubmit}
+                  aria-label="Send"
+                  className="inline-flex h-9 w-9 sm:h-7 sm:w-7 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:bg-muted disabled:text-muted-foreground disabled:pointer-events-none"
+                >
+                  {submitting ? (
+                    <Loader2 className="h-4 w-4 sm:h-3.5 sm:w-3.5 animate-spin" />
+                  ) : (
+                    <ArrowUp className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                  )}
+                </button>
+              </div>
             </div>
             {isDragOver && <FileDropOverlay />}
           </div>

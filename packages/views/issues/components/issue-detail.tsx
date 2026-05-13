@@ -1874,6 +1874,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           visible={!isAtBottom && timeline.length > 0}
           onClick={() => scrollToBottom()}
           label="Latest"
+          // CEREBRO-PATCH(issue-detail-latest-pill-top-right): JEH-1143 — pin
+          // pill to top-right (under PageHeader) so it stops fighting the
+          // comment/reply composer for the bottom-right corner on mobile.
+          className="top-3 bottom-auto"
         />
         </div>
       </div>
