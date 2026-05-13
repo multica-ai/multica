@@ -860,10 +860,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             return (
                               <React.Fragment key={item.id}>
                                 <SidebarMenuItem>
+                                  {/* CEREBRO-PATCH(nested-projects-guide-line): v3 mockup shows continuous left guide line at all levels, not only nested children. */}
                                   <div
                                     className={cn(
-                                      "relative",
-                                      level > 0 && "border-l border-sidebar-border/70",
+                                      "relative border-l border-sidebar-border/70",
                                     )}
                                     style={nestedStyle}
                                   >
