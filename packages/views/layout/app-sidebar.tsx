@@ -144,6 +144,7 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
 
 const crmNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "crm", labelKey: "crm", icon: Users },
+  { key: "crmCustomers", labelKey: "customers", icon: Users },
   { key: "crmEmails", labelKey: "emails", icon: Mail },
 ];
 

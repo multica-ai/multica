@@ -153,11 +153,11 @@ describe("PinRow", () => {
     expect(await screen.findByText("MUL-123 Keep this pin")).toBeInTheDocument();
   });
 
-  it("links the CRM menu to the dashboard root instead of the customer list", () => {
+  it("links CRM to the dashboard and keeps a customer list entry below it", () => {
     const { container } = render(<AppSidebar />);
 
     expect(container.querySelector('a[href="/acme/crm"]')).not.toBeNull();
-    expect(container.querySelector('a[href="/acme/crm/customers"]')).toBeNull();
+    expect(container.querySelector('a[href="/acme/crm/customers"]')).not.toBeNull();
     expect(container.querySelector('a[href="/acme/crm/emails"]')).not.toBeNull();
   });
 });
