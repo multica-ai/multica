@@ -10,7 +10,6 @@ import {
   FolderGit2,
   FlaskConical,
   Bell,
-  Plug,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
