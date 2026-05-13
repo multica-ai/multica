@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/mention"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -130,6 +132,101 @@ type CreateCommentRequest struct {
 	AttachmentIDs []string `json:"attachment_ids"`
 }
 
+func taskContextForCommentType(commentType string) []byte {
+	if commentType != "plan_request" {
+		return nil
+	}
+	data, err := json.Marshal(service.TaskContext{RunMode: "plan"})
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func (h *Handler) resolveCommentTargetAgentIDs(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, authorType, authorID string) []string {
+	targets := make([]string, 0, 2)
+	seen := make(map[string]struct{}, 2)
+	addTarget := func(agentID string) {
+		if agentID == "" {
+			return
+		}
+		if _, exists := seen[agentID]; exists {
+			return
+		}
+		seen[agentID] = struct{}{}
+		targets = append(targets, agentID)
+	}
+
+	if authorType == "member" && h.shouldEnqueueOnComment(ctx, issue) &&
+		!h.commentMentionsOthersButNotAssignee(content, issue) &&
+		!h.isReplyToMemberThread(ctx, parentComment, content, issue) {
+		addTarget(uuidToString(issue.AssigneeID))
+	}
+
+	mentions := util.ParseMentions(content)
+	if shouldInheritParentMentions(parentComment, mentions, authorType) {
+		mentions = util.ParseMentions(parentComment.Content)
+	}
+	for _, m := range mentions {
+		if m.Type != "agent" {
+			continue
+		}
+		if authorType == "agent" && authorID == m.ID {
+			continue
+		}
+		agentUUID := parseUUID(m.ID)
+		agent, err := h.Queries.GetAgent(ctx, agentUUID)
+		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+			continue
+		}
+		if agent.Visibility == "private" {
+			targetOwner := uuidToString(agent.OwnerID)
+			switch authorType {
+			case "member":
+				if targetOwner != authorID {
+					continue
+				}
+			case "agent":
+				triggerAgent, err := h.Queries.GetAgent(ctx, parseUUID(authorID))
+				if err != nil || uuidToString(triggerAgent.OwnerID) != targetOwner {
+					continue
+				}
+			default:
+				continue
+			}
+		}
+		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+			IssueID: issue.ID,
+			AgentID: agentUUID,
+		})
+		if err != nil || hasPending {
+			continue
+		}
+		addTarget(m.ID)
+	}
+
+	return targets
+}
+
+func (h *Handler) validatePlanRequest(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, authorType, authorID string) error {
+	targetIDs := h.resolveCommentTargetAgentIDs(ctx, issue, content, parentComment, authorType, authorID)
+	switch len(targetIDs) {
+	case 0:
+		return fmt.Errorf("plan only requires exactly one eligible target agent, but this request resolved to none")
+	case 1:
+		agent, err := h.Queries.GetAgent(ctx, parseUUID(targetIDs[0]))
+		if err != nil {
+			return fmt.Errorf("load plan target agent: %w", err)
+		}
+		if !protocol.ResolveTraceEnabled(agent.RuntimeConfig) {
+			return fmt.Errorf("plan only requires Stream to be enabled on the target agent")
+		}
+		return nil
+	default:
+		return fmt.Errorf("plan only requires exactly one eligible target agent, but this request resolved to %d", len(targetIDs))
+	}
+}
+
 func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -180,6 +277,13 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+
+	if req.Type == "plan_request" {
+		if err := h.validatePlanRequest(r.Context(), issue, req.Content, parentComment, authorType, authorID); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+	}
 
 	// Defense against resumed-session drift: when an agent posts from inside a
 	// comment-triggered task AND the comment is being posted on that same
@@ -265,6 +369,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// the user is talking to someone else, not requesting work from the assignee.
 	// Also skip when replying in a member-started thread without mentioning the
 	// assignee — the user is continuing a member-to-member conversation.
+	taskContext := taskContextForCommentType(req.Type)
 	if authorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue) &&
 		!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
 		!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
@@ -273,14 +378,20 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		// thread grouping) is handled downstream by createAgentComment,
 		// which resolves parent_id to the thread root before posting. This
 		// mirrors the mention path's behavior (see enqueueMentionedAgentTasks).
-		if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue, comment.ID); err != nil {
+		if _, err := h.TaskService.EnqueueTaskForIssueWithContext(
+			r.Context(),
+			issue,
+			buildTriggerActor("comment", "member", uuidToString(comment.AuthorID)),
+			taskContext,
+			comment.ID,
+		); err != nil {
 			slog.Warn("enqueue agent task on comment failed", "issue_id", issueID, "error", err)
 		}
 	}
 
 	// Trigger @mentioned agents: parse agent mentions and enqueue tasks for each.
 	// Pass parentComment so that replies inherit mentions from the thread root.
-	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID)
+	h.enqueueMentionedAgentTasks(r.Context(), issue, comment, parentComment, authorType, authorID, taskContext)
 	h.trackMentionFrequency(r.Context(), issue.WorkspaceID, authorType, authorID, comment.Content)
 
 	writeJSON(w, http.StatusCreated, resp)
@@ -494,7 +605,7 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 // a private agent via @mention).
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
-func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
+func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string, taskContext []byte) {
 	mentions := util.ParseMentions(comment.Content)
 	if shouldInheritParentMentions(parentComment, mentions, authorType) {
 		mentions = util.ParseMentions(parentComment.Content)
@@ -543,7 +654,14 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		}
 		// Always use the current comment as the trigger so the agent reads the
 		// actual reply that mentioned it, not the thread root.
-		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, comment.ID); err != nil {
+		if _, err := h.TaskService.EnqueueTaskForMentionWithContext(
+			ctx,
+			issue,
+			agentUUID,
+			buildTriggerActor("mention", authorType, uuidToString(comment.AuthorID)),
+			comment.ID,
+			taskContext,
+		); err != nil {
 			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", err)
 		}
 	}

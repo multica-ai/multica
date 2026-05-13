@@ -21,7 +21,9 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/notifier"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/daemon/trace"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // ErrRepoNotConfigured is returned by ensureRepoReady when the requested repo
@@ -67,6 +69,7 @@ type Daemon struct {
 	client    *Client
 	notifier  notifier.Notifier
 	repoCache repoCacheBackend
+	traceStore trace.TraceStore
 	logger    *slog.Logger
 
 	mu           sync.Mutex
@@ -99,7 +102,19 @@ type Daemon struct {
 
 // New creates a new Daemon instance.
 func New(cfg Config, logger *slog.Logger) *Daemon {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
+	var traceStore trace.TraceStore
+	if cfg.WorkspacesRoot != "" {
+		store, err := trace.NewJSONLStore(filepath.Join(cfg.WorkspacesRoot, ".traces"))
+		if err != nil {
+			logger.Warn("trace store disabled", "error", err)
+		} else {
+			traceStore = store
+		}
+	}
 	client := NewClient(cfg.ServerBaseURL)
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).
@@ -109,6 +124,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		client:         client,
 		notifier:       notifier.New(),
 		repoCache:      repocache.New(cacheRoot, logger),
+		traceStore:     traceStore,
 		logger:         logger,
 		workspaces:     make(map[string]*workspaceState),
 		runtimeIndex:   make(map[string]Runtime),
@@ -267,6 +283,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Deregister runtimes on shutdown (uses a fresh context since ctx will be cancelled).
 	defer d.deregisterRuntimes()
+	if d.traceStore != nil {
+		defer func() {
+			if err := d.traceStore.Close(); err != nil && !errors.Is(err, trace.ErrStoreClosed) {
+				d.logger.Warn("failed to close trace store", "error", err)
+			}
+		}()
+	}
 
 	// Start workspace sync loop to discover newly created workspaces.
 	go d.workspaceSyncLoop(ctx)
@@ -377,6 +400,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"device_name":       d.cfg.DeviceName,
 		"cli_version":       d.cfg.CLIVersion,
 		"launched_by":       d.cfg.LaunchedBy,
+		"health_port":       d.cfg.HealthPort,
 		"runtimes":          runtimes,
 	}
 
@@ -1760,6 +1784,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			defer d.unmarkActiveEnvRoot(priorRoot)
 		}
 	}
+	if task.Agent != nil {
+		taskCtx.RuntimeConfig = task.Agent.RuntimeConfig
+	}
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
 	var env *execenv.Environment
@@ -1789,6 +1816,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		defer d.unmarkActiveEnvRoot(env.RootDir)
 	}
 
+	requestedRunMode := protocol.ResolveTaskRunMode(task.Context)
+	effectiveRunMode := requestedRunMode
+	if requestedRunMode == protocol.TaskRunModePlan && provider != "claude" {
+		effectiveRunMode = protocol.TaskRunModeNormal
+	}
+	visibleLanguage := detectVisibleLanguage(task)
+
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
 	if err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
@@ -1797,7 +1831,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// the same (agent, issue) pair. The work_dir path is stored in DB on
 	// task completion and passed back via PriorWorkDir on the next claim.
 
-	prompt := BuildPrompt(task)
+	prompt := BuildPromptWithRunMode(task, effectiveRunMode)
+
+	taskStart := time.Now()
+	traceRunID := newTraceRunID(taskStart)
 
 	// Pass the daemon's auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
@@ -1812,6 +1849,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_AGENT_NAME":   agentName,
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
+		"MULTICA_TASK_RUN_ID":  traceRunID,
 		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
 	}
 	if task.AutopilotRunID != "" {
@@ -1874,8 +1912,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskLog.Info("resuming session", "session_id", task.PriorSessionID)
 	}
 
-	taskStart := time.Now()
-
 	var customArgs []string
 	extraArgs := defaultArgsForProvider(d.cfg, provider)
 	var mcpConfig json.RawMessage
@@ -1909,6 +1945,55 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
 	}
+	// Resolve approval policy from agent runtime_config and inject callback.
+	// Default is "auto" — nil callback preserves existing auto-approve behaviour.
+	{
+		var rtCfg json.RawMessage
+		if task.Agent != nil {
+			rtCfg = task.Agent.RuntimeConfig
+		}
+		policy := protocol.ResolveApprovalPolicy(rtCfg)
+		if provider == "claude" && effectiveRunMode == protocol.TaskRunModePlan {
+			execOpts.OnApproval = BuildPlanAwareApprovalCallback(policy, task.ID, provider, d.client)
+		} else {
+			execOpts.OnApproval = BuildApprovalCallback(policy, task.ID, provider, d.client)
+		}
+		traceEnabled := protocol.ResolveTraceEnabled(rtCfg)
+		if traceEnabled {
+			if provider == "claude" && effectiveRunMode == protocol.TaskRunModePlan && policy == protocol.ApprovalPolicyAuto {
+				execOpts.OnApproval = WithApprovalTraceFilter(execOpts.OnApproval, d.traceStore, task.ID, traceRunID, provider, func(req agent.ApprovalRequest) bool {
+					return req.Type == protocol.InteractionPlanApproval
+				})
+			} else {
+				execOpts.OnApproval = WithApprovalTrace(execOpts.OnApproval, d.traceStore, task.ID, traceRunID, provider)
+			}
+			execOpts.TraceCallback = BuildTraceCallback(d.traceStore, task.ID, traceRunID, provider)
+		}
+		if provider == "claude" {
+			execOpts.ClaudePermissionMode = protocol.ResolveClaudePermissionMode(rtCfg)
+			if effectiveRunMode == protocol.TaskRunModePlan {
+				execOpts.ClaudePermissionMode = "plan"
+				execOpts.ClaudeUseSDKBridge = true
+			}
+		}
+		execOpts.VisibleLanguage = visibleLanguage
+		if policy != protocol.ApprovalPolicyAuto {
+			taskLog.Info("approval policy active", "policy", policy)
+		}
+	}
+	if execOpts.TraceCallback != nil && requestedRunMode == protocol.TaskRunModePlan && effectiveRunMode != protocol.TaskRunModePlan {
+		emitDaemonDisplayTrace(execOpts.TraceCallback, "status", "Plan mode unavailable", localizedPlanUnsupportedMessage(visibleLanguage, provider), map[string]any{
+			"requested_run_mode": requestedRunMode,
+			"effective_run_mode": effectiveRunMode,
+			"provider":           provider,
+		})
+	}
+	if execOpts.TraceCallback != nil && effectiveRunMode == protocol.TaskRunModePlan {
+		emitDaemonDisplayTrace(execOpts.TraceCallback, "plan_stage", "Plan mode", localizedPlanDraftingMessage(visibleLanguage), map[string]any{
+			"stage": "planning",
+		})
+	}
+
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
 	//   - openclaw loads bootstrap files (AGENTS.md, SOUL.md, ...) from its own
@@ -2106,6 +2191,24 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		var pendingThinking strings.Builder
 		var batch []TaskMessageData
 		callIDToTool := map[string]string{}
+		traceDisplay := func(eventType, title, content string, metadata map[string]any) {
+			if opts.TraceCallback == nil {
+				return
+			}
+			payload := map[string]any{
+				"type":    eventType,
+				"title":   title,
+				"content": content,
+			}
+			if len(metadata) > 0 {
+				payload["metadata"] = metadata
+			}
+			data, err := json.Marshal(payload)
+			if err != nil {
+				return
+			}
+			opts.TraceCallback(trace.ChannelDisplayEvent, string(data), "")
+		}
 
 		flush := func() {
 			mu.Lock()
@@ -2221,6 +2324,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					mu.Unlock()
 				case agent.MessageThinking:
 					if msg.Content != "" {
+						traceDisplay("thinking", "Thinking", msg.Content, map[string]any{"source": "daemon_message"})
 						mu.Lock()
 						pendingThinking.WriteString(msg.Content)
 						mu.Unlock()
@@ -2228,6 +2332,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				case agent.MessageText:
 					if msg.Content != "" {
 						taskLog.Debug("agent", "text", truncateLog(msg.Content, 200))
+						traceDisplay("assistant_text", "Assistant", msg.Content, map[string]any{"source": "daemon_message"})
 						mu.Lock()
 						pendingText.WriteString(msg.Content)
 						mu.Unlock()
@@ -2401,6 +2506,25 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 		}
 	}
 	return result
+}
+
+func emitDaemonDisplayTrace(cb agent.TraceCallback, eventType, title, content string, metadata map[string]any) {
+	if cb == nil {
+		return
+	}
+	payload := map[string]any{
+		"type":    eventType,
+		"title":   title,
+		"content": content,
+	}
+	if len(metadata) > 0 {
+		payload["metadata"] = metadata
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	cb(trace.ChannelDisplayEvent, string(data), "")
 }
 
 // isBlockedEnvKey returns true if the key must not be overridden by user-

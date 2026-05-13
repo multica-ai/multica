@@ -39,10 +39,18 @@ import { PropRow } from "../../common/prop-row";
 import { availabilityConfig } from "../presence";
 import { CharCounter } from "./char-counter";
 import { useT } from "../../i18n";
+import {
+  ApprovalPicker,
+  type ApprovalPolicy,
+} from "./inspector/approval-picker";
 import { ConcurrencyPicker } from "./inspector/concurrency-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { SkillAttach } from "./inspector/skill-attach";
+import {
+  StreamPicker,
+  type StreamMode,
+} from "./inspector/stream-picker";
 import { VisibilityPicker } from "./inspector/visibility-picker";
 
 interface InspectorProps {
@@ -93,6 +101,28 @@ export function AgentDetailInspector({
   const { t } = useT("agents");
   const update = (data: Record<string, unknown>) => onUpdate(agent.id, data);
   const isOnline = runtime?.status === "online";
+  const approvalPolicy = resolveApprovalPolicy(agent);
+  const streamMode = resolveStreamMode(agent);
+
+  const updateRuntimeConfig = (next: {
+    streamMode?: StreamMode;
+    approvalPolicy?: ApprovalPolicy;
+  }) => {
+    const currentConfig = agent.runtime_config ?? {};
+    const nextStreamMode = next.streamMode ?? streamMode;
+    const nextApprovalPolicy =
+      nextStreamMode === "off"
+        ? "auto"
+        : next.approvalPolicy ?? approvalPolicy;
+
+    return update({
+      runtime_config: {
+        ...currentConfig,
+        trace_enabled: nextStreamMode === "on",
+        approval_policy: nextApprovalPolicy,
+      },
+    });
+  };
 
   return (
     <aside className="flex w-full flex-col rounded-lg border bg-background md:h-full md:min-h-0 md:overflow-y-auto">
@@ -144,6 +174,24 @@ export function AgentDetailInspector({
             onChange={(n) => update({ max_concurrent_tasks: n })}
           />
         </PropRow>
+        <PropRow label={t(($) => $.inspector.prop_stream)} interactive={false}>
+          <StreamPicker
+            value={streamMode}
+            canEdit={canEdit}
+            onChange={(mode) => updateRuntimeConfig({ streamMode: mode })}
+          />
+        </PropRow>
+        {streamMode === "on" && (
+          <PropRow label={t(($) => $.inspector.prop_approval)} interactive={false}>
+            <ApprovalPicker
+              value={approvalPolicy}
+              canEdit={canEdit}
+              onChange={(policy) =>
+                updateRuntimeConfig({ approvalPolicy: policy })
+              }
+            />
+          </PropRow>
+        )}
       </Section>
 
       {/* Details — read-only (no hover, no chip styling — these aren't clickable) */}
@@ -196,6 +244,15 @@ export function AgentDetailInspector({
       </div>
     </aside>
   );
+}
+
+function resolveStreamMode(agent: Agent): StreamMode {
+  return agent.runtime_config?.trace_enabled === false ? "off" : "on";
+}
+
+function resolveApprovalPolicy(agent: Agent): ApprovalPolicy {
+  const value = agent.runtime_config?.approval_policy;
+  return value === "prompt" || value === "deny" ? value : "auto";
 }
 
 // ---------------------------------------------------------------------------

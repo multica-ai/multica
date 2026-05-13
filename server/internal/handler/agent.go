@@ -171,6 +171,7 @@ type AgentTaskResponse struct {
 	CompletedAt             *string               `json:"completed_at"`
 	Result                  any                   `json:"result"`
 	Error                   *string               `json:"error"`
+	Context                 any                   `json:"context,omitempty"`
 	FailureReason           string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
 	Attempt                 int32                 `json:"attempt"`
 	MaxAttempts             int32                 `json:"max_attempts"`
@@ -214,12 +215,17 @@ type TaskAgentData struct {
 	CustomArgs   []string                 `json:"custom_args,omitempty"`
 	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
 	Model        string                   `json:"model,omitempty"`
+	RuntimeConfig json.RawMessage         `json:"runtime_config,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 	var result any
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
+	}
+	var context any
+	if t.Context != nil {
+		json.Unmarshal(t.Context, &context)
 	}
 	failureReason := ""
 	if t.FailureReason.Valid {
@@ -241,6 +247,7 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		CompletedAt:      timestampToPtr(t.CompletedAt),
 		Result:           result,
 		Error:            textToPtr(t.Error),
+		Context:          context,
 		FailureReason:    failureReason,
 		Attempt:          t.Attempt,
 		MaxAttempts:      t.MaxAttempts,

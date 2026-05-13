@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
-import { ArrowUp, Loader2, Maximize2, Minimize2 } from "lucide-react";
+import { ArrowUp, ClipboardList, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   AlertDialog,
@@ -25,7 +25,7 @@ import { toast } from "sonner";
 
 interface CommentInputProps {
   issueId: string;
-  onSubmit: (content: string, attachmentIds?: string[]) => Promise<void>;
+  onSubmit: (content: string, attachmentIds?: string[], type?: string) => Promise<void>;
 }
 
 const COMMENT_DRAFT_STORAGE_PREFIX = "multica:issue-comment-draft";
@@ -237,7 +237,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     return result;
   }, [uploadWithToast, issueId]);
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (type = "comment") => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
     // Only send attachment IDs for uploads still present in the content.
@@ -247,7 +247,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     }
     setSubmitting(true);
     try {
-      await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
+      await onSubmit(content, activeIds.length > 0 ? activeIds : undefined, type);
       clearPendingSave();
       if (draftKey) removeDraft(draftKey);
       currentContentRef.current = "";
@@ -333,11 +333,28 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
             size="sm"
             onSelect={(file) => editorRef.current?.uploadFile(file)}
           />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  disabled={isEmpty || submitting}
+                  onClick={() => handleSubmit("plan_request")}
+                  className="rounded-sm p-1.5 text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ClipboardList className="size-4" />
+                </button>
+              }
+            />
+            <TooltipContent side="top">Plan only</TooltipContent>
+          </Tooltip>
           <Button
             size="icon-sm"
             aria-label="Submit comment"
             disabled={isEmpty || submitting}
-            onClick={handleSubmit}
+            onClick={() => {
+              void handleSubmit();
+            }}
           >
             {submitting ? (
               <Loader2 className="animate-spin" />

@@ -203,6 +203,14 @@ func createHandlerTestAgent(t *testing.T, name string, mcpConfig []byte) string 
 	return agentID
 }
 
+func updateHandlerTestAgentRuntimeConfig(t *testing.T, agentID string, raw string) {
+	t.Helper()
+
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent SET runtime_config = $2::jsonb WHERE id = $1`, agentID, raw); err != nil {
+		t.Fatalf("failed to update handler test agent runtime_config: %v", err)
+	}
+}
+
 func fetchAgentMcpConfig(t *testing.T, agentID string) []byte {
 	t.Helper()
 
@@ -2554,5 +2562,119 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 	}
 	if got := countTasks(agentA); got != 0 {
 		t.Fatalf("expected 0 tasks for Agent A (no self-trigger on own mention), got %d", got)
+	}
+}
+
+func TestPlanRequestRejectsMultipleEligibleTargetAgents(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentA := createHandlerTestAgent(t, "Plan Target A", nil)
+	agentB := createHandlerTestAgent(t, "Plan Target B", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Plan multi target gate test",
+		"status":        "backlog",
+		"assignee_type": "agent",
+		"assignee_id":   agentA,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	content := fmt.Sprintf("[@Plan Target A](mention://agent/%s) and [@Plan Target B](mention://agent/%s) please propose a plan", agentA, agentB)
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": content,
+		"type":    "plan_request",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("CreateComment(plan multi target): expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "exactly one eligible target agent") {
+		t.Fatalf("expected exact-target error, got %s", w.Body.String())
+	}
+
+	var comments int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE issue_id = $1`, issueID).Scan(&comments); err != nil {
+		t.Fatalf("count comments: %v", err)
+	}
+	if comments != 0 {
+		t.Fatalf("expected no persisted plan_request comment, got %d", comments)
+	}
+	var tasks int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`, issueID).Scan(&tasks); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if tasks != 0 {
+		t.Fatalf("expected no queued tasks for rejected plan_request, got %d", tasks)
+	}
+}
+
+func TestPlanRequestRejectsStreamDisabledTargetAgent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentA := createHandlerTestAgent(t, "Plan Stream Off Agent", nil)
+	updateHandlerTestAgentRuntimeConfig(t, agentA, `{"trace_enabled":false}`)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Plan stream gate test",
+		"status":        "backlog",
+		"assignee_type": "agent",
+		"assignee_id":   agentA,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "Please draft a plan for this issue.",
+		"type":    "plan_request",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("CreateComment(plan stream off): expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "requires Stream to be enabled") {
+		t.Fatalf("expected stream gate error, got %s", w.Body.String())
+	}
+
+	var comments int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE issue_id = $1`, issueID).Scan(&comments); err != nil {
+		t.Fatalf("count comments: %v", err)
+	}
+	if comments != 0 {
+		t.Fatalf("expected no persisted plan_request comment, got %d", comments)
 	}
 }

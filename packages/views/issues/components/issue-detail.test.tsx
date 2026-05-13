@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, TimelineEntry } from "@multica/core/types";
+import type { ComponentProps } from "react";
 
 const mockNavigationPush = vi.hoisted(() => vi.fn());
 const mockNavigationReplace = vi.hoisted(() => vi.fn());
@@ -411,12 +412,15 @@ function createTestQueryClient() {
   });
 }
 
-function renderIssueDetail(issueId = "issue-1") {
+function renderIssueDetail(
+  issueId = "issue-1",
+  props: Partial<ComponentProps<typeof IssueDetail>> = {},
+) {
   const queryClient = createTestQueryClient();
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
-        <IssueDetail issueId={issueId} />
+        <IssueDetail issueId={issueId} {...props} />
       </QueryClientProvider>
     </I18nProvider>,
   );
@@ -500,13 +504,35 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     await waitFor(() => {
-      expect(screen.getByText("Properties")).toBeInTheDocument();
+      expect(screen.getAllByText("Properties").length).toBeGreaterThanOrEqual(1);
     });
 
     expect(screen.getByText("Status")).toBeInTheDocument();
     expect(screen.getByText("Priority")).toBeInTheDocument();
     expect(screen.getByText("Assignee")).toBeInTheDocument();
     expect(screen.getByText("Due date")).toBeInTheDocument();
+  });
+
+  it("uses a wider default max sidebar size on the standalone issue page", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    const panels = screen.getAllByTestId("panel");
+    expect(panels[1]).toHaveAttribute("maxsize", "560");
+  });
+
+  it("keeps custom sidebar max size overrides for embedded layouts", async () => {
+    renderIssueDetail("issue-1", { sidebarMaxSize: 420 });
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    const panels = screen.getAllByTestId("panel");
+    expect(panels[1]).toHaveAttribute("maxsize", "420");
   });
 
   it("uses a non-resizable layout with the sidebar sheet closed by default on mobile", async () => {

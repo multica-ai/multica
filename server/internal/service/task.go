@@ -44,6 +44,24 @@ type TaskService struct {
 	analyticsContextOrder []string
 }
 
+type TaskContext struct {
+	RunMode string `json:"run_mode,omitempty"`
+}
+
+type TriggerActor struct {
+	Source    string
+	ActorType string
+	ActorID   pgtype.UUID
+}
+
+func (t TriggerActor) sourceText() pgtype.Text {
+	return pgtype.Text{String: t.Source, Valid: t.Source != ""}
+}
+
+func (t TriggerActor) actorTypeText() pgtype.Text {
+	return pgtype.Text{String: t.ActorType, Valid: t.ActorType != ""}
+}
+
 type TaskWakeupNotifier interface {
 	NotifyTaskAvailable(runtimeID, taskID string)
 }
@@ -364,11 +382,15 @@ func (s *TaskService) willRetryTask(task db.AgentTaskQueue) bool {
 // No context snapshot is stored — the agent fetches all data it needs at
 // runtime via the multica CLI.
 func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.EnqueueTaskForIssueWithContext(ctx, issue, TriggerActor{}, nil, triggerCommentID...)
+}
+
+func (s *TaskService) EnqueueTaskForIssueWithContext(ctx context.Context, issue db.Issue, trigger TriggerActor, taskContext []byte, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
 	var commentID pgtype.UUID
 	if len(triggerCommentID) > 0 {
 		commentID = triggerCommentID[0]
 	}
-	return s.enqueueIssueTask(ctx, issue, commentID, false)
+	return s.enqueueIssueTask(ctx, issue, trigger, commentID, taskContext, false)
 }
 
 // enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
@@ -376,7 +398,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 // daemon claim handler skips the (agent_id, issue_id) resume lookup — the
 // user already judged the prior output bad, a fresh agent session is the
 // expected behavior.
-func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trigger TriggerActor, triggerCommentID pgtype.UUID, taskContext []byte, forceFreshSession bool) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -402,6 +424,10 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		IssueID:           issue.ID,
 		Priority:          priorityToInt(issue.Priority),
 		TriggerCommentID:  triggerCommentID,
+		Context:           taskContext,
+		TriggerSource:     trigger.sourceText(),
+		TriggerActorType:  trigger.actorTypeText(),
+		TriggerActorID:    trigger.ActorID,
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 	})
@@ -431,6 +457,10 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.EnqueueTaskForMentionWithContext(ctx, issue, agentID, TriggerActor{}, triggerCommentID, nil)
+}
+
+func (s *TaskService) EnqueueTaskForMentionWithContext(ctx context.Context, issue db.Issue, agentID pgtype.UUID, trigger TriggerActor, triggerCommentID pgtype.UUID, taskContext []byte) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -451,6 +481,10 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 		IssueID:          issue.ID,
 		Priority:         priorityToInt(issue.Priority),
 		TriggerCommentID: triggerCommentID,
+		Context:          taskContext,
+		TriggerSource:    trigger.sourceText(),
+		TriggerActorType: trigger.actorTypeText(),
+		TriggerActorID:   trigger.ActorID,
 		TriggerSummary:   s.buildCommentTriggerSummary(ctx, triggerCommentID),
 	})
 	if err != nil {
@@ -977,12 +1011,16 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			var payload protocol.TaskCompletedPayload
 			if err := json.Unmarshal(result, &payload); err == nil {
 				if payload.Output != "" {
+					parentID := pgtype.UUID{}
+					if task.TriggerCommentID.Valid {
+						parentID = task.TriggerCommentID
+					}
 					// Match the CLI's --content / --description behavior: agents that
 					// emit literal `\n` 4-char sequences (Python/JSON-style) get them
 					// decoded into real newlines before the comment hits the DB. See
 					// util.UnescapeBackslashEscapes for the exact contract.
 					body := util.UnescapeBackslashEscapes(payload.Output)
-					s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", pgtype.UUID{})
+					s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", parentID)
 				}
 			}
 		}
@@ -1135,7 +1173,11 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// want to spam the issue with "task timed out" messages on every
 	// daemon hiccup.
 	if errMsg != "" && task.IssueID.Valid && retried == nil {
-		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", pgtype.UUID{})
+		parentID := pgtype.UUID{}
+		if task.TriggerCommentID.Valid {
+			parentID = task.TriggerCommentID
+		}
+		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", parentID)
 	}
 
 	// Mirror the issue fallback for chat tasks: write an assistant
@@ -1295,7 +1337,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 
-	task, err := s.enqueueIssueTask(ctx, issue, triggerCommentID, true)
+	task, err := s.enqueueIssueTask(ctx, issue, TriggerActor{}, triggerCommentID, nil, true)
 	if err != nil {
 		return nil, err
 	}

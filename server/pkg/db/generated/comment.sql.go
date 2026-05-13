@@ -205,7 +205,7 @@ func (q *Queries) HasAgentRepliedInThread(ctx context.Context, arg HasAgentRepli
 
 const listCommentsForIssue = `-- name: ListCommentsForIssue :many
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, deleted_at, resolved_at, resolved_by_type, resolved_by_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
+WHERE issue_id = $1 AND workspace_id = $2 AND deleted_at IS NULL
 ORDER BY created_at ASC, id ASC
 LIMIT $3
 `
@@ -256,7 +256,7 @@ func (q *Queries) ListCommentsForIssue(ctx context.Context, arg ListCommentsForI
 
 const listCommentsSinceForIssue = `-- name: ListCommentsSinceForIssue :many
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, deleted_at, resolved_at, resolved_by_type, resolved_by_id FROM comment
-WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
+WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3 AND deleted_at IS NULL
 ORDER BY created_at ASC, id ASC
 LIMIT $4
 `
