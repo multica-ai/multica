@@ -71,6 +71,7 @@ const (
 	EventChatDone           = "chat:done"
 	EventChatSessionRead    = "chat:session_read"
 	EventChatSessionDeleted = "chat:session_deleted"
+	EventChatSessionUpdated = "chat:session_updated"
 
 	// Channel events. Channels is the multi-participant chat surface (distinct
 	// from the 1:1 agent Chat above) — see migration 065 and the channels

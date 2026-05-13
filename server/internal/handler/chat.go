@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -13,6 +14,10 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// chatSessionTitleMaxLen caps the rename input. Long enough to fit a
+// meaningful summary, short enough to keep the dropdown row scannable.
+const chatSessionTitleMaxLen = 200
 
 // ---------------------------------------------------------------------------
 // Chat Sessions
@@ -230,6 +235,66 @@ func (h *Handler) GetChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, chatSessionToResponse(session))
+}
+
+type UpdateChatSessionRequest struct {
+	Title *string `json:"title"`
+}
+
+// UpdateChatSession updates user-editable fields on a chat session — today
+// just `title`, surfaced by the inline rename affordance in the session
+// dropdown. Title is the only field accepted: `status` is legacy + read-only,
+// agent/creator/workspace are immutable, the resume pointers
+// (session_id / work_dir / runtime_id) are daemon-owned.
+func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+
+	var req UpdateChatSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Title == nil {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+	title := strings.TrimSpace(*req.Title)
+	if title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+	if len([]rune(title)) > chatSessionTitleMaxLen {
+		writeError(w, http.StatusBadRequest, "title is too long")
+		return
+	}
+
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+
+	updated, err := h.Queries.UpdateChatSessionTitle(r.Context(), db.UpdateChatSessionTitleParams{
+		ID:    session.ID,
+		Title: title,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update chat session")
+		return
+	}
+
+	resolvedSessionID := uuidToString(updated.ID)
+	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
+		ChatSessionID: resolvedSessionID,
+		Title:         updated.Title,
+		UpdatedAt:     timestampToString(updated.UpdatedAt),
+	})
+
+	writeJSON(w, http.StatusOK, chatSessionToResponse(updated))
 }
 
 // DeleteChatSession hard-deletes a chat session owned by the caller. The
