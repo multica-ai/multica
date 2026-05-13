@@ -478,3 +478,5 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `issue-detail-pin-comment-input` | packages/views/issues/components/issue-detail.tsx | 5 | JEH-1065 — passes `pinnable` to the bottom CommentInput on issue pages. |
 | `i18n-comment-pin` | packages/views/locales/en/issues.json<br>packages/views/locales/zh-Hans/issues.json | 4 | JEH-1065 — pin/unpin tooltip + pinned-placeholder copy for the issue comment input. |
 | `i18n-reply-pin` | packages/views/locales/en/issues.json<br>packages/views/locales/zh-Hans/issues.json | 4 | JEH-1065 — pin/unpin tooltip + pinned-placeholder copy for the issue reply input. |
+| `reply-input-pin-floating-box` | packages/views/issues/components/reply-input.tsx | 5 | JEH-1065 — opaque box (`bg-background` + border + shadow) on the wrapper while the pinned reply floats over arbitrary thread content. |
+| `reply-input-mobile-paperclip` | packages/views/issues/components/reply-input.tsx | ~10 | JEH-1065 — on mobile, move paperclip to the left to match CommentInput so pin/expand/send aren't cramped on the right. |

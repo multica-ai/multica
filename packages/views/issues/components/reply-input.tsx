@@ -126,7 +126,15 @@ function ReplyInput({
           (which would also break the sticky measurement and trigger a flicker
           loop). */}
       {isFloating && <div aria-hidden style={{ height: floatRect.height }} />}
-      <div style={floatStyle}>
+      {/* CEREBRO-PATCH(reply-input-pin-floating-box): JEH-1065 — when the
+          floating reply is on top of arbitrary thread content, it needs its
+          own opaque box (background + border + shadow) so it does not bleed
+          into the comments behind it. Layout stays identical inside the box,
+          and the placeholder above keeps the thread height stable. */}
+      <div
+        style={floatStyle}
+        className={cn(isFloating && "rounded-lg border border-border bg-background p-2 shadow-lg")}
+      >
         <div className="group/editor flex items-start gap-2.5">
           <ActorAvatar
             actorType={avatarType}
