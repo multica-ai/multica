@@ -185,12 +185,18 @@ export function DashboardPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader className="justify-between px-5">
-        <div className="flex items-center gap-2">
-          <BarChart3 className="h-4 w-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">{t(($) => $.title)}</h1>
+      {/* h-auto + min-h-12 + flex-wrap: the toolbar (project filter, range
+          switch, timezone select) overflows the single h-12 row on narrow
+          and medium widths once the timezone picker is added — letting the
+          right cluster wrap underneath keeps every control reachable
+          without an off-screen bleed. Wider viewports still render the
+          original single row. */}
+      <PageHeader className="h-auto min-h-12 flex-wrap justify-between gap-y-1.5 px-5 py-1.5 sm:py-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <BarChart3 className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <h1 className="truncate text-sm font-medium">{t(($) => $.title)}</h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <ProjectFilter
             projects={projects}
             value={projectValue}
@@ -205,7 +211,7 @@ export function DashboardPage() {
             value={timezone}
             onValueChange={setTimezone}
             browserSuffix={tRuntimes(($) => $.detail.timezone_browser_suffix)}
-            triggerClassName="min-w-[180px] rounded-md font-mono text-xs"
+            triggerClassName="rounded-md font-mono text-xs"
           />
         </div>
       </PageHeader>
