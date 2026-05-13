@@ -1,0 +1,76 @@
+name: Build Web Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to publish"
+        required: false
+        default: "crm-latest"
+  push:
+    branches:
+      - multica-with-crm
+    paths:
+      - "Dockerfile.web"
+      - "apps/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - "turbo.json"
+      - ".github/workflows/build-web-image.yml"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-web-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/multica-web
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=${{ github.event.inputs.image_tag || 'crm-latest' }}
+            type=sha,prefix=crm-sha-
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.web
+          pull: true
+          push: true
+          platforms: linux/amd64
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=crm-web-amd64
+          cache-to: type=gha,mode=max,scope=crm-web-amd64
+          build-args: |
+            REMOTE_API_URL=http://backend:8080
+            NEXT_PUBLIC_APP_VERSION=${{ github.sha }}
+
+      - name: Inspect pushed image
+        run: |
+          docker buildx imagetools inspect ghcr.io/${{ github.repository_owner }}/multica-web:${{ github.event.inputs.image_tag || 'crm-latest' }}
