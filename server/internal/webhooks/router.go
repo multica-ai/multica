@@ -2,6 +2,7 @@ package webhooks
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,37 @@ import (
 
 	"github.com/go-chi/chi/v5"
 )
+
+// EventStore is the persistence surface PR3 wires in. Implemented by
+// *cascade.Store. The router calls Insert after a successful Normalize
+// so the durable record exists before we 200. Defined here (not
+// imported from cascade) so the webhooks package doesn't depend on
+// cascade — keeps the import graph one-way.
+type EventStore interface {
+	// Insert persists the event. ErrAlreadyExists return value
+	// (equivalent to cascade.ErrRetriggerAlreadyExists) signals a
+	// re-delivery — the router treats both fresh-insert and
+	// idempotent-collision as a 200 response.
+	Insert(ctx context.Context, e PersistableEvent) error
+}
+
+// PersistableEvent is the subset of TriggerEvent fields the storage
+// layer cares about. Promotes loose coupling — the cascade.Store can
+// add columns (PR4 will add a worker-tracking column) without
+// reshaping TriggerEvent.
+type PersistableEvent struct {
+	EventID   string // uuid.UUID.String()
+	PRURL     string
+	PRNumber  int
+	HeadSHA   string
+	EventType string
+	FiredAt   time.Time
+}
+
+// ErrAlreadyExists is returned by EventStore.Insert on a duplicate
+// event_id (idempotent re-delivery). The router maps this to a 200
+// instead of a 500.
+var ErrAlreadyExists = errors.New("webhooks: event already persisted")
 
 // maxPayloadSize caps the bytes the router will buffer before refusing
 // a webhook (413). GitHub's documented webhook payload ceiling is 25
@@ -34,6 +66,13 @@ type Router struct {
 	// duplicate-registration panic stays as the only failure mode.
 	sources map[string]Source
 
+	// store is the optional persistence surface. When nil, the
+	// router runs in PR2-skeleton mode (always 202, no durable
+	// record). When set (PR3 wiring), the router INSERTs after
+	// successful Normalize and returns 200/204 according to the
+	// outcome.
+	store EventStore
+
 	// now is injected for tests so ReceivedAt is deterministic. nil
 	// means use time.Now (production).
 	now func() time.Time
@@ -45,6 +84,7 @@ type Router struct {
 
 // NewRouter constructs an empty Router. Call Register for each Source
 // you want to expose, then Mount the router onto a parent Chi router.
+// Pass a non-nil EventStore to enable persistence (PR3 wiring).
 func NewRouter(logger *slog.Logger) *Router {
 	if logger == nil {
 		logger = slog.Default()
@@ -53,6 +93,14 @@ func NewRouter(logger *slog.Logger) *Router {
 		sources: make(map[string]Source),
 		logger:  logger,
 	}
+}
+
+// WithStore enables persistence. Returns the same Router for chaining.
+// When the store is set, successful Normalize → INSERT → 200; without
+// the store, successful Normalize → 202 (PR2 skeleton behavior).
+func (r *Router) WithStore(store EventStore) *Router {
+	r.store = store
+	return r
 }
 
 // Register adds a Source to the router. Panics on:
@@ -215,22 +263,64 @@ func (r *Router) serve(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Success: event is fully normalized. PR3 inserts into
-	// cascade_retrigger here and returns 200; PR2 ships 202 Accepted
-	// because no durable record is taken yet — vendors that retry on
-	// 5xx will not retry on 202, so this remains correct under
-	// feature-flag-on-but-PR3-not-yet-shipped scenarios.
+	// Success: event is fully normalized. Stamp metadata, then
+	// persist if a store is wired (PR3 onward). Without a store the
+	// router runs in PR2-skeleton mode and returns 202 — vendors
+	// that retry on 5xx do not retry on 202, so this stays correct
+	// even if a future operator partially deploys the subsystem.
 	if event.ReceivedAt.IsZero() {
 		event.ReceivedAt = r.clock()
 	}
 	event.Source = sourceName
 
-	w.WriteHeader(http.StatusAccepted)
-	r.logger.Info("webhooks.received",
-		"source", sourceName,
-		"event_id", event.EventID.String(),
-		"event_type", event.EventType,
-		"pr_number", event.PRNumber,
-		"head_sha", event.HeadSHA,
-	)
+	if r.store == nil {
+		w.WriteHeader(http.StatusAccepted)
+		r.logger.Info("webhooks.received_no_store",
+			"source", sourceName,
+			"event_id", event.EventID.String(),
+			"event_type", event.EventType,
+			"pr_number", event.PRNumber,
+			"head_sha", event.HeadSHA,
+		)
+		return
+	}
+
+	err = r.store.Insert(req.Context(), PersistableEvent{
+		EventID:   event.EventID.String(),
+		PRURL:     event.PRURL,
+		PRNumber:  event.PRNumber,
+		HeadSHA:   event.HeadSHA,
+		EventType: event.EventType,
+		FiredAt:   event.ReceivedAt,
+	})
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusOK)
+		r.logger.Info("webhooks.persisted",
+			"source", sourceName,
+			"event_id", event.EventID.String(),
+			"event_type", event.EventType,
+			"pr_number", event.PRNumber,
+			"head_sha", event.HeadSHA,
+		)
+
+	case errors.Is(err, ErrAlreadyExists):
+		// Idempotent re-delivery — accepted, no work. Distinct from
+		// the unsupported-event 204 because the event itself was
+		// legitimate; we just already have it.
+		w.WriteHeader(http.StatusOK)
+		r.logger.Debug("webhooks.duplicate_delivery",
+			"source", sourceName,
+			"event_id", event.EventID.String(),
+		)
+
+	default:
+		// Genuine storage failure. 500 → GitHub retries within 8h.
+		http.Error(w, "persist failed", http.StatusInternalServerError)
+		r.logger.Error("webhooks.persist_failed",
+			"source", sourceName,
+			"event_id", event.EventID.String(),
+			"error", err,
+		)
+	}
 }
