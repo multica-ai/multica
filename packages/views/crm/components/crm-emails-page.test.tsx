@@ -67,6 +67,13 @@ const unlinkedThread = {
   message_count: 1,
 };
 
+const sentThread = {
+  ...linkedThread,
+  id: "thread-3",
+  subject: "Sent quotation",
+  direction: "outbound",
+};
+
 const account = {
   id: "account-1",
   workspace_id: "ws-1",
@@ -109,17 +116,46 @@ beforeEach(() => {
 });
 
 describe("CRMEmailsPage", () => {
-  it("renders a two-pane email workspace with thread detail and message body", async () => {
+  it("renders a CRM-style email workspace with folders, detail, context, and message body", async () => {
     renderEmailsPage();
 
+    expect(await screen.findByText("Email workspace")).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Email folders" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Inbox/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Mailbox settings/ })).toBeInTheDocument();
     expect((await screen.findAllByText("New quotation request")).length).toBeGreaterThan(0);
+    expect(screen.getByText("CRM context")).toBeInTheDocument();
+    expect(screen.getByText("Related project")).toBeInTheDocument();
+    expect(screen.getByText("Related issue")).toBeInTheDocument();
     expect(screen.getAllByText(/sales@example.com/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/inbound/).length).toBeGreaterThan(0);
     expect(screen.getByText(/2 messages/)).toBeInTheDocument();
     expect(mockApi.listCRMEmailThreads).toHaveBeenCalledWith(undefined);
+    expect(screen.getByRole("button", { name: /Mark read/ })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Archive/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /Star/ }).length).toBeGreaterThan(0);
     expect(await screen.findByText("Please quote 500 units.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Linked customer\s*Acme Buyer/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Linked contact\s*Alice/ })).toBeInTheDocument();
+  });
+
+  it("filters folders and opens the IMAP mailbox binding dialog", async () => {
+    mockApi.listCRMEmailThreads.mockResolvedValue({ threads: [linkedThread, sentThread, unlinkedThread], total: 3 });
+    renderEmailsPage();
+
+    expect((await screen.findAllByText("New quotation request")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Sent quotation")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /Sent/ }));
+    expect((await screen.findAllByText("Sent quotation")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("New quotation request")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /Mailbox settings/ }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Bind an IMAP mailbox for CRM email import. Automatic sync stays off until the connection and security model are confirmed.")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("IMAP host")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Secret reference")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Test connection" })).toBeInTheDocument();
   });
 
   it("opens CRM detail dialogs from linked customer and contact names", async () => {

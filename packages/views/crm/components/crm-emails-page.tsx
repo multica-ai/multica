@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Building2, Link2, Mail, Search, UserRound } from "lucide-react";
+import { Archive, ArrowRight, Building2, Inbox, Link2, Mail, MailOpen, Search, Settings, Star, UserRound } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { crmAccountListOptions, crmContactListOptions, crmEmailMessageListOptions, crmEmailThreadListOptions, crmKeys } from "@multica/core/crm/queries";
@@ -75,21 +75,41 @@ export function CRMEmailsPage() {
   const paths = useWorkspacePaths();
   const { t } = useT("crm");
   const [search, setSearch] = useState("");
+  const [activeFolder, setActiveFolder] = useState<"inbox" | "sent" | "archived" | "starred" | "unlinked">("inbox");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [detailDialog, setDetailDialog] = useState<{ type: "account"; account: CRMAccount } | { type: "contact"; contact: CRMContact } | null>(null);
   const [associationDraft, setAssociationDraft] = useState<AssociationDraft | null>(null);
   const { data: threads = [], isLoading } = useQuery(crmEmailThreadListOptions(wsId));
   const { data: accounts = [] } = useQuery(crmAccountListOptions(wsId, { sort: "name" }));
 
+  const folderThreads = useMemo(() => {
+    return threads.filter((thread) => {
+      if (activeFolder === "sent") return thread.direction === "outbound";
+      if (activeFolder === "archived") return thread.status === "archived";
+      if (activeFolder === "starred") return false;
+      if (activeFolder === "unlinked") return !thread.account_id;
+      return thread.status !== "archived" && thread.direction !== "outbound";
+    });
+  }, [activeFolder, threads]);
+
   const filteredThreads = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return threads;
-    return threads.filter((thread) => [thread.subject, thread.mailbox, thread.direction, thread.status]
+    if (!q) return folderThreads;
+    return folderThreads.filter((thread) => [thread.subject, thread.mailbox, thread.direction, thread.status]
       .filter(Boolean)
       .join(" ")
       .toLowerCase()
       .includes(q));
-  }, [search, threads]);
+  }, [folderThreads, search]);
+
+  const folderCounts = useMemo(() => ({
+    inbox: threads.filter((thread) => thread.status !== "archived" && thread.direction !== "outbound").length,
+    sent: threads.filter((thread) => thread.direction === "outbound").length,
+    archived: threads.filter((thread) => thread.status === "archived").length,
+    starred: 0,
+    unlinked: threads.filter((thread) => !thread.account_id).length,
+  }), [threads]);
 
   const selectedThread = useMemo<CRMEmailThread | null>(() => {
     const found = threads.find((thread) => thread.id === selectedThreadId) ?? filteredThreads[0] ?? null;
@@ -158,12 +178,44 @@ export function CRMEmailsPage() {
       <PageHeader className="justify-between border-b bg-background px-5">
         <div className="flex items-center gap-2">
           <Mail className="size-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">{t(($) => $.emails.title)}</h1>
+          <h1 className="text-sm font-medium">{t(($) => $.emails.workspace_title)}</h1>
           {!isLoading && <Badge variant="secondary" className="tabular-nums">{threads.length}</Badge>}
         </div>
+        <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
+          <Settings className="mr-1 size-3" />
+          {t(($) => $.emails.mailbox_settings)}
+        </Button>
       </PageHeader>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 lg:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 lg:grid-cols-[220px_360px_minmax(0,1fr)]">
+        <aside className="flex min-h-0 flex-col border-r bg-card/80 p-3">
+          <div className="mb-3 rounded-lg border bg-background p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t(($) => $.emails.mailboxes)}</div>
+            <div className="mt-2 truncate text-sm font-medium">sales@example.com</div>
+            <div className="mt-1 text-xs text-muted-foreground">{t(($) => $.emails.imap_not_connected)}</div>
+          </div>
+          <nav className="space-y-1" aria-label={t(($) => $.emails.folder_nav)}>
+            {([
+              ["inbox", Inbox, t(($) => $.emails.folder_inbox)],
+              ["sent", MailOpen, t(($) => $.emails.folder_sent)],
+              ["archived", Archive, t(($) => $.emails.folder_archived)],
+              ["starred", Star, t(($) => $.emails.folder_starred)],
+              ["unlinked", Link2, t(($) => $.emails.folder_unlinked)],
+            ] as const).map(([folder, Icon, label]) => (
+              <button
+                key={folder}
+                type="button"
+                className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm hover:bg-muted ${activeFolder === folder ? "bg-muted font-medium" : ""}`}
+                onClick={() => setActiveFolder(folder)}
+              >
+                <span className="flex items-center gap-2"><Icon className="size-4 text-muted-foreground" />{label}</span>
+                <Badge variant="secondary" className="tabular-nums">{folderCounts[folder]}</Badge>
+              </button>
+            ))}
+          </nav>
+          <Button className="mt-auto" variant="outline" onClick={() => setSettingsOpen(true)}>{t(($) => $.emails.add_mailbox)}</Button>
+        </aside>
+
         <aside className="flex min-h-0 flex-col border-r bg-background">
           <div className="border-b p-3">
             <div className="relative">
@@ -224,7 +276,12 @@ export function CRMEmailsPage() {
                     {selectedAccount ? t(($) => $.emails.change_association) : t(($) => $.emails.link_customer_contact)}
                   </Button>
                 </div>
-                <div className="mt-4 flex flex-wrap items-center gap-2">
+                <div className="mt-4 flex flex-wrap items-center gap-2 border-t pt-3">
+                  <Button variant="outline" size="sm"><MailOpen className="mr-1 size-3" />{t(($) => $.emails.mark_read)}</Button>
+                  <Button variant="outline" size="sm"><Archive className="mr-1 size-3" />{t(($) => $.emails.archive)}</Button>
+                  <Button variant="outline" size="sm"><Star className="mr-1 size-3" />{t(($) => $.emails.star)}</Button>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
                   <AssociationChip icon={<Building2 className="size-4" />} label={t(($) => $.emails.linked_customer)} value={selectedAccount?.name ?? t(($) => $.emails.no_customer)} onClick={selectedAccount ? () => setDetailDialog({ type: "account", account: selectedAccount }) : undefined} />
                   <AssociationChip icon={<UserRound className="size-4" />} label={t(($) => $.emails.linked_contact)} value={selectedContact?.name ?? t(($) => $.emails.no_contact)} onClick={selectedContact ? () => setDetailDialog({ type: "contact", contact: selectedContact }) : undefined} />
                   {selectedAccount && (
@@ -235,7 +292,8 @@ export function CRMEmailsPage() {
                 </div>
                 {updateAssociation.isError && <p className="mt-2 text-xs text-destructive">{t(($) => $.emails.association_error)}</p>}
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto bg-muted/20 p-5">
+              <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_300px]">
+                <div className="min-h-0 overflow-y-auto bg-muted/20 p-5">
                 {messagesLoading ? (
                   <div className="space-y-3">
                     <Skeleton className="h-24 w-full" />
@@ -259,6 +317,19 @@ export function CRMEmailsPage() {
                     ))}
                   </div>
                 )}
+                </div>
+                <aside className="border-l bg-card/60 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t(($) => $.emails.crm_context)}</div>
+                  <div className="mt-3 space-y-3">
+                    <DetailRow label={t(($) => $.emails.linked_customer)} value={selectedAccount?.name ?? t(($) => $.emails.no_customer)} />
+                    <DetailRow label={t(($) => $.emails.linked_contact)} value={selectedContact?.name ?? t(($) => $.emails.no_contact)} />
+                    <DetailRow label={t(($) => $.emails.related_project)} value={t(($) => $.emails.not_linked_yet)} />
+                    <DetailRow label={t(($) => $.emails.related_issue)} value={t(($) => $.emails.not_linked_yet)} />
+                  </div>
+                  <div className="mt-4 rounded-lg border border-dashed bg-background p-3 text-xs text-muted-foreground">
+                    {t(($) => $.emails.profile_automation_hint)}
+                  </div>
+                </aside>
               </div>
             </div>
           )}
@@ -343,6 +414,33 @@ export function CRMEmailsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setAssociationDraft(null)}>{t(($) => $.actions.cancel)}</Button>
             <Button disabled={!associationDraft?.accountId || updateAssociation.isPending} onClick={() => updateAssociation.mutate()}>{t(($) => $.emails.save_association)}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.emails.mailbox_settings)}</DialogTitle>
+            <DialogDescription>{t(($) => $.emails.mailbox_settings_help)}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Input aria-label={t(($) => $.emails.mailbox_name)} placeholder={t(($) => $.emails.mailbox_name)} />
+            <Input aria-label={t(($) => $.emails.email_address)} placeholder="sales@example.com" />
+            <Input aria-label={t(($) => $.emails.imap_host)} placeholder="imap.example.com" />
+            <Input aria-label={t(($) => $.emails.imap_port)} placeholder="993" />
+            <select aria-label={t(($) => $.emails.tls_mode)} className="h-9 rounded-md border bg-background px-3 text-sm">
+              <option>{t(($) => $.emails.tls_ssl)}</option>
+              <option>{t(($) => $.emails.tls_starttls)}</option>
+            </select>
+            <Input aria-label={t(($) => $.emails.username)} placeholder={t(($) => $.emails.username)} />
+            <Input className="sm:col-span-2" aria-label={t(($) => $.emails.secret_reference)} placeholder={t(($) => $.emails.secret_reference_placeholder)} />
+          </div>
+          <p className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">{t(($) => $.emails.imap_security_note)}</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSettingsOpen(false)}>{t(($) => $.actions.cancel)}</Button>
+            <Button variant="outline">{t(($) => $.emails.test_connection)}</Button>
+            <Button disabled>{t(($) => $.actions.save)}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
