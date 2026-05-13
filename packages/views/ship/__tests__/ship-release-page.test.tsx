@@ -136,6 +136,18 @@ vi.mock("@multica/core/ship", () => ({
   }),
 }));
 
+vi.mock("../components/ship-concierge-panel", () => ({
+  ShipConciergePanel: () => (
+    <div data-testid="ship-concierge-panel" />
+  ),
+}));
+
+vi.mock("../components/ship-concierge-inline", () => ({
+  ShipConciergeInline: () => (
+    <div data-testid="ship-concierge-inline" />
+  ),
+}));
+
 // The release page resolves project metadata (pipeline_kind, title) via
 // `projectListOptions` from @multica/core/projects/queries. Mocking this
 // module returns a single-project fixture tied to the release's
@@ -323,6 +335,8 @@ describe("ShipReleasePage", () => {
     );
     expect(screen.getByTestId("release-stage-progress")).toBeInTheDocument();
     expect(screen.getByTestId("release-cancel-button")).toBeInTheDocument();
+    expect(screen.getByTestId("ship-concierge-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("ship-concierge-inline")).not.toBeInTheDocument();
   });
 
   it("hides the cancel button outside the assembling stage", () => {
@@ -490,6 +504,7 @@ describe("ShipReleasePage", () => {
     expect(screen.getByTestId("release-resume-button")).toBeInTheDocument();
     expect(screen.getByTestId("release-resume-with-skip-button")).toBeInTheDocument();
     expect(screen.getByTestId("release-abort-button")).toBeInTheDocument();
+    expect(screen.getByTestId("ship-concierge-inline")).toBeInTheDocument();
   });
 
   it("calls resume mutation when the Resume button is clicked", async () => {
