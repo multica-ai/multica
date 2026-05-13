@@ -46,6 +46,8 @@ function workspaceScoped(slug: string) {
     skillDetail: (id: string) => `${ws}/skills/${encode(id)}`,
     settings: () => `${ws}/settings`,
     memberDetail: (memberId: string) => `${ws}/members/${encode(memberId)}`,
+    // CEREBRO-PATCH(cerebro-paths-permissions): JEH-1180 Persona permissions admin page
+    permissions: () => `${ws}/permissions`,
   };
 }
 

@@ -24,7 +24,8 @@ export type CerebroFlagKey =
   | "cerebro_runtime_accounts"
   | "cerebro_tasks"
   | "cerebro_pin_input"
-  | "cerebro_workflows";
+  | "cerebro_workflows"
+  | "cerebro_persona_permissions";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -53,6 +54,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_tasks: false,
   cerebro_pin_input: true,
   cerebro_workflows: false,
+  cerebro_persona_permissions: false,
 };
 
 export interface CerebroFlagDefinition {
@@ -173,5 +175,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Workflow engine",
     description:
       "Enable the cerebro workflow engine and the /:workspace/workflows page (data-driven status/trigger rules, builder UI, run log). Server-side execution is additionally gated by the CEREBRO_WORKFLOWS_ENABLED env var.",
+  },
+  {
+    key: "cerebro_persona_permissions",
+    label: "Persona permissions",
+    description:
+      "Enable the workspace permissions admin page at /:workspace/permissions — list, create, edit, and audit Persona grants (subject × resource × capability). Hidden until the Persona grant API (JEH-1179) is live in this environment.",
   },
 ];

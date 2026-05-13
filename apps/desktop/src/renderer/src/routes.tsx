@@ -33,6 +33,7 @@ import { NotificationsPage } from "@multica/cerebro-notifications/views";
 import { SettingsPage } from "@multica/views/settings";
 import { MemberDetailPage } from "@multica/cerebro-users/views";
 import { TasksPage } from "@multica/cerebro-tasks";
+import { PermissionsPage } from "@multica/cerebro-permissions";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { Download, Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
@@ -195,6 +196,11 @@ export const appRoutes: RouteObject[] = [
           },
           { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
           { path: "tasks", element: <TasksPage />, handle: { title: "Tasks" } },
+          {
+            path: "permissions",
+            element: <PermissionsPage />,
+            handle: { title: "Permissions" },
+          },
           {
             path: "notifications",
             element: <NotificationsPage />,
