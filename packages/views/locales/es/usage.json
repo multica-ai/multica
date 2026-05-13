@@ -1,0 +1,39 @@
+{
+  "title": "Uso",
+  "subtitle": "Gasto de tokens y actividad de agentes en este espacio de trabajo.",
+  "filter": {
+    "project_label": "Proyecto",
+    "all_projects": "Todos los proyectos",
+    "period_label": "Período"
+  },
+  "kpi": {
+    "cost_label": "Coste · {{days}}D",
+    "tokens_label": "Tokens · {{days}}D",
+    "tokens_hint": "Entrada {{input}} · Salida {{output}}",
+    "run_time_label": "Tiempo de ejecución · {{days}}D",
+    "run_time_hint": "En {{tasks}} tareas",
+    "tasks_label": "Tareas · {{days}}D",
+    "tasks_hint": "{{failed}} fallidas"
+  },
+  "daily": {
+    "title": "Coste diario",
+    "no_data": "Sin uso en este período."
+  },
+  "leaderboard": {
+    "title": "Clasificación",
+    "caption": "{{count}} agentes",
+    "header_agent": "Agente",
+    "header_tokens": "Tokens",
+    "header_cost": "Coste",
+    "header_time": "Tiempo",
+    "header_tasks": "Tareas",
+    "no_data": "Sin actividad de agentes en este período."
+  },
+  "empty": {
+    "title": "Sin uso todavía",
+    "body": "Cuando los agentes comiencen a ejecutar tareas aquí, su gasto de tokens y tiempo de ejecución aparecerán en esta vista."
+  },
+  "duration": {
+    "less_than_minute": "<1m"
+  }
+}

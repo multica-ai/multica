@@ -72,6 +72,7 @@ import esChat from "./es/chat.json";
 import esModals from "./es/modals.json";
 import esRuntimes from "./es/runtimes.json";
 import esLayout from "./es/layout.json";
+import esUsage from "./es/usage.json";
 import esTimeTracking from "./es/time-tracking.json";
 import esWorkCalendars from "./es/work-calendars.json";
 import esRedmine from "./es/redmine.json";
@@ -159,6 +160,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     modals: esModals,
     runtimes: esRuntimes,
     layout: esLayout,
+    usage: esUsage,
     "time-tracking": esTimeTracking,
     "work-calendars": esWorkCalendars,
     redmine: esRedmine,
