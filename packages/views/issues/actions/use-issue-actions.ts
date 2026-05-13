@@ -3,6 +3,7 @@
 import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { copyToClipboard } from "@multica/ui/lib/clipboard";
 import type {
   Issue,
   MemberWithUser,
@@ -122,7 +123,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     if (!issueId) return;
     const url = navigation.getShareableUrl(paths.issueDetail(issueId));
     try {
-      await navigator.clipboard.writeText(url);
+      await copyToClipboard(url);
       toast.success(t(($) => $.detail.link_copied));
     } catch {
       toast.error(t(($) => $.detail.link_copy_failed));

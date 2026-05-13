@@ -25,6 +25,7 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
+import { copyToClipboard as copyText } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
@@ -56,8 +57,8 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
   useWSEvent("daemon:register", handleDaemonRegister);
 
   const copyToClipboard = useCallback(
-    (text: string, key: string) => {
-      navigator.clipboard.writeText(text);
+    async (text: string, key: string) => {
+      await copyText(text);
       setCopied(key);
     },
     [],

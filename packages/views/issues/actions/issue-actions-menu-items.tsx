@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { copyToClipboard } from "@multica/ui/lib/clipboard";
 import {
   ArrowDown,
   ArrowUp,
@@ -134,7 +135,7 @@ export function IssueActionsMenuItems({
       toast.error(t(($) => $.detail.workdir_path_unavailable));
       return;
     }
-    navigator.clipboard.writeText(latestWorkDir).then(
+    copyToClipboard(latestWorkDir).then(
       () => toast.success(t(($) => $.detail.workdir_path_copied)),
       () => toast.error(t(($) => $.detail.workdir_path_copy_failed)),
     );

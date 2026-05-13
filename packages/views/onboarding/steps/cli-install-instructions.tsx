@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Check, Copy, Terminal } from "lucide-react";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { copyToClipboard } from "@multica/ui/lib/clipboard";
 import { useT } from "../../i18n";
 
 const INSTALL_CMD =
@@ -13,8 +14,8 @@ function CopyButton({ text }: { text: string }) {
   const { t } = useT("onboarding");
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(text);
+  const handleCopy = async () => {
+    await copyToClipboard(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

@@ -35,6 +35,7 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
+import { copyToClipboard } from "@multica/ui/lib/clipboard";
 import { useT } from "../../i18n";
 
 const EXPIRY_KEYS = ["30", "90", "365", "never"] as const;
@@ -95,7 +96,7 @@ export function TokensTab() {
 
   const handleCopyToken = async () => {
     if (!newToken) return;
-    await navigator.clipboard.writeText(newToken);
+    await copyToClipboard(newToken);
     setTokenCopied(true);
     setTimeout(() => setTokenCopied(false), 2000);
   };

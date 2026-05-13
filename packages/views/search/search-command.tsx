@@ -26,6 +26,7 @@ import {
 import { Command as CommandPrimitive } from "cmdk";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { copyToClipboard } from "@multica/ui/lib/clipboard";
 import type { SearchIssueResult, SearchProjectResult } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import { selectRecentIssues, useRecentIssuesStore } from "@multica/core/issues/stores";
@@ -228,7 +229,7 @@ export function SearchCommand() {
           icon: Link2,
           keywords: ["copy", "link", "share", "url", identifier.toLowerCase()],
           onSelect: () => {
-            void navigator.clipboard.writeText(getShareableUrl(pathname));
+            void copyToClipboard(getShareableUrl(pathname));
             toast.success(t(($) => $.toast.link_copied));
             setOpen(false);
           },
@@ -239,7 +240,7 @@ export function SearchCommand() {
           icon: Copy,
           keywords: ["copy", "id", "identifier", identifier.toLowerCase()],
           onSelect: () => {
-            void navigator.clipboard.writeText(identifier);
+            void copyToClipboard(identifier);
             toast.success(t(($) => $.toast.copied_identifier, { identifier }));
             setOpen(false);
           },

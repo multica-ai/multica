@@ -6,6 +6,7 @@ import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, 
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
+import { copyToClipboard } from "@multica/ui/lib/clipboard";
 import type { Issue, IssueStatus, ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
@@ -560,8 +561,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   }
                 />
                 <DropdownMenuContent align="end" className="w-auto">
-                  <DropdownMenuItem onClick={() => {
-                    navigator.clipboard.writeText(window.location.href);
+                  <DropdownMenuItem onClick={async () => {
+                    await copyToClipboard(window.location.href);
                     toast.success(t(($) => $.detail.toast_link_copied));
                   }}>
                     <Link2 className="h-3.5 w-3.5" />

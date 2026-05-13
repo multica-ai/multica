@@ -1,6 +1,5 @@
-/**
- * Copy markdown content to the clipboard.
- */
+import { copyToClipboard } from "@multica/ui/lib/clipboard";
+
 export async function copyMarkdown(markdown: string): Promise<void> {
-  await navigator.clipboard.writeText(markdown);
+  await copyToClipboard(markdown);
 }

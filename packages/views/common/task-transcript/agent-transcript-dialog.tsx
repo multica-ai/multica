@@ -19,6 +19,7 @@ import {
   Filter,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { copyToClipboard } from "@multica/ui/lib/clipboard";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
 import {
@@ -250,7 +251,7 @@ export function AgentTranscriptDialog({
         return `[${label}] ${summary}`;
       })
       .join("\n");
-    navigator.clipboard.writeText(text).then(() => {
+    copyToClipboard(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });

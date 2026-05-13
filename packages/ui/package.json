@@ -16,6 +16,7 @@
     "./markdown/mentions": "./markdown/mentions.ts",
     "./hooks/*": "./hooks/*.ts",
     "./lib/utils": "./lib/utils.ts",
+    "./lib/clipboard": "./lib/clipboard.ts",
     "./lib/data-table": "./lib/data-table.ts",
     "./styles/tokens.css": "./styles/tokens.css",
     "./styles/base.css": "./styles/base.css"

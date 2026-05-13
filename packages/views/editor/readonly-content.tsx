@@ -33,6 +33,7 @@ import { toHtml } from "hast-util-to-html";
 import { Maximize2, Download, Link as LinkIcon, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
+import { copyToClipboard } from "@multica/ui/lib/clipboard";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import type { Attachment } from "@multica/core/types";
 import { useNavigation } from "../navigation";
@@ -198,7 +199,7 @@ function ReadonlyImage({
   };
   const handleCopyLink = async () => {
     try {
-      await navigator.clipboard.writeText(imgSrc);
+      await copyToClipboard(imgSrc);
       toast.success(t(($) => $.image.link_copied));
     } catch {
       toast.error(t(($) => $.image.copy_link_failed));

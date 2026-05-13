@@ -15,6 +15,7 @@ import { computePosition, offset, flip, shift } from "@floating-ui/dom";
 import { ExternalLink, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
+import { copyToClipboard } from "@multica/ui/lib/clipboard";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useT } from "../i18n";
 import { openLink, isMentionHref } from "./utils/link-handler";
@@ -171,7 +172,7 @@ function LinkHoverCard({
     e.stopPropagation();
     e.preventDefault();
     try {
-      await navigator.clipboard.writeText(href);
+      await copyToClipboard(href);
       toast.success(t(($) => $.link_hover.link_copied));
     } catch {
       toast.error(t(($) => $.link_hover.copy_failed));

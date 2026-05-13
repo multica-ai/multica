@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
+import { copyToClipboard } from "@multica/ui/lib/clipboard";
 import { useT } from "../../i18n";
 import { useAttachmentDownloadResolver } from "../attachment-download-context";
 
@@ -79,7 +80,7 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
 
   const handleCopyLink = async () => {
     try {
-      await navigator.clipboard.writeText(src);
+      await copyToClipboard(src);
       toast.success(t(($) => $.image.link_copied));
     } catch {
       toast.error(t(($) => $.image.copy_link_failed));
