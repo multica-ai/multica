@@ -300,6 +300,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes session/prompt failed: %v", err)
+				if opts.ResumeSessionID != "" {
+					sessionID = ""
+				}
 			}
 		} else {
 			// The prompt completed. Check if we got a promptDone result
