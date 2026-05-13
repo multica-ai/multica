@@ -13,10 +13,12 @@ import { Input } from "@multica/ui/components/ui/input";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { useModalStore } from "@multica/core/modals";
 import type { Agent, Squad } from "@multica/core/types";
+import { useT } from "../../i18n";
 
 type Scope = "mine" | "all";
 
 export function SquadsPage() {
+  const { t } = useT("squads");
   const workspace = useCurrentWorkspace();
   const wsId = workspace?.id ?? "";
   const p = useWorkspacePaths();
@@ -65,14 +67,14 @@ export function SquadsPage() {
       <PageHeader className="justify-between px-5">
         <div className="flex items-center gap-2">
           <Users className="h-4 w-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">Squads</h1>
+          <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
           {!isLoading && squads.length > 0 && (
             <span className="text-xs text-muted-foreground tabular-nums">{squads.length}</span>
           )}
         </div>
         <Button size="sm" variant="outline" onClick={() => useModalStore.getState().open("create-squad")}>
           <Plus className="size-3.5 mr-1.5" />
-          New Squad
+          {t(($) => $.page.new_button)}
         </Button>
       </PageHeader>
 
@@ -82,7 +84,7 @@ export function SquadsPage() {
         ) : squads.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
             <Users className="size-10 text-muted-foreground/50" />
-            <p className="text-sm text-muted-foreground">No squads yet. Create one to get started.</p>
+            <p className="text-sm text-muted-foreground">{t(($) => $.page.empty_no_squads)}</p>
           </div>
         ) : (
           <>
@@ -104,7 +106,7 @@ export function SquadsPage() {
 
             {filtered.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-                <p className="text-sm text-muted-foreground">No squads match your filters.</p>
+                <p className="text-sm text-muted-foreground">{t(($) => $.page.empty_no_match)}</p>
               </div>
             ) : (
               <div className="flex-1 overflow-y-auto p-4">

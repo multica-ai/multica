@@ -1,0 +1,47 @@
+{
+  "page": {
+    "title": "Squads",
+    "new_button": "New Squad",
+    "empty_no_squads": "No squads yet. Create one to get started.",
+    "empty_no_match": "No squads match your filters."
+  },
+  "inspector": {
+    "details_section": "Details",
+    "archive_button": "Archive"
+  },
+  "name_editor": {
+    "cancel": "Cancel"
+  },
+  "add_member_dialog": {
+    "title": "Add Member",
+    "description": "Add a workspace member or agent to this squad.",
+    "label_member": "Member",
+    "label_role": "Role",
+    "label_optional": "(optional)",
+    "placeholder_role_inline": "Add role…",
+    "cancel": "Cancel"
+  },
+  "description_dialog": {
+    "title": "Edit description",
+    "placeholder_empty": "Add a description",
+    "cancel": "Cancel"
+  },
+  "discard_changes_dialog": {
+    "title": "Discard unsaved changes?",
+    "description": "You have unsaved changes on this tab. Switching tabs will discard them.",
+    "keep_editing": "Keep editing",
+    "discard_button": "Discard"
+  },
+  "members_tab": {
+    "section_title": "Members",
+    "section_count_one": "{{count}} member in this squad",
+    "section_count_other": "{{count}} members in this squad",
+    "add_member_button": "Add Member",
+    "leader_chip": "Leader"
+  },
+  "instructions_tab": {
+    "description": "Squad instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every task.",
+    "unsaved_changes": "Unsaved changes",
+    "save_button": "Save"
+  }
+}

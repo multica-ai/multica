@@ -49,8 +49,10 @@ import {
 import { ChevronDown, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import type { Squad, SquadMember, Agent, MemberWithUser } from "@multica/core/types";
+import { useT } from "../../i18n";
 
 export function SquadDetailPage() {
+  const { t } = useT("squads");
   const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
@@ -161,7 +163,7 @@ export function SquadDetailPage() {
         </div>
         <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => { if (confirm("Archive this squad? Issues will be transferred to the leader.")) deleteMut.mutate(); }}>
           <Trash2 className="size-3.5 mr-1" />
-          Archive
+          {t(($) => $.inspector.archive_button)}
         </Button>
       </PageHeader>
 
@@ -344,6 +346,7 @@ function InlineEditPopover({
   validate?: (v: string) => string | null;
   children: (triggerProps: { onClick: (e: React.MouseEvent) => void }) => ReactNode;
 }) {
+  const { t } = useT("squads");
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
@@ -410,7 +413,7 @@ function InlineEditPopover({
           {error && <p className="text-xs text-destructive">{error}</p>}
           <div className="flex items-center justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={saving}>
-              Cancel
+              {t(($) => $.name_editor.cancel)}
             </Button>
             <Button size="sm" onClick={() => void commit()} disabled={saving || draft === value}>
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
@@ -439,6 +442,7 @@ function AddMemberDialog({
   onClose: () => void;
   onSubmit: (input: { type: "agent" | "member"; id: string; role?: string }) => Promise<void>;
 }) {
+  const { t } = useT("squads");
   const [target, setTarget] = useState<{ type: "agent" | "member"; id: string; name: string } | null>(null);
   const [role, setRole] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -466,13 +470,13 @@ function AddMemberDialog({
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Member</DialogTitle>
-          <DialogDescription>Add a workspace member or agent to this squad.</DialogDescription>
+          <DialogTitle>{t(($) => $.add_member_dialog.title)}</DialogTitle>
+          <DialogDescription>{t(($) => $.add_member_dialog.description)}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 min-w-0">
           <div>
-            <Label className="text-xs text-muted-foreground">Member</Label>
+            <Label className="text-xs text-muted-foreground">{t(($) => $.add_member_dialog.label_member)}</Label>
             <Popover open={pickerOpen} onOpenChange={(v) => { setPickerOpen(v); if (!v) setPickerFilter(""); }}>
               <PopoverTrigger className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1 text-left text-sm transition-colors hover:bg-muted">
                 {target ? (
@@ -545,7 +549,10 @@ function AddMemberDialog({
           </div>
 
           <div>
-            <Label className="text-xs text-muted-foreground">Role <span className="text-muted-foreground/60">(optional)</span></Label>
+            <Label className="text-xs text-muted-foreground">
+              {t(($) => $.add_member_dialog.label_role)}{" "}
+              <span className="text-muted-foreground/60">{t(($) => $.add_member_dialog.label_optional)}</span>
+            </Label>
             <Input
               type="text"
               value={role}
@@ -561,7 +568,7 @@ function AddMemberDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose}>{t(($) => $.add_member_dialog.cancel)}</Button>
           <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
             {submitting ? <Loader2 className="size-3.5 animate-spin" /> : "Add"}
           </Button>
@@ -576,6 +583,7 @@ function AddMemberDialog({
 // commits on blur / Enter and cancels on Escape. Avoids opening a modal
 // for what is usually a one-word change.
 function RoleEditor({ value, onSave }: { value: string; onSave: (next: string) => Promise<void> }) {
+  const { t } = useT("squads");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
@@ -621,7 +629,7 @@ function RoleEditor({ value, onSave }: { value: string; onSave: (next: string) =
       onClick={() => setEditing(true)}
       className="text-xs text-muted-foreground mt-0.5 text-left hover:text-foreground transition-colors"
     >
-      {value || <span className="italic opacity-60">Add role…</span>}
+      {value || <span className="italic opacity-60">{t(($) => $.add_member_dialog.placeholder_role_inline)}</span>}
     </button>
   );
 }
@@ -650,6 +658,7 @@ function SquadDetailInspector({
   onRename: (next: string) => Promise<void>;
   onUpdateDescription: (next: string) => Promise<void>;
 }) {
+  const { t } = useT("squads");
   const initials = squad.name
     .split(" ")
     .map((w) => w[0])
@@ -679,7 +688,7 @@ function SquadDetailInspector({
       {/* Details — read-only */}
       <div className="border-b px-5 py-4">
         <div className="mb-1 -mx-2 px-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          Details
+          {t(($) => $.inspector.details_section)}
         </div>
         <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
           <InspectorRow label="Leader">
@@ -729,6 +738,7 @@ function SquadDescriptionEditor({
   value: string;
   onSave: (next: string) => Promise<void>;
 }) {
+  const { t } = useT("squads");
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -740,7 +750,7 @@ function SquadDescriptionEditor({
         {value ? (
           <span className="text-muted-foreground">{value}</span>
         ) : (
-          <span className="italic text-muted-foreground/50">Add a description</span>
+          <span className="italic text-muted-foreground/50">{t(($) => $.description_dialog.placeholder_empty)}</span>
         )}
         <Pencil className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" />
       </button>
@@ -769,6 +779,7 @@ function SquadDescriptionEditorBody({
   onSave: (next: string) => Promise<void>;
   onClose: () => void;
 }) {
+  const { t } = useT("squads");
   const [draft, setDraft] = useState(initialValue);
   const [saving, setSaving] = useState(false);
   const dirty = draft !== initialValue;
@@ -789,7 +800,7 @@ function SquadDescriptionEditorBody({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Edit description</DialogTitle>
+        <DialogTitle>{t(($) => $.description_dialog.title)}</DialogTitle>
       </DialogHeader>
       <textarea
         autoFocus
@@ -808,7 +819,7 @@ function SquadDescriptionEditorBody({
         className="w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-input"
       />
       <DialogFooter>
-        <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>{t(($) => $.description_dialog.cancel)}</Button>
         <Button size="sm" onClick={() => void commit()} disabled={saving || !dirty}>
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
         </Button>
@@ -852,6 +863,7 @@ function SquadOverviewPane({
   onSaveInstructions: (next: string) => Promise<void>;
   setLeaderPending: boolean;
 }) {
+  const { t } = useT("squads");
   const [activeTab, setActiveTab] = useState<SquadDetailTab>("members");
   const [activeDirty, setActiveDirty] = useState(false);
   const [pendingTab, setPendingTab] = useState<SquadDetailTab | null>(null);
@@ -920,15 +932,15 @@ function SquadOverviewPane({
         <AlertDialog open onOpenChange={(v) => { if (!v) setPendingTab(null); }}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
+              <AlertDialogTitle>{t(($) => $.discard_changes_dialog.title)}</AlertDialogTitle>
               <AlertDialogDescription>
-                You have unsaved changes on this tab. Switching tabs will discard them.
+                {t(($) => $.discard_changes_dialog.description)}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Keep editing</AlertDialogCancel>
+              <AlertDialogCancel>{t(($) => $.discard_changes_dialog.keep_editing)}</AlertDialogCancel>
               <AlertDialogAction variant="destructive" onClick={commitTabChange}>
-                Discard
+                {t(($) => $.discard_changes_dialog.discard_button)}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -958,16 +970,19 @@ function SquadMembersTab({
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
   setLeaderPending: boolean;
 }) {
+  const { t } = useT("squads");
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-medium">Members</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">{members.length} member{members.length !== 1 ? "s" : ""} in this squad</p>
+          <h3 className="text-sm font-medium">{t(($) => $.members_tab.section_title)}</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {t(($) => $.members_tab.section_count, { count: members.length })}
+          </p>
         </div>
         <Button size="sm" variant="outline" onClick={onAddMemberClick}>
           <Plus className="size-3.5 mr-1.5" />
-          Add Member
+          {t(($) => $.members_tab.add_member_button)}
         </Button>
       </div>
 
@@ -982,7 +997,7 @@ function SquadMembersTab({
                 {isLeader(m) && (
                   <span className="inline-flex items-center gap-0.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded">
                     <Crown className="size-3" />
-                    Leader
+                    {t(($) => $.members_tab.leader_chip)}
                   </span>
                 )}
               </div>
@@ -1035,6 +1050,7 @@ function SquadInstructionsTab({
   onSave: (instructions: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const { t } = useT("squads");
   const [value, setValue] = useState(squad.instructions ?? "");
   const [saving, setSaving] = useState(false);
   const isDirty = value !== (squad.instructions ?? "");
@@ -1061,7 +1077,7 @@ function SquadInstructionsTab({
   return (
     <div className="flex h-full flex-col gap-4">
       <p className="text-xs text-muted-foreground">
-        Squad instructions are injected into the leader agent&apos;s prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every task.
+        {t(($) => $.instructions_tab.description)}
       </p>
 
       <div className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input">
@@ -1078,7 +1094,7 @@ function SquadInstructionsTab({
 
       <div className="flex items-center justify-end gap-3">
         {isDirty && (
-          <span className="text-xs text-muted-foreground">Unsaved changes</span>
+          <span className="text-xs text-muted-foreground">{t(($) => $.instructions_tab.unsaved_changes)}</span>
         )}
         <Button size="sm" onClick={handleSave} disabled={!isDirty || saving}>
           {saving ? (
@@ -1086,7 +1102,7 @@ function SquadInstructionsTab({
           ) : (
             <Save className="h-3.5 w-3.5" />
           )}
-          Save
+          {t(($) => $.instructions_tab.save_button)}
         </Button>
       </div>
     </div>
