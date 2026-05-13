@@ -266,7 +266,7 @@ func TestBuildPromptAutopilotRunOnly(t *testing.T) {
 		"Autopilot run ID: run-1",
 		"Daily dependency check",
 		"Check dependencies and report outdated packages.",
-		"multica autopilot get autopilot-1 --output json",
+		"forge autopilot get autopilot-1 --output json",
 		"Do not run `forge issue get`",
 	} {
 		if !strings.Contains(prompt, want) {
