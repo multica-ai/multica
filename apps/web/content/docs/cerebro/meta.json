@@ -1,5 +1,5 @@
 {
   "title": "Cerebro",
   "icon": "Sparkles",
-  "pages": ["index", "---Guides---", "daemon-setup", "release-notes", "..."]
+  "pages": ["index", "---Guides---", "daemon-setup", "pwa", "release-notes", "..."]
 }
