@@ -68,7 +68,7 @@ export function RuntimesPage({ topSlot, bootstrapping }: RuntimesPageProps = {})
   const isLoading = useAuthStore((s) => s.isLoading);
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
-  const [scope, setScope] = useState<RuntimeFilter>("mine");
+  const [scope, setScope] = useState<RuntimeFilter>("all");
   const [healthFilter, setHealthFilter] = useState<HealthFilter>("all");
   const [search, setSearch] = useState("");
   const [showConnectDialog, setShowConnectDialog] = useState(false);

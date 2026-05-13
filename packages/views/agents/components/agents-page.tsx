@@ -99,10 +99,7 @@ export function AgentsPage() {
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
 
   const [view, setView] = useState<View>("active");
-  // Default to "mine" — matches runtimes page convention and the visual
-  // ordering (Mine first). All is one click away when users want the
-  // workspace-wide view.
-  const [scope, setScope] = useState<Scope>("mine");
+  const [scope, setScope] = useState<Scope>("all");
   const [availabilityFilter, setAvailabilityFilter] =
     useState<AvailabilityFilter>("all");
   const [sort, setSort] = useState<SortKey>("recent");
