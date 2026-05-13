@@ -19,6 +19,8 @@ import (
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 account handler import
 	cerebroaccount "github.com/multica-ai/multica/server/internal/cerebro/account"
 	cerebrochannels "github.com/multica-ai/multica/server/internal/cerebro/channels"
+	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196 credential registry handler import
+	cerebrocredentials "github.com/multica-ai/multica/server/internal/cerebro/credentials"
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler import
 	cerebrodashboard "github.com/multica-ai/multica/server/internal/cerebro/dashboard"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
@@ -203,6 +205,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.GroupPermissions = cerebrogrouppermissions.NewHandlerSeam(cerebroGroupPermissionsHandler.Service)
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 workspace accounts handler
 	cerebroAccountHandler := cerebroaccount.New(cerebroQueries, bus)
+	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196 credential registry handler — cipher loaded from MULTICA_CREDENTIALS_KEY; nil cipher → 503 at request time.
+	cerebroCredentialsHandler := cerebrocredentials.New(cerebroQueries, cerebrocredentials.MustNewCipherFromEnv(), bus)
 	// CEREBRO-PATCH(references-routes): JEH-837 issue references handler instance.
 	cerebroReferencesHandler := cerebroreferences.New(cerebroQueries, queries, bus)
 	// CEREBRO-PATCH(router-runtime-pause): mount cerebro pause/unpause service so
@@ -460,6 +464,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/accounts", cerebroAccountHandler.Create)
 					r.Get("/accounts/{id}", cerebroAccountHandler.Get)
 					r.Delete("/accounts/{id}", cerebroAccountHandler.Delete)
+					// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196 credential registry routes (CRUD + reveal + rotate + bindings + audit).
+					cerebroCredentialsHandler.Mount(r)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
