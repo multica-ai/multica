@@ -72,11 +72,14 @@ interface MentionGroup {
 }
 
 function groupItems(items: MentionItem[]): MentionGroup[] {
+  const broadcasts: MentionItem[] = [];
   const users: MentionItem[] = [];
   const issues: MentionItem[] = [];
 
   for (const item of items) {
-    if (item.type === "issue") {
+    if (item.type === "broadcast") {
+      broadcasts.push(item);
+    } else if (item.type === "issue") {
       issues.push(item);
     } else {
       users.push(item);
@@ -84,6 +87,7 @@ function groupItems(items: MentionItem[]): MentionGroup[] {
   }
 
   const groups: MentionGroup[] = [];
+  if (broadcasts.length > 0) groups.push({ label: "Broadcast", items: broadcasts });
   if (users.length > 0) groups.push({ label: "Users", items: users });
   if (issues.length > 0) groups.push({ label: "Issues", items: issues });
   return groups;
@@ -246,6 +250,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
 
     const groups = groupItems(displayItems);
     const groupLabel = (label: string): string => {
+      if (label === "Broadcast") return t(($) => $.mention.group_broadcast);
       if (label === "Users") return t(($) => $.mention.group_users);
       if (label === "Issues") return t(($) => $.mention.group_issues);
       return label;
@@ -296,6 +301,23 @@ function MentionRow({
   buttonRef: (el: HTMLButtonElement | null) => void;
 }) {
   const { t } = useT("editor");
+  if (item.type === "broadcast") {
+    return (
+      <button
+        ref={buttonRef}
+        className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
+          selected ? "bg-accent" : "hover:bg-accent/50"
+        }`}
+        onClick={onSelect}
+      >
+        <span className="mention font-mono text-xs">@{item.label}</span>
+        <span className="ml-2 truncate text-muted-foreground">
+          {item.id === "all" ? t(($) => $.mention.broadcast_all) : `Tag: ${item.id}`}
+        </span>
+      </button>
+    );
+  }
+
   if (item.type === "issue") {
     // Visually dim closed issues (done/cancelled) so they're distinguishable
     // from active ones in the suggestion list — they're still selectable.
@@ -401,6 +423,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
 
     const members: MemberWithUser[] = qc.getQueryData(workspaceKeys.members(wsId)) ?? [];
     const agents: Agent[] = qc.getQueryData(workspaceKeys.agents(wsId)) ?? [];
+    const agentTags: AgentTag[] = qc.getQueryData(workspaceKeys.agentTags(wsId)) ?? [];
     const cachedResponse = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
     const cachedIssues: Issue[] = cachedResponse ? flattenIssueBuckets(cachedResponse) : [];
 
@@ -414,6 +437,26 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       members.find((m) => m.user_id === userId)?.role ?? null;
 
     const q = query.toLowerCase();
+
+    if (query.startsWith("@")) {
+      const tagFilter = query.slice(1).toLowerCase();
+      const broadcastItems: MentionItem[] = [
+        { id: "all", label: "@", type: "broadcast" as const },
+        ...agentTags
+          .filter((t) => !tagFilter || t.name.toLowerCase().startsWith(tagFilter))
+          .map((t) => ({
+            id: t.name,
+            label: `@${t.name}`,
+            type: "broadcast" as const,
+          })),
+      ];
+      if (tagFilter) {
+        return broadcastItems.filter(
+          (i) => i.id === "all" || i.id.toLowerCase().startsWith(tagFilter),
+        );
+      }
+      return broadcastItems;
+    }
 
     const allItem: MentionItem[] =
       "all members".includes(q) || "all".includes(q)

@@ -222,6 +222,9 @@ type MentionTriggerCandidate struct {
 // SelectAgentsForMentionParams is the input shape for the selector.
 type SelectAgentsForMentionParams struct {
 	ChannelID pgtype.UUID
+	// WorkspaceID scopes broadcast mentions when resolving @@all / @@tag
+	// fanout to workspace agents.
+	WorkspaceID pgtype.UUID
 	// ChannelKind is "channel" | "dm". DMs trigger every agent member
 	// implicitly even without an @mention — the whole conversation is
 	// addressed at the agent participant(s).
@@ -249,11 +252,13 @@ type SelectAgentsForMentionParams struct {
 
 // ParsedMention is the surface area the channel package uses from the
 // caller's mention parser. Mirrors util.Mention without requiring the
-// import. Type values: "member" | "agent" | "issue" | "all".
+// import. Type values: "member" | "agent" | "issue" | "all" | "broadcast".
 type ParsedMention struct {
 	Type string
 	ID   string
 }
+
+const broadcastMaxAgents = 10
 
 // SelectAgentsForMention returns the agents that should be triggered
 // by a freshly-posted message. Applies, in order:
@@ -360,6 +365,77 @@ func (s *MessageService) SelectAgentsForMention(ctx context.Context, p SelectAge
 			AgentID: agentUUID,
 			Agent:   agent,
 		})
+	}
+
+	for _, m := range mentions {
+		if m.Type != "broadcast" {
+			continue
+		}
+
+		key := m.Type + ":" + m.ID
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		var agentsToFan []db.Agent
+		var err error
+		if m.ID == "all" || m.ID == "" {
+			agentsToFan, err = s.Queries.ListAgents(ctx, p.WorkspaceID)
+		} else {
+			agentsToFan, err = s.Queries.ListAgentsByTag(ctx, db.ListAgentsByTagParams{
+				WorkspaceID: p.WorkspaceID,
+				TagName:     m.ID,
+			})
+		}
+		if err != nil {
+			slog.Warn("channel broadcast mention: failed to list agents",
+				"channel_id", uuidString(p.ChannelID),
+				"tag", m.ID,
+				"error", err,
+			)
+			continue
+		}
+
+		count := 0
+		for _, a := range agentsToFan {
+			if count >= broadcastMaxAgents {
+				break
+			}
+			agentIDStr := uuidString(a.ID)
+			if p.Author.Type == ActorAgent && uuidString(p.Author.ID) == agentIDStr {
+				continue
+			}
+			if _, dup := added[agentIDStr]; dup {
+				continue
+			}
+			if a.ArchivedAt.Valid || !a.RuntimeID.Valid {
+				continue
+			}
+			if _, err := s.Queries.GetChannelMembership(ctx, db.GetChannelMembershipParams{
+				ChannelID:  p.ChannelID,
+				MemberType: ActorAgent,
+				MemberID:   a.ID,
+			}); err != nil {
+				continue
+			}
+
+			hasPending, err := s.Queries.HasPendingChannelMentionForAgent(ctx, db.HasPendingChannelMentionForAgentParams{
+				AgentID:       a.ID,
+				ChannelID:     uuidString(p.ChannelID),
+				WindowSeconds: p.DedupWindowSeconds,
+			})
+			if err != nil || hasPending {
+				continue
+			}
+
+			added[agentIDStr] = struct{}{}
+			candidates = append(candidates, MentionTriggerCandidate{
+				AgentID: a.ID,
+				Agent:   a,
+			})
+			count++
+		}
 	}
 
 	// DM auto-trigger fanout. In a DM with one or more agents, every

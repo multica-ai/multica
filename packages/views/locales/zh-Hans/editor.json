@@ -43,8 +43,10 @@
     "copy_failed": "复制失败"
   },
   "mention": {
+    "group_broadcast": "广播",
     "group_users": "用户",
     "group_issues": "issue",
+    "broadcast_all": "所有 Agent",
     "all_members": "所有成员",
     "broadcast_all": "所有智能体",
     "searching": "搜索中...",

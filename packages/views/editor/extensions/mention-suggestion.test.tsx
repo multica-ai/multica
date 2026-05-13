@@ -113,6 +113,24 @@ describe("createMentionSuggestion", () => {
     expect(items.some((i) => i.type === "agent" && i.label === "Aegis")).toBe(true);
   });
 
+  it("returns broadcast options when typing @@", () => {
+    const qc = fakeQc({
+      agentTags: [
+        { id: "t1", workspace_id: "ws-1", name: "coding", created_at: "" },
+        { id: "t2", workspace_id: "ws-1", name: "ops", created_at: "" },
+      ],
+    });
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "@co", editor: {} as never });
+
+    const items = result as MentionItem[];
+    expect(items).toEqual([
+      { id: "all", label: "@", type: "broadcast" },
+      { id: "coding", label: "@coding", type: "broadcast" },
+    ]);
+  });
+
   it("loads server issue matches into the popup when the list cache misses", async () => {
     searchIssuesMock.mockResolvedValue({
       issues: [

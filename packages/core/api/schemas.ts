@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Attachment, ListIssuesResponse, MarketplaceSearchResult, TimelineEntry } from "../types";
+import type { AgentTag, Attachment, ListIssuesResponse, MarketplaceSearchResult, TimelineEntry } from "../types";
 
 // ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
@@ -75,6 +75,16 @@ export const EMPTY_ATTACHMENT: Attachment = {
   size_bytes: 0,
   created_at: "",
 };
+
+const AgentTagSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  created_at: z.string(),
+}).loose();
+
+export const AgentTagListSchema = z.array(AgentTagSchema);
+export const EMPTY_AGENT_TAG_LIST: AgentTag[] = [];
 
 const MarketplaceSkillSchema = z.object({
   name: z.string(),

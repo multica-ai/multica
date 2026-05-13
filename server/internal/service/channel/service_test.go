@@ -880,6 +880,10 @@ func mentionMarkdown(t string, id pgtype.UUID) string {
 	return "[@x](mention://" + t + "/" + uuidString(id) + ")"
 }
 
+func mentionMarkdownID(t, id string) string {
+	return "[@x](mention://" + t + "/" + id + ")"
+}
+
 // useUtilParser is the production-equivalent parser. We intentionally
 // avoid importing util here — see SelectAgentsForMentionParams.MentionParser
 // docstring for why — and parse minimally inline using the same
@@ -1097,6 +1101,90 @@ func TestSelectAgentsForMention_MemberMentionsIgnored(t *testing.T) {
 	}
 	if len(cands) != 0 {
 		t.Fatalf("member mentions must not produce agent triggers, got %d", len(cands))
+	}
+}
+
+func TestSelectAgentsForMention_BroadcastAllTriggersChannelAgentMembers(t *testing.T) {
+	t.Cleanup(func() { wipeChannels(t) })
+	ctx := context.Background()
+
+	ch, _ := testService.Create(ctx, CreateChannelParams{
+		WorkspaceID: testWorkspaceID, Name: "broadcast", DisplayName: "Broadcast",
+		Kind: KindChannel, Visibility: VisibilityPublic, CreatedBy: memberActor(),
+	})
+	if _, err := testService.AddMember(ctx, ch.ID, AddMemberParams{
+		Member: agentActor(), Role: RoleMember,
+	}); err != nil {
+		t.Fatalf("AddMember(agent): %v", err)
+	}
+
+	cands, err := testMessageSvc.SelectAgentsForMention(ctx, SelectAgentsForMentionParams{
+		ChannelID:          ch.ID,
+		WorkspaceID:        testWorkspaceID,
+		Content:            mentionMarkdownID("broadcast", "all"),
+		Author:             memberActor(),
+		DedupWindowSeconds: 30,
+		MentionParser:      useUtilParser,
+	})
+	if err != nil {
+		t.Fatalf("SelectAgentsForMention: %v", err)
+	}
+	if len(cands) != 1 {
+		t.Fatalf("expected 1 broadcast candidate, got %d", len(cands))
+	}
+	if cands[0].AgentID.Bytes != testAgentID.Bytes {
+		t.Fatalf("unexpected candidate id")
+	}
+}
+
+func TestSelectAgentsForMention_BroadcastTagTriggersTaggedChannelAgentMembers(t *testing.T) {
+	t.Cleanup(func() { wipeChannels(t) })
+	ctx := context.Background()
+
+	ch, _ := testService.Create(ctx, CreateChannelParams{
+		WorkspaceID: testWorkspaceID, Name: "broadcast-tag", DisplayName: "Broadcast Tag",
+		Kind: KindChannel, Visibility: VisibilityPublic, CreatedBy: memberActor(),
+	})
+	if _, err := testService.AddMember(ctx, ch.ID, AddMemberParams{
+		Member: agentActor(), Role: RoleMember,
+	}); err != nil {
+		t.Fatalf("AddMember(agent): %v", err)
+	}
+
+	tag, err := testQueries.CreateAgentTag(ctx, db.CreateAgentTagParams{
+		WorkspaceID: testWorkspaceID,
+		Name:        "roa213",
+	})
+	if err != nil {
+		t.Fatalf("CreateAgentTag: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_tag WHERE id = $1`, tag.ID)
+	})
+	if err := testQueries.AddTagToAgent(ctx, db.AddTagToAgentParams{
+		AgentID:     testAgentID,
+		TagID:       tag.ID,
+		WorkspaceID: testWorkspaceID,
+	}); err != nil {
+		t.Fatalf("AddTagToAgent: %v", err)
+	}
+
+	cands, err := testMessageSvc.SelectAgentsForMention(ctx, SelectAgentsForMentionParams{
+		ChannelID:          ch.ID,
+		WorkspaceID:        testWorkspaceID,
+		Content:            mentionMarkdownID("broadcast", "roa213"),
+		Author:             memberActor(),
+		DedupWindowSeconds: 30,
+		MentionParser:      useUtilParser,
+	})
+	if err != nil {
+		t.Fatalf("SelectAgentsForMention: %v", err)
+	}
+	if len(cands) != 1 {
+		t.Fatalf("expected 1 tag broadcast candidate, got %d", len(cands))
+	}
+	if cands[0].AgentID.Bytes != testAgentID.Bytes {
+		t.Fatalf("unexpected candidate id")
 	}
 }
 

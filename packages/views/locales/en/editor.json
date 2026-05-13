@@ -43,8 +43,10 @@
     "copy_failed": "Failed to copy"
   },
   "mention": {
+    "group_broadcast": "Broadcast",
     "group_users": "Users",
     "group_issues": "Issues",
+    "broadcast_all": "All agents",
     "all_members": "All members",
     "broadcast_all": "All agents",
     "searching": "Searching...",

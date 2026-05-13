@@ -162,6 +162,7 @@ import type {
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
+  AgentTag,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -225,6 +226,8 @@ import {
   EMPTY_MERGE_STATE_RESPONSE,
   PullRequestDetailsResponseSchema,
   EMPTY_PULL_REQUEST_DETAILS_RESPONSE,
+  AgentTagListSchema,
+  EMPTY_AGENT_TAG_LIST,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -743,7 +746,10 @@ export class ApiClient {
   }
 
   async listAgentTags(): Promise<AgentTag[]> {
-    return this.fetch("/api/agent-tags");
+    const raw = await this.fetch<unknown>("/api/agent-tags");
+    return parseWithFallback(raw, AgentTagListSchema, EMPTY_AGENT_TAG_LIST, {
+      endpoint: "GET /api/agent-tags",
+    });
   }
 
   async getAgent(id: string): Promise<Agent> {
