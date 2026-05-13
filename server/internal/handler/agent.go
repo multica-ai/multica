@@ -155,6 +155,7 @@ type AgentTaskResponse struct {
 	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
 	ProjectTitle            string                `json:"project_title,omitempty"`     // for surfacing in agent context
 	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
+	TargetProjectResourceID string                `json:"target_project_resource_id,omitempty"` // PUL-94: explicit github_repo project_resource for the daemon's per-task worktree bare. Empty → legacy fallback.
 	CreatedAt               string                `json:"created_at"`
 	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
 	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
@@ -227,7 +228,12 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		// with issue_id = "" once a task has no linked issue.
 		ChatSessionID:  uuidToString(t.ChatSessionID),
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
-		Kind:           computeTaskKind(t),
+		// PUL-94: explicit target_project_resource_id flows through claim
+		// responses so the daemon can resolve which bare repo to use for the
+		// per-task worktree. Empty when NULL in DB (legacy task) — daemon
+		// falls back to shared per-agent worktree.
+		TargetProjectResourceID: uuidToString(t.TargetProjectResourceID),
+		Kind:                    computeTaskKind(t),
 	}
 }
 
