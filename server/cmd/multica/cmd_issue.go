@@ -204,6 +204,16 @@ var issueRerunCmd = &cobra.Command{
 	RunE:  runIssueRerun,
 }
 
+var issueCancelTaskCmd = &cobra.Command{
+	Use:   "cancel-task <task-id>",
+	Short: "Cancel a running or queued task (interrupts in-flight agent)",
+	Long: "Cancel a single task by its ID. Accepts the short ID prefix shown by `issue runs`. " +
+		"Use --issue to scope short-ID resolution to a specific issue when ambiguous. " +
+		"Triggers daemon-side interrupt of any in-flight agent so it stops emitting tool calls promptly.",
+	Args: exactArgs(1),
+	RunE: runIssueCancelTask,
+}
+
 var issueSearchCmd = &cobra.Command{
 	Use:   "search <query>",
 	Short: "Search issues by title or description",
@@ -227,6 +237,7 @@ func init() {
 	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueRunMessagesCmd)
 	issueCmd.AddCommand(issueRerunCmd)
+	issueCmd.AddCommand(issueCancelTaskCmd)
 	issueCmd.AddCommand(issueSearchCmd)
 
 	issueCommentCmd.AddCommand(issueCommentListCmd)
@@ -299,7 +310,9 @@ func init() {
 
 	// issue rerun
 	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
-
+	// issue cancel-task
+	issueCancelTaskCmd.Flags().String("output", "json", "Output format: table or json")
+	issueCancelTaskCmd.Flags().String("issue", "", "Issue ID/key to scope short task ID prefix resolution")
 	// issue run-messages
 	issueRunMessagesCmd.Flags().String("output", "json", "Output format: table or json")
 	issueRunMessagesCmd.Flags().Int("since", 0, "Only return messages after this sequence number")
@@ -1153,6 +1166,51 @@ func runIssueRerun(cmd *cobra.Command, args []string) error {
 	}
 	agent := loadActorDisplayLookup(ctx, client).agent(strVal(task, "agent_id"))
 	fmt.Fprintf(os.Stdout, "Re-enqueued task %s on agent %s\n", strVal(task, "id"), agent)
+	return nil
+}
+
+// runIssueCancelTask cancels a single task by ID. It accepts the short ID
+// prefix shown by `issue runs` (resolved through resolveTaskRunID), and uses
+// /api/tasks/{taskId}/cancel which both updates the DB row to status=cancelled
+// and triggers the daemon-side interrupt path (#2107) so an in-flight agent
+// stops emitting tool calls promptly instead of running until its own timeout.
+func runIssueCancelTask(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	issueScope := ""
+	if issueInput, _ := cmd.Flags().GetString("issue"); issueInput != "" {
+		issueRef, err := resolveIssueRef(ctx, client, issueInput)
+		if err != nil {
+			return fmt.Errorf("resolve issue: %w", err)
+		}
+		issueScope = issueRef.ID
+	}
+	taskRef, err := resolveTaskRunID(ctx, client, issueScope, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve task run: %w", err)
+	}
+
+	var result map[string]any
+	path := "/api/tasks/" + url.PathEscape(taskRef.ID) + "/cancel"
+	if err := client.PostJSON(ctx, path, map[string]any{}, &result); err != nil {
+		return fmt.Errorf("cancel task: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	status := strVal(result, "status")
+	if status == "" {
+		status = "cancelled"
+	}
+	fmt.Fprintf(os.Stdout, "Task %s -> status=%s\n", taskRef.ID, status)
 	return nil
 }
 
