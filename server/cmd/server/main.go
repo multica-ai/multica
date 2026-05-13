@@ -294,12 +294,15 @@ func main() {
 	// shutdown so any pending bumps are flushed before we exit.
 	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
 
+	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 / JEH-1108 — engine is constructed here (before the router) so the public webhook ingress route can be wired into the router with the same Service instance the bus listener and sweepers use.
+	workflowSvc := cerebroworkflows.New(cerebrodb.New(pool), queries, bus)
 	// CEREBRO-PATCH(router-push-service): pushSvc threaded through to handlers.
 	r := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, pushSvc, RouterOptions{
 		HTTPMetrics:        httpMetrics,
 		DaemonHub:          daemonHub,
 		DaemonWakeup:       daemonWakeup,
 		HeartbeatScheduler: heartbeatScheduler,
+		WorkflowService:    workflowSvc,
 	})
 
 	srv := &http.Server{
@@ -336,9 +339,10 @@ func main() {
 	// CEREBRO-PATCH(main-runtime-pause-sweeper): cerebro auto-unpause sweeper.
 	go cerebroruntime.New(cerebrodb.New(pool), taskSvc, bus).RunUnpauseSweeper(sweepCtx)
 	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 workflow engine subscribe + retry sweeper, wired to the event bus.
-	workflowSvc := cerebroworkflows.New(cerebrodb.New(pool), queries, bus)
 	cerebroworkflows.NewListener(workflowSvc).Attach(bus)
 	go workflowSvc.RunRetrySweeper(sweepCtx, 30*time.Second)
+	// CEREBRO-PATCH(cerebro-workflows-cron-sweeper): JEH-1108 PR 2 cron tick. Default 1-minute tick; gated per-tick on CEREBRO_WORKFLOWS_ENABLED.
+	go workflowSvc.RunCronSweeper(sweepCtx, time.Minute)
 	if gatewayCfg, err := cerebroruntime.LoadFirtalGatewayRuntimeConfig(); err != nil {
 		slog.Error("invalid firtal gateway server runtime config", "error", err)
 		os.Exit(1)

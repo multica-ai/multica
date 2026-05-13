@@ -1,10 +1,16 @@
 package workflows
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -53,6 +59,16 @@ type workflowResponse struct {
 	CreatedByType string          `json:"created_by_type"`
 	CreatedAt     string          `json:"created_at"`
 	UpdatedAt     string          `json:"updated_at"`
+
+	// Phase-3 webhook fields (JEH-1108, PR 2). The token is a *capability*
+	// and is intentionally visible — the URL it forms is the integration
+	// surface the user copies into the source system. The two secrets are
+	// NEVER returned in plaintext after the regenerate endpoints — only the
+	// presence-bool is exposed, so the UI can render "Secret set" /
+	// "No secret" without learning the value.
+	InboundWebhookToken      string `json:"inbound_webhook_token,omitempty"`
+	InboundSigningSecretSet  bool   `json:"inbound_signing_secret_set"`
+	OutboundWebhookSecretSet bool   `json:"outbound_webhook_secret_set"`
 }
 
 func toWorkflowResponse(row cerebrodb.CerebroWorkflow) workflowResponse {
@@ -78,6 +94,15 @@ func toWorkflowResponse(row cerebrodb.CerebroWorkflow) workflowResponse {
 	if len(row.EditorLayout) > 0 {
 		out.EditorLayout = row.EditorLayout
 	}
+	// Mask-on-read for the phase-3 webhook secrets. Token IS visible —
+	// it's the integration URL surface the user copies. Secrets are
+	// surfaced only as presence-bools; the plaintext leaves the server
+	// exactly once on the regenerate response.
+	if row.InboundWebhookToken.Valid {
+		out.InboundWebhookToken = row.InboundWebhookToken.String
+	}
+	out.InboundSigningSecretSet = row.InboundSigningSecret.Valid && row.InboundSigningSecret.String != ""
+	out.OutboundWebhookSecretSet = row.OutboundWebhookSecret.Valid && row.OutboundWebhookSecret.String != ""
 	return out
 }
 
@@ -143,6 +168,15 @@ type writeWorkflowRequest struct {
 // validateWriteRequest enforces the shape we let through to the DB before we
 // hit the CHECK constraints. Friendlier than a raw constraint violation in
 // the UI, and keeps the API surface stable when the constraint list grows.
+//
+// Phase-3 additions:
+//   - cron triggers parse the schedule_expr with robfig/cron/v3 so a typo
+//     fails fast (400) instead of silently never firing.
+//   - comment_mention with MatchMode=regex compiles the regex so a bad
+//     pattern surfaces before runtime.
+//   - webhook_outbound action_config goes through the SSRF guard's
+//     URL + header validators (https-only unless localhost-bypass env
+//     flag, header-name whitelist + forbidden-name set).
 func validateWriteRequest(req writeWorkflowRequest) error {
 	if req.Name == "" {
 		return errors.New("name is required")
@@ -155,6 +189,55 @@ func validateWriteRequest(req writeWorkflowRequest) error {
 	}
 	if req.EditorMode != "" && !knownEditorMode(req.EditorMode) {
 		return errors.New("unknown editor_mode")
+	}
+
+	// Trigger-config validation.
+	switch req.TriggerType {
+	case TriggerCron:
+		var cfg TriggerConfigCron
+		if len(req.TriggerConfig) > 0 {
+			if err := json.Unmarshal(req.TriggerConfig, &cfg); err != nil {
+				return fmt.Errorf("trigger_config: %w", err)
+			}
+		}
+		if err := validateCronSchedule(cfg.ScheduleExpr, cfg.Timezone); err != nil {
+			return err
+		}
+	case TriggerCommentMention:
+		var cfg TriggerConfigCommentMention
+		if len(req.TriggerConfig) > 0 {
+			if err := json.Unmarshal(req.TriggerConfig, &cfg); err != nil {
+				return fmt.Errorf("trigger_config: %w", err)
+			}
+		}
+		if cfg.MatchMode == CommentMatchRegex {
+			if cfg.Target == "" {
+				return errors.New("comment_mention regex requires target")
+			}
+			if _, err := regexp.Compile(cfg.Target); err != nil {
+				return fmt.Errorf("comment_mention regex: %w", err)
+			}
+		}
+	}
+
+	// Action-config validation.
+	switch req.ActionType {
+	case ActionWebhookOutbound:
+		var cfg ActionConfigWebhookOutbound
+		if len(req.ActionConfig) > 0 {
+			if err := json.Unmarshal(req.ActionConfig, &cfg); err != nil {
+				return fmt.Errorf("action_config: %w", err)
+			}
+		}
+		if cfg.URL == "" {
+			return errors.New("webhook_outbound: url is required")
+		}
+		if err := validateOutboundURL(cfg.URL, envAllowLocalhost()); err != nil {
+			return err
+		}
+		if err := validateOutboundHeaders(cfg.Headers); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -431,6 +514,130 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// RegenerateInboundToken handles POST /api/cerebro/workflows/{id}/regenerate-token.
+// Generates a fresh 32-byte URL-safe-base64 token and returns the full
+// inbound webhook URL so the UI can show "copy this to source system". The
+// returned token is the only time the value crosses the network in
+// plaintext after generation — subsequent GETs return the (visible) token
+// alongside the row.
+func (h *Handler) RegenerateInboundToken(w http.ResponseWriter, r *http.Request) {
+	row, ok := h.loadWorkflowForWrite(w, r)
+	if !ok {
+		return
+	}
+	token, err := generateOpaqueToken(32)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+	if err := h.Cerebro.UpdateCerebroWorkflowInboundToken(r.Context(), cerebrodb.UpdateCerebroWorkflowInboundTokenParams{
+		ID:                  row.ID,
+		InboundWebhookToken: pgtype.Text{String: token, Valid: true},
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set token")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"inbound_webhook_token": token,
+		"inbound_webhook_url":   publicWebhookURL(r, token),
+	})
+}
+
+// RegenerateInboundSigningSecret handles
+// POST /api/cerebro/workflows/{id}/regenerate-signing-secret.
+// Generates a 32-byte secret returned exactly once. Subsequent GETs mask
+// the value via the inbound_signing_secret_set boolean.
+func (h *Handler) RegenerateInboundSigningSecret(w http.ResponseWriter, r *http.Request) {
+	row, ok := h.loadWorkflowForWrite(w, r)
+	if !ok {
+		return
+	}
+	secret, err := generateOpaqueToken(32)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate secret")
+		return
+	}
+	if err := h.Cerebro.UpdateCerebroWorkflowInboundSigningSecret(r.Context(), cerebrodb.UpdateCerebroWorkflowInboundSigningSecretParams{
+		ID:                   row.ID,
+		InboundSigningSecret: pgtype.Text{String: secret, Valid: true},
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set secret")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"inbound_signing_secret": secret,
+	})
+}
+
+// RegenerateOutboundSecret handles
+// POST /api/cerebro/workflows/{id}/regenerate-outbound-secret.
+// Same mask-on-read shape as the inbound signing secret.
+func (h *Handler) RegenerateOutboundSecret(w http.ResponseWriter, r *http.Request) {
+	row, ok := h.loadWorkflowForWrite(w, r)
+	if !ok {
+		return
+	}
+	secret, err := generateOpaqueToken(32)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate secret")
+		return
+	}
+	if err := h.Cerebro.UpdateCerebroWorkflowOutboundSecret(r.Context(), cerebrodb.UpdateCerebroWorkflowOutboundSecretParams{
+		ID:                    row.ID,
+		OutboundWebhookSecret: pgtype.Text{String: secret, Valid: true},
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set secret")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"outbound_webhook_secret": secret,
+	})
+}
+
+// loadWorkflowForWrite is the auth + workspace-scope check shared by the
+// three regenerate endpoints (and conceptually by Update/Toggle/Delete,
+// though those still inline it for readability). Returns false after
+// writing the error response.
+func (h *Handler) loadWorkflowForWrite(w http.ResponseWriter, r *http.Request) (cerebrodb.CerebroWorkflow, bool) {
+	if _, ok := requireUserID(w, r); !ok {
+		return cerebrodb.CerebroWorkflow{}, false
+	}
+	id, ok := pathUUIDOr400(w, r, "id")
+	if !ok {
+		return cerebrodb.CerebroWorkflow{}, false
+	}
+	row, err := h.Cerebro.GetCerebroWorkflow(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "workflow not found")
+		return cerebrodb.CerebroWorkflow{}, false
+	}
+	if !inWorkspace(r, row.WorkspaceID) {
+		writeError(w, http.StatusNotFound, "workflow not found")
+		return cerebrodb.CerebroWorkflow{}, false
+	}
+	return row, true
+}
+
+// generateOpaqueToken mints n random bytes and returns the URL-safe-base64
+// (no padding) encoding. 32 random bytes → roughly 43 chars. crypto/rand
+// failure is treated as a server error by the caller.
+func generateOpaqueToken(n int) (string, error) {
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// publicWebhookURL composes the full ingress URL the UI should display
+// next to "Copy this to your source system". Mirrors handler/runtime_setup.go's
+// publicServerURL so both the daemon-install URL and the webhook URL agree
+// on host detection (MULTICA_APP_URL / FRONTEND_ORIGIN env override,
+// otherwise X-Forwarded-Proto + r.Host).
+func publicWebhookURL(r *http.Request, token string) string {
+	return publicServerOrigin(r) + "/api/cerebro/workflows/webhook/" + token
+}
+
 // Runs handles GET /api/cerebro/workflows/{id}/runs (per-workflow log) and
 // GET /api/cerebro/workflows/runs (workspace-wide log when no id is set).
 // Pagination is offset/limit, capped at maxRunsLimit.
@@ -581,4 +788,26 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// publicServerOrigin mirrors handler.publicServerURL — MULTICA_APP_URL /
+// FRONTEND_ORIGIN env override, otherwise X-Forwarded-Proto + r.Host. Kept
+// local to the workflows package so the cerebro zone doesn't have to depend
+// on the upstream handler package for one helper.
+func publicServerOrigin(r *http.Request) string {
+	if v := strings.TrimSpace(os.Getenv("MULTICA_APP_URL")); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	if v := strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN")); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	host := r.Host
+	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
+		host = h
+	}
+	return scheme + "://" + host
 }

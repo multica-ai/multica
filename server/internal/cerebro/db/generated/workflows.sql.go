@@ -267,6 +267,62 @@ func (q *Queries) GetCerebroWorkflow(ctx context.Context, id pgtype.UUID) (Cereb
 	return i, err
 }
 
+const getCerebroWorkflowByInboundToken = `-- name: GetCerebroWorkflowByInboundToken :one
+SELECT id, workspace_id, project_id, name, enabled,
+       trigger_type, trigger_config, conditions,
+       action_type, action_config,
+       created_by_id, created_by_type,
+       created_at, updated_at,
+       editor_mode, editor_layout,
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+FROM cerebro_workflow
+WHERE inbound_webhook_token = $1
+LIMIT 1
+`
+
+// Phase-3 (JEH-1108, PR 2). Webhook ingress lookup. The partial-unique index
+// on (workspace_id, inbound_webhook_token) covers this — we filter on the
+// non-null token column directly, so the index lookup is O(1).
+func (q *Queries) GetCerebroWorkflowByInboundToken(ctx context.Context, inboundWebhookToken pgtype.Text) (CerebroWorkflow, error) {
+	row := q.db.QueryRow(ctx, getCerebroWorkflowByInboundToken, inboundWebhookToken)
+	var i CerebroWorkflow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Enabled,
+		&i.TriggerType,
+		&i.TriggerConfig,
+		&i.Conditions,
+		&i.ActionType,
+		&i.ActionConfig,
+		&i.CreatedByID,
+		&i.CreatedByType,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EditorMode,
+		&i.EditorLayout,
+		&i.InboundWebhookToken,
+		&i.InboundSigningSecret,
+		&i.OutboundWebhookSecret,
+	)
+	return i, err
+}
+
+const getCerebroWorkflowCronState = `-- name: GetCerebroWorkflowCronState :one
+SELECT workflow_id, last_fired_at, next_fire_at
+FROM cerebro_workflow_cron_state
+WHERE workflow_id = $1
+`
+
+func (q *Queries) GetCerebroWorkflowCronState(ctx context.Context, workflowID pgtype.UUID) (CerebroWorkflowCronState, error) {
+	row := q.db.QueryRow(ctx, getCerebroWorkflowCronState, workflowID)
+	var i CerebroWorkflowCronState
+	err := row.Scan(&i.WorkflowID, &i.LastFiredAt, &i.NextFireAt)
+	return i, err
+}
+
 const insertCerebroWorkflowIdempotencyKey = `-- name: InsertCerebroWorkflowIdempotencyKey :execrows
 INSERT INTO cerebro_workflow_idempotency_key (key, workflow_id, run_id)
 VALUES ($1, $2, $3)
@@ -506,6 +562,62 @@ func (q *Queries) ListDueIssuesForSweeper(ctx context.Context, arg ListDueIssues
 			&i.Status,
 			&i.EffectiveDueAt,
 			&i.HasExplicitTime,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEnabledCronWorkflowsAcrossWorkspaces = `-- name: ListEnabledCronWorkflowsAcrossWorkspaces :many
+SELECT id, workspace_id, project_id, name, enabled,
+       trigger_type, trigger_config, conditions,
+       action_type, action_config,
+       created_by_id, created_by_type,
+       created_at, updated_at,
+       editor_mode, editor_layout,
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+FROM cerebro_workflow
+WHERE trigger_type = 'cron'
+  AND enabled = TRUE
+`
+
+// Phase-3 (JEH-1108, PR 2). Cron sweeper feed — multi-workspace, since the
+// sweeper runs once per process, not per workspace. Trigger_config carries
+// the schedule expression which the sweeper parses in Go.
+func (q *Queries) ListEnabledCronWorkflowsAcrossWorkspaces(ctx context.Context) ([]CerebroWorkflow, error) {
+	rows, err := q.db.Query(ctx, listEnabledCronWorkflowsAcrossWorkspaces)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CerebroWorkflow{}
+	for rows.Next() {
+		var i CerebroWorkflow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.Name,
+			&i.Enabled,
+			&i.TriggerType,
+			&i.TriggerConfig,
+			&i.Conditions,
+			&i.ActionType,
+			&i.ActionConfig,
+			&i.CreatedByID,
+			&i.CreatedByType,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.EditorMode,
+			&i.EditorLayout,
+			&i.InboundWebhookToken,
+			&i.InboundSigningSecret,
+			&i.OutboundWebhookSecret,
 		); err != nil {
 			return nil, err
 		}
@@ -768,6 +880,60 @@ func (q *Queries) UpdateCerebroWorkflow(ctx context.Context, arg UpdateCerebroWo
 	return i, err
 }
 
+const updateCerebroWorkflowInboundSigningSecret = `-- name: UpdateCerebroWorkflowInboundSigningSecret :exec
+UPDATE cerebro_workflow
+SET inbound_signing_secret = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+type UpdateCerebroWorkflowInboundSigningSecretParams struct {
+	ID                   pgtype.UUID `json:"id"`
+	InboundSigningSecret pgtype.Text `json:"inbound_signing_secret"`
+}
+
+func (q *Queries) UpdateCerebroWorkflowInboundSigningSecret(ctx context.Context, arg UpdateCerebroWorkflowInboundSigningSecretParams) error {
+	_, err := q.db.Exec(ctx, updateCerebroWorkflowInboundSigningSecret, arg.ID, arg.InboundSigningSecret)
+	return err
+}
+
+const updateCerebroWorkflowInboundToken = `-- name: UpdateCerebroWorkflowInboundToken :exec
+UPDATE cerebro_workflow
+SET inbound_webhook_token = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+type UpdateCerebroWorkflowInboundTokenParams struct {
+	ID                  pgtype.UUID `json:"id"`
+	InboundWebhookToken pgtype.Text `json:"inbound_webhook_token"`
+}
+
+// Phase-3 (JEH-1108, PR 2). Token regeneration is the only path that writes
+// inbound_webhook_token — the regular Update query deliberately omits the
+// column so a generic save can't clobber it.
+func (q *Queries) UpdateCerebroWorkflowInboundToken(ctx context.Context, arg UpdateCerebroWorkflowInboundTokenParams) error {
+	_, err := q.db.Exec(ctx, updateCerebroWorkflowInboundToken, arg.ID, arg.InboundWebhookToken)
+	return err
+}
+
+const updateCerebroWorkflowOutboundSecret = `-- name: UpdateCerebroWorkflowOutboundSecret :exec
+UPDATE cerebro_workflow
+SET outbound_webhook_secret = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+type UpdateCerebroWorkflowOutboundSecretParams struct {
+	ID                    pgtype.UUID `json:"id"`
+	OutboundWebhookSecret pgtype.Text `json:"outbound_webhook_secret"`
+}
+
+func (q *Queries) UpdateCerebroWorkflowOutboundSecret(ctx context.Context, arg UpdateCerebroWorkflowOutboundSecretParams) error {
+	_, err := q.db.Exec(ctx, updateCerebroWorkflowOutboundSecret, arg.ID, arg.OutboundWebhookSecret)
+	return err
+}
+
 const upsertCerebroIssueDueTime = `-- name: UpsertCerebroIssueDueTime :one
 INSERT INTO cerebro_issue_due_time (issue_id, due_at, set_by_id, set_by_type)
 VALUES ($1, $2, $3, $4)
@@ -803,4 +969,26 @@ func (q *Queries) UpsertCerebroIssueDueTime(ctx context.Context, arg UpsertCereb
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const upsertCerebroWorkflowCronState = `-- name: UpsertCerebroWorkflowCronState :exec
+INSERT INTO cerebro_workflow_cron_state (workflow_id, last_fired_at, next_fire_at)
+VALUES ($1, $2, $3)
+ON CONFLICT (workflow_id) DO UPDATE
+SET last_fired_at = EXCLUDED.last_fired_at,
+    next_fire_at  = EXCLUDED.next_fire_at
+`
+
+type UpsertCerebroWorkflowCronStateParams struct {
+	WorkflowID  pgtype.UUID        `json:"workflow_id"`
+	LastFiredAt pgtype.Timestamptz `json:"last_fired_at"`
+	NextFireAt  pgtype.Timestamptz `json:"next_fire_at"`
+}
+
+// Sweeper writes one row per workflow on each fire. last_fired_at / next_fire_at
+// are nullable so the "first sweep" insert can leave next_fire_at NULL and
+// still satisfy the schema.
+func (q *Queries) UpsertCerebroWorkflowCronState(ctx context.Context, arg UpsertCerebroWorkflowCronStateParams) error {
+	_, err := q.db.Exec(ctx, upsertCerebroWorkflowCronState, arg.WorkflowID, arg.LastFiredAt, arg.NextFireAt)
+	return err
 }

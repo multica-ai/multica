@@ -203,6 +203,72 @@ WHERE parent_issue_id = $1
   AND workspace_id = $2
 FOR UPDATE;
 
+-- name: GetCerebroWorkflowByInboundToken :one
+-- Phase-3 (JEH-1108, PR 2). Webhook ingress lookup. The partial-unique index
+-- on (workspace_id, inbound_webhook_token) covers this — we filter on the
+-- non-null token column directly, so the index lookup is O(1).
+SELECT id, workspace_id, project_id, name, enabled,
+       trigger_type, trigger_config, conditions,
+       action_type, action_config,
+       created_by_id, created_by_type,
+       created_at, updated_at,
+       editor_mode, editor_layout,
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+FROM cerebro_workflow
+WHERE inbound_webhook_token = $1
+LIMIT 1;
+
+-- name: UpdateCerebroWorkflowInboundToken :exec
+-- Phase-3 (JEH-1108, PR 2). Token regeneration is the only path that writes
+-- inbound_webhook_token — the regular Update query deliberately omits the
+-- column so a generic save can't clobber it.
+UPDATE cerebro_workflow
+SET inbound_webhook_token = $2,
+    updated_at = now()
+WHERE id = $1;
+
+-- name: UpdateCerebroWorkflowInboundSigningSecret :exec
+UPDATE cerebro_workflow
+SET inbound_signing_secret = $2,
+    updated_at = now()
+WHERE id = $1;
+
+-- name: UpdateCerebroWorkflowOutboundSecret :exec
+UPDATE cerebro_workflow
+SET outbound_webhook_secret = $2,
+    updated_at = now()
+WHERE id = $1;
+
+-- name: ListEnabledCronWorkflowsAcrossWorkspaces :many
+-- Phase-3 (JEH-1108, PR 2). Cron sweeper feed — multi-workspace, since the
+-- sweeper runs once per process, not per workspace. Trigger_config carries
+-- the schedule expression which the sweeper parses in Go.
+SELECT id, workspace_id, project_id, name, enabled,
+       trigger_type, trigger_config, conditions,
+       action_type, action_config,
+       created_by_id, created_by_type,
+       created_at, updated_at,
+       editor_mode, editor_layout,
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+FROM cerebro_workflow
+WHERE trigger_type = 'cron'
+  AND enabled = TRUE;
+
+-- name: GetCerebroWorkflowCronState :one
+SELECT workflow_id, last_fired_at, next_fire_at
+FROM cerebro_workflow_cron_state
+WHERE workflow_id = $1;
+
+-- name: UpsertCerebroWorkflowCronState :exec
+-- Sweeper writes one row per workflow on each fire. last_fired_at / next_fire_at
+-- are nullable so the "first sweep" insert can leave next_fire_at NULL and
+-- still satisfy the schema.
+INSERT INTO cerebro_workflow_cron_state (workflow_id, last_fired_at, next_fire_at)
+VALUES ($1, $2, $3)
+ON CONFLICT (workflow_id) DO UPDATE
+SET last_fired_at = EXCLUDED.last_fired_at,
+    next_fire_at  = EXCLUDED.next_fire_at;
+
 -- name: ListDueIssuesForSweeper :many
 -- Joins upstream issue.due_date with the optional per-issue clock override.
 -- The sweeper publishes due_date_reached / due_time_reached events for any

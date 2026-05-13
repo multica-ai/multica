@@ -650,36 +650,18 @@ func TestActionReassignIssue_RequiresIssueID(t *testing.T) {
 	}
 }
 
-func TestActionWebhookOutbound_PlaceholderReturnsUnimplemented(t *testing.T) {
-	fake := &fakeIssueActions{}
-	svc := newServiceWithFake(fake)
-	wf := testWorkflow(ActionWebhookOutbound, ActionConfigWebhookOutbound{
-		URL: "https://example.com/hook",
-	})
-	err := svc.actionWebhookOutbound(context.Background(), wf, testTriggerEvent())
-	if err == nil {
-		t.Fatal("placeholder must return an error until PR 2 lands")
-	}
-	if !errors.Is(err, ErrWebhookOutboundUnimplemented) {
-		t.Fatalf("expected ErrWebhookOutboundUnimplemented, got %v", err)
-	}
-}
-
 func TestActionWebhookOutbound_ValidatesURL(t *testing.T) {
 	fake := &fakeIssueActions{}
 	svc := newServiceWithFake(fake)
-	// Missing URL is a config error, not the unimplemented sentinel.
+	// Missing URL is a config error, not an SSRF / network error.
 	wf := testWorkflow(ActionWebhookOutbound, ActionConfigWebhookOutbound{})
 	err := svc.actionWebhookOutbound(context.Background(), wf, testTriggerEvent())
 	if err == nil || !strings.Contains(err.Error(), "url is required") {
 		t.Fatalf("expected url-required error, got %v", err)
 	}
-	if errors.Is(err, ErrWebhookOutboundUnimplemented) {
-		t.Fatal("url-required must surface before the unimplemented sentinel")
-	}
 }
 
-func TestRunAction_DispatchesPhase3Actions(t *testing.T) {
+func TestRunAction_DispatchesReassignIssue(t *testing.T) {
 	fake := &fakeIssueActions{}
 	svc := newServiceWithFake(fake)
 
@@ -693,13 +675,6 @@ func TestRunAction_DispatchesPhase3Actions(t *testing.T) {
 	}
 	if !fake.UpdateAssigneeUsed {
 		t.Fatal("runAction must invoke UpdateIssueAssignee for reassign_issue")
-	}
-
-	// webhook_outbound routes through runAction and surfaces the sentinel.
-	wf = testWorkflow(ActionWebhookOutbound, ActionConfigWebhookOutbound{URL: "https://example.com"})
-	err := svc.runAction(context.Background(), wf, testTriggerEvent())
-	if !errors.Is(err, ErrWebhookOutboundUnimplemented) {
-		t.Fatalf("runAction(webhook_outbound) must surface the unimplemented sentinel, got %v", err)
 	}
 }
 

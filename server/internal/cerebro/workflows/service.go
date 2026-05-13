@@ -77,6 +77,7 @@ type workflow struct {
 	id            pgtype.UUID
 	workspaceID   pgtype.UUID
 	projectID     pgtype.UUID
+	name          string
 	triggerType   string
 	triggerConfig []byte
 	conditions    []byte
@@ -84,6 +85,12 @@ type workflow struct {
 	actionConfig  []byte
 	createdByID   pgtype.UUID
 	createdByType string
+
+	// outboundSecret is the optional HMAC secret for ActionWebhookOutbound
+	// deliveries. Carried on the projection so the action runner doesn't
+	// need a second DB round-trip per outbound call. NEVER serialized in
+	// the run_event JSON or logged in plaintext.
+	outboundSecret string
 }
 
 // Dispatch is the listener-facing entry point: load matching workflows,
@@ -108,16 +115,18 @@ func (s *Service) Dispatch(ctx context.Context, te TriggerEvent) error {
 
 	for _, row := range rows {
 		wf := workflow{
-			id:            row.ID,
-			workspaceID:   row.WorkspaceID,
-			projectID:     row.ProjectID,
-			triggerType:   row.TriggerType,
-			triggerConfig: row.TriggerConfig,
-			conditions:    row.Conditions,
-			actionType:    row.ActionType,
-			actionConfig:  row.ActionConfig,
-			createdByID:   row.CreatedByID,
-			createdByType: row.CreatedByType,
+			id:             row.ID,
+			workspaceID:    row.WorkspaceID,
+			projectID:      row.ProjectID,
+			name:           row.Name,
+			triggerType:    row.TriggerType,
+			triggerConfig:  row.TriggerConfig,
+			conditions:     row.Conditions,
+			actionType:     row.ActionType,
+			actionConfig:   row.ActionConfig,
+			createdByID:    row.CreatedByID,
+			createdByType:  row.CreatedByType,
+			outboundSecret: row.OutboundWebhookSecret.String,
 		}
 		if !triggerMatches(wf, te) {
 			continue
@@ -292,16 +301,18 @@ func (s *Service) sweepRetries(ctx context.Context) error {
 			continue
 		}
 		wf := workflow{
-			id:            wfRow.ID,
-			workspaceID:   wfRow.WorkspaceID,
-			projectID:     wfRow.ProjectID,
-			triggerType:   wfRow.TriggerType,
-			triggerConfig: wfRow.TriggerConfig,
-			conditions:    wfRow.Conditions,
-			actionType:    wfRow.ActionType,
-			actionConfig:  wfRow.ActionConfig,
-			createdByID:   wfRow.CreatedByID,
-			createdByType: wfRow.CreatedByType,
+			id:             wfRow.ID,
+			workspaceID:    wfRow.WorkspaceID,
+			projectID:      wfRow.ProjectID,
+			name:           wfRow.Name,
+			triggerType:    wfRow.TriggerType,
+			triggerConfig:  wfRow.TriggerConfig,
+			conditions:     wfRow.Conditions,
+			actionType:     wfRow.ActionType,
+			actionConfig:   wfRow.ActionConfig,
+			createdByID:    wfRow.CreatedByID,
+			createdByType:  wfRow.CreatedByType,
+			outboundSecret: wfRow.OutboundWebhookSecret.String,
 		}
 		if err := s.attempt(ctx, row.ID, wf, te, next); err != nil {
 			slog.Warn("workflow retry: attempt failed", "run_id", uuidString(row.ID), "error", err)

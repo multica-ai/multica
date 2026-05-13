@@ -102,6 +102,11 @@ type RouterOptions struct {
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
 	// tests leave this nil and get the legacy synchronous behavior.
 	HeartbeatScheduler handler.HeartbeatScheduler
+	// CEREBRO-PATCH(cerebro-workflows-webhook-ingress): inbound webhook
+	// handler needs the engine's Service to Execute a specific row outside
+	// the bus. When nil, the route is registered with a 503 stub so the
+	// router still builds for tests that don't wire the engine.
+	WorkflowService *cerebroworkflows.Service
 }
 
 func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, pushSvc *service.PushService, opts RouterOptions) chi.Router {
@@ -291,6 +296,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// (install script + exchange) — used by the cerebro daemon bootstrap flow.
 	r.Get("/install-runtime.sh", h.ServeInstallRuntimeScript)
 	r.Post("/api/runtime-setup/exchange", h.ExchangeRuntimeSetupToken)
+
+	// CEREBRO-PATCH(cerebro-workflows-webhook-ingress): JEH-1108 PR 2 public inbound webhook endpoint. Token-in-URL is the auth surface; HMAC + timestamp window are layered defenses. Mounted OUTSIDE the auth-required groups by design. When opts.WorkflowService is nil (tests), the route returns 503.
+	if opts.WorkflowService != nil {
+		webhookInbound := cerebroworkflows.NewWebhookInboundHandler(cerebroQueries, opts.WorkflowService, queries)
+		r.Post("/api/cerebro/workflows/webhook/{token}", webhookInbound.ServeHTTP)
+	}
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -850,6 +861,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/{id}", cerebroWorkflowsHandler.Delete)
 				r.Post("/{id}/toggle", cerebroWorkflowsHandler.Toggle)
 				r.Get("/{id}/runs", cerebroWorkflowsHandler.Runs)
+				// CEREBRO-PATCH(cerebro-workflows-regenerate-token): JEH-1108 PR 2 token/secret regeneration endpoints. Each rotates one column and returns the freshly-minted value exactly once; subsequent GETs mask the secret via the _set boolean.
+				r.Post("/{id}/regenerate-token", cerebroWorkflowsHandler.RegenerateInboundToken)
+				r.Post("/{id}/regenerate-signing-secret", cerebroWorkflowsHandler.RegenerateInboundSigningSecret)
+				r.Post("/{id}/regenerate-outbound-secret", cerebroWorkflowsHandler.RegenerateOutboundSecret)
 			})
 		})
 	})
