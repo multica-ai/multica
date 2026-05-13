@@ -1,4 +1,5 @@
 export { useIssueSelectionStore } from "./selection-store";
+export { useCreateModeStore, type CreateMode } from "./create-mode-store";
 export { useIssueDraftStore } from "./draft-store";
 export { useRecentIssuesStore, type RecentIssueEntry } from "./recent-issues-store";
 export {
@@ -13,6 +14,11 @@ export {
   type MyIssuesViewState,
   type MyIssuesScope,
 } from "./my-issues-view-store";
+export {
+  useMobileIssuesFilterStore,
+  useRehydrateMobileIssuesFilters,
+  type MobileIssuesFilterState,
+} from "./mobile-issues-filter-store";
 export {
   useIssueViewStore,
   createIssueViewStore,

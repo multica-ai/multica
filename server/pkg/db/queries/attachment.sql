@@ -5,7 +5,7 @@ RETURNING *;
 
 -- name: ListAttachmentsByIssue :many
 SELECT * FROM attachment
-WHERE issue_id = $1 AND workspace_id = $2
+WHERE issue_id = $1 AND workspace_id = $2 AND comment_id IS NULL
 ORDER BY created_at ASC;
 
 -- name: ListAttachmentsByComment :many

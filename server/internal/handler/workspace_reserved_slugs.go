@@ -1,91 +1,47 @@
 package handler
 
+import (
+	_ "embed"
+	"encoding/json"
+)
+
 // reservedSlugs are workspace slugs that would collide with frontend top-level
 // routes, platform features, or web standards. The frontend URL shape is
 // /{workspaceSlug}/... so any slug that matches a top-level route or a
 // system-significant name is rejected at workspace creation time.
 //
-// Keep this list in sync with packages/core/paths/reserved-slugs.ts.
-//
-// Convention for new global routes: use a single word (`/login`, `/inbox`)
-// or `/{noun}/{verb}` (`/workspaces/new`). Hyphenated root-level word groups
-// (`/new-workspace`, `/create-team`) collide with common user workspace names.
-var reservedSlugs = map[string]bool{
-	// Auth flow
-	"login":      true,
-	"logout":     true,
-	"signin":     true,
-	"signout":    true,
-	"signup":     true,
-	"auth":       true,
-	"oauth":      true,
-	"callback":   true,
-	"invite":     true,
-	"verify":     true,
-	"reset":      true,
-	"password":   true,
-	"onboarding": true, // historical, kept reserved post-removal
+// The list is loaded from reserved_slugs.json (embedded at build time), which
+// is the single source of truth shared with the TypeScript side. Edit only
+// the JSON; packages/core/paths/reserved-slugs.ts is regenerated from it by
+// `pnpm generate:reserved-slugs` and CI fails on any drift.
 
-	// Platform / marketing routes (current + likely-future)
-	"api":       true,
-	"admin":     true,
-	"multica":   true, // brand name — prevent impersonation workspaces
-	"www":       true, // hostname confusable; never a legitimate workspace slug
-	"new":       true, // ambiguous verb-as-slug; reserved for future global create routes
-	"help":      true,
-	"about":     true,
-	"pricing":   true,
-	"changelog": true,
-	"docs":      true,
-	"support":   true,
-	"status":    true,
-	"legal":     true,
-	"privacy":   true,
-	"terms":     true,
-	"security":  true,
-	"contact":   true,
-	"blog":      true,
-	"careers":   true,
-	"press":     true,
-	"download":  true,
+//go:embed reserved_slugs.json
+var reservedSlugsJSON []byte
 
-	// Dashboard / workspace route segments
-	"issues":     true,
-	"projects":   true,
-	"autopilots": true,
-	"agents":     true,
-	"inbox":      true,
-	"my-issues":  true,
-	"runtimes":   true,
-	"skills":     true,
-	"settings":   true,
-	"workspaces": true, // global /workspaces/new workspace creation page
-	"teams":      true, // reserved for future team management routes
+var reservedSlugs = loadReservedSlugs()
 
-	// RFC 2142 — privileged email mailboxes
-	"postmaster": true,
-	"abuse":      true,
-	"noreply":    true,
-	"webmaster":  true,
-	"hostmaster": true,
+type reservedSlugsFile struct {
+	Groups []struct {
+		Slugs []string `json:"slugs"`
+	} `json:"groups"`
+}
 
-	// Hostname / subdomain confusables
-	"mail":    true,
-	"ftp":     true,
-	"static":  true,
-	"cdn":     true,
-	"assets":  true,
-	"public":  true,
-	"files":   true,
-	"uploads": true,
-
-	// Next.js / web standards
-	"_next":         true,
-	"favicon.ico":   true,
-	"robots.txt":    true,
-	"sitemap.xml":   true,
-	"manifest.json": true,
-	".well-known":   true,
+func loadReservedSlugs() map[string]bool {
+	var data reservedSlugsFile
+	if err := json.Unmarshal(reservedSlugsJSON, &data); err != nil {
+		// reserved_slugs.json is checked into the repo and embedded into the
+		// binary; a parse failure is a programming error caught at the very
+		// first request that touches workspace creation, which is too late.
+		// Panic at init so the binary refuses to start instead.
+		panic("handler: parse reserved_slugs.json: " + err.Error())
+	}
+	out := make(map[string]bool)
+	for _, g := range data.Groups {
+		for _, slug := range g.Slugs {
+			out[slug] = true
+		}
+	}
+	return out
 }
 
 func isReservedSlug(slug string) bool {

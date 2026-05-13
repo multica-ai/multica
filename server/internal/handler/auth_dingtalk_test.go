@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/hex"
@@ -235,6 +236,75 @@ func TestDingTalkLogin_MissingUnionID(t *testing.T) {
 	json.NewDecoder(rec.Body).Decode(&errResp)
 	if !strings.Contains(errResp["error"], "unionId") {
 		t.Fatalf("expected unionId error, got %s", errResp["error"])
+	}
+}
+
+func TestDingTalkLogin_PreservesNotificationBindingMetadata(t *testing.T) {
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `
+		DELETE FROM external_account_binding WHERE user_id = $1 AND provider = 'dingtalk'
+	`, testUserID); err != nil {
+		t.Fatalf("delete existing binding: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `
+			DELETE FROM external_account_binding WHERE user_id = $1 AND provider = 'dingtalk'
+		`, testUserID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO external_account_binding (
+			user_id, provider, external_user_id, display_name, status, metadata
+		) VALUES (
+			$1, 'dingtalk', 'union-preserve', 'DingTalk User', 'active',
+			'{"corp_id":"corp-existing","user_id":"staff-existing","mobile":"13800000000"}'::jsonb
+		)
+	`, testUserID); err != nil {
+		t.Fatalf("insert existing binding: %v", err)
+	}
+
+	srv := mockDingTalkServer(t, http.StatusOK,
+		dingtalkTokenResponse{AccessToken: "test-access-token", RefreshToken: "refresh-token", ExpireIn: 7200},
+		http.StatusOK,
+		dingtalkUserInfo{UnionID: "union-preserve", OpenID: "open-new", Nick: "New Nick", AvatarURL: "https://avatar.test/me.png"})
+	defer srv.Close()
+
+	origBase := dingtalkBaseURL
+	dingtalkBaseURL = srv.URL
+	defer func() { dingtalkBaseURL = origBase }()
+
+	t.Setenv("DINGTALK_CLIENT_ID", "test-client-id")
+	t.Setenv("DINGTALK_CLIENT_SECRET", "test-client-secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/dingtalk", strings.NewReader(`{"code":"valid-code"}`))
+	rec := httptest.NewRecorder()
+	testHandler.DingTalkLogin(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var metadataRaw []byte
+	if err := testPool.QueryRow(ctx, `
+		SELECT metadata FROM external_account_binding WHERE user_id = $1 AND provider = 'dingtalk'
+	`, testUserID).Scan(&metadataRaw); err != nil {
+		t.Fatalf("select metadata: %v", err)
+	}
+
+	var metadata map[string]string
+	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if metadata["corp_id"] != "corp-existing" {
+		t.Fatalf("expected existing corp_id to be preserved, got %#v", metadata)
+	}
+	if metadata["user_id"] != "staff-existing" {
+		t.Fatalf("expected existing user_id to be preserved, got %#v", metadata)
+	}
+	if metadata["mobile"] != "13800000000" {
+		t.Fatalf("expected existing mobile to be preserved, got %#v", metadata)
+	}
+	if metadata["open_id"] != "open-new" {
+		t.Fatalf("expected login metadata to add open_id, got %#v", metadata)
 	}
 }
 

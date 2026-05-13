@@ -15,7 +15,7 @@ const acceptInvitation = `-- name: AcceptInvitation :one
 UPDATE workspace_invitation
 SET status = 'accepted', updated_at = now()
 WHERE id = $1 AND status = 'pending'
-RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at
+RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invite_type, token_hash, max_uses, used_count, revoked_at, last_used_at, created_by_ip, created_by_user_agent
 `
 
 func (q *Queries) AcceptInvitation(ctx context.Context, id pgtype.UUID) (WorkspaceInvitation, error) {
@@ -32,6 +32,55 @@ func (q *Queries) AcceptInvitation(ctx context.Context, id pgtype.UUID) (Workspa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ExpiresAt,
+		&i.InviteType,
+		&i.TokenHash,
+		&i.MaxUses,
+		&i.UsedCount,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.CreatedByIp,
+		&i.CreatedByUserAgent,
+	)
+	return i, err
+}
+
+const consumeInviteLink = `-- name: ConsumeInviteLink :one
+UPDATE workspace_invitation
+SET used_count = used_count + 1,
+    last_used_at = now(),
+    updated_at = now(),
+    status = CASE WHEN used_count + 1 >= max_uses THEN 'accepted' ELSE status END
+WHERE id = $1
+  AND invite_type = 'link'
+  AND revoked_at IS NULL
+  AND status = 'pending'
+  AND expires_at > now()
+  AND used_count < max_uses
+RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invite_type, token_hash, max_uses, used_count, revoked_at, last_used_at, created_by_ip, created_by_user_agent
+`
+
+func (q *Queries) ConsumeInviteLink(ctx context.Context, id pgtype.UUID) (WorkspaceInvitation, error) {
+	row := q.db.QueryRow(ctx, consumeInviteLink, id)
+	var i WorkspaceInvitation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.InviterID,
+		&i.InviteeEmail,
+		&i.InviteeUserID,
+		&i.Role,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+		&i.InviteType,
+		&i.TokenHash,
+		&i.MaxUses,
+		&i.UsedCount,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.CreatedByIp,
+		&i.CreatedByUserAgent,
 	)
 	return i, err
 }
@@ -39,13 +88,13 @@ func (q *Queries) AcceptInvitation(ctx context.Context, id pgtype.UUID) (Workspa
 const createInvitation = `-- name: CreateInvitation :one
 INSERT INTO workspace_invitation (workspace_id, inviter_id, invitee_email, invitee_user_id, role)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at
+RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invite_type, token_hash, max_uses, used_count, revoked_at, last_used_at, created_by_ip, created_by_user_agent
 `
 
 type CreateInvitationParams struct {
 	WorkspaceID   pgtype.UUID `json:"workspace_id"`
 	InviterID     pgtype.UUID `json:"inviter_id"`
-	InviteeEmail  string      `json:"invitee_email"`
+	InviteeEmail  pgtype.Text `json:"invitee_email"`
 	InviteeUserID pgtype.UUID `json:"invitee_user_id"`
 	Role          string      `json:"role"`
 }
@@ -70,6 +119,76 @@ func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ExpiresAt,
+		&i.InviteType,
+		&i.TokenHash,
+		&i.MaxUses,
+		&i.UsedCount,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.CreatedByIp,
+		&i.CreatedByUserAgent,
+	)
+	return i, err
+}
+
+const createInviteLink = `-- name: CreateInviteLink :one
+INSERT INTO workspace_invitation (
+    workspace_id,
+    inviter_id,
+    invite_type,
+    token_hash,
+    role,
+    expires_at,
+    max_uses,
+    created_by_ip,
+    created_by_user_agent
+)
+VALUES ($1, $2, 'link', $3, $4, $5, $6, $7, $8)
+RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invite_type, token_hash, max_uses, used_count, revoked_at, last_used_at, created_by_ip, created_by_user_agent
+`
+
+type CreateInviteLinkParams struct {
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	InviterID          pgtype.UUID        `json:"inviter_id"`
+	TokenHash          pgtype.Text        `json:"token_hash"`
+	Role               string             `json:"role"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	MaxUses            int32              `json:"max_uses"`
+	CreatedByIp        pgtype.Text        `json:"created_by_ip"`
+	CreatedByUserAgent pgtype.Text        `json:"created_by_user_agent"`
+}
+
+func (q *Queries) CreateInviteLink(ctx context.Context, arg CreateInviteLinkParams) (WorkspaceInvitation, error) {
+	row := q.db.QueryRow(ctx, createInviteLink,
+		arg.WorkspaceID,
+		arg.InviterID,
+		arg.TokenHash,
+		arg.Role,
+		arg.ExpiresAt,
+		arg.MaxUses,
+		arg.CreatedByIp,
+		arg.CreatedByUserAgent,
+	)
+	var i WorkspaceInvitation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.InviterID,
+		&i.InviteeEmail,
+		&i.InviteeUserID,
+		&i.Role,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+		&i.InviteType,
+		&i.TokenHash,
+		&i.MaxUses,
+		&i.UsedCount,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.CreatedByIp,
+		&i.CreatedByUserAgent,
 	)
 	return i, err
 }
@@ -78,7 +197,7 @@ const declineInvitation = `-- name: DeclineInvitation :one
 UPDATE workspace_invitation
 SET status = 'declined', updated_at = now()
 WHERE id = $1 AND status = 'pending'
-RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at
+RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invite_type, token_hash, max_uses, used_count, revoked_at, last_used_at, created_by_ip, created_by_user_agent
 `
 
 func (q *Queries) DeclineInvitation(ctx context.Context, id pgtype.UUID) (WorkspaceInvitation, error) {
@@ -95,12 +214,58 @@ func (q *Queries) DeclineInvitation(ctx context.Context, id pgtype.UUID) (Worksp
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ExpiresAt,
+		&i.InviteType,
+		&i.TokenHash,
+		&i.MaxUses,
+		&i.UsedCount,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.CreatedByIp,
+		&i.CreatedByUserAgent,
 	)
 	return i, err
 }
 
+const deleteInviteLink = `-- name: DeleteInviteLink :exec
+DELETE FROM workspace_invitation
+WHERE id = $1 AND workspace_id = $2 AND invite_type = 'link'
+`
+
+type DeleteInviteLinkParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteInviteLink(ctx context.Context, arg DeleteInviteLinkParams) error {
+	_, err := q.db.Exec(ctx, deleteInviteLink, arg.ID, arg.WorkspaceID)
+	return err
+}
+
+const expireStalePendingInvitations = `-- name: ExpireStalePendingInvitations :exec
+UPDATE workspace_invitation
+SET status = 'expired', updated_at = now()
+WHERE workspace_id = $1
+  AND invitee_email = $2
+  AND status = 'pending'
+  AND expires_at <= now()
+`
+
+type ExpireStalePendingInvitationsParams struct {
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	InviteeEmail pgtype.Text `json:"invitee_email"`
+}
+
+// Mark any past-due pending invitations for (workspace_id, invitee_email) as expired,
+// so the next CreateInvitation does not collide with the partial unique index
+// idx_invitation_unique_pending (which is WHERE status = 'pending' and cannot
+// itself reference now() in its predicate).
+func (q *Queries) ExpireStalePendingInvitations(ctx context.Context, arg ExpireStalePendingInvitationsParams) error {
+	_, err := q.db.Exec(ctx, expireStalePendingInvitations, arg.WorkspaceID, arg.InviteeEmail)
+	return err
+}
+
 const getInvitation = `-- name: GetInvitation :one
-SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at FROM workspace_invitation
+SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invite_type, token_hash, max_uses, used_count, revoked_at, last_used_at, created_by_ip, created_by_user_agent FROM workspace_invitation
 WHERE id = $1
 `
 
@@ -118,18 +283,218 @@ func (q *Queries) GetInvitation(ctx context.Context, id pgtype.UUID) (WorkspaceI
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ExpiresAt,
+		&i.InviteType,
+		&i.TokenHash,
+		&i.MaxUses,
+		&i.UsedCount,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.CreatedByIp,
+		&i.CreatedByUserAgent,
+	)
+	return i, err
+}
+
+const getInviteLinkByID = `-- name: GetInviteLinkByID :one
+SELECT wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_id, wi.role, wi.status, wi.created_at, wi.updated_at, wi.expires_at, wi.invite_type, wi.token_hash, wi.max_uses, wi.used_count, wi.revoked_at, wi.last_used_at, wi.created_by_ip, wi.created_by_user_agent,
+       w.name AS workspace_name,
+       u.name AS inviter_name,
+       u.email AS inviter_email
+FROM workspace_invitation wi
+JOIN workspace w ON w.id = wi.workspace_id
+JOIN "user" u ON u.id = wi.inviter_id
+WHERE wi.invite_type = 'link' AND wi.id = $1
+`
+
+type GetInviteLinkByIDRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	InviterID          pgtype.UUID        `json:"inviter_id"`
+	InviteeEmail       pgtype.Text        `json:"invitee_email"`
+	InviteeUserID      pgtype.UUID        `json:"invitee_user_id"`
+	Role               string             `json:"role"`
+	Status             string             `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	InviteType         string             `json:"invite_type"`
+	TokenHash          pgtype.Text        `json:"token_hash"`
+	MaxUses            int32              `json:"max_uses"`
+	UsedCount          int32              `json:"used_count"`
+	RevokedAt          pgtype.Timestamptz `json:"revoked_at"`
+	LastUsedAt         pgtype.Timestamptz `json:"last_used_at"`
+	CreatedByIp        pgtype.Text        `json:"created_by_ip"`
+	CreatedByUserAgent pgtype.Text        `json:"created_by_user_agent"`
+	WorkspaceName      string             `json:"workspace_name"`
+	InviterName        string             `json:"inviter_name"`
+	InviterEmail       string             `json:"inviter_email"`
+}
+
+func (q *Queries) GetInviteLinkByID(ctx context.Context, id pgtype.UUID) (GetInviteLinkByIDRow, error) {
+	row := q.db.QueryRow(ctx, getInviteLinkByID, id)
+	var i GetInviteLinkByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.InviterID,
+		&i.InviteeEmail,
+		&i.InviteeUserID,
+		&i.Role,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+		&i.InviteType,
+		&i.TokenHash,
+		&i.MaxUses,
+		&i.UsedCount,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.CreatedByIp,
+		&i.CreatedByUserAgent,
+		&i.WorkspaceName,
+		&i.InviterName,
+		&i.InviterEmail,
+	)
+	return i, err
+}
+
+const getInviteLinkByIDForUpdate = `-- name: GetInviteLinkByIDForUpdate :one
+SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invite_type, token_hash, max_uses, used_count, revoked_at, last_used_at, created_by_ip, created_by_user_agent FROM workspace_invitation
+WHERE invite_type = 'link' AND id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetInviteLinkByIDForUpdate(ctx context.Context, id pgtype.UUID) (WorkspaceInvitation, error) {
+	row := q.db.QueryRow(ctx, getInviteLinkByIDForUpdate, id)
+	var i WorkspaceInvitation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.InviterID,
+		&i.InviteeEmail,
+		&i.InviteeUserID,
+		&i.Role,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+		&i.InviteType,
+		&i.TokenHash,
+		&i.MaxUses,
+		&i.UsedCount,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.CreatedByIp,
+		&i.CreatedByUserAgent,
+	)
+	return i, err
+}
+
+const getInviteLinkByTokenHash = `-- name: GetInviteLinkByTokenHash :one
+SELECT wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_id, wi.role, wi.status, wi.created_at, wi.updated_at, wi.expires_at, wi.invite_type, wi.token_hash, wi.max_uses, wi.used_count, wi.revoked_at, wi.last_used_at, wi.created_by_ip, wi.created_by_user_agent,
+       w.name AS workspace_name,
+       u.name AS inviter_name,
+       u.email AS inviter_email
+FROM workspace_invitation wi
+JOIN workspace w ON w.id = wi.workspace_id
+JOIN "user" u ON u.id = wi.inviter_id
+WHERE wi.invite_type = 'link' AND wi.token_hash = $1
+`
+
+type GetInviteLinkByTokenHashRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	InviterID          pgtype.UUID        `json:"inviter_id"`
+	InviteeEmail       pgtype.Text        `json:"invitee_email"`
+	InviteeUserID      pgtype.UUID        `json:"invitee_user_id"`
+	Role               string             `json:"role"`
+	Status             string             `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	InviteType         string             `json:"invite_type"`
+	TokenHash          pgtype.Text        `json:"token_hash"`
+	MaxUses            int32              `json:"max_uses"`
+	UsedCount          int32              `json:"used_count"`
+	RevokedAt          pgtype.Timestamptz `json:"revoked_at"`
+	LastUsedAt         pgtype.Timestamptz `json:"last_used_at"`
+	CreatedByIp        pgtype.Text        `json:"created_by_ip"`
+	CreatedByUserAgent pgtype.Text        `json:"created_by_user_agent"`
+	WorkspaceName      string             `json:"workspace_name"`
+	InviterName        string             `json:"inviter_name"`
+	InviterEmail       string             `json:"inviter_email"`
+}
+
+func (q *Queries) GetInviteLinkByTokenHash(ctx context.Context, tokenHash pgtype.Text) (GetInviteLinkByTokenHashRow, error) {
+	row := q.db.QueryRow(ctx, getInviteLinkByTokenHash, tokenHash)
+	var i GetInviteLinkByTokenHashRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.InviterID,
+		&i.InviteeEmail,
+		&i.InviteeUserID,
+		&i.Role,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+		&i.InviteType,
+		&i.TokenHash,
+		&i.MaxUses,
+		&i.UsedCount,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.CreatedByIp,
+		&i.CreatedByUserAgent,
+		&i.WorkspaceName,
+		&i.InviterName,
+		&i.InviterEmail,
+	)
+	return i, err
+}
+
+const getInviteLinkByTokenHashForUpdate = `-- name: GetInviteLinkByTokenHashForUpdate :one
+SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invite_type, token_hash, max_uses, used_count, revoked_at, last_used_at, created_by_ip, created_by_user_agent FROM workspace_invitation
+WHERE invite_type = 'link' AND token_hash = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetInviteLinkByTokenHashForUpdate(ctx context.Context, tokenHash pgtype.Text) (WorkspaceInvitation, error) {
+	row := q.db.QueryRow(ctx, getInviteLinkByTokenHashForUpdate, tokenHash)
+	var i WorkspaceInvitation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.InviterID,
+		&i.InviteeEmail,
+		&i.InviteeUserID,
+		&i.Role,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+		&i.InviteType,
+		&i.TokenHash,
+		&i.MaxUses,
+		&i.UsedCount,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.CreatedByIp,
+		&i.CreatedByUserAgent,
 	)
 	return i, err
 }
 
 const getPendingInvitationByEmail = `-- name: GetPendingInvitationByEmail :one
-SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at FROM workspace_invitation
-WHERE workspace_id = $1 AND invitee_email = $2 AND status = 'pending'
+SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invite_type, token_hash, max_uses, used_count, revoked_at, last_used_at, created_by_ip, created_by_user_agent FROM workspace_invitation
+WHERE workspace_id = $1 AND invite_type = 'email' AND invitee_email = $2 AND status = 'pending' AND expires_at > now()
 `
 
 type GetPendingInvitationByEmailParams struct {
 	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	InviteeEmail string      `json:"invitee_email"`
+	InviteeEmail pgtype.Text `json:"invitee_email"`
 }
 
 func (q *Queries) GetPendingInvitationByEmail(ctx context.Context, arg GetPendingInvitationByEmailParams) (WorkspaceInvitation, error) {
@@ -146,33 +511,123 @@ func (q *Queries) GetPendingInvitationByEmail(ctx context.Context, arg GetPendin
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ExpiresAt,
+		&i.InviteType,
+		&i.TokenHash,
+		&i.MaxUses,
+		&i.UsedCount,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.CreatedByIp,
+		&i.CreatedByUserAgent,
 	)
 	return i, err
 }
 
+const listInviteLinksByWorkspace = `-- name: ListInviteLinksByWorkspace :many
+SELECT wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_id, wi.role, wi.status, wi.created_at, wi.updated_at, wi.expires_at, wi.invite_type, wi.token_hash, wi.max_uses, wi.used_count, wi.revoked_at, wi.last_used_at, wi.created_by_ip, wi.created_by_user_agent,
+       u.name AS inviter_name,
+       u.email AS inviter_email
+FROM workspace_invitation wi
+JOIN "user" u ON u.id = wi.inviter_id
+WHERE wi.workspace_id = $1 AND wi.invite_type = 'link'
+ORDER BY wi.created_at DESC
+`
+
+type ListInviteLinksByWorkspaceRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	InviterID          pgtype.UUID        `json:"inviter_id"`
+	InviteeEmail       pgtype.Text        `json:"invitee_email"`
+	InviteeUserID      pgtype.UUID        `json:"invitee_user_id"`
+	Role               string             `json:"role"`
+	Status             string             `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	InviteType         string             `json:"invite_type"`
+	TokenHash          pgtype.Text        `json:"token_hash"`
+	MaxUses            int32              `json:"max_uses"`
+	UsedCount          int32              `json:"used_count"`
+	RevokedAt          pgtype.Timestamptz `json:"revoked_at"`
+	LastUsedAt         pgtype.Timestamptz `json:"last_used_at"`
+	CreatedByIp        pgtype.Text        `json:"created_by_ip"`
+	CreatedByUserAgent pgtype.Text        `json:"created_by_user_agent"`
+	InviterName        string             `json:"inviter_name"`
+	InviterEmail       string             `json:"inviter_email"`
+}
+
+func (q *Queries) ListInviteLinksByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListInviteLinksByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listInviteLinksByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListInviteLinksByWorkspaceRow{}
+	for rows.Next() {
+		var i ListInviteLinksByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.InviterID,
+			&i.InviteeEmail,
+			&i.InviteeUserID,
+			&i.Role,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ExpiresAt,
+			&i.InviteType,
+			&i.TokenHash,
+			&i.MaxUses,
+			&i.UsedCount,
+			&i.RevokedAt,
+			&i.LastUsedAt,
+			&i.CreatedByIp,
+			&i.CreatedByUserAgent,
+			&i.InviterName,
+			&i.InviterEmail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingInvitationsByWorkspace = `-- name: ListPendingInvitationsByWorkspace :many
-SELECT wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_id, wi.role, wi.status, wi.created_at, wi.updated_at, wi.expires_at,
+SELECT wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_id, wi.role, wi.status, wi.created_at, wi.updated_at, wi.expires_at, wi.invite_type, wi.token_hash, wi.max_uses, wi.used_count, wi.revoked_at, wi.last_used_at, wi.created_by_ip, wi.created_by_user_agent,
        u.name  AS inviter_name,
        u.email AS inviter_email
 FROM workspace_invitation wi
 JOIN "user" u ON u.id = wi.inviter_id
-WHERE wi.workspace_id = $1 AND wi.status = 'pending' AND wi.expires_at > now()
+WHERE wi.workspace_id = $1 AND wi.invite_type = 'email' AND wi.status = 'pending' AND wi.expires_at > now()
 ORDER BY wi.created_at DESC
 `
 
 type ListPendingInvitationsByWorkspaceRow struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	InviterID     pgtype.UUID        `json:"inviter_id"`
-	InviteeEmail  string             `json:"invitee_email"`
-	InviteeUserID pgtype.UUID        `json:"invitee_user_id"`
-	Role          string             `json:"role"`
-	Status        string             `json:"status"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
-	InviterName   string             `json:"inviter_name"`
-	InviterEmail  string             `json:"inviter_email"`
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	InviterID          pgtype.UUID        `json:"inviter_id"`
+	InviteeEmail       pgtype.Text        `json:"invitee_email"`
+	InviteeUserID      pgtype.UUID        `json:"invitee_user_id"`
+	Role               string             `json:"role"`
+	Status             string             `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	InviteType         string             `json:"invite_type"`
+	TokenHash          pgtype.Text        `json:"token_hash"`
+	MaxUses            int32              `json:"max_uses"`
+	UsedCount          int32              `json:"used_count"`
+	RevokedAt          pgtype.Timestamptz `json:"revoked_at"`
+	LastUsedAt         pgtype.Timestamptz `json:"last_used_at"`
+	CreatedByIp        pgtype.Text        `json:"created_by_ip"`
+	CreatedByUserAgent pgtype.Text        `json:"created_by_user_agent"`
+	InviterName        string             `json:"inviter_name"`
+	InviterEmail       string             `json:"inviter_email"`
 }
 
 func (q *Queries) ListPendingInvitationsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingInvitationsByWorkspaceRow, error) {
@@ -195,6 +650,14 @@ func (q *Queries) ListPendingInvitationsByWorkspace(ctx context.Context, workspa
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ExpiresAt,
+			&i.InviteType,
+			&i.TokenHash,
+			&i.MaxUses,
+			&i.UsedCount,
+			&i.RevokedAt,
+			&i.LastUsedAt,
+			&i.CreatedByIp,
+			&i.CreatedByUserAgent,
 			&i.InviterName,
 			&i.InviterEmail,
 		); err != nil {
@@ -209,14 +672,14 @@ func (q *Queries) ListPendingInvitationsByWorkspace(ctx context.Context, workspa
 }
 
 const listPendingInvitationsForUser = `-- name: ListPendingInvitationsForUser :many
-SELECT wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_id, wi.role, wi.status, wi.created_at, wi.updated_at, wi.expires_at,
+SELECT wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_id, wi.role, wi.status, wi.created_at, wi.updated_at, wi.expires_at, wi.invite_type, wi.token_hash, wi.max_uses, wi.used_count, wi.revoked_at, wi.last_used_at, wi.created_by_ip, wi.created_by_user_agent,
        w.name AS workspace_name,
        u.name AS inviter_name,
        u.email AS inviter_email
 FROM workspace_invitation wi
 JOIN workspace w ON w.id = wi.workspace_id
 JOIN "user" u ON u.id = wi.inviter_id
-WHERE wi.status = 'pending'
+WHERE wi.invite_type = 'email' AND wi.status = 'pending'
   AND (wi.invitee_user_id = $1 OR wi.invitee_email = $2)
   AND wi.expires_at > now()
 ORDER BY wi.created_at DESC
@@ -224,23 +687,31 @@ ORDER BY wi.created_at DESC
 
 type ListPendingInvitationsForUserParams struct {
 	InviteeUserID pgtype.UUID `json:"invitee_user_id"`
-	InviteeEmail  string      `json:"invitee_email"`
+	InviteeEmail  pgtype.Text `json:"invitee_email"`
 }
 
 type ListPendingInvitationsForUserRow struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	InviterID     pgtype.UUID        `json:"inviter_id"`
-	InviteeEmail  string             `json:"invitee_email"`
-	InviteeUserID pgtype.UUID        `json:"invitee_user_id"`
-	Role          string             `json:"role"`
-	Status        string             `json:"status"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
-	WorkspaceName string             `json:"workspace_name"`
-	InviterName   string             `json:"inviter_name"`
-	InviterEmail  string             `json:"inviter_email"`
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	InviterID          pgtype.UUID        `json:"inviter_id"`
+	InviteeEmail       pgtype.Text        `json:"invitee_email"`
+	InviteeUserID      pgtype.UUID        `json:"invitee_user_id"`
+	Role               string             `json:"role"`
+	Status             string             `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	InviteType         string             `json:"invite_type"`
+	TokenHash          pgtype.Text        `json:"token_hash"`
+	MaxUses            int32              `json:"max_uses"`
+	UsedCount          int32              `json:"used_count"`
+	RevokedAt          pgtype.Timestamptz `json:"revoked_at"`
+	LastUsedAt         pgtype.Timestamptz `json:"last_used_at"`
+	CreatedByIp        pgtype.Text        `json:"created_by_ip"`
+	CreatedByUserAgent pgtype.Text        `json:"created_by_user_agent"`
+	WorkspaceName      string             `json:"workspace_name"`
+	InviterName        string             `json:"inviter_name"`
+	InviterEmail       string             `json:"inviter_email"`
 }
 
 func (q *Queries) ListPendingInvitationsForUser(ctx context.Context, arg ListPendingInvitationsForUserParams) ([]ListPendingInvitationsForUserRow, error) {
@@ -263,6 +734,14 @@ func (q *Queries) ListPendingInvitationsForUser(ctx context.Context, arg ListPen
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ExpiresAt,
+			&i.InviteType,
+			&i.TokenHash,
+			&i.MaxUses,
+			&i.UsedCount,
+			&i.RevokedAt,
+			&i.LastUsedAt,
+			&i.CreatedByIp,
+			&i.CreatedByUserAgent,
 			&i.WorkspaceName,
 			&i.InviterName,
 			&i.InviterEmail,
@@ -285,4 +764,42 @@ WHERE id = $1 AND status = 'pending'
 func (q *Queries) RevokeInvitation(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, revokeInvitation, id)
 	return err
+}
+
+const revokeInviteLink = `-- name: RevokeInviteLink :one
+UPDATE workspace_invitation
+SET status = 'expired', revoked_at = now(), updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND invite_type = 'link' AND revoked_at IS NULL
+RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invite_type, token_hash, max_uses, used_count, revoked_at, last_used_at, created_by_ip, created_by_user_agent
+`
+
+type RevokeInviteLinkParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) RevokeInviteLink(ctx context.Context, arg RevokeInviteLinkParams) (WorkspaceInvitation, error) {
+	row := q.db.QueryRow(ctx, revokeInviteLink, arg.ID, arg.WorkspaceID)
+	var i WorkspaceInvitation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.InviterID,
+		&i.InviteeEmail,
+		&i.InviteeUserID,
+		&i.Role,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+		&i.InviteType,
+		&i.TokenHash,
+		&i.MaxUses,
+		&i.UsedCount,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.CreatedByIp,
+		&i.CreatedByUserAgent,
+	)
+	return i, err
 }

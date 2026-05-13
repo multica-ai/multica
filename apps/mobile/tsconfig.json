@@ -1,0 +1,10 @@
+{
+  "extends": "@multica/tsconfig/react-library.json",
+  "compilerOptions": {
+    "jsx": "react-native",
+    "allowJs": true,
+    "noEmit": true,
+    "types": ["react"]
+  },
+  "include": ["index.ts", "src/**/*.ts", "src/**/*.tsx"]
+}

@@ -98,28 +98,37 @@ func (q *Queries) ClaimDueScheduleTriggers(ctx context.Context) ([]ClaimDueSched
 	return items, nil
 }
 
+const countAutopilotRuns = `-- name: CountAutopilotRuns :one
+SELECT count(*) FROM autopilot_run WHERE autopilot_id = $1
+`
+
+func (q *Queries) CountAutopilotRuns(ctx context.Context, autopilotID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countAutopilotRuns, autopilotID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAutopilot = `-- name: CreateAutopilot :one
 INSERT INTO autopilot (
-    workspace_id, project_id, title, description, assignee_id,
-    priority, status, execution_mode, issue_title_template,
+    workspace_id, title, description, assignee_id,
+    status, execution_mode, issue_title_template,
     created_by_type, created_by_id
 ) VALUES (
-    $1, $9, $2, $10, $3,
-    $4, $5, $6, $11,
-    $7, $8
-) RETURNING id, workspace_id, project_id, title, description, assignee_id, priority, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at
+    $1, $2, $8, $3,
+    $4, $5, $9,
+    $6, $7
+) RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at
 `
 
 type CreateAutopilotParams struct {
 	WorkspaceID        pgtype.UUID `json:"workspace_id"`
 	Title              string      `json:"title"`
 	AssigneeID         pgtype.UUID `json:"assignee_id"`
-	Priority           string      `json:"priority"`
 	Status             string      `json:"status"`
 	ExecutionMode      string      `json:"execution_mode"`
 	CreatedByType      string      `json:"created_by_type"`
 	CreatedByID        pgtype.UUID `json:"created_by_id"`
-	ProjectID          pgtype.UUID `json:"project_id"`
 	Description        pgtype.Text `json:"description"`
 	IssueTitleTemplate pgtype.Text `json:"issue_title_template"`
 }
@@ -129,12 +138,10 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 		arg.WorkspaceID,
 		arg.Title,
 		arg.AssigneeID,
-		arg.Priority,
 		arg.Status,
 		arg.ExecutionMode,
 		arg.CreatedByType,
 		arg.CreatedByID,
-		arg.ProjectID,
 		arg.Description,
 		arg.IssueTitleTemplate,
 	)
@@ -142,11 +149,9 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
-		&i.ProjectID,
 		&i.Title,
 		&i.Description,
 		&i.AssigneeID,
-		&i.Priority,
 		&i.Status,
 		&i.ExecutionMode,
 		&i.IssueTitleTemplate,
@@ -208,16 +213,24 @@ func (q *Queries) CreateAutopilotRun(ctx context.Context, arg CreateAutopilotRun
 
 const createAutopilotTask = `-- name: CreateAutopilotTask :one
 
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id)
-VALUES ($1, $2, NULL, 'queued', $3, $4)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, autopilot_run_id,
+    trigger_source, trigger_actor_type, trigger_actor_id,
+    trigger_summary
+)
+VALUES ($1, $2, NULL, 'queued', $3, $4, $5, $6, $7, $8)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_source, trigger_actor_type, trigger_actor_id, trigger_summary, force_fresh_session
 `
 
 type CreateAutopilotTaskParams struct {
-	AgentID        pgtype.UUID `json:"agent_id"`
-	RuntimeID      pgtype.UUID `json:"runtime_id"`
-	Priority       int32       `json:"priority"`
-	AutopilotRunID pgtype.UUID `json:"autopilot_run_id"`
+	AgentID          pgtype.UUID `json:"agent_id"`
+	RuntimeID        pgtype.UUID `json:"runtime_id"`
+	Priority         int32       `json:"priority"`
+	AutopilotRunID   pgtype.UUID `json:"autopilot_run_id"`
+	TriggerSource    pgtype.Text `json:"trigger_source"`
+	TriggerActorType pgtype.Text `json:"trigger_actor_type"`
+	TriggerActorID   pgtype.UUID `json:"trigger_actor_id"`
+	TriggerSummary   pgtype.Text `json:"trigger_summary"`
 }
 
 // =====================
@@ -229,6 +242,10 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		arg.RuntimeID,
 		arg.Priority,
 		arg.AutopilotRunID,
+		arg.TriggerSource,
+		arg.TriggerActorType,
+		arg.TriggerActorID,
+		arg.TriggerSummary,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -250,6 +267,15 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		&i.TriggerCommentID,
 		&i.ChatSessionID,
 		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSource,
+		&i.TriggerActorType,
+		&i.TriggerActorID,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
 	)
 	return i, err
 }
@@ -337,7 +363,7 @@ func (q *Queries) FailAutopilotRunsByIssue(ctx context.Context, issueID pgtype.U
 }
 
 const getAutopilot = `-- name: GetAutopilot :one
-SELECT id, workspace_id, project_id, title, description, assignee_id, priority, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at FROM autopilot
 WHERE id = $1
 `
 
@@ -347,11 +373,9 @@ func (q *Queries) GetAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, 
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
-		&i.ProjectID,
 		&i.Title,
 		&i.Description,
 		&i.AssigneeID,
-		&i.Priority,
 		&i.Status,
 		&i.ExecutionMode,
 		&i.IssueTitleTemplate,
@@ -365,7 +389,7 @@ func (q *Queries) GetAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, 
 }
 
 const getAutopilotInWorkspace = `-- name: GetAutopilotInWorkspace :one
-SELECT id, workspace_id, project_id, title, description, assignee_id, priority, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at FROM autopilot
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -380,11 +404,9 @@ func (q *Queries) GetAutopilotInWorkspace(ctx context.Context, arg GetAutopilotI
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
-		&i.ProjectID,
 		&i.Title,
 		&i.Description,
 		&i.AssigneeID,
-		&i.Priority,
 		&i.Status,
 		&i.ExecutionMode,
 		&i.IssueTitleTemplate,
@@ -571,7 +593,7 @@ func (q *Queries) ListAutopilotTriggers(ctx context.Context, autopilotID pgtype.
 
 const listAutopilots = `-- name: ListAutopilots :many
 
-SELECT id, workspace_id, project_id, title, description, assignee_id, priority, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at FROM autopilot
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
 ORDER BY created_at DESC
@@ -597,11 +619,9 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
-			&i.ProjectID,
 			&i.Title,
 			&i.Description,
 			&i.AssigneeID,
-			&i.Priority,
 			&i.Status,
 			&i.ExecutionMode,
 			&i.IssueTitleTemplate,
@@ -689,19 +709,131 @@ func (q *Queries) RecoverLostTriggers(ctx context.Context) ([]RecoverLostTrigger
 	return items, nil
 }
 
+const selectAutopilotsExceedingFailureThreshold = `-- name: SelectAutopilotsExceedingFailureThreshold :many
+
+WITH stats AS (
+    SELECT autopilot_id,
+           count(*) FILTER (WHERE status IN ('completed', 'failed')) AS total,
+           count(*) FILTER (WHERE status = 'failed') AS failed
+    FROM autopilot_run
+    WHERE created_at >= $3::timestamptz
+    GROUP BY autopilot_id
+)
+SELECT a.id, a.workspace_id, a.title, a.assignee_id,
+       a.created_by_type, a.created_by_id,
+       s.total::bigint  AS total_runs,
+       s.failed::bigint AS failed_runs
+FROM autopilot a
+JOIN stats s ON s.autopilot_id = a.id
+WHERE a.status = 'active'
+  AND s.total >= $1::bigint
+  AND s.failed::float8 / NULLIF(s.total, 0)::float8 >= $2::float8
+ORDER BY s.failed DESC, a.id ASC
+`
+
+type SelectAutopilotsExceedingFailureThresholdParams struct {
+	MinRuns            int64              `json:"min_runs"`
+	FailRatioThreshold float64            `json:"fail_ratio_threshold"`
+	Since              pgtype.Timestamptz `json:"since"`
+}
+
+type SelectAutopilotsExceedingFailureThresholdRow struct {
+	ID            pgtype.UUID `json:"id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	Title         string      `json:"title"`
+	AssigneeID    pgtype.UUID `json:"assignee_id"`
+	CreatedByType string      `json:"created_by_type"`
+	CreatedByID   pgtype.UUID `json:"created_by_id"`
+	TotalRuns     int64       `json:"total_runs"`
+	FailedRuns    int64       `json:"failed_runs"`
+}
+
+// =====================
+// Failure-rate auto-pause
+// =====================
+// Find active autopilots whose recent run failure rate exceeds the threshold.
+// Counts only "real" terminal runs (completed | failed). 'skipped' is
+// excluded from BOTH numerator and denominator: an admission-skipped run
+// (e.g. assignee runtime offline at dispatch time, MUL-1899) is neither a
+// success nor a failure, so it must not dilute the failure ratio (which
+// would let a 100%-failing autopilot mask itself behind a wall of skips)
+// nor inflate it. issue_created/running are still excluded so in-flight
+// work isn't penalised.
+// Used by the failure monitor to auto-pause sustained-failure autopilots
+// (the canonical example from MUL-1336 was an autopilot scheduled every 5 min
+// that 100% failed for days, burning ~1.5k useless tasks per week).
+func (q *Queries) SelectAutopilotsExceedingFailureThreshold(ctx context.Context, arg SelectAutopilotsExceedingFailureThresholdParams) ([]SelectAutopilotsExceedingFailureThresholdRow, error) {
+	rows, err := q.db.Query(ctx, selectAutopilotsExceedingFailureThreshold, arg.MinRuns, arg.FailRatioThreshold, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SelectAutopilotsExceedingFailureThresholdRow{}
+	for rows.Next() {
+		var i SelectAutopilotsExceedingFailureThresholdRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.AssigneeID,
+			&i.CreatedByType,
+			&i.CreatedByID,
+			&i.TotalRuns,
+			&i.FailedRuns,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const systemPauseAutopilot = `-- name: SystemPauseAutopilot :one
+UPDATE autopilot
+SET status = 'paused', updated_at = now()
+WHERE id = $1 AND status = 'active'
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at
+`
+
+// Atomically pauses an autopilot only if it is currently active. Returns no
+// rows when the autopilot was already paused/archived (or another worker
+// raced first), letting the caller treat that as a benign no-op rather than
+// an error.
+func (q *Queries) SystemPauseAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, error) {
+	row := q.db.QueryRow(ctx, systemPauseAutopilot, id)
+	var i Autopilot
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.AssigneeID,
+		&i.Status,
+		&i.ExecutionMode,
+		&i.IssueTitleTemplate,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.LastRunAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateAutopilot = `-- name: UpdateAutopilot :one
 UPDATE autopilot SET
     title = COALESCE($2, title),
     description = COALESCE($3, description),
     assignee_id = COALESCE($4::uuid, assignee_id),
-    project_id = $5,
-    priority = COALESCE($6, priority),
-    status = COALESCE($7, status),
-    execution_mode = COALESCE($8, execution_mode),
-    issue_title_template = $9,
+    status = COALESCE($5, status),
+    execution_mode = COALESCE($6, execution_mode),
+    issue_title_template = $7,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, project_id, title, description, assignee_id, priority, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at
 `
 
 type UpdateAutopilotParams struct {
@@ -709,8 +841,6 @@ type UpdateAutopilotParams struct {
 	Title              pgtype.Text `json:"title"`
 	Description        pgtype.Text `json:"description"`
 	AssigneeID         pgtype.UUID `json:"assignee_id"`
-	ProjectID          pgtype.UUID `json:"project_id"`
-	Priority           pgtype.Text `json:"priority"`
 	Status             pgtype.Text `json:"status"`
 	ExecutionMode      pgtype.Text `json:"execution_mode"`
 	IssueTitleTemplate pgtype.Text `json:"issue_title_template"`
@@ -722,8 +852,6 @@ func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams
 		arg.Title,
 		arg.Description,
 		arg.AssigneeID,
-		arg.ProjectID,
-		arg.Priority,
 		arg.Status,
 		arg.ExecutionMode,
 		arg.IssueTitleTemplate,
@@ -732,11 +860,9 @@ func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
-		&i.ProjectID,
 		&i.Title,
 		&i.Description,
 		&i.AssigneeID,
-		&i.Priority,
 		&i.Status,
 		&i.ExecutionMode,
 		&i.IssueTitleTemplate,
@@ -891,12 +1017,51 @@ func (q *Queries) UpdateAutopilotRunRunning(ctx context.Context, arg UpdateAutop
 	return i, err
 }
 
+const updateAutopilotRunSkipped = `-- name: UpdateAutopilotRunSkipped :one
+UPDATE autopilot_run
+SET status = 'skipped', completed_at = now(), failure_reason = $2
+WHERE id = $1
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at
+`
+
+type UpdateAutopilotRunSkippedParams struct {
+	ID            pgtype.UUID `json:"id"`
+	FailureReason pgtype.Text `json:"failure_reason"`
+}
+
+// Marks an autopilot_run as skipped without enqueueing any task. Used by the
+// pre-flight admission check when the assignee agent's runtime is offline:
+// creating an issue / task in that state would just pile a doomed job onto
+// agent_task_queue (the canonical "持续给离线 local agent 入队" symptom from
+// MUL-1899). Recording the skip + reason gives the UI / failure monitor / ops
+// a paper trail without polluting the failure ratio.
+func (q *Queries) UpdateAutopilotRunSkipped(ctx context.Context, arg UpdateAutopilotRunSkippedParams) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, updateAutopilotRunSkipped, arg.ID, arg.FailureReason)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const updateAutopilotTrigger = `-- name: UpdateAutopilotTrigger :one
 UPDATE autopilot_trigger SET
     enabled = COALESCE($2::boolean, enabled),
     cron_expression = COALESCE($3, cron_expression),
     timezone = COALESCE($4, timezone),
-    next_run_at = $5,
+    next_run_at = COALESCE($5, next_run_at),
     label = COALESCE($6, label),
     updated_at = now()
 WHERE id = $1

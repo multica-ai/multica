@@ -15,6 +15,7 @@ import { workspaceKeys } from "../workspace/queries";
 import { createLogger } from "../logger";
 import { defaultStorage } from "./storage";
 import { setCurrentWorkspace } from "./workspace-storage";
+import type { ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
 import type { User } from "../types";
 
@@ -26,12 +27,16 @@ export function AuthInitializer({
   onLogout,
   storage = defaultStorage,
   cookieAuth,
+  fetchConfig = true,
+  identity,
 }: {
   children: ReactNode;
   onLogin?: () => void;
   onLogout?: () => void;
   storage?: StorageAdapter;
   cookieAuth?: boolean;
+  fetchConfig?: boolean;
+  identity?: ClientIdentity;
 }) {
   const qc = useQueryClient();
 
@@ -42,18 +47,29 @@ export function AuthInitializer({
     // reads this cookie, so it has to be present before the user hits submit.
     captureSignupSource();
 
-    // Fetch app config (CDN domain, PostHog key, …) in the background — non-blocking.
-    api
-      .getConfig()
-      .then((cfg) => {
-        if (cfg.cdn_domain) configStore.getState().setCdnDomain(cfg.cdn_domain);
-        if (cfg.posthog_key) {
-          initAnalytics({ key: cfg.posthog_key, host: cfg.posthog_host || "" });
-        }
-      })
-      .catch(() => {
-        /* config is optional — legacy file card matching degrades gracefully */
-      });
+    if (fetchConfig) {
+      // Fetch app config (CDN domain, PostHog key, …) in the background — non-blocking.
+      api
+        .getConfig()
+        .then((cfg) => {
+          if (cfg.cdn_domain) configStore.getState().setCdnDomain(cfg.cdn_domain);
+          configStore.getState().setAuthConfig({
+            allowSignup: cfg.allow_signup,
+            googleClientId: cfg.google_client_id,
+          });
+          if (cfg.posthog_key) {
+            initAnalytics({
+              key: cfg.posthog_key,
+              host: cfg.posthog_host || "",
+              appVersion: identity?.version,
+              environment: cfg.analytics_environment,
+            });
+          }
+        })
+        .catch(() => {
+          /* config is optional — legacy file card matching degrades gracefully */
+        });
+    }
 
     const onAuthSuccess = (user: User) => {
       onLogin?.();

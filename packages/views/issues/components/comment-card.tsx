@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
-import { ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, RotateCw, Trash2 } from "lucide-react";
+import { memo, useCallback, useRef, useState } from "react";
+import { CheckCircle2, ChevronRight, Copy, Download, FileText, Link2, MoreHorizontal, Pencil, RotateCcw, RotateCw, Trash2 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -37,9 +38,11 @@ import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { Agent } from "@multica/core/types/agent";
+import { useNavigation } from "../../navigation";
 import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
+import { useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,23 +51,42 @@ import { useCommentCollapseStore } from "@multica/core/issues/stores";
 interface CommentCardProps {
   issueId: string;
   entry: TimelineEntry;
-  allReplies: Map<string, TimelineEntry[]>;
-  /** All comment entries by id (for thread ancestry). */
+  /**
+   * Flat list of every nested reply under this thread root, in render order.
+   * Computed once in `issue-detail.tsx`'s `timelineView` and stabilized so
+   * the array reference only changes when *this* thread's replies change —
+   * an unrelated thread receiving a new reply must NOT bust this card's
+   * memo. Passing the full Map here used to do exactly that.
+   */
+  replies: TimelineEntry[];
   commentById: Map<string, TimelineEntry>;
   agents: Agent[];
-  isWorkspaceAdmin: boolean;
-  /** False when issue is done or cancelled — hides Retry on agent replies. */
   issueOpen: boolean;
   currentUserId?: string;
+  /**
+   * True when the current user is a workspace owner/admin and can therefore
+   * moderate comments authored by anyone — restoring the admin override that
+   * the backend already grants at `comment.go:507-512`. Computed once in
+   * `issue-detail.tsx` and threaded down so neither this component nor
+   * `CommentRow` has to rerun the rule per row.
+   */
+  canModerate?: boolean;
   onReply: (parentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onEdit: (commentId: string, content: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
+  /** Toggle the resolved state on the thread root. Only invoked for root entries. */
+  onResolveToggle?: (commentId: string, resolved: boolean) => void;
+  /**
+   * When non-null, the thread root is currently rendered as a resolved-but-
+   * expanded card. Pass a "Collapse" affordance into the header so the user
+   * can fold the thread back to the bar; the parent owns the session state.
+   */
+  onCollapseResolved?: () => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
 }
 
-/** Walk parent_id until a member-authored comment (for issue-thread agent retry permissions). */
 function findMemberAncestorComment(
   entry: TimelineEntry,
   commentById: Map<string, TimelineEntry>,
@@ -78,6 +100,15 @@ function findMemberAncestorComment(
     cur = commentById.get(cur.parent_id);
   }
   return null;
+}
+
+/** Any comment authored by an agent — used to gate the Retry action.
+ *  The backend RetryAgentComment handler only requires author_type=agent,
+ *  so the frontend should match. The previous isTaskRunSystemComment check
+ *  (comment_type==="system") was too narrow: normal agent output also needs
+ *  the Retry affordance. */
+function isAgentComment(entry: TimelineEntry): boolean {
+  return entry.type === "comment" && entry.actor_type === "agent";
 }
 
 // ---------------------------------------------------------------------------
@@ -95,21 +126,22 @@ function DeleteCommentDialog({
   onConfirm: () => void;
   hasReplies?: boolean;
 }) {
+  const { t } = useT("issues");
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete comment</AlertDialogTitle>
+          <AlertDialogTitle>{t(($) => $.comment.delete_title)}</AlertDialogTitle>
           <AlertDialogDescription>
             {hasReplies
-              ? "This comment and all its replies will be permanently deleted. This cannot be undone."
-              : "This comment will be permanently deleted. This cannot be undone."}
+              ? t(($) => $.comment.delete_desc_with_replies)
+              : t(($) => $.comment.delete_desc)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{t(($) => $.comment.cancel_action)}</AlertDialogCancel>
           <AlertDialogAction variant="destructive" onClick={onConfirm}>
-            Delete
+            {t(($) => $.comment.delete_action)}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -170,6 +202,44 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
   );
 }
 
+function useCopyCommentLink(issueId: string) {
+  const { t } = useT("issues");
+  const paths = useWorkspacePaths();
+  const navigation = useNavigation();
+
+  return useCallback(async (commentId: string) => {
+    const path = paths.issueDetail(issueId, { commentId });
+    const url = navigation.getShareableUrl
+      ? navigation.getShareableUrl(path)
+      : typeof window !== "undefined"
+        ? window.location.origin + path
+        : path;
+
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success(t(($) => $.detail.link_copied));
+    } catch {
+      toast.error(t(($) => $.detail.link_copy_failed));
+    }
+  }, [issueId, navigation, paths, t]);
+}
+
+function useRetryAgentComment(issueId: string, commentId: string) {
+  const { t } = useT("issues");
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.retryAgentComment(commentId),
+    onSuccess: () => {
+      toast.success(t(($) => $.comment.retry_success));
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : t(($) => $.comment.retry_failed));
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Single comment row (used for both parent and replies within the same Card)
 // ---------------------------------------------------------------------------
@@ -179,9 +249,9 @@ function CommentRow({
   entry,
   commentById,
   agents,
-  isWorkspaceAdmin,
   issueOpen,
   currentUserId,
+  canModerate = false,
   onEdit,
   onDelete,
   onToggleReaction,
@@ -190,32 +260,33 @@ function CommentRow({
   entry: TimelineEntry;
   commentById: Map<string, TimelineEntry>;
   agents: Agent[];
-  isWorkspaceAdmin: boolean;
   issueOpen: boolean;
   currentUserId?: string;
+  canModerate?: boolean;
   onEdit: (commentId: string, content: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
 }) {
+  const { t } = useT("issues");
   const { getActorName } = useActorName();
-  const qc = useQueryClient();
+  const copyCommentLink = useCopyCommentLink(issueId);
   const [editing, setEditing] = useState(false);
   const editEditorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
-  const { uploadWithToast } = useFileUpload(api);
+  const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editEditorRef.current?.uploadFile(f)),
     enabled: editing,
   });
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
+  const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
+  const canDeleteEntry = isOwn || canModerate;
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [confirmAgentDelete, setConfirmAgentDelete] = useState(false);
-
-  const agentMeta = entry.actor_type === "agent" ? agents.find((a) => a.id === entry.actor_id) : undefined;
-  const memberAncestor =
-    entry.actor_type === "agent" ? findMemberAncestorComment(entry, commentById) : null;
+  const isAgent = isAgentComment(entry);
+  const agentMeta = isAgent ? agents.find((agent) => agent.id === entry.actor_id) : undefined;
+  const memberAncestor = isAgent ? findMemberAncestorComment(entry, commentById) : null;
   const isAgentOwner = !!(agentMeta?.owner_id && currentUserId && agentMeta.owner_id === currentUserId);
   const isTriggerMember = !!(
     memberAncestor &&
@@ -223,21 +294,12 @@ function CommentRow({
     memberAncestor.actor_type === "member" &&
     memberAncestor.actor_id === currentUserId
   );
-  const canDeleteAgentReply = entry.actor_type === "agent" && !isTemp && (isWorkspaceAdmin || isAgentOwner);
-  const canRetryAgentReply =
-    entry.actor_type === "agent" && !isTemp && issueOpen && (isWorkspaceAdmin || isAgentOwner || isTriggerMember);
-
-  const retryAgentMut = useMutation({
-    mutationFn: () => api.retryAgentComment(entry.id),
-    onSuccess: () => {
-      toast.success("Agent run queued");
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
-    },
-    onError: (e: unknown) =>
-      toast.error(e instanceof Error ? e.message : "Failed to retry agent"),
-  });
-
-  const showAgentActionsFooter = canRetryAgentReply || canDeleteAgentReply;
+  const canRetryAgentComment =
+    isAgent &&
+    !isTemp &&
+    issueOpen &&
+    (canModerate || isAgentOwner || isTriggerMember);
+  const retryAgentComment = useRetryAgentComment(issueId, entry.id);
 
   const startEdit = () => {
     cancelledRef.current = false;
@@ -263,7 +325,7 @@ function CommentRow({
       await onEdit(entry.id, trimmed);
       setEditing(false);
     } catch {
-      toast.error("Failed to update comment");
+      toast.error(t(($) => $.comment.update_failed));
     }
   };
 
@@ -274,8 +336,8 @@ function CommentRow({
   return (
     <div className={`py-3${isTemp ? " opacity-60" : ""}`}>
       <div className="flex items-center gap-2.5">
-        <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} />
-        <span className="text-sm font-medium">
+        <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
+        <span className="cursor-pointer text-sm font-medium">
           {getActorName(entry.actor_type, entry.actor_id)}
         </span>
         <Tooltip>
@@ -308,39 +370,41 @@ function CommentRow({
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => {
                 copyMarkdown(entry.content ?? "");
-                toast.success("Copied");
+                toast.success(t(($) => $.comment.copied_toast));
               }}>
                 <Copy className="h-3.5 w-3.5" />
-                Copy
+                {t(($) => $.comment.copy_action)}
               </DropdownMenuItem>
-              {showAgentActionsFooter && <DropdownMenuSeparator />}
-              {canRetryAgentReply && (
+              <DropdownMenuItem onClick={() => { void copyCommentLink(entry.id); }}>
+                <Link2 className="h-3.5 w-3.5" />
+                {t(($) => $.actions.copy_link)}
+              </DropdownMenuItem>
+              {canRetryAgentComment && <DropdownMenuSeparator />}
+              {canRetryAgentComment && (
                 <DropdownMenuItem
-                  disabled={retryAgentMut.isPending}
-                  onClick={() => retryAgentMut.mutate()}
+                  disabled={retryAgentComment.isPending}
+                  onClick={() => retryAgentComment.mutate()}
                 >
                   <RotateCw className="h-3.5 w-3.5" />
-                  Retry
+                  {t(($) => $.comment.retry_action)}
                 </DropdownMenuItem>
               )}
-              {canDeleteAgentReply && (
-                <DropdownMenuItem variant="destructive" onClick={() => setConfirmAgentDelete(true)}>
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete
-                </DropdownMenuItem>
-              )}
-              {isOwn && (
+              {(canEditEntry || canDeleteEntry) && (
                 <>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={startEdit}>
-                    <Pencil className="h-3.5 w-3.5" />
-                    Edit
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
-                    <Trash2 className="h-3.5 w-3.5" />
-                    Delete
-                  </DropdownMenuItem>
+                  {canEditEntry && (
+                    <DropdownMenuItem onClick={startEdit}>
+                      <Pencil className="h-3.5 w-3.5" />
+                      {t(($) => $.comment.edit_action)}
+                    </DropdownMenuItem>
+                  )}
+                  {canEditEntry && canDeleteEntry && <DropdownMenuSeparator />}
+                  {canDeleteEntry && (
+                    <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
+                      <Trash2 className="h-3.5 w-3.5" />
+                      {t(($) => $.comment.delete_action)}
+                    </DropdownMenuItem>
+                  )}
                 </>
               )}
             </DropdownMenuContent>
@@ -348,11 +412,6 @@ function CommentRow({
           <DeleteCommentDialog
             open={confirmDelete}
             onOpenChange={setConfirmDelete}
-            onConfirm={() => onDelete(entry.id)}
-          />
-          <DeleteCommentDialog
-            open={confirmAgentDelete}
-            onOpenChange={setConfirmAgentDelete}
             onConfirm={() => onDelete(entry.id)}
           />
           </div>
@@ -369,7 +428,7 @@ function CommentRow({
             <ContentEditor
               ref={editEditorRef}
               defaultValue={entry.content ?? ""}
-              placeholder="Edit comment..."
+              placeholder={t(($) => $.comment.edit_placeholder)}
               onSubmit={saveEdit}
               onUploadFile={(file) => uploadWithToast(file, { issueId })}
               debounceMs={100}
@@ -382,8 +441,8 @@ function CommentRow({
               onSelect={(file) => editEditorRef.current?.uploadFile(file)}
             />
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="ghost" onClick={cancelEdit}>Cancel</Button>
-              <Button size="sm" variant="outline" onClick={saveEdit}>Save</Button>
+              <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
+              <Button size="sm" variant="outline" onClick={saveEdit}>{t(($) => $.comment.save_action)}</Button>
             </div>
           </div>
           {isDragOver && <FileDropOverlay />}
@@ -414,24 +473,27 @@ function CommentRow({
 // CommentCard — One Card per thread (parent + all replies flat inside)
 // ---------------------------------------------------------------------------
 
-function CommentCard({
+function CommentCardImpl({
   issueId,
   entry,
-  allReplies,
+  replies,
   commentById,
   agents,
-  isWorkspaceAdmin,
   issueOpen,
   currentUserId,
+  canModerate = false,
   onReply,
   onEdit,
   onDelete,
   onToggleReaction,
+  onResolveToggle,
+  onCollapseResolved,
   highlightedCommentId,
 }: CommentCardProps) {
+  const { t } = useT("issues");
   const { getActorName } = useActorName();
-  const qc = useQueryClient();
-  const { uploadWithToast } = useFileUpload(api);
+  const copyCommentLink = useCopyCommentLink(issueId);
+  const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
   const open = !isCollapsed;
@@ -445,34 +507,30 @@ function CommentCard({
   });
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
+  // Author-only edit is the same as before; admins additionally get edit
+  // *and* delete on member-authored comments, plus delete on agent-authored
+  // ones. Edit on agent comments is intentionally never offered — agents
+  // own their own outputs.
+  const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
+  const canDeleteEntry = isOwn || canModerate;
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [confirmAgentDelete, setConfirmAgentDelete] = useState(false);
-
-  const rootAgentMeta = entry.actor_type === "agent" ? agents.find((a) => a.id === entry.actor_id) : undefined;
-  const rootMemberAncestor =
-    entry.actor_type === "agent" ? findMemberAncestorComment(entry, commentById) : null;
-  const rootIsAgentOwner = !!(rootAgentMeta?.owner_id && currentUserId && rootAgentMeta.owner_id === currentUserId);
-  const rootIsTriggerMember = !!(
-    rootMemberAncestor &&
+  const isAgent = isAgentComment(entry);
+  const agentMeta = isAgent ? agents.find((agent) => agent.id === entry.actor_id) : undefined;
+  const memberAncestor = isAgent ? findMemberAncestorComment(entry, commentById) : null;
+  const isAgentOwner = !!(agentMeta?.owner_id && currentUserId && agentMeta.owner_id === currentUserId);
+  const isTriggerMember = !!(
+    memberAncestor &&
     currentUserId &&
-    rootMemberAncestor.actor_type === "member" &&
-    rootMemberAncestor.actor_id === currentUserId
+    memberAncestor.actor_type === "member" &&
+    memberAncestor.actor_id === currentUserId
   );
-  const canDeleteRootAgentReply = entry.actor_type === "agent" && !isTemp && (isWorkspaceAdmin || rootIsAgentOwner);
-  const canRetryRootAgentReply =
-    entry.actor_type === "agent" && !isTemp && issueOpen && (isWorkspaceAdmin || rootIsAgentOwner || rootIsTriggerMember);
-  const showRootAgentActionsFooter = canRetryRootAgentReply || canDeleteRootAgentReply;
-
-  const retryRootAgentMut = useMutation({
-    mutationFn: () => api.retryAgentComment(entry.id),
-    onSuccess: () => {
-      toast.success("Agent run queued");
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
-    },
-    onError: (e: unknown) =>
-      toast.error(e instanceof Error ? e.message : "Failed to retry agent"),
-  });
+  const canRetryAgentComment =
+    isAgent &&
+    !isTemp &&
+    issueOpen &&
+    (canModerate || isAgentOwner || isTriggerMember);
+  const retryAgentComment = useRetryAgentComment(issueId, entry.id);
 
   const startEdit = () => {
     cancelledRef.current = false;
@@ -498,20 +556,14 @@ function CommentCard({
       await onEdit(entry.id, trimmed);
       setEditing(false);
     } catch {
-      toast.error("Failed to update comment");
+      toast.error(t(($) => $.comment.update_failed));
     }
   };
 
-  // Collect all nested replies recursively into a flat list
-  const allNestedReplies: TimelineEntry[] = [];
-  const collectReplies = (parentId: string) => {
-    const children = allReplies.get(parentId) ?? [];
-    for (const child of children) {
-      allNestedReplies.push(child);
-      collectReplies(child.id);
-    }
-  };
-  collectReplies(entry.id);
+  // The parent precomputes the flat thread (using collectThreadReplies),
+  // memoizes by thread, and stabilizes the array reference, so we render
+  // straight from `replies` instead of re-walking the graph on every render.
+  const allNestedReplies = replies;
 
   const replyCount = allNestedReplies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
@@ -523,6 +575,20 @@ function CommentCard({
 
   return (
     <Card className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isTemp && "opacity-60", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
+      {onCollapseResolved && (
+        <button
+          type="button"
+          onClick={onCollapseResolved}
+          className="flex w-full items-center justify-between border-b border-border/50 px-4 py-2.5 text-left text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+          aria-label={t(($) => $.comment.resolve.collapse)}
+        >
+          <span className="flex items-center gap-2">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            {t(($) => $.comment.resolve.collapse)}
+          </span>
+          <ChevronRight className="h-3.5 w-3.5 -rotate-90" />
+        </button>
+      )}
       <Collapsible open={open} onOpenChange={handleOpenChange}>
         {/* Header — always visible, acts as toggle */}
         <div className="px-4 py-3">
@@ -530,8 +596,8 @@ function CommentCard({
             <CollapsibleTrigger className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
               <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
             </CollapsibleTrigger>
-            <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} />
-            <span className="shrink-0 text-sm font-medium">
+            <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
+            <span className="shrink-0 cursor-pointer text-sm font-medium">
               {getActorName(entry.actor_type, entry.actor_id)}
             </span>
             <Tooltip>
@@ -554,7 +620,7 @@ function CommentCard({
             )}
             {!open && replyCount > 0 && (
               <span className="shrink-0 text-xs text-muted-foreground">
-                {replyCount} {replyCount === 1 ? "reply" : "replies"}
+                {t(($) => $.comment.reply_count, { count: replyCount })}
               </span>
             )}
 
@@ -575,39 +641,59 @@ function CommentCard({
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => {
                     copyMarkdown(entry.content ?? "");
-                    toast.success("Copied");
+                    toast.success(t(($) => $.comment.copied_toast));
                   }}>
                     <Copy className="h-3.5 w-3.5" />
-                    Copy
+                    {t(($) => $.comment.copy_action)}
                   </DropdownMenuItem>
-                  {showRootAgentActionsFooter && <DropdownMenuSeparator />}
-                  {canRetryRootAgentReply && (
-                    <DropdownMenuItem
-                      disabled={retryRootAgentMut.isPending}
-                      onClick={() => retryRootAgentMut.mutate()}
-                    >
-                      <RotateCw className="h-3.5 w-3.5" />
-                      Retry
-                    </DropdownMenuItem>
-                  )}
-                  {canDeleteRootAgentReply && (
-                    <DropdownMenuItem variant="destructive" onClick={() => setConfirmAgentDelete(true)}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Delete
-                    </DropdownMenuItem>
-                  )}
-                  {isOwn && (
+                  <DropdownMenuItem onClick={() => { void copyCommentLink(entry.id); }}>
+                    <Link2 className="h-3.5 w-3.5" />
+                    {t(($) => $.actions.copy_link)}
+                  </DropdownMenuItem>
+                  {onResolveToggle && (
                     <>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={startEdit}>
-                        <Pencil className="h-3.5 w-3.5" />
-                        Edit
+                      <DropdownMenuItem onClick={() => onResolveToggle(entry.id, !entry.resolved_at)}>
+                        {entry.resolved_at ? (
+                          <>
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            {t(($) => $.comment.resolve.unresolve_action)}
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            {t(($) => $.comment.resolve.resolve_action)}
+                          </>
+                        )}
                       </DropdownMenuItem>
+                    </>
+                  )}
+                  {canRetryAgentComment && <DropdownMenuSeparator />}
+                  {canRetryAgentComment && (
+                    <DropdownMenuItem
+                      disabled={retryAgentComment.isPending}
+                      onClick={() => retryAgentComment.mutate()}
+                    >
+                      <RotateCw className="h-3.5 w-3.5" />
+                      {t(($) => $.comment.retry_action)}
+                    </DropdownMenuItem>
+                  )}
+                  {(canEditEntry || canDeleteEntry) && (
+                    <>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Delete
-                      </DropdownMenuItem>
+                      {canEditEntry && (
+                        <DropdownMenuItem onClick={startEdit}>
+                          <Pencil className="h-3.5 w-3.5" />
+                          {t(($) => $.comment.edit_action)}
+                        </DropdownMenuItem>
+                      )}
+                      {canEditEntry && canDeleteEntry && <DropdownMenuSeparator />}
+                      {canDeleteEntry && (
+                        <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
+                          <Trash2 className="h-3.5 w-3.5" />
+                          {t(($) => $.comment.delete_action)}
+                        </DropdownMenuItem>
+                      )}
                     </>
                   )}
                 </DropdownMenuContent>
@@ -615,12 +701,6 @@ function CommentCard({
               <DeleteCommentDialog
                 open={confirmDelete}
                 onOpenChange={setConfirmDelete}
-                onConfirm={() => onDelete(entry.id)}
-                hasReplies
-              />
-              <DeleteCommentDialog
-                open={confirmAgentDelete}
-                onOpenChange={setConfirmAgentDelete}
                 onConfirm={() => onDelete(entry.id)}
                 hasReplies
               />
@@ -643,7 +723,7 @@ function CommentCard({
                   <ContentEditor
                     ref={editEditorRef}
                     defaultValue={entry.content ?? ""}
-                    placeholder="Edit comment..."
+                    placeholder={t(($) => $.comment.edit_placeholder)}
                     onSubmit={saveEdit}
                     onUploadFile={(file) => uploadWithToast(file, { issueId })}
                     debounceMs={100}
@@ -656,8 +736,8 @@ function CommentCard({
                     onSelect={(file) => editEditorRef.current?.uploadFile(file)}
                   />
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="ghost" onClick={cancelEdit}>Cancel</Button>
-                    <Button size="sm" variant="outline" onClick={saveEdit}>Save</Button>
+                    <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
+                    <Button size="sm" variant="outline" onClick={saveEdit}>{t(($) => $.comment.save_action)}</Button>
                   </div>
                 </div>
                 {parentDragOver && <FileDropOverlay />}
@@ -690,9 +770,9 @@ function CommentCard({
                 entry={reply}
                 commentById={commentById}
                 agents={agents}
-                isWorkspaceAdmin={isWorkspaceAdmin}
                 issueOpen={issueOpen}
                 currentUserId={currentUserId}
+                canModerate={canModerate}
                 onEdit={onEdit}
                 onDelete={onDelete}
                 onToggleReaction={onToggleReaction}
@@ -704,7 +784,7 @@ function CommentCard({
           <div className="border-t border-border/50 px-4 py-2.5">
             <ReplyInput
               issueId={issueId}
-              placeholder="Leave a reply..."
+              placeholder={t(($) => $.reply.placeholder)}
               size="sm"
               avatarType="member"
               avatarId={currentUserId ?? ""}
@@ -716,5 +796,12 @@ function CommentCard({
     </Card>
   );
 }
+
+// Memoized so a long timeline (e.g. Inbox-embedded IssueDetail with thousands
+// of comments) does not re-render every card on each parent state update or
+// WS-driven cache refresh. Default shallow comparison is sufficient: the
+// timeline grouping is useMemo'd in issue-detail.tsx (stable Map ref), and
+// every callback is stabilized via useCallback in use-issue-timeline.ts.
+const CommentCard = memo(CommentCardImpl);
 
 export { CommentCard, type CommentCardProps };

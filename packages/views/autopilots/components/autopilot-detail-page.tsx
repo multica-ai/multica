@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil } from "lucide-react";
+import { useState } from "react";
+import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions } from "@multica/core/autopilots/queries";
 import {
@@ -11,7 +11,6 @@ import {
   useCreateAutopilotTrigger,
   useDeleteAutopilotTrigger,
 } from "@multica/core/autopilots/mutations";
-import { agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -29,19 +28,27 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@multica/ui/components/ui/select";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import {
   TriggerConfigSection,
   getDefaultTriggerConfig,
   toCronExpression,
 } from "./trigger-config";
 import type { TriggerConfig } from "./trigger-config";
-import type { AutopilotRun, AutopilotTrigger } from "@multica/core/types";
+import type { AutopilotExecutionMode, AutopilotRun, AutopilotTrigger } from "@multica/core/types";
+import type { AgentTask } from "@multica/core/types/agent";
+import { ReadonlyContent } from "../../editor";
+import { TranscriptButton } from "../../common/task-transcript";
+import { AutopilotDialog } from "./autopilot-dialog";
+import { useT } from "../../i18n";
 
 function formatDate(date: string): string {
   return new Date(date).toLocaleString(undefined, {
@@ -52,26 +59,110 @@ function formatDate(date: string): string {
   });
 }
 
-const RUN_STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof CheckCircle2; spin?: boolean }> = {
-  issue_created: { label: "Issue Created", color: "text-blue-500", icon: Clock },
-  running: { label: "Running", color: "text-blue-500", icon: Loader2, spin: true },
-  completed: { label: "Completed", color: "text-emerald-500", icon: CheckCircle2 },
-  failed: { label: "Failed", color: "text-destructive", icon: XCircle },
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${secs}s`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${hours}h ${mins}m`;
+}
+
+interface RunResult {
+  output?: string;
+  pr_url?: string;
+  session_id?: string;
+}
+
+function parseRunResult(result: unknown): RunResult | null {
+  if (!result || typeof result !== "object") return null;
+  return result as RunResult;
+}
+
+type RunStatus = "issue_created" | "running" | "completed" | "failed";
+
+const RUN_VISUAL: Record<RunStatus, { color: string; icon: typeof CheckCircle2; spin?: boolean }> = {
+  issue_created: { color: "text-blue-500", icon: Clock },
+  running: { color: "text-blue-500", icon: Loader2, spin: true },
+  completed: { color: "text-emerald-500", icon: CheckCircle2 },
+  failed: { color: "text-destructive", icon: XCircle },
 };
 
-function RunRow({ run }: { run: AutopilotRun }) {
+function RunRow({
+  run,
+  agentId,
+  agentName,
+  isExpanded,
+  onToggle,
+}: {
+  run: AutopilotRun;
+  agentId: string;
+  agentName: string;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  const { t } = useT("autopilots");
   const wsPaths = useWorkspacePaths();
-  const cfg = (RUN_STATUS_CONFIG[run.status] ?? RUN_STATUS_CONFIG["issue_created"])!;
-  const StatusIcon = cfg.icon;
+  const status = (RUN_VISUAL[run.status as RunStatus] ? (run.status as RunStatus) : "issue_created");
+  const visual = RUN_VISUAL[status];
+  const StatusIcon = visual.icon;
 
-  const content = (
+  const result = parseRunResult(run.result);
+  const outputSummary = result?.output ? result.output.slice(0, 150) : null;
+
+  const durationMs = run.completed_at && run.triggered_at
+    ? new Date(run.completed_at).getTime() - new Date(run.triggered_at).getTime()
+    : null;
+
+  // For runs with a task_id (run_only mode), build a minimal AgentTask so
+  // TranscriptButton can lazy-load the execution transcript.
+  const syntheticTask: AgentTask | null = run.task_id
+    ? {
+        id: run.task_id,
+        agent_id: agentId,
+        runtime_id: "",
+        issue_id: "",
+        status:
+          run.status === "running" ? "running" :
+          run.status === "completed" ? "completed" :
+          run.status === "failed" ? "failed" :
+          "queued",
+        priority: 0,
+        dispatched_at: null,
+        started_at: run.triggered_at || null,
+        completed_at: run.completed_at || null,
+        result: null,
+        error: run.failure_reason || null,
+        created_at: run.created_at,
+      }
+    : null;
+
+  const hasExpandableContent = !!(result?.output || result?.pr_url || result?.session_id);
+  const canExpand = hasExpandableContent && !run.issue_id;
+
+  const rowClass = "flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent/30 transition-colors";
+
+  const headerContent = (
     <>
-      <StatusIcon className={cn("h-4 w-4 shrink-0", cfg.color, cfg.spin && "animate-spin")} />
-      <span className={cn("w-24 shrink-0 text-xs font-medium", cfg.color)}>{cfg.label}</span>
+      {canExpand ? (
+        isExpanded
+          ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      ) : (
+        <span className="w-3.5 shrink-0" />
+      )}
+      <StatusIcon className={cn("h-4 w-4 shrink-0", visual.color, visual.spin && "animate-spin")} />
+      <span className={cn("w-24 shrink-0 text-xs font-medium", visual.color)}>
+        {t(($) => $.run_status[status])}
+      </span>
       <span className="w-16 shrink-0 text-xs text-muted-foreground capitalize">{run.source}</span>
       <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
         {run.issue_id ? (
-          "Issue linked"
+          t(($) => $.run.issue_linked)
+        ) : outputSummary ? (
+          outputSummary + (result!.output!.length > 150 ? "…" : "")
         ) : run.failure_reason ? (
           <span className="text-destructive">{run.failure_reason}</span>
         ) : null}
@@ -79,24 +170,99 @@ function RunRow({ run }: { run: AutopilotRun }) {
       <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
         {formatDate(run.triggered_at || run.created_at)}
       </span>
+      {durationMs != null && durationMs >= 0 && (
+        <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+          {formatDuration(durationMs)}
+        </span>
+      )}
+      {syntheticTask && !run.issue_id && (
+        <TranscriptButton
+          task={syntheticTask}
+          agentName={agentName}
+          isLive={run.status === "running"}
+          title={t(($) => $.run.view_log)}
+        />
+      )}
     </>
   );
 
-  const rowClass = "flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent/30 transition-colors";
+  const expandedPanel = isExpanded && (
+    <div className="px-4 pb-3 pt-0 border-t border-border/50 bg-accent/10">
+      <div className="space-y-2 pt-2">
+        {run.completed_at && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="font-medium">{t(($) => $.run.completed_at)}:</span>
+            <span>{formatDate(run.completed_at)}</span>
+          </div>
+        )}
+        {result?.output ? (
+          <div className="space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">{t(($) => $.run.output_summary)}:</span>
+            <div className="rounded-md border bg-background p-3 text-sm max-h-80 overflow-y-auto">
+              <ReadonlyContent content={result.output} />
+            </div>
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground italic">{t(($) => $.run.no_output)}</div>
+        )}
+        {result?.pr_url && (
+          <div className="flex items-center gap-2 text-xs">
+            <span className="font-medium text-muted-foreground">{t(($) => $.run.pr_link)}:</span>
+            <a href={result.pr_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline inline-flex items-center gap-1">
+              {result.pr_url}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
+        )}
+        {result?.session_id && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="font-medium">{t(($) => $.run.session_id)}:</span>
+            <code className="bg-muted px-1.5 py-0.5 rounded text-[11px]">{result.session_id}</code>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
   if (run.issue_id) {
     return (
       <AppLink href={wsPaths.issueDetail(run.issue_id)} className={cn(rowClass, "cursor-pointer")}>
-        {content}
+        {headerContent}
       </AppLink>
     );
   }
 
-  return <div className={rowClass}>{content}</div>;
+  return (
+    <div>
+      <div
+        className={cn(rowClass, canExpand && "cursor-pointer")}
+        onClick={canExpand ? onToggle : undefined}
+      >
+        {headerContent}
+      </div>
+      {expandedPanel}
+    </div>
+  );
 }
 
 function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autopilotId: string }) {
+  const { t } = useT("autopilots");
   const deleteTrigger = useDeleteAutopilotTrigger();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteTrigger.mutateAsync({ autopilotId, triggerId: trigger.id });
+      toast.success(t(($) => $.trigger_row.toast_deleted));
+      setConfirmOpen(false);
+    } catch {
+      toast.error(t(($) => $.trigger_row.toast_delete_failed));
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div className="flex items-center gap-3 rounded-md border px-3 py-2">
@@ -108,7 +274,9 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
             <span className="text-xs text-muted-foreground">({trigger.label})</span>
           )}
           {!trigger.enabled && (
-            <span className="text-xs bg-muted px-1.5 py-0.5 rounded">Disabled</span>
+            <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
+              {t(($) => $.trigger_row.disabled_badge)}
+            </span>
           )}
         </div>
         {trigger.cron_expression && (
@@ -119,7 +287,7 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
         )}
         {trigger.next_run_at && (
           <div className="text-xs text-muted-foreground">
-            Next: {formatDate(trigger.next_run_at)}
+            {t(($) => $.trigger_row.next_label, { date: formatDate(trigger.next_run_at) })}
           </div>
         )}
       </div>
@@ -127,178 +295,35 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
         size="icon"
         variant="ghost"
         className="h-7 w-7 shrink-0"
-        onClick={() => {
-          deleteTrigger.mutate({ autopilotId, triggerId: trigger.id });
-          toast.success("Trigger deleted");
-        }}
+        onClick={() => setConfirmOpen(true)}
       >
         <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
       </Button>
+      <AlertDialog open={confirmOpen} onOpenChange={(v) => { if (!v && !deleting) setConfirmOpen(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t(($) => $.trigger_row.delete_dialog.title)}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.trigger_row.delete_dialog.description)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>
+              {t(($) => $.trigger_row.delete_dialog.cancel)}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deleting
+                ? t(($) => $.trigger_row.delete_dialog.deleting)
+                : t(($) => $.trigger_row.delete_dialog.confirm)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
-  );
-}
-
-const PRIORITY_OPTIONS = [
-  { value: "urgent", label: "Urgent" },
-  { value: "high", label: "High" },
-  { value: "medium", label: "Medium" },
-  { value: "low", label: "Low" },
-  { value: "none", label: "None" },
-];
-
-const EXECUTION_MODE_OPTIONS = [
-  { value: "create_issue", label: "Create Issue" },
-  { value: "run_only", label: "Run Only" },
-];
-
-function EditAutopilotDialog({
-  open,
-  onOpenChange,
-  autopilot,
-  agents,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  autopilot: { id: string; title: string; description?: string | null; assignee_id: string; priority: string; execution_mode: string; issue_title_template?: string | null };
-  agents: { id: string; name: string; archived_at?: string | null }[];
-}) {
-  const updateAutopilot = useUpdateAutopilot();
-  const [title, setTitle] = useState(autopilot.title);
-  const [description, setDescription] = useState(autopilot.description ?? "");
-  const [assigneeId, setAssigneeId] = useState(autopilot.assignee_id);
-  const [priority, setPriority] = useState(autopilot.priority);
-  const [executionMode, setExecutionMode] = useState(autopilot.execution_mode);
-  const [submitting, setSubmitting] = useState(false);
-
-  const activeAgents = agents.filter((a) => !a.archived_at);
-
-  // Sync form when autopilot data changes (e.g. after optimistic update)
-  useEffect(() => {
-    setTitle(autopilot.title);
-    setDescription(autopilot.description ?? "");
-    setAssigneeId(autopilot.assignee_id);
-    setPriority(autopilot.priority);
-    setExecutionMode(autopilot.execution_mode);
-  }, [autopilot]);
-
-  const handleSubmit = async () => {
-    if (!title.trim() || !assigneeId || submitting) return;
-    setSubmitting(true);
-    try {
-      await updateAutopilot.mutateAsync({
-        id: autopilot.id,
-        title: title.trim(),
-        description: description.trim() || null,
-        assignee_id: assigneeId,
-        priority,
-        execution_mode: executionMode as "create_issue" | "run_only",
-      });
-      onOpenChange(false);
-      toast.success("Autopilot updated");
-    } catch {
-      toast.error("Failed to update autopilot");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogTitle>Edit Autopilot</DialogTitle>
-        <div className="space-y-4 pt-2">
-          {/* Name */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Name</label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Daily code review"
-              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
-              autoFocus
-            />
-          </div>
-
-          {/* Prompt */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Prompt</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Step-by-step instructions for the agent..."
-              rows={6}
-              className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring resize-y"
-            />
-          </div>
-
-          {/* Agent + Priority */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Agent</label>
-              <Select value={assigneeId} onValueChange={(v) => v && setAssigneeId(v)}>
-                <SelectTrigger className="mt-1 w-full">
-                  <SelectValue>
-                    {(value: string | null) => {
-                      if (!value) return "Select agent...";
-                      const agent = activeAgents.find((a) => a.id === value);
-                      return agent?.name ?? "Unknown Agent";
-                    }}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {activeAgents.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Priority</label>
-              <Select value={priority} onValueChange={(v) => v && setPriority(v)}>
-                <SelectTrigger className="mt-1 w-full">
-                  <SelectValue>
-                    {(value: string | null) => PRIORITY_OPTIONS.find((o) => o.value === value)?.label ?? "Medium"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {PRIORITY_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Execution Mode */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Execution Mode</label>
-            <Select value={executionMode} onValueChange={(v) => v && setExecutionMode(v)}>
-              <SelectTrigger className="mt-1 w-full">
-                <SelectValue>
-                  {(value: string | null) => EXECUTION_MODE_OPTIONS.find((o) => o.value === value)?.label ?? "Create Issue"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {EXECUTION_MODE_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Actions */}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || !assigneeId || submitting}>
-              {submitting ? "Saving..." : "Save"}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -311,6 +336,7 @@ function AddTriggerDialog({
   onOpenChange: (open: boolean) => void;
   autopilotId: string;
 }) {
+  const { t } = useT("autopilots");
   const createTrigger = useCreateAutopilotTrigger();
   const [config, setConfig] = useState<TriggerConfig>(getDefaultTriggerConfig);
   const [label, setLabel] = useState("");
@@ -332,9 +358,9 @@ function AddTriggerDialog({
       onOpenChange(false);
       setConfig(getDefaultTriggerConfig());
       setLabel("");
-      toast.success("Trigger added");
+      toast.success(t(($) => $.add_trigger_dialog.toast_added));
     } catch {
-      toast.error("Failed to add trigger");
+      toast.error(t(($) => $.add_trigger_dialog.toast_add_failed));
     } finally {
       setSubmitting(false);
     }
@@ -343,22 +369,26 @@ function AddTriggerDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
-        <DialogTitle>Add Trigger</DialogTitle>
+        <DialogTitle>{t(($) => $.add_trigger_dialog.title)}</DialogTitle>
         <div className="space-y-4 pt-2">
           <TriggerConfigSection config={config} onChange={setConfig} />
           <div>
-            <label className="text-xs font-medium text-muted-foreground">Label (optional)</label>
+            <label className="text-xs font-medium text-muted-foreground">
+              {t(($) => $.add_trigger_dialog.label_field)}
+            </label>
             <input
               type="text"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="e.g. Weekday morning"
+              placeholder={t(($) => $.add_trigger_dialog.label_placeholder)}
               className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
           <div className="flex justify-end pt-1">
             <Button size="sm" onClick={handleSubmit} disabled={submitting}>
-              {submitting ? "Adding..." : "Add trigger"}
+              {submitting
+                ? t(($) => $.add_trigger_dialog.submitting)
+                : t(($) => $.add_trigger_dialog.submit)}
             </Button>
           </div>
         </div>
@@ -368,6 +398,7 @@ function AddTriggerDialog({
 }
 
 export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
+  const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
@@ -375,13 +406,15 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
   const { data, isLoading } = useQuery(autopilotDetailOptions(wsId, autopilotId));
   const { data: runs = [], isLoading: runsLoading } = useQuery(autopilotRunsOptions(wsId, autopilotId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const updateAutopilot = useUpdateAutopilot();
   const deleteAutopilot = useDeleteAutopilot();
   const triggerAutopilot = useTriggerAutopilot();
 
   const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
 
   if (isLoading) {
     return (
@@ -425,7 +458,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   if (!data) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground">
-        Autopilot not found
+        {t(($) => $.detail.not_found)}
       </div>
     );
   }
@@ -435,19 +468,21 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const handleRunNow = async () => {
     try {
       await triggerAutopilot.mutateAsync(autopilotId);
-      toast.success("Autopilot triggered");
+      toast.success(t(($) => $.detail.toast_triggered));
     } catch (e: any) {
-      toast.error(e?.message || "Failed to trigger autopilot");
+      toast.error(e?.message || t(($) => $.detail.toast_trigger_failed));
     }
   };
 
   const handleDelete = async () => {
+    setDeleting(true);
     try {
       await deleteAutopilot.mutateAsync(autopilotId);
-      toast.success("Autopilot deleted");
+      toast.success(t(($) => $.detail.toast_deleted));
       router.push(wsPaths.autopilots());
     } catch {
-      toast.error("Failed to delete autopilot");
+      toast.error(t(($) => $.detail.toast_delete_failed));
+      setDeleting(false);
     }
   };
 
@@ -471,26 +506,32 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               checked={autopilot.status === "active"}
               onCheckedChange={handleToggleStatus}
               disabled={autopilot.status === "archived"}
-              aria-label={autopilot.status === "active" ? "Pause autopilot" : "Activate autopilot"}
+              aria-label={
+                autopilot.status === "active"
+                  ? t(($) => $.detail.pause_aria)
+                  : t(($) => $.detail.activate_aria)
+              }
             />
             <span className={cn(
-              "text-xs font-medium capitalize",
+              "text-xs font-medium",
               autopilot.status === "active" ? "text-emerald-500" :
               autopilot.status === "paused" ? "text-amber-500" :
               "text-muted-foreground",
             )}>
-              {autopilot.status}
+              {t(($) => $.status[autopilot.status])}
             </span>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)}>
             <Pencil className="h-3.5 w-3.5 mr-1" />
-            Edit
+            {t(($) => $.detail.edit)}
           </Button>
           <Button size="sm" onClick={handleRunNow} disabled={autopilot.status !== "active" || triggerAutopilot.isPending}>
             <Play className="h-3.5 w-3.5 mr-1" />
-            {triggerAutopilot.isPending ? "Running..." : "Run now"}
+            {triggerAutopilot.isPending
+              ? t(($) => $.detail.running)
+              : t(($) => $.detail.run_now)}
           </Button>
         </div>
       </PageHeader>
@@ -499,29 +540,29 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         <div className="max-w-4xl mx-auto p-6 space-y-8">
           {/* Properties */}
           <section className="space-y-4">
-            <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Properties</h2>
+            <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+              {t(($) => $.detail.section_properties)}
+            </h2>
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
-                <label className="text-xs text-muted-foreground">Agent</label>
+                <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_agent)}</label>
                 <div className="mt-1 flex items-center gap-2">
-                  <ActorAvatar actorType="agent" actorId={autopilot.assignee_id} size={20} />
-                  <span>{getActorName("agent", autopilot.assignee_id)}</span>
+                  <ActorAvatar actorType="agent" actorId={autopilot.assignee_id} size={20} enableHoverCard showStatusDot />
+                  <span className="cursor-pointer">{getActorName("agent", autopilot.assignee_id)}</span>
                 </div>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground">Priority</label>
-                <div className="mt-1 capitalize">{autopilot.priority}</div>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground">Execution Mode</label>
+                <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_output_mode)}</label>
                 <div className="mt-1">
-                  {autopilot.execution_mode === "create_issue" ? "Create Issue" : "Run Only"}
+                  {t(($) => $.execution_mode[autopilot.execution_mode as AutopilotExecutionMode])}
                 </div>
               </div>
               {autopilot.description && (
                 <div className="col-span-2">
-                  <label className="text-xs text-muted-foreground">Prompt</label>
-                  <div className="mt-1 whitespace-pre-wrap text-sm">{autopilot.description}</div>
+                  <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_prompt)}</label>
+                  <div className="mt-1">
+                    <ReadonlyContent content={autopilot.description} />
+                  </div>
                 </div>
               )}
             </div>
@@ -530,20 +571,22 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           {/* Triggers */}
           <section className="space-y-3">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Triggers</h2>
+              <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                {t(($) => $.detail.section_triggers)}
+              </h2>
               <Button size="sm" variant="outline" onClick={() => setTriggerDialogOpen(true)}>
                 <Plus className="h-3.5 w-3.5 mr-1" />
-                Add trigger
+                {t(($) => $.detail.add_trigger)}
               </Button>
             </div>
             {triggers.length === 0 ? (
               <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-                No triggers configured. Add a schedule to run automatically.
+                {t(($) => $.detail.no_triggers)}
               </div>
             ) : (
               <div className="space-y-2">
-                {triggers.map((t) => (
-                  <TriggerRow key={t.id} trigger={t} autopilotId={autopilotId} />
+                {triggers.map((trig) => (
+                  <TriggerRow key={trig.id} trigger={trig} autopilotId={autopilotId} />
                 ))}
               </div>
             )}
@@ -551,7 +594,9 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
           {/* Run History */}
           <section className="space-y-3">
-            <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Run History</h2>
+            <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+              {t(($) => $.detail.section_run_history)}
+            </h2>
             {runsLoading ? (
               <div className="space-y-1">
                 {Array.from({ length: 3 }).map((_, i) => (
@@ -560,12 +605,19 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               </div>
             ) : runs.length === 0 ? (
               <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-                No runs yet. Click &quot;Run now&quot; to trigger manually.
+                {t(($) => $.detail.no_runs)}
               </div>
             ) : (
-              <div className="rounded-md border overflow-hidden">
+              <div className="rounded-md border overflow-hidden divide-y">
                 {runs.map((run) => (
-                  <RunRow key={run.id} run={run} />
+                  <RunRow
+                    key={run.id}
+                    run={run}
+                    agentId={autopilot.assignee_id}
+                    agentName={getActorName("agent", autopilot.assignee_id)}
+                    isExpanded={expandedRunId === run.id}
+                    onToggle={() => setExpandedRunId(expandedRunId === run.id ? null : run.id)}
+                  />
                 ))}
               </div>
             )}
@@ -573,10 +625,12 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
           {/* Danger zone */}
           <section className="space-y-3 pt-4 border-t">
-            <h2 className="text-sm font-medium text-destructive uppercase tracking-wider">Danger Zone</h2>
-            <Button size="sm" variant="destructive" onClick={handleDelete}>
+            <h2 className="text-sm font-medium text-destructive uppercase tracking-wider">
+              {t(($) => $.detail.section_danger)}
+            </h2>
+            <Button size="sm" variant="destructive" onClick={() => setDeleteConfirmOpen(true)}>
               <Trash2 className="h-3.5 w-3.5 mr-1" />
-              Delete autopilot
+              {t(($) => $.detail.delete_button)}
             </Button>
           </section>
         </div>
@@ -587,12 +641,48 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         onOpenChange={setTriggerDialogOpen}
         autopilotId={autopilotId}
       />
-      <EditAutopilotDialog
-        open={editDialogOpen}
-        onOpenChange={setEditDialogOpen}
-        autopilot={autopilot}
-        agents={agents}
-      />
+      {editDialogOpen && (
+        <AutopilotDialog
+          mode="edit"
+          open={editDialogOpen}
+          onOpenChange={setEditDialogOpen}
+          autopilotId={autopilot.id}
+          initial={{
+            title: autopilot.title,
+            description: autopilot.description ?? "",
+            assignee_id: autopilot.assignee_id,
+            execution_mode: autopilot.execution_mode as AutopilotExecutionMode,
+          }}
+          triggers={triggers}
+        />
+      )}
+      <AlertDialog
+        open={deleteConfirmOpen}
+        onOpenChange={(v) => { if (!v && !deleting) setDeleteConfirmOpen(false); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t(($) => $.detail.delete_dialog.title)}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.detail.delete_dialog.description, { title: autopilot.title })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>
+              {t(($) => $.detail.delete_dialog.cancel)}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {deleting
+                ? t(($) => $.detail.delete_dialog.deleting)
+                : t(($) => $.detail.delete_dialog.confirm)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

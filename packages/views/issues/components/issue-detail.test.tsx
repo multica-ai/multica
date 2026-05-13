@@ -6,6 +6,20 @@ import type { Issue, TimelineEntry } from "@multica/core/types";
 
 const mockNavigationPush = vi.hoisted(() => vi.fn());
 const mockNavigationReplace = vi.hoisted(() => vi.fn());
+const mockNavigationSearchParams = vi.hoisted(() => ({
+  current: new URLSearchParams(),
+}));
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../../locales/en/common.json";
+import enIssues from "../../locales/en/issues.json";
+
+const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
+
+const mockViewport = vi.hoisted(() => ({ isMobile: false }));
+
+vi.mock("@multica/ui/hooks/use-mobile", () => ({
+  useIsMobile: () => mockViewport.isMobile,
+}));
 
 // useWorkspaceId() derives from useCurrentWorkspace (relative import inside
 // @multica/core/hooks.tsx). vi.mock("@multica/core/paths") only intercepts
@@ -62,6 +76,10 @@ vi.mock("@multica/core/workspace/queries", () => ({
     queryKey: ["workspaces", "ws-1", "assignee-frequency"],
     queryFn: () => Promise.resolve([]),
   }),
+  mentionFrequencyOptions: () => ({
+    queryKey: ["workspaces", "ws-1", "mention-frequency"],
+    queryFn: () => Promise.resolve([]),
+  }),
   workspaceListOptions: () => ({
     queryKey: ["workspaces"],
     queryFn: () => Promise.resolve([{ id: "ws-1", name: "Test WS", slug: "test" }]),
@@ -93,8 +111,8 @@ vi.mock("../../navigation", () => ({
     push: mockNavigationPush,
     replace: mockNavigationReplace,
     pathname: "/issues/issue-1",
-    searchParams: new URLSearchParams(),
-    getShareableUrl: undefined,
+    searchParams: mockNavigationSearchParams.current,
+    getShareableUrl: (p: string) => `https://app.multica.com${p}`,
   }),
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
@@ -114,9 +132,11 @@ vi.mock("../../editor", () => ({
     const [value, setValue] = useState(defaultValue || "");
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
+      setMarkdown: (markdown: string) => { valueRef.current = markdown; setValue(markdown); },
       clearContent: () => { valueRef.current = ""; setValue(""); },
       focus: () => {},
       uploadFile: () => {},
+      hasActiveUploads: () => false,
     }));
     return (
       <textarea
@@ -394,9 +414,11 @@ function createTestQueryClient() {
 function renderIssueDetail(issueId = "issue-1") {
   const queryClient = createTestQueryClient();
   return render(
-    <QueryClientProvider client={queryClient}>
-      <IssueDetail issueId={issueId} />
-    </QueryClientProvider>,
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={queryClient}>
+        <IssueDetail issueId={issueId} />
+      </QueryClientProvider>
+    </I18nProvider>,
   );
 }
 
@@ -407,8 +429,11 @@ function renderIssueDetail(issueId = "issue-1") {
 describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockViewport.isMobile = false;
+    mockNavigationSearchParams.current = new URLSearchParams();
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
+    // /timeline returns the entries flat in chronological order (oldest first).
     mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
@@ -484,6 +509,19 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("Due date")).toBeInTheDocument();
   });
 
+  it("uses a non-resizable layout with the sidebar sheet closed by default on mobile", async () => {
+    mockViewport.isMobile = true;
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
+    expect(screen.queryByText("Properties")).not.toBeInTheDocument();
+  });
+
   it("renders Details section with Created by and dates", async () => {
     renderIssueDetail();
 
@@ -534,6 +572,21 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
+  });
+
+  it("anchors the initial timeline fetch on the comment from URL search params", async () => {
+    mockNavigationSearchParams.current = new URLSearchParams({
+      comment: "comment-2",
+    });
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(mockApiObj.listTimeline).toHaveBeenCalledWith("issue-1", {
+        mode: "around",
+        id: "comment-2",
+      });
+    });
   });
 
   it("sends empty description when editor is cleared", async () => {

@@ -13,8 +13,8 @@ WHERE id = $1 AND workspace_id = $2;
 
 -- name: UpsertAgentRuntime :one
 -- (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
--- that updated an existing row (false). Analytics reads this to fire the
--- runtime_registered event only on first-time registration.
+-- that updated an existing row (false). Analytics reads this to fire
+-- runtime_registered/runtime_ready only on first-time registration.
 INSERT INTO agent_runtime (
     workspace_id,
     daemon_id,
@@ -39,7 +39,41 @@ DO UPDATE SET
     updated_at = now()
 RETURNING *, (xmax = 0) AS inserted;
 
--- name: UpdateAgentRuntimeHeartbeat :one
+-- name: TouchAgentRuntimeLastSeen :execrows
+-- Bumps last_seen_at on an already-online runtime. Deliberately does NOT
+-- touch status or updated_at: status is unchanged on the hot heartbeat path,
+-- and avoiding updated_at keeps the row HOT-eligible (no index columns
+-- change) and avoids invalidating any downstream consumer that watches
+-- updated_at.
+--
+-- The status='online' predicate is load-bearing: callers read rt.Status from
+-- a prior SELECT and may race with the sweeper, which can flip the row to
+-- offline between that SELECT and this UPDATE. Without the predicate this
+-- query would silently leave a freshly-heartbeated runtime stuck in offline.
+-- Returning affected rows lets callers detect that race and fall back to
+-- MarkAgentRuntimeOnline to flip the row back online.
+UPDATE agent_runtime
+SET last_seen_at = now()
+WHERE id = $1 AND status = 'online';
+
+-- name: TouchAgentRuntimesLastSeenBatch :execrows
+-- Bulk variant of TouchAgentRuntimeLastSeen used by the BatchedHeartbeatScheduler:
+-- coalesces N per-runtime "bump last_seen_at" requests into a single UPDATE so a
+-- fleet beating every 15s costs ~1 DB transaction per batch tick instead of N.
+--
+-- Same load-bearing predicate as the single-id form: status='online' avoids
+-- silently un-deleting a sweeper-flipped offline row, and we deliberately do
+-- NOT touch updated_at so the rows stay HOT-eligible. Affected-rows < len(ids)
+-- means some IDs raced to offline between Schedule and flush; their next beat
+-- will fall through the recordHeartbeat sync path and call MarkAgentRuntimeOnline.
+UPDATE agent_runtime
+SET last_seen_at = now()
+WHERE id = ANY(@ids::uuid[]) AND status = 'online';
+
+-- name: MarkAgentRuntimeOnline :one
+-- Used on the offline→online transition (and on first heartbeat after
+-- registration). Writes status, last_seen_at, and updated_at because the
+-- status flip is a real state change and we want updated_at to reflect it.
 UPDATE agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()
 WHERE id = $1
@@ -50,23 +84,45 @@ UPDATE agent_runtime
 SET status = 'offline', updated_at = now()
 WHERE id = $1;
 
--- name: MarkStaleRuntimesOffline :many
+-- name: SelectStaleOnlineRuntimes :many
+-- Lists online runtimes whose last_seen_at exceeds the stale window. The
+-- sweeper uses this as a candidate set, then optionally filters via the
+-- LivenessStore before flipping rows to offline (a fresh Redis liveness
+-- record means the DB row is just lagging, not actually dead).
+SELECT id, workspace_id, owner_id, daemon_id, provider FROM agent_runtime
+WHERE status = 'online'
+  AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision);
+
+-- name: MarkRuntimesOfflineByIDs :many
+-- Flips a known set of runtime IDs from online to offline. Paired with
+-- SelectStaleOnlineRuntimes in the sweeper so the candidate selection and
+-- the actual write are decoupled (the LivenessStore filter sits between).
+--
+-- Re-checks the stale predicate inside the UPDATE so a concurrent heartbeat
+-- between the SELECT (candidate gather), the LivenessStore filter, and this
+-- UPDATE cannot demote a runtime that just refreshed last_seen_at. The
+-- legacy MarkStaleRuntimesOffline UPDATE had this property implicitly
+-- because the predicate and the write lived in one statement; here we
+-- carry it forward explicitly so the SELECT/filter/UPDATE pipeline retains
+-- the same race-freedom.
 UPDATE agent_runtime
 SET status = 'offline', updated_at = now()
 WHERE status = 'online'
+  AND id = ANY(@ids::uuid[])
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
-RETURNING id, workspace_id;
+RETURNING id, workspace_id, owner_id, daemon_id, provider;
 
 -- name: FailTasksForOfflineRuntimes :many
 -- Marks dispatched/running tasks as failed when their runtime is offline.
 -- This cleans up orphaned tasks after a daemon crash or network partition.
 UPDATE agent_task_queue
-SET status = 'failed', completed_at = now(), error = 'runtime went offline'
+SET status = 'failed', completed_at = now(), error = 'runtime went offline',
+    failure_reason = 'runtime_offline'
 WHERE status IN ('dispatched', 'running')
   AND runtime_id IN (
     SELECT id FROM agent_runtime WHERE status = 'offline'
   )
-RETURNING id, agent_id, issue_id;
+RETURNING *;
 
 -- name: ListAgentRuntimesByOwner :many
 SELECT * FROM agent_runtime

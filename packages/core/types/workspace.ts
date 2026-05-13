@@ -2,7 +2,6 @@ export type MemberRole = "owner" | "admin" | "member";
 
 export interface WorkspaceRepo {
   url: string;
-  description: string;
 }
 
 export interface Workspace {
@@ -11,6 +10,7 @@ export interface Workspace {
   slug: string;
   description: string | null;
   context: string | null;
+  wiki_content: string | null;
   settings: Record<string, unknown>;
   repos: WorkspaceRepo[];
   issue_prefix: string;
@@ -50,6 +50,8 @@ export interface User {
    * 'retry_after_error') can be added without churning this type.
    */
   starter_content_state: string | null;
+  /** Preferred UI language. null means "follow client/system". */
+  language: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -79,4 +81,32 @@ export interface Invitation {
   inviter_name?: string;
   inviter_email?: string;
   workspace_name?: string;
+}
+
+export interface InviteLink {
+  id: string;
+  workspace_id?: string;
+  workspace_name?: string;
+  inviter_id?: string;
+  inviter_name?: string;
+  inviter_email?: string;
+  role: Exclude<MemberRole, "owner">;
+  status: "valid" | "expired" | "revoked" | "used_up";
+  error?: "expired" | "revoked" | "used_up";
+  created_at?: string;
+  updated_at?: string;
+  expires_at: string;
+  max_uses: number;
+  used_count: number;
+  revoked_at?: string | null;
+  last_used_at?: string | null;
+  token?: string;
+  invite_url?: string;
+}
+
+export interface CreateInviteLinkRequest {
+  role?: Exclude<MemberRole, "owner">;
+  expires_at?: string;
+  ttl_hours?: number;
+  max_uses?: number;
 }

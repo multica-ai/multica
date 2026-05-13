@@ -5,13 +5,17 @@
   "type": "module",
   "scripts": {
     "dev:web": "turbo dev --filter=@multica/web",
+    "dev:docs": "turbo dev --filter=@multica/docs",
     "dev:desktop": "turbo dev --filter=@multica/desktop",
+    "dev:mobile": "turbo dev --filter=@multica/mobile",
+    "dev:desktop:staging": "turbo dev:staging --filter=@multica/desktop",
     "build": "turbo build",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "lint": "turbo lint",
     "clean": "turbo clean && rm -rf node_modules",
-    "ui:add": "cd packages/ui && npx shadcn@latest add"
+    "ui:add": "cd packages/ui && npx shadcn@latest add",
+    "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs"
   },
   "packageManager": "pnpm@10.28.2",
   "pnpm": {

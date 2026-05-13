@@ -1,6 +1,10 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
-import type { IssueStatus, ListIssuesParams, ListIssuesCache } from "../types";
+import type {
+  IssueStatus,
+  ListIssuesParams,
+  ListIssuesCache,
+} from "../types";
 import { BOARD_STATUSES } from "./config";
 
 export const issueKeys = {
@@ -17,11 +21,22 @@ export const issueKeys = {
     [...issueKeys.all(wsId), "children", id] as const,
   childProgress: (wsId: string) =>
     [...issueKeys.all(wsId), "child-progress"] as const,
-  timeline: (issueId: string) => ["issues", "timeline", issueId] as const,
+  /** Full-issue timeline (single TanStack Query, no cursor). */
+  timeline: (issueId: string, _aroundCommentId?: string) =>
+    ["issues", "timeline", issueId] as const,
   reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
   subscribers: (issueId: string) =>
     ["issues", "subscribers", issueId] as const,
   usage: (issueId: string) => ["issues", "usage", issueId] as const,
+  /** Per-issue task list (issue-detail Execution log section). */
+  tasks: (issueId: string) => ["issues", "tasks", issueId] as const,
+  /** Prefix-match key for invalidating tasks across all issues — used by
+   *  the global WS task: prefix path so any task lifecycle event refreshes
+   *  every per-issue list, regardless of which issue is currently mounted. */
+  tasksAll: () => ["issues", "tasks"] as const,
+  attachments: (issueId: string) => ["issues", "attachments", issueId] as const,
+  taskRuns: (issueId: string) => ["issues", "task-runs", issueId] as const,
+  taskMessages: (taskId: string) => ["issues", "task-messages", taskId] as const,
 };
 
 export type MyIssuesFilter = Pick<
@@ -60,6 +75,42 @@ async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesC
 }
 
 /**
+ * Merge two ListIssuesCache results, deduplicating issues by id.
+ * Used by the "my" scope to combine assigned + created issues.
+ */
+function mergeIssueBuckets(a: ListIssuesCache, b: ListIssuesCache): ListIssuesCache {
+  const byStatus: ListIssuesCache["byStatus"] = {};
+  for (const status of PAGINATED_STATUSES) {
+    const issuesA = a.byStatus[status]?.issues ?? [];
+    const issuesB = b.byStatus[status]?.issues ?? [];
+    const seen = new Set<string>();
+    const merged = [];
+    for (const issue of [...issuesA, ...issuesB]) {
+      if (!seen.has(issue.id)) {
+        seen.add(issue.id);
+        merged.push(issue);
+      }
+    }
+    if (merged.length > 0 || a.byStatus[status] || b.byStatus[status]) {
+      byStatus[status] = { issues: merged, total: merged.length };
+    }
+  }
+  return { byStatus };
+}
+
+/**
+ * Fetch issues where the user is either the assignee or the creator.
+ * Makes two parallel fetches and merges + deduplicates the results.
+ */
+async function fetchMyIssues(userId: string): Promise<ListIssuesCache> {
+  const [assigned, created] = await Promise.all([
+    fetchFirstPages({ assignee_id: userId }),
+    fetchFirstPages({ creator_id: userId }),
+  ]);
+  return mergeIssueBuckets(assigned, created);
+}
+
+/**
  * CACHE SHAPE NOTE: The raw cache stores {@link ListIssuesCache} (buckets keyed
  * by status, each with `{ issues, total }`), and `select` flattens it to
  * `Issue[]` for consumers. Mutations and ws-updaters must use
@@ -92,6 +143,19 @@ export function myIssueListOptions(
   });
 }
 
+/**
+ * Combined "my issues" query: fetches issues where the user is either the
+ * assignee or the creator, then merges and deduplicates the two result sets.
+ * Used for the default "my" scope which shows all issues relevant to the user.
+ */
+export function myAllIssuesListOptions(wsId: string, userId: string) {
+  return queryOptions({
+    queryKey: [...issueKeys.myAll(wsId), "my", userId],
+    queryFn: () => fetchMyIssues(userId),
+    select: flattenIssueBuckets,
+  });
+}
+
 export function issueDetailOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.detail(wsId, id),
@@ -120,10 +184,24 @@ export function childIssuesOptions(wsId: string, id: string) {
   });
 }
 
-export function issueTimelineOptions(issueId: string) {
+/**
+ * Single-fetch timeline options. The endpoint returns the full ordered set of
+ * comments + activities for an issue (server caps at 2000 as a safety net).
+ * Cursor pagination was removed in #1929 — at observed data sizes (p99 ~30
+ * entries per issue) it added complexity without a UX win and broke reply
+ * threads at page boundaries.
+ */
+export function issueTimelineOptions(
+  issueId: string,
+  aroundCommentId?: string,
+) {
   return queryOptions({
-    queryKey: issueKeys.timeline(issueId),
-    queryFn: () => api.listTimeline(issueId),
+    queryKey: issueKeys.timeline(issueId, aroundCommentId),
+    queryFn: () =>
+      api.listTimeline(
+        issueId,
+        aroundCommentId ? { mode: "around", id: aroundCommentId } : undefined,
+      ),
   });
 }
 
@@ -148,5 +226,29 @@ export function issueUsageOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.usage(issueId),
     queryFn: () => api.getIssueUsage(issueId),
+  });
+}
+
+export function issueAttachmentsOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.attachments(issueId),
+    queryFn: () => api.listAttachments(issueId),
+    enabled: !!issueId,
+  });
+}
+
+export function issueTaskRunsOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.taskRuns(issueId),
+    queryFn: () => api.listTasksByIssue(issueId),
+    enabled: !!issueId,
+  });
+}
+
+export function taskMessagesOptions(taskId: string) {
+  return queryOptions({
+    queryKey: issueKeys.taskMessages(taskId),
+    queryFn: () => api.listTaskMessages(taskId),
+    enabled: !!taskId,
   });
 }

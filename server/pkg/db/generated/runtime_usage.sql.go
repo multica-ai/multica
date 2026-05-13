@@ -44,6 +44,71 @@ func (q *Queries) GetRuntimeTaskHourlyActivity(ctx context.Context, runtimeID pg
 	return items, nil
 }
 
+const getRuntimeUsageByHour = `-- name: GetRuntimeUsageByHour :many
+SELECT
+    EXTRACT(HOUR FROM tu.created_at)::int AS hour,
+    tu.model,
+    SUM(tu.input_tokens)::bigint AS input_tokens,
+    SUM(tu.output_tokens)::bigint AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.runtime_id = $1
+  AND tu.created_at >= DATE_TRUNC('day', $2::timestamptz)
+GROUP BY EXTRACT(HOUR FROM tu.created_at), tu.model
+ORDER BY hour, tu.model
+`
+
+type GetRuntimeUsageByHourParams struct {
+	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	Since     pgtype.Timestamptz `json:"since"`
+}
+
+type GetRuntimeUsageByHourRow struct {
+	Hour             int32  `json:"hour"`
+	Model            string `json:"model"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	TaskCount        int32  `json:"task_count"`
+}
+
+// Per-(hour, model) token aggregates (hour ∈ 0..23) for a runtime since a
+// cutoff. Powers the "By hour" tab — shows when in the day this runtime is
+// doing real work, with model preserved for client-side cost calculation
+// (same reason as ListRuntimeUsageByAgent above). Hours with zero activity
+// are omitted; the client fills the 24-bucket axis.
+func (q *Queries) GetRuntimeUsageByHour(ctx context.Context, arg GetRuntimeUsageByHourParams) ([]GetRuntimeUsageByHourRow, error) {
+	rows, err := q.db.Query(ctx, getRuntimeUsageByHour, arg.RuntimeID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetRuntimeUsageByHourRow{}
+	for rows.Next() {
+		var i GetRuntimeUsageByHourRow
+		if err := rows.Scan(
+			&i.Hour,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRuntimeUsage = `-- name: ListRuntimeUsage :many
 SELECT
     DATE(tu.created_at) AS date,
@@ -76,10 +141,11 @@ type ListRuntimeUsageRow struct {
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
 }
 
-// Bucket by tu.created_at (usage report time, ~= task completion time), not
-// atq.created_at (task enqueue time), so tasks that queue one day and execute
-// the next are attributed to the day tokens were actually produced. The since
-// cutoff is truncated to start-of-day so `days=N` yields full calendar days.
+// Reads from raw `task_usage`, bucketed by DATE(tu.created_at) — usage
+// report time, ~= task completion time. Since cutoff is truncated to
+// start-of-day so `days=N` yields full calendar days. This is the
+// always-correct fallback path; used when USAGE_DAILY_ROLLUP_ENABLED
+// is false (or the rollup hasn't been deployed yet).
 func (q *Queries) ListRuntimeUsage(ctx context.Context, arg ListRuntimeUsageParams) ([]ListRuntimeUsageRow, error) {
 	rows, err := q.db.Query(ctx, listRuntimeUsage, arg.RuntimeID, arg.Since)
 	if err != nil {
@@ -89,6 +155,145 @@ func (q *Queries) ListRuntimeUsage(ctx context.Context, arg ListRuntimeUsagePara
 	items := []ListRuntimeUsageRow{}
 	for rows.Next() {
 		var i ListRuntimeUsageRow
+		if err := rows.Scan(
+			&i.Date,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRuntimeUsageByAgent = `-- name: ListRuntimeUsageByAgent :many
+SELECT
+    atq.agent_id,
+    tu.model,
+    SUM(tu.input_tokens)::bigint AS input_tokens,
+    SUM(tu.output_tokens)::bigint AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.runtime_id = $1
+  AND tu.created_at >= DATE_TRUNC('day', $2::timestamptz)
+GROUP BY atq.agent_id, tu.model
+ORDER BY atq.agent_id, tu.model
+`
+
+type ListRuntimeUsageByAgentParams struct {
+	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	Since     pgtype.Timestamptz `json:"since"`
+}
+
+type ListRuntimeUsageByAgentRow struct {
+	AgentID          pgtype.UUID `json:"agent_id"`
+	Model            string      `json:"model"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	TaskCount        int32       `json:"task_count"`
+}
+
+// Per-(agent, model) token aggregates for a runtime since a cutoff. Powers
+// the runtime-detail "Cost by agent" tab. task_usage only carries task_id,
+// so we join the queue to expose agent_id. The model dimension is kept on
+// purpose: cost is computed client-side from a per-model pricing table, so
+// collapsing models server-side would erase the information needed to do
+// that arithmetic. The client groups by agent_id and sums cost per agent.
+func (q *Queries) ListRuntimeUsageByAgent(ctx context.Context, arg ListRuntimeUsageByAgentParams) ([]ListRuntimeUsageByAgentRow, error) {
+	rows, err := q.db.Query(ctx, listRuntimeUsageByAgent, arg.RuntimeID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRuntimeUsageByAgentRow{}
+	for rows.Next() {
+		var i ListRuntimeUsageByAgentRow
+		if err := rows.Scan(
+			&i.AgentID,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRuntimeUsageDaily = `-- name: ListRuntimeUsageDaily :many
+SELECT
+    bucket_date AS date,
+    provider,
+    model,
+    SUM(input_tokens)::bigint AS input_tokens,
+    SUM(output_tokens)::bigint AS output_tokens,
+    SUM(cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(cache_write_tokens)::bigint AS cache_write_tokens
+FROM task_usage_daily
+WHERE runtime_id = $1
+  AND bucket_date >= DATE(DATE_TRUNC('day', $2::timestamptz))
+GROUP BY bucket_date, provider, model
+ORDER BY bucket_date DESC, provider, model
+`
+
+type ListRuntimeUsageDailyParams struct {
+	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	Since     pgtype.Timestamptz `json:"since"`
+}
+
+type ListRuntimeUsageDailyRow struct {
+	Date             pgtype.Date `json:"date"`
+	Provider         string      `json:"provider"`
+	Model            string      `json:"model"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+}
+
+// Reads from the `task_usage_daily` rollup table maintained by
+// rollup_task_usage_daily() (scheduled every 5 min via pg_cron, or any
+// equivalent external scheduler that calls the function). Same shape as
+// ListRuntimeUsage above. Today's bucket may lag the raw table by up to
+// ~10 min (5 min cron period + 5 min rollup safety lag); intentional.
+//
+// Only used when USAGE_DAILY_ROLLUP_ENABLED is true AND deploy has
+// verified that the rollup is fresh (see task_usage_rollup_lag_seconds
+// helper from migration 076).
+//
+// The PK on task_usage_daily already collapses to one row per
+// (bucket_date, runtime_id, provider, model), but SUM/GROUP BY is kept
+// so future schema changes (extra dimensions promoted into the table)
+// don't silently change query semantics.
+func (q *Queries) ListRuntimeUsageDaily(ctx context.Context, arg ListRuntimeUsageDailyParams) ([]ListRuntimeUsageDailyRow, error) {
+	rows, err := q.db.Query(ctx, listRuntimeUsageDaily, arg.RuntimeID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRuntimeUsageDailyRow{}
+	for rows.Next() {
+		var i ListRuntimeUsageDailyRow
 		if err := rows.Scan(
 			&i.Date,
 			&i.Provider,

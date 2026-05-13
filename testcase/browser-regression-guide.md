@@ -1,64 +1,20 @@
-# Browser Regression Guide
+## Browser Regression Guide
 
-This suite is prepared for later execution by `agent-browser`. It covers the Skills page local-directory import feature for issue `OPE-12`; it does not execute browser tests by itself.
+This suite is prepared for later execution by `agent-browser` through the Multica regression test runner skill. This stage only defines repository-local browser cases and does not execute them.
 
-## Format
+Testcase files live under `testcase/case/` and should be read in lexicographic filename order. Each `tc-*.md` file contains exactly one browser regression scenario.
 
-- `testcase/ui-selectors.json` is not present in this repository at generation time.
-- `browser-regression-cases.md` therefore uses scenario format, not executable operation syntax.
-- Do not treat the cases as ready-to-run scripts until selector bindings are added or a human-guided browser run converts them to executable steps.
+This repository currently does not provide `testcase/ui-selectors.json`, so cases should be executed directly from scenario prose using visible UI semantics. Resolve controls by page titles, button text, form labels, placeholder text, dialog text, and final page state. Selector authoring is optional follow-up work, not a prerequisite for execution.
 
-## Scope
+Fallback order for later execution is:
+1. The visible UI target described in the testcase step or sentence.
+2. Accessible role and name, label text, placeholder text, or obvious page semantics.
+3. Stable business-state assertions such as the authenticated redirect target and the presence of Issues page content.
 
-- Verify the Skills page exposes a Local import flow in the Add Workspace Skill dialog.
-- Verify Codex, Claude Code, and `SKILL.md` local directory inputs produce browser-visible parsed skill states.
-- Verify successful imports surface visible success and selected-skill state.
-- Verify unsupported directories show a browser-visible validation error before import.
+Authentication data for this feature is already stored in `testcase/auth/auth.json`. For the fixed verification code login case, use `tester@multica.com` with verification code `888888`, then verify that the browser leaves `/login` and reaches the default authenticated Issues route.
 
-## Preconditions
+For authenticated settings cases, reuse the same auth fixture, then navigate to the workspace `Settings` page and open the `Notifications` tab. Prefer asserting by visible section titles such as `Notifications`, `Custom Webhooks`, `Webhook endpoints`, `Channels`, `Delivery channels`, and the `Custom Webhook` channel row shown in the UI.
 
-- Use a workspace member account that can create workspace skills.
-- Start from an existing workspace slug and navigate to the Skills page.
-- Prepare the fixture directories named in `browser-regression-cases.md` on the same machine running the browser.
-- Keep fixture skill names unique per run unless a later regression task intentionally tests duplicate handling.
+Browser-observable assertions are preferred over implementation details. For this feature, the key proof points are the login card transition from email entry to code entry, the absence of visible login errors, and the final authenticated Issues page after successful verification.
 
-## Selector Guidance
-
-- Add `testcase/ui-selectors.json` before converting these scenarios to executable operation syntax.
-- When a selector manifest exists, semantic keys should be resolved through `pages` first and `dynamic` second.
-- If a manifest mapping is missing, use visible text, role, label, dialog title, toast text, and the scenario notes as fallback locator guidance.
-- Concrete CSS selectors, XPath, or final `data-testid` values belong in `testcase/ui-selectors.json`, not in these generated scenario cases.
-
-## Suggested Semantic Keys
-
-- `skills.page_heading`
-- `skills.add_skill_button`
-- `skill_dialog.title`
-- `skill_dialog.local_tab`
-- `skill_dialog.local.select_directory_button`
-- `skill_dialog.local.directory_input`
-- `skill_dialog.local.supported_formats_hint`
-- `skill_dialog.local.detected_skill_row`
-- `skill_dialog.local.detected_skill_count`
-- `skill_dialog.local.detected_skill_name`
-- `skill_dialog.local.detected_skill_files_badge`
-- `skill_dialog.local.import_button`
-- `skill_dialog.local.import_button_disabled`
-- `skill_dialog.local.error_no_skill_files`
-- `skill_list.selected_skill_name`
-- `skill_editor.main_content`
-- `toast.skill_imported_count`
-
-## Fixture Guidance
-
-- `codex-basic` should include `AGENTS.md` plus at least one supporting file so the files badge can be asserted.
-- `claude-basic` should include at least two `.claude/commands/*.md` command files so multiple parsed skills are visible.
-- `skillmd-basic` should include a nested `SKILL.md` package and a supporting file in the same package directory.
-- `empty` should contain no supported text files so the UI remains in the Local tab and shows the validation error.
-
-## Execution Notes
-
-- Prefer direct directory upload on the hidden Local tab directory input when the runner supports it.
-- If direct directory upload is unavailable, use the visible Select Directory control with runner assistance.
-- Wait for visible parsed rows, toast text, selected skill state, or validation error rather than fixed sleeps.
-- Assertions should remain browser-observable and should not depend on backend implementation details beyond visible success or error state.
+For the custom webhook feature, the key proof points are the ability to create a webhook endpoint from the Notifications settings page, the visible masked webhook entry after saving, successful test-send feedback, and a persisted `Custom Webhook` master toggle that controls the supported webhook-trigger events together.

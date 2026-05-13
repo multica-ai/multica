@@ -62,6 +62,74 @@ func isSecureCookie() bool {
 	return strings.EqualFold(u.Scheme, "https")
 }
 
+func requestHost(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = strings.TrimSpace(r.Host)
+	}
+	if i := strings.Index(host, ","); i >= 0 {
+		host = strings.TrimSpace(host[:i])
+	}
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
+	}
+	return strings.Trim(strings.ToLower(host), "[]")
+}
+
+func cookieDomainForHost(host string) string {
+	domain := cookieDomain()
+	if domain == "" || host == "" {
+		return domain
+	}
+	normalized := strings.TrimPrefix(strings.ToLower(domain), ".")
+	if host == normalized || strings.HasSuffix(host, "."+normalized) {
+		return domain
+	}
+	return ""
+}
+
+func frontendOriginHostMatches(host string) bool {
+	raw := strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN"))
+	if raw == "" || host == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	originHost := strings.ToLower(u.Hostname())
+	return host == originHost
+}
+
+func isSecureCookieForRequest(r *http.Request, host, domain string) bool {
+	if r == nil {
+		return isSecureCookie()
+	}
+	if proto := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))); proto != "" {
+		if i := strings.Index(proto, ","); i >= 0 {
+			proto = strings.TrimSpace(proto[:i])
+		}
+		return proto == "https"
+	}
+	if r.TLS != nil {
+		return true
+	}
+	if domain != "" || frontendOriginHostMatches(host) {
+		return isSecureCookie()
+	}
+	return false
+}
+
+func cookieSettingsForRequest(r *http.Request) (secure bool, domain string) {
+	host := requestHost(r)
+	domain = cookieDomainForHost(host)
+	secure = isSecureCookieForRequest(r, host, domain)
+	return secure, domain
+}
+
 // generateCSRFToken creates a CSRF token bound to the auth token via HMAC.
 // Format: hex(nonce) + "." + hex(HMAC-SHA256(nonce, authToken)).
 // This ensures an attacker who can write cookies on a subdomain cannot forge
@@ -84,7 +152,18 @@ func generateCSRFToken(authToken string) (string, error) {
 func SetAuthCookies(w http.ResponseWriter, token string) error {
 	secure := isSecureCookie()
 	domain := cookieDomain()
+	return setAuthCookies(w, token, secure, domain)
+}
 
+// SetAuthCookiesForRequest sets cookies using attributes compatible with the
+// actual browser-facing request host. This lets local self-hosting work even
+// when the env file also contains production FRONTEND_ORIGIN/COOKIE_DOMAIN.
+func SetAuthCookiesForRequest(w http.ResponseWriter, r *http.Request, token string) error {
+	secure, domain := cookieSettingsForRequest(r)
+	return setAuthCookies(w, token, secure, domain)
+}
+
+func setAuthCookies(w http.ResponseWriter, token string, secure bool, domain string) error {
 	http.SetCookie(w, &http.Cookie{
 		Name:     AuthCookieName,
 		Value:    token,
@@ -121,7 +200,15 @@ func SetAuthCookies(w http.ResponseWriter, token string) error {
 func ClearAuthCookies(w http.ResponseWriter) {
 	domain := cookieDomain()
 	secure := isSecureCookie()
+	clearAuthCookies(w, secure, domain)
+}
 
+func ClearAuthCookiesForRequest(w http.ResponseWriter, r *http.Request) {
+	secure, domain := cookieSettingsForRequest(r)
+	clearAuthCookies(w, secure, domain)
+}
+
+func clearAuthCookies(w http.ResponseWriter, secure bool, domain string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     AuthCookieName,
 		Value:    "",

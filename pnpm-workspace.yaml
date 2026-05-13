@@ -16,6 +16,15 @@ catalog:
   # State Management
   zustand: "^5.0.0"
   "@tanstack/react-query": "^5.96.2"
+  "@react-navigation/core": "^7.17.2"
+  "@react-navigation/native": "^7.1.26"
+  "@react-navigation/native-stack": "^7.8.7"
+  "@react-navigation/bottom-tabs": "^7.8.4"
+  "@tanstack/react-table": "^8.21.3"
+
+  # Runtime schema validation (defensive boundary against API drift —
+  # see CLAUDE.md "API Response Compatibility")
+  zod: "^4.1.5"
 
   # UI & Styling
   tailwindcss: "^4"
@@ -24,9 +33,24 @@ catalog:
   tailwind-merge: "^3.4.0"
   class-variance-authority: "^0.7.1"
   clsx: "^2.1.1"
+  katex: "^0.16.45"
+  rehype-katex: "^7.0.1"
+  remark-math: "^6.0.0"
+  mermaid: "^11.14.0"
 
   # Icons
   lucide-react: "^1.0.1"
+  lucide-react-native: "^1.0.1"
+  react-native-svg: "15.15.3"
+
+  # i18n
+  i18next: "^26.0.8"
+  react-i18next: "^17.0.6"
+  "@formatjs/intl-localematcher": "^0.8.4"
+  eslint-plugin-i18next: "^6.1.4"
+
+  # Loading animations (chat StatusPill)
+  unicode-animations: "^1.0.3"
 
   # Product analytics
   posthog-js: "^1.176.1"

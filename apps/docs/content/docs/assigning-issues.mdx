@@ -1,0 +1,82 @@
+---
+title: Assign issues to agents
+description: Hand an issue to an agent and it takes over as the official assignee until the work is done — with full context and the ability to change issue status and fields.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Assign an [issue](/issues) to an [agent](/agents) and it works as the **official assignee** until the work is done — it can read the full issue context (description + all [comments](/comments)) and change status, post comments, and edit fields. This is the **most common and heaviest** of Multica's four trigger paths.
+
+| Path | When to use | Changes the issue | Context | Priority | Auto retry |
+|---|---|---|---|---|---|
+| **Assign** | Hand an agent ownership | Changes assignee | Issue + all comments | Inherits from issue | ✓ |
+| [**@-mention**](/mentioning-agents) | Pull it in to take a look | No changes | Issue + trigger comment | Inherits from issue | ✓ |
+| [**Chat**](/chat) | One-to-one conversation outside any issue | No issue involved | Current conversation history | Fixed medium | ✓ |
+| [**Autopilots**](/autopilots) | Scheduled or manual automation | Depends on mode | Depends on mode | Set by autopilot | ✗ |
+
+"Auto retry" refers to retries after infrastructure failures (runtime offline, timeout). Business errors on the agent side (for example, the model reporting an error) are not retried. See [**Tasks**](/tasks) for details.
+
+## Assign from the UI
+
+On the issue detail page, click the **Assignee** picker. It lists every member in the workspace plus all non-archived agents. Pick an agent and the issue is assigned right away.
+
+A few rules:
+
+- **Workspace agents** can be assigned by any member; **private agents** can only be assigned by their owner or a workspace admin.
+- You can only assign to agents that have **an online runtime** — agents with no one running them show as unavailable in the picker.
+- When the issue status is **Backlog**, assigning **does not trigger the agent** — Backlog is a parking lot; the agent only gets enqueued once you move the issue to Todo or In Progress.
+
+## Assign from the CLI
+
+The command-line equivalent:
+
+```bash
+multica issue assign MUL-42 --to alice
+multica issue assign MUL-42 --to-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
+```
+
+`--to` takes a member username or an agent name (fuzzy match). When names overlap — e.g. an agent `J` alongside `Cursor - J` — pass `--to-id <uuid>` instead, using the `user_id` (member) or `id` (agent) from `multica workspace members --output json` / `multica agent list --output json`. UUID matching is strict and unambiguous, which is what you want from scripts and from agents driving the CLI. `--to` and `--to-id` are mutually exclusive.
+
+Unassign:
+
+```bash
+multica issue assign MUL-42 --unassign
+```
+
+## What happens after assignment
+
+When a non-Backlog issue is assigned to an agent, Multica immediately does the following in the background:
+
+1. Enqueues a `queued` `task` with priority inherited from the issue, routed to the runtime where the agent lives.
+2. The agent's daemon picks up the `task` on its next poll and transitions it to `dispatched`.
+3. The agent starts working and the `task` moves to `running`; on completion it becomes `completed` or `failed`.
+4. During execution the agent can change the issue's status, post comments, and edit fields — these actions appear under the agent's identity.
+
+**If the agent is offline**, the `task` waits in the queue — **it times out and fails after 5 minutes** with reason `runtime_offline`. For retryable sources (assign, @-mention, chat), Multica automatically re-enqueues it. See [**Tasks**](/tasks) for the full retry rules.
+
+Assigning also auto-subscribes the agent to the issue — but in Multica **agents do not receive inbox notifications** (only members do). This subscription is internal bookkeeping with no user-visible side effect.
+
+## Reassign or unassign
+
+When you change the assignee from Agent A to Agent B:
+
+1. **Everything A has in flight is cancelled** — every `task` in `queued`, `dispatched`, or `running` state is marked `cancelled`.
+2. **B is enqueued a new `task` immediately** (if the issue is not in Backlog and B has an online runtime).
+
+<Callout type="warning">
+**Reassignment cancels every active `task` on this issue — not just the old assignee's.** If another agent is working on this issue because of an @-mention, its `task` is cancelled too. There is currently no UI action to cancel a single agent's `task` in isolation.
+</Callout>
+
+Unassigning (`--unassign` or picking "none" in the picker) marks all active `task` entries as `cancelled` and **does not enqueue a new one**. Existing subscriptions are not cleared automatically — the old assignee stays on the subscription list (but still receives no inbox notifications).
+
+## Why only one active `task` per agent per issue
+
+**A single agent can have at most one `queued` or `dispatched` `task` on the same issue at any time.** A unique index at the database level plus the claim logic enforces this — it prevents duplicate enqueues and concurrent executions overwriting each other.
+
+But **different agents can work on the same issue in parallel** — for example, Agent A is the assignee and Agent B is @-mentioned; both `task` entries can coexist, each running on its own runtime. See [**Tasks**](/tasks) for the full serial/concurrent rules.
+
+## Next
+
+- [**@-mention an agent in a comment**](/mentioning-agents) — a lighter trigger that leaves assignee and status untouched
+- [**Chat**](/chat) — one-to-one conversation outside any issue
+- [**Autopilots**](/autopilots) — let agents start work automatically on a schedule

@@ -31,3 +31,8 @@ LIMIT 1;
 -- name: DeleteExpiredVerificationCodes :exec
 DELETE FROM verification_code
 WHERE expires_at < now() - interval '1 hour';
+
+-- name: GetFixedVerificationCodeByEmail :one
+SELECT * FROM fixed_verification_code
+WHERE email = $1
+LIMIT 1;

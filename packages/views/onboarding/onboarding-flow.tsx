@@ -1,18 +1,20 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { captureEvent } from "@multica/core/analytics";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import {
   completeOnboarding,
   ONBOARDING_STEP_ORDER,
   saveQuestionnaire,
+  type OnboardingCompletionPath,
   type OnboardingStep,
   type QuestionnaireAnswers,
 } from "@multica/core/onboarding";
-import { workspaceListOptions } from "@multica/core/workspace/queries";
+import { workspaceListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import type { Agent, AgentRuntime, Workspace } from "@multica/core/types";
 import { DragStrip } from "@multica/views/platform";
 import { StepHeader } from "./components/step-header";
@@ -23,6 +25,7 @@ import { StepRuntimeConnect } from "./steps/step-runtime-connect";
 import { StepPlatformFork } from "./steps/step-platform-fork";
 import { StepAgent } from "./steps/step-agent";
 import { StepFirstIssue } from "./steps/step-first-issue";
+import { useT } from "../i18n";
 
 const EMPTY_QUESTIONNAIRE: QuestionnaireAnswers = {
   team_size: null,
@@ -54,6 +57,7 @@ export function OnboardingFlow({
   onComplete: (workspace?: Workspace) => void;
   runtimeInstructions?: React.ReactNode;
 }) {
+  const { t } = useT("onboarding");
   const user = useAuthStore((s) => s.user);
   if (!user) {
     throw new Error("OnboardingFlow requires an authenticated user");
@@ -65,10 +69,17 @@ export function OnboardingFlow({
   // saved, so every entry starts at Welcome.
   const storedQuestionnaire = mergeQuestionnaire(user.onboarding_questionnaire);
 
+  const qc = useQueryClient();
+
   const [step, setStep] = useState<OnboardingStep>("welcome");
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [runtime, setRuntime] = useState<AgentRuntime | null>(null);
   const [, setAgent] = useState<Agent | null>(null);
+  // Sticky flag: Step 3's cloud-waitlist dialog only lives inside
+  // StepPlatformFork's local state, so the completion path for
+  // `runtime=null && waitlist submitted` would be invisible here without
+  // a shell-level record. One way latch; never cleared once set.
+  const [waitlistSubmitted, setWaitlistSubmitted] = useState(false);
 
   // Fetched at Step 0 + Step 2. Step 2 uses it to detect a pre-existing
   // workspace from an earlier abandoned onboarding (so StepWorkspace shows
@@ -83,6 +94,21 @@ export function OnboardingFlow({
   });
   const existingWorkspace = workspace ?? workspaces[0] ?? null;
   const canSkipWelcome = workspacesFetched && workspaces.length > 0;
+  const startedEmittedRef = useRef(false);
+  useEffect(() => {
+    if (startedEmittedRef.current || !workspacesFetched) return;
+    startedEmittedRef.current = true;
+    captureEvent("onboarding_started", {
+      source: "onboarding",
+      ...(existingWorkspace ? { workspace_id: existingWorkspace.id } : {}),
+    });
+  }, [existingWorkspace, workspacesFetched]);
+
+  // The `runtimeInstructions` slot is only plumbed by the web shell
+  // (desktop bundles a daemon, so a CLI install card would be noise
+  // there). We reuse its presence as the web signal rather than
+  // introducing a redundant prop.
+  const isWeb = !!runtimeInstructions;
 
   const handleWelcomeNext = useCallback(() => {
     setStep("questionnaire");
@@ -97,10 +123,10 @@ export function OnboardingFlow({
   // they never got a starter project and may want one now.
   const handleWelcomeSkip = useCallback(async () => {
     try {
-      await completeOnboarding();
+      await completeOnboarding("skip_existing", workspaces[0]?.id);
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Failed to finish onboarding",
+        err instanceof Error ? err.message : t(($) => $.errors.skip_failed),
       );
       return;
     }
@@ -129,10 +155,23 @@ export function OnboardingFlow({
     setStep(rt ? "agent" : "first_issue");
   }, []);
 
-  const handleAgentCreated = useCallback((created: Agent) => {
-    setAgent(created);
-    setStep("first_issue");
-  }, []);
+  const handleAgentCreated = useCallback(
+    (created: Agent) => {
+      setAgent(created);
+      // Mark the workspace's agent list stale so the dashboard's first
+      // mount refetches and includes the just-created agent. Without
+      // this, anything resolving an agent ID from the cached list (the
+      // welcome issue's assignee in particular) renders as "Unknown
+      // Agent" until something else triggers a refetch.
+      if (workspace) {
+        qc.invalidateQueries({
+          queryKey: workspaceKeys.agents(workspace.id),
+        });
+      }
+      setStep("first_issue");
+    },
+    [workspace, qc],
+  );
 
   const handleBack = useCallback((from: OnboardingStep) => {
     const idx = ONBOARDING_STEP_ORDER.indexOf(from);
@@ -158,6 +197,7 @@ export function OnboardingFlow({
       <StepWelcome
         onNext={handleWelcomeNext}
         onSkip={canSkipWelcome ? handleWelcomeSkip : undefined}
+        isWeb={isWeb}
       />
     );
   }
@@ -194,6 +234,7 @@ export function OnboardingFlow({
           wsId={workspace.id}
           onNext={handleRuntimeNext}
           onBack={() => handleBack("runtime")}
+          onWaitlistSubmitted={() => setWaitlistSubmitted(true)}
         />
       );
     }
@@ -203,6 +244,7 @@ export function OnboardingFlow({
         onNext={handleRuntimeNext}
         onBack={() => handleBack("runtime")}
         cliInstructions={runtimeInstructions}
+        onWaitlistSubmitted={() => setWaitlistSubmitted(true)}
       />
     );
   }
@@ -225,6 +267,18 @@ export function OnboardingFlow({
     );
   }
 
+  // Derive the completion-path label for Step 5 here — runtime +
+  // waitlist state both live in this shell, StepFirstIssue doesn't
+  // have the visibility to compute it itself.
+  //   runtime set          → "full"
+  //   no runtime + waitlist → "cloud_waitlist"
+  //   no runtime, no waitlist → "runtime_skipped"
+  const completionPath: OnboardingCompletionPath = runtime
+    ? "full"
+    : waitlistSubmitted
+      ? "cloud_waitlist"
+      : "runtime_skipped";
+
   return (
     <div className="animate-onboarding-enter flex min-h-full flex-col">
       <DragStrip />
@@ -232,7 +286,11 @@ export function OnboardingFlow({
         <div className="flex w-full max-w-xl flex-col gap-8">
           <StepHeader currentStep={step} />
           {step === "first_issue" && (
-            <StepFirstIssue onFinished={handleFinished} />
+            <StepFirstIssue
+              onFinished={handleFinished}
+              completionPath={completionPath}
+              workspaceId={workspace?.id}
+            />
           )}
         </div>
       </div>

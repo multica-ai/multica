@@ -512,6 +512,183 @@ func TestCommentTriggerThreadInheritedMention(t *testing.T) {
 	})
 }
 
+// createPrivateAgent creates a private agent in the test workspace and returns its ID.
+// The agent is owned by testUserID (the workspace owner).
+func createPrivateAgent(t *testing.T) string {
+	t.Helper()
+	resp := authRequest(t, "GET", "/api/agents?workspace_id="+testWorkspaceID, nil)
+	var agents []map[string]any
+	readJSON(t, resp, &agents)
+	if len(agents) == 0 {
+		t.Fatal("no agents in test workspace")
+	}
+	runtimeID := agents[0]["runtime_id"].(string)
+
+	resp = authRequest(t, "POST", "/api/agents?workspace_id="+testWorkspaceID, map[string]any{
+		"name":       "Private Test Agent",
+		"runtime_id": runtimeID,
+		"visibility": "private",
+	})
+	if resp.StatusCode != 201 {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("CreateAgent(private): expected 201, got %d: %s", resp.StatusCode, body)
+	}
+	var agent map[string]any
+	readJSON(t, resp, &agent)
+	id := agent["id"].(string)
+	t.Cleanup(func() {
+		authRequest(t, "POST", "/api/agents/"+id+"/archive?workspace_id="+testWorkspaceID, nil)
+	})
+	return id
+}
+
+// adminMember holds credentials for a second user added as admin to the workspace.
+type adminMember struct {
+	UserID string
+	Token  string
+}
+
+// createAdminMember creates a second user with admin role in the test workspace.
+func createAdminMember(t *testing.T) adminMember {
+	t.Helper()
+	ctx := context.Background()
+	const (
+		email = "integration-admin@multica.ai"
+		name  = "Admin Tester"
+	)
+	// Cleanup any leftover from previous runs.
+	testPool.Exec(ctx, `DELETE FROM member WHERE user_id IN (SELECT id FROM "user" WHERE email = $1)`, email)
+	testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+
+	var userID string
+	err := testPool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`, name, email).Scan(&userID)
+	if err != nil {
+		t.Fatalf("failed to create admin user: %v", err)
+	}
+	_, err = testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')`, testWorkspaceID, userID)
+	if err != nil {
+		t.Fatalf("failed to add admin member: %v", err)
+	}
+	token, err := generateTestJWT(userID, email, name)
+	if err != nil {
+		t.Fatalf("failed to generate admin JWT: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM member WHERE user_id = $1`, userID)
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+	})
+	return adminMember{UserID: userID, Token: token}
+}
+
+// authRequestWithToken makes an authenticated request using a specific token.
+func authRequestWithToken(t *testing.T, method, path string, body any, token string) *http.Response {
+	t.Helper()
+	var bodyReader io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		bodyReader = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, testServer.URL+path, bodyReader)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	return r
+}
+
+// postCommentWithToken posts a comment using a specific auth token.
+func postCommentWithToken(t *testing.T, issueID, content, token string) string {
+	t.Helper()
+	body := map[string]any{
+		"content": content,
+		"type":    "comment",
+	}
+	resp := authRequestWithToken(t, "POST", "/api/issues/"+issueID+"/comments", body, token)
+	if resp.StatusCode != 201 {
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("postCommentWithToken: expected 201, got %d: %s", resp.StatusCode, b)
+	}
+	var comment map[string]any
+	readJSON(t, resp, &comment)
+	return comment["id"].(string)
+}
+
+// TestCommentTriggerPrivateAgentVisibility verifies that private agents can
+// only be triggered via @mention by their owner — workspace admins and other
+// members must be blocked.
+func TestCommentTriggerPrivateAgentVisibility(t *testing.T) {
+	privateAgentID := createPrivateAgent(t) // owned by testUserID
+	issueID := createIssue(t, "Private agent visibility test")
+	t.Cleanup(func() {
+		clearTasks(t, issueID)
+		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
+		resp.Body.Close()
+	})
+
+	t.Run("owner can mention private agent", func(t *testing.T) {
+		clearTasks(t, issueID)
+		content := fmt.Sprintf("[@PrivateAgent](mention://agent/%s) do something", privateAgentID)
+		postComment(t, issueID, content, nil) // posted by testUser (owner)
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (owner mentions own private agent), got %d", n)
+		}
+	})
+
+	t.Run("workspace admin cannot mention private agent", func(t *testing.T) {
+		clearTasks(t, issueID)
+		admin := createAdminMember(t)
+		content := fmt.Sprintf("[@PrivateAgent](mention://agent/%s) do something", privateAgentID)
+		postCommentWithToken(t, issueID, content, admin.Token) // posted by admin (not owner)
+		if n := countPendingTasks(t, issueID); n != 0 {
+			t.Errorf("expected 0 pending tasks (admin should not trigger private agent), got %d", n)
+		}
+	})
+}
+
+// TestDeleteCommentCancelsTriggeredTasks verifies that deleting a comment
+// also cancels any active tasks that were triggered by it. Without this,
+// the daemon would still claim the queued task after the FK SET NULL
+// nullified its trigger_comment_id, and the agent would either run with a
+// stale prompt (race during claim) or with a generic "you are assigned"
+// prompt that has no record of the now-deleted user request — both of
+// which manifest as "the agent still sees the deleted comment".
+func TestDeleteCommentCancelsTriggeredTasks(t *testing.T) {
+	agentID := getAgentID(t)
+	issueID := createIssueAssignedToAgent(t, "Delete-comment cancels task test", agentID)
+	t.Cleanup(func() {
+		clearTasks(t, issueID)
+		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
+		resp.Body.Close()
+	})
+
+	t.Run("deleting trigger comment cancels its queued task", func(t *testing.T) {
+		clearTasks(t, issueID)
+		commentID := postComment(t, issueID, "Please fix this bug", nil)
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Fatalf("expected 1 pending task before delete, got %d", n)
+		}
+
+		resp := authRequest(t, "DELETE", "/api/comments/"+commentID, nil)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("DeleteComment: expected 204, got %d", resp.StatusCode)
+		}
+
+		if n := countPendingTasks(t, issueID); n != 0 {
+			t.Errorf("expected 0 pending tasks after deleting trigger comment, got %d", n)
+		}
+	})
+}
+
 // TestCommentTriggerCoalescing verifies that rapid-fire comments don't create
 // duplicate tasks (coalescing dedup).
 func TestCommentTriggerCoalescing(t *testing.T) {

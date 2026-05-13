@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"runtime/debug"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -12,21 +13,91 @@ import (
 )
 
 const schedulerInterval = 30 * time.Second
+const schedulerRestartDelay = time.Second
 
 // runAutopilotScheduler polls for due schedule triggers and dispatches them.
 func runAutopilotScheduler(ctx context.Context, queries *db.Queries, svc *service.AutopilotService) {
+	defer restartAutopilotSchedulerOnPanic(ctx, queries, svc)
+
 	// Recover triggers that were claimed but never advanced (e.g. after a crash).
-	recoverLostTriggers(ctx, queries)
+	runSchedulerStep("startup_recovery", func() {
+		recoverLostTriggers(ctx, queries)
+	})
 
 	ticker := time.NewTicker(schedulerInterval)
 	defer ticker.Stop()
 
+	runAutopilotSchedulerLoop(ctx, ticker.C, func() {
+		safeSchedulerTick(
+			func() {
+				tickScheduledAutopilots(ctx, queries, svc)
+			},
+			func() {
+				recoverLostTriggers(ctx, queries)
+			},
+		)
+	})
+}
+
+func runAutopilotSchedulerLoop(ctx context.Context, ticks <-chan time.Time, tick func()) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			tickScheduledAutopilots(ctx, queries, svc)
+		case <-ticks:
+			if tick != nil {
+				tick()
+			}
+		}
+	}
+}
+
+func safeSchedulerTick(tick func(), onRecovered func()) {
+	if !runSchedulerStep("tick", tick) {
+		return
+	}
+	runSchedulerStep("panic_recovery", onRecovered)
+}
+
+func runSchedulerStep(step string, fn func()) (recovered bool) {
+	if fn == nil {
+		return false
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			recovered = true
+			slog.Error("autopilot scheduler: recovered panic",
+				"step", step,
+				"panic", r,
+				"stack", string(debug.Stack()),
+			)
+		}
+	}()
+
+	fn()
+	return false
+}
+
+func restartAutopilotSchedulerOnPanic(ctx context.Context, queries *db.Queries, svc *service.AutopilotService) {
+	if r := recover(); r != nil {
+		slog.Error("autopilot scheduler: panic escaped scheduler loop, restarting",
+			"panic", r,
+			"stack", string(debug.Stack()),
+		)
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		timer := time.NewTimer(schedulerRestartDelay)
+		defer timer.Stop()
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			go runAutopilotScheduler(ctx, queries, svc)
 		}
 	}
 }
@@ -93,7 +164,11 @@ func tickScheduledAutopilots(ctx context.Context, queries *db.Queries, svc *serv
 		}
 
 		// Dispatch the autopilot run.
-		if _, err := svc.DispatchAutopilot(ctx, autopilot, t.ID, "schedule", nil); err != nil {
+		if _, err := svc.DispatchAutopilot(ctx, autopilot, t.ID, "schedule", nil, service.TriggerActor{
+			Source:    "autopilot_schedule",
+			ActorType: "system",
+			ActorID:   pgtype.UUID{},
+		}); err != nil {
 			slog.Warn("autopilot scheduler: dispatch failed",
 				"autopilot_id", util.UUIDToString(autopilot.ID),
 				"trigger_id", util.UUIDToString(t.ID),

@@ -1,9 +1,8 @@
 import { githubUrl } from "../components/shared";
 import type { LandingDict } from "./types";
 
-export const ALLOW_SIGNUP = process.env.NEXT_PUBLIC_ALLOW_SIGNUP !== "false";
-
-export const en: LandingDict = {
+export function createEnDict(allowSignup: boolean): LandingDict {
+  return {
   header: {
     github: "GitHub",
     login: "Log in",
@@ -95,7 +94,7 @@ export const en: LandingDict = {
       label: "RUNTIMES",
       title: "One dashboard for all your compute",
       description:
-        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects local CLIs \u2014 plug in and go.",
+        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 11 supported coding tools on your machine.",
       cards: [
         {
           title: "Unified runtime panel",
@@ -108,9 +107,9 @@ export const en: LandingDict = {
             "Online/offline status, usage charts, and activity heatmaps. Know exactly what your compute is doing at any moment.",
         },
         {
-          title: "Auto-detection & plug-and-play",
+          title: "Auto-detection on first run",
           description:
-            "Multica detects available CLIs like Claude Code, Codex, OpenClaw, and OpenCode automatically. Connect a machine, and it\u2019s ready to work.",
+            "Multica scans for 11 supported coding tools \u2014 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -122,15 +121,15 @@ export const en: LandingDict = {
     headlineFaded: "in the next hour.",
     steps: [
       {
-        title: ALLOW_SIGNUP ? "Sign up & create your workspace" : "Login to your workspace",
-        description: ALLOW_SIGNUP
+        title: allowSignup ? "Sign up & create your workspace" : "Login to your workspace",
+        description: allowSignup
           ? "Enter your email, verify with a code, and you\u2019re in. Your workspace is created automatically \u2014 no setup wizard, no configuration forms."
           : "Enter your email, verify with a code, and you\u2019re logged into your workspace \u2014 no setup wizard, no configuration forms.",
       },
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica setup to configure, authenticate, and start the daemon. It auto-detects Claude Code, Codex, OpenClaw, and OpenCode on your machine \u2014 plug in and go.",
+          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 11 supported coding tools (Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi). Whichever ones you already have installed get registered as runtimes automatically.",
       },
       {
         title: "Create your first agent",
@@ -145,6 +144,7 @@ export const en: LandingDict = {
     ],
     cta: "Get started",
     ctaGithub: "View on GitHub",
+    ctaDocs: "Read the docs",
   },
 
   openSource: {
@@ -185,7 +185,7 @@ export const en: LandingDict = {
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica currently supports Claude Code, Codex, OpenClaw, and OpenCode out of the box. The daemon auto-detects whichever CLIs you have installed. Since it\u2019s open source, you can also add your own backends.",
+          "Multica supports 11 coding tools out of the box: Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -227,13 +227,13 @@ export const en: LandingDict = {
           { label: "Features", href: "#features" },
           { label: "How it Works", href: "#how-it-works" },
           { label: "Changelog", href: "/changelog" },
-          { label: "Desktop", href: "https://github.com/multica-ai/multica/releases/latest" },
+          { label: "Download", href: "/download" },
         ],
       },
       resources: {
         label: "Resources",
         links: [
-          { label: "Documentation", href: githubUrl },
+          { label: "Documentation", href: "/docs" },
           { label: "API", href: githubUrl },
           { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
         ],
@@ -276,12 +276,332 @@ export const en: LandingDict = {
   changelog: {
     title: "Changelog",
     subtitle: "New updates and improvements to Multica.",
+    toc: "All releases",
     categories: {
       features: "New Features",
       improvements: "Improvements",
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.2.29",
+        date: "2026-05-09",
+        title: "Project Picker in Quick Create, Resolvable Comments & Timeline Performance",
+        changes: [],
+        features: [
+          "Quick Create lets you pick a project, and remembers your last choice",
+          "Comment threads can be resolved and collapsed, keeping long discussions tidy",
+          "Issue live banner now shows agent tasks waiting in queue",
+          "Failed or cancelled tasks can be rerun in one click from the Execution Log",
+          "Agent Create modal gains an expand button for editing long descriptions",
+        ],
+        improvements: [
+          "Issue timeline no longer fully re-renders on every WebSocket event — long issues scroll smoothly",
+          "Editor skips parsing very large or JSON pastes, eliminating freezes",
+          "Autopilot skips dispatch when the assignee runtime is offline, avoiding empty runs",
+          "Inbox auto-archives `task_failed` rows once they reach a terminal state",
+          "Hermes sends agent instructions inline with each request",
+          "Timeline and Comment switched to client-side virtualization, dropping server-side pagination",
+          "Reserved slugs share a single JSON between front and back end, with CI guarding drift",
+          "ACP error messages include the JSON-RPC `error.data` field for clearer debugging",
+        ],
+        fixes: [
+          "429 / insufficient-balance agent runs are now marked `failed` instead of `completed`",
+          "Agent sessions stuck on poisoned images can recover, so the issue resumes",
+          "`pi --list-models` table format parses correctly, restoring model discovery",
+          "`pi` colon-to-slash normalization only applies to the legacy format",
+          "`kiro` and `kimi` added to the inline-system-prompt provider allowlist",
+          "Priority dropdown badge colors aligned with PriorityIcon semantic tokens",
+          "Long single-line agent messages now expand correctly",
+          "Desktop \"copy issue link\" uses the current connection URL instead of localhost",
+          "Mobile WebSocket handshake succeeds without cookies",
+          "Workspace slug creation validates reserved words; slug error messages are translated",
+          "Timeline correctly syncs `around` state when props flip to falsy",
+          "DropdownMenu popovers size to their content",
+        ],
+      },
+      {
+        version: "0.2.28",
+        date: "2026-05-08",
+        title: "Daemon Disk-Usage CLI, Timeline Polish & Task Usage Rollup",
+        changes: [],
+        features: [
+          "New `multica daemon disk-usage` CLI surfaces per-task and per-workspace disk footprint",
+          "Skill picker in agent settings has a search box for fast lookup",
+          "Daemon GC extends to chat, autopilot, and quick-create tasks",
+          "Issue detail breadcrumb now shows the MUL-xxxx identifier for quick reference",
+        ],
+        improvements: [
+          "Timeline page size bumped to 50, with per-pool keyset cursors for comments and activities",
+          "'Show older / newer' affordances now appear in edge cases and look clearly clickable",
+          "Server `task_usage` rolls up into a daily aggregate table, dropping DB load significantly",
+          "Daemon health check stays responsive while repo lookups are in flight",
+          "Runtime stats exclude archived agents for accurate active counts",
+        ],
+        fixes: [
+          "Linux daemon self-restart uses `brew prefix` symlinks, so Homebrew Cellar deletion no longer orphans runtimes",
+          "CLI short IDs now route correctly — copied prefixes no longer 404",
+          "Windows non-ASCII comment / description input lands via new `--content-file` / `--description-file` flags",
+          "Windows / Linux desktop replaces the Electron placeholder icon with the Multica asterisk",
+          "Orphaned timeline replies are now correctly surfaced",
+          "Timeline comment pagination budget excludes activities, so heavy activity no longer crowds out real comments",
+        ],
+      },
+      {
+        version: "0.2.27",
+        date: "2026-05-07",
+        title: "Smoother Chat, GitHub Skill Import & Stability Fixes",
+        changes: [],
+        features: [
+          "Import reusable skills directly from GitHub links",
+        ],
+        improvements: [
+          "Chat and Inbox feel smoother, with clearer history, easier reply copying, and faster triage after archiving",
+          "Issue actions keep more context, from easier access to the local folder to sub-issues inheriting the right project and status",
+          "Autopilots pause themselves after repeated failures, so noisy automations are easier to catch and fix",
+        ],
+        fixes: [
+          "Chinese input, desktop updates, long issue timelines, and live status updates are more reliable",
+        ],
+      },
+      {
+        version: "0.2.26",
+        date: "2026-05-06",
+        title: "Full i18n Rollout, Long-Issue Timeline & System Notifications Toggle",
+        changes: [],
+        features: [
+          "Web app fully translated to Simplified Chinese (21 namespaces), with per-user locale",
+          "System Notifications toggle in Settings",
+          "Delete chat sessions; History panel surfaced on the chat header",
+          "Runtime liveness backed by Redis, with DB fallback",
+          "Desktop loads runtime self-host config",
+          "CLI adds `--assignee-id` / `--to-id` / `--user-id` for unambiguous targeting",
+        ],
+        improvements: [
+          "Settings 'Appearance' tab is renamed to 'Preferences', and the active tab is reflected in the URL so deep links work",
+          "Long issues open instantly — Timeline switched to cursor-based keyset pagination, and repeated `task_completed` / `task_failed` activity entries are coalesced",
+          "Runtime poll and heartbeat schedules are isolated per-runtime, so one busy runtime can no longer starve others",
+          "CLI update requests persist in Redis, so a server restart no longer drops them",
+          "Runtime cost usage window narrowed from 180 days to 14 days, dropping query load",
+          "Project list returns a `resource_count` instead of inlining all resources, keeping responses lean",
+          "404 page redesigned, with the No-Access redirect loop fixed",
+          "Quick Create exempts git-describe daemons from the CLI version gate",
+          "CI now enforces lint on every PR, and the existing lint debt has been cleared",
+        ],
+        fixes: [
+          "Daemon cancels the running agent when the task is deleted server-side, eliminating orphan processes",
+          "Daemon refreshes a stale Codex `auth.json` when reusing an exec env, fixing intermittent auth errors",
+          "Daemon refuses to write `.gc_meta.json` when `issue_id` is empty",
+          "Session / resume across ACP backends now trusts the agent-reported session id, fixing cross-session bleed",
+          "OpenCode skills are written under `.opencode/skills/` so they are discovered natively",
+          "404 task-not-found semantics tightened on both server and the final guard",
+          "Pinned sidebar rows are auto-unpinned when the underlying entity disappears",
+          "Project detail page splits desktop and mobile sidebar state",
+          "Runtime detail page hides archived agents",
+          "Already-attached repos in Add Resource show a URL tooltip; empty project state has a New Issue button",
+          "S3 public URLs are region-qualified, fixing cross-region access",
+          "Windows installer parses version numbers and decodes checksums correctly",
+          "Quick Create submit button no longer shows a duplicate keyboard shortcut",
+        ],
+      },
+      {
+        version: "0.2.24",
+        date: "2026-05-03",
+        title: "Repo Checkout `--ref`, Hermes Replay Fix & Multi-Replica Model Picker",
+        changes: [],
+        features: [
+          "`multica repo checkout --ref` targets a branch, tag, or specific commit when pulling a repo into the workspace",
+          "`multica agent avatar` uploads an agent avatar straight from the CLI",
+          "Inbox shows an archive button on done tasks; the redundant mark-as-done hover button is gone",
+        ],
+        improvements: [
+          "Long-timeline issues open instantly from Inbox — the markdown render pipeline is memoized so unrelated WS events no longer re-render thousands of comments",
+          "Model picker works on multi-replica deployments — pending requests persist via Redis, with daemon retries on transient report failures",
+          "Daemon empty-claim cache TTL bumped, further reducing idle DB load",
+        ],
+        fixes: [
+          "Newly created agents show up everywhere immediately — the agent cache is hydrated on create",
+          "Hermes no longer replays the previous answer when a new turn starts — historical chunks are gated behind a per-turn flag",
+          "Codex runtime model picker exposes the GPT-5.5 family",
+          "`multica login --token <PAT>` accepts the PAT as a flag value instead of rejecting it",
+          "CLI update completion status is now reliable",
+          "Session resume is guarded by runtime, preventing cross-runtime resume",
+          "Kanban display settings survive when dragging issues across columns",
+          "Autopilot list is responsive on mobile viewports",
+          "Quick Create prompts produce higher-fidelity descriptions from the user's input",
+          "Skill upsert sanitizes null bytes, fixing a PostgreSQL UTF8 error",
+          "Connect Remote dialog points to the correct install script URL",
+        ],
+      },
+      {
+        version: "0.2.21",
+        date: "2026-04-30",
+        title: "Quick Capture Overhaul, Mermaid Diagrams & Typed Project Resources",
+        changes: [],
+        features: [
+          "Quick Capture replaces the old New Issue dialog — continuous-create mode, file uploads, and automatic enrichment from pasted URLs",
+          "Mermaid diagrams render inline in markdown, with a fullscreen lightbox for complex graphs",
+          "Projects can bind their own repo, separate from the workspace default",
+          "Permission-aware UI across agents, comments, runtimes, and skills — actions you can't take are no longer offered",
+        ],
+        improvements: [
+          "Daemon `/tasks/claim` polling uses a Redis empty-claim fast-path, dropping idle DB load and reclaiming disk on long-open issues",
+          "Multica Agent commits include a `Co-authored-by` trailer for proper Git attribution",
+          "Desktop blocks Cmd+R / Ctrl+R / F5 from reloading the app and shows the real version in dev and Updates settings",
+        ],
+        fixes: [
+          "Quick Create no longer invents requirements beyond user input, and subscribes the requester to the issue it creates",
+          "Inbox jumps straight to the targeted comment, and auto-archives when the issue is marked Done from the detail page",
+          "Task rerun starts a fresh session and skips poisoned resume state",
+          "Invitees land on their workspace after sign-in instead of being forced through `/onboarding`",
+        ],
+      },
+      {
+        version: "0.2.20",
+        date: "2026-04-29",
+        title: "Create Issue by Agent, Agent Presence v3 & Daemon WebSocket Heartbeat",
+        changes: [],
+        features: [
+          "Create Issue by Agent — press `c`, write one line, pick an agent; issue creation runs async and the result lands in your inbox",
+          "Agent Presence v3 — availability and last-task split into clearer signals, with an execution log on the issue panel showing active and recent runs",
+          "Daemon ↔ server heartbeat now flows over WebSocket with HTTP fallback, cutting task wakeup latency",
+          "Mention picker ranks suggestions by your local recency",
+        ],
+        improvements: [
+          "Server caches PAT / daemon token lookups in Redis, so large fleets stop hammering the database on every request",
+          "Backend default agent CLI args via `MULTICA_CLAUDE_ARGS` / `MULTICA_CODEX_ARGS` env vars",
+          "Manual and agent create-issue flows share one dialog shell, and picker agents become the default assignee",
+        ],
+        fixes: [
+          "Create-issue-by-agent no longer leaves tasks stuck queued, and no longer duplicates the issue when an attachment upload fails",
+          "Agent comments respect newlines instead of rendering literal `\\n`, and multi-line replies keep their formatting",
+          "Agent-authored root comments no longer inherit parent @mentions, breaking accidental agent loops",
+          "Cursor agent on Windows preserves multi-line prompts",
+        ],
+      },
+      {
+        version: "0.2.19",
+        date: "2026-04-28",
+        title: "Kiro CLI Runtime, Desktop Notifications & Issue Label Filter",
+        changes: [],
+        features: [
+          "Kiro CLI added as a local agent runtime option",
+          "macOS dock badge for unread issues, plus a native notification when the window is unfocused — click to jump straight to the issue",
+          "Issue list now supports filtering by label, combinable with status / priority / assignee",
+          "Daemon receives task wakeups over WebSocket — task startup latency drops noticeably",
+        ],
+        improvements: [
+          "List and board status group headers are simpler, with clearer color cues",
+          "Author-written markdown links are preserved through linkify",
+          "Label attach now applies optimistically, no server round-trip wait",
+          "Mention picker's issue search refreshes as you type",
+        ],
+        fixes: [
+          "Deleting a comment now cancels any agent task it triggered — no more ghost runs",
+          "Stalled Codex turns now time out instead of holding the slot",
+          "Windows daemon no longer dies when the parent shell closes",
+          "Agent-to-agent mention threads no longer cause feedback loops",
+        ],
+      },
+      {
+        version: "0.2.18",
+        date: "2026-04-27",
+        title: "Issue Labels, Labs Tab & Sidebar Invite Dot",
+        changes: [],
+        features: [
+          "Issue labels — color-code and filter issues across list, board and detail views",
+          "Labs settings tab for experimental toggles",
+          "Sidebar shows a dot when you have an unread workspace invite",
+        ],
+        improvements: [
+          "Project picker now shows the selected project's icon",
+          "Sidebar parent items stay highlighted on detail pages",
+          "Self-hosted deployments correctly honor signup gating env vars",
+        ],
+        fixes: [
+          "Agent comments preserve line breaks again",
+          "Desktop RPM no longer conflicts with Slack / VS Code on Fedora",
+          "Windows agents handle multi-line prompts correctly",
+        ],
+      },
+      {
+        version: "0.2.17",
+        date: "2026-04-26",
+        title: "Custom Agent Env, Better Failure Messages & Reliability Fixes",
+        changes: [],
+        features: [
+          "`multica agent create/update --custom-env KEY=VALUE` injects custom environment variables into agent runs",
+          "Agent failure messages now include a tail of the runtime CLI's stderr — much easier to debug runtime errors",
+          "CLI update download timeout is now configurable, so slow links no longer abort `multica update`",
+        ],
+        improvements: [
+          "Daemon reports cancelled tasks as `cancelled` instead of `timeout`, and reconciles agent status when an issue's tasks are cancelled",
+          "Server heartbeat split into probe/claim with slow-log + a model-list running-timeout, so a lost heartbeat no longer wedges the UI",
+        ],
+        fixes: [
+          "Server validates `assignee_id` on issue create/update so phantom IDs are rejected, and `DeleteIssue` uses the resolved issue ID",
+          "Pi runtime now reads/writes `.pi/skills` instead of the old `.pi/agent/skills` path",
+          "Windows daemon uses `CREATE_NEW_CONSOLE` so grandchild console popups no longer appear when launching agents",
+          "Autopilot run-only context is now properly forwarded to the agent",
+        ],
+      },
+      {
+        version: "0.2.16",
+        date: "2026-04-24",
+        title: "Chat V2, Issue Right-Click Menu & In-App Feedback",
+        changes: [],
+        features: [
+          "Chat V2 — dedicated sidebar entry and full main-area page for AI conversations",
+          "Right-click context menu on issues with a unified action set across list, board, and detail",
+          "In-app feedback flow with a new Help launcher centralizing docs, support, and feedback",
+          "Autopilot modal redesigned — simpler schema and consistent schedule UI across creation and edit",
+          "Skills page redesigned — list + detail pages, scroll-fade card layout, shared PageHeader and mobile nav",
+          "Bilingual flat-content rewrite of the docs site — English and Chinese sections share one tree",
+        ],
+        improvements: [
+          "Agent profile card appears on avatar hover for quick context",
+          "Native right-click menu on desktop with clipboard actions (copy / paste / cut / select all)",
+          "Daemon agent prompts hardened to break self-mention loops between agents",
+          "Server readiness health endpoints for proper rollout / ingress probes",
+          "Daemon GC defaults tightened and now accept flexible duration suffixes (e.g. `7d`, `12h`)",
+          "Test Connection / runtime ping removed — runtime reachability is detected automatically",
+        ],
+        fixes: [
+          "Chat no longer flickers when a streamed response finalizes, and the input box no longer jumps when sending the first message",
+          "Desktop reopens the last-used workspace on app start instead of falling back to the first one",
+          "Editor preserves nested ordered lists through the readonly render path",
+          "CLI `browser-login` now works from a machine that isn't running the server",
+          "Daemon suppresses extra terminal windows when launching agents on Windows, and retries local-skill reports on transient server errors",
+          "`/api/config` is publicly reachable again so unauthenticated clients can bootstrap",
+          "Defense-in-depth owner check on workspace deletion, and `/health/realtime` metrics restricted to authorized callers (security)",
+          "Hermes ACP runtime now receives the configured model; OpenClaw agent discovery timeout raised to 30s",
+        ],
+      },
+      {
+        version: "0.2.15",
+        date: "2026-04-22",
+        title: "Local Skills, LaTeX, Focus Mode & Orphan-Task Recovery",
+        changes: [],
+        features: [
+          "Import runtime local Skills into the workspace as first-class artifacts",
+          "Orphan-task recovery — abandoned agent runs auto-retry, with manual rerun as fallback",
+          "LaTeX rendering in issues, comments and chat",
+          "Chat Focus mode — share the page you're on as conversation context",
+        ],
+        improvements: [
+          "Sub-issue `status_changed` events no longer spam parent-issue subscribers",
+          "Multi-arch Docker release images built natively per-arch (no QEMU)",
+          "Pin sidebar derives fields client-side for snappier reorders",
+          "Expanded reserved-slug list so new slugs can't collide with product routes",
+        ],
+        fixes: [
+          "Gemini runtime model list now includes Gemini 3 and CLI aliases",
+          "Chat focus button disabled on pages without an anchor",
+          "Onboarding pin sync, welcome layout and runtime bootstrap state",
+          "`install.ps1` OS architecture detection hardened for more Windows setups",
+          "`/download` falls back to the previous release within a 1h freshness window",
+        ],
+      },
       {
         version: "0.2.11",
         date: "2026-04-21",
@@ -726,4 +1046,80 @@ export const en: LandingDict = {
       },
     ],
   },
-};
+  download: {
+    hero: {
+      macArm64: {
+        title: "Multica for macOS",
+        sub: "Apple Silicon · bundled daemon, zero setup",
+        primary: "Download (.dmg)",
+        altZip: "or download .zip",
+      },
+      macIntel: {
+        title: "Multica for macOS",
+        sub: "Apple Silicon required — Intel Macs not yet supported.",
+        disabledCta: "Apple Silicon required",
+        intelHint:
+          "On an Intel Mac? Use the CLI below — it runs the same daemon.",
+      },
+      winX64: {
+        title: "Multica for Windows",
+        sub: "Bundled daemon, zero setup",
+        primary: "Download (.exe)",
+      },
+      winArm64: {
+        title: "Multica for Windows",
+        sub: "ARM · bundled daemon, zero setup",
+        primary: "Download (.exe)",
+      },
+      linux: {
+        title: "Multica for Linux",
+        sub: "Bundled daemon, zero setup",
+        primary: "Download AppImage",
+        altFormats: "or .deb / .rpm",
+      },
+      unknown: {
+        title: "Choose your platform",
+        sub: "All installers are listed below.",
+      },
+      safariMacHint: "On an Intel Mac? Use the CLI below.",
+      archFallbackHint: "Wrong architecture? See all formats below.",
+    },
+    allPlatforms: {
+      title: "All platforms",
+      macLabel: "macOS · Apple Silicon",
+      winX64Label: "Windows · x64",
+      winArm64Label: "Windows · ARM64",
+      linuxX64Label: "Linux · x64",
+      linuxArm64Label: "Linux · ARM64",
+      formatDmg: ".dmg",
+      formatZip: ".zip",
+      formatExe: ".exe",
+      formatAppImage: ".AppImage",
+      formatDeb: ".deb",
+      formatRpm: ".rpm",
+      intelNote:
+        "Apple Silicon only — Intel Macs not supported in this release.",
+      unavailable: "Not available",
+    },
+    cli: {
+      title: "Prefer the CLI?",
+      sub: "For servers, remote dev boxes, and headless setups. Same daemon as Desktop, installed via terminal.",
+      installLabel: "Install",
+      startLabel: "Start daemon",
+      sshNote: "Already on a server? Same commands work over SSH.",
+      copyLabel: "Copy",
+      copiedLabel: "Copied",
+    },
+    cloud: {
+      title: "Cloud runtime (waitlist)",
+      sub: "We’ll host the runtime for you. Not live yet — leave your email to be notified.",
+    },
+    footer: {
+      releaseNotes: "What’s new in {version}",
+      allReleases: "View all releases",
+      currentVersion: "Current version: {version}",
+      versionUnavailable: "Version unavailable — check GitHub",
+    },
+  },
+  };
+}

@@ -1,0 +1,54 @@
+---
+title: Multica 是怎么工作的
+description: 三个核心组件（server / 守护进程 / AI 编程工具）怎么协同完成一次智能体工作。
+---
+
+import { ArchitectureDiagram } from "@/components/architecture-diagram";
+
+Multica 是一个**分布式**平台。你看到的 Web 界面只是前台——真正干活的有三个组件：**Multica 服务器**管数据（[工作区](/workspaces)、[issue](/issues)、[成员](/members-roles)、[任务](/tasks) 队列等）；**[守护进程](/daemon-runtimes)** 跑在你自己机器上，领任务、调用 AI 编程工具；**[AI 编程工具](/providers)**（Claude Code、Codex 等本地 CLI）是真正写代码的那一环。这个结构是 Multica 和 Linear / Jira 最大的差别——**[智能体](/agents) 不跑在我们的服务器上，而是在你自己的机器上**。
+
+## 系统的三个核心组件
+
+<ArchitectureDiagram />
+
+- **Multica 服务器**——你看到的工作区、issue 列表、评论线都存在它的数据库里。它同时是 WebSocket hub，把你和同事之间的实时更新推送过去。它**不**执行任何智能体任务。
+- **守护进程**（daemon）——Multica CLI 的一部分，跑在你自己的机器上。启动后它探测本地装了哪些 AI 编程工具，注册到 server，开始每 3 秒领一次任务、每 15 秒发一次心跳。
+- **AI 编程工具**——[Claude Code](/providers#claude-code)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Gemini](/providers#gemini)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi) 11 款之一（或多款并存）。守护进程领到任务后，用这些工具真正去写代码。
+
+工具链在本地的结果：**你的 API 密钥、代码目录、已授权的工具**都只在本地使用；Multica 服务器一个都看不到。自部署还是用 Cloud 都不改变这一点。
+
+## 一个任务从创建到完成会经历什么
+
+以"你把一个 issue 分配给某个智能体"这个最常见的场景为例：
+
+1. 你在 Web 上点击分配。浏览器发 HTTP 请求到 Multica 服务器。
+2. 服务器把这条 issue 的 assignee 改成那个智能体，**同时**在任务队列里创建一条执行任务，状态 `queued`。
+3. 你机器上的守护进程下一次轮询（3 秒内）把这条任务领走。任务状态变 `dispatched`。
+4. 守护进程在本地创建隔离工作目录、调用对应 AI 编程工具开始执行。任务状态变 `running`。
+5. AI 在本地写代码、跑测试、发评论回服务器。
+6. 执行结束。守护进程把结果（成功 / 失败）汇报给服务器，任务状态变 `completed` 或 `failed`。你在 Web 上看到进度实时更新（WebSocket 推送）。
+
+详细机制见 [守护进程与运行时](/daemon-runtimes) 和 [执行任务](/tasks)。
+
+## 让智能体开工的四种方式
+
+不只是"分配 issue"——Multica 有 4 种触发方式，对应不同协作场景：
+
+| 方式 | 典型场景 | 文档 |
+|---|---|---|
+| **分配 issue** | 最常见。把一条 issue 指派给智能体，它自动开工 | [分配 issue](/assigning-issues) |
+| **在评论里 @智能体** | "这条你帮我看一下"——不改 assignee、不改状态，用一条评论触发 | [在评论里 @智能体](/mentioning-agents) |
+| **直接聊天** | 独立对话，不绑 issue——问问题、让它帮起草任务 | [聊天](/chat) |
+| **Autopilots（定时）** | 长期指令——每周一早上做 standup 总结之类 | [Autopilots](/autopilots) |
+
+## 运行时：在哪里跑，跑几家工具
+
+**运行时**（runtime）是"守护进程 × 一款 AI 编程工具"的组合。同一台机器上的守护进程装了 Claude Code 和 Codex，两个工作区都加入了，那么 Multica 会注册 4 个独立运行时（2 工作区 × 2 工具）。
+
+目前只支持**本地守护进程**这一种运行模式。云端运行时（不需要你自己开机）**即将开放**，当前处于等待名单阶段——在 [下载页面](https://multica.ai/download) 登记邮箱。
+
+## 下一步
+
+- [Cloud Quickstart](/cloud-quickstart) —— 5 分钟接入 Multica Cloud
+- [Self-Host Quickstart](/self-host-quickstart) —— 在自己的服务器上跑一套
+- [守护进程与运行时](/daemon-runtimes) —— 架构的灵魂组件深度讲解

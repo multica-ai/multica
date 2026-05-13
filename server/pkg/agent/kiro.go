@@ -8,26 +8,29 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // kiroBlockedArgs are flags hardcoded by the daemon that must not be
-// overridden by user-configured custom_args. `acp` is the protocol
-// subcommand and `--trust-all-tools` is the auto-approve flag that
-// the daemon always sets; overriding either would break the
-// daemon↔Kiro communication contract.
+// overridden by user-configured custom_args. `acp` is the protocol subcommand,
+// and --trust-all-tools covers Kiro's CLI-level tool gate while
+// hermesClient handles ACP session/request_permission auto-approval. In Kiro
+// CLI 2.1.1, `-a` is short for --trust-all-tools, not --agent; --agent remains
+// allowed so users can select a custom Kiro agent.
 var kiroBlockedArgs = map[string]blockedArgMode{
 	"acp":               blockedStandalone,
+	"-a":                blockedStandalone,
 	"--trust-all-tools": blockedStandalone,
+	"--trust-tools":     blockedWithValue,
 }
 
 // kiroBackend implements Backend by spawning `kiro-cli acp` and communicating
-// via the ACP (Agent Client Protocol) JSON-RPC 2.0 over stdin/stdout.
+// via the standard ACP JSON-RPC 2.0 transport over stdin/stdout.
 //
-// Kiro CLI (https://kiro.dev/) supports ACP out of the box via the
-// `kiro-cli acp` subcommand. We reuse the existing hermesClient ACP
-// transport since both runtimes speak the same protocol — only the
-// binary, env, and tool-name extraction differ.
+// Kiro CLI advertises loadSession, returns models from session/new, and supports
+// session/set_model, so the existing Hermes/Kimi ACP client can drive it with
+// only provider-specific launch and tool-name normalization.
 type kiroBackend struct {
 	cfg Config
 }
@@ -53,6 +56,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	// as a belt-and-suspenders approach.
 	kiroArgs := append([]string{"acp", "--trust-all-tools"}, filterCustomArgs(opts.CustomArgs, kiroBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, kiroArgs...)
+	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", kiroArgs)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -69,13 +73,28 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		cancel()
 		return nil, fmt.Errorf("kiro stdin pipe: %w", err)
 	}
+	// StderrPipe + an explicit copier give us a join point
+	// (`stderrDone`) that fires before the failure-promotion
+	// decision; see the matching comment in hermes.go for why the
+	// io.MultiWriter form races with stopReason=end_turn under load.
 	providerErr := newACPProviderErrorSniffer("kiro")
-	cmd.Stderr = io.MultiWriter(newLogWriter(b.cfg.Logger, "[kiro:stderr] "), providerErr)
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("kiro stderr pipe: %w", err)
+	}
 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start kiro: %w", err)
 	}
+
+	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[kiro:stderr] "), providerErr)
+	stderrDone := make(chan struct{})
+	go func() {
+		defer close(stderrDone)
+		_, _ = io.Copy(stderrSink, stderr)
+	}()
 
 	b.cfg.Logger.Info("kiro acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
@@ -85,15 +104,23 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	var outputMu sync.Mutex
 	var output strings.Builder
 
+	// Reuse the hermesClient ACP transport — Kiro speaks the same protocol.
+	var streamingCurrentTurn atomic.Bool
+
 	promptDone := make(chan hermesPromptResult, 1)
 
-	// Reuse the hermesClient ACP transport — Kiro speaks the same protocol.
 	c := &hermesClient{
 		cfg:          b.cfg,
 		stdin:        stdin,
 		pending:      make(map[int]*pendingRPC),
 		pendingTools: make(map[string]*pendingToolCall),
+		acceptNotification: func(string) bool {
+			return streamingCurrentTurn.Load()
+		},
 		onMessage: func(msg Message) {
+			if !streamingCurrentTurn.Load() {
+				return
+			}
 			if msg.Type == MessageToolUse {
 				msg.Tool = kiroToolNameFromTitle(msg.Tool)
 			}
@@ -105,6 +132,9 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			trySend(msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
+			if !streamingCurrentTurn.Load() {
+				return
+			}
 			select {
 			case promptDone <- result:
 			default:
@@ -166,18 +196,34 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		if opts.ResumeSessionID != "" {
-			result, err := c.request(runCtx, "session/resume", map[string]any{
-				"cwd":       cwd,
-				"sessionId": opts.ResumeSessionID,
+			result, err := c.request(runCtx, "session/load", map[string]any{
+				"cwd":        cwd,
+				"sessionId":  opts.ResumeSessionID,
+				"mcpServers": []any{},
 			})
 			if err != nil {
 				finalStatus = "failed"
-				finalError = fmt.Sprintf("kiro session/resume failed: %v", err)
+				finalError = fmt.Sprintf("kiro session/load failed: %v", err)
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
-			sessionID = opts.ResumeSessionID
-			_ = result
+			// Apply the same defensive resolution kimi/hermes use: if
+			// kiro echoes a sessionId in the session/load response, prefer
+			// it (the canonical id the backend is committed to). When the
+			// response is empty or doesn't include sessionId — kiro's
+			// current observed shape — the helper falls back to the
+			// requested id, preserving today's behavior. Fixing this here
+			// too means a future kiro that DOES return a different id on
+			// silent state reset is handled the same way as hermes/kimi.
+			var changed bool
+			sessionID, changed = resolveResumedSessionID(opts.ResumeSessionID, result)
+			if changed {
+				b.cfg.Logger.Warn("agent returned a different session id on resume — original was likely lost; continuing with the new id",
+					"backend", "kiro",
+					"requested", opts.ResumeSessionID,
+					"actual", sessionID,
+				)
+			}
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,
@@ -228,12 +274,18 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
 		}
 
-		// 5. Send the prompt and wait for PromptResponse.
+		promptBlocks := []map[string]any{
+			{"type": "text", "text": userText},
+		}
+		// Kiro's published docs use `content`, while Kiro CLI 2.1.1 still
+		// requires the standard ACP `prompt` field. Send both so either wire
+		// shape can drive the turn.
+		// TODO: drop one field once Kiro lands on a single canonical payload.
+		streamingCurrentTurn.Store(true)
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
-			"prompt": []map[string]any{
-				{"type": "text", "text": userText},
-			},
+			"content":   promptBlocks,
+			"prompt":    promptBlocks,
 		})
 		if err != nil {
 			if runCtx.Err() == context.DeadlineExceeded {
@@ -268,17 +320,21 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		cancel()
 
 		<-readerDone
+		// Ensure the stderr copier has drained before consulting the
+		// provider-error sniffer; see hermes.go for the failure mode.
+		<-stderrDone
 
 		outputMu.Lock()
 		finalOutput := output.String()
 		outputMu.Unlock()
 
-		if finalStatus == "completed" && finalOutput == "" {
-			if msg := providerErr.message(); msg != "" {
-				finalStatus = "failed"
-				finalError = msg
-			}
-		}
+		// Promote completed→failed when stderr or the agent text
+		// stream show a terminal upstream-LLM failure (HTTP 4xx /
+		// rate-limit / expired token). See the helper docs for the
+		// full signal set; the key safety property is that transient
+		// per-attempt warnings followed by a successful retry stay
+		// "completed".
+		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
 
 		c.usageMu.Lock()
 		u := c.usage
@@ -337,11 +393,13 @@ func kiroToolNameFromTitle(title string) string {
 		return "search_files"
 	case "glob":
 		return "glob"
+	case "code":
+		return "code"
 	case "web search":
 		return "web_search"
 	case "fetch", "web fetch":
 		return "web_fetch"
-	case "todo", "todo write":
+	case "todo", "todo write", "todo list", "todo_list":
 		return "todo_write"
 	}
 

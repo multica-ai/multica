@@ -21,6 +21,7 @@ import {
 } from "./cache-helpers";
 import { useWorkspaceId } from "../hooks";
 import { useRecentIssuesStore } from "./stores";
+import { workspaceKeys } from "../workspace/queries";
 import type { Issue, IssueReaction, IssueStatus } from "../types";
 import type {
   CreateIssueRequest,
@@ -58,8 +59,16 @@ export function useLoadMoreByStatus(
   status: IssueStatus,
   myIssues?: { scope: string; filter: MyIssuesFilter },
 ) {
-  const qc = useQueryClient();
   const wsId = useWorkspaceId();
+  return useLoadMoreByStatusForWorkspace(wsId, status, myIssues);
+}
+
+export function useLoadMoreByStatusForWorkspace(
+  wsId: string,
+  status: IssueStatus,
+  myIssues?: { scope: string; filter: MyIssuesFilter },
+) {
+  const qc = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
 
   const queryKey = myIssues
@@ -308,8 +317,11 @@ export function useBatchDeleteIssues() {
 // Comments / Timeline
 // ---------------------------------------------------------------------------
 
+type TimelineCache = TimelineEntry[];
+
 export function useCreateComment(issueId: string) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: ({
       content,
@@ -323,31 +335,36 @@ export function useCreateComment(issueId: string) {
       attachmentIds?: string[];
     }) => api.createComment(issueId, content, type, parentId, attachmentIds),
     onSuccess: (comment) => {
-      qc.setQueryData<TimelineEntry[]>(
-        issueKeys.timeline(issueId),
-        (old) => {
-          if (!old) return old;
-          const entry: TimelineEntry = {
-            type: "comment",
-            id: comment.id,
-            actor_type: comment.author_type,
-            actor_id: comment.author_id,
-            content: comment.content,
-            parent_id: comment.parent_id,
-            comment_type: comment.type,
-            reactions: comment.reactions ?? [],
-            attachments: comment.attachments ?? [],
-            created_at: comment.created_at,
-            updated_at: comment.updated_at,
-          };
-          if (old.some((e) => e.id === comment.id)) return old;
-          return [...old, entry];
-        },
-      );
+      const entry: TimelineEntry = {
+        type: "comment",
+        id: comment.id,
+        actor_type: comment.author_type,
+        actor_id: comment.author_id,
+        content: comment.content,
+        parent_id: comment.parent_id,
+        comment_type: comment.type,
+        reactions: comment.reactions ?? [],
+        attachments: comment.attachments ?? [],
+        created_at: comment.created_at,
+        updated_at: comment.updated_at,
+      };
+      // Dedupe by id: the `comment:created` WS event may have already added
+      // this entry from the broadcast path before this onSuccess fires. Skip
+      // the append if the entry is already in the cache.
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
+        if (!old) return [entry];
+        if (old.some((e) => e.id === entry.id)) return old;
+        return [...old, entry];
+      });
+      qc.invalidateQueries({ queryKey: workspaceKeys.mentionFrequency(wsId) });
     },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
-    },
+    // No onSettled invalidate. The `comment:created` WS broadcast keeps
+    // the timeline cache fresh after a successful create, and reconnect
+    // recovery in useIssueTimeline already invalidates if the connection
+    // dropped. Re-fetching on every submit replaces every entry's
+    // reference, which forces every memoized CommentCard subtree to
+    // re-render (visible as a flash across sibling threads during AI
+    // streaming).
   });
 }
 
@@ -358,17 +375,16 @@ export function useUpdateComment(issueId: string) {
       api.updateComment(commentId, content),
     onMutate: async ({ commentId, content }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
-      const prev = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId));
-      qc.setQueryData<TimelineEntry[]>(
-        issueKeys.timeline(issueId),
-        (old) =>
-          old?.map((e) => (e.id === commentId ? { ...e, content } : e)),
+      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
+        old?.map((e) => (e.id === commentId ? { ...e, content } : e)),
       );
       return { prev };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prev)
+      if (ctx?.prev !== undefined) {
         qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
+      }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
@@ -382,16 +398,20 @@ export function useDeleteComment(issueId: string) {
     mutationFn: (commentId: string) => api.deleteComment(commentId),
     onMutate: async (commentId) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
-      const prev = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId));
+      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
 
-      // Cascade: collect all child comment IDs
+      // Cascade: collect all descendants of the deleted comment.
       const toRemove = new Set<string>([commentId]);
       if (prev) {
         let changed = true;
         while (changed) {
           changed = false;
           for (const e of prev) {
-            if (e.parent_id && toRemove.has(e.parent_id) && !toRemove.has(e.id)) {
+            if (
+              e.parent_id &&
+              toRemove.has(e.parent_id) &&
+              !toRemove.has(e.id)
+            ) {
               toRemove.add(e.id);
               changed = true;
             }
@@ -399,15 +419,48 @@ export function useDeleteComment(issueId: string) {
         }
       }
 
-      qc.setQueryData<TimelineEntry[]>(
-        issueKeys.timeline(issueId),
-        (old) => old?.filter((e) => !toRemove.has(e.id)),
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
+        old?.filter((e) => !toRemove.has(e.id)),
       );
       return { prev };
     },
     onError: (_err, _id, ctx) => {
-      if (ctx?.prev)
+      if (ctx?.prev !== undefined) {
         qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
+      }
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+    },
+  });
+}
+
+export function useResolveComment(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ commentId, resolved }: { commentId: string; resolved: boolean }) =>
+      resolved ? api.resolveComment(commentId) : api.unresolveComment(commentId),
+    onMutate: async ({ commentId, resolved }) => {
+      await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
+      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
+        old?.map((e) =>
+          e.id === commentId
+            ? {
+                ...e,
+                resolved_at: resolved ? new Date().toISOString() : null,
+                resolved_by_type: resolved ? e.resolved_by_type ?? null : null,
+                resolved_by_id: resolved ? e.resolved_by_id ?? null : null,
+              }
+            : e,
+        ),
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev !== undefined) {
+        qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
+      }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
@@ -417,8 +470,9 @@ export function useDeleteComment(issueId: string) {
 
 export function useToggleCommentReaction(issueId: string) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
-    mutationKey: ["toggleCommentReaction", issueId] as const,
+    mutationKey: ["toggleCommentReaction", wsId, issueId] as const,
     mutationFn: async ({
       commentId,
       emoji,
@@ -442,8 +496,9 @@ export function useToggleCommentReaction(issueId: string) {
 
 export function useToggleIssueReaction(issueId: string) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
-    mutationKey: ["toggleIssueReaction", issueId] as const,
+    mutationKey: ["toggleIssueReaction", wsId, issueId] as const,
     mutationFn: async ({
       emoji,
       existing,
@@ -525,6 +580,31 @@ export function useToggleIssueSubscriber(issueId: string) {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.subscribers(issueId) });
+    },
+  });
+}
+
+export function useClearIssueHistory() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({
+      issueId,
+      clearComments,
+      clearTasks,
+    }: {
+      issueId: string;
+      clearComments: boolean;
+      clearTasks: boolean;
+    }) =>
+      api.clearIssueHistory(issueId, {
+        clear_comments: clearComments,
+        clear_tasks: clearTasks,
+      }),
+    onSuccess: (_data, { issueId }) => {
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.taskRuns(issueId) });
     },
   });
 }

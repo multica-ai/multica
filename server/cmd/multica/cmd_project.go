@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -58,6 +59,32 @@ var projectStatusCmd = &cobra.Command{
 	RunE:  runProjectStatus,
 }
 
+var projectResourceCmd = &cobra.Command{
+	Use:   "resource",
+	Short: "Manage resources attached to a project",
+}
+
+var projectResourceListCmd = &cobra.Command{
+	Use:   "list <project-id>",
+	Short: "List resources attached to a project",
+	Args:  exactArgs(1),
+	RunE:  runProjectResourceList,
+}
+
+var projectResourceAddCmd = &cobra.Command{
+	Use:   "add <project-id>",
+	Short: "Attach a resource to a project (e.g. --type github_repo --url <url>)",
+	Args:  exactArgs(1),
+	RunE:  runProjectResourceAdd,
+}
+
+var projectResourceRemoveCmd = &cobra.Command{
+	Use:   "remove <project-id> <resource-id>",
+	Short: "Detach a resource from a project",
+	Args:  exactArgs(2),
+	RunE:  runProjectResourceRemove,
+}
+
 var validProjectStatuses = []string{
 	"planned", "in_progress", "paused", "completed", "cancelled",
 }
@@ -69,9 +96,15 @@ func init() {
 	projectCmd.AddCommand(projectUpdateCmd)
 	projectCmd.AddCommand(projectDeleteCmd)
 	projectCmd.AddCommand(projectStatusCmd)
+	projectCmd.AddCommand(projectResourceCmd)
+
+	projectResourceCmd.AddCommand(projectResourceListCmd)
+	projectResourceCmd.AddCommand(projectResourceAddCmd)
+	projectResourceCmd.AddCommand(projectResourceRemoveCmd)
 
 	// project list
 	projectListCmd.Flags().String("output", "table", "Output format: table or json")
+	projectListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	projectListCmd.Flags().String("status", "", "Filter by status")
 
 	// project get
@@ -83,7 +116,25 @@ func init() {
 	projectCreateCmd.Flags().String("status", "", "Project status")
 	projectCreateCmd.Flags().String("icon", "", "Project icon (emoji)")
 	projectCreateCmd.Flags().String("lead", "", "Lead name (member or agent)")
+	projectCreateCmd.Flags().StringArray("repo", nil, "Attach a github_repo resource by URL (may be repeated)")
 	projectCreateCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// project resource list
+	projectResourceListCmd.Flags().String("output", "table", "Output format: table or json")
+	projectResourceListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
+
+	// project resource add — generic shape: any --type with a JSON --ref payload
+	// works without further CLI changes. github_repo is supported via the
+	// dedicated --url / --default-branch-hint shortcuts as a convenience.
+	projectResourceAddCmd.Flags().String("type", "github_repo", "Resource type (e.g. github_repo, notion_page — see docs)")
+	projectResourceAddCmd.Flags().String("url", "", "Shortcut: the repo URL (only used when --type github_repo)")
+	projectResourceAddCmd.Flags().String("default-branch-hint", "", "Shortcut: optional default branch hint (only used when --type github_repo)")
+	projectResourceAddCmd.Flags().String("ref", "", "Generic JSON resource_ref payload — overrides the per-type shortcuts when set")
+	projectResourceAddCmd.Flags().String("label", "", "Optional human-readable label")
+	projectResourceAddCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// project resource remove
+	projectResourceRemoveCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// project update
 	projectUpdateCmd.Flags().String("title", "", "New title")
@@ -138,6 +189,8 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 		return cli.PrintJSON(os.Stdout, projectsRaw)
 	}
 
+	fullID, _ := cmd.Flags().GetBool("full-id")
+	actors := loadActorDisplayLookup(ctx, client)
 	headers := []string{"ID", "TITLE", "STATUS", "LEAD", "CREATED"}
 	rows := make([][]string, 0, len(projectsRaw))
 	for _, raw := range projectsRaw {
@@ -145,13 +198,13 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 		if !ok {
 			continue
 		}
-		lead := formatLead(p)
+		lead := formatLead(p, actors)
 		created := strVal(p, "created_at")
 		if len(created) >= 10 {
 			created = created[:10]
 		}
 		rows = append(rows, []string{
-			truncateID(strVal(p, "id")),
+			displayID(strVal(p, "id"), fullID),
 			strVal(p, "title"),
 			strVal(p, "status"),
 			lead,
@@ -171,17 +224,31 @@ func runProjectGet(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
 	var project map[string]any
-	if err := client.GetJSON(ctx, "/api/projects/"+args[0], &project); err != nil {
+	if err := client.GetJSON(ctx, "/api/projects/"+projectRef.ID, &project); err != nil {
 		return fmt.Errorf("get project: %w", err)
+	}
+
+	// Breadcrumb to the resources sub-collection. Goes to stderr so JSON on
+	// stdout stays parseable; the `resource_count` field on the response is
+	// the programmatic equivalent. JSON numbers decode as float64.
+	if n, _ := project["resource_count"].(float64); n > 0 {
+		fmt.Fprintf(os.Stderr, "%d resource(s) attached — run `multica project resource list %s` to view.\n",
+			int64(n), strVal(project, "id"))
 	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
-		lead := formatLead(project)
+		actors := loadActorDisplayLookup(ctx, client)
+		lead := formatLead(project, actors)
 		headers := []string{"ID", "TITLE", "STATUS", "LEAD", "DESCRIPTION"}
 		rows := [][]string{{
-			truncateID(strVal(project, "id")),
+			strVal(project, "id"),
 			strVal(project, "title"),
 			strVal(project, "status"),
 			lead,
@@ -227,6 +294,27 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 		body["lead_id"] = aID
 	}
 
+	// Bundle resources into the create payload so the server attaches them in
+	// the same transaction; this avoids leaving a half-attached project on
+	// failure.
+	repos, _ := cmd.Flags().GetStringArray("repo")
+	if len(repos) > 0 {
+		resources := make([]map[string]any, 0, len(repos))
+		for _, repoURL := range repos {
+			repoURL = strings.TrimSpace(repoURL)
+			if repoURL == "" {
+				continue
+			}
+			resources = append(resources, map[string]any{
+				"resource_type": "github_repo",
+				"resource_ref":  map[string]any{"url": repoURL},
+			})
+		}
+		if len(resources) > 0 {
+			body["resources"] = resources
+		}
+	}
+
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/projects", body, &result); err != nil {
 		return fmt.Errorf("create project: %w", err)
@@ -236,7 +324,7 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 	if output == "table" {
 		headers := []string{"ID", "TITLE", "STATUS"}
 		rows := [][]string{{
-			truncateID(strVal(result, "id")),
+			strVal(result, "id"),
 			strVal(result, "title"),
 			strVal(result, "status"),
 		}}
@@ -255,6 +343,11 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
 
 	body := map[string]any{}
 	if cmd.Flags().Changed("title") {
@@ -288,7 +381,7 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/projects/"+args[0], body, &result); err != nil {
+	if err := client.PutJSON(ctx, "/api/projects/"+projectRef.ID, body, &result); err != nil {
 		return fmt.Errorf("update project: %w", err)
 	}
 
@@ -296,7 +389,7 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 	if output == "table" {
 		headers := []string{"ID", "TITLE", "STATUS"}
 		rows := [][]string{{
-			truncateID(strVal(result, "id")),
+			strVal(result, "id"),
 			strVal(result, "title"),
 			strVal(result, "status"),
 		}}
@@ -316,11 +409,16 @@ func runProjectDelete(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	if err := client.DeleteJSON(ctx, "/api/projects/"+args[0]); err != nil {
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
+	if err := client.DeleteJSON(ctx, "/api/projects/"+projectRef.ID); err != nil {
 		return fmt.Errorf("delete project: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Project %s deleted.\n", truncateID(args[0]))
+	fmt.Fprintf(os.Stderr, "Project %s deleted.\n", projectRef.Display)
 	return nil
 }
 
@@ -347,13 +445,18 @@ func runProjectStatus(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	projectRef, err := resolveProjectID(ctx, client, id)
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
 	body := map[string]any{"status": status}
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/projects/"+id, body, &result); err != nil {
+	if err := client.PutJSON(ctx, "/api/projects/"+projectRef.ID, body, &result); err != nil {
 		return fmt.Errorf("update status: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Project %s status changed to %s.\n", truncateID(id), status)
+	fmt.Fprintf(os.Stderr, "Project %s status changed to %s.\n", strVal(result, "title"), status)
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
@@ -363,14 +466,176 @@ func runProjectStatus(cmd *cobra.Command, args []string) error {
 }
 
 // ---------------------------------------------------------------------------
+// Project resource commands
+// ---------------------------------------------------------------------------
+
+func runProjectResourceList(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/projects/"+projectRef.ID+"/resources", &result); err != nil {
+		return fmt.Errorf("list project resources: %w", err)
+	}
+	resourcesRaw, _ := result["resources"].([]any)
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, resourcesRaw)
+	}
+
+	fullID, _ := cmd.Flags().GetBool("full-id")
+	headers := []string{"ID", "TYPE", "REF", "LABEL"}
+	rows := make([][]string, 0, len(resourcesRaw))
+	for _, raw := range resourcesRaw {
+		r, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		rows = append(rows, []string{
+			displayID(strVal(r, "id"), fullID),
+			strVal(r, "resource_type"),
+			summarizeResourceRef(r["resource_ref"]),
+			strVal(r, "label"),
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runProjectResourceAdd(cmd *cobra.Command, args []string) error {
+	resourceType, _ := cmd.Flags().GetString("type")
+	resourceType = strings.TrimSpace(resourceType)
+	if resourceType == "" {
+		return fmt.Errorf("--type is required")
+	}
+
+	body := map[string]any{"resource_type": resourceType}
+
+	// --ref takes precedence: any new resource type works through this path
+	// without a CLI change. Per-type shortcuts (--url etc.) only apply when
+	// --ref is empty.
+	if rawRef, _ := cmd.Flags().GetString("ref"); strings.TrimSpace(rawRef) != "" {
+		var ref any
+		if err := json.Unmarshal([]byte(rawRef), &ref); err != nil {
+			return fmt.Errorf("--ref is not valid JSON: %w", err)
+		}
+		body["resource_ref"] = ref
+	} else {
+		switch resourceType {
+		case "github_repo":
+			urlVal, _ := cmd.Flags().GetString("url")
+			urlVal = strings.TrimSpace(urlVal)
+			if urlVal == "" {
+				return fmt.Errorf("github_repo requires --url (or pass a JSON payload via --ref)")
+			}
+			ref := map[string]any{"url": urlVal}
+			if hint, _ := cmd.Flags().GetString("default-branch-hint"); hint != "" {
+				ref["default_branch_hint"] = strings.TrimSpace(hint)
+			}
+			body["resource_ref"] = ref
+		default:
+			return fmt.Errorf("type %q has no built-in CLI shortcut; pass the payload via --ref '<json>'", resourceType)
+		}
+	}
+
+	if label, _ := cmd.Flags().GetString("label"); label != "" {
+		body["label"] = label
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/projects/"+projectRef.ID+"/resources", body, &result); err != nil {
+		return fmt.Errorf("add project resource: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		headers := []string{"ID", "TYPE", "REF"}
+		rows := [][]string{{
+			strVal(result, "id"),
+			strVal(result, "resource_type"),
+			summarizeResourceRef(result["resource_ref"]),
+		}}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+func runProjectResourceRemove(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+	resourceRef, err := resolveProjectResourceID(ctx, client, projectRef.ID, args[1])
+	if err != nil {
+		return fmt.Errorf("resolve project resource: %w", err)
+	}
+
+	if err := client.DeleteJSON(ctx, "/api/projects/"+projectRef.ID+"/resources/"+resourceRef.ID); err != nil {
+		return fmt.Errorf("remove project resource: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Resource %s removed from project %s.\n", resourceRef.Display, projectRef.Display)
+	return nil
+}
+
+// summarizeResourceRef extracts the most useful single string from a
+// resource_ref object — for github_repo this is the URL.
+func summarizeResourceRef(raw any) string {
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return ""
+	}
+	if u, ok := m["url"].(string); ok && u != "" {
+		return u
+	}
+	if data, err := json.Marshal(m); err == nil {
+		return string(data)
+	}
+	return ""
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-func formatLead(project map[string]any) string {
+func formatLead(project map[string]any, actors actorDisplayLookup) string {
 	lType := strVal(project, "lead_type")
 	lID := strVal(project, "lead_id")
 	if lType == "" || lID == "" {
 		return ""
 	}
-	return lType + ":" + truncateID(lID)
+	return actors.actor(lType, lID)
 }

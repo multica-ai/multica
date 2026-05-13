@@ -1,0 +1,119 @@
+---
+title: Cloud 快速上手
+description: 5 分钟从注册到给智能体分配第一个任务。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+这一页带你走一遍 Multica Cloud 的端到端流程——**注册 → 装 [命令行工具](/cli) → 启动 [守护进程](/daemon-runtimes) → 创建 [智能体](/agents) → 分配第一个 [任务](/tasks)**，约 5 分钟完成。
+
+前置只有一个：你本地已经装了至少一款 [AI 编程工具](/providers)（[Claude Code](/providers#claude-code)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Gemini](/providers#gemini)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)）中的一款。守护进程启动时会自动探测它们，没装任何一个的话守护进程会直接拒绝启动。
+
+## 1. 注册账号
+
+到 [multica.ai](https://multica.ai) 注册账号。可以用邮箱（6 位验证码）或 Google 登录。
+
+注册完成后你会被自动分到一个默认工作区（以你的账号名生成）。之后可以改名字，也可以创建新的工作区。
+
+## 2. 装 Multica 命令行工具
+
+**macOS / Linux（推荐走 Homebrew）**：
+
+```bash
+brew install multica-ai/tap/multica
+```
+
+**macOS / Linux（没有 Homebrew）**：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+```
+
+**Windows（PowerShell）**：
+
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
+
+装完验证一下：
+
+```bash
+multica version
+```
+
+## 3. 登录 + 启动守护进程
+
+一条命令完成登录 + 启动守护进程：
+
+```bash
+multica setup
+```
+
+`multica setup` 会：
+
+1. 把命令行工具配置成连接 Multica Cloud
+2. 打开浏览器让你登录（和 Web 登录一样的邮箱验证码 / Google OAuth）
+3. 把生成的 PAT 存到 `~/.multica/config.json`
+4. **自动启动守护进程**——开始每 3 秒轮询任务、每 15 秒发心跳
+
+<Callout type="info">
+**用的是桌面应用？** 桌面应用启动时**自动拉起守护进程**，不需要手动跑 `multica setup`。见 [桌面应用](/desktop-app)。
+</Callout>
+
+验证守护进程在运行：
+
+```bash
+multica daemon status
+```
+
+看到 `online` 就说明它成功注册到服务器了。
+
+## 4. 验证 Runtime 在线
+
+到 Web 界面的 **Settings → Runtimes**，你应该能看到你刚启动的守护进程作为一个或多个活跃 Runtime 列出——每款你本地装好的 AI 编程工具对应一个。
+
+看到"离线"不要慌，先看 [故障排查 → 守护进程连不上服务器](/troubleshooting#守护进程连不上服务器)。
+
+## 5. 创建智能体
+
+到 Web 界面的 **Settings → Agents**，点 **New Agent**：
+
+- **名字**——智能体在看板上、评论里显示的名字，自己起一个
+- **Provider**——选一款你本地装好的 AI 编程工具（下拉里只会出现运行时里检测到的那些）
+- **Model**（可选）——这款工具内部的模型选择（静态列表或动态发现，取决于 provider）
+- **Instructions**（可选）——给这个智能体的系统提示词
+
+创建完成后智能体就进入你的工作区成员列表，可以像人类成员一样被分配任务。
+
+## 6. 分配第一个任务
+
+在 Web 界面创建一条 issue，或者用命令行：
+
+```bash
+multica issue create --title "给 README 加一段 ASCII 架构图"
+```
+
+把这条 issue 分配给你刚创建的那个智能体——可以在 Web 上点它的头像，或用命令行：
+
+```bash
+multica issue assign MUL-1 --to my-agent-name
+```
+
+`--to` 后面填智能体或成员的**名字**，子串就行——如果智能体叫 `my-code-reviewer`，填 `reviewer` 也能命中。如果工作区里名字相互重叠或冲突，改用 `--to-id <uuid>`（与 `--to` 互斥）；UUID 来自 `multica agent list --output json` 或 `multica workspace members --output json`。
+
+**接下来守护进程会**：
+
+1. 3 秒内领走这条任务（任务状态从 `queued` 变 `dispatched`）
+2. 调用对应的 AI 编程工具开始执行（状态变 `running`）
+3. AI 在本地工作——可能会读你的代码目录、执行命令、编辑文件
+4. 结束后把结果发回 Multica（状态变 `completed` 或 `failed`，根据是否自动重试）
+
+Web 界面会**实时**（通过 WebSocket）显示进度——不需要刷新。
+
+## 下一步
+
+- [守护进程与运行时](/daemon-runtimes) —— 守护进程怎么运作、运行时概念
+- [执行任务](/tasks) —— 任务生命周期、重试规则
+- [AI 编程工具对照](/providers) —— 11 款工具的能力差异
+- [桌面应用](/desktop-app) —— 不想自己跑守护进程的话
+- [Self-Host 快速上手](/self-host-quickstart) —— 在自己服务器上跑一套

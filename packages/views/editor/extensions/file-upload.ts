@@ -134,7 +134,7 @@ export async function uploadAndInsertFile(
 
 /** Deduplicate files from the same paste/drop event.
  *  macOS/Chrome can put the same file in the FileList twice. */
-function dedupFiles(files: FileList): File[] {
+function dedupFiles(files: Iterable<File>): File[] {
   const seen = new Set<string>();
   return Array.from(files).filter((file) => {
     const key = `${file.name}\0${file.size}\0${file.type}`;
@@ -142,6 +142,30 @@ function dedupFiles(files: FileList): File[] {
     seen.add(key);
     return true;
   });
+}
+
+/**
+ * Extract files from clipboard data, checking both `.files` and `.items`.
+ *
+ * Some browsers (Safari, macOS screenshot paste) only expose pasted images
+ * through `clipboardData.items` and leave `clipboardData.files` empty.
+ * This helper unifies both sources and deduplicates the result.
+ */
+function getClipboardFiles(
+  clipboard: Pick<DataTransfer, "files" | "items"> | null | undefined,
+): File[] {
+  if (!clipboard) return [];
+
+  const directFiles = clipboard.files ? Array.from(clipboard.files) : [];
+  const itemFiles =
+    clipboard.items == null
+      ? []
+      : Array.from(clipboard.items)
+          .filter((item) => item.kind === "file")
+          .map((item) => item.getAsFile())
+          .filter((file): file is File => file != null);
+
+  return dedupFiles([...directFiles, ...itemFiles]);
 }
 
 export function createFileUploadExtension(
@@ -152,7 +176,7 @@ export function createFileUploadExtension(
     addProseMirrorPlugins() {
       const { editor } = this;
 
-      const handleFiles = async (files: FileList) => {
+      const handleFiles = async (files: Iterable<File>) => {
         const handler = onUploadFileRef.current;
         if (!handler) return false;
         for (const file of dedupFiles(files)) {
@@ -166,8 +190,8 @@ export function createFileUploadExtension(
           key: new PluginKey("fileUpload"),
           props: {
             handlePaste(_view, event) {
-              const files = event.clipboardData?.files;
-              if (!files?.length) return false;
+              const files = getClipboardFiles(event.clipboardData);
+              if (!files.length) return false;
               if (!onUploadFileRef.current) return false;
               handleFiles(files);
               return true;
@@ -182,7 +206,7 @@ export function createFileUploadExtension(
               // Only the first file uses the drop position; subsequent files
               // append to the end to avoid stale position issues.
               const dropPos = view.posAtCoords({ left: dragEvent.clientX, top: dragEvent.clientY });
-              const unique = dedupFiles(files);
+              const unique = dedupFiles(Array.from(files));
               for (let i = 0; i < unique.length; i++) {
                 const insertPos = i === 0 ? dropPos?.pos : undefined;
                 uploadAndInsertFile(editor, unique[i]!, handler, insertPos);
@@ -195,3 +219,5 @@ export function createFileUploadExtension(
     },
   });
 }
+
+export { getClipboardFiles };

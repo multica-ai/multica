@@ -6,6 +6,55 @@ afterEach(() => {
 });
 
 describe("ApiClient", () => {
+  it("does not clear a newer token when a stale request returns 401", async () => {
+    let resolveStaleRequest:
+      | ((response: Response) => void)
+      | undefined;
+    const onUnauthorized = vi.fn();
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveStaleRequest = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "u1", email: "u@example.com" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test", {
+      onUnauthorized,
+    });
+    client.setToken("old-token");
+
+    const staleRequest = client.getMe().catch((err: unknown) => err);
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Authorization: "Bearer old-token",
+    });
+
+    client.setToken("new-token");
+    resolveStaleRequest?.(
+      new Response(JSON.stringify({ error: "invalid token" }), {
+        status: 401,
+        statusText: "Unauthorized",
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(staleRequest).resolves.toBeInstanceOf(ApiError);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+
+    await client.getMe();
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).toMatchObject({
+      Authorization: "Bearer new-token",
+    });
+  });
+
   it("preserves HTTP status on failed requests", async () => {
     vi.stubGlobal(
       "fetch",
@@ -31,6 +80,27 @@ describe("ApiClient", () => {
         statusText: "Conflict",
       });
     }
+  });
+
+  it("uses the state-based Google binding callback endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ binding: {}, next_path: "/settings" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.completeGoogleBinding("code-1", "google.signed-state");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/notification-bindings/google/callback",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ code: "code-1", state: "google.signed-state" }),
+      }),
+    );
   });
 
   it("uses the expected HTTP contract for autopilot endpoints", async () => {
@@ -105,5 +175,43 @@ describe("ApiClient", () => {
       },
       { url: "https://api.example.test/api/autopilots/ap-1/triggers/tr-1", method: "DELETE" },
     ]);
+  });
+
+  it("emits X-Client-* headers when identity is configured", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test", {
+      identity: { platform: "desktop", version: "1.2.3", os: "macos" },
+    });
+    await client.listWorkspaces();
+
+    const headers = fetchMock.mock.calls[0]![1]!.headers as Record<string, string>;
+    expect(headers["X-Client-Platform"]).toBe("desktop");
+    expect(headers["X-Client-Version"]).toBe("1.2.3");
+    expect(headers["X-Client-OS"]).toBe("macos");
+  });
+
+  it("omits X-Client-* headers when identity is not configured", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.listWorkspaces();
+
+    const headers = fetchMock.mock.calls[0]![1]!.headers as Record<string, string>;
+    expect(headers["X-Client-Platform"]).toBeUndefined();
+    expect(headers["X-Client-Version"]).toBeUndefined();
+    expect(headers["X-Client-OS"]).toBeUndefined();
   });
 });

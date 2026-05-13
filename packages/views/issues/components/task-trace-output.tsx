@@ -9,7 +9,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui
 import { cn } from "@multica/ui/lib/utils";
 import { Markdown } from "@multica/ui/markdown";
 import { toast } from "sonner";
-import { redactSecrets } from "../utils/redact";
+import { redactSecrets } from "../../common/task-transcript/redact";
 
 interface TaskTraceOutputProps {
   task: AgentTask;
@@ -234,7 +234,7 @@ function summarizeToolResult(kind: ReturnType<typeof toolKind>, result: string |
   if (result === undefined) return "";
   const text = redactSecrets(String(unwrapJson(result)));
   if (!text.trim()) return "Completed";
-  const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const lines = text.split(/\r?\n/).filter((line: string) => line.trim().length > 0);
   if (kind === "read") return `Read ${lines.length || 1} line${lines.length === 1 ? "" : "s"}`;
   if (kind === "search") return `Found ${lines.length} matching line${lines.length === 1 ? "" : "s"}`;
   if (kind === "write" || kind === "edit") {

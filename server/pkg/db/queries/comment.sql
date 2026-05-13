@@ -1,36 +1,31 @@
--- name: ListComments :many
+-- name: ListCommentsForIssue :many
+-- All comments for an issue in chronological order, capped at $3 (DB safety
+-- net). Issue p99 is ~30 comments, max ever observed in prod is ~1.1k, so
+-- the handler-side cap of 2000 is purely defensive.
 SELECT * FROM comment
 WHERE issue_id = $1 AND workspace_id = $2
-ORDER BY created_at ASC;
+ORDER BY created_at ASC, id ASC
+LIMIT $3;
 
--- name: ListCommentsPaginated :many
-SELECT * FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
-ORDER BY created_at ASC
-LIMIT $3 OFFSET $4;
-
--- name: ListCommentsSince :many
+-- name: ListCommentsSinceForIssue :many
+-- Comments created strictly after $3 in chronological order, capped at $4.
+-- Powers the CLI's `--since` agent-polling flow.
 SELECT * FROM comment
 WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
-ORDER BY created_at ASC;
-
--- name: ListCommentsSincePaginated :many
-SELECT * FROM comment
-WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
-ORDER BY created_at ASC
-LIMIT $4 OFFSET $5;
+ORDER BY created_at ASC, id ASC
+LIMIT $4;
 
 -- name: CountComments :one
 SELECT count(*) FROM comment
-WHERE issue_id = $1 AND workspace_id = $2;
+WHERE issue_id = $1 AND workspace_id = $2 AND deleted_at IS NULL;
 
 -- name: GetComment :one
 SELECT * FROM comment
-WHERE id = $1;
+WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: GetCommentInWorkspace :one
 SELECT * FROM comment
-WHERE id = $1 AND workspace_id = $2;
+WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL;
 
 -- name: CreateComment :one
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
@@ -41,7 +36,7 @@ RETURNING *;
 UPDATE comment SET
     content = $2,
     updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND deleted_at IS NULL
 RETURNING *;
 
 -- name: HasAgentCommentedSince :one
@@ -51,6 +46,7 @@ SELECT EXISTS (
       AND author_type = 'agent'
       AND author_id = @author_id
       AND created_at >= @since
+      AND deleted_at IS NULL
 ) AS commented;
 
 -- name: HasAgentRepliedInThread :one
@@ -58,7 +54,31 @@ SELECT EXISTS (
 -- the specified parent comment. Used to detect agent participation in a
 -- member-started thread so that follow-up member replies still trigger the agent.
 SELECT count(*) > 0 AS has_replied FROM comment
-WHERE parent_id = @parent_id AND author_type = 'agent' AND author_id = @agent_id;
+WHERE parent_id = @parent_id AND author_type = 'agent' AND author_id = @agent_id AND deleted_at IS NULL;
 
 -- name: DeleteComment :exec
 DELETE FROM comment WHERE id = $1;
+
+-- name: DeleteCommentsByIssue :execrows
+DELETE FROM comment WHERE issue_id = $1 AND workspace_id = $2;
+
+-- name: ResolveComment :one
+-- Idempotent: re-resolving keeps the original resolved_at + resolver. Always
+-- returns the row so the handler can surface the canonical state.
+UPDATE comment SET
+    resolved_at = COALESCE(resolved_at, now()),
+    resolved_by_type = COALESCE(resolved_by_type, $2),
+    resolved_by_id = COALESCE(resolved_by_id, $3),
+    updated_at = CASE WHEN resolved_at IS NULL THEN now() ELSE updated_at END
+WHERE id = $1
+RETURNING *;
+
+-- name: UnresolveComment :one
+-- Idempotent: a no-op clear (already unresolved) just returns the row.
+UPDATE comment SET
+    resolved_at = NULL,
+    resolved_by_type = NULL,
+    resolved_by_id = NULL,
+    updated_at = CASE WHEN resolved_at IS NOT NULL THEN now() ELSE updated_at END
+WHERE id = $1
+RETURNING *;

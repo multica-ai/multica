@@ -6,6 +6,7 @@ const apiMock = vi.hoisted(() => ({
   listNotificationBindings: vi.fn(),
   deleteNotificationBinding: vi.fn(),
   startDingTalkBinding: vi.fn(),
+  startGoogleBinding: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -29,6 +30,9 @@ describe("LinkedAccountsSection", () => {
     apiMock.startDingTalkBinding.mockResolvedValue({
       auth_url: "https://login.dingtalk.com/oauth2/auth?state=test",
     });
+    apiMock.startGoogleBinding.mockResolvedValue({
+      auth_url: "https://accounts.google.com/o/oauth2/v2/auth?state=test",
+    });
   });
 
   it("starts dingtalk binding when connect is clicked", async () => {
@@ -36,13 +40,15 @@ describe("LinkedAccountsSection", () => {
 
     render(<LinkedAccountsSection />);
 
-    await user.click(
-      await screen.findByRole("button", { name: "Connect" }),
-    );
+    const connectButtons = await screen.findAllByRole("button", {
+      name: "Connect",
+    });
+    await user.click(connectButtons[0]!);
 
     await waitFor(() => {
       expect(apiMock.startDingTalkBinding).toHaveBeenCalledWith({
         next_path: window.location.pathname,
+        redirect_uri: `${window.location.origin}/auth/callback`,
       });
     });
   });
@@ -67,5 +73,27 @@ describe("LinkedAccountsSection", () => {
     expect(await screen.findByText("Ding User")).toBeInTheDocument();
     expect(screen.getByText("External user: union-id-123")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
+  });
+
+  it("does not render email account linking in Profile", async () => {
+    apiMock.listNotificationBindings.mockResolvedValue({
+      bindings: [
+        {
+          id: "binding-email",
+          provider: "email",
+          external_user_id: "user@example.com",
+          display_name: "user@example.com",
+          status: "active",
+          created_at: "2026-04-27T00:00:00Z",
+          updated_at: "2026-04-27T00:00:00Z",
+        },
+      ],
+    });
+
+    render(<LinkedAccountsSection />);
+
+    await screen.findByText("No DingTalk account connected");
+    expect(screen.queryByText("Email")).not.toBeInTheDocument();
+    expect(screen.queryByText("user@example.com")).not.toBeInTheDocument();
   });
 });

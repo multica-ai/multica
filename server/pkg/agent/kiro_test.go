@@ -36,10 +36,13 @@ func TestKiroToolNameFromTitle(t *testing.T) {
 		{"Bash", "terminal"},
 		{"Run command: pwd", "terminal"},
 		{"Search: foo", "search_files"},
+		{"grep", "search_files"},
 		{"Glob: *.go", "glob"},
+		{"Code", "code"},
 		{"Web search: golang acp", "web_search"},
 		{"Fetch: https://example.com", "web_fetch"},
 		{"Todo Write", "todo_write"},
+		{"Todo List", "todo_write"},
 		// Fallback: snake_case the title.
 		{"Custom Thing", "custom_thing"},
 		// Empty input returns empty — caller decides how to react.
@@ -76,16 +79,57 @@ if [ -n "$KIRO_ARGS_FILE" ]; then
   done
 fi
 while IFS= read -r line; do
+  if [ -n "$KIRO_REQUESTS_FILE" ]; then
+    printf '%s\n' "$line" >> "$KIRO_REQUESTS_FILE"
+  fi
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
       ;;
     *'"method":"session/new"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_fake"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_new","models":{"currentModelId":"auto","availableModels":[{"modelId":"auto","name":"auto"}]}}}\n' "$id"
+      ;;
+    *'"method":"session/load"'*)
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"history should be ignored"}}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"UsageUpdate","usage":{"inputTokens":1000,"outputTokens":1000,"cachedReadTokens":100}}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"ToolCall","toolCallId":"tc-current","name":"Shell","status":"pending","parameters":{"command":"echo replay"}}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"session/resume should not be used for kiro"}}\n' "$id"
       ;;
     *'"method":"session/set_model"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"model not available: bogus-model"}}\n' "$id"
+      case "$line" in
+        *bogus-model*)
+          printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"model not available: bogus-model"}}\n' "$id"
+          exit 0
+          ;;
+        *)
+          printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+          ;;
+      esac
+      ;;
+    *'"method":"session/prompt"'*)
+      case "$line" in
+        *'"content":'*)
+          ;;
+        *)
+          printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"session/prompt must send content and prompt"}}\n' "$id"
+          exit 0
+          ;;
+      esac
+      case "$line" in
+        *'"prompt":'*)
+          ;;
+        *)
+          printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"session/prompt must send content and prompt"}}\n' "$id"
+          exit 0
+          ;;
+      esac
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"ToolCallUpdate","toolCallId":"tc-current","status":"completed","name":"Shell","parameters":{"command":"echo current"},"output":"current tool output\\n"}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"loaded"}}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1}}}\n' "$id"
       exit 0
       ;;
   esac
@@ -101,9 +145,7 @@ func TestKiroBackendSetModelFailureFailsTask(t *testing.T) {
 	t.Parallel()
 
 	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
-	if err := os.WriteFile(fakePath, []byte(fakeKiroACPScript()), 0o755); err != nil {
-		t.Fatalf("write fake kiro-cli: %v", err)
-	}
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPScript()))
 
 	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
 	if err != nil {
@@ -140,7 +182,7 @@ func TestKiroBackendSetModelFailureFailsTask(t *testing.T) {
 		if !strings.Contains(result.Error, "model not available") {
 			t.Errorf("expected error to surface upstream message, got %q", result.Error)
 		}
-		if result.SessionID != "ses_fake" {
+		if result.SessionID != "ses_new" {
 			t.Errorf("expected session id to be preserved on failure, got %q", result.SessionID)
 		}
 	case <-time.After(10 * time.Second):
@@ -157,9 +199,7 @@ func TestKiroBackendInvokesACPWithTrustAllTools(t *testing.T) {
 	tempDir := t.TempDir()
 	argsFile := filepath.Join(tempDir, "argv.txt")
 	fakePath := filepath.Join(tempDir, "kiro-cli")
-	if err := os.WriteFile(fakePath, []byte(fakeKiroACPScript()), 0o755); err != nil {
-		t.Fatalf("write fake kiro-cli: %v", err)
-	}
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPScript()))
 
 	backend, err := New("kiro", Config{
 		ExecutablePath: fakePath,
@@ -173,11 +213,10 @@ func TestKiroBackendInvokesACPWithTrustAllTools(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Set Model so the fake binary exits on set_model and we don't
-	// have to wait for the prompt branch. We only care about argv here.
 	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
-		Model:   "bogus-model",
-		Timeout: 5 * time.Second,
+		Model:      "bogus-model",
+		Timeout:    5 * time.Second,
+		CustomArgs: []string{"acp", "--trust-tools", "shell", "-a", "--agent", "multica"},
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -193,13 +232,118 @@ func TestKiroBackendInvokesACPWithTrustAllTools(t *testing.T) {
 		t.Fatalf("read args file: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("expected at least 2 args (acp --trust-all-tools), got %d: %q", len(lines), lines)
+	wantPrefix := []string{"acp", "--trust-all-tools"}
+	if len(lines) < len(wantPrefix) {
+		t.Fatalf("expected at least %d args, got %d: %q", len(wantPrefix), len(lines), lines)
 	}
-	if lines[0] != "acp" {
-		t.Errorf("expected first arg to be acp, got %q (full: %q)", lines[0], lines)
+	for i, want := range wantPrefix {
+		if lines[i] != want {
+			t.Fatalf("arg[%d] = %q, want %q (full: %q)", i, lines[i], want, lines)
+		}
 	}
-	if lines[1] != "--trust-all-tools" {
-		t.Errorf("expected second arg to be --trust-all-tools, got %q (full: %q)", lines[1], lines)
+	for _, blocked := range []string{"--trust-tools", "shell", "-a"} {
+		for _, got := range lines {
+			if got == blocked {
+				t.Errorf("protocol-critical custom arg %q was not filtered: %q", blocked, lines)
+			}
+		}
+	}
+	if strings.Join(lines, "\n") != strings.Join([]string{"acp", "--trust-all-tools", "--agent", "multica"}, "\n") {
+		t.Errorf("unexpected argv after filtering: %q", lines)
+	}
+}
+
+func TestKiroBackendUsesSessionLoadForResume(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	requestsFile := filepath.Join(tempDir, "requests.jsonl")
+	fakePath := filepath.Join(tempDir, "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPScript()))
+
+	backend, err := New("kiro", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"KIRO_REQUESTS_FILE": requestsFile},
+	})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "continue", ExecOptions{
+		ResumeSessionID: "ses_existing",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var messages []Message
+	messagesDone := make(chan struct{})
+	go func() {
+		defer close(messagesDone)
+		for msg := range session.Messages {
+			messages = append(messages, msg)
+		}
+	}()
+
+	result := <-session.Result
+	<-messagesDone
+	if result.Status != "completed" {
+		t.Fatalf("expected completed result, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "loaded" {
+		t.Fatalf("output = %q, want loaded", result.Output)
+	}
+	if usage := result.Usage["unknown"]; usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 0 {
+		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=0", usage)
+	}
+	if len(messages) != 3 {
+		t.Fatalf("messages = %+v, want current tool use, tool result, and text only", messages)
+	}
+	if messages[0].Type != MessageToolUse {
+		t.Fatalf("messages[0].Type = %v, want MessageToolUse", messages[0].Type)
+	}
+	if messages[0].Tool != "terminal" {
+		t.Fatalf("messages[0].Tool = %q, want terminal", messages[0].Tool)
+	}
+	if command, _ := messages[0].Input["command"].(string); command != "echo current" {
+		t.Fatalf("messages[0].Input[command] = %q, want echo current", command)
+	}
+	if messages[1].Type != MessageToolResult {
+		t.Fatalf("messages[1].Type = %v, want MessageToolResult", messages[1].Type)
+	}
+	if messages[1].Output != "current tool output\n" {
+		t.Fatalf("messages[1].Output = %q, want current tool output", messages[1].Output)
+	}
+	if messages[2].Type != MessageText || messages[2].Content != "loaded" {
+		t.Fatalf("messages[2] = %+v, want text loaded", messages[2])
+	}
+	if result.SessionID != "ses_existing" {
+		t.Fatalf("session id = %q, want ses_existing", result.SessionID)
+	}
+
+	raw, err := os.ReadFile(requestsFile)
+	if err != nil {
+		t.Fatalf("read requests file: %v", err)
+	}
+	requests := string(raw)
+	if !strings.Contains(requests, `"method":"session/load"`) {
+		t.Fatalf("expected session/load request, got:\n%s", requests)
+	}
+	if strings.Contains(requests, `"method":"session/resume"`) {
+		t.Fatalf("kiro backend must not call session/resume, got:\n%s", requests)
+	}
+	if !strings.Contains(requests, `"mcpServers":[]`) {
+		t.Fatalf("session/load must include mcpServers, got:\n%s", requests)
+	}
+	// Kiro docs use content, but Kiro CLI 2.1.1 still requires prompt.
+	if !strings.Contains(requests, `"content":[`) {
+		t.Fatalf("session/prompt must send Kiro content field, got:\n%s", requests)
+	}
+	if !strings.Contains(requests, `"prompt":[`) {
+		t.Fatalf("session/prompt must send standard ACP prompt field for Kiro 2.1.1 compatibility, got:\n%s", requests)
 	}
 }

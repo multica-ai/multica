@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { IssueStatus, IssuePriority, IssueAssigneeType } from "../../types";
+import type { IssueAssigneeType, IssueStatus, IssuePriority } from "../../types";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
@@ -45,6 +45,16 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
     }),
     {
       name: "multica_issue_draft",
+      version: 2,
+      migrate: (persistedState) => {
+        const state = (persistedState as { draft?: Partial<IssueDraft> } | undefined) ?? {};
+        const draft = { ...EMPTY_DRAFT, ...(state.draft ?? {}) };
+        if (!draft.title && !draft.description) {
+          draft.assigneeType = undefined;
+          draft.assigneeId = undefined;
+        }
+        return { draft };
+      },
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
     },
   ),

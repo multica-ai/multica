@@ -1,7 +1,27 @@
+import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render as rtlRender, screen, type RenderOptions } from "@testing-library/react";
 import { ONBOARDING_STEP_ORDER } from "@multica/core/onboarding";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../../locales/en/common.json";
+import enOnboarding from "../../locales/en/onboarding.json";
 import { StepHeader } from "./step-header";
+
+const TEST_RESOURCES = {
+  en: { common: enCommon, onboarding: enOnboarding },
+};
+
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
+
+function render(ui: React.ReactElement, options?: RenderOptions) {
+  return rtlRender(ui, { wrapper: I18nWrapper, ...options });
+}
 
 describe("StepHeader", () => {
   it("renders one dot per step in ONBOARDING_STEP_ORDER", () => {

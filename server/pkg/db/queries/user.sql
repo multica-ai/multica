@@ -15,6 +15,7 @@ RETURNING *;
 UPDATE "user" SET
     name = COALESCE($2, name),
     avatar_url = COALESCE($3, avatar_url),
+    language = COALESCE($4, language),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

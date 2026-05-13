@@ -8,14 +8,14 @@ import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { MyIssuesFilter } from "@multica/core/issues/queries";
-import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { useModalStore } from "@multica/core/modals";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { sortIssues } from "../utils/sort";
-import { StatusIcon } from "./status-icon";
+import { StatusHeading } from "./status-heading";
 import { ListRow, type ChildProgress } from "./list-row";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { useT } from "../../i18n";
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 
@@ -25,6 +25,7 @@ export function ListView({
   childProgressMap = EMPTY_PROGRESS_MAP,
   myIssuesScope,
   myIssuesFilter,
+  projectId,
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatus[];
@@ -32,6 +33,8 @@ export function ListView({
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
+  /** When set, the per-section "+" pre-fills the project on the create form. */
+  projectId?: string;
 }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
@@ -86,6 +89,7 @@ export function ListView({
             issues={issuesByStatus.get(status) ?? []}
             childProgressMap={childProgressMap}
             myIssuesOpts={myIssuesOpts}
+            projectId={projectId}
           />
         ))}
       </Accordion.Root>
@@ -98,13 +102,15 @@ function StatusAccordionItem({
   issues,
   childProgressMap,
   myIssuesOpts,
+  projectId,
 }: {
   status: IssueStatus;
   issues: Issue[];
   childProgressMap: Map<string, ChildProgress>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  projectId?: string;
 }) {
-  const cfg = STATUS_CONFIG[status];
+  const { t } = useT("issues");
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
   const select = useIssueSelectionStore((s) => s.select);
   const deselect = useIssueSelectionStore((s) => s.deselect);
@@ -140,11 +146,7 @@ function StatusAccordionItem({
         </div>
         <Accordion.Trigger className="group/trigger flex flex-1 items-center gap-2 px-2 h-full text-left outline-none">
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90" />
-          <span className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-semibold ${cfg.badgeBg} ${cfg.badgeText}`}>
-            <StatusIcon status={status} className="h-3 w-3" inheritColor />
-            {cfg.label}
-          </span>
-          <span className="text-xs text-muted-foreground">{total}</span>
+          <StatusHeading status={status} count={total} />
         </Accordion.Trigger>
         <div className="pr-2">
           <Tooltip>
@@ -154,17 +156,18 @@ function StatusAccordionItem({
                   variant="ghost"
                   size="icon-sm"
                   className="rounded-full text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
+                  aria-label="Add issue"
                   onClick={() =>
                     useModalStore
                       .getState()
-                      .open("create-issue", { status })
+                      .open("create-issue", { status, ...(projectId ? { project_id: projectId } : {}) })
                   }
                 />
               }
             >
               <Plus className="size-3.5" />
             </TooltipTrigger>
-            <TooltipContent>Add issue</TooltipContent>
+            <TooltipContent>{t(($) => $.list.add_issue_tooltip)}</TooltipContent>
           </Tooltip>
         </div>
       </Accordion.Header>
@@ -180,7 +183,7 @@ function StatusAccordionItem({
           </>
         ) : (
           <p className="py-6 text-center text-xs text-muted-foreground">
-            No issues
+            {t(($) => $.list.empty_status)}
           </p>
         )}
       </Accordion.Panel>

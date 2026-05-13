@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	defaultUpdateManifestURL = "https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json"
+	DefaultUpdateManifestURL = "https://multica.obs.cn-east-3.myhuaweicloud.com/cli/manifest.json"
 )
 
 type UpdateManifest struct {
@@ -108,12 +108,12 @@ func resolveUpdateManifestURL() string {
 	if err == nil && strings.TrimSpace(cfg.UpdateManifestURL) != "" {
 		return strings.TrimSpace(cfg.UpdateManifestURL)
 	}
-	return defaultUpdateManifestURL
+	return DefaultUpdateManifestURL
 }
 
-func FetchLatestRelease() (*UpdateManifest, error) {
+func FetchUpdateManifestFromURL(url string) (*UpdateManifest, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, resolveUpdateManifestURL(), nil)
+	req, err := http.NewRequest(http.MethodGet, strings.TrimSpace(url), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +137,10 @@ func FetchLatestRelease() (*UpdateManifest, error) {
 		return nil, fmt.Errorf("update manifest missing version")
 	}
 	return &manifest, nil
+}
+
+func FetchLatestRelease() (*UpdateManifest, error) {
+	return FetchUpdateManifestFromURL(resolveUpdateManifestURL())
 }
 
 func resolveManagedInstallPath() (string, error) {
@@ -181,6 +185,62 @@ func IsManagedInstall() bool {
 		return false
 	}
 	return current == managedPath
+}
+
+// knownBrewPrefixes lists the install roots Homebrew uses on each platform.
+// Order is irrelevant — the prefixes do not nest.
+var knownBrewPrefixes = []string{"/opt/homebrew", "/usr/local", "/home/linuxbrew/.linuxbrew"}
+
+// MatchKnownBrewPrefix returns the Homebrew prefix whose Cellar contains path,
+// or "" if path is not under a known Cellar. It is the offline equivalent of
+// `brew --prefix`: callers reach for it when `brew --prefix` is unavailable
+// (brew not on PATH) but the binary's path still betrays its install root.
+func MatchKnownBrewPrefix(path string) string {
+	for _, prefix := range knownBrewPrefixes {
+		if strings.HasPrefix(path, prefix+"/Cellar/") {
+			return prefix
+		}
+	}
+	return ""
+}
+
+// IsBrewInstall checks whether the running multica binary was installed via Homebrew.
+func IsBrewInstall() bool {
+	exePath, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	resolved, err := filepath.EvalSymlinks(exePath)
+	if err != nil {
+		resolved = exePath
+	}
+
+	brewPrefix := GetBrewPrefix()
+	if brewPrefix != "" && strings.HasPrefix(resolved, brewPrefix) {
+		return true
+	}
+
+	return MatchKnownBrewPrefix(resolved) != ""
+}
+
+// GetBrewPrefix returns the Homebrew prefix by running `brew --prefix`, or empty string.
+func GetBrewPrefix() string {
+	out, err := exec.Command("brew", "--prefix").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// UpdateViaBrew runs `brew upgrade multica-ai/tap/multica`.
+// Returns the combined output and any error.
+func UpdateViaBrew() (string, error) {
+	cmd := exec.Command("brew", "upgrade", "multica-ai/tap/multica")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("brew upgrade failed: %w", err)
+	}
+	return string(out), nil
 }
 
 func findManifestAsset(manifest *UpdateManifest, goos, goarch string) (*UpdateManifestAsset, error) {
@@ -377,44 +437,4 @@ func extractBinaryFromZip(r io.Reader, name string) ([]byte, error) {
 		}
 	}
 	return nil, fmt.Errorf("binary %q not found in archive", name)
-}
-
-func GetBrewPrefix() string {
-	out, err := exec.Command("brew", "--prefix").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-func IsBrewInstall() bool {
-	exePath, err := os.Executable()
-	if err != nil {
-		return false
-	}
-	resolved, err := filepath.EvalSymlinks(exePath)
-	if err != nil {
-		resolved = exePath
-	}
-
-	brewPrefix := GetBrewPrefix()
-	if brewPrefix != "" && strings.HasPrefix(resolved, brewPrefix) {
-		return true
-	}
-
-	for _, prefix := range []string{"/opt/homebrew", "/usr/local", "/home/linuxbrew/.linuxbrew"} {
-		if strings.HasPrefix(resolved, prefix+"/Cellar/") {
-			return true
-		}
-	}
-	return false
-}
-
-func UpdateViaBrew() (string, error) {
-	cmd := exec.Command("brew", "upgrade", "multica-ai/tap/multica")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(out), fmt.Errorf("brew upgrade failed: %w", err)
-	}
-	return string(out), nil
 }

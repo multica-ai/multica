@@ -79,6 +79,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKiroModels(ctx, executablePath)
 		})
+	case "DeepSeek-TUI":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverDeepseekModels(ctx, executablePath)
+		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -150,7 +154,9 @@ func claudeStaticModels() []Model {
 
 func codexStaticModels() []Model {
 	return []Model{
-		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai", Default: true},
+		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai", Default: true},
+		{ID: "gpt-5.5-mini", Label: "GPT-5.5 mini", Provider: "openai"},
+		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai"},
 		{ID: "gpt-5.4-mini", Label: "GPT-5.4 mini", Provider: "openai"},
 		{ID: "gpt-5.3-codex", Label: "GPT-5.3 Codex", Provider: "openai"},
 		{ID: "gpt-5", Label: "GPT-5", Provider: "openai"},
@@ -159,11 +165,28 @@ func codexStaticModels() []Model {
 	}
 }
 
+// geminiStaticModels lists the values we pass via `gemini -m`. Gemini
+// CLI has no `models list` subcommand, so dynamic discovery isn't
+// possible; the next best thing is to expose the CLI's own aliases
+// (auto / pro / flash / flash-lite and the `auto-gemini-*` family)
+// alongside a few explicit version pins. Aliases track whatever the
+// installed CLI considers current (see `resolveModel` in the CLI's
+// packages/core/src/config/models.ts), so new Gemini releases light
+// up without a Multica redeploy. Default is `auto` to match Google's
+// recommendation — the CLI picks Pro vs Flash per task and falls back
+// when quota is exhausted.
 func geminiStaticModels() []Model {
 	return []Model{
-		{ID: "gemini-2.5-pro", Label: "Gemini 2.5 Pro", Provider: "google", Default: true},
+		{ID: "auto", Label: "Auto (Gemini 3)", Provider: "google", Default: true},
+		{ID: "auto-gemini-2.5", Label: "Auto (Gemini 2.5)", Provider: "google"},
+		{ID: "pro", Label: "Pro", Provider: "google"},
+		{ID: "flash", Label: "Flash", Provider: "google"},
+		{ID: "flash-lite", Label: "Flash Lite", Provider: "google"},
+		{ID: "gemini-3-pro-preview", Label: "Gemini 3 Pro (preview)", Provider: "google"},
+		{ID: "gemini-3-flash-preview", Label: "Gemini 3 Flash (preview)", Provider: "google"},
+		{ID: "gemini-2.5-pro", Label: "Gemini 2.5 Pro", Provider: "google"},
 		{ID: "gemini-2.5-flash", Label: "Gemini 2.5 Flash", Provider: "google"},
-		{ID: "gemini-2.0-flash", Label: "Gemini 2.0 Flash", Provider: "google"},
+		{ID: "gemini-2.5-flash-lite", Label: "Gemini 2.5 Flash Lite", Provider: "google"},
 	}
 }
 
@@ -207,6 +230,7 @@ func discoverOpenCodeModels(ctx context.Context, executablePath string) ([]Model
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "models")
+	hideAgentWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return []Model{}, nil
@@ -265,6 +289,7 @@ func discoverPiModels(ctx context.Context, executablePath string) ([]Model, erro
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
+	hideAgentWindow(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	stdout, err := cmd.Output()
@@ -278,9 +303,11 @@ func discoverPiModels(ctx context.Context, executablePath string) ([]Model, erro
 	return parsePiModels(text), nil
 }
 
-// parsePiModels accepts the `pi --list-models` output and extracts
-// model IDs. Pi's format uses `provider:model` rows; we normalize to
-// the same `provider/model` form as opencode for UI consistency.
+// parsePiModels accepts the `pi --list-models` output. Pi historically
+// emitted `provider:model` per line and now emits a multi-column table
+// (`provider  model  context …`); both shapes are normalized to
+// `provider/model` to match opencode/UI conventions. The case-insensitive
+// `provider` token in column 0 is treated as the table header and skipped.
 func parsePiModels(output string) []Model {
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -291,16 +318,25 @@ func parsePiModels(output string) []Model {
 		if line == "" {
 			continue
 		}
-		first := strings.Fields(line)
-		if len(first) == 0 {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
 			continue
 		}
-		id := first[0]
-		if !strings.ContainsAny(id, ":/") {
+		first := fields[0]
+		if strings.EqualFold(first, "provider") {
 			continue
 		}
-		// Normalize ":" to "/" since pi uses colon but opencode/UI uses slash.
-		id = strings.Replace(id, ":", "/", 1)
+		var id string
+		if strings.ContainsAny(first, ":/") {
+			// Legacy `provider:model` format — normalize colon to slash.
+			// Restricted to this branch so a model name with a `:` in
+			// the table format's column 1 is not silently rewritten.
+			id = strings.Replace(first, ":", "/", 1)
+		} else if len(fields) >= 2 {
+			id = first + "/" + fields[1]
+		} else {
+			continue
+		}
 		if seen[id] {
 			continue
 		}
@@ -326,10 +362,10 @@ func parsePiModels(output string) []Model {
 // creatable manual-entry input instead of blocking the form.
 func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, error) {
 	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
-		defaultBin:      "hermes",
-		clientName:      "multica-model-discovery",
-		extraEnv:        []string{"HERMES_YOLO_MODE=1"},
-		tmpdirPrefix:    "multica-hermes-discovery-",
+		defaultBin:   "hermes",
+		clientName:   "multica-model-discovery",
+		extraEnv:     []string{"HERMES_YOLO_MODE=1"},
+		tmpdirPrefix: "multica-hermes-discovery-",
 	})
 }
 
@@ -363,6 +399,145 @@ func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, er
 	})
 }
 
+// discoverDeepseekModels spins up a throwaway `deepseek app-server
+// --stdio` process and queries the model catalog via the native
+// `app/models` JSON-RPC method. DeepSeek-TUI does NOT speak ACP —
+// it has its own protocol where `app/models` returns a structured
+// list of available models with provider and capability information.
+//
+// If discovery fails (binary missing, API error), we fall back to a
+// static catalog of DeepSeek's flagship models.
+func discoverDeepseekModels(ctx context.Context, executablePath string) ([]Model, error) {
+	bin := executablePath
+	if bin == "" {
+		bin = "deepseek"
+	}
+
+	discoverCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(discoverCtx, bin, "app-server", "--stdio")
+	cmd.Stderr = io.Discard
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return deepseekStaticModels(), nil
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return deepseekStaticModels(), nil
+	}
+	if err := cmd.Start(); err != nil {
+		return deepseekStaticModels(), nil
+	}
+	defer func() {
+		stdin.Close()
+		_ = cmd.Wait()
+	}()
+
+	// Send app/models request.
+	req, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "app/models",
+		"params":  map[string]any{},
+	})
+	req = append(req, '\n')
+	if _, err := stdin.Write(req); err != nil {
+		return deepseekStaticModels(), nil
+	}
+
+	// Read lines until we get the JSON-RPC response.
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+
+	type dsModel struct {
+		ID               string   `json:"id"`
+		Provider         string   `json:"provider"`
+		Aliases          []string `json:"aliases"`
+		SupportsTools    bool     `json:"supports_tools"`
+		SupportsReasoning bool   `json:"supports_reasoning"`
+	}
+	type dsModelsResult struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Models []dsModel `json:"models"`
+		} `json:"data"`
+	}
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			continue
+		}
+
+		// Skip push events (have "type", no "id").
+		if _, hasType := raw["type"]; hasType {
+			continue
+		}
+		if _, hasID := raw["id"]; !hasID {
+			continue
+		}
+
+		// Parse the result.
+		resultData, ok := raw["result"]
+		if !ok {
+			break
+		}
+
+		var result dsModelsResult
+		if err := json.Unmarshal(resultData, &result); err != nil || !result.OK || len(result.Data.Models) == 0 {
+			break
+		}
+
+		var models []Model
+		for i, m := range result.Data.Models {
+			label := m.ID
+			if m.Provider != "" && !strings.HasPrefix(m.ID, m.Provider+"/") {
+				label = m.ID
+			}
+			models = append(models, Model{
+				ID:       m.ID,
+				Label:    label,
+				Provider: m.Provider,
+				Default:  i == 0,
+			})
+		}
+
+		// Shut down the process.
+		shutdown, _ := json.Marshal(map[string]any{
+			"jsonrpc": "2.0", "id": 2,
+			"method": "shutdown", "params": map[string]any{},
+		})
+		_, _ = stdin.Write(append(shutdown, '\n'))
+
+		return models, nil
+	}
+
+	// Shut down on failure path.
+	shutdown, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": 2,
+		"method": "shutdown", "params": map[string]any{},
+	})
+	_, _ = stdin.Write(append(shutdown, '\n'))
+
+	return deepseekStaticModels(), nil
+}
+
+// deepseekStaticModels is a fallback catalog for DeepSeek models when
+// ACP discovery fails. The list covers DeepSeek's two flagship models.
+func deepseekStaticModels() []Model {
+	return []Model{
+		{ID: "deepseek-v4-pro", Label: "DeepSeek V4 Pro", Provider: "DeepSeek-TUI", Default: true},
+		{ID: "deepseek-v4-flash", Label: "DeepSeek V4 Flash", Provider: "DeepSeek-TUI"},
+	}
+}
+
 // acpDiscoveryProvider configures how discoverACPModels launches an
 // ACP-speaking agent CLI. The shared helper drives every CLI in
 // the same way (initialize → session/new → parse models block) — the
@@ -374,14 +549,16 @@ type acpDiscoveryProvider struct {
 	clientName   string
 	extraEnv     []string
 	tmpdirPrefix string
+	args         []string // subcommand args; defaults to ["acp"] when empty
 }
 
 // discoverACPModels runs the ACP handshake for any agent CLI that
 // implements the standard `initialize` + `session/new` flow and
 // advertises its model catalog in the response under
 // `models.availableModels` / `models.currentModelId`. This covers
-// Hermes, Kimi, and Kiro today; future ACP backends can plug in by
-// adding an acpDiscoveryProvider entry instead of duplicating the loop.
+// Hermes, Kimi, Kiro, and DeepSeek today; future ACP backends can
+// plug in by adding an acpDiscoveryProvider entry instead of
+// duplicating the loop.
 func discoverACPModels(ctx context.Context, executablePath string, p acpDiscoveryProvider) ([]Model, error) {
 	if executablePath == "" {
 		executablePath = p.defaultBin
@@ -392,7 +569,12 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, executablePath, "acp")
+	cmdArgs := p.args
+	if len(cmdArgs) == 0 {
+		cmdArgs = []string{"acp"}
+	}
+	cmd := exec.CommandContext(runCtx, executablePath, cmdArgs...)
+	hideAgentWindow(cmd)
 	if len(p.extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), p.extraEnv...)
 	}
@@ -571,6 +753,7 @@ func discoverCursorModels(ctx context.Context, executablePath string) ([]Model, 
 	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
+	hideAgentWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return cursorStaticModels(), nil
@@ -656,7 +839,7 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return []Model{}, nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	// Try JSON modes first. Different openclaw builds expose the
@@ -667,6 +850,7 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 		{"agents", "list", "-o", "json"},
 	} {
 		cmd := exec.CommandContext(runCtx, executablePath, jsonArgs...)
+		hideAgentWindow(cmd)
 		out, err := cmd.Output()
 		if err != nil {
 			continue
@@ -680,6 +864,7 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 	// banner with box-drawing and section headers, and picking up
 	// the wrong tokens produces nonsense entries like "Identity:".
 	cmd := exec.CommandContext(runCtx, executablePath, "agents", "list")
+	hideAgentWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return []Model{}, nil

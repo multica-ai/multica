@@ -15,6 +15,8 @@ import type {
   AgentTask,
   TaskInteraction,
   TaskTraceResponse,
+  AgentActivityBucket,
+  AgentRunCount,
   AgentRuntime,
   InboxItem,
   IssueSubscriber,
@@ -26,6 +28,7 @@ import type {
   MemberWithUser,
   User,
   Skill,
+  SkillSummary,
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
@@ -36,11 +39,18 @@ import type {
   RuntimeUsage,
   IssueUsageSummary,
   RuntimeHourlyActivity,
-  RuntimePing,
+  RuntimeUsageByAgent,
+  RuntimeUsageByHour,
   RuntimeUpdate,
+  CLIUpdateManifest,
+  RuntimePing,
   RuntimeModelListRequest,
+  RuntimeLocalSkillListRequest,
+  CreateRuntimeLocalSkillImportRequest,
+  RuntimeLocalSkillImportRequest,
   TimelineEntry,
   AssigneeFrequencyEntry,
+  MentionFrequencyEntry,
   TaskMessagePayload,
   Attachment,
   ChatSession,
@@ -52,14 +62,29 @@ import type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  ProjectResource,
+  CreateProjectResourceRequest,
+  ListProjectResourcesResponse,
+  Label,
+  CreateLabelRequest,
+  UpdateLabelRequest,
+  ListLabelsResponse,
+  IssueLabelsResponse,
   PinnedItem,
   CreatePinRequest,
   PinnedItemType,
   ReorderPinsRequest,
   Invitation,
+  InviteLink,
+  CreateInviteLinkRequest,
   ListNotificationBindingsResponse,
   ListNotificationPreferencesResponse,
   NotificationChannelPreference,
+  NotificationWebhook,
+  ListNotificationWebhooksResponse,
+  CreateNotificationWebhookRequest,
+  UpdateNotificationWebhookRequest,
+  TestNotificationWebhookResponse,
   UpdateNotificationPreferenceRequest,
   StartDingTalkBindingRequest,
   StartDingTalkBindingResponse,
@@ -68,6 +93,9 @@ import type {
   StartEmailBindingResponse,
   VerifyEmailBindingRequest,
   VerifyEmailBindingResponse,
+  StartGoogleBindingRequest,
+  StartGoogleBindingResponse,
+  CompleteGoogleBindingResponse,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -78,14 +106,49 @@ import type {
   ListAutopilotsResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  NotificationPreferenceResponse,
+  NotificationPreferences,
+  AgentDefaults,
+  AgentDefaultsWithUser,
+  WikiPage,
+  ListWikiPagesResponse,
+  CreateWikiPageRequest,
+  UpdateWikiPageRequest,
+  ReorderWikiPagesRequest,
 } from "../types";
+import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
+import { parseWithFallback } from "./schema";
+import {
+  ChildIssuesResponseSchema,
+  CommentsListSchema,
+  EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_TIMELINE_ENTRIES,
+  ListIssuesResponseSchema,
+  SubscribersListSchema,
+  TimelineEntriesSchema,
+} from "./schemas";
+
+/** Identifies the calling client to the server.
+ *  Sent on every HTTP request as X-Client-Platform / X-Client-Version /
+ *  X-Client-OS so the backend can log, gate, or split metrics by client.
+ *  See server/internal/middleware/client.go for the receiving end. */
+export interface ApiClientIdentity {
+  /** Logical client kind. Server expects: "web" | "desktop" | "cli" | "daemon". */
+  platform?: string;
+  /** Client/app version string (e.g. "0.1.0", git tag, commit). */
+  version?: string;
+  /** Operating system the client is running on: "macos" | "windows" | "linux". */
+  os?: string;
+}
 
 export interface ApiClientOptions {
   logger?: Logger;
   onUnauthorized?: () => void;
+  /** Identifies the client to the server. Sent as X-Client-* headers. */
+  identity?: ApiClientIdentity;
 }
 
 export interface LoginResponse {
@@ -142,12 +205,17 @@ export interface ImportStarterContentResponse {
 export class ApiError extends Error {
   readonly status: number;
   readonly statusText: string;
+  // Raw decoded JSON body (when the server returned one). Carries structured
+  // error fields like `code` so callers can branch on machine-readable
+  // identifiers instead of pattern-matching the human-readable message.
+  readonly body?: unknown;
 
-  constructor(message: string, status: number, statusText: string) {
+  constructor(message: string, status: number, statusText: string, body?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.statusText = statusText;
+    this.body = body;
   }
 }
 
@@ -186,10 +254,17 @@ export class ApiClient {
     if (slug) headers["X-Workspace-Slug"] = slug;
     const csrf = this.readCsrfToken();
     if (csrf) headers["X-CSRF-Token"] = csrf;
+    const id = this.options.identity;
+    if (id?.platform) headers["X-Client-Platform"] = id.platform;
+    if (id?.version) headers["X-Client-Version"] = id.version;
+    if (id?.os) headers["X-Client-OS"] = id.os;
     return headers;
   }
 
-  private handleUnauthorized() {
+  private handleUnauthorized(requestToken: string | null) {
+    if (requestToken !== this.token) {
+      return;
+    }
     this.token = null;
     // Workspace id is owned by the URL-driven workspace-storage singleton
     // (set by [workspaceSlug]/layout.tsx). On 401, the auth flow navigates
@@ -208,10 +283,24 @@ export class ApiClient {
     return fallback;
   }
 
+  // Reads the response body once for both human-readable error message and
+  // structured fields. The Response stream can only be consumed once, so
+  // both pieces have to come from a single read.
+  private async parseErrorBody(res: Response, fallback: string): Promise<{ message: string; body: unknown }> {
+    try {
+      const data = await res.json() as { error?: string };
+      const message = typeof data.error === "string" && data.error ? data.error : fallback;
+      return { message, body: data };
+    } catch {
+      return { message: fallback, body: undefined };
+    }
+  }
+
   private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
     const rid = createRequestId();
     const start = Date.now();
     const method = init?.method ?? "GET";
+    const requestToken = this.token;
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -229,11 +318,11 @@ export class ApiClient {
     });
 
     if (!res.ok) {
-      if (res.status === 401) this.handleUnauthorized();
-      const message = await this.parseErrorMessage(res, `API error: ${res.status} ${res.statusText}`);
+      if (res.status === 401) this.handleUnauthorized(requestToken);
+      const { message, body } = await this.parseErrorBody(res, `API error: ${res.status} ${res.statusText}`);
       const logLevel = res.status === 404 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
-      throw new ApiError(message, res.status, res.statusText);
+      throw new ApiError(message, res.status, res.statusText, body);
     }
 
     this.logger.info(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms` });
@@ -268,6 +357,13 @@ export class ApiClient {
     });
   }
 
+  async googleMobileLogin(idToken: string, platform: string): Promise<LoginResponse> {
+    return this.fetch("/auth/google/mobile", {
+      method: "POST",
+      body: JSON.stringify({ id_token: idToken, platform }),
+    });
+  }
+
   async dingtalkLogin(code: string, redirectUri: string): Promise<LoginResponse> {
     return this.fetch("/auth/dingtalk", {
       method: "POST",
@@ -287,8 +383,14 @@ export class ApiClient {
     return this.fetch("/api/me");
   }
 
-  async markOnboardingComplete(): Promise<User> {
-    return this.fetch("/api/me/onboarding/complete", { method: "POST" });
+  async markOnboardingComplete(payload?: {
+    completion_path?: OnboardingCompletionPath;
+    workspace_id?: string;
+  }): Promise<User> {
+    return this.fetch("/api/me/onboarding/complete", {
+      method: "POST",
+      body: payload ? JSON.stringify(payload) : undefined,
+    });
   }
 
   async joinCloudWaitlist(payload: {
@@ -329,9 +431,12 @@ export class ApiClient {
     });
   }
 
-  async dismissStarterContent(): Promise<User> {
+  async dismissStarterContent(payload?: {
+    workspace_id?: string;
+  }): Promise<User> {
     return this.fetch("/api/me/starter-content/dismiss", {
       method: "POST",
+      body: payload ? JSON.stringify(payload) : undefined,
     });
   }
 
@@ -389,8 +494,62 @@ export class ApiClient {
     });
   }
 
+  async startGoogleBinding(
+    payload: StartGoogleBindingRequest,
+  ): Promise<StartGoogleBindingResponse> {
+    return this.fetch("/api/me/notification-bindings/google/start", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async completeGoogleBinding(
+    code: string,
+    state: string,
+  ): Promise<CompleteGoogleBindingResponse> {
+    return this.fetch("/api/notification-bindings/google/callback", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
+    });
+  }
+
   async listNotificationPreferences(): Promise<ListNotificationPreferencesResponse> {
     return this.fetch("/api/me/notification-preferences");
+  }
+
+  async listNotificationWebhooks(): Promise<ListNotificationWebhooksResponse> {
+    return this.fetch("/api/me/notification-webhooks");
+  }
+
+  async createNotificationWebhook(
+    data: CreateNotificationWebhookRequest,
+  ): Promise<NotificationWebhook> {
+    return this.fetch("/api/me/notification-webhooks", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateNotificationWebhook(
+    id: string,
+    data: UpdateNotificationWebhookRequest,
+  ): Promise<NotificationWebhook> {
+    return this.fetch(`/api/me/notification-webhooks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteNotificationWebhook(id: string): Promise<void> {
+    await this.fetch(`/api/me/notification-webhooks/${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  async testNotificationWebhook(id: string): Promise<TestNotificationWebhookResponse> {
+    return this.fetch(`/api/me/notification-webhooks/${id}/test`, {
+      method: "POST",
+    });
   }
 
   async updateNotificationPreference(
@@ -415,7 +574,11 @@ export class ApiClient {
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.project_id) search.set("project_id", params.project_id);
     if (params?.open_only) search.set("open_only", "true");
-    return this.fetch(`/api/issues?${search}`);
+    const path = `/api/issues?${search}`;
+    const raw = await this.fetch<unknown>(path);
+    return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
+      endpoint: "GET /api/issues",
+    });
   }
 
   async searchIssues(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchIssuesResponse> {
@@ -445,6 +608,24 @@ export class ApiClient {
     });
   }
 
+  async quickCreateIssue(data: { agent_id: string; prompt: string; project_id?: string | null }): Promise<{ task_id: string }> {
+    return this.fetch("/api/issues/quick-create", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async createFeedback(data: {
+    message: string;
+    url?: string;
+    workspace_id?: string;
+  }): Promise<{ id: string; created_at: string }> {
+    return this.fetch("/api/feedback", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   async updateIssue(id: string, data: UpdateIssueRequest): Promise<Issue> {
     return this.fetch(`/api/issues/${id}`, {
       method: "PUT",
@@ -453,7 +634,10 @@ export class ApiClient {
   }
 
   async listChildIssues(id: string): Promise<{ issues: Issue[] }> {
-    return this.fetch(`/api/issues/${id}/children`);
+    const raw = await this.fetch<unknown>(`/api/issues/${id}/children`);
+    return parseWithFallback(raw, ChildIssuesResponseSchema, { issues: [] }, {
+      endpoint: "GET /api/issues/:id/children",
+    });
   }
 
   async getChildIssueProgress(): Promise<{ progress: { parent_issue_id: string; total: number; done: number }[] }> {
@@ -478,9 +662,22 @@ export class ApiClient {
     });
   }
 
+  async clearIssueHistory(
+    issueId: string,
+    options: { clear_comments: boolean; clear_tasks: boolean },
+  ): Promise<{ comments_deleted: number; tasks_deleted: number }> {
+    return this.fetch(`/api/issues/${issueId}/clear-history`, {
+      method: "POST",
+      body: JSON.stringify(options),
+    });
+  }
+
   // Comments
   async listComments(issueId: string): Promise<Comment[]> {
-    return this.fetch(`/api/issues/${issueId}/comments`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments`);
+    return parseWithFallback(raw, CommentsListSchema, [], {
+      endpoint: "GET /api/issues/:id/comments",
+    });
   }
 
   async createComment(issueId: string, content: string, type?: string, parentId?: string, attachmentIds?: string[]): Promise<Comment> {
@@ -495,12 +692,45 @@ export class ApiClient {
     });
   }
 
-  async listTimeline(issueId: string): Promise<TimelineEntry[]> {
-    return this.fetch(`/api/issues/${issueId}/timeline`);
+  async listTimeline(
+    issueId: string,
+    options?: { mode: "around"; id: string },
+  ): Promise<TimelineEntry[]> {
+    const query = new URLSearchParams();
+    if (options?.mode === "around" && options.id) {
+      query.set("around", options.id);
+    }
+
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${issueId}/timeline${query.size > 0 ? `?${query.toString()}` : ""}`,
+    );
+
+    if (
+      options?.mode === "around" &&
+      raw &&
+      typeof raw === "object" &&
+      Array.isArray((raw as { entries?: unknown }).entries)
+    ) {
+      const entries = parseWithFallback(
+        (raw as { entries: unknown }).entries,
+        TimelineEntriesSchema,
+        EMPTY_TIMELINE_ENTRIES,
+        { endpoint: "GET /api/issues/:id/timeline?around=..." },
+      );
+      return [...entries].reverse();
+    }
+
+    return parseWithFallback(raw, TimelineEntriesSchema, EMPTY_TIMELINE_ENTRIES, {
+      endpoint: "GET /api/issues/:id/timeline",
+    });
   }
 
   async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
     return this.fetch("/api/assignee-frequency");
+  }
+
+  async getMentionFrequency(): Promise<MentionFrequencyEntry[]> {
+    return this.fetch("/api/mention-frequency");
   }
 
   async updateComment(commentId: string, content: string): Promise<Comment> {
@@ -517,6 +747,14 @@ export class ApiClient {
   /** Re-queue the agent for this reply (issue threads only). */
   async retryAgentComment(commentId: string): Promise<void> {
     await this.fetch(`/api/comments/${commentId}/retry-agent`, { method: "POST" });
+  }
+
+  async resolveComment(commentId: string): Promise<Comment> {
+    return this.fetch(`/api/comments/${commentId}/resolve`, { method: "POST" });
+  }
+
+  async unresolveComment(commentId: string): Promise<Comment> {
+    return this.fetch(`/api/comments/${commentId}/resolve`, { method: "DELETE" });
   }
 
   async addReaction(commentId: string, emoji: string): Promise<Reaction> {
@@ -549,7 +787,10 @@ export class ApiClient {
 
   // Subscribers
   async listIssueSubscribers(issueId: string): Promise<IssueSubscriber[]> {
-    return this.fetch(`/api/issues/${issueId}/subscribers`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/subscribers`);
+    return parseWithFallback(raw, SubscribersListSchema, [], {
+      endpoint: "GET /api/issues/:id/subscribers",
+    });
   }
 
   async subscribeToIssue(issueId: string, userId?: string, userType?: string): Promise<void> {
@@ -618,6 +859,14 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/restore`, { method: "POST" });
   }
 
+  // Bulk-cancel every active task (queued/dispatched/running) for the agent.
+  // Permission: agent owner or workspace admin/owner. Server returns the
+  // count of cancelled rows; broadcasts task:cancelled for each so other
+  // surfaces can clear their live cards.
+  async cancelAgentTasks(id: string): Promise<{ cancelled: number }> {
+    return this.fetch(`/api/agents/${id}/cancel-tasks`, { method: "POST" });
+  }
+
   async listRuntimes(params?: { workspace_id?: string; owner?: "me" }): Promise<AgentRuntime[]> {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
@@ -669,6 +918,24 @@ export class ApiClient {
     return `http://127.0.0.1:${healthPort}/traces/tasks/${taskId}/stream${suffix}`;
   }
 
+  async getRuntimeUsageByAgent(
+    runtimeId: string,
+    params?: { days?: number },
+  ): Promise<RuntimeUsageByAgent[]> {
+    const search = new URLSearchParams();
+    if (params?.days) search.set("days", String(params.days));
+    return this.fetch(`/api/runtimes/${runtimeId}/usage/by-agent?${search}`);
+  }
+
+  async getRuntimeUsageByHour(
+    runtimeId: string,
+    params?: { days?: number },
+  ): Promise<RuntimeUsageByHour[]> {
+    const search = new URLSearchParams();
+    if (params?.days) search.set("days", String(params.days));
+    return this.fetch(`/api/runtimes/${runtimeId}/usage/by-hour?${search}`);
+  }
+
   async pingRuntime(runtimeId: string): Promise<RuntimePing> {
     return this.fetch(`/api/runtimes/${runtimeId}/ping`, { method: "POST" });
   }
@@ -677,13 +944,21 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/ping/${pingId}`);
   }
 
+  async getCLIUpdateManifest(): Promise<CLIUpdateManifest> {
+    return this.fetch("/api/runtimes/cli-update-manifest");
+  }
+
   async initiateUpdate(
     runtimeId: string,
-    targetVersion: string,
+    targetVersion?: string,
   ): Promise<RuntimeUpdate> {
+    const body =
+      targetVersion && targetVersion.trim()
+        ? { target_version: targetVersion.trim() }
+        : {};
     return this.fetch(`/api/runtimes/${runtimeId}/update`, {
       method: "POST",
-      body: JSON.stringify({ target_version: targetVersion }),
+      body: JSON.stringify(body),
     });
   }
 
@@ -705,8 +980,62 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/models/${requestId}`);
   }
 
+  async initiateListLocalSkills(
+    runtimeId: string,
+  ): Promise<RuntimeLocalSkillListRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills`, {
+      method: "POST",
+    });
+  }
+
+  async getListLocalSkillsResult(
+    runtimeId: string,
+    requestId: string,
+  ): Promise<RuntimeLocalSkillListRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/${requestId}`);
+  }
+
+  async initiateImportLocalSkill(
+    runtimeId: string,
+    data: CreateRuntimeLocalSkillImportRequest,
+  ): Promise<RuntimeLocalSkillImportRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getImportLocalSkillResult(
+    runtimeId: string,
+    requestId: string,
+  ): Promise<RuntimeLocalSkillImportRequest> {
+    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import/${requestId}`);
+  }
+
   async listAgentTasks(agentId: string): Promise<AgentTask[]> {
     return this.fetch(`/api/agents/${agentId}/tasks`);
+  }
+
+  // Workspace-scoped agent task snapshot: every active task
+  // (queued/dispatched/running) plus each agent's most recent terminal task.
+  // Powers the front-end's "active wins, else latest terminal" presence
+  // derivation; one fetch backs every per-agent presence read in the app.
+  // Workspace is resolved server-side from the X-Workspace-Slug header.
+  async getAgentTaskSnapshot(): Promise<AgentTask[]> {
+    return this.fetch(`/api/agent-task-snapshot`);
+  }
+
+  // Per-agent daily activity for the last 30 days, anchored on
+  // completed_at. One workspace-wide fetch backs both the Agents-list
+  // sparkline (uses trailing 7 buckets) and the agent detail "Last 30
+  // days" panel (uses all 30).
+  async getWorkspaceAgentActivity30d(): Promise<AgentActivityBucket[]> {
+    return this.fetch(`/api/agent-activity-30d`);
+  }
+
+  // Per-agent 30-day total run count for the Agents-list RUNS column.
+  async getWorkspaceAgentRunCounts(): Promise<AgentRunCount[]> {
+    return this.fetch(`/api/agent-run-counts`);
   }
 
   async getActiveTasksForIssue(issueId: string): Promise<{ tasks: AgentTask[] }> {
@@ -744,6 +1073,12 @@ export class ApiClient {
     });
   }
 
+  async rerunIssue(issueId: string): Promise<AgentTask> {
+    return this.fetch(`/api/issues/${issueId}/rerun`, {
+      method: "POST",
+    });
+  }
+
   // Inbox
   async listInbox(): Promise<InboxItem[]> {
     return this.fetch("/api/inbox");
@@ -777,14 +1112,30 @@ export class ApiClient {
     return this.fetch("/api/inbox/archive-completed", { method: "POST" });
   }
 
+  // Notification preferences
+  async getNotificationPreferences(): Promise<NotificationPreferenceResponse> {
+    return this.fetch("/api/notification-preferences");
+  }
+
+  async updateNotificationPreferences(preferences: NotificationPreferences): Promise<NotificationPreferenceResponse> {
+    return this.fetch("/api/notification-preferences", {
+      method: "PUT",
+      body: JSON.stringify({ preferences }),
+    });
+  }
+
   // App Config
   async getConfig(): Promise<{
     cdn_domain: string;
+    allow_signup: boolean;
+    google_client_id?: string;
+    google_ios_client_id?: string;
     dingtalk_client_id?: string;
     dingtalk_oauth_scope?: string;
     hide_email_login?: boolean;
     posthog_key?: string;
     posthog_host?: string;
+    analytics_environment?: string;
   }> {
     return this.fetch("/api/config");
   }
@@ -805,9 +1156,43 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[] }): Promise<Workspace> {
+  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; wiki_content?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[] }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Wiki pages
+  async listWikiPages(): Promise<ListWikiPagesResponse> {
+    return this.fetch("/api/wiki-pages");
+  }
+
+  async getWikiPage(id: string): Promise<WikiPage> {
+    return this.fetch(`/api/wiki-pages/${id}`);
+  }
+
+  async createWikiPage(data: CreateWikiPageRequest): Promise<WikiPage> {
+    return this.fetch("/api/wiki-pages", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateWikiPage(id: string, data: UpdateWikiPageRequest): Promise<WikiPage> {
+    return this.fetch(`/api/wiki-pages/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteWikiPage(id: string): Promise<{ deleted: boolean; page_id: string; child_count: number }> {
+    return this.fetch(`/api/wiki-pages/${id}`, { method: "DELETE" });
+  }
+
+  async reorderWikiPages(data: ReorderWikiPagesRequest): Promise<ListWikiPagesResponse> {
+    return this.fetch("/api/wiki-pages/reorder", {
+      method: "PUT",
       body: JSON.stringify(data),
     });
   }
@@ -854,6 +1239,33 @@ export class ApiClient {
     });
   }
 
+  async createInviteLink(workspaceId: string, data: CreateInviteLinkRequest): Promise<InviteLink> {
+    return this.fetch(`/api/workspaces/${workspaceId}/invite-links`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listInviteLinks(workspaceId: string): Promise<InviteLink[]> {
+    return this.fetch(`/api/workspaces/${workspaceId}/invite-links`);
+  }
+
+  async revokeInviteLink(workspaceId: string, invitationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/invite-links/${invitationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async validateInviteLink(token: string): Promise<InviteLink> {
+    return this.fetch(`/api/invite-links/${encodeURIComponent(token)}`);
+  }
+
+  async acceptInviteLink(token: string): Promise<MemberWithUser> {
+    return this.fetch(`/api/invite-links/${encodeURIComponent(token)}/accept`, {
+      method: "POST",
+    });
+  }
+
   async listMyInvitations(): Promise<Invitation[]> {
     return this.fetch("/api/invitations");
   }
@@ -881,7 +1293,7 @@ export class ApiClient {
   }
 
   // Skills
-  async listSkills(): Promise<Skill[]> {
+  async listSkills(): Promise<SkillSummary[]> {
     return this.fetch("/api/skills");
   }
 
@@ -921,7 +1333,7 @@ export class ApiClient {
     });
   }
 
-  async listAgentSkills(agentId: string): Promise<Skill[]> {
+  async listAgentSkills(agentId: string): Promise<SkillSummary[]> {
     return this.fetch(`/api/agents/${agentId}/skills`);
   }
 
@@ -957,6 +1369,7 @@ export class ApiClient {
 
     const rid = createRequestId();
     const start = Date.now();
+    const requestToken = this.token;
     this.logger.info("→ POST /api/upload-file", { rid });
 
     const res = await fetch(`${this.baseUrl}/api/upload-file`, {
@@ -967,7 +1380,7 @@ export class ApiClient {
     });
 
     if (!res.ok) {
-      if (res.status === 401) this.handleUnauthorized();
+      if (res.status === 401) this.handleUnauthorized(requestToken);
       const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
       this.logger.error(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms`, error: message });
       throw new Error(message);
@@ -994,7 +1407,7 @@ export class ApiClient {
     });
   }
 
-  async archiveChatSession(id: string): Promise<void> {
+  async deleteChatSession(id: string): Promise<void> {
     await this.fetch(`/api/chat/sessions/${id}`, { method: "DELETE" });
   }
 
@@ -1072,6 +1485,76 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  // Project resources
+  async listProjectResources(
+    projectId: string,
+  ): Promise<ListProjectResourcesResponse> {
+    return this.fetch(`/api/projects/${projectId}/resources`);
+  }
+
+  async createProjectResource(
+    projectId: string,
+    data: CreateProjectResourceRequest,
+  ): Promise<ProjectResource> {
+    return this.fetch(`/api/projects/${projectId}/resources`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProjectResource(
+    projectId: string,
+    resourceId: string,
+  ): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // Labels
+  async listLabels(): Promise<ListLabelsResponse> {
+    return this.fetch(`/api/labels`);
+  }
+
+  async getLabel(id: string): Promise<Label> {
+    return this.fetch(`/api/labels/${id}`);
+  }
+
+  async createLabel(data: CreateLabelRequest): Promise<Label> {
+    return this.fetch(`/api/labels`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateLabel(id: string, data: UpdateLabelRequest): Promise<Label> {
+    return this.fetch(`/api/labels/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteLabel(id: string): Promise<void> {
+    await this.fetch(`/api/labels/${id}`, { method: "DELETE" });
+  }
+
+  async listLabelsForIssue(issueId: string): Promise<IssueLabelsResponse> {
+    return this.fetch(`/api/issues/${issueId}/labels`);
+  }
+
+  async attachLabel(issueId: string, labelId: string): Promise<IssueLabelsResponse> {
+    return this.fetch(`/api/issues/${issueId}/labels`, {
+      method: "POST",
+      body: JSON.stringify({ label_id: labelId }),
+    });
+  }
+
+  async detachLabel(issueId: string, labelId: string): Promise<IssueLabelsResponse> {
+    return this.fetch(`/api/issues/${issueId}/labels/${labelId}`, {
+      method: "DELETE",
+    });
   }
 
   // Pins
@@ -1153,5 +1636,27 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // Personal Agent Defaults
+  async getPersonalAgentDefaults(workspaceId: string): Promise<AgentDefaults> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/me`);
+  }
+
+  async updatePersonalAgentDefaults(workspaceId: string, config: Record<string, unknown>): Promise<AgentDefaults> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/me`, {
+      method: "PUT",
+      body: JSON.stringify({ config }),
+    });
+  }
+
+  async listAllAgentDefaults(workspaceId: string): Promise<AgentDefaultsWithUser[]> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults`);
+  }
+
+  async duplicateAgentDefaults(workspaceId: string, configId: string): Promise<AgentDefaults> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/duplicate/${configId}`, {
+      method: "POST",
+    });
   }
 }
