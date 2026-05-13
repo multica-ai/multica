@@ -23,10 +23,12 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/cascade"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/webhooks"
+	githubsource "github.com/multica-ai/multica/server/internal/webhooks/github"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -187,11 +189,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// per MULTICA_CASCADE_WEBHOOK_ENABLED env var. When off, the
 	// route literally does not exist on the parent router — vendors
 	// hitting /webhooks/{source} receive a 404 indistinguishable
-	// from a typo. PR3 will replace the GitHub stub with the real
-	// adapter; this wiring is a one-time call site that does not
-	// move.
-	if router := webhooks.MountFromEnv(r, nil); router != nil {
-		slog.Info("webhooks subsystem active", "source_count", router.SourceCount())
+	// from a typo. PR3 wires the cascade.Store (persistence to
+	// cascade_retrigger) and the real GitHub source when its secret
+	// env vars are set; without those, the GitHub stub stays in
+	// place.
+	cascadeStore := cascade.NewStore(pool)
+	cascadeOpts := webhooks.MountOptions{
+		Store:        cascadeStore,
+		GitHubSource: githubsource.FromEnv(os.Getenv),
+	}
+	if router := webhooks.MountFromEnv(r, cascadeOpts, nil); router != nil {
+		slog.Info("webhooks subsystem active",
+			"source_count", router.SourceCount(),
+			"github_real_adapter", cascadeOpts.GitHubSource != nil,
+		)
 	}
 
 	// WebSocket
