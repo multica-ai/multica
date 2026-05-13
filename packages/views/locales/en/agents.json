@@ -132,9 +132,31 @@
     "prop_model": "Model",
     "prop_visibility": "Visibility",
     "prop_concurrency": "Concurrency",
+    "prop_stream": "Stream",
+    "prop_approval": "Approval",
     "prop_owner": "Owner",
     "prop_created": "Created",
     "prop_updated": "Updated",
+    "stream_tooltip": "Stream · {{value}}",
+    "approval_tooltip": "Approval · {{value}}",
+    "stream_value": {
+      "on": "On",
+      "off": "Off"
+    },
+    "stream_description": {
+      "on": "Capture and show the local agent execution stream.",
+      "off": "Run without showing the local execution stream."
+    },
+    "approval_value": {
+      "auto": "Auto",
+      "prompt": "Ask me",
+      "deny": "Deny"
+    },
+    "approval_description": {
+      "auto": "Approve runtime actions automatically.",
+      "prompt": "Ask before running commands or editing files.",
+      "deny": "Reject runtime actions automatically."
+    },
     "no_description_placeholder": "No description",
     "change_avatar_aria": "Change avatar",
     "avatar_updated_toast": "Avatar updated",
