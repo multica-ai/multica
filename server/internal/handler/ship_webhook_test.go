@@ -98,7 +98,7 @@ func TestWebhook_RejectsBadSignature(t *testing.T) {
 	body := loadWebhookFixture(t, "pull_request_opened.json")
 	req := newWebhookRequest(t, "pull_request", "delivery-bad-sig", "wrong-secret", body)
 	rec := httptest.NewRecorder()
-	testHandler.HandleGitHubWebhook(rec, req)
+	testHandler.HandleShipHubGitHubWebhook(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -126,7 +126,7 @@ func TestWebhook_AcceptsValidSignature(t *testing.T) {
 	body := loadWebhookFixture(t, "pull_request_opened.json")
 	req := newWebhookRequest(t, "pull_request", "delivery-pr-1", "secret-123", body)
 	rec := httptest.NewRecorder()
-	testHandler.HandleGitHubWebhook(rec, req)
+	testHandler.HandleShipHubGitHubWebhook(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -170,7 +170,7 @@ func TestWebhook_DeduplicatesRetry(t *testing.T) {
 	// First delivery.
 	req := newWebhookRequest(t, "pull_request", "delivery-dedup-1", "dedup-secret", body)
 	rec := httptest.NewRecorder()
-	testHandler.HandleGitHubWebhook(rec, req)
+	testHandler.HandleShipHubGitHubWebhook(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("first: expected 200, got %d", rec.Code)
 	}
@@ -179,7 +179,7 @@ func TestWebhook_DeduplicatesRetry(t *testing.T) {
 	// Same delivery ID again — must dedupe.
 	req2 := newWebhookRequest(t, "pull_request", "delivery-dedup-1", "dedup-secret", body)
 	rec2 := httptest.NewRecorder()
-	testHandler.HandleGitHubWebhook(rec2, req2)
+	testHandler.HandleShipHubGitHubWebhook(rec2, req2)
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("retry: expected 200, got %d", rec2.Code)
 	}
@@ -206,7 +206,7 @@ func TestWebhook_PullRequestReview_DerivesDecision(t *testing.T) {
 	body := loadWebhookFixture(t, "pull_request_review_approved.json")
 	req := newWebhookRequest(t, "pull_request_review", "delivery-review-1", "review-secret", body)
 	rec := httptest.NewRecorder()
-	testHandler.HandleGitHubWebhook(rec, req)
+	testHandler.HandleShipHubGitHubWebhook(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -239,7 +239,7 @@ func TestWebhook_CheckRun_FailureDominates(t *testing.T) {
 	body := loadWebhookFixture(t, "check_run_completed_success.json")
 	req := newWebhookRequest(t, "check_run", "delivery-check-success", "check-secret", body)
 	rec := httptest.NewRecorder()
-	testHandler.HandleGitHubWebhook(rec, req)
+	testHandler.HandleShipHubGitHubWebhook(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("success: %d", rec.Code)
 	}
@@ -259,7 +259,7 @@ func TestWebhook_CheckRun_FailureDominates(t *testing.T) {
 	body = loadWebhookFixture(t, "check_run_completed_failure.json")
 	req = newWebhookRequest(t, "check_run", "delivery-check-failure", "check-secret", body)
 	rec = httptest.NewRecorder()
-	testHandler.HandleGitHubWebhook(rec, req)
+	testHandler.HandleShipHubGitHubWebhook(rec, req)
 	waitForDeliveryProcessed(t, "delivery-check-failure")
 
 	if err := testPool.QueryRow(context.Background(),
@@ -293,7 +293,7 @@ func TestWebhook_DeploymentLifecycle(t *testing.T) {
 	body := loadWebhookFixture(t, "deployment_created.json")
 	req := newWebhookRequest(t, "deployment", "delivery-dep-1", "deploy-secret", body)
 	rec := httptest.NewRecorder()
-	testHandler.HandleGitHubWebhook(rec, req)
+	testHandler.HandleShipHubGitHubWebhook(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("deployment.created: %d", rec.Code)
 	}
@@ -313,7 +313,7 @@ func TestWebhook_DeploymentLifecycle(t *testing.T) {
 	body = loadWebhookFixture(t, "deployment_status_success.json")
 	req = newWebhookRequest(t, "deployment_status", "delivery-dep-2", "deploy-secret", body)
 	rec = httptest.NewRecorder()
-	testHandler.HandleGitHubWebhook(rec, req)
+	testHandler.HandleShipHubGitHubWebhook(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("deployment_status: %d", rec.Code)
 	}
@@ -350,7 +350,7 @@ func TestWebhook_MissingHeaders400(t *testing.T) {
 		bytes.NewReader(body))
 	req.Header.Set("X-Hub-Signature-256", gh.ComputeSignature(body, "x"))
 	rec := httptest.NewRecorder()
-	testHandler.HandleGitHubWebhook(rec, req)
+	testHandler.HandleShipHubGitHubWebhook(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
@@ -367,7 +367,7 @@ func TestWebhook_PushNoMatchingProject(t *testing.T) {
 	body := loadWebhookFixture(t, "push_to_main.json")
 	req := newWebhookRequest(t, "push", "delivery-push-1", "push-secret", body)
 	rec := httptest.NewRecorder()
-	testHandler.HandleGitHubWebhook(rec, req)
+	testHandler.HandleShipHubGitHubWebhook(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
