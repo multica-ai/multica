@@ -51,6 +51,9 @@
   },
   "display": {
     "tooltip": "显示设置",
+    "grouping_section": "分组",
+    "group_by_status": "按状态",
+    "group_by_none": "无分组",
     "ordering_section": "排序",
     "card_properties_section": "卡片属性",
     "ascending_title": "升序",

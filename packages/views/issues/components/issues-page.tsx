@@ -32,6 +32,7 @@ export function IssuesPage() {
   const workspace = useCurrentWorkspace();
   const scope = useIssuesScopeStore((s) => s.scope);
   const viewMode = useIssueViewStore((s) => s.viewMode);
+  const groupBy = useIssueViewStore((s) => s.groupBy);
   const statusFilters = useIssueViewStore((s) => s.statusFilters);
   const priorityFilters = useIssueViewStore((s) => s.priorityFilters);
   const assigneeFilters = useIssueViewStore((s) => s.assigneeFilters);
@@ -170,7 +171,7 @@ export function IssuesPage() {
                 issues={issues}
                 visibleStatuses={visibleStatuses}
                 childProgressMap={childProgressMap}
-                onMoveIssue={handleMoveIssue}
+                onMoveIssue={groupBy === "status" ? handleMoveIssue : undefined}
               />
             )}
           </div>

@@ -20,6 +20,7 @@ import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { useT } from "../../i18n";
+import { StatusIcon } from "./status-icon";
 
 export interface ChildProgress {
   done: number;
@@ -43,6 +44,7 @@ export const ListRow = memo(function ListRow({
   isOrphan = false,
   isSortable = false,
   isDragOverlay = false,
+  showStatus = false,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
@@ -73,6 +75,8 @@ export const ListRow = memo(function ListRow({
    * doesn't intercept drag events while it follows the cursor.
    */
   isDragOverlay?: boolean;
+  /** Show the issue status inline, used when the list is not grouped by status. */
+  showStatus?: boolean;
 }) {
   const { t } = useT("issues");
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
@@ -198,6 +202,11 @@ export const ListRow = memo(function ListRow({
             }`}
           />
         </div>
+        {showStatus && (
+          <span className="flex w-4 h-4 shrink-0 items-center justify-center">
+            <StatusIcon status={issue.status} className="h-4 w-4" />
+          </span>
+        )}
         <AppLink
           href={p.issueDetail(issue.id)}
           className="flex flex-1 items-center gap-2 min-w-0"

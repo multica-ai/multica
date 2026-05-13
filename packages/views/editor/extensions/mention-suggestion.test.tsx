@@ -126,7 +126,6 @@ describe("createMentionSuggestion", () => {
 
     const items = result as MentionItem[];
     expect(items).toEqual([
-      { id: "all", label: "@", type: "broadcast" },
       { id: "coding", label: "@coding", type: "broadcast" },
     ]);
   });

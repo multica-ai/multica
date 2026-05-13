@@ -10,6 +10,7 @@ import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "..
 import { defaultStorage } from "../../platform/storage";
 
 export type ViewMode = "board" | "list";
+export type GroupByMode = "status" | "none";
 export type SortField = "position" | "priority" | "due_date" | "created_at" | "title";
 export type SortDirection = "asc" | "desc";
 
@@ -56,6 +57,7 @@ export interface IssueViewState {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  groupBy: GroupByMode;
   sortBy: SortField;
   sortDirection: SortDirection;
   cardProperties: CardProperties;
@@ -79,6 +81,7 @@ export interface IssueViewState {
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
   clearFilters: () => void;
+  setGroupBy: (mode: GroupByMode) => void;
   setSortBy: (field: SortField) => void;
   setSortDirection: (dir: SortDirection) => void;
   toggleCardProperty: (key: keyof CardProperties) => void;
@@ -96,6 +99,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   projectFilters: [],
   includeNoProject: false,
   labelFilters: [],
+  groupBy: "status",
   sortBy: "position",
   sortDirection: "asc",
   cardProperties: {
@@ -192,6 +196,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       includeNoProject: false,
       labelFilters: [],
     }),
+  setGroupBy: (mode) => set({ groupBy: mode }),
   setSortBy: (field) => set({ sortBy: field }),
   setSortDirection: (dir) => set({ sortDirection: dir }),
   toggleCardProperty: (key) =>
@@ -228,6 +233,7 @@ export const viewStorePersistOptions = (name: string) => ({
     projectFilters: state.projectFilters,
     includeNoProject: state.includeNoProject,
     labelFilters: state.labelFilters,
+    groupBy: state.groupBy,
     sortBy: state.sortBy,
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,

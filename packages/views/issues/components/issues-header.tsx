@@ -469,6 +469,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const groupBy = useViewStore((s) => s.groupBy);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const cardProperties = useViewStore((s) => s.cardProperties);
@@ -476,17 +477,17 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
 
   const counts = useIssueCounts(scopedIssues);
 
-  const hasActiveFilters =
-    getActiveFilterCount({
-      statusFilters,
-      priorityFilters,
-      assigneeFilters,
-      includeNoAssignee,
-      creatorFilters,
-      projectFilters,
-      includeNoProject,
-      labelFilters,
-    }) > 0;
+  const activeFilterCount = getActiveFilterCount({
+    statusFilters,
+    priorityFilters,
+    assigneeFilters,
+    includeNoAssignee,
+    creatorFilters,
+    projectFilters,
+    includeNoProject,
+    labelFilters,
+  });
+  const hasActiveFilters = activeFilterCount > 0;
 
   const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_priority" | "sort_due_date" | "sort_created" | "sort_title"> = {
     position: "sort_manual",
@@ -560,8 +561,10 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                     >
                       <Filter className="size-4" />
                       {isMobile && <span>{t(($) => $.filters.button)}</span>}
-                      {hasActiveFilters && (
-                        <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />
+                      {activeFilterCount > 0 && (
+                        <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-brand text-[10px] font-semibold leading-none text-white">
+                          {activeFilterCount}
+                        </span>
                       )}
                     </Button>
                   }
@@ -760,6 +763,31 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
             <TooltipContent side="bottom">{t(($) => $.display.tooltip)}</TooltipContent>
           </Tooltip>
           <PopoverContent align="end" className="w-64 p-0">
+            {viewMode === "list" && (
+              <div className="border-b px-3 py-2.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t(($) => $.display.grouping_section)}
+                </span>
+                <div className="mt-2 flex items-center gap-1">
+                  <Button
+                    variant={groupBy === "status" ? "default" : "outline"}
+                    size="sm"
+                    className="flex-1 text-xs"
+                    onClick={() => act.setGroupBy("status")}
+                  >
+                    {t(($) => $.display.group_by_status)}
+                  </Button>
+                  <Button
+                    variant={groupBy === "none" ? "default" : "outline"}
+                    size="sm"
+                    className="flex-1 text-xs"
+                    onClick={() => act.setGroupBy("none")}
+                  >
+                    {t(($) => $.display.group_by_none)}
+                  </Button>
+                </div>
+              </div>
+            )}
             <div className="border-b px-3 py-2.5">
               <span className="text-xs font-medium text-muted-foreground">
                 {t(($) => $.display.ordering_section)}

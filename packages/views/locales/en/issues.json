@@ -52,6 +52,9 @@
   },
   "display": {
     "tooltip": "Display settings",
+    "grouping_section": "Grouping",
+    "group_by_status": "Status",
+    "group_by_none": "None",
     "ordering_section": "Ordering",
     "card_properties_section": "Card properties",
     "ascending_title": "Ascending",

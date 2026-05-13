@@ -102,6 +102,7 @@ export function ListView({
 }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
+  const groupBy = useViewStore((s) => s.groupBy);
   const listCollapsedStatuses = useViewStore(
     (s) => s.listCollapsedStatuses
   );
@@ -116,7 +117,7 @@ export function ListView({
   // also in `issues` is treated as nested; a child whose parent has been
   // filtered out becomes an "orphan" and renders at the top level so it
   // isn't silently hidden when a status filter excludes the parent.
-  const { issuesByStatus, childrenByParent, orphanedChildIds } = useMemo(() => {
+  const { issuesByStatus, childrenByParent, orphanedChildIds, flatTopLevelIssues } = useMemo(() => {
     const parentIds = new Set<string>();
     for (const i of issues) parentIds.add(i.id);
 
@@ -150,10 +151,15 @@ export function ListView({
       byStatus.set(status, sortIssues(filtered, sortBy, sortDirection));
     }
 
+    const flatTopLevel = sortIssues(issues, sortBy, sortDirection).filter(
+      (i) => !i.parent_issue_id || !parentIds.has(i.parent_issue_id),
+    );
+
     return {
       issuesByStatus: byStatus,
       childrenByParent: childrenMap,
       orphanedChildIds: orphans,
+      flatTopLevelIssues: flatTopLevel,
     };
   }, [issues, visibleStatuses, sortBy, sortDirection]);
 
@@ -258,6 +264,47 @@ export function ListView({
     },
     [onMoveIssue, issuesByStatus],
   );
+
+  if (groupBy === "none") {
+    return (
+      <div className="flex-1 min-h-0 overflow-y-auto p-2">
+        {flatTopLevelIssues.map((issue) => {
+          const children = childrenByParent.get(issue.id);
+          const hasChildren = !!children && children.length > 0;
+          const collapsed = collapsedSet.has(issue.id);
+          const isOrphan = orphanedChildIds.has(issue.id);
+          return (
+            <div key={issue.id}>
+              <ListRow
+                issue={issue}
+                childProgress={childProgressMap.get(issue.id)}
+                hasChildren={hasChildren}
+                collapsed={collapsed}
+                onToggleCollapsed={
+                  hasChildren ? () => toggleParentCollapsed(issue.id) : undefined
+                }
+                isOrphan={isOrphan}
+                showStatus
+              />
+              {hasChildren && !collapsed && (
+                <div role="group" aria-label={`Sub-issues of ${issue.identifier}`}>
+                  {children!.map((child) => (
+                    <ListRow
+                      key={child.id}
+                      issue={child}
+                      childProgress={childProgressMap.get(child.id)}
+                      indentLevel={1}
+                      showStatus
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   const accordion = (
     <Accordion.Root

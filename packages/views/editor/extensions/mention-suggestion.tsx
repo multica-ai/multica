@@ -345,26 +345,6 @@ function MentionRow({
     );
   }
 
-  if (item.type === "broadcast") {
-    return (
-      <button
-        ref={buttonRef}
-        className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
-          selected ? "bg-accent" : "hover:bg-accent/50"
-        }`}
-        onClick={onSelect}
-      >
-        <span className="shrink-0 font-mono text-muted-foreground">@@</span>
-        <span className="truncate font-medium">
-          {item.id === "all" ? t(($) => $.mention.broadcast_all) : item.id}
-        </span>
-        {/* "Broadcast" names the mention mode in the picker. */}
-        {/* eslint-disable-next-line i18next/no-literal-string */}
-        <Badge variant="outline" className="ml-auto text-[10px] h-4 px-1.5">Broadcast</Badge>
-      </button>
-    );
-  }
-
   return (
     <button
       ref={buttonRef}
