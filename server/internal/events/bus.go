@@ -3,10 +3,19 @@ package events
 import (
 	"log/slog"
 	"sync"
+
+	"github.com/google/uuid"
 )
 
 // Event represents a domain event published by handlers or services.
 type Event struct {
+	// ID is a UUIDv7 minted at Publish time. Stable across all listeners
+	// (realtime, webhooks, audit). Sortable. Subscribers can dedup on it
+	// across retries since every retry of the same delivery preserves the
+	// event_id while a separate delivery_id changes per attempt batch.
+	// See RFC #1964 (issue/1964) for the rationale.
+	ID string
+
 	Type        string // e.g. "issue:created", "inbox:new"
 	WorkspaceID string // routes to correct Hub room
 	ActorType   string // "member", "agent", or "system"
@@ -58,7 +67,23 @@ func (b *Bus) SubscribeAll(h Handler) {
 // Type-specific handlers run first, then global (SubscribeAll) handlers.
 // Each handler is called synchronously. Panics in individual handlers are
 // recovered so one failing handler does not prevent others from executing.
+//
+// If the caller did not set Event.ID, Publish mints a UUIDv7 here so every
+// listener (realtime hub, webhook dispatcher, future audit log) sees the
+// same stable identifier. Callers that need to set a specific ID (e.g. tests
+// reproducing a known sequence) can populate it before calling Publish.
 func (b *Bus) Publish(e Event) {
+	if e.ID == "" {
+		if id, err := uuid.NewV7(); err == nil {
+			e.ID = id.String()
+		} else {
+			// Fallback to v4 if v7 fails (vanishingly unlikely on a host
+			// with a working entropy source). Still better than the empty
+			// string which would force every listener to mint its own.
+			e.ID = uuid.NewString()
+		}
+	}
+
 	b.mu.RLock()
 	handlers := b.listeners[e.Type]
 	globals := b.globalHandlers
