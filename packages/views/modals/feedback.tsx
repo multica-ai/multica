@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
@@ -93,9 +92,17 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
       <DialogContent className="sm:max-w-2xl !h-[28rem] p-0 gap-0 flex flex-col overflow-hidden">
         <DialogHeader className="px-5 pt-4 pb-2 shrink-0">
           <DialogTitle>{t(($) => $.feedback.title)}</DialogTitle>
-          <DialogDescription>
-            {t(($) => $.feedback.description)}
-          </DialogDescription>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t(($) => $.feedback.github_hint_prefix)}
+            <a
+              href="https://github.com/multica-ai/multica/issues"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
+            >
+              {t(($) => $.feedback.github_hint_link)}
+            </a>
+          </p>
         </DialogHeader>
 
         <div className="flex-1 min-h-0 px-5 pb-3">

@@ -81,6 +81,9 @@ import type {
   ListAutopilotRunsResponse,
   NotificationPreferenceResponse,
   NotificationPreferences,
+  GitHubPullRequest,
+  ListGitHubInstallationsResponse,
+  GitHubConnectResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -1021,11 +1024,15 @@ export class ApiClient {
   }
 
   // File Upload & Attachments
-  async uploadFile(file: File, opts?: { issueId?: string; commentId?: string }): Promise<Attachment> {
+  async uploadFile(
+    file: File,
+    opts?: { issueId?: string; commentId?: string; chatSessionId?: string },
+  ): Promise<Attachment> {
     const formData = new FormData();
     formData.append("file", file);
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
     if (opts?.commentId) formData.append("comment_id", opts.commentId);
+    if (opts?.chatSessionId) formData.append("chat_session_id", opts.chatSessionId);
 
     const rid = createRequestId();
     const start = Date.now();
@@ -1046,7 +1053,10 @@ export class ApiClient {
     }
 
     this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });
-    return res.json() as Promise<Attachment>;
+    const raw = (await res.json()) as unknown;
+    return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+      endpoint: "POST /api/upload-file",
+    });
   }
 
   // Chat Sessions
@@ -1074,10 +1084,18 @@ export class ApiClient {
     return this.fetch(`/api/chat/sessions/${sessionId}/messages`);
   }
 
-  async sendChatMessage(sessionId: string, content: string): Promise<SendChatMessageResponse> {
+  async sendChatMessage(
+    sessionId: string,
+    content: string,
+    attachmentIds?: string[],
+  ): Promise<SendChatMessageResponse> {
+    const body: { content: string; attachment_ids?: string[] } = { content };
+    if (attachmentIds && attachmentIds.length > 0) {
+      body.attachment_ids = attachmentIds;
+    }
     return this.fetch(`/api/chat/sessions/${sessionId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(body),
     });
   }
 
@@ -1294,5 +1312,24 @@ export class ApiClient {
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
+  }
+
+  // GitHub integration
+  async getGitHubConnectURL(workspaceId: string): Promise<GitHubConnectResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/github/connect`);
+  }
+
+  async listGitHubInstallations(workspaceId: string): Promise<ListGitHubInstallationsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/github/installations`);
+  }
+
+  async deleteGitHubInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/github/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
+    return this.fetch(`/api/issues/${issueId}/pull-requests`);
   }
 }
