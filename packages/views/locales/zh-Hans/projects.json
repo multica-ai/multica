@@ -18,7 +18,7 @@
     "in_progress": "进行中",
     "paused": "已暂停",
     "completed": "已完成",
-    "cancelled": "已取消"
+    "cancelled": "归档"
   },
   "priority": {
     "urgent": "紧急",

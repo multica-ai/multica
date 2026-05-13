@@ -13,7 +13,7 @@
     "in_review": "In Review",
     "done": "Done",
     "blocked": "Blocked",
-    "cancelled": "Cancelled"
+    "cancelled": "Archive"
   },
   "priority": {
     "urgent": "Urgent",

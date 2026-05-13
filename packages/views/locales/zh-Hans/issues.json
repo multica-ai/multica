@@ -13,7 +13,7 @@
     "in_review": "审核中",
     "done": "已完成",
     "blocked": "已阻塞",
-    "cancelled": "已取消"
+    "cancelled": "归档"
   },
   "priority": {
     "urgent": "紧急",

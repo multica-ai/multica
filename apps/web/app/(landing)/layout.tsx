@@ -21,22 +21,16 @@ const jsonLd = {
   "@graph": [
     {
       "@type": "Organization",
-      name: "Multica",
-      url: "https://www.multica.ai",
-      sameAs: ["https://github.com/multica-ai/multica"],
+      name: "Asymbl",
+      url: "https://asymbl.com",
     },
     {
       "@type": "SoftwareApplication",
-      name: "Multica",
+      name: "Forge",
       applicationCategory: "ProjectManagement",
       operatingSystem: "Web",
       description:
-        "Open-source project management platform that turns coding agents into real teammates.",
-      offers: {
-        "@type": "Offer",
-        price: "0",
-        priceCurrency: "USD",
-      },
+        "Asymbl Forge — AI-native project workspace where agents are first-class teammates.",
     },
   ],
 };

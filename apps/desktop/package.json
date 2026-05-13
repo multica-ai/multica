@@ -1,18 +1,18 @@
 {
   "name": "@multica/desktop",
-  "productName": "Multica",
+  "productName": "Forge",
   "version": "0.1.0",
   "private": true,
-  "description": "Multica Desktop — native desktop client for the Multica platform.",
-  "homepage": "https://multica.ai",
+  "description": "Forge Desktop — Asymbl's AI-native project workspace.",
+  "homepage": "https://forge.asymbl.app",
   "repository": {
     "type": "git",
-    "url": "https://github.com/multica-ai/multica.git",
+    "url": "https://github.com/shivasymbl/forge.git",
     "directory": "apps/desktop"
   },
   "author": {
-    "name": "Multica",
-    "email": "support@multica.ai"
+    "name": "Asymbl",
+    "email": "support@asymbl.com"
   },
   "license": "UNLICENSED",
   "main": "./out/main/index.js",

@@ -765,31 +765,36 @@ func bareHeadBranch(barePath string) string {
 	return ref
 }
 
-// multicaHookMarker is a sentinel comment embedded in every prepare-commit-msg
+// forgeHookMarker is the sentinel comment embedded in every prepare-commit-msg
 // hook installed by the daemon. removeCoAuthoredByHook uses it to recognize
 // hooks it owns so it never deletes a hook installed by the user or another
-// tool. Do not change without bumping the recognition logic.
+// tool.
+const forgeHookMarker = "# forge:prepare-commit-msg:co-authored-by"
+
+// multicaHookMarker is the legacy sentinel used by daemon versions prior to the
+// Forge rebrand. Kept here solely for hook removal — never write this value into
+// new hooks. Do not remove from daemonInstalledHookSignatures.
 const multicaHookMarker = "# multica:prepare-commit-msg:co-authored-by"
 
 // daemonInstalledHookSignatures lists substrings that identify a
 // prepare-commit-msg hook as one the daemon installed. removeCoAuthoredByHook
-// treats a hook as Multica-owned if its content contains ANY of these
-// substrings. The list deliberately includes the legacy comment that the
-// daemon used before multicaHookMarker existed, so disabling the toggle on
-// existing installations still cleans up old hooks seeded by previous daemon
-// versions. Add to this list — never remove from it — so future tweaks to
-// prepareCommitMsgHook keep recognizing every previously-shipped variant.
+// treats a hook as daemon-owned if its content contains ANY of these
+// substrings. The list deliberately includes legacy markers so disabling the
+// toggle on existing installations still cleans up old hooks seeded by previous
+// daemon versions. Add to this list — never remove from it — so future tweaks
+// to prepareCommitMsgHook keep recognizing every previously-shipped variant.
 var daemonInstalledHookSignatures = []string{
+	forgeHookMarker,
 	multicaHookMarker,
 	"# Installed by the Multica daemon.",
 }
 
 // prepareCommitMsgHook is the prepare-commit-msg hook script that appends a
-// Co-authored-by trailer for the Multica Agent to every commit message.
+// Co-authored-by trailer for the Forge Agent to every commit message.
 const prepareCommitMsgHook = `#!/bin/sh
-# multica:prepare-commit-msg:co-authored-by
-# Multica: add Co-authored-by trailer for the Multica Agent.
-# Installed by the Multica daemon. Do not edit — it will be overwritten.
+# forge:prepare-commit-msg:co-authored-by
+# Forge: add Co-authored-by trailer for the Forge Agent.
+# Installed by the Forge daemon. Do not edit — it will be overwritten.
 
 COMMIT_MSG_FILE="$1"
 COMMIT_SOURCE="$2"
@@ -799,7 +804,7 @@ case "$COMMIT_SOURCE" in
   merge|squash) exit 0 ;;
 esac
 
-TRAILER="Co-authored-by: multica-agent <github@multica.ai>"
+TRAILER="Co-authored-by: forge-agent <github@asymbl.com>"
 
 # Don't add if already present.
 if grep -qF "$TRAILER" "$COMMIT_MSG_FILE"; then
@@ -811,7 +816,7 @@ git interpret-trailers --in-place --trailer "$TRAILER" "$COMMIT_MSG_FILE"
 `
 
 // installCoAuthoredByHook installs a prepare-commit-msg git hook that appends
-// a Co-authored-by trailer for the Multica Agent. The hook is installed in the
+// a Co-authored-by trailer for the Forge Agent. The hook is installed in the
 // git common directory (the bare repo for worktrees) so it applies to all
 // worktrees created from this cache.
 func installCoAuthoredByHook(worktreePath string) error {

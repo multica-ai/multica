@@ -28,7 +28,7 @@ var statusLabels = map[string]string{
 	"in_review":   "In Review",
 	"done":        "Done",
 	"blocked":     "Blocked",
-	"cancelled":   "Cancelled",
+	"cancelled":   "Archive",
 }
 
 // priorityLabels maps DB priority values to human-readable labels for notifications.

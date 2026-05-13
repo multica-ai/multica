@@ -18,7 +18,7 @@
     "in_progress": "In Progress",
     "paused": "Paused",
     "completed": "Completed",
-    "cancelled": "Cancelled"
+    "cancelled": "Archive"
   },
   "priority": {
     "urgent": "Urgent",
