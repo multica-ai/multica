@@ -106,6 +106,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AllowedEmails:                 splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
 		AllowedEmailDomains:           splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
 		UseDailyRollupForRuntimeUsage: os.Getenv("USAGE_DAILY_ROLLUP_ENABLED") == "true",
+		UseDailyRollupForDashboard:    os.Getenv("USAGE_DASHBOARD_ROLLUP_ENABLED") == "true",
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	if opts.DaemonWakeup != nil {
@@ -218,6 +219,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Public API
 	r.Get("/api/config", h.GetConfig)
 
+	// GitHub App webhook (no Multica auth — requests are authenticated via
+	// HMAC-SHA256 signature in the handler) and post-install setup callback.
+	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
+	r.Get("/api/github/setup", h.GitHubSetupCallback)
+
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache))
@@ -324,6 +330,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteWorkspace)
 					r.Delete("/invite-links/{invitationId}", h.RevokeInviteLink)
 				})
+
+				// GitHub integration — admin-only operations live here so the
+				// nesting matches the rest of /api/workspaces/{id}/* routes.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Get("/github/connect", h.GitHubConnect)
+					r.Get("/github/installations", h.ListGitHubInstallations)
+					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
+				})
 			})
 		})
 
@@ -380,6 +395,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/labels", h.ListLabelsForIssue)
 					r.Post("/labels", h.AttachLabel)
 					r.Delete("/labels/{labelId}", h.DetachLabel)
+					r.Get("/pull-requests", h.ListPullRequestsForIssue)
 				})
 			})
 
@@ -504,6 +520,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/summary", h.GetWorkspaceUsageSummary)
 			})
 
+			// Dashboard — workspace-wide token + run-time rollups for the
+			// "/{slug}/dashboard" page. Optional ?project_id filter scopes
+			// the rollup to a single project.
+			r.Route("/api/dashboard", func(r chi.Router) {
+				r.Get("/usage/daily", h.GetDashboardUsageDaily)
+				r.Get("/usage/by-agent", h.GetDashboardUsageByAgent)
+				r.Get("/agent-runtime", h.GetDashboardAgentRunTime)
+			})
+
 			// Runtimes
 			r.Route("/api/runtimes", func(r chi.Router) {
 				r.Get("/", h.ListAgentRuntimes)
@@ -546,6 +571,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListChatSessions)
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
+					r.Patch("/", h.UpdateChatSession)
 					r.Delete("/", h.DeleteChatSession)
 					r.Post("/messages", h.SendChatMessage)
 					r.Get("/messages", h.ListChatMessages)
@@ -635,6 +661,18 @@ func (pr *patResolver) ResolveToken(ctx context.Context, token string) (string, 
 // internal round-trips of DB-sourced UUIDs (e.g. issue.ID, e.ActorID), so an
 // invalid value indicates a programming error and should panic loudly.
 func parseUUID(s string) pgtype.UUID {
+	return util.MustParseUUID(s)
+}
+
+// optionalUUID returns a NULL pgtype.UUID for an empty string and otherwise
+// behaves like parseUUID. Use this for actor IDs on events where the producer
+// may legitimately be a "system" actor with no member/agent attribution
+// (e.g. GitHub webhook auto-status sync) — the activity_log and inbox_item
+// tables both allow actor_id to be NULL.
+func optionalUUID(s string) pgtype.UUID {
+	if s == "" {
+		return pgtype.UUID{}
+	}
 	return util.MustParseUUID(s)
 }
 

@@ -523,7 +523,7 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		}
 		// Private-agent gate (member→private requires allowed_principals;
 		// agent→agent always passes).
-		if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
+		if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, uuidToString(issue.WorkspaceID)) {
 			continue
 		}
 		// Dedup: skip if this agent already has a pending task for this issue.

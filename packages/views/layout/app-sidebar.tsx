@@ -29,6 +29,7 @@ import {
   SquarePen,
   CircleUser,
   FolderKanban,
+  BarChart3,
   X,
   Zap,
 } from "lucide-react";
@@ -106,6 +107,7 @@ type NavKey =
   | "autopilots"
   | "agents"
   | "wiki"
+  | "usage"
   | "runtimes"
   | "skills"
   | "settings";
@@ -119,6 +121,7 @@ type NavLabelKey =
   | "autopilots"
   | "agents"
   | "wiki"
+  | "usage"
   | "runtimes"
   | "skills"
   | "settings";
@@ -134,6 +137,7 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
   { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "agents", labelKey: "agents", icon: Bot },
   { key: "wiki", labelKey: "wiki", icon: BookOpenText },
+  { key: "usage", labelKey: "usage", icon: BarChart3 },
 ];
 
 const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [

@@ -285,6 +285,56 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.32",
+        date: "2026-05-13",
+        title: "用量洞察、聊天重命名与桌面体验优化",
+        changes: [],
+        features: [
+          "Usage 页面集中展示 workspace 和 project 的 token 使用、runtime 趋势和 agent 排名",
+          "聊天会话可以直接在聊天页顶部重命名",
+          "反馈时可以附带截图或文件，方便团队快速理解问题",
+        ],
+        improvements: [
+          "Dashboard 更名为 Usage，并加入更清晰的 agent 排行展示",
+          "新聊天和消息完成状态切换更顺，不再频繁闪加载状态",
+          "自托管 GitHub 配置更完整，文档里的云端链接也已修正",
+          "用户安装的 Codex Skills 会自动带入新的 agent 任务",
+        ],
+        fixes: [
+          "没有输出内容但成功完成的 agent 任务会显示为 completed，不再误判为 blocked",
+          "在指令编辑器中粘贴的 mention 会保留可点击链接",
+          "Linux 桌面端下载附件时走系统原生流程，关闭标签页也不再触发循环跳转",
+          "Gemini 和 Windows runtime 的启动检查更稳定，适合无人值守执行",
+          "添加项目资源时，较长的 GitHub 仓库列表可以正常滚动",
+        ],
+      },
+      {
+        version: "0.2.31",
+        date: "2026-05-12",
+        title: "GitHub 集成、聊天附件与 Issue 定位优化",
+        changes: [],
+        features: [
+          "接入 GitHub 后，关联的 Pull Request 会显示在 Multica Issue 中，状态会同步到 Multica，关闭 PR 后会自动关闭对应 Issue",
+          "聊天消息支持添加文件附件和图片预览",
+          "Agent 和 runtime 可以设置公开或私有，方便控制团队可见范围",
+          "停止单个 agent 任务前会先弹出确认，避免误操作",
+          "新增 GitHub 集成文档，覆盖托管版和自托管配置",
+        ],
+        improvements: [
+          "打开 Issue 链接时，会更稳定地定位到指定评论或动态",
+          "很长的 Issue 时间线滚动更顺畅",
+          "反馈入口更明确地引导用户到 GitHub 参与讨论和反馈",
+          "自托管 Caddy 配置文档补充实时连接要求",
+          "Linux 桌面端安装包恢复显示 Multica 应用图标",
+        ],
+        fixes: [
+          "下载附件时保留原始文件名",
+          "本地附件访问更稳定，上传按钮会等文件准备好后再可用",
+          "创建 Issue 弹窗里的文本框高度显示正确",
+          "Runtime 文档入口跳转到正确页面",
+        ],
+      },
+      {
         version: "0.2.30",
         date: "2026-05-11",
         title: "Issue 内 Mermaid、Runtime 时区聚合与离开 Workspace 自动吊销",

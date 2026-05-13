@@ -39,6 +39,9 @@ import type {
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
+  DashboardUsageDaily,
+  DashboardUsageByAgent,
+  DashboardAgentRunTime,
   RuntimeUpdate,
   CLIUpdateManifest,
   RuntimePing,
@@ -113,6 +116,9 @@ import type {
   CreateWikiPageRequest,
   UpdateWikiPageRequest,
   ReorderWikiPagesRequest,
+  GitHubPullRequest,
+  ListGitHubInstallationsResponse,
+  GitHubConnectResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -123,6 +129,9 @@ import {
   AttachmentResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
+  DashboardAgentRunTimeListSchema,
+  DashboardUsageByAgentListSchema,
+  DashboardUsageDailyListSchema,
   EMPTY_ATTACHMENT,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_TIMELINE_ENTRIES,
@@ -880,7 +889,7 @@ export class ApiClient {
 
   async updateRuntime(
     runtimeId: string,
-    patch: { timezone?: string },
+    patch: { timezone?: string; visibility?: "private" | "public" },
   ): Promise<AgentRuntime> {
     return this.fetch(`/api/runtimes/${runtimeId}`, {
       method: "PATCH",
@@ -926,6 +935,58 @@ export class ApiClient {
 
   async getCLIUpdateManifest(): Promise<CLIUpdateManifest> {
     return this.fetch("/api/runtimes/cli-update-manifest");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Workspace dashboard — three independent rollups for `/{slug}/dashboard`.
+  // Each accepts an optional `project_id` to narrow the scope to one project.
+  // Cost is computed client-side from the model pricing table (same contract
+  // as the per-runtime endpoints above).
+  // ---------------------------------------------------------------------------
+
+  async getDashboardUsageDaily(
+    params: { days?: number; project_id?: string | null },
+  ): Promise<DashboardUsageDaily[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    const raw = await this.fetch<unknown>(`/api/dashboard/usage/daily?${search}`);
+    return parseWithFallback<DashboardUsageDaily[]>(
+      raw,
+      DashboardUsageDailyListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/usage/daily" },
+    );
+  }
+
+  async getDashboardUsageByAgent(
+    params: { days?: number; project_id?: string | null },
+  ): Promise<DashboardUsageByAgent[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-agent?${search}`);
+    return parseWithFallback<DashboardUsageByAgent[]>(
+      raw,
+      DashboardUsageByAgentListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/usage/by-agent" },
+    );
+  }
+
+  async getDashboardAgentRunTime(
+    params: { days?: number; project_id?: string | null },
+  ): Promise<DashboardAgentRunTime[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    const raw = await this.fetch<unknown>(`/api/dashboard/agent-runtime?${search}`);
+    return parseWithFallback<DashboardAgentRunTime[]>(
+      raw,
+      DashboardAgentRunTimeListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/agent-runtime" },
+    );
   }
 
   async initiateUpdate(
@@ -1328,11 +1389,15 @@ export class ApiClient {
   }
 
   // File Upload & Attachments
-  async uploadFile(file: File, opts?: { issueId?: string; commentId?: string }): Promise<Attachment> {
+  async uploadFile(
+    file: File,
+    opts?: { issueId?: string; commentId?: string; chatSessionId?: string },
+  ): Promise<Attachment> {
     const formData = new FormData();
     formData.append("file", file);
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
     if (opts?.commentId) formData.append("comment_id", opts.commentId);
+    if (opts?.chatSessionId) formData.append("chat_session_id", opts.chatSessionId);
 
     const rid = createRequestId();
     const start = Date.now();
@@ -1354,7 +1419,10 @@ export class ApiClient {
     }
 
     this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });
-    return res.json() as Promise<Attachment>;
+    const raw = (await res.json()) as unknown;
+    return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+      endpoint: "POST /api/upload-file",
+    });
   }
 
   // Chat Sessions
@@ -1378,14 +1446,29 @@ export class ApiClient {
     await this.fetch(`/api/chat/sessions/${id}`, { method: "DELETE" });
   }
 
+  async updateChatSession(id: string, data: { title: string }): Promise<ChatSession> {
+    return this.fetch(`/api/chat/sessions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
   async listChatMessages(sessionId: string): Promise<ChatMessage[]> {
     return this.fetch(`/api/chat/sessions/${sessionId}/messages`);
   }
 
-  async sendChatMessage(sessionId: string, content: string): Promise<SendChatMessageResponse> {
+  async sendChatMessage(
+    sessionId: string,
+    content: string,
+    attachmentIds?: string[],
+  ): Promise<SendChatMessageResponse> {
+    const body: { content: string; attachment_ids?: string[] } = { content };
+    if (attachmentIds && attachmentIds.length > 0) {
+      body.attachment_ids = attachmentIds;
+    }
     return this.fetch(`/api/chat/sessions/${sessionId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(body),
     });
   }
 
@@ -1636,5 +1719,24 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/duplicate/${configId}`, {
       method: "POST",
     });
+  }
+
+  // GitHub integration
+  async getGitHubConnectURL(workspaceId: string): Promise<GitHubConnectResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/github/connect`);
+  }
+
+  async listGitHubInstallations(workspaceId: string): Promise<ListGitHubInstallationsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/github/installations`);
+  }
+
+  async deleteGitHubInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/github/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
+    return this.fetch(`/api/issues/${issueId}/pull-requests`);
   }
 }

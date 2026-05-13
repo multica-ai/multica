@@ -142,6 +142,23 @@ func buildChatPrompt(task Task) string {
 	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
 	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
+	// List attachments by id + filename so the agent can fetch them via
+	// the CLI. We deliberately do NOT inline the URL: chat attachments
+	// live behind a signed CDN with a short TTL, so by the time the agent
+	// has finished thinking the URL embedded in the markdown body may
+	// have expired. `multica attachment download <id>` re-signs at click
+	// time and is the only reliable path.
+	if len(task.ChatMessageAttachments) > 0 {
+		b.WriteString("\nAttachments on this message:\n")
+		for _, a := range task.ChatMessageAttachments {
+			if a.ContentType != "" {
+				fmt.Fprintf(&b, "- id=%s filename=%q content_type=%s\n", a.ID, a.Filename, a.ContentType)
+			} else {
+				fmt.Fprintf(&b, "- id=%s filename=%q\n", a.ID, a.Filename)
+			}
+		}
+		b.WriteString("Use `multica attachment download <id>` to fetch each file locally before referring to it.\n")
+	}
 	return b.String()
 }
 

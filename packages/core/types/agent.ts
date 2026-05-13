@@ -4,6 +4,14 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
+// Runtime visibility is a separate axis from agent visibility — different
+// vocabulary because it gates a different action. "private" (default) means
+// only the runtime owner and workspace admins can bind agents to it;
+// "public" opens binding to any workspace member. Older backends that
+// haven't shipped MUL-2062 omit the field; the consumer must default to
+// "private" so the strictest behavior is the fallback.
+export type RuntimeVisibility = "private" | "public";
+
 export interface RuntimeDevice {
   id: string;
   workspace_id: string;
@@ -16,6 +24,8 @@ export interface RuntimeDevice {
   device_info: string;
   metadata: Record<string, unknown>;
   owner_id: string | null;
+  /** Defaults to "private" when the backend predates the visibility flag. */
+  visibility: RuntimeVisibility;
   timezone: string;
   last_seen_at: string | null;
   created_at: string;
@@ -302,6 +312,44 @@ export interface RuntimeUsageByHour {
   cache_read_tokens: number;
   cache_write_tokens: number;
   task_count: number;
+}
+
+// One (date, model) bucket of token usage for the workspace dashboard.
+// Same shape as RuntimeUsage but workspace-scoped (no runtime_id, no
+// provider field on the wire) and optionally narrowed to a single project
+// on the server side. Cost stays client-side via the model pricing table.
+export interface DashboardUsageDaily {
+  date: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  task_count: number;
+}
+
+// Per-(agent, model) token totals for the workspace dashboard. Identical
+// wire shape to RuntimeUsageByAgent — the client folds by agent_id and
+// sums cost.
+export interface DashboardUsageByAgent {
+  agent_id: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  task_count: number;
+}
+
+// Per-agent total terminal-task run-time + counts. Powers the workspace
+// dashboard's "time by agent" list. failed_count is a subset of
+// task_count (failed tasks still contribute to total_seconds because
+// they consumed runtime to fail).
+export interface DashboardAgentRunTime {
+  agent_id: string;
+  total_seconds: number;
+  task_count: number;
+  failed_count: number;
 }
 
 export type RuntimeUpdateStatus =

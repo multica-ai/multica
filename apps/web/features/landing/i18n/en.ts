@@ -285,6 +285,56 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.2.32",
+        date: "2026-05-13",
+        title: "Usage Insights, Chat Renaming & Smoother Desktop Flows",
+        changes: [],
+        features: [
+          "Usage now shows workspace and project token activity, runtime trends, and per-agent rankings in one place",
+          "Chat sessions can be renamed directly from the chat header",
+          "Feedback reports can include screenshots or files so teams have the context they need",
+        ],
+        improvements: [
+          "The Usage page has clearer naming and a more dynamic agent leaderboard",
+          "New chats and completed chat responses update more smoothly with fewer loading flashes",
+          "Self-hosted GitHub setup is easier to configure and the setup docs point to the right cloud URL",
+          "User-installed Codex skills are available automatically when new tasks run",
+        ],
+        fixes: [
+          "Empty successful agent responses are marked completed instead of blocked",
+          "Pasted mentions in instruction editors keep their mention links",
+          "Desktop attachment downloads use the native Linux flow and tab closing no longer loops",
+          "Gemini and Windows runtime startup checks are more reliable in unattended runs",
+          "Long GitHub repository lists stay usable when adding project resources",
+        ],
+      },
+      {
+        version: "0.2.31",
+        date: "2026-05-12",
+        title: "GitHub Integration, Chat Attachments & Safer Issue Navigation",
+        changes: [],
+        features: [
+          "Connect GitHub so linked pull requests appear on Multica issues, sync their status, and close the Multica issue automatically when the PR closes",
+          "Chat messages can include file attachments and image previews",
+          "Agents and runtimes can now be kept public or private for clearer team access",
+          "Stopping a single agent task now asks for confirmation before it is terminated",
+          "New GitHub integration docs cover both hosted and self-hosted setup",
+        ],
+        improvements: [
+          "Issue links land more reliably on the exact comment or activity you opened",
+          "Long issue timelines scroll more smoothly",
+          "The feedback dialog now points contributors toward GitHub discussions and issues",
+          "Self-hosted Caddy guidance now calls out real-time connection requirements",
+          "Linux desktop packages show the Multica app icon again",
+        ],
+        fixes: [
+          "Downloaded attachments keep their original filenames",
+          "Local attachments are served more reliably, and upload controls stay disabled until files are ready",
+          "Issue creation dialogs keep their text fields at the correct height",
+          "Runtime documentation links point to the correct page",
+        ],
+      },
+      {
         version: "0.2.30",
         date: "2026-05-11",
         title: "Mermaid in Issues, Per-Runtime Timezone & Workspace-Leave Runtime Revocation",
