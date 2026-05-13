@@ -101,13 +101,134 @@ multica daemon stop
 multica daemon start
 ```
 
-## Færdig
+## 6. Opret en agent
 
-Du kan nu blive tildelt issues i Cerebro, og agenterne kører på din maskine. Logs ligger i `~/.multica/daemon.log` — eller stream dem live:
+Daemonen er kun runtimen — den udfører ikke noget før der findes en **agent** der peger på den. En agent binder din runtime sammen med et navn, en system-prompt og evt. en model, og kan tildeles issues præcis som en kollega.
+
+### Via UI'et (anbefalet)
+
+1. Åbn `https://sara.tailbde0.ts.net` i din browser og vælg Firtal-workspacet.
+2. Gå til **Agents** i sidemenuen og klik **New agent**.
+3. Udfyld:
+   - **Name** — fx `Mia - CEO EA`. Det er det navn issues bliver assigned med.
+   - **Runtime** — vælg din lokale daemons runtime (typisk `Local Agent — claude`). Det er denne kobling der gør at opgaver havner på din maskine.
+   - **Model** — fx `claude-opus-4-7`. Lader du den stå tom, bruger daemonen CLI'ens default.
+   - **Instructions** — agentens system-prompt. Hold den specifik: rolle, opgaver der er i scope, kommunikationsregler.
+   - **Visibility** — `private` (kun dig) eller `workspace` (hele teamet kan tildele opgaver).
+4. Gem. Agenten dukker op i Agents-listen og kan nu vælges som assignee på issues.
+
+### Via CLI
+
+Find først runtime-ID'et:
+
+```bash
+multica daemon status --output json
+```
+
+Notér `runtime_id` for den runtime du vil bruge, og opret agenten:
+
+```bash
+multica agent create \
+  --name "Min agent" \
+  --runtime-id <runtime-uuid> \
+  --model claude-opus-4-7 \
+  --instructions "Du er ..." \
+  --visibility workspace
+```
+
+Se alle flags med `multica agent create --help`. API-nøgler i `--custom-env` bør altid sendes via `--custom-env-stdin` eller `--custom-env-file`, aldrig inline på kommandolinjen — så røber de sig ikke i shell-historik eller `ps`.
+
+### Test agenten
+
+```bash
+multica issue create \
+  --title "Test opgave" \
+  --description "Sig hej og bekræft du kører lokalt på min maskine." \
+  --assignee "Min agent"
+```
+
+Følg daemon-loggen mens den eksekverer:
 
 ```bash
 multica daemon logs -f
 ```
+
+Daemonen skal claime opgaven, spawne din AI-CLI, og afslutte med en kommentar på issuet.
+
+## 7. Gør daemonen persistent (macOS, launchd)
+
+`multica daemon start` kører kun indtil næste reboot. For at daemonen automatisk starter igen efter reboot — og respawner hvis den crasher — registrér den som en launchd-agent.
+
+1. Find stien til din `multica`-binær:
+
+   ```bash
+   which multica
+   # fx /opt/homebrew/bin/multica  (Apple Silicon)
+   #    /usr/local/bin/multica     (Intel)
+   ```
+
+2. Opret `~/Library/LaunchAgents/com.multica.daemon.plist` med følgende indhold — udskift `/opt/homebrew/bin/multica` og `<DIT-BRUGERNAVN>` med dine egne værdier:
+
+   ```xml
+   <?xml version="1.0" encoding="UTF-8"?>
+   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+     "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+   <plist version="1.0">
+   <dict>
+     <key>Label</key>
+     <string>com.multica.daemon</string>
+     <key>ProgramArguments</key>
+     <array>
+       <string>/opt/homebrew/bin/multica</string>
+       <string>daemon</string>
+       <string>start</string>
+       <string>--foreground</string>
+     </array>
+     <key>EnvironmentVariables</key>
+     <dict>
+       <key>PATH</key>
+       <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+     </dict>
+     <key>RunAtLoad</key>
+     <true/>
+     <key>KeepAlive</key>
+     <true/>
+     <key>StandardOutPath</key>
+     <string>/Users/<DIT-BRUGERNAVN>/Library/Logs/multica-daemon.out.log</string>
+     <key>StandardErrorPath</key>
+     <string>/Users/<DIT-BRUGERNAVN>/Library/Logs/multica-daemon.err.log</string>
+     <key>ProcessType</key>
+     <string>Background</string>
+   </dict>
+   </plist>
+   ```
+
+3. Stop en evt. allerede kørende daemon og indlæs agenten:
+
+   ```bash
+   multica daemon stop
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.multica.daemon.plist
+   launchctl kickstart -k gui/$(id -u)/com.multica.daemon
+   ```
+
+4. Verificér:
+
+   ```bash
+   launchctl print gui/$(id -u)/com.multica.daemon | grep -E 'state|last exit'
+   multica daemon status
+   ```
+
+   `state = running` og en runtime-liste fra `daemon status` betyder du er kørende.
+
+<Callout type="info">
+**Stop / fjern agenten** med `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.multica.daemon.plist`. Slet evt. `.plist`-filen bagefter hvis du ikke vil have den aktiveret automatisk igen.
+</Callout>
+
+Kræver din AI-CLI login (fx `claude /login`), så kør det login-flow i din normale brugersession **én gang** — credentials gemmes i din hjemmemappe og bruges også af daemonen når den kører via launchd.
+
+## Færdig
+
+Du har nu en kørende daemon, en agent på din egen runtime og en persistent setup der overlever reboots. Tildel agenten et issue og se den arbejde.
 
 ## Almindelige problemer
 
@@ -118,3 +239,7 @@ multica daemon logs -f
 **Daemonen starter ikke fordi porten er optaget.** En anden daemon-instans kører allerede. `multica daemon stop` og prøv igen, eller tjek `~/.multica/daemon.log`.
 
 **Jeg har klikket Opret workspace og lavet et "Mit Workspace".** Bed Jesper slette det og sende en ny invitation. Du vil ikke have to workspaces — alt arbejde foregår i Firtal.
+
+**Daemonen er nede efter genstart.** Du har ikke gjort den persistent endnu. Følg trin 7 ovenfor for at registrere `com.multica.daemon` som en launchd-agent der starter ved login og respawner ved crash.
+
+**`multica daemon status` viser runtimes, men ingen agent kan claime opgaven.** Opret en agent (trin 6) der peger på den runtime — uden agent forbliver runtimes blot tilgængelige uden ejer.
