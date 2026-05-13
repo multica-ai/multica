@@ -1459,14 +1459,6 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		taskLog.Info("picked task", "issue", task.IssueID, "agent", agentName, "provider", provider)
 	}
 
-	if err := preflightPrivateAgentGate(task); err != nil {
-		taskLog.Warn("private agent gate rejected task", "error", err)
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", ""); failErr != nil {
-			taskLog.Error("fail task after private gate rejection failed", "error", failErr)
-		}
-		return
-	}
-
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
 		taskLog.Error("start task failed", "error", err)
 		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("start task failed: %s", err.Error()), "", "", "agent_error"); failErr != nil {
@@ -1694,36 +1686,6 @@ func taskAgentName(task Task) string {
 		return name
 	}
 	return "Agent"
-}
-
-func preflightPrivateAgentGate(task Task) error {
-	if task.Agent == nil {
-		return nil
-	}
-	if task.Agent.Visibility != "private" {
-		return nil
-	}
-
-	switch task.TriggerActorType {
-	case "member":
-		if task.TriggerActorID == "" {
-			return fmt.Errorf("private agent execution denied: task dispatch actor is missing or not owner")
-		}
-		if task.Agent.OwnerID != "" && task.TriggerActorID == task.Agent.OwnerID {
-			return nil
-		}
-	case "agent":
-		// Allow same-owner agent-to-agent invocations: if the triggering
-		// agent's owner matches the target agent's owner, the invocation
-		// is authorised (the owner effectively delegated to both agents).
-		if task.TriggerActorOwnerID != "" && task.Agent.OwnerID != "" && task.TriggerActorOwnerID == task.Agent.OwnerID {
-			return nil
-		}
-	default:
-		return fmt.Errorf("private agent execution denied: task dispatch actor is missing or not owner")
-	}
-
-	return fmt.Errorf("private agent execution denied: only the agent owner can run this task")
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {

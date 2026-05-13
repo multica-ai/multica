@@ -1171,18 +1171,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		// Look up the prior session for this (agent, issue) pair so the daemon
 		// can resume the Claude Code conversation context.
 		//
-		// Resolve the trigger actor's owner when the trigger came from an
-		// agent. The daemon's private-agent gate needs this to allow
-		// same-owner agent-to-agent invocations.
-		if task.TriggerActorType.Valid && task.TriggerActorType.String == "agent" && task.TriggerActorID.Valid {
-			if triggerAgent, err := h.Queries.GetAgent(r.Context(), task.TriggerActorID); err == nil {
-				resp.TriggerActorOwnerID = uuidToString(triggerAgent.OwnerID)
-			}
-		}
-
-		// Look up the prior session for this (agent, issue) pair so the daemon
-		// can resume the Claude Code conversation context.
-		//
 		// Skip the lookup when the task was flagged as a manual rerun: the
 		// user just judged the prior output bad, so the daemon must start a
 		// fresh agent session instead of resuming the same conversation that
