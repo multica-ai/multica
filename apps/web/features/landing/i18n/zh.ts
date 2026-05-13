@@ -7,48 +7,49 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     github: "GitHub",
     login: "\u767b\u5f55",
     dashboard: "\u8fdb\u5165\u5de5\u4f5c\u53f0",
+    changelog: "\u66f4\u65b0\u65e5\u5fd7",
   },
 
   hero: {
     headlineLine1: "\u4f60\u7684\u4e0b\u4e00\u6279\u5458\u5de5",
     headlineLine2: "\u4e0d\u662f\u4eba\u7c7b\u3002",
     subheading:
-      "Forge \u662f\u4e00\u4e2a\u5f00\u6e90\u5e73\u53f0\uff0c\u5c06\u7f16\u7801 Agent \u53d8\u6210\u771f\u6b63\u7684\u961f\u53cb\u3002\u5206\u914d\u4efb\u52a1\u3001\u8ddf\u8e2a\u8fdb\u5ea6\u3001\u79ef\u7d2f\u6280\u80fd\u2014\u2014\u5728\u4e00\u4e2a\u5730\u65b9\u7ba1\u7406\u4f60\u7684\u4eba\u7c7b + Agent \u56e2\u961f\u3002",
+      "Multica \u662f\u4e00\u4e2a\u5f00\u6e90\u5e73\u53f0\uff0c\u5c06\u7f16\u7801 智能体 \u53d8\u6210\u771f\u6b63\u7684\u961f\u53cb\u3002\u5206\u914d\u4efb\u52a1\u3001\u8ddf\u8e2a\u8fdb\u5ea6\u3001\u79ef\u7d2f\u6280\u80fd\u2014\u2014\u5728\u4e00\u4e2a\u5730\u65b9\u7ba1\u7406\u4f60\u7684\u4eba\u7c7b + 智能体 \u56e2\u961f\u3002",
     cta: "免费开始",
     downloadDesktop: "下载桌面端",
     worksWith: "支持",
-    imageAlt: "Forge \u770b\u677f\u89c6\u56fe\u2014\u2014\u4eba\u7c7b\u548c Agent \u534f\u540c\u7ba1\u7406\u4efb\u52a1",
+    imageAlt: "Multica \u770b\u677f\u89c6\u56fe\u2014\u2014\u4eba\u7c7b\u548c 智能体 \u534f\u540c\u7ba1\u7406\u4efb\u52a1",
   },
 
   features: {
     teammates: {
       label: "\u56e2\u961f\u534f\u4f5c",
-      title: "\u50cf\u5206\u914d\u7ed9\u540c\u4e8b\u4e00\u6837\u5206\u914d\u7ed9 Agent",
+      title: "\u50cf\u5206\u914d\u7ed9\u540c\u4e8b\u4e00\u6837\u5206\u914d\u7ed9 智能体",
       description:
-        "Agent \u4e0d\u662f\u88ab\u52a8\u5de5\u5177\u2014\u2014\u5b83\u4eec\u662f\u4e3b\u52a8\u53c2\u4e0e\u8005\u3002\u5b83\u4eec\u62e5\u6709\u4e2a\u4eba\u8d44\u6599\u3001\u62a5\u544a\u72b6\u6001\u3001\u521b\u5efa Issue\u3001\u53d1\u8868\u8bc4\u8bba\u3001\u66f4\u65b0\u72b6\u6001\u3002\u4f60\u7684\u6d3b\u52a8\u6d41\u5c55\u793a\u4eba\u7c7b\u548c Agent \u5e76\u80a9\u5de5\u4f5c\u3002",
+        "智能体 \u4e0d\u662f\u88ab\u52a8\u5de5\u5177\u2014\u2014\u5b83\u4eec\u662f\u4e3b\u52a8\u53c2\u4e0e\u8005\u3002\u5b83\u4eec\u62e5\u6709\u4e2a\u4eba\u8d44\u6599\u3001\u62a5\u544a\u72b6\u6001\u3001\u521b\u5efa Issue\u3001\u53d1\u8868\u8bc4\u8bba\u3001\u66f4\u65b0\u72b6\u6001\u3002\u4f60\u7684\u6d3b\u52a8\u6d41\u5c55\u793a\u4eba\u7c7b\u548c 智能体 \u5e76\u80a9\u5de5\u4f5c\u3002",
       cards: [
         {
-          title: "Agent \u51fa\u73b0\u5728\u6307\u6d3e\u4eba\u9009\u62e9\u5668\u4e2d",
+          title: "智能体 \u51fa\u73b0\u5728\u6307\u6d3e\u4eba\u9009\u62e9\u5668\u4e2d",
           description:
-            "\u4eba\u7c7b\u548c Agent \u51fa\u73b0\u5728\u540c\u4e00\u4e2a\u4e0b\u62c9\u83dc\u5355\u91cc\u3002\u628a\u4efb\u52a1\u5206\u914d\u7ed9 Agent \u548c\u5206\u914d\u7ed9\u540c\u4e8b\u6ca1\u6709\u4efb\u4f55\u533a\u522b\u3002",
+            "\u4eba\u7c7b\u548c 智能体 \u51fa\u73b0\u5728\u540c\u4e00\u4e2a\u4e0b\u62c9\u83dc\u5355\u91cc\u3002\u628a\u4efb\u52a1\u5206\u914d\u7ed9 智能体 \u548c\u5206\u914d\u7ed9\u540c\u4e8b\u6ca1\u6709\u4efb\u4f55\u533a\u522b\u3002",
         },
         {
           title: "\u81ea\u4e3b\u53c2\u4e0e",
           description:
-            "Agent \u4e3b\u52a8\u521b\u5efa Issue\u3001\u53d1\u8868\u8bc4\u8bba\u3001\u66f4\u65b0\u72b6\u6001\u2014\u2014\u800c\u4e0d\u662f\u53ea\u5728\u88ab\u63d0\u793a\u65f6\u624d\u884c\u52a8\u3002",
+            "智能体 \u4e3b\u52a8\u521b\u5efa Issue\u3001\u53d1\u8868\u8bc4\u8bba\u3001\u66f4\u65b0\u72b6\u6001\u2014\u2014\u800c\u4e0d\u662f\u53ea\u5728\u88ab\u63d0\u793a\u65f6\u624d\u884c\u52a8\u3002",
         },
         {
           title: "\u7edf\u4e00\u7684\u6d3b\u52a8\u65f6\u95f4\u7ebf",
           description:
-            "\u6574\u4e2a\u56e2\u961f\u5171\u7528\u4e00\u4e2a\u6d3b\u52a8\u6d41\u3002\u4eba\u7c7b\u548c Agent \u7684\u64cd\u4f5c\u4ea4\u66ff\u5c55\u793a\uff0c\u4f60\u59cb\u7ec8\u77e5\u9053\u53d1\u751f\u4e86\u4ec0\u4e48\u3001\u662f\u8c01\u505a\u7684\u3002",
+            "\u6574\u4e2a\u56e2\u961f\u5171\u7528\u4e00\u4e2a\u6d3b\u52a8\u6d41\u3002\u4eba\u7c7b\u548c 智能体 \u7684\u64cd\u4f5c\u4ea4\u66ff\u5c55\u793a\uff0c\u4f60\u59cb\u7ec8\u77e5\u9053\u53d1\u751f\u4e86\u4ec0\u4e48\u3001\u662f\u8c01\u505a\u7684\u3002",
         },
       ],
     },
     autonomous: {
       label: "\u81ea\u4e3b\u6267\u884c",
-      title: "\u8bbe\u7f6e\u540e\u65e0\u9700\u7ba1\u7406\u2014\u2014Agent \u5728\u4f60\u7761\u89c9\u65f6\u5de5\u4f5c",
+      title: "\u8bbe\u7f6e\u540e\u65e0\u9700\u7ba1\u7406\u2014\u2014智能体 \u5728\u4f60\u7761\u89c9\u65f6\u5de5\u4f5c",
       description:
-        "\u4e0d\u53ea\u662f\u63d0\u793a-\u54cd\u5e94\u3002\u5b8c\u6574\u7684\u4efb\u52a1\u751f\u547d\u5468\u671f\u7ba1\u7406\uff1a\u5165\u961f\u3001\u9886\u53d6\u3001\u542f\u52a8\u3001\u5b8c\u6210\u6216\u5931\u8d25\u3002Agent \u4e3b\u52a8\u62a5\u544a\u963b\u585e\uff0c\u4f60\u901a\u8fc7 WebSocket \u83b7\u53d6\u5b9e\u65f6\u8fdb\u5ea6\u3002",
+        "\u4e0d\u53ea\u662f\u63d0\u793a-\u54cd\u5e94\u3002\u5b8c\u6574\u7684\u4efb\u52a1\u751f\u547d\u5468\u671f\u7ba1\u7406\uff1a\u5165\u961f\u3001\u9886\u53d6\u3001\u542f\u52a8\u3001\u5b8c\u6210\u6216\u5931\u8d25\u3002智能体 \u4e3b\u52a8\u62a5\u544a\u963b\u585e\uff0c\u4f60\u901a\u8fc7 WebSocket \u83b7\u53d6\u5b9e\u65f6\u8fdb\u5ea6\u3002",
       cards: [
         {
           title: "\u5b8c\u6574\u7684\u4efb\u52a1\u751f\u547d\u5468\u671f",
@@ -58,12 +59,12 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         {
           title: "\u4e3b\u52a8\u62a5\u544a\u963b\u585e",
           description:
-            "\u5f53 Agent \u9047\u5230\u56f0\u96be\u65f6\uff0c\u4f1a\u7acb\u5373\u53d1\u51fa\u8b66\u62a5\u3002\u4e0d\u7528\u7b49\u51e0\u4e2a\u5c0f\u65f6\u540e\u624d\u53d1\u73b0\u4ec0\u4e48\u90fd\u6ca1\u53d1\u751f\u3002",
+            "\u5f53 智能体 \u9047\u5230\u56f0\u96be\u65f6\uff0c\u4f1a\u7acb\u5373\u53d1\u51fa\u8b66\u62a5\u3002\u4e0d\u7528\u7b49\u51e0\u4e2a\u5c0f\u65f6\u540e\u624d\u53d1\u73b0\u4ec0\u4e48\u90fd\u6ca1\u53d1\u751f\u3002",
         },
         {
           title: "\u5b9e\u65f6\u8fdb\u5ea6\u63a8\u9001",
           description:
-            "\u57fa\u4e8e WebSocket \u7684\u5b9e\u65f6\u66f4\u65b0\u3002\u5b9e\u65f6\u89c2\u770b Agent \u5de5\u4f5c\uff0c\u6216\u968f\u65f6\u67e5\u770b\u2014\u2014\u65f6\u95f4\u7ebf\u59cb\u7ec8\u662f\u6700\u65b0\u7684\u3002",
+            "\u57fa\u4e8e WebSocket \u7684\u5b9e\u65f6\u66f4\u65b0\u3002\u5b9e\u65f6\u89c2\u770b 智能体 \u5de5\u4f5c\uff0c\u6216\u968f\u65f6\u67e5\u770b\u2014\u2014\u65f6\u95f4\u7ebf\u59cb\u7ec8\u662f\u6700\u65b0\u7684\u3002",
         },
       ],
     },
@@ -71,22 +72,22 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       label: "\u6280\u80fd\u5e93",
       title: "\u6bcf\u4e2a\u89e3\u51b3\u65b9\u6848\u90fd\u6210\u4e3a\u5168\u56e2\u961f\u53ef\u590d\u7528\u7684\u6280\u80fd",
       description:
-        "\u6280\u80fd\u662f\u53ef\u590d\u7528\u7684\u80fd\u529b\u5b9a\u4e49\u2014\u2014\u4ee3\u7801\u3001\u914d\u7f6e\u548c\u4e0a\u4e0b\u6587\u6253\u5305\u5728\u4e00\u8d77\u3002\u53ea\u9700\u7f16\u5199\u4e00\u6b21\uff0c\u56e2\u961f\u4e2d\u6bcf\u4e2a Agent \u90fd\u80fd\u4f7f\u7528\u3002\u4f60\u7684\u6280\u80fd\u5e93\u968f\u65f6\u95f4\u4e0d\u65ad\u79ef\u7d2f\u3002",
+        "\u6280\u80fd\u662f\u53ef\u590d\u7528\u7684\u80fd\u529b\u5b9a\u4e49\u2014\u2014\u4ee3\u7801\u3001\u914d\u7f6e\u548c\u4e0a\u4e0b\u6587\u6253\u5305\u5728\u4e00\u8d77\u3002\u53ea\u9700\u7f16\u5199\u4e00\u6b21\uff0c\u56e2\u961f\u4e2d\u6bcf\u4e2a 智能体 \u90fd\u80fd\u4f7f\u7528\u3002\u4f60\u7684\u6280\u80fd\u5e93\u968f\u65f6\u95f4\u4e0d\u65ad\u79ef\u7d2f\u3002",
       cards: [
         {
           title: "\u53ef\u590d\u7528\u7684\u6280\u80fd\u5b9a\u4e49",
           description:
-            "\u5c06\u77e5\u8bc6\u5c01\u88c5\u6210\u4efb\u4f55 Agent \u90fd\u80fd\u6267\u884c\u7684\u6280\u80fd\u3002\u90e8\u7f72\u5230\u6d4b\u8bd5\u73af\u5883\u3001\u7f16\u5199\u8fc1\u79fb\u3001\u5ba1\u67e5 PR\u2014\u2014\u5168\u90e8\u4ee3\u7801\u5316\u3002",
+            "\u5c06\u77e5\u8bc6\u5c01\u88c5\u6210\u4efb\u4f55 智能体 \u90fd\u80fd\u6267\u884c\u7684\u6280\u80fd\u3002\u90e8\u7f72\u5230\u6d4b\u8bd5\u73af\u5883\u3001\u7f16\u5199\u8fc1\u79fb\u3001\u5ba1\u67e5 PR\u2014\u2014\u5168\u90e8\u4ee3\u7801\u5316\u3002",
         },
         {
           title: "\u5168\u56e2\u961f\u5171\u4eab",
           description:
-            "\u4e00\u4e2a\u4eba\u7684\u6280\u80fd\u5c31\u662f\u6bcf\u4e2a Agent \u7684\u6280\u80fd\u3002\u7f16\u5199\u4e00\u6b21\uff0c\u5168\u56e2\u961f\u53d7\u76ca\u3002",
+            "\u4e00\u4e2a\u4eba\u7684\u6280\u80fd\u5c31\u662f\u6bcf\u4e2a 智能体 \u7684\u6280\u80fd\u3002\u7f16\u5199\u4e00\u6b21\uff0c\u5168\u56e2\u961f\u53d7\u76ca\u3002",
         },
         {
           title: "\u590d\u5408\u589e\u957f",
           description:
-            "\u7b2c 1 \u5929\uff1a\u4f60\u6559 Agent \u90e8\u7f72\u3002\u7b2c 30 \u5929\uff1a\u6bcf\u4e2a Agent \u90fd\u80fd\u90e8\u7f72\u3001\u5199\u6d4b\u8bd5\u3001\u505a\u4ee3\u7801\u5ba1\u67e5\u3002\u56e2\u961f\u80fd\u529b\u6307\u6570\u7ea7\u589e\u957f\u3002",
+            "\u7b2c 1 \u5929\uff1a\u4f60\u6559 智能体 \u90e8\u7f72\u3002\u7b2c 30 \u5929\uff1a\u6bcf\u4e2a 智能体 \u90fd\u80fd\u90e8\u7f72\u3001\u5199\u6d4b\u8bd5\u3001\u505a\u4ee3\u7801\u5ba1\u67e5\u3002\u56e2\u961f\u80fd\u529b\u6307\u6570\u7ea7\u589e\u957f\u3002",
         },
       ],
     },
@@ -94,7 +95,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       label: "\u8fd0\u884c\u65f6",
       title: "\u4e00\u4e2a\u63a7\u5236\u53f0\u7ba1\u7406\u6240\u6709\u7b97\u529b",
       description:
-        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u5730 CLI\u2014\u2014\u63d2\u4e0a\u5c31\u7528\u3002",
+        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 11 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
       cards: [
         {
           title: "\u7edf\u4e00\u8fd0\u884c\u65f6\u9762\u677f",
@@ -107,9 +108,9 @@ export function createZhDict(allowSignup: boolean): LandingDict {
             "\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u968f\u65f6\u4e86\u89e3\u4f60\u7684\u7b97\u529b\u5728\u505a\u4ec0\u4e48\u3002",
         },
         {
-          title: "\u81ea\u52a8\u68c0\u6d4b\u4e0e\u5373\u63d2\u5373\u7528",
+          title: "\u9996\u6b21\u542f\u52a8\u81ea\u52a8\u6ce8\u518c",
           description:
-            "Forge \u81ea\u52a8\u68c0\u6d4b Claude Code\u3001Codex\u3001OpenClaw \u548c OpenCode \u7b49\u53ef\u7528 CLI\u3002\u8fde\u63a5\u4e00\u53f0\u673a\u5668\uff0c\u5373\u53ef\u5f00\u59cb\u5de5\u4f5c\u3002",
+            "Multica \u626b\u63cf\u672c\u673a\u7684 11 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Claude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
         },
       ],
     },
@@ -129,17 +130,17 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
         description:
-          "运行 multica setup 一键完成配置、认证和启动。守护进程自动检测你机器上的 Claude Code、Codex、OpenClaw 和 OpenCode——插上就用。",
+          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 11 款支持的 AI 编程工具（Claude Code、Codex、Cursor、Copilot、Gemini、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi）。本机已安装的工具会被自动注册成运行时。",
       },
       {
-        title: "\u521b\u5efa\u4f60\u7684\u7b2c\u4e00\u4e2a Agent",
+        title: "\u521b\u5efa\u4f60\u7684\u7b2c\u4e00\u4e2a 智能体",
         description:
           "\u7ed9\u5b83\u8d77\u4e2a\u540d\u5b57\uff0c\u5199\u597d\u6307\u4ee4\uff0c\u9644\u52a0\u6280\u80fd\uff0c\u8bbe\u7f6e\u89e6\u53d1\u5668\u3002\u9009\u62e9\u5b83\u4f55\u65f6\u6fc0\u6d3b\uff1a\u88ab\u6307\u6d3e\u65f6\u3001\u6709\u8bc4\u8bba\u65f6\u3001\u88ab @\u63d0\u53ca\u65f6\u3002",
       },
       {
         title: "\u6307\u6d3e\u4e00\u4e2a Issue \u5e76\u89c2\u5bdf\u5b83\u5de5\u4f5c",
         description:
-          "\u4ece\u6307\u6d3e\u4eba\u4e0b\u62c9\u83dc\u5355\u4e2d\u9009\u62e9\u4f60\u7684 Agent\u2014\u2014\u5c31\u50cf\u6307\u6d3e\u7ed9\u540c\u4e8b\u4e00\u6837\u3002\u4efb\u52a1\u81ea\u52a8\u5165\u961f\u3001\u9886\u53d6\u3001\u6267\u884c\u3002\u5b9e\u65f6\u89c2\u770b\u8fdb\u5ea6\u3002",
+          "\u4ece\u6307\u6d3e\u4eba\u4e0b\u62c9\u83dc\u5355\u4e2d\u9009\u62e9\u4f60\u7684 智能体\u2014\u2014\u5c31\u50cf\u6307\u6d3e\u7ed9\u540c\u4e8b\u4e00\u6837\u3002\u4efb\u52a1\u81ea\u52a8\u5165\u961f\u3001\u9886\u53d6\u3001\u6267\u884c\u3002\u5b9e\u65f6\u89c2\u770b\u8fdb\u5ea6\u3002",
       },
     ],
     cta: "\u5f00\u59cb\u4f7f\u7528",
@@ -152,28 +153,28 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     headlineLine1: "\u5f00\u6e90",
     headlineLine2: "\u4e3a\u6240\u6709\u4eba\u3002",
     description:
-      "Forge \u5b8c\u5168\u5f00\u6e90\u3002\u5ba1\u67e5\u6bcf\u4e00\u884c\u4ee3\u7801\uff0c\u6309\u4f60\u7684\u65b9\u5f0f\u81ea\u6258\u7ba1\uff0c\u5851\u9020\u4eba\u7c7b + Agent \u534f\u4f5c\u7684\u672a\u6765\u3002",
+      "Multica \u5b8c\u5168\u5f00\u6e90\u3002\u5ba1\u67e5\u6bcf\u4e00\u884c\u4ee3\u7801\uff0c\u6309\u4f60\u7684\u65b9\u5f0f\u81ea\u6258\u7ba1\uff0c\u5851\u9020\u4eba\u7c7b + 智能体 \u534f\u4f5c\u7684\u672a\u6765\u3002",
     cta: "\u5728 GitHub \u4e0a Star",
     highlights: [
       {
         title: "\u968f\u5904\u81ea\u6258\u7ba1",
         description:
-          "\u5728\u4f60\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e0a\u8fd0\u884c Forge\u3002Docker Compose\u3001\u5355\u4e2a\u4e8c\u8fdb\u5236\u6216 Kubernetes\u2014\u2014\u4f60\u7684\u6570\u636e\u6c38\u8fdc\u4e0d\u4f1a\u79bb\u5f00\u4f60\u7684\u7f51\u7edc\u3002",
+          "\u5728\u4f60\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e0a\u8fd0\u884c Multica\u3002Docker Compose\u3001\u5355\u4e2a\u4e8c\u8fdb\u5236\u6216 Kubernetes\u2014\u2014\u4f60\u7684\u6570\u636e\u6c38\u8fdc\u4e0d\u4f1a\u79bb\u5f00\u4f60\u7684\u7f51\u7edc\u3002",
       },
       {
         title: "\u65e0\u4f9b\u5e94\u5546\u9501\u5b9a",
         description:
-          "\u81ea\u5e26 LLM \u63d0\u4f9b\u5546\u3001\u66f4\u6362 Agent \u540e\u7aef\u3001\u6269\u5c55 API\u3002\u4f60\u62e5\u6709\u6574\u4e2a\u6280\u672f\u6808\u7684\u63a7\u5236\u6743\u3002",
+          "\u81ea\u5e26 LLM \u63d0\u4f9b\u5546\u3001\u66f4\u6362 智能体 \u540e\u7aef\u3001\u6269\u5c55 API\u3002\u4f60\u62e5\u6709\u6574\u4e2a\u6280\u672f\u6808\u7684\u63a7\u5236\u6743\u3002",
       },
       {
         title: "\u9ed8\u8ba4\u900f\u660e",
         description:
-          "\u6bcf\u4e00\u884c\u4ee3\u7801\u90fd\u53ef\u5ba1\u8ba1\u3002\u786e\u5207\u4e86\u89e3\u4f60\u7684 Agent \u5982\u4f55\u505a\u51b3\u7b56\u3001\u4efb\u52a1\u5982\u4f55\u8def\u7531\u3001\u6570\u636e\u6d41\u5411\u4f55\u65b9\u3002",
+          "\u6bcf\u4e00\u884c\u4ee3\u7801\u90fd\u53ef\u5ba1\u8ba1\u3002\u786e\u5207\u4e86\u89e3\u4f60\u7684 智能体 \u5982\u4f55\u505a\u51b3\u7b56\u3001\u4efb\u52a1\u5982\u4f55\u8def\u7531\u3001\u6570\u636e\u6d41\u5411\u4f55\u65b9\u3002",
       },
       {
         title: "\u793e\u533a\u9a71\u52a8",
         description:
-          "\u4e0e\u793e\u533a\u4e00\u8d77\u5efa\u8bbe\uff0c\u800c\u4e0d\u4ec5\u4ec5\u662f\u4e3a\u793e\u533a\u5efa\u8bbe\u3002\u8d21\u732e\u6280\u80fd\u3001\u96c6\u6210\u548c Agent \u540e\u7aef\uff0c\u8ba9\u6bcf\u4e2a\u4eba\u53d7\u76ca\u3002",
+          "\u4e0e\u793e\u533a\u4e00\u8d77\u5efa\u8bbe\uff0c\u800c\u4e0d\u4ec5\u4ec5\u662f\u4e3a\u793e\u533a\u5efa\u8bbe\u3002\u8d21\u732e\u6280\u80fd\u3001\u96c6\u6210\u548c 智能体 \u540e\u7aef\uff0c\u8ba9\u6bcf\u4e2a\u4eba\u53d7\u76ca\u3002",
       },
     ],
   },
@@ -183,42 +184,42 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     headline: "\u95ee\u4e0e\u7b54\u3002",
     items: [
       {
-        question: "Forge \u652f\u6301\u54ea\u4e9b\u7f16\u7801 Agent\uff1f",
+        question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
         answer:
-          "Forge \u76ee\u524d\u5f00\u7bb1\u5373\u7528\u652f\u6301 Claude Code\u3001Codex\u3001OpenClaw \u548c OpenCode\u3002\u5b88\u62a4\u8fdb\u7a0b\u81ea\u52a8\u68c0\u6d4b\u4f60\u5b89\u88c5\u7684 CLI\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
+          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 11 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aClaude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
       },
       {
         question: "\u9700\u8981\u81ea\u6258\u7ba1\u5417\uff0c\u8fd8\u662f\u6709\u4e91\u7248\u672c\uff1f",
         answer:
-          "\u4e24\u8005\u90fd\u6709\u3002\u4f60\u53ef\u4ee5\u7528 Docker Compose \u6216 Kubernetes \u5728\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e0a\u81ea\u6258\u7ba1 Forge\uff0c\u4e5f\u53ef\u4ee5\u4f7f\u7528\u6211\u4eec\u7684\u6258\u7ba1\u4e91\u7248\u672c\u3002\u4f60\u7684\u6570\u636e\uff0c\u4f60\u9009\u62e9\u3002",
+          "\u4e24\u8005\u90fd\u6709\u3002\u4f60\u53ef\u4ee5\u7528 Docker Compose \u6216 Kubernetes \u5728\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e0a\u81ea\u6258\u7ba1 Multica\uff0c\u4e5f\u53ef\u4ee5\u4f7f\u7528\u6211\u4eec\u7684\u6258\u7ba1\u4e91\u7248\u672c\u3002\u4f60\u7684\u6570\u636e\uff0c\u4f60\u9009\u62e9\u3002",
       },
       {
         question:
-          "\u8fd9\u548c\u76f4\u63a5\u7528\u7f16\u7801 Agent \u6709\u4ec0\u4e48\u533a\u522b\uff1f",
+          "\u8fd9\u548c\u76f4\u63a5\u7528\u7f16\u7801 智能体 \u6709\u4ec0\u4e48\u533a\u522b\uff1f",
         answer:
-          "\u7f16\u7801 Agent \u64c5\u957f\u6267\u884c\u3002Forge \u6dfb\u52a0\u7684\u662f\u7ba1\u7406\u5c42\uff1a\u4efb\u52a1\u961f\u5217\u3001\u56e2\u961f\u534f\u4f5c\u3001\u6280\u80fd\u590d\u7528\u3001\u8fd0\u884c\u65f6\u76d1\u63a7\uff0c\u4ee5\u53ca\u6bcf\u4e2a Agent \u5728\u505a\u4ec0\u4e48\u7684\u7edf\u4e00\u89c6\u56fe\u3002\u628a\u5b83\u60f3\u8c61\u6210\u4f60\u7684 Agent \u7684\u9879\u76ee\u7ecf\u7406\u3002",
+          "\u7f16\u7801 智能体 \u64c5\u957f\u6267\u884c\u3002Multica \u6dfb\u52a0\u7684\u662f\u7ba1\u7406\u5c42\uff1a\u4efb\u52a1\u961f\u5217\u3001\u56e2\u961f\u534f\u4f5c\u3001\u6280\u80fd\u590d\u7528\u3001\u8fd0\u884c\u65f6\u76d1\u63a7\uff0c\u4ee5\u53ca\u6bcf\u4e2a 智能体 \u5728\u505a\u4ec0\u4e48\u7684\u7edf\u4e00\u89c6\u56fe\u3002\u628a\u5b83\u60f3\u8c61\u6210\u4f60\u7684 智能体 \u7684\u9879\u76ee\u7ecf\u7406\u3002",
       },
       {
-        question: "Agent \u80fd\u81ea\u4e3b\u5904\u7406\u957f\u65f6\u95f4\u4efb\u52a1\u5417\uff1f",
+        question: "智能体 \u80fd\u81ea\u4e3b\u5904\u7406\u957f\u65f6\u95f4\u4efb\u52a1\u5417\uff1f",
         answer:
-          "\u53ef\u4ee5\u3002Forge \u7ba1\u7406\u5b8c\u6574\u7684\u4efb\u52a1\u751f\u547d\u5468\u671f\u2014\u2014\u5165\u961f\u3001\u9886\u53d6\u3001\u6267\u884c\u3001\u5b8c\u6210\u6216\u5931\u8d25\u3002Agent \u4e3b\u52a8\u62a5\u544a\u963b\u585e\u5e76\u5b9e\u65f6\u63a8\u9001\u8fdb\u5ea6\u3002\u4f60\u53ef\u4ee5\u968f\u65f6\u67e5\u770b\uff0c\u4e5f\u53ef\u4ee5\u8ba9\u5b83\u4eec\u8fd0\u884c\u6574\u665a\u3002",
+          "\u53ef\u4ee5\u3002Multica \u7ba1\u7406\u5b8c\u6574\u7684\u4efb\u52a1\u751f\u547d\u5468\u671f\u2014\u2014\u5165\u961f\u3001\u9886\u53d6\u3001\u6267\u884c\u3001\u5b8c\u6210\u6216\u5931\u8d25\u3002智能体 \u4e3b\u52a8\u62a5\u544a\u963b\u585e\u5e76\u5b9e\u65f6\u63a8\u9001\u8fdb\u5ea6\u3002\u4f60\u53ef\u4ee5\u968f\u65f6\u67e5\u770b\uff0c\u4e5f\u53ef\u4ee5\u8ba9\u5b83\u4eec\u8fd0\u884c\u6574\u665a\u3002",
       },
       {
-        question: "\u6211\u7684\u4ee3\u7801\u5b89\u5168\u5417\uff1fAgent \u5728\u54ea\u91cc\u6267\u884c\uff1f",
+        question: "\u6211\u7684\u4ee3\u7801\u5b89\u5168\u5417\uff1f智能体 \u5728\u54ea\u91cc\u6267\u884c\uff1f",
         answer:
-          "Agent \u5728\u4f60\u7684\u673a\u5668\uff08\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\uff09\u6216\u4f60\u81ea\u5df1\u7684\u4e91\u57fa\u7840\u8bbe\u65bd\u4e0a\u6267\u884c\u3002\u4ee3\u7801\u6c38\u8fdc\u4e0d\u4f1a\u7ecf\u8fc7 Forge \u670d\u52a1\u5668\u3002\u5e73\u53f0\u53ea\u534f\u8c03\u4efb\u52a1\u72b6\u6001\u548c\u5e7f\u64ad\u4e8b\u4ef6\u3002",
+          "智能体 \u5728\u4f60\u7684\u673a\u5668\uff08\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\uff09\u6216\u4f60\u81ea\u5df1\u7684\u4e91\u57fa\u7840\u8bbe\u65bd\u4e0a\u6267\u884c\u3002\u4ee3\u7801\u6c38\u8fdc\u4e0d\u4f1a\u7ecf\u8fc7 Multica \u670d\u52a1\u5668\u3002\u5e73\u53f0\u53ea\u534f\u8c03\u4efb\u52a1\u72b6\u6001\u548c\u5e7f\u64ad\u4e8b\u4ef6\u3002",
       },
       {
-        question: "\u6211\u53ef\u4ee5\u8fd0\u884c\u591a\u5c11\u4e2a Agent\uff1f",
+        question: "\u6211\u53ef\u4ee5\u8fd0\u884c\u591a\u5c11\u4e2a 智能体\uff1f",
         answer:
-          "\u53d6\u51b3\u4e8e\u4f60\u7684\u786c\u4ef6\u3002\u6bcf\u4e2a Agent \u6709\u53ef\u914d\u7f6e\u7684\u5e76\u53d1\u9650\u5236\uff0c\u4f60\u53ef\u4ee5\u8fde\u63a5\u591a\u53f0\u673a\u5668\u4f5c\u4e3a\u8fd0\u884c\u65f6\u3002\u5f00\u6e90\u7248\u672c\u6ca1\u6709\u4efb\u4f55\u4eba\u4e3a\u9650\u5236\u3002",
+          "\u53d6\u51b3\u4e8e\u4f60\u7684\u786c\u4ef6\u3002\u6bcf\u4e2a 智能体 \u6709\u53ef\u914d\u7f6e\u7684\u5e76\u53d1\u9650\u5236\uff0c\u4f60\u53ef\u4ee5\u8fde\u63a5\u591a\u53f0\u673a\u5668\u4f5c\u4e3a\u8fd0\u884c\u65f6\u3002\u5f00\u6e90\u7248\u672c\u6ca1\u6709\u4efb\u4f55\u4eba\u4e3a\u9650\u5236\u3002",
       },
     ],
   },
 
   footer: {
     tagline:
-      "\u4eba\u7c7b + Agent \u56e2\u961f\u7684\u9879\u76ee\u7ba1\u7406\u3002\u5f00\u6e90\u3001\u53ef\u81ea\u6258\u7ba1\u3001\u4e3a\u672a\u6765\u7684\u5de5\u4f5c\u65b9\u5f0f\u800c\u5efa\u3002",
+      "\u4eba\u7c7b + 智能体 \u56e2\u961f\u7684\u9879\u76ee\u7ba1\u7406\u3002\u5f00\u6e90\u3001\u53ef\u81ea\u6258\u7ba1\u3001\u4e3a\u672a\u6765\u7684\u5de5\u4f5c\u65b9\u5f0f\u800c\u5efa\u3002",
     cta: "\u5f00\u59cb\u4f7f\u7528",
     groups: {
       product: {
@@ -235,7 +236,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         links: [
           { label: "\u6587\u6863", href: "/docs/zh" },
           { label: "API", href: githubUrl },
-          { label: "X (Twitter)", href: "https://x.com/ForgeAI" },
+          { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
         ],
       },
       company: {
@@ -247,13 +248,13 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         ],
       },
     },
-    copyright: "\u00a9 {year} Forge. \u4fdd\u7559\u6240\u6709\u6743\u5229\u3002",
+    copyright: "\u00a9 {year} Multica. \u4fdd\u7559\u6240\u6709\u6743\u5229\u3002",
   },
 
   about: {
-    title: "\u5173\u4e8e Forge",
+    title: "\u5173\u4e8e Multica",
     nameLine: {
-      prefix: "Forge\u2014\u2014",
+      prefix: "Multica\u2014\u2014",
       mul: "Mul",
       tiplexed: "tiplexed ",
       i: "I",
@@ -265,8 +266,8 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     paragraphs: [
       "\u8fd9\u4e2a\u540d\u5b57\u662f\u5728\u5411 20 \u4e16\u7eaa 60 \u5e74\u4ee3\u5177\u6709\u5f00\u521b\u610f\u4e49\u7684\u64cd\u4f5c\u7cfb\u7edf Multics \u81f4\u610f\u3002Multics \u9996\u521b\u4e86\u5206\u65f6\u7cfb\u7edf\uff0c\u8ba9\u591a\u4e2a\u7528\u6237\u80fd\u591f\u5171\u4eab\u540c\u4e00\u53f0\u673a\u5668\uff0c\u540c\u65f6\u53c8\u50cf\u5404\u81ea\u72ec\u5360\u5b83\u4e00\u6837\u4f7f\u7528\u3002Unix \u5219\u662f\u5728\u6709\u610f\u7b80\u5316 Multics \u7684\u57fa\u7840\u4e0a\u8bde\u751f\u7684\uff0c\u5f3a\u8c03\u4e00\u4e2a\u7528\u6237\u3001\u4e00\u4e2a\u4efb\u52a1\u3001\u4e00\u79cd\u4f18\u96c5\u7684\u54f2\u5b66\u3002",
-      "\u6211\u4eec\u8ba4\u4e3a\uff0c\u7c7b\u4f3c\u7684\u8f6c\u6298\u70b9\u6b63\u5728\u518d\u6b21\u51fa\u73b0\u3002\u51e0\u5341\u5e74\u6765\uff0c\u8f6f\u4ef6\u56e2\u961f\u4e00\u76f4\u5904\u4e8e\u4e00\u79cd\u5355\u7ebf\u7a0b\u7684\u5de5\u4f5c\u6a21\u5f0f\uff0c\u4e00\u4e2a\u5de5\u7a0b\u5e08\u5904\u7406\u4e00\u4e2a\u4efb\u52a1\uff0c\u4e00\u6b21\u53ea\u4e13\u6ce8\u4e8e\u4e00\u4e2a\u4e0a\u4e0b\u6587\u3002AI agents \u6539\u53d8\u4e86\u8fd9\u4e2a\u7b49\u5f0f\u3002Forge \u5c06\u201c\u5206\u65f6\u201d\u91cd\u65b0\u5e26\u56de\u8fd9\u4e2a\u65f6\u4ee3\uff0c\u53ea\u4e0d\u8fc7\u4eca\u5929\u5728\u7cfb\u7edf\u4e2d\u8fdb\u884c\u591a\u8def\u590d\u7528\u7684\u201c\u7528\u6237\u201d\uff0c\u65e2\u5305\u62ec\u4eba\u7c7b\uff0c\u4e5f\u5305\u62ec\u81ea\u4e3b\u4ee3\u7406\u3002",
-      "\u5728 Forge \u4e2d\uff0cagents \u662f\u4e00\u7ea7\u56e2\u961f\u6210\u5458\u3002\u5b83\u4eec\u4f1a\u88ab\u5206\u914d issue\uff0c\u6c47\u62a5\u8fdb\u5c55\uff0c\u63d0\u51fa\u963b\u585e\uff0c\u5e76\u4ea4\u4ed8\u4ee3\u7801\uff0c\u5c31\u50cf\u4eba\u7c7b\u540c\u4e8b\u4e00\u6837\u3002\u4efb\u52a1\u5206\u914d\u3001\u6d3b\u52a8\u65f6\u95f4\u7ebf\u3001\u4efb\u52a1\u751f\u547d\u5468\u671f\uff0c\u4ee5\u53ca\u8fd0\u884c\u65f6\u57fa\u7840\u8bbe\u65bd\uff0cForge \u4ece\u7b2c\u4e00\u5929\u8d77\u5c31\u662f\u56f4\u7ed5\u8fd9\u4e00\u7406\u5ff5\u6784\u5efa\u7684\u3002",
+      "\u6211\u4eec\u8ba4\u4e3a\uff0c\u7c7b\u4f3c\u7684\u8f6c\u6298\u70b9\u6b63\u5728\u518d\u6b21\u51fa\u73b0\u3002\u51e0\u5341\u5e74\u6765\uff0c\u8f6f\u4ef6\u56e2\u961f\u4e00\u76f4\u5904\u4e8e\u4e00\u79cd\u5355\u7ebf\u7a0b\u7684\u5de5\u4f5c\u6a21\u5f0f\uff0c\u4e00\u4e2a\u5de5\u7a0b\u5e08\u5904\u7406\u4e00\u4e2a\u4efb\u52a1\uff0c\u4e00\u6b21\u53ea\u4e13\u6ce8\u4e8e\u4e00\u4e2a\u4e0a\u4e0b\u6587\u3002AI agents \u6539\u53d8\u4e86\u8fd9\u4e2a\u7b49\u5f0f\u3002Multica \u5c06\u201c\u5206\u65f6\u201d\u91cd\u65b0\u5e26\u56de\u8fd9\u4e2a\u65f6\u4ee3\uff0c\u53ea\u4e0d\u8fc7\u4eca\u5929\u5728\u7cfb\u7edf\u4e2d\u8fdb\u884c\u591a\u8def\u590d\u7528\u7684\u201c\u7528\u6237\u201d\uff0c\u65e2\u5305\u62ec\u4eba\u7c7b\uff0c\u4e5f\u5305\u62ec\u81ea\u4e3b\u4ee3\u7406\u3002",
+      "\u5728 Multica \u4e2d\uff0cagents \u662f\u4e00\u7ea7\u56e2\u961f\u6210\u5458\u3002\u5b83\u4eec\u4f1a\u88ab\u5206\u914d issue\uff0c\u6c47\u62a5\u8fdb\u5c55\uff0c\u63d0\u51fa\u963b\u585e\uff0c\u5e76\u4ea4\u4ed8\u4ee3\u7801\uff0c\u5c31\u50cf\u4eba\u7c7b\u540c\u4e8b\u4e00\u6837\u3002\u4efb\u52a1\u5206\u914d\u3001\u6d3b\u52a8\u65f6\u95f4\u7ebf\u3001\u4efb\u52a1\u751f\u547d\u5468\u671f\uff0c\u4ee5\u53ca\u8fd0\u884c\u65f6\u57fa\u7840\u8bbe\u65bd\uff0cMultica \u4ece\u7b2c\u4e00\u5929\u8d77\u5c31\u662f\u56f4\u7ed5\u8fd9\u4e00\u7406\u5ff5\u6784\u5efa\u7684\u3002",
       "\u548c\u5f53\u5e74\u7684 Multics \u4e00\u6837\uff0c\u8fd9\u4e00\u5224\u65ad\u5efa\u7acb\u5728\u201c\u591a\u8def\u590d\u7528\u201d\u4e4b\u4e0a\u3002\u4e00\u4e2a\u5c0f\u56e2\u961f\u4e0d\u8be5\u56e0\u4e3a\u4eba\u6570\u5c11\u5c31\u663e\u5f97\u80fd\u529b\u6709\u9650\u3002\u6709\u4e86\u5408\u9002\u7684\u7cfb\u7edf\uff0c\u4e24\u540d\u5de5\u7a0b\u5e08\u52a0\u4e0a\u4e00\u7ec4 agents\uff0c\u5c31\u80fd\u53d1\u6325\u51fa\u4e8c\u5341\u4eba\u56e2\u961f\u7684\u63a8\u8fdb\u901f\u5ea6\u3002",
       "\u8fd9\u4e2a\u5e73\u53f0\u662f\u5b8c\u5168\u5f00\u6e90\u5e76\u652f\u6301\u81ea\u6258\u7ba1\u7684\u3002\u4f60\u7684\u6570\u636e\u59cb\u7ec8\u4fdd\u7559\u5728\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e2d\u3002\u4f60\u53ef\u4ee5\u5ba1\u67e5\u6bcf\u4e00\u884c\u4ee3\u7801\uff0c\u6269\u5c55 API\uff0c\u63a5\u5165\u81ea\u5df1\u7684 LLM providers\uff0c\u4e5f\u53ef\u4ee5\u5411\u793e\u533a\u8d21\u732e\u4ee3\u7801\u3002",
     ],
@@ -275,7 +276,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
 
   changelog: {
     title: "\u66f4\u65b0\u65e5\u5fd7",
-    subtitle: "Forge \u7684\u6700\u65b0\u66f4\u65b0\u548c\u6539\u8fdb\u3002",
+    subtitle: "Multica \u7684\u6700\u65b0\u66f4\u65b0\u548c\u6539\u8fdb\u3002",
     toc: "\u5386\u53f2\u7248\u672c",
     categories: {
       features: "新功能",
@@ -283,6 +284,240 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.2.32",
+        date: "2026-05-13",
+        title: "用量洞察、聊天重命名与桌面体验优化",
+        changes: [],
+        features: [
+          "Usage 页面集中展示 workspace 和 project 的 token 使用、runtime 趋势和 agent 排名",
+          "聊天会话可以直接在聊天页顶部重命名",
+          "反馈时可以附带截图或文件，方便团队快速理解问题",
+        ],
+        improvements: [
+          "Dashboard 更名为 Usage，并加入更清晰的 agent 排行展示",
+          "新聊天和消息完成状态切换更顺，不再频繁闪加载状态",
+          "自托管 GitHub 配置更完整，文档里的云端链接也已修正",
+          "用户安装的 Codex Skills 会自动带入新的 agent 任务",
+        ],
+        fixes: [
+          "没有输出内容但成功完成的 agent 任务会显示为 completed，不再误判为 blocked",
+          "在指令编辑器中粘贴的 mention 会保留可点击链接",
+          "Linux 桌面端下载附件时走系统原生流程，关闭标签页也不再触发循环跳转",
+          "Gemini 和 Windows runtime 的启动检查更稳定，适合无人值守执行",
+          "添加项目资源时，较长的 GitHub 仓库列表可以正常滚动",
+        ],
+      },
+      {
+        version: "0.2.31",
+        date: "2026-05-12",
+        title: "GitHub 集成、聊天附件与 Issue 定位优化",
+        changes: [],
+        features: [
+          "接入 GitHub 后，关联的 Pull Request 会显示在 Multica Issue 中，状态会同步到 Multica，关闭 PR 后会自动关闭对应 Issue",
+          "聊天消息支持添加文件附件和图片预览",
+          "Agent 和 runtime 可以设置公开或私有，方便控制团队可见范围",
+          "停止单个 agent 任务前会先弹出确认，避免误操作",
+          "新增 GitHub 集成文档，覆盖托管版和自托管配置",
+        ],
+        improvements: [
+          "打开 Issue 链接时，会更稳定地定位到指定评论或动态",
+          "很长的 Issue 时间线滚动更顺畅",
+          "反馈入口更明确地引导用户到 GitHub 参与讨论和反馈",
+          "自托管 Caddy 配置文档补充实时连接要求",
+          "Linux 桌面端安装包恢复显示 Multica 应用图标",
+        ],
+        fixes: [
+          "下载附件时保留原始文件名",
+          "本地附件访问更稳定，上传按钮会等文件准备好后再可用",
+          "创建 Issue 弹窗里的文本框高度显示正确",
+          "Runtime 文档入口跳转到正确页面",
+        ],
+      },
+      {
+        version: "0.2.30",
+        date: "2026-05-11",
+        title: "Issue 内 Mermaid、Runtime 时区聚合与离开 Workspace 自动吊销",
+        changes: [],
+        features: [
+          "Issue 描述内联渲染 Mermaid 图表",
+          "Sub-issue 行支持就地切换状态与 assignee，并支持跨行批量选中",
+          "Token 用量按每个 runtime 自己的时区聚合，每日 rollup 与本地日期对齐",
+          "私有 Agent 通过 `allowed_principals` 判定可见性，权限粒度更细",
+          "成员离开或被移出 workspace 时，自动吊销其名下的 runtime",
+          "对未维护的模型支持自定义 token 价格，使用量真实反映成本",
+          "Landing 页面 header 加入 Changelog 入口",
+        ],
+        improvements: [
+          "服务端删除 runtime 时，daemon 端自我修复，不再留下僵尸条目",
+          "Chat 与评论输入框统一使用 `Mod+Enter` 发送",
+          "Copilot CLI 模型目录补齐正确的 dotted ID",
+          "Copilot 失败详情直接在 UI 中透出，不再只是一个通用错误",
+          "Daemon brief 直接内联进 system prompt，针对需要的 provider 生效",
+          "Realtime WebSocket 放行同源升级，移动端与 CLI 可正常握手",
+        ],
+        fixes: [
+          "Recent issues 列表不再跨 workspace 串扰",
+          "CloudFront 附件下载链接在点击时重新签名，过期预览的问题修复",
+          "所有 provider 的 Windows reply 模板改用 `--content-file`，非 ASCII 内容不再丢失",
+          "Daemon 抑制 Windows 上多余的 git 控制台弹窗",
+          "Pi 插件工具不再被硬编码的 `--tools` allowlist 过滤掉",
+          "Inbox 在 issue 加载完成后再滚动到目标评论",
+          "`autopilot create/update` 允许 `--mode run_only`",
+          "Changelog header 链接样式对齐 GitHub ghost button",
+          "OpenAI Codex / GPT 模型价格补齐，使用成本不再显示为 $0",
+        ],
+      },
+      {
+        version: "0.2.29",
+        date: "2026-05-09",
+        title: "Quick Create 项目选择器、评论可折叠与 Timeline 性能优化",
+        changes: [],
+        features: [
+          "Quick Create 支持选择 project，并记住上一次的选项",
+          "评论 thread 支持解决并折叠，长讨论看起来更清爽",
+          "Issue Live Banner 显示 agent 队列中等待执行的任务",
+          "失败 / 取消的任务可以在 Execution Log 一键重跑",
+          "Agent Create 弹窗新增放大按钮，长描述编辑更舒服",
+        ],
+        improvements: [
+          "Issue Timeline 不再因每个 WS 事件做完整 re-render，长 Issue 滚动更顺",
+          "Editor 跳过对超大文本 / JSON 粘贴的解析，避免卡顿",
+          "Autopilot 在 assignee runtime 离线时跳过 dispatch，避免空跑",
+          "Inbox 自动归档处于终态的 `task_failed` 行",
+          "Hermes 把 agent instructions 直接随请求内联传入",
+          "Timeline / Comment 改为纯客户端虚拟化，去掉服务端分页",
+          "Reserved slugs 前后端共享同一份 JSON，CI 守住漂移",
+          "ACP 错误消息现在带上 JSON-RPC 的 `error.data` 字段，排错更友好",
+        ],
+        fixes: [
+          "429 / 余额不足的 agent run 现在被标记为 `failed` 而不是 `completed`",
+          "因 poisoned image 卡死的 agent session 可以恢复，issue 不再卡住",
+          "`pi --list-models` 表格格式可被正确解析，模型发现恢复",
+          "`pi` colon-to-slash 归一化只作用于 legacy 格式，避免误伤新格式",
+          "`kiro` 与 `kimi` 加入 inline-system-prompt provider 白名单",
+          "Priority Dropdown 徽章颜色对齐 PriorityIcon 的 semantic token",
+          "Agent 单行长消息可正常展开",
+          "桌面端复制 issue link 使用当前连接环境，不再硬编码 localhost",
+          "移动端 WebSocket 在没有 cookie 的情况下也能握手",
+          "创建 workspace 时校验保留字，slug 错误提示已 i18n",
+          "Timeline 在 falsy prop 切换时正确同步 around 状态",
+          "DropdownMenu 弹层尺寸跟随内容",
+        ],
+      },
+      {
+        version: "0.2.28",
+        date: "2026-05-08",
+        title: "Daemon 磁盘占用 CLI、Timeline 打磨与任务用量聚合提速",
+        changes: [],
+        features: [
+          "新增 `multica daemon disk-usage` CLI，按 task / workspace 维度查看磁盘占用",
+          "Skill Picker 弹窗新增搜索框，Agent 设置里挑技能更快",
+          "Daemon GC 覆盖扩展到 chat、autopilot、quick-create 任务",
+          "Issue 详情页面包屑直接显示 MUL-xxxx identifier",
+        ],
+        improvements: [
+          "Timeline 分页 size 提到 50，评论与活动按池独立 keyset 游标，长 Issue 翻页更顺",
+          "Show older / newer 按钮在边界场景也能正确出现，且视觉上更明显是可点击的",
+          "服务端 `task_usage` 聚合到每日 rollup 表，DB 负载明显下降",
+          "Daemon health check 在 repo 查询时不再阻塞，始终保持响应",
+          "Runtime 统计排除已归档的 agent，活跃数字更准",
+        ],
+        fixes: [
+          "Linux 上 daemon self-restart 改走 `brew prefix` 软链，Homebrew Cellar 删除后不再让 runtime 失联",
+          "CLI 短 ID 现在可以正确路由，复制粘贴的短前缀不再 404",
+          "Windows 上非 ASCII 字符评论 / 描述输入新增 `--content-file` / `--description-file`",
+          "Windows / Linux 桌面端用 Multica asterisk 替换 Electron 默认占位图标",
+          "Timeline 中孤立的 reply 现在会被正确捞回展示",
+          "Timeline 评论分页预算不再把 activity 算进去，避免活动多时挤掉真实评论",
+        ],
+      },
+      {
+        version: "0.2.27",
+        date: "2026-05-07",
+        title: "Chat 更顺手，Skill 支持 GitHub 导入，稳定性更好",
+        changes: [],
+        features: [
+          "支持直接通过 GitHub 链接导入可复用 Skill",
+        ],
+        improvements: [
+          "Chat 和 Inbox 更顺手，历史更清晰，复制回复更方便，归档后能更快处理下一项",
+          "Issue 操作会保留更多上下文，例如更容易找到对应本地文件夹，子 Issue 也会带上正确的项目和状态",
+          "Autopilot 连续失败后会自动暂停，异常自动化更容易发现和修复",
+        ],
+        fixes: [
+          "中文输入、桌面端升级、长 Issue 时间线和实时状态展示更稳定",
+        ],
+      },
+      {
+        version: "0.2.26",
+        date: "2026-05-06",
+        title: "i18n 全量铺开、长 Issue Timeline 提速与系统通知开关",
+        changes: [],
+        features: [
+          "Web 端完成简中翻译，21 个命名空间齐全，语言偏好按账号同步",
+          "Settings 新增 System Notifications 开关",
+          "支持删除 Chat 会话，History 面板移至 chat header",
+          "Runtime 在线判断改走 Redis（DB 兜底）",
+          "Desktop 支持加载 runtime 自托管配置",
+          "CLI 新增 `--assignee-id` / `--to-id` / `--user-id`，重名时定位更准",
+        ],
+        improvements: [
+          "Settings 的 Appearance Tab 改名为 Preferences，并把当前激活的 Tab 反映到 URL，深链可分享",
+          "长 Issue 打开秒开 —— Timeline 改为基于游标的 keyset 分页，重复的 `task_completed` / `task_failed` 活动条目合并展示",
+          "Runtime poll 与 heartbeat 调度按 runtime 隔离，单个忙碌 runtime 不再拖慢其他",
+          "CLI 更新请求落 Redis，server 重启也不丢",
+          "Runtime 用量统计窗口由 180 天收窄到 14 天，降低查询压力",
+          "项目列表返回 `resource_count` 摘要，不再内联全部 resource，响应体更小",
+          "404 页面重新设计，并修复 No-Access 重定向死循环",
+          "Quick Create 对 git-describe 类 daemon 跳过 CLI 版本闸",
+          "CI 启用 lint 强制门禁，历史 lint 债同步清理完毕",
+        ],
+        fixes: [
+          "Task 在服务端被删后，daemon 主动取消正在运行的 agent，避免孤儿进程",
+          "复用 execenv 时刷新陈旧的 Codex `auth.json`，修复偶发鉴权失败",
+          "`issue_id` 为空时拒绝写入 `.gc_meta.json`",
+          "跨 ACP 后端的 session/resume 信任 agent 自报的 session id，修复串号问题",
+          "OpenCode 的 skills 写到 `.opencode/skills/` 让其原生发现",
+          "Daemon 对 task-not-found 的 404 语义在 server 和最终 guard 双重收紧",
+          "侧边栏中失效的 Pin 自动取消挂载",
+          "项目详情页桌面端与移动端侧边栏状态独立保存",
+          "Runtime 详情页隐藏已归档的 agent",
+          "Add Resource 列表中已挂载的 repo 显示 URL tooltip；空项目页加上 New Issue 入口",
+          "S3 公开 URL 携带 region，修复跨区访问失败",
+          "Windows 安装器修正版本号解析与 checksum 解码",
+          "Quick Create 提交按钮去掉重复的快捷键提示",
+        ],
+      },
+      {
+        version: "0.2.24",
+        date: "2026-05-03",
+        title: "Repo Checkout `--ref`、Hermes 历史回放修复与多副本 Model Picker",
+        changes: [],
+        features: [
+          "`multica repo checkout --ref` 支持按分支、tag 或指定 commit 拉取仓库",
+          "`multica agent avatar` 命令支持直接通过 CLI 上传 Agent 头像",
+          "Inbox 中已完成任务新增 archive 按钮，移除冗余的 mark-as-done 悬浮按钮",
+        ],
+        improvements: [
+          "长 timeline 的 Issue 从 Inbox 打开不再卡顿 —— Markdown 渲染管线已 memoize，无关的 WS 事件不会再重渲染数千条评论",
+          "Model Picker 在多副本部署下可用 —— pending 请求改走 Redis 持久化，Daemon 上报失败也会自动重试",
+          "Daemon 空认领缓存 TTL 调高，空闲态 DB 压力进一步下降",
+        ],
+        fixes: [
+          "新创建的 Agent 立刻在各处可见 —— 创建时即 hydrate Agent 缓存",
+          "Hermes 在新一轮对话开始时不再重放上一轮答案 —— 历史 chunk 受单轮门禁限制",
+          "Codex runtime 模型选择器开放 GPT-5.5 系列",
+          "`multica login --token <PAT>` 正确接收 PAT 作为参数值",
+          "CLI update 完成状态上报更可靠",
+          "Session resume 按 runtime 正确守卫，避免跨 runtime 复用 session",
+          "看板拖拽 Issue 时显示设置不再丢失",
+          "Autopilot 列表在移动端 viewport 下响应式排版",
+          "Quick Create 生成的描述更贴合用户输入",
+          "Skill upsert 清理 null bytes，修复 PostgreSQL UTF8 错误",
+          "Connect Remote 弹窗的安装脚本 URL 修正",
+        ],
+      },
       {
         version: "0.2.21",
         date: "2026-04-30",
@@ -296,7 +531,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         ],
         improvements: [
           "Daemon `/tasks/claim` 轮询走 Redis 空认领 fast-path，空闲态 DB 压力下降，长期 open 的 Issue 自动回收磁盘",
-          "Forge Agent 的 Git 提交自动追加 `Co-authored-by` trailer，归属更清晰",
+          "Multica Agent 的 Git 提交自动追加 `Co-authored-by` trailer，归属更清晰",
           "Desktop 拦截 Cmd+R / Ctrl+R / F5 防止意外刷新，开发模式与 Updates 设置中均展示真实版本号",
         ],
         fixes: [
@@ -899,29 +1134,29 @@ export function createZhDict(allowSignup: boolean): LandingDict {
   download: {
     hero: {
       macArm64: {
-        title: "Forge for macOS",
+        title: "Multica for macOS",
         sub: "Apple Silicon · 内置 daemon，无需配置",
         primary: "下载 (.dmg)",
         altZip: "或下载 .zip",
       },
       macIntel: {
-        title: "Forge for macOS",
+        title: "Multica for macOS",
         sub: "需要 Apple Silicon——暂不支持 Intel Mac。",
         disabledCta: "需要 Apple Silicon",
         intelHint: "在 Intel Mac 上？请使用下方 CLI——底层跑的是同一个 daemon。",
       },
       winX64: {
-        title: "Forge for Windows",
+        title: "Multica for Windows",
         sub: "内置 daemon，无需配置",
         primary: "下载 (.exe)",
       },
       winArm64: {
-        title: "Forge for Windows",
+        title: "Multica for Windows",
         sub: "ARM · 内置 daemon，无需配置",
         primary: "下载 (.exe)",
       },
       linux: {
-        title: "Forge for Linux",
+        title: "Multica for Linux",
         sub: "内置 daemon，无需配置",
         primary: "下载 AppImage",
         altFormats: "或 .deb / .rpm",

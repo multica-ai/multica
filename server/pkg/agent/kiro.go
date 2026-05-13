@@ -69,13 +69,28 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		cancel()
 		return nil, fmt.Errorf("kiro stdin pipe: %w", err)
 	}
+	// StderrPipe + an explicit copier give us a join point
+	// (`stderrDone`) that fires before the failure-promotion
+	// decision; see the matching comment in hermes.go for why the
+	// io.MultiWriter form races with stopReason=end_turn under load.
 	providerErr := newACPProviderErrorSniffer("kiro")
-	cmd.Stderr = io.MultiWriter(newLogWriter(b.cfg.Logger, "[kiro:stderr] "), providerErr)
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("kiro stderr pipe: %w", err)
+	}
 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start kiro: %w", err)
 	}
+
+	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[kiro:stderr] "), providerErr)
+	stderrDone := make(chan struct{})
+	go func() {
+		defer close(stderrDone)
+		_, _ = io.Copy(stderrSink, stderr)
+	}()
 
 	b.cfg.Logger.Info("kiro acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
@@ -171,7 +186,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		if opts.ResumeSessionID != "" {
-			_, err := c.request(runCtx, "session/load", map[string]any{
+			result, err := c.request(runCtx, "session/load", map[string]any{
 				"cwd":        cwd,
 				"sessionId":  opts.ResumeSessionID,
 				"mcpServers": []any{},
@@ -182,7 +197,23 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
-			sessionID = opts.ResumeSessionID
+			// Apply the same defensive resolution kimi/hermes use: if
+			// kiro echoes a sessionId in the session/load response, prefer
+			// it (the canonical id the backend is committed to). When the
+			// response is empty or doesn't include sessionId — kiro's
+			// current observed shape — the helper falls back to the
+			// requested id, preserving today's behavior. Fixing this here
+			// too means a future kiro that DOES return a different id on
+			// silent state reset is handled the same way as hermes/kimi.
+			var changed bool
+			sessionID, changed = resolveResumedSessionID(opts.ResumeSessionID, result)
+			if changed {
+				b.cfg.Logger.Warn("agent returned a different session id on resume — original was likely lost; continuing with the new id",
+					"backend", "kiro",
+					"requested", opts.ResumeSessionID,
+					"actual", sessionID,
+				)
+			}
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,
@@ -276,17 +307,21 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		cancel()
 
 		<-readerDone
+		// Ensure the stderr copier has drained before consulting the
+		// provider-error sniffer; see hermes.go for the failure mode.
+		<-stderrDone
 
 		outputMu.Lock()
 		finalOutput := output.String()
 		outputMu.Unlock()
 
-		if finalStatus == "completed" && finalOutput == "" {
-			if msg := providerErr.message(); msg != "" {
-				finalStatus = "failed"
-				finalError = msg
-			}
-		}
+		// Promote completed→failed when stderr or the agent text
+		// stream show a terminal upstream-LLM failure (HTTP 4xx /
+		// rate-limit / expired token). See the helper docs for the
+		// full signal set; the key safety property is that transient
+		// per-attempt warnings followed by a successful retry stay
+		// "completed".
+		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
 
 		c.usageMu.Lock()
 		u := c.usage

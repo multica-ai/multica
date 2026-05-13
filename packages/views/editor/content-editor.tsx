@@ -42,12 +42,14 @@ import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useQueryClient } from "@tanstack/react-query";
+import type { Attachment } from "@multica/core/types";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
+import { AttachmentDownloadProvider } from "./attachment-download-context";
 import "katex/dist/katex.min.css";
 import "./content-editor.css";
 
@@ -87,11 +89,22 @@ interface ContentEditorProps {
    */
   currentIssueId?: string;
   /**
-   * When true, the @mention extension is not registered. Use for editors
-   * where mentioning members/agents has no business meaning (e.g. agent
-   * system prompts, where the content is fed to an LLM as plain text).
+   * When true, the `@` suggestion picker is disabled but the mention node
+   * type remains in the schema, so existing mentions pasted in from other
+   * Multica editors still render as the normal pill. Use for editors where
+   * *creating* a new mention has no business meaning (e.g. agent system
+   * prompts) but *preserving* an existing one still matters.
    */
   disableMentions?: boolean;
+  /**
+   * Attachments referenced by this content. The download buttons on file
+   * cards and images inside the editor look up an attachment by `url` and
+   * fetch a fresh CloudFront signature at click time, so a stale URL
+   * persisted in markdown never opens. Pass `issue.attachments` /
+   * `comment.attachments` etc.; omit when no attachment context is
+   * available (NodeView buttons fall back to opening the raw URL).
+   */
+  attachments?: Attachment[];
 }
 
 interface ContentEditorRef {
@@ -126,6 +139,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       submitOnEnter = false,
       currentIssueId,
       disableMentions = false,
+      attachments,
     },
     ref,
   ) {
@@ -199,7 +213,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           },
         },
         attributes: {
-          class: cn("rich-text-editor text-sm outline-none", className),
+          class: cn("flex-1 rich-text-editor text-sm outline-none", className),
         },
       },
     });
@@ -257,17 +271,19 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     if (!editor) return null;
 
     return (
-      <div
-        ref={wrapperRef}
-        className="relative flex min-h-full flex-col"
-        onMouseDown={handleContainerMouseDown}
-      >
-        <EditorContent className="flex-1 min-h-full" editor={editor} />
-        {showBubbleMenu && (
-          <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
-        )}
-        <LinkHoverCard {...hover} />
-      </div>
+      <AttachmentDownloadProvider attachments={attachments}>
+        <div
+          ref={wrapperRef}
+          className="relative flex flex-1 min-h-full flex-col"
+          onMouseDown={handleContainerMouseDown}
+        >
+          <EditorContent className="flex flex-1 flex-col" editor={editor} />
+          {showBubbleMenu && (
+            <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
+          )}
+          <LinkHoverCard {...hover} />
+        </div>
+      </AttachmentDownloadProvider>
     );
   },
 );

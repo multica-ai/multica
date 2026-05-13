@@ -502,6 +502,55 @@ func TestCreateWorktree(t *testing.T) {
 	}
 }
 
+func TestCreateWorktreeExcludesOpenCodeSkills(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "OpenCode",
+		TaskID:      "opencode-exclude-test",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	exclude := gitInfoExclude(t, result.Path)
+	if !strings.Contains(exclude, ".opencode\n") {
+		t.Fatalf("expected .git/info/exclude to contain .opencode, got:\n%s", exclude)
+	}
+	if strings.Contains(exclude, ".config/opencode") {
+		t.Fatalf("expected .git/info/exclude to not contain stale .config/opencode, got:\n%s", exclude)
+	}
+}
+
+func gitInfoExclude(t *testing.T, worktreePath string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-dir")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse --git-dir failed in %s: %v", worktreePath, err)
+	}
+	gitDir := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(worktreePath, gitDir)
+	}
+	data, err := os.ReadFile(filepath.Join(gitDir, "info", "exclude"))
+	if err != nil {
+		t.Fatalf("read .git/info/exclude failed: %v", err)
+	}
+	return string(data)
+}
+
 func TestCreateWorktreeNotCached(t *testing.T) {
 	t.Parallel()
 	cacheRoot := t.TempDir()
@@ -588,6 +637,38 @@ func TestCreateWorktreeWithRequestedCommitRef(t *testing.T) {
 
 	if got := gitHead(t, result.Path); got != firstCommit {
 		t.Fatalf("worktree HEAD = %s, want requested commit %s", got, firstCommit)
+	}
+}
+
+func TestCreateWorktreeWithRequestedTagRef(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	taggedCommit := gitHead(t, sourceRepo)
+	runGitAuthored(t, sourceRepo, "tag", "v1")
+	// Advance the default branch past the tag so worktree HEAD == taggedCommit
+	// can only be true if the tag was actually resolved (vs falling back to
+	// the default branch tip).
+	addEmptyCommit(t, sourceRepo, "post-tag commit")
+
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		Ref:         "v1",
+		AgentName:   "Reviewer",
+		TaskID:      "tag-task-id",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if got := gitHead(t, result.Path); got != taggedCommit {
+		t.Fatalf("worktree HEAD = %s, want tagged commit %s", got, taggedCommit)
 	}
 }
 
@@ -1123,6 +1204,210 @@ func TestCoAuthoredByHookIdempotent(t *testing.T) {
 	count := strings.Count(commitMsg, trailer)
 	if count != 1 {
 		t.Errorf("expected exactly 1 Co-authored-by trailer, found %d.\ngot:\n%s", count, commitMsg)
+	}
+}
+
+// TestCreateWorktreeRemovesCoAuthoredByHookWhenDisabled verifies the toggle-off
+// path: a bare cache that already carries the Multica prepare-commit-msg hook
+// (e.g. from a prior worktree created with the setting on) must drop the hook
+// when the next CreateWorktree call passes CoAuthoredByEnabled=false.
+// Otherwise commits keep getting the trailer even after the user disables the
+// workspace setting.
+func TestCreateWorktreeRemovesCoAuthoredByHookWhenDisabled(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	// First worktree: setting enabled → hook installed in the bare cache's
+	// shared hooks dir.
+	workDir1 := t.TempDir()
+	if _, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir1,
+		AgentName:           "Test Agent",
+		TaskID:              "11111111-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: true,
+	}); err != nil {
+		t.Fatalf("CreateWorktree (enabled) failed: %v", err)
+	}
+
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	hookPath := filepath.Join(barePath, "hooks", "prepare-commit-msg")
+	if _, err := os.Stat(hookPath); err != nil {
+		t.Fatalf("precondition: expected hook to be installed at %s: %v", hookPath, err)
+	}
+
+	// Second worktree on the same bare cache: setting disabled → hook must
+	// be removed and a commit in the new worktree must NOT carry the
+	// trailer.
+	workDir2 := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir2,
+		AgentName:           "Test Agent",
+		TaskID:              "22222222-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: false,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree (disabled) failed: %v", err)
+	}
+
+	if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+		t.Errorf("expected hook to be removed at %s, stat err=%v", hookPath, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(result.Path, "test.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGitAuthored(t, result.Path, "add", ".")
+	runGitAuthored(t, result.Path, "commit", "-m", "test commit")
+
+	out, err := exec.Command("git", "-C", result.Path, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	commitMsg := string(out)
+	if strings.Contains(commitMsg, "Co-authored-by: multica-agent") {
+		t.Errorf("commit unexpectedly carries the Co-authored-by trailer with setting disabled.\ngot:\n%s", commitMsg)
+	}
+}
+
+// TestCreateWorktreeRemovesLegacyCoAuthoredByHook verifies the migration
+// path: bare clones already on disk from previous daemon versions carry a
+// prepare-commit-msg hook that does NOT include the multicaHookMarker
+// sentinel — only the older `# Installed by the Multica daemon.` comment.
+// Toggling the workspace setting off must still remove those legacy hooks,
+// otherwise users who flip the toggle in production keep seeing the trailer
+// indefinitely (the exact bug reported in MUL-1704).
+func TestCreateWorktreeRemovesLegacyCoAuthoredByHook(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	// Seed the bare cache with the exact hook content shipped by the
+	// previous daemon release (no multicaHookMarker line). Keeping a
+	// verbatim copy here means the test fails if recognition logic ever
+	// drifts away from what production hosts actually have on disk.
+	const legacyHook = `#!/bin/sh
+# Multica: add Co-authored-by trailer for the Multica Agent.
+# Installed by the Multica daemon. Do not edit — it will be overwritten.
+
+COMMIT_MSG_FILE="$1"
+COMMIT_SOURCE="$2"
+
+# Skip merge and squash commits.
+case "$COMMIT_SOURCE" in
+  merge|squash) exit 0 ;;
+esac
+
+TRAILER="Co-authored-by: multica-agent <github@multica.ai>"
+
+# Don't add if already present.
+if grep -qF "$TRAILER" "$COMMIT_MSG_FILE"; then
+  exit 0
+fi
+
+# Use git interpret-trailers for proper formatting.
+git interpret-trailers --in-place --trailer "$TRAILER" "$COMMIT_MSG_FILE"
+`
+
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	hooksDir := filepath.Join(barePath, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("create hooks dir: %v", err)
+	}
+	hookPath := filepath.Join(hooksDir, "prepare-commit-msg")
+	if err := os.WriteFile(hookPath, []byte(legacyHook), 0o755); err != nil {
+		t.Fatalf("seed legacy hook: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Test Agent",
+		TaskID:              "44444444-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: false,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree (disabled) failed: %v", err)
+	}
+
+	if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+		t.Errorf("expected legacy hook to be removed at %s, stat err=%v", hookPath, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(result.Path, "test.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGitAuthored(t, result.Path, "add", ".")
+	runGitAuthored(t, result.Path, "commit", "-m", "test commit")
+
+	out, err := exec.Command("git", "-C", result.Path, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	if commitMsg := string(out); strings.Contains(commitMsg, "Co-authored-by: multica-agent") {
+		t.Errorf("commit unexpectedly carries the Co-authored-by trailer after legacy hook removal.\ngot:\n%s", commitMsg)
+	}
+}
+
+// TestRemoveCoAuthoredByHookPreservesUserHook verifies that the disable path
+// only deletes hooks installed by the daemon. A prepare-commit-msg hook
+// without the Multica marker (e.g. one a user added manually) must be left
+// untouched even when CoAuthoredByEnabled=false.
+func TestRemoveCoAuthoredByHookPreservesUserHook(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	hooksDir := filepath.Join(barePath, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("create hooks dir: %v", err)
+	}
+	hookPath := filepath.Join(hooksDir, "prepare-commit-msg")
+	userHook := "#!/bin/sh\n# user hook, not Multica\nexit 0\n"
+	if err := os.WriteFile(hookPath, []byte(userHook), 0o755); err != nil {
+		t.Fatalf("seed user hook: %v", err)
+	}
+
+	workDir := t.TempDir()
+	if _, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "Test Agent",
+		TaskID:              "33333333-0000-0000-0000-000000000000",
+		CoAuthoredByEnabled: false,
+	}); err != nil {
+		t.Fatalf("CreateWorktree (disabled) failed: %v", err)
+	}
+
+	got, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatalf("user hook unexpectedly removed: %v", err)
+	}
+	if string(got) != userHook {
+		t.Errorf("user hook contents changed.\nwant:\n%s\ngot:\n%s", userHook, string(got))
 	}
 }
 

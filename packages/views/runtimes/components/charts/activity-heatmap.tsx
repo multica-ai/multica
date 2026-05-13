@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import type { RuntimeUsage } from "@multica/core/types";
+import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { estimateCost } from "../../utils";
+import { useT } from "../../../i18n";
 
 // 26 weeks (~6 months) gives the heatmap real presence in the wider chart
 // card and turns "long-view" into a meaningful tab — a 13-week strip looked
@@ -46,6 +48,10 @@ interface Insights {
 }
 
 export function ActivityHeatmap({ usage }: { usage: RuntimeUsage[] }) {
+  const { t } = useT("runtimes");
+  // Memo dep — estimateCost (called inside the body below) consults the
+  // user-override store, so saving a custom rate must invalidate the cells.
+  const pricings = useCustomPricingStore((s) => s.pricings);
   const { cells, monthLabels, insights } = useMemo(() => {
     // Sum priced cost per day. Cost (not tokens) gives the colour scale a
     // financial meaning that lines up with the rest of the page — a "hot"
@@ -165,7 +171,7 @@ export function ActivityHeatmap({ usage }: { usage: RuntimeUsage[] }) {
     };
 
     return { cells: cellsWithLevel, monthLabels: months, insights };
-  }, [usage]);
+  }, [usage, pricings]);
 
   const labelWidth = 28;
   const svgWidth = labelWidth + HEATMAP_WEEKS * (CELL_SIZE + CELL_GAP);
@@ -225,7 +231,7 @@ export function ActivityHeatmap({ usage }: { usage: RuntimeUsage[] }) {
           </svg>
         </div>
         <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-          <span>Less</span>
+          <span>{t(($) => $.charts.heatmap_less)}</span>
           {[0, 1, 2, 3, 4].map((level) => (
             <div
               key={level}
@@ -233,7 +239,7 @@ export function ActivityHeatmap({ usage }: { usage: RuntimeUsage[] }) {
               style={{ backgroundColor: getHeatmapColor(level) }}
             />
           ))}
-          <span>More</span>
+          <span>{t(($) => $.charts.heatmap_more)}</span>
         </div>
       </div>
 

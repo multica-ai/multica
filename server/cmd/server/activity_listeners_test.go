@@ -12,16 +12,16 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// listActivitiesForIssue is a test helper that fetches all activity_log records for an issue.
+// listActivitiesForIssue is a test helper that fetches up to 100 activity_log
+// records for an issue. Uses the same query that backs the timeline endpoint.
 func listActivitiesForIssue(t *testing.T, queries *db.Queries, issueID string) []db.ActivityLog {
 	t.Helper()
-	activities, err := queries.ListActivities(context.Background(), db.ListActivitiesParams{
+	activities, err := queries.ListActivitiesForIssue(context.Background(), db.ListActivitiesForIssueParams{
 		IssueID: util.MustParseUUID(issueID),
 		Limit:   100,
-		Offset:  0,
 	})
 	if err != nil {
-		t.Fatalf("ListActivities: %v", err)
+		t.Fatalf("ListActivitiesForIssue: %v", err)
 	}
 	return activities
 }
@@ -156,7 +156,7 @@ func TestActivityIssueUpdated_AssigneeChanged(t *testing.T) {
 				AssigneeType: &assigneeType,
 				AssigneeID:   &assigneeID,
 			},
-			"assignee_changed":  true,
+			"assignee_changed":   true,
 			"prev_assignee_type": (*string)(nil),
 			"prev_assignee_id":   (*string)(nil),
 		},

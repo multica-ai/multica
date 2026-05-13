@@ -20,17 +20,19 @@ var errRuntimeSetChanged = errors.New("runtime set changed")
 
 func (d *Daemon) taskWakeupLoop(ctx context.Context, taskWakeups chan<- struct{}) {
 	backoff := time.Second
+	runtimeSetCh, unsub := d.runtimeSet.Subscribe()
+	defer unsub()
 
 	for {
 		runtimeIDs := d.allRuntimeIDs()
 		if len(runtimeIDs) == 0 {
-			if err := sleepWithContextOrRuntimeChange(ctx, 5*time.Second, d.runtimeSetCh); err != nil {
+			if err := sleepWithContextOrRuntimeChange(ctx, 5*time.Second, runtimeSetCh); err != nil {
 				return
 			}
 			continue
 		}
 
-		err := d.runTaskWakeupConnection(ctx, runtimeIDs, taskWakeups)
+		err := d.runTaskWakeupConnection(ctx, runtimeIDs, taskWakeups, runtimeSetCh)
 		if ctx.Err() != nil {
 			return
 		}
@@ -42,7 +44,7 @@ func (d *Daemon) taskWakeupLoop(ctx context.Context, taskWakeups chan<- struct{}
 			d.logger.Debug("task wakeup websocket unavailable; polling fallback remains active", "error", err, "retry_in", backoff)
 		}
 
-		if err := sleepWithContextOrRuntimeChange(ctx, jitterDuration(backoff), d.runtimeSetCh); err != nil {
+		if err := sleepWithContextOrRuntimeChange(ctx, jitterDuration(backoff), runtimeSetCh); err != nil {
 			return
 		}
 		if backoff < 30*time.Second {
@@ -66,7 +68,7 @@ func jitterDuration(d time.Duration) time.Duration {
 	return d + delta
 }
 
-func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []string, taskWakeups chan<- struct{}) error {
+func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []string, taskWakeups chan<- struct{}, runtimeSetCh <-chan struct{}) error {
 	wsURL, err := taskWakeupURL(d.cfg.ServerBaseURL, runtimeIDs)
 	if err != nil {
 		return err
@@ -101,8 +103,16 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 
 	// Serialize all writes through a single channel: the gorilla/websocket
 	// Conn does not allow concurrent WriteMessage calls, and the heartbeat
-	// sender now coexists with future server-initiated writes.
-	writes := make(chan []byte, 8)
+	// sender now coexists with future server-initiated writes. The buffer
+	// is sized to fit a full per-runtime heartbeat batch plus headroom; a
+	// fixed 8-slot queue would silently drop heartbeats once a daemon
+	// watched more than ~8 runtimes (typical when one machine connects to
+	// several workspaces), even when the network was healthy.
+	writeBufSize := 16
+	if 2*len(runtimeIDs) > writeBufSize {
+		writeBufSize = 2 * len(runtimeIDs)
+	}
+	writes := make(chan []byte, writeBufSize)
 	writerDone := make(chan struct{})
 	go d.runWSWriter(conn, writes, writerDone)
 
@@ -138,7 +148,7 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-d.runtimeSetCh:
+	case <-runtimeSetCh:
 		return errRuntimeSetChanged
 	case err := <-errCh:
 		return err
@@ -221,6 +231,30 @@ func marshalRaw(v any) json.RawMessage {
 	return data
 }
 
+// handleWSHeartbeatAck dispatches one heartbeat_ack received over the WS
+// task-wakeup connection. Extracted from readTaskWakeupMessages so tests can
+// exercise the branching logic without a real WebSocket.
+//
+// A RuntimeGone=true ack is the WebSocket twin of an HTTP 404 "runtime not
+// found": it tells the daemon the runtime row was deleted server-side. We
+// route it through the same self-heal entry point as the HTTP path and do
+// NOT record a heartbeat freshness mark — pretending the runtime is alive
+// would let HTTP keep skipping its own heartbeat against the dead UUID.
+//
+// handleRuntimeGone uses the daemon root context for its register call, so
+// this function can safely pass any caller context here.
+func (d *Daemon) handleWSHeartbeatAck(ctx context.Context, ack *HeartbeatResponse) {
+	if ack == nil || ack.RuntimeID == "" {
+		return
+	}
+	if ack.RuntimeGone {
+		go d.handleRuntimeGone(ack.RuntimeID)
+		return
+	}
+	d.recordWSHeartbeatAck(ack.RuntimeID)
+	d.handleHeartbeatActions(ctx, ack.RuntimeID, ack)
+}
+
 func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<- struct{}) error {
 	conn.SetReadLimit(64 * 1024)
 	for {
@@ -252,11 +286,7 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 				d.logger.Debug("ws heartbeat ack invalid payload", "error", err)
 				continue
 			}
-			if ack.RuntimeID == "" {
-				continue
-			}
-			d.recordWSHeartbeatAck(ack.RuntimeID)
-			d.handleHeartbeatActions(context.Background(), ack.RuntimeID, &ack)
+			d.handleWSHeartbeatAck(context.Background(), &ack)
 		}
 	}
 }

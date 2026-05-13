@@ -12,13 +12,18 @@ import (
 )
 
 // validNotifGroups is the set of notification preference group keys that the
-// API accepts. Keys not in this set are rejected.
+// API accepts. Keys not in this set are rejected. `system_notifications` is
+// not an inbox event group — it's a delivery-channel toggle controlling
+// whether native OS notification banners fire — but it shares the same
+// preferences map so a single endpoint covers all user notification
+// preferences.
 var validNotifGroups = map[string]bool{
-	"assignments":    true,
-	"status_changes": true,
-	"comments":       true,
-	"updates":        true,
-	"agent_activity": true,
+	"assignments":          true,
+	"status_changes":       true,
+	"comments":             true,
+	"updates":              true,
+	"agent_activity":       true,
+	"system_notifications": true,
 }
 
 // validNotifValues is the set of allowed preference values per group.

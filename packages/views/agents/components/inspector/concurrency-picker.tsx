@@ -5,6 +5,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { PropertyPicker } from "../../../issues/components/pickers";
 import { CHIP_CLASS } from "./chip";
+import { useT } from "../../../i18n";
 
 const MIN = 1;
 const MAX = 50;
@@ -19,8 +20,18 @@ export function ConcurrencyPicker({
   canEdit?: boolean;
   onChange: (next: number) => Promise<void> | void;
 }) {
+  const { t } = useT("agents");
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(String(value));
+
+  // Reset draft from authoritative value whenever the popover (re-)opens or
+  // the prop changes from elsewhere — protects against stale draft state if
+  // the user closes mid-edit and reopens later. Hook MUST run unconditionally
+  // (before the !canEdit early return) to keep call order stable across
+  // renders where canEdit may flip.
+  useEffect(() => {
+    if (open) setDraft(String(value));
+  }, [open, value]);
 
   if (!canEdit) {
     return (
@@ -30,13 +41,6 @@ export function ConcurrencyPicker({
     );
   }
 
-  // Reset draft from authoritative value whenever the popover (re-)opens or
-  // the prop changes from elsewhere — protects against stale draft state if
-  // the user closes mid-edit and reopens later.
-  useEffect(() => {
-    if (open) setDraft(String(value));
-  }, [open, value]);
-
   const commit = async () => {
     const n = Number(draft);
     if (!Number.isFinite(n) || n < MIN || n > MAX) return;
@@ -44,7 +48,7 @@ export function ConcurrencyPicker({
     if (n !== value) await onChange(n);
   };
 
-  const tooltip = `Concurrency · ${value} max concurrent tasks`;
+  const tooltip = t(($) => $.pickers.concurrency_tooltip, { value });
 
   return (
     <PropertyPicker
@@ -62,7 +66,7 @@ export function ConcurrencyPicker({
     >
       <div className="space-y-2 p-2">
         <p className="text-xs text-muted-foreground">
-          Max concurrent tasks ({MIN}–{MAX})
+          {t(($) => $.pickers.concurrency_range, { min: MIN, max: MAX })}
         </p>
         <div className="flex items-center gap-2">
           <Input
@@ -81,7 +85,7 @@ export function ConcurrencyPicker({
             className="h-8 w-20 font-mono text-xs"
           />
           <Button size="sm" onClick={() => void commit()}>
-            Save
+            {t(($) => $.inspector.save)}
           </Button>
         </div>
       </div>

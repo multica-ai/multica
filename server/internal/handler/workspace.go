@@ -572,17 +572,22 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.Queries.DeleteMember(r.Context(), target.ID); err != nil {
+	requesterUserID := requestUserID(r)
+	result, err := h.revokeAndRemoveMember(r.Context(), target.WorkspaceID, target.UserID, target.ID, parseUUID(requesterUserID))
+	if err != nil {
 		slog.Warn("delete member failed", append(logger.RequestAttrs(r), "error", err, "member_id", memberID, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete member")
 		return
 	}
 
+	wsIDStr := uuidToString(requester.WorkspaceID)
+	logRevocation(result, wsIDStr, uuidToString(target.UserID))
+	h.publishRevocation(r.Context(), result, wsIDStr, "member", requesterUserID)
+
 	slog.Info("member removed", append(logger.RequestAttrs(r), "member_id", uuidToString(target.ID), "workspace_id", workspaceID, "user_id", uuidToString(target.UserID))...)
-	userID := requestUserID(r)
-	h.publish(protocol.EventMemberRemoved, uuidToString(requester.WorkspaceID), "member", userID, map[string]any{
+	h.publish(protocol.EventMemberRemoved, wsIDStr, "member", requesterUserID, map[string]any{
 		"member_id":    uuidToString(target.ID),
-		"workspace_id": uuidToString(requester.WorkspaceID),
+		"workspace_id": wsIDStr,
 		"user_id":      uuidToString(target.UserID),
 	})
 
@@ -608,14 +613,18 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.Queries.DeleteMember(r.Context(), member.ID); err != nil {
+	result, err := h.revokeAndRemoveMember(r.Context(), member.WorkspaceID, member.UserID, member.ID, member.UserID)
+	if err != nil {
 		slog.Warn("leave workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to leave workspace")
 		return
 	}
 
-	slog.Info("member removed", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "user_id", uuidToString(member.UserID))...)
 	userID := requestUserID(r)
+	logRevocation(result, workspaceID, uuidToString(member.UserID))
+	h.publishRevocation(r.Context(), result, workspaceID, "member", userID)
+
+	slog.Info("member removed", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "user_id", uuidToString(member.UserID))...)
 	h.publish(protocol.EventMemberRemoved, workspaceID, "member", userID, map[string]any{
 		"member_id":    uuidToString(member.ID),
 		"workspace_id": workspaceID,

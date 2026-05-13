@@ -29,23 +29,31 @@ var extContentTypes = map[string]string{
 
 const maxUploadSize = 100 << 20 // 100 MB
 
+// maxPreviewTextSize caps the body the preview proxy will load into memory
+// for text-based types. Anything larger returns 413 and the UI falls back
+// to "please download". Sized so a typical README/source-file fits but a
+// 100 MB log dump can't blow up the renderer.
+const maxPreviewTextSize = 2 << 20 // 2 MB
+
 // ---------------------------------------------------------------------------
 // Response types
 // ---------------------------------------------------------------------------
 
 type AttachmentResponse struct {
-	ID           string  `json:"id"`
-	WorkspaceID  string  `json:"workspace_id"`
-	IssueID      *string `json:"issue_id"`
-	CommentID    *string `json:"comment_id"`
-	UploaderType string  `json:"uploader_type"`
-	UploaderID   string  `json:"uploader_id"`
-	Filename     string  `json:"filename"`
-	URL          string  `json:"url"`
-	DownloadURL  string  `json:"download_url"`
-	ContentType  string  `json:"content_type"`
-	SizeBytes    int64   `json:"size_bytes"`
-	CreatedAt    string  `json:"created_at"`
+	ID            string  `json:"id"`
+	WorkspaceID   string  `json:"workspace_id"`
+	IssueID       *string `json:"issue_id"`
+	CommentID     *string `json:"comment_id"`
+	ChatSessionID *string `json:"chat_session_id"`
+	ChatMessageID *string `json:"chat_message_id"`
+	UploaderType  string  `json:"uploader_type"`
+	UploaderID    string  `json:"uploader_id"`
+	Filename      string  `json:"filename"`
+	URL           string  `json:"url"`
+	DownloadURL   string  `json:"download_url"`
+	ContentType   string  `json:"content_type"`
+	SizeBytes     int64   `json:"size_bytes"`
+	CreatedAt     string  `json:"created_at"`
 }
 
 func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
@@ -72,6 +80,14 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 		s := uuidToString(a.CommentID)
 		resp.CommentID = &s
 	}
+	if a.ChatSessionID.Valid {
+		s := uuidToString(a.ChatSessionID)
+		resp.ChatSessionID = &s
+	}
+	if a.ChatMessageID.Valid {
+		s := uuidToString(a.ChatMessageID)
+		resp.ChatMessageID = &s
+	}
 	return resp
 }
 
@@ -93,6 +109,30 @@ func (h *Handler) groupAttachments(r *http.Request, commentIDs []pgtype.UUID) ma
 	for _, a := range attachments {
 		cid := uuidToString(a.CommentID)
 		grouped[cid] = append(grouped[cid], h.attachmentToResponse(a))
+	}
+	return grouped
+}
+
+// groupChatMessageAttachments loads attachments for multiple chat messages
+// and groups them by chat_message_id. Mirrors groupAttachments — used so the
+// chat message list can surface attachment metadata to the UI bubble (file
+// cards, click-through download) without an N+1 query per message.
+func (h *Handler) groupChatMessageAttachments(ctx context.Context, workspaceID string, messageIDs []pgtype.UUID) map[string][]AttachmentResponse {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	attachments, err := h.Queries.ListAttachmentsByChatMessageIDs(ctx, db.ListAttachmentsByChatMessageIDsParams{
+		Column1:     messageIDs,
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		slog.Error("failed to load attachments for chat messages", "error", err)
+		return nil
+	}
+	grouped := make(map[string][]AttachmentResponse, len(messageIDs))
+	for _, a := range attachments {
+		mid := uuidToString(a.ChatMessageID)
+		grouped[mid] = append(grouped[mid], h.attachmentToResponse(a))
 	}
 	return grouped
 }
@@ -214,6 +254,16 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			}
 			params.CommentID = comment.ID
 		}
+		if chatSessionID := r.FormValue("chat_session_id"); chatSessionID != "" {
+			// Re-use the existing private-agent gate so the user can still
+			// reach this session — covers role downgrade and agent
+			// visibility flips. The gate writes 4xx on failure.
+			session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, chatSessionID)
+			if !ok {
+				return
+			}
+			params.ChatSessionID = session.ID
+		}
 
 		link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 		if err != nil {
@@ -314,6 +364,163 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
+}
+
+// ---------------------------------------------------------------------------
+// GetAttachmentContent — GET /api/attachments/{id}/content
+//
+// Streams the raw bytes of a text-previewable attachment back to the client.
+// Exists to (a) bypass CloudFront CORS (not configured) and (b) bypass
+// Content-Disposition: attachment which Chromium honors for iframe document
+// loads. Media types (image/video/audio/pdf) intentionally do NOT go through
+// this endpoint — clients render them directly from the CloudFront signed
+// download_url, which already serves them with Content-Disposition: inline
+// (see storage/util.go isInlineContentType).
+//
+// Hard cap: 2 MB. Larger files return 413. Anything outside the text
+// whitelist returns 415.
+// ---------------------------------------------------------------------------
+
+func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
+	attachmentID := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
+	attUUID, ok := parseUUIDOrBadRequest(w, attachmentID, "attachment id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
+	att, err := h.Queries.GetAttachment(r.Context(), db.GetAttachmentParams{
+		ID:          attUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+
+	if !isTextPreviewable(att.ContentType, att.Filename) {
+		writeError(w, http.StatusUnsupportedMediaType, "preview not supported for this file type")
+		return
+	}
+
+	if h.Storage == nil {
+		writeError(w, http.StatusServiceUnavailable, "storage not configured")
+		return
+	}
+	key := h.Storage.KeyFromURL(att.Url)
+	reader, err := h.Storage.GetReader(r.Context(), key)
+	if err != nil {
+		slog.Error("failed to open attachment for preview", "id", attachmentID, "key", key, "error", err)
+		writeError(w, http.StatusNotFound, "attachment object not found")
+		return
+	}
+	defer reader.Close()
+
+	// LimitReader to maxPreviewTextSize+1 so we can detect "exactly at the
+	// limit" vs "exceeds the limit" by checking the returned length.
+	body, err := io.ReadAll(io.LimitReader(reader, maxPreviewTextSize+1))
+	if err != nil {
+		slog.Error("failed to read attachment body for preview", "id", attachmentID, "error", err)
+		writeError(w, http.StatusBadGateway, "failed to read attachment body")
+		return
+	}
+	if len(body) > maxPreviewTextSize {
+		writeError(w, http.StatusRequestEntityTooLarge, "file too large for inline preview")
+		return
+	}
+
+	// Always reply as text/plain so a hostile HTML payload can't be
+	// re-interpreted as a document by the browser. The original MIME is
+	// surfaced via X-Original-Content-Type for the client-side dispatcher.
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Original-Content-Type", att.ContentType)
+	// No-store: workspace membership / attachment ACL can change between
+	// requests (member removed, attachment deleted). A cached body would
+	// stay readable past the revocation window. The redundant request is
+	// fine here — bodies are capped at 2 MB and the endpoint is only hit
+	// when a user explicitly opens a preview.
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	if _, err := w.Write(body); err != nil {
+		slog.Error("failed to write attachment preview body", "id", attachmentID, "error", err)
+	}
+}
+
+// isTextPreviewable is the whitelist for the text preview proxy.
+//
+// IMPORTANT — KEEP IN SYNC with the client-side mirror in
+// packages/views/editor/utils/preview.ts (TEXT_EXTENSIONS / TEXT_CONTENT_TYPES
+// / TEXT_BASENAMES + extensionToLanguage). If a type is allowed here but not
+// mapped client-side the user sees raw unhighlighted text; if mapped client-side
+// but rejected here the user sees a 415 fallback.
+//
+// TODO(follow-up): extract this list to a JSON single-source-of-truth and
+// generate the TS side, mirroring the reserved-slugs pattern (see
+// server/internal/handler/reserved_slugs.json + scripts/generate-reserved-slugs.mjs).
+// Drift severity here is low (worst case: Eye button visible but proxy 415s,
+// modal shows the unsupported fallback — still functional, just confusing),
+// so it ships as manual hand-sync for v1.
+//
+// We check both content_type and extension because http.DetectContentType
+// regularly returns "text/plain" for Markdown / source code, so a pure
+// content-type check would 415 those.
+func isTextPreviewable(contentType, filename string) bool {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	// Strip params (e.g. "text/plain; charset=utf-8")
+	if idx := strings.Index(ct, ";"); idx >= 0 {
+		ct = strings.TrimSpace(ct[:idx])
+	}
+	if strings.HasPrefix(ct, "text/") {
+		return true
+	}
+	switch ct {
+	case "application/json",
+		"application/javascript",
+		"application/xml",
+		"application/x-yaml",
+		"application/yaml",
+		"application/toml",
+		"application/x-sh",
+		"application/x-httpd-php":
+		return true
+	}
+
+	ext := strings.ToLower(path.Ext(filename))
+	switch ext {
+	case ".md", ".markdown",
+		".txt", ".log",
+		".csv", ".tsv",
+		".html", ".htm",
+		".json", ".xml",
+		".yml", ".yaml", ".toml", ".ini", ".conf",
+		".sh", ".bash", ".zsh",
+		".py", ".rb", ".go", ".rs",
+		".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+		".css", ".scss", ".sass", ".less",
+		".sql",
+		".java", ".kt", ".swift",
+		".c", ".cc", ".cpp", ".h", ".hpp",
+		".cs", ".php", ".lua", ".vim",
+		".dockerfile", ".makefile", ".gitignore":
+		return true
+	}
+	// Filenames without extension that match well-known build files.
+	base := strings.ToLower(path.Base(filename))
+	switch base {
+	case "dockerfile", "makefile", ".env":
+		return true
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------

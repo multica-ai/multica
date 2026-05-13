@@ -13,25 +13,26 @@ import {
 } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { SkillAddDialog } from "../skill-add-dialog";
+import { useT } from "../../../i18n";
 
 export function SkillsTab({
   agent,
 }: {
   agent: Agent;
 }) {
+  const { t } = useT("agents");
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   // Same query the SkillAddDialog uses (TanStack Query dedupes by key, so
-  // this isn't an extra request) — used here only to grey out the "Add skill"
-  // button when there's nothing left to attach.
+  // this isn't an extra request) — used here only to grey out the "Add
+  // skill" button when the workspace has zero skills total. When skills
+  // exist but are all already attached, we still open the dialog: it
+  // filters out attached skills and renders a localised "no more skills
+  // to add" empty state, which is more useful than a mysterious
+  // greyed-out button.
   const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
   const [removing, setRemoving] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
-
-  const agentSkillIds = new Set(agent.skills.map((s) => s.id));
-  const availableCount = workspaceSkills.filter(
-    (s) => !agentSkillIds.has(s.id),
-  ).length;
 
   const handleRemove = async (skillId: string) => {
     setRemoving(true);
@@ -42,7 +43,7 @@ export function SkillsTab({
       await api.setAgentSkills(agent.id, { skill_ids: newIds });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to remove skill");
+      toast.error(e instanceof Error ? e.message : t(($) => $.tab_body.skills.remove_failed_toast));
     } finally {
       setRemoving(false);
     }
@@ -52,25 +53,24 @@ export function SkillsTab({
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <p className="text-xs text-muted-foreground">
-          Workspace skills assigned to this agent. Local runtime skills are
-          always available automatically.
+          {t(($) => $.tab_body.skills.intro)}
         </p>
         <Button
           variant="outline"
           size="sm"
           onClick={() => setShowAdd(true)}
-          disabled={availableCount === 0}
+          disabled={workspaceSkills.length === 0}
           className="shrink-0"
         >
           <Plus className="h-3 w-3" />
-          Add skill
+          {t(($) => $.tab_body.skills.add_action)}
         </Button>
       </div>
 
       <div className="flex items-start gap-2 rounded-md border border-info/20 bg-info/5 px-3 py-2.5">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" />
         <p className="text-xs text-muted-foreground">
-          Importing creates a workspace copy that your team can edit and reuse.
+          {t(($) => $.tab_body.skills.import_hint)}
         </p>
       </div>
 
@@ -78,19 +78,19 @@ export function SkillsTab({
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
           <FileText className="h-8 w-8 text-muted-foreground/40" />
           <p className="mt-3 text-sm text-muted-foreground">
-            No skills assigned
+            {t(($) => $.tab_body.skills.empty_title)}
           </p>
           <p className="mt-1 max-w-xs text-center text-xs text-muted-foreground">
-            Add workspace skills to share team knowledge with this agent.
+            {t(($) => $.tab_body.skills.empty_hint)}
           </p>
-          {availableCount > 0 && (
+          {workspaceSkills.length > 0 && (
             <Button
               onClick={() => setShowAdd(true)}
               size="sm"
               className="mt-3"
             >
               <Plus className="h-3 w-3" />
-              Add skill
+              {t(($) => $.tab_body.skills.add_action)}
             </Button>
           )}
         </div>

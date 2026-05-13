@@ -56,13 +56,15 @@ Changes take effect after restarting the backend / compose stack. The web UI rea
 
 ### File Storage (Optional)
 
-For file uploads and attachments, configure S3 and CloudFront:
+For file uploads and attachments, configure S3 and (optionally) CloudFront:
 
 | Variable | Description |
 |----------|-------------|
-| `S3_BUCKET` | S3 bucket name |
-| `S3_REGION` | AWS region (default: `us-west-2`) |
-| `CLOUDFRONT_DOMAIN` | CloudFront distribution domain |
+| `S3_BUCKET` | Bucket name only (e.g. `my-bucket`). Do **not** include the `.s3.<region>.amazonaws.com` suffix — the server constructs the public URL from `S3_BUCKET` + `S3_REGION` |
+| `S3_REGION` | AWS region (default: `us-west-2`). Must match the bucket's actual region — used for both SDK signing and public URLs |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Static credentials. When both are unset, the AWS SDK default credential chain is used |
+| `AWS_ENDPOINT_URL` | Custom S3-compatible endpoint (e.g. MinIO, R2, B2). Setting this switches the public URL to path-style |
+| `CLOUDFRONT_DOMAIN` | CloudFront distribution domain — when set, public URLs use this host instead of the S3 host |
 | `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID for signed URLs |
 | `CLOUDFRONT_PRIVATE_KEY` | CloudFront private key (PEM format) |
 
@@ -103,6 +105,8 @@ Agent-specific overrides:
 | `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
 | `MULTICA_CODEX_MODEL` | Override the Codex model used |
+| `MULTICA_COPILOT_PATH` | Custom path to the `copilot` (GitHub Copilot CLI) binary |
+| `MULTICA_COPILOT_MODEL` | Override the Copilot model used (note: GitHub Copilot routes models through your account entitlement, so this may not be honoured) |
 | `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
 | `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
 | `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
@@ -182,15 +186,46 @@ In production, put a reverse proxy in front of both the backend and frontend to 
 
 ### Caddy (Recommended)
 
+**Single-domain layout** — frontend and backend served on the same hostname (this is what `docker-compose.selfhost.yml` defaults to):
+
+```
+multica.example.com {
+    # WebSocket route — must come before the catch-all
+    @multica_ws path /ws /ws/*
+    handle @multica_ws {
+        reverse_proxy localhost:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Everything else → frontend
+    reverse_proxy localhost:3000
+}
+```
+
+**Separate-domain layout** — frontend and backend on different hostnames:
+
 ```
 app.example.com {
     reverse_proxy localhost:3000
 }
 
 api.example.com {
+    @multica_ws path /ws /ws/*
+    handle @multica_ws {
+        reverse_proxy localhost:8080 {
+            flush_interval -1
+        }
+    }
+
     reverse_proxy localhost:8080
 }
 ```
+
+Two non-obvious bits inside the `/ws` block are worth calling out — both are common reasons real-time updates "stop working" on a Caddy-fronted self-host:
+
+- **`path /ws /ws/*` (not `/ws*`)** — bare `handle /ws` is an exact match, so future path variants under `/ws/` fall through to the frontend block. The obvious shortcut `handle /ws*` overcorrects in the other direction: Caddy's `*` is a glob without a path-segment boundary, so it would also catch unrelated paths like `/ws-foo`, which is a legitimate workspace URL (only the exact slug `ws` is reserved). Listing `/ws` and `/ws/*` explicitly covers both real cases without overreach.
+- **`flush_interval -1`** — disables response buffering so WebSocket frames are forwarded as soon as they arrive. Without it, frames can sit behind Caddy's default flush window, which looks like delayed comments, missing typing indicators, or "comments only appear after a page refresh."
 
 ### Nginx
 

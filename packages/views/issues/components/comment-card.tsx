@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useRef, useState } from "react";
-import { ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, Copy, Download, Eye, FileText, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -30,13 +30,14 @@ import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-pick
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
-import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment, useAttachmentPreview, isPreviewable } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
-import { useCommentCollapseStore } from "@multica/core/issues/stores";
+import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
+import { useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,7 +46,14 @@ import { useCommentCollapseStore } from "@multica/core/issues/stores";
 interface CommentCardProps {
   issueId: string;
   entry: TimelineEntry;
-  allReplies: Map<string, TimelineEntry[]>;
+  /**
+   * Flat list of every nested reply under this thread root, in render order.
+   * Computed once in `issue-detail.tsx`'s `timelineView` and stabilized so
+   * the array reference only changes when *this* thread's replies change —
+   * an unrelated thread receiving a new reply must NOT bust this card's
+   * memo. Passing the full Map here used to do exactly that.
+   */
+  replies: TimelineEntry[];
   currentUserId?: string;
   /**
    * True when the current user is a workspace owner/admin and can therefore
@@ -59,6 +67,14 @@ interface CommentCardProps {
   onEdit: (commentId: string, content: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
+  /** Toggle the resolved state on the thread root. Only invoked for root entries. */
+  onResolveToggle?: (commentId: string, resolved: boolean) => void;
+  /**
+   * When non-null, the thread root is currently rendered as a resolved-but-
+   * expanded card. Pass a "Collapse" affordance into the header so the user
+   * can fold the thread back to the bar; the parent owns the session state.
+   */
+  onCollapseResolved?: () => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
 }
@@ -78,21 +94,22 @@ function DeleteCommentDialog({
   onConfirm: () => void;
   hasReplies?: boolean;
 }) {
+  const { t } = useT("issues");
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete comment</AlertDialogTitle>
+          <AlertDialogTitle>{t(($) => $.comment.delete_title)}</AlertDialogTitle>
           <AlertDialogDescription>
             {hasReplies
-              ? "This comment and all its replies will be permanently deleted. This cannot be undone."
-              : "This comment will be permanently deleted. This cannot be undone."}
+              ? t(($) => $.comment.delete_desc_with_replies)
+              : t(($) => $.comment.delete_desc)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{t(($) => $.comment.cancel_action)}</AlertDialogCancel>
           <AlertDialogAction variant="destructive" onClick={onConfirm}>
-            Delete
+            {t(($) => $.comment.delete_action)}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -105,6 +122,9 @@ function DeleteCommentDialog({
 // ---------------------------------------------------------------------------
 
 function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
+  const { t } = useT("editor");
+  const download = useDownloadAttachment();
+  const preview = useAttachmentPreview();
   if (!attachments?.length) return null;
   // Skip attachments whose URL is already referenced in the markdown content,
   // and duplicates of the same file (same name/type/size) that are referenced.
@@ -138,17 +158,29 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm">{a.filename}</p>
           </div>
-          {a.download_url && (
+          {isPreviewable(a.content_type, a.filename) && (
             <button
               type="button"
               className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              onClick={() => window.open(a.download_url, "_blank", "noopener,noreferrer")}
+              title={t(($) => $.attachment.preview)}
+              aria-label={t(($) => $.attachment.preview)}
+              onClick={() => preview.tryOpen(a)}
             >
-              <Download className="size-3.5" />
+              <Eye className="size-3.5" />
             </button>
           )}
+          <button
+            type="button"
+            className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            title={t(($) => $.image.download)}
+            aria-label={t(($) => $.image.download)}
+            onClick={() => download(a.id)}
+          >
+            <Download className="size-3.5" />
+          </button>
         </div>
       ))}
+      {preview.modal}
     </div>
   );
 }
@@ -174,6 +206,7 @@ function CommentRow({
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
 }) {
+  const { t } = useT("issues");
   const { getActorName } = useActorName();
   const [editing, setEditing] = useState(false);
   const editEditorRef = useRef<ContentEditorRef>(null);
@@ -183,6 +216,22 @@ function CommentRow({
     onDrop: (files) => files.forEach((f) => editEditorRef.current?.uploadFile(f)),
     enabled: editing,
   });
+
+  // Edit-mode draft: virtualization unmounts the card when it scrolls out
+  // of viewport, taking the in-progress edit with it. Persist via store
+  // so a scroll-away + scroll-back round-trip restores the user's edits.
+  // Key includes issueId so two issues with the same comment id (impossible
+  // but defensive) don't collide; cleared on cancel and on save.
+  const editDraftKey = `edit:${issueId}:${entry.id}` as const;
+  const getEditDraft = useCommentDraftStore.getState().getDraft;
+  const setEditDraft = useCommentDraftStore((s) => s.setDraft);
+  const clearEditDraft = useCommentDraftStore((s) => s.clearDraft);
+  // Read the snapshot once when the edit pass mounts; ContentEditor only
+  // honors `defaultValue` on mount, so a live store subscription here would
+  // cause an extra unmount/remount on every keystroke.
+  const editInitialValue = editing
+    ? (getEditDraft(editDraftKey) ?? entry.content ?? "")
+    : (entry.content ?? "");
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
@@ -198,6 +247,7 @@ function CommentRow({
   const cancelEdit = () => {
     cancelledRef.current = true;
     setEditing(false);
+    clearEditDraft(editDraftKey);
   };
 
   const saveEdit = async () => {
@@ -208,13 +258,15 @@ function CommentRow({
       .trim();
     if (!trimmed || trimmed === (entry.content ?? "").trim()) {
       setEditing(false);
+      clearEditDraft(editDraftKey);
       return;
     }
     try {
       await onEdit(entry.id, trimmed);
       setEditing(false);
+      clearEditDraft(editDraftKey);
     } catch {
-      toast.error("Failed to update comment");
+      toast.error(t(($) => $.comment.update_failed));
     }
   };
 
@@ -259,10 +311,10 @@ function CommentRow({
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => {
                 copyMarkdown(entry.content ?? "");
-                toast.success("Copied");
+                toast.success(t(($) => $.comment.copied_toast));
               }}>
                 <Copy className="h-3.5 w-3.5" />
-                Copy
+                {t(($) => $.comment.copy_action)}
               </DropdownMenuItem>
               {(canEditEntry || canDeleteEntry) && (
                 <>
@@ -270,14 +322,14 @@ function CommentRow({
                   {canEditEntry && (
                     <DropdownMenuItem onClick={startEdit}>
                       <Pencil className="h-3.5 w-3.5" />
-                      Edit
+                      {t(($) => $.comment.edit_action)}
                     </DropdownMenuItem>
                   )}
                   {canEditEntry && canDeleteEntry && <DropdownMenuSeparator />}
                   {canDeleteEntry && (
                     <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
                       <Trash2 className="h-3.5 w-3.5" />
-                      Delete
+                      {t(($) => $.comment.delete_action)}
                     </DropdownMenuItem>
                   )}
                 </>
@@ -302,12 +354,17 @@ function CommentRow({
           <div className="text-sm leading-relaxed">
             <ContentEditor
               ref={editEditorRef}
-              defaultValue={entry.content ?? ""}
-              placeholder="Edit comment..."
+              defaultValue={editInitialValue}
+              placeholder={t(($) => $.comment.edit_placeholder)}
+              onUpdate={(md) => {
+                if (md.trim().length > 0) setEditDraft(editDraftKey, md);
+                else clearEditDraft(editDraftKey);
+              }}
               onSubmit={saveEdit}
               onUploadFile={(file) => uploadWithToast(file, { issueId })}
               debounceMs={100}
               currentIssueId={issueId}
+              attachments={entry.attachments}
             />
           </div>
           <div className="flex items-center justify-between mt-2">
@@ -316,8 +373,8 @@ function CommentRow({
               onSelect={(file) => editEditorRef.current?.uploadFile(file)}
             />
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="ghost" onClick={cancelEdit}>Cancel</Button>
-              <Button size="sm" variant="outline" onClick={saveEdit}>Save</Button>
+              <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
+              <Button size="sm" variant="outline" onClick={saveEdit}>{t(($) => $.comment.save_action)}</Button>
             </div>
           </div>
           {isDragOver && <FileDropOverlay />}
@@ -325,7 +382,7 @@ function CommentRow({
       ) : (
         <>
           <div className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85">
-            <ReadonlyContent content={entry.content ?? ""} />
+            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
           {!isTemp && (
@@ -351,15 +408,18 @@ function CommentRow({
 function CommentCardImpl({
   issueId,
   entry,
-  allReplies,
+  replies,
   currentUserId,
   canModerate = false,
   onReply,
   onEdit,
   onDelete,
   onToggleReaction,
+  onResolveToggle,
+  onCollapseResolved,
   highlightedCommentId,
 }: CommentCardProps) {
+  const { t } = useT("issues");
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
@@ -373,6 +433,15 @@ function CommentCardImpl({
     onDrop: (files) => files.forEach((f) => editEditorRef.current?.uploadFile(f)),
     enabled: editing,
   });
+
+  // Edit-mode draft (root comment). Same rationale as CommentRow's draft.
+  const parentEditDraftKey = `edit:${issueId}:${entry.id}` as const;
+  const getParentEditDraft = useCommentDraftStore.getState().getDraft;
+  const setParentEditDraft = useCommentDraftStore((s) => s.setDraft);
+  const clearParentEditDraft = useCommentDraftStore((s) => s.clearDraft);
+  const parentEditInitialValue = editing
+    ? (getParentEditDraft(parentEditDraftKey) ?? entry.content ?? "")
+    : (entry.content ?? "");
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   // Author-only edit is the same as before; admins additionally get edit
@@ -392,6 +461,7 @@ function CommentCardImpl({
   const cancelEdit = () => {
     cancelledRef.current = true;
     setEditing(false);
+    clearParentEditDraft(parentEditDraftKey);
   };
 
   const saveEdit = async () => {
@@ -402,26 +472,22 @@ function CommentCardImpl({
       .trim();
     if (!trimmed || trimmed === (entry.content ?? "").trim()) {
       setEditing(false);
+      clearParentEditDraft(parentEditDraftKey);
       return;
     }
     try {
       await onEdit(entry.id, trimmed);
       setEditing(false);
+      clearParentEditDraft(parentEditDraftKey);
     } catch {
-      toast.error("Failed to update comment");
+      toast.error(t(($) => $.comment.update_failed));
     }
   };
 
-  // Collect all nested replies recursively into a flat list
-  const allNestedReplies: TimelineEntry[] = [];
-  const collectReplies = (parentId: string) => {
-    const children = allReplies.get(parentId) ?? [];
-    for (const child of children) {
-      allNestedReplies.push(child);
-      collectReplies(child.id);
-    }
-  };
-  collectReplies(entry.id);
+  // The parent precomputes the flat thread (using collectThreadReplies),
+  // memoizes by thread, and stabilizes the array reference, so we render
+  // straight from `replies` instead of re-walking the graph on every render.
+  const allNestedReplies = replies;
 
   const replyCount = allNestedReplies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
@@ -433,6 +499,20 @@ function CommentCardImpl({
 
   return (
     <Card className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isTemp && "opacity-60", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
+      {onCollapseResolved && (
+        <button
+          type="button"
+          onClick={onCollapseResolved}
+          className="flex w-full items-center justify-between border-b border-border/50 px-4 py-2.5 text-left text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+          aria-label={t(($) => $.comment.resolve.collapse)}
+        >
+          <span className="flex items-center gap-2">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            {t(($) => $.comment.resolve.collapse)}
+          </span>
+          <ChevronRight className="h-3.5 w-3.5 -rotate-90" />
+        </button>
+      )}
       <Collapsible open={open} onOpenChange={handleOpenChange}>
         {/* Header — always visible, acts as toggle */}
         <div className="px-4 py-3">
@@ -464,7 +544,7 @@ function CommentCardImpl({
             )}
             {!open && replyCount > 0 && (
               <span className="shrink-0 text-xs text-muted-foreground">
-                {replyCount} {replyCount === 1 ? "reply" : "replies"}
+                {t(($) => $.comment.reply_count, { count: replyCount })}
               </span>
             )}
 
@@ -485,25 +565,43 @@ function CommentCardImpl({
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => {
                     copyMarkdown(entry.content ?? "");
-                    toast.success("Copied");
+                    toast.success(t(($) => $.comment.copied_toast));
                   }}>
                     <Copy className="h-3.5 w-3.5" />
-                    Copy
+                    {t(($) => $.comment.copy_action)}
                   </DropdownMenuItem>
+                  {onResolveToggle && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => onResolveToggle(entry.id, !entry.resolved_at)}>
+                        {entry.resolved_at ? (
+                          <>
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            {t(($) => $.comment.resolve.unresolve_action)}
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            {t(($) => $.comment.resolve.resolve_action)}
+                          </>
+                        )}
+                      </DropdownMenuItem>
+                    </>
+                  )}
                   {(canEditEntry || canDeleteEntry) && (
                     <>
                       <DropdownMenuSeparator />
                       {canEditEntry && (
                         <DropdownMenuItem onClick={startEdit}>
                           <Pencil className="h-3.5 w-3.5" />
-                          Edit
+                          {t(($) => $.comment.edit_action)}
                         </DropdownMenuItem>
                       )}
                       {canEditEntry && canDeleteEntry && <DropdownMenuSeparator />}
                       {canDeleteEntry && (
                         <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
                           <Trash2 className="h-3.5 w-3.5" />
-                          Delete
+                          {t(($) => $.comment.delete_action)}
                         </DropdownMenuItem>
                       )}
                     </>
@@ -534,12 +632,17 @@ function CommentCardImpl({
                 <div className="text-sm leading-relaxed">
                   <ContentEditor
                     ref={editEditorRef}
-                    defaultValue={entry.content ?? ""}
-                    placeholder="Edit comment..."
+                    defaultValue={parentEditInitialValue}
+                    placeholder={t(($) => $.comment.edit_placeholder)}
+                    onUpdate={(md) => {
+                      if (md.trim().length > 0) setParentEditDraft(parentEditDraftKey, md);
+                      else clearParentEditDraft(parentEditDraftKey);
+                    }}
                     onSubmit={saveEdit}
                     onUploadFile={(file) => uploadWithToast(file, { issueId })}
                     debounceMs={100}
                     currentIssueId={issueId}
+                    attachments={entry.attachments}
                   />
                 </div>
                 <div className="flex items-center justify-between mt-2">
@@ -548,8 +651,8 @@ function CommentCardImpl({
                     onSelect={(file) => editEditorRef.current?.uploadFile(file)}
                   />
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="ghost" onClick={cancelEdit}>Cancel</Button>
-                    <Button size="sm" variant="outline" onClick={saveEdit}>Save</Button>
+                    <Button size="sm" variant="ghost" onClick={cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
+                    <Button size="sm" variant="outline" onClick={saveEdit}>{t(($) => $.comment.save_action)}</Button>
                   </div>
                 </div>
                 {parentDragOver && <FileDropOverlay />}
@@ -557,7 +660,7 @@ function CommentCardImpl({
             ) : (
               <>
                 <div className="pl-10 text-sm leading-relaxed text-foreground/85">
-                  <ReadonlyContent content={entry.content ?? ""} />
+                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
                 {!isTemp && (
@@ -593,10 +696,11 @@ function CommentCardImpl({
           <div className="border-t border-border/50 px-4 py-2.5">
             <ReplyInput
               issueId={issueId}
-              placeholder="Leave a reply..."
+              placeholder={t(($) => $.reply.placeholder)}
               size="sm"
               avatarType="member"
               avatarId={currentUserId ?? ""}
+              draftKey={`reply:${issueId}:${entry.id}`}
               onSubmit={(content, attachmentIds) => onReply(entry.id, content, attachmentIds)}
             />
           </div>

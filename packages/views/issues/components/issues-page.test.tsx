@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue } from "@multica/core/types";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../../locales/en/common.json";
+import enIssues from "../../locales/en/issues.json";
+
+const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
@@ -190,11 +195,18 @@ vi.mock("@multica/core/issues/stores/selection-store", () => ({
 vi.mock("@multica/core/issues/stores/recent-issues-store", () => ({
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
-      const state = { items: [], recordVisit: vi.fn() };
+      const state = { byWorkspace: {}, recordVisit: vi.fn(), pruneWorkspaces: vi.fn() };
       return selector ? selector(state) : state;
     },
-    { getState: () => ({ items: [], recordVisit: vi.fn() }) },
+    {
+      getState: () => ({
+        byWorkspace: {},
+        recordVisit: vi.fn(),
+        pruneWorkspaces: vi.fn(),
+      }),
+    },
   ),
+  selectRecentIssues: () => () => [],
 }));
 
 vi.mock("@multica/core/modals", () => ({
@@ -338,9 +350,11 @@ function renderWithQuery(ui: React.ReactElement) {
     },
   });
   return render(
-    <QueryClientProvider client={qc}>
-      {ui}
-    </QueryClientProvider>,
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={qc}>
+        {ui}
+      </QueryClientProvider>
+    </I18nProvider>,
   );
 }
 

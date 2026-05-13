@@ -53,8 +53,8 @@ func releaseAssetCandidates(targetVersion, goos, goarch string) []string {
 	// Prefer the versioned name (current scheme); fall back to the legacy
 	// `multica_{os}_{arch}` name for releases that still ship it.
 	return []string{
-		fmt.Sprintf("forge-cli-%s-%s-%s.%s", version, goos, goarch, ext),
-		fmt.Sprintf("forge-cli-%s-%s.%s", goos, goarch, ext),
+		fmt.Sprintf("multica-cli-%s-%s-%s.%s", version, goos, goarch, ext),
+		fmt.Sprintf("multica_%s_%s.%s", goos, goarch, ext),
 	}
 }
 
@@ -73,7 +73,7 @@ func findReleaseAsset(assets []GitHubReleaseAsset, targetVersion, goos, goarch s
 
 func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/shivasymbl/forge/releases/tags/"+tag, nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/tags/"+tag, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -96,10 +96,10 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	return &release, nil
 }
 
-// FetchLatestRelease fetches the latest release tag from the forge GitHub repo.
+// FetchLatestRelease fetches the latest release tag from the multica GitHub repo.
 func FetchLatestRelease() (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/shivasymbl/forge/releases/latest", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/latest", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +122,24 @@ func FetchLatestRelease() (*GitHubRelease, error) {
 	return &release, nil
 }
 
-// IsBrewInstall checks whether the running forge binary was installed via Homebrew.
+// knownBrewPrefixes lists the install roots Homebrew uses on each platform.
+// Order is irrelevant — the prefixes do not nest.
+var knownBrewPrefixes = []string{"/opt/homebrew", "/usr/local", "/home/linuxbrew/.linuxbrew"}
+
+// MatchKnownBrewPrefix returns the Homebrew prefix whose Cellar contains path,
+// or "" if path is not under a known Cellar. It is the offline equivalent of
+// `brew --prefix`: callers reach for it when `brew --prefix` is unavailable
+// (brew not on PATH) but the binary's path still betrays its install root.
+func MatchKnownBrewPrefix(path string) string {
+	for _, prefix := range knownBrewPrefixes {
+		if strings.HasPrefix(path, prefix+"/Cellar/") {
+			return prefix
+		}
+	}
+	return ""
+}
+
+// IsBrewInstall checks whether the running multica binary was installed via Homebrew.
 func IsBrewInstall() bool {
 	exePath, err := os.Executable()
 	if err != nil {
@@ -138,12 +155,7 @@ func IsBrewInstall() bool {
 		return true
 	}
 
-	for _, prefix := range []string{"/opt/homebrew", "/usr/local", "/home/linuxbrew/.linuxbrew"} {
-		if strings.HasPrefix(resolved, prefix+"/Cellar/") {
-			return true
-		}
-	}
-	return false
+	return MatchKnownBrewPrefix(resolved) != ""
 }
 
 // GetBrewPrefix returns the Homebrew prefix by running `brew --prefix`, or empty string.
@@ -158,7 +170,7 @@ func GetBrewPrefix() string {
 // UpdateViaBrew runs `brew upgrade multica-ai/tap/multica`.
 // Returns the combined output and any error.
 func UpdateViaBrew() (string, error) {
-	cmd := exec.Command("brew", "upgrade", "asymbl/tap/forge")
+	cmd := exec.Command("brew", "upgrade", "multica-ai/tap/multica")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("brew upgrade failed: %w", err)
@@ -216,9 +228,9 @@ func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Dur
 	}
 
 	// Extract the binary from the archive.
-	binaryName := "forge"
+	binaryName := "multica"
 	if runtime.GOOS == "windows" {
-		binaryName = "forge.exe"
+		binaryName = "multica.exe"
 	}
 	var binaryData []byte
 	if runtime.GOOS == "windows" {
@@ -232,7 +244,7 @@ func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Dur
 
 	// Atomic replace: write to temp file, then rename over the original.
 	dir := filepath.Dir(exePath)
-	tmpFile, err := os.CreateTemp(dir, "forge-update-*")
+	tmpFile, err := os.CreateTemp(dir, "multica-update-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}

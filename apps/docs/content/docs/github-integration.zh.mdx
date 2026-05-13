@@ -1,0 +1,183 @@
+---
+title: GitHub 集成
+description: 一次性连接 GitHub App，之后 PR 的分支名、标题或正文里写了 issue 编号（例如 MUL-123），就会自动挂到那个 issue 上——PR 合并时 issue 自动转 Done。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+在 **Settings → Integrations** 里一次性连一个 GitHub 账号或组织。之后任何 PR 只要分支名、标题或正文里出现 issue 编号（例如 `MUL-123`），就会**自动关联**到那个 [issue](/issues)，出现在 issue 详情页右侧的 **Pull requests** 区块里——PR 合并时，issue 自动转 **Done**。
+
+没有 per-issue 的配置，整个流程是「编号驱动」的。
+
+## 集成做了什么
+
+| 出现位置 | 行为 |
+|---|---|
+| **Settings → Integrations** | 工作区 owner / admin 看到一个 GitHub 卡片，里面有 **Connect GitHub** 按钮。点击会打开 GitHub 的 App 安装页；装好后跳回 Settings。 |
+| **Issue 详情侧栏 → Pull requests** | 列出所有自动关联到该 issue 的 PR，含标题、仓库、状态（`Open` / `Draft` / `Merged` / `Closed`）和作者。点一行跳到 GitHub。 |
+| **Webhook（后台）** | 每次 `pull_request` 事件触发：upsert PR 行 → 扫描里面的 issue 编号 →（重新）建立 link。幂等——重投 delivery 不会产生重复记录。 |
+| **Merge 自动改 status** | PR 转 `merged` 时，所有已关联且状态不是 `Done` / `Cancelled` 的 issue 会被推到 `Done`。时间线里以 source 为 `github_pr_merged` 记录。 |
+
+只镜像 PR 本身。Commit、没开 PR 的分支、CI 检查状态都**不**入库——集成有意保持窄边界。
+
+## 编号是怎么匹配的
+
+Webhook 从三个字段抽取编号，顺序是：**PR head 分支** → **PR 标题** → **PR 正文**。匹配规则：
+
+- 大小写不敏感——`mul-123`、`MUL-123`、`Mul-123` 都能匹配
+- 有边界——左侧 `\b`、右侧只接数字，避免误抓 `v1.2-3`、email 地址等
+- 限定到本工作区——只匹配本工作区的 [issue prefix](/workspaces)。前缀是 `MUL` 的工作区里，PR 出现 `FOO-1` 不会匹配，即使数字撞另一个 issue 也不会
+- 自动去重——`Closes MUL-1, MUL-1` 只关联一次
+
+一个 PR 里**可以同时引用多个 issue**。比如 `Closes MUL-1, MUL-2`：PR 同时关联两个 issue，合并时两个 issue 都会转 `Done`。
+
+## Merge 自动转 Done 的规则
+
+PR 的 `merged` 字段翻成 `true` 时，逐个评估关联的 issue：
+
+| Issue 当前状态 | 结果 |
+|---|---|
+| `done` | 不变（已经是终态）|
+| `cancelled` | **不变**——cancelled 是用户明确放弃工作的信号，集成不覆盖 |
+| 其他（`todo` / `in_progress` / `in_review` / `blocked` / `backlog`）| 转成 `done` |
+
+PR **关闭但没合并**——只更新 PR 卡片的状态为 `Closed`，issue 状态不变。"关闭但不合并"语义因团队而异，Multica 不替用户做决定。
+
+<Callout type="info">
+状态变更的 actor 是 `system`。订阅了该 issue 的成员会收到 inbox 通知，和成员手动改状态时一致。
+</Callout>
+
+## 哪些情况不会自动关联
+
+- **Commit message 里的编号**——只扫 PR 的分支 / 标题 / 正文。一个 commit message 写 `MUL-123: fix login` 不会触发关联，除非同样的字符串也出现在 PR 标题或正文里
+- **PR 评论里的编号**——只扫 PR 自己的元数据，后续的 GitHub comment 不读
+- **App 没安装的仓库里的 PR**——没 App，Multica 收不到 webhook
+- **手动把 PR 关联到 issue**——暂时没有这个 UI。如果你们的约定把编号放到 Multica 不扫的地方，请改放到 PR 标题或正文里
+
+## 断开连接
+
+**Settings → Integrations** 里没有 installation 列表——现有 installation 直接到 GitHub 上管理：
+
+- **从 GitHub 卸载** —— 个人在 `https://github.com/settings/installations`、组织在 `https://github.com/organizations/<org>/settings/installations` 卸载 Multica App。Multica 收到 `installation.deleted` webhook 后立刻删行；任何已打开的 Settings tab 实时更新，不用刷新
+- **Multica 这边的断开是 admin only** —— 卡片对非 admin 不显示连接操作
+
+断开之后，已经镜像的 PR 行保留在数据库里——历史 issue 侧栏仍能显示当时关联的 PR，但来自这个 installation 的新 webhook 事件不再被接受。
+
+## 权限和可见性
+
+- **Connect / Disconnect** 需要工作区 **owner 或 admin**。普通成员能看到卡片描述但看不到 Connect 按钮
+- **Pull requests** 侧栏对所有能看到该 issue 的成员可见——和 issue 详情页其他部分权限一致
+- GitHub App 申请的是 PR 和 Metadata 的 **只读** 权限。Multica 从不向 GitHub 推 commit、评论或 status check
+
+## Self-Host 配置
+
+如果你在 Multica Cloud 上，集成已经配好——跳过本节。
+
+Self-Host 需要：建一个 GitHub App、指向你的 server、设两个环境变量。完整流程如下。
+
+### 1. 创建一个 GitHub App
+
+到下面其中一个页面：
+
+- 个人账号 → `https://github.com/settings/apps/new`
+- 组织 → `https://github.com/organizations/<org>/settings/apps/new`
+
+按下表填写：
+
+| 字段 | 值 |
+|---|---|
+| **GitHub App name** | 任何能辨识的名字，例如 `Multica` 或 `Multica (staging)` |
+| **Homepage URL** | 你的 Multica 前端，例如 `https://multica.example.com` |
+| **Callback URL** | 留空——本集成不使用 OAuth 用户身份 |
+| **Setup URL** | `https://<api-host>/api/github/setup`。**勾选 "Redirect on update"** |
+| **Webhook → Active** | 启用 |
+| **Webhook URL** | `https://<api-host>/api/webhooks/github` |
+| **Webhook secret** | 生成一个长随机字符串（例如 `openssl rand -hex 32`）。这个值会同样填到 step 2 的 env 里 |
+| **Permissions → Repository → Pull requests** | **Read-only** |
+| **Permissions → Repository → Metadata** | Read-only（必填）|
+| **Subscribe to events** | 勾选 **Pull request** |
+| **Where can this GitHub App be installed?** | 自选。单组织部署建议选 `Only on this account` |
+
+点 **Create GitHub App** 之后，从详情页记下两件事：
+
+- 顶部 **public link** 的尾部即 slug。`https://github.com/apps/multica-acme` → slug = `multica-acme`
+- 你刚生成的 **webhook secret**（GitHub 之后不会再让你读取这个值——现在就保存好）
+
+<Callout type="warning">
+**Webhook secret ≠ Client secret。** App 设置页里两个字段紧挨着。**Webhook secret** 用于签 `pull_request` payload，这才是 Multica 需要的那个；**Client secret** 是 OAuth 用的，和本集成无关。混淆这两个会得到「每条 webhook 都 `401 invalid signature`」的诡异症状。
+</Callout>
+
+### 2. 配置环境变量
+
+API server 上：
+
+```dotenv
+GITHUB_APP_SLUG=multica-acme
+GITHUB_WEBHOOK_SECRET=<你刚生成的 webhook secret>
+```
+
+两个都必填。任何一个缺失：
+
+- Settings 里 `Connect GitHub` 按钮会被 **disable**，并显示「not configured」提示
+- `/api/webhooks/github` 直接返回 **`503 github webhooks not configured`**——Multica 在 secret 没配置时拒绝处理事件，不会出现「没 secret 也接受 webhook」的安全坑
+
+`FRONTEND_ORIGIN` 也必须设置（任何生产 self-host 都已经设了）——setup 回调结束后用它把用户跳回 `<FRONTEND_ORIGIN>/settings`。
+
+设完 env 重启 API。
+
+### 3. 执行 migration
+
+集成的表在 migration `079_github_integration` 里。如果是升级既有部署：
+
+```bash
+make migrate-up
+```
+
+会创建三张表：`github_installation`、`github_pull_request`、`issue_pull_request`。三张表都 cascade 跟随 workspace——删工作区会自动清理。
+
+### 4. 在 UI 里连接
+
+到 Multica：
+
+1. 以 owner 或 admin 身份打开 **Settings → Integrations**
+2. 点 **Connect GitHub**，GitHub 在新 tab 打开
+3. 选择要授权的仓库，点 **Install**
+4. GitHub 跳回 `<api-host>/api/github/setup`，落库后再跳到 `<FRONTEND_ORIGIN>/settings?github_connected=1`
+
+之后在任意一个仓库开一个分支 / 标题 / 正文带本工作区 issue 编号的 PR——几秒内对应 issue 的详情页上就能看到 Pull requests 区块。
+
+### 5. 用 curl 自检
+
+如果 GitHub 的 **Recent Deliveries** 里第一次 PR 事件就报 `401 invalid signature`，说明两边的 secret 不一致。绕过 GitHub 直接测 server 是最快的定位方法：
+
+```bash
+SECRET="<你填给 GITHUB_WEBHOOK_SECRET 的值>"
+BODY='{"zen":"test"}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $NF}')
+curl -i -X POST https://<api-host>/api/webhooks/github \
+  -H "X-Hub-Signature-256: sha256=$SIG" \
+  -H "X-GitHub-Event: ping" \
+  -H "Content-Type: application/json" \
+  -d "$BODY"
+```
+
+| HTTP 状态 | 含义 | 修法 |
+|---|---|---|
+| `200` `{"ok":"pong"}` | server 加载的 secret 和你 `$SECRET` 一致——GitHub 那边的 secret 才是错的 | 编辑 App → Webhook secret 字段**粘相同的值** → **必须点 Save changes**（不点 Save 等于没改）→ Redeliver |
+| `401 invalid signature` | server 加载的 secret **不是**你以为的那个 | 进容器确认 env 实际生效（例如 `kubectl exec` → `echo -n "$GITHUB_WEBHOOK_SECRET" \| wc -c`），重新部署 |
+| `503 github webhooks not configured` | `GITHUB_WEBHOOK_SECRET` 在进程里是空的 | 配上 env，重启 API |
+
+## 已知限制
+
+目前还没做的几个边界：
+
+- **手动 link UI 暂未提供**——关联 PR 的唯一方法是把 issue 编号写到 PR 分支 / 标题 / 正文
+- **不读 CI / check 状态**——只镜像 PR 本身，构建状态、reviewer 评论、reviewer 列表都没接进 Multica
+- **没有工作区级别的 merge → status 映射配置**——默认固定是 `merged → done`（cancelled 除外）。可配置映射是后续迭代
+- **同 issue 多 PR 时，merge 行为偏激进**——两个 PR 都引用 `MUL-123` 时，第一个 merge 就把 issue 转 Done。"等所有关联 PR 都解决再推进 issue 状态"的优化已经在做了
+
+## 下一步
+
+- [Issues](/issues) —— PR 引用的 issue 编号（`MUL-123`）的来源
+- [工作区](/workspaces) —— 工作区 issue prefix 的设置位置
+- [环境变量](/environment-variables) —— 完整 env 清单，包含上面提到的 GitHub 变量

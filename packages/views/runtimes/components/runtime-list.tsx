@@ -21,6 +21,7 @@ import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { DataTable } from "@multica/ui/components/ui/data-table";
 import { useNavigation } from "../../navigation";
 import { type RuntimeRow, createRuntimeColumns } from "./runtime-columns";
+import { useT } from "../../i18n";
 
 interface RuntimeWorkload {
   agentIds: string[];
@@ -38,7 +39,7 @@ const EMPTY_WORKLOAD: RuntimeWorkload = {
 // the avatar stack; .length doubles as the agent count) plus task counts
 // split by status. Built once per render off the workspace-wide
 // agents / agent-task-snapshot caches; filtered locally — no extra requests.
-function buildWorkloadIndex(
+export function buildWorkloadIndex(
   agents: Agent[],
   tasks: AgentTask[],
 ): Map<string, RuntimeWorkload> {
@@ -46,7 +47,7 @@ function buildWorkloadIndex(
   const agentToRuntime = new Map<string, string>();
 
   for (const a of agents) {
-    if (!a.runtime_id) continue;
+    if (!a.runtime_id || a.archived_at) continue;
     agentToRuntime.set(a.id, a.runtime_id);
     const entry =
       result.get(a.runtime_id) ?? {
@@ -84,6 +85,7 @@ export function RuntimeList({
 }) {
   void updatableIds;
 
+  const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
   const slug = useWorkspaceSlug();
   const navigation = useNavigation();
@@ -141,8 +143,9 @@ export function RuntimeList({
         latestCliVersion,
         wsId,
         now,
+        t,
       }),
-    [showOwner, latestCliVersion, wsId, now],
+    [showOwner, latestCliVersion, wsId, now, t],
   );
 
   const table = useReactTable({

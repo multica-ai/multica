@@ -69,6 +69,8 @@ services:
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
       POSTHOG_API_KEY: ${POSTHOG_API_KEY:-}
       POSTHOG_HOST: ${POSTHOG_HOST:-https://us.i.posthog.com}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
     restart: unless-stopped
     deploy:
       resources:

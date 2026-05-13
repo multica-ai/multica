@@ -40,8 +40,8 @@ check "1.2 Electron appId is com.asymbl.forge" \
 check "1.3 Asymbl mark PNG bundled in renderer/public" \
   "test -f apps/desktop/src/renderer/public/brand/asymbl-mark.png"
 
-check "1.4 Desktop login page uses VITE_APP_URL" \
-  "grep -q 'VITE_APP_URL' apps/desktop/src/renderer/src/pages/login.tsx"
+check "1.4 Desktop login page reads app URL from self-host runtime config" \
+  "grep -q 'requireRuntimeAppUrl\|runtimeConfig' apps/desktop/src/renderer/src/pages/login.tsx"
 
 check "1.5 router.go reads ALLOWED_EMAIL_DOMAINS env var (plural, not singular)" \
   "grep -q 'ALLOWED_EMAIL_DOMAINS' server/cmd/server/router.go"

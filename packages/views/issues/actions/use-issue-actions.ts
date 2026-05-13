@@ -21,6 +21,7 @@ import {
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import { canAssignAgent } from "../components/pickers";
 import { useNavigation } from "../../navigation";
+import { useT } from "../../i18n";
 
 const BACKLOG_HINT_LS_KEY = "multica:backlog-agent-hint-dismissed";
 
@@ -45,6 +46,7 @@ export interface UseIssueActionsResult {
  * `issue` is null.
  */
 export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
+  const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
@@ -83,13 +85,14 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const issueId = issue?.id ?? null;
   const issueStatus = issue?.status ?? null;
   const issueIdentifier = issue?.identifier ?? null;
+  const issueProjectId = issue?.project_id ?? null;
 
   const updateField = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
       if (!issueId) return;
       updateIssue.mutate(
         { id: issueId, ...updates },
-        { onError: () => toast.error("Failed to update issue") },
+        { onError: () => toast.error(t(($) => $.detail.update_failed)) },
       );
       // Hint: assigning an agent to a backlog issue won't trigger execution
       // until the issue is moved to an active status.
@@ -103,7 +106,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
         openModal("issue-backlog-agent-hint", { issueId });
       }
     },
-    [issueId, issueStatus, updateIssue, openModal],
+    [issueId, issueStatus, updateIssue, openModal, t],
   );
 
   const togglePin = useCallback(() => {
@@ -117,27 +120,23 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
 
   const copyLink = useCallback(async () => {
     if (!issueId) return;
-    const path = paths.issueDetail(issueId);
-    const url = navigation.getShareableUrl
-      ? navigation.getShareableUrl(path)
-      : typeof window !== "undefined"
-        ? window.location.origin + path
-        : path;
+    const url = navigation.getShareableUrl(paths.issueDetail(issueId));
     try {
       await navigator.clipboard.writeText(url);
-      toast.success("Link copied");
+      toast.success(t(($) => $.detail.link_copied));
     } catch {
-      toast.error("Failed to copy link");
+      toast.error(t(($) => $.detail.link_copy_failed));
     }
-  }, [paths, issueId, navigation]);
+  }, [paths, issueId, navigation, t]);
 
   const openCreateSubIssue = useCallback(() => {
     if (!issueId) return;
     openModal("create-issue", {
       parent_issue_id: issueId,
       parent_issue_identifier: issueIdentifier,
+      ...(issueProjectId ? { project_id: issueProjectId } : {}),
     });
-  }, [openModal, issueId, issueIdentifier]);
+  }, [openModal, issueId, issueIdentifier, issueProjectId]);
 
   const openSetParent = useCallback(() => {
     if (!issueId) return;

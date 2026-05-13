@@ -5,20 +5,7 @@ import { Loader2, Save } from "lucide-react";
 import type { Agent } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { ContentEditor } from "../../../editor/content-editor";
-
-const INSTRUCTIONS_PLACEHOLDER = `Define this agent's role, expertise, and working style.
-
-# Example
-You are a frontend engineer specializing in React and TypeScript.
-
-## Working Style
-- Write small, focused PRs — one commit per logical change
-- Prefer composition over inheritance
-- Always add unit tests for new components
-
-## Constraints
-- Do not modify shared/ types without explicit approval
-- Follow the existing component patterns in features/`;
+import { useT } from "../../../i18n";
 
 export function InstructionsTab({
   agent,
@@ -29,6 +16,7 @@ export function InstructionsTab({
   onSave: (instructions: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const { t } = useT("agents");
   const [value, setValue] = useState(agent.instructions ?? "");
   const [saving, setSaving] = useState(false);
   const isDirty = value !== (agent.instructions ?? "");
@@ -60,8 +48,7 @@ export function InstructionsTab({
     // the Save row scrolls off-screen as the user writes longer prompts.
     <div className="flex h-full flex-col gap-4">
       <p className="text-xs text-muted-foreground">
-        Define this agent&apos;s identity and working style. Injected into the
-        agent&apos;s context for every task. Markdown is supported.
+        {t(($) => $.tab_body.instructions.intro)}
       </p>
 
       <div
@@ -77,7 +64,7 @@ export function InstructionsTab({
           key={agent.id}
           defaultValue={value}
           onUpdate={setValue}
-          placeholder={INSTRUCTIONS_PLACEHOLDER}
+          placeholder={t(($) => $.tab_body.instructions.placeholder)}
           debounceMs={150}
           // Mention has no business meaning in agent system prompts — typing
           // `@` would just confuse users with a member/agent picker.
@@ -92,7 +79,7 @@ export function InstructionsTab({
 
       <div className="flex items-center justify-end gap-3">
         {isDirty && (
-          <span className="text-xs text-muted-foreground">Unsaved changes</span>
+          <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
         )}
         <Button
           size="sm"
@@ -104,7 +91,7 @@ export function InstructionsTab({
           ) : (
             <Save className="h-3.5 w-3.5" />
           )}
-          Save
+          {t(($) => $.tab_body.common.save)}
         </Button>
       </div>
     </div>

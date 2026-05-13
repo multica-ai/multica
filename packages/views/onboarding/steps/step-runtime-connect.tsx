@@ -21,6 +21,7 @@ import { RuntimeAsidePanel } from "../components/runtime-aside-panel";
 import { useRuntimePicker } from "../components/use-runtime-picker";
 import { CloudWaitlistExpand } from "../components/cloud-waitlist-expand";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
+import { useT } from "../../i18n";
 
 /**
  * Step 3 (desktop) — connect a runtime.
@@ -57,6 +58,7 @@ export function StepRuntimeConnect({
 
   return (
     <FancyView
+      wsId={wsId}
       runtimes={runtimes}
       selected={selected}
       selectedId={selectedId}
@@ -78,6 +80,7 @@ type Phase = "scanning" | "found" | "empty";
 const EMPTY_TIMEOUT_MS = 5000;
 
 function FancyView({
+  wsId,
   runtimes,
   selected,
   selectedId,
@@ -86,6 +89,7 @@ function FancyView({
   onBack,
   onWaitlistSubmitted,
 }: {
+  wsId: string;
   runtimes: AgentRuntime[];
   selected: AgentRuntime | null;
   selectedId: string | null;
@@ -94,6 +98,7 @@ function FancyView({
   onBack?: () => void;
   onWaitlistSubmitted?: () => void;
 }) {
+  const { t } = useT("onboarding");
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
 
@@ -140,7 +145,9 @@ function FancyView({
     const detectMs = Math.round(now - (detectStartRef.current ?? now));
 
     captureEvent("onboarding_runtime_detected", {
-      source: "step3_desktop",
+      source: "onboarding",
+      surface: "step3_desktop",
+      workspace_id: wsId,
       outcome: phase,
       runtime_count: runtimes.length,
       online_count: onlineCount,
@@ -190,14 +197,14 @@ function FancyView({
 
   const footerHint =
     phase === "found" && selected
-      ? `Selected: ${selected.name}`
+      ? t(($) => $.step_runtime.hint_selected, { name: selected.name })
       : phase === "found"
-        ? "Pick a runtime above to continue."
+        ? t(($) => $.step_runtime.hint_pick)
         : phase === "scanning"
-          ? "Waiting for the first result…"
+          ? t(($) => $.step_runtime.hint_waiting)
           : waitlistSubmitted
-            ? "You're on the waitlist — skip to keep exploring."
-            : "Skip to enter your workspace, or join the cloud waitlist above.";
+            ? t(($) => $.step_runtime.hint_waitlist_done)
+            : t(($) => $.step_runtime.hint_skip_or_waitlist);
 
   return (
     <div className="animate-onboarding-enter grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_480px]">
@@ -214,7 +221,7 @@ function FancyView({
               className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              Back
+              {t(($) => $.common.back)}
             </button>
           ) : (
             <span aria-hidden className="w-0" />
@@ -278,7 +285,7 @@ function FancyView({
             disabled={submitting}
             onClick={handleSkip}
           >
-            Skip for now
+            {t(($) => $.step_runtime.skip)}
           </Button>
           <Button
             size="lg"
@@ -286,7 +293,7 @@ function FancyView({
             onClick={handleContinue}
           >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            Continue
+            {t(($) => $.common.continue)}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </footer>
@@ -309,18 +316,20 @@ function FancyView({
 // ------------------------------------------------------------
 
 function ScanningView() {
+  const { t } = useT("onboarding");
   return (
     <div>
       <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
-        Looking for your tools…
+        {t(($) => $.step_runtime.scanning_headline)}
       </h1>
       <p className="mt-4 max-w-[560px] text-[15.5px] leading-[1.55] text-muted-foreground">
-        Forge drives local AI coding tools like{" "}
-        <span className="font-medium text-foreground">Claude Code</span>,{" "}
-        <span className="font-medium text-foreground">Codex</span>,{" "}
-        <span className="font-medium text-foreground">Cursor</span>, and
-        others. We&apos;re waiting to hear back from your machine about
-        which ones are installed.
+        {t(($) => $.step_runtime.scanning_lede_prefix)}
+        <span className="font-medium text-foreground">{"Claude Code"}</span>
+        {", "}
+        <span className="font-medium text-foreground">{"Codex"}</span>
+        {", "}
+        <span className="font-medium text-foreground">{"Cursor"}</span>
+        {t(($) => $.step_runtime.scanning_lede_suffix)}
       </p>
       <div className="mt-10 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
         <SkeletonRuntimeCard />
@@ -341,30 +350,29 @@ function FoundView({
   onSelect: (id: string) => void;
   onlineCount: number;
 }) {
+  const { t } = useT("onboarding");
   const total = runtimes.length;
   const statusLabel =
     onlineCount === total
-      ? "all online"
+      ? t(($) => $.step_runtime.status_all_online)
       : onlineCount === 0
-        ? "none online"
-        : `${onlineCount} online`;
+        ? t(($) => $.step_runtime.status_none_online)
+        : t(($) => $.step_runtime.status_n_online, { count: onlineCount });
   const statusTone =
     onlineCount === 0 ? "text-muted-foreground" : "text-success";
 
   return (
     <div>
       <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
-        We found your runtimes.
+        {t(($) => $.step_runtime.found_headline)}
       </h1>
       <p className="mt-4 max-w-[560px] text-[15.5px] leading-[1.55] text-muted-foreground">
-        We scanned your machine for AI coding tools you&apos;ve already
-        set up. Pick one for your first agent.
+        {t(($) => $.step_runtime.found_lede)}
       </p>
 
-      {/* Summary strip — trust signal ("we really did scan") */}
       <div className="mt-8 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-muted/60 px-4 py-2.5 text-xs">
         <span className="font-semibold text-foreground">
-          {total} runtime{total === 1 ? "" : "s"}
+          {t(($) => $.step_runtime.runtime_count, { count: total })}
         </span>
         <span className="text-muted-foreground">·</span>
         <span className={cn("flex items-center gap-1", statusTone)}>
@@ -402,40 +410,40 @@ function EmptyView({
   onWaitlistSubmitted: () => void;
   onSkip: () => void;
 }) {
-  // Two exits: "Skip for now" (enter the workspace in read-only mode)
-  // or "Join waitlist" (capture interest in the hosted runtime we
-  // haven't shipped yet). We deliberately don't link out to Claude
-  // Code / Codex / Cursor here — those are other companies' products,
-  // and nudging the user to install one would frame Forge as a
-  // launcher for them rather than a product that runs them.
+  const { t } = useT("onboarding");
   const [waitlistOpen, setWaitlistOpen] = useState(false);
 
   return (
     <div>
       <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
-        No supported tools detected.
+        {t(($) => $.step_runtime.empty_headline)}
       </h1>
       <p className="mt-4 max-w-[560px] text-[15.5px] leading-[1.55] text-muted-foreground">
-        Forge drives local AI coding tools like{" "}
-        <span className="font-medium text-foreground">Claude Code</span>,{" "}
-        <span className="font-medium text-foreground">Codex</span>,{" "}
-        <span className="font-medium text-foreground">Cursor</span>, and
-        others — we didn&apos;t find any on this machine. Install one and
-        come back, or pick a path below.
+        {t(($) => $.step_runtime.empty_lede_prefix)}
+        <span className="font-medium text-foreground">{"Claude Code"}</span>
+        {", "}
+        <span className="font-medium text-foreground">{"Codex"}</span>
+        {", "}
+        <span className="font-medium text-foreground">{"Cursor"}</span>
+        {t(($) => $.step_runtime.empty_lede_suffix)}
       </p>
 
       <div className="mt-10 flex flex-col gap-3.5">
         <EmptyCard
-          title="Skip for now"
-          subtitle="Enter your workspace in read-only mode. Agents can't execute tasks until a runtime connects — but you can still browse, plan, and invite teammates."
-          actionLabel="Skip"
+          title={t(($) => $.step_runtime.empty_skip_title)}
+          subtitle={t(($) => $.step_runtime.empty_skip_subtitle)}
+          actionLabel={t(($) => $.step_runtime.empty_skip_action)}
           onAction={onSkip}
         />
 
         <EmptyCard
-          title="Join the cloud runtime waitlist"
-          subtitle="We'll host the runtime for you — no local install, no setup. Not live yet; click to leave your email and get notified."
-          actionLabel={waitlistSubmitted ? "On the waitlist" : "Join waitlist"}
+          title={t(($) => $.step_runtime.empty_waitlist_title)}
+          subtitle={t(($) => $.step_runtime.empty_waitlist_subtitle)}
+          actionLabel={
+            waitlistSubmitted
+              ? t(($) => $.step_runtime.empty_waitlist_done)
+              : t(($) => $.step_runtime.empty_waitlist_action)
+          }
           onAction={() => setWaitlistOpen(true)}
         />
       </div>
@@ -446,10 +454,9 @@ function EmptyView({
       >
         <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[520px]">
           <DialogHeader>
-            <DialogTitle>Join the cloud runtime waitlist</DialogTitle>
+            <DialogTitle>{t(($) => $.step_runtime.dialog_title)}</DialogTitle>
             <DialogDescription>
-              Cloud runtimes aren&apos;t live yet. Leave your email and
-              we&apos;ll email you when they are.
+              {t(($) => $.step_runtime.dialog_description)}
             </DialogDescription>
           </DialogHeader>
 
@@ -462,7 +469,9 @@ function EmptyView({
 
           <DialogFooter>
             <Button variant="ghost" onClick={() => setWaitlistOpen(false)}>
-              {waitlistSubmitted ? "Close" : "Cancel"}
+              {waitlistSubmitted
+                ? t(($) => $.step_runtime.dialog_close)
+                : t(($) => $.step_runtime.dialog_cancel)}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -523,6 +532,7 @@ function RuntimeCard({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useT("onboarding");
   const online = runtime.status === "online";
 
   return (
@@ -553,7 +563,7 @@ function RuntimeCard({
             )}
             aria-hidden
           />
-          {online ? "online" : "offline"}
+          {online ? t(($) => $.step_runtime.online_label) : t(($) => $.step_runtime.offline_label)}
         </div>
       </div>
       <RadioMark selected={selected} />
@@ -592,4 +602,3 @@ function RadioMark({ selected }: { selected: boolean }) {
     </span>
   );
 }
-

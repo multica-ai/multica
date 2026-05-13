@@ -25,7 +25,7 @@ export interface InboxItem {
   workspace_id: string;
   recipient_type: "member" | "agent";
   recipient_id: string;
-  actor_type: "member" | "agent" | null;
+  actor_type: "member" | "agent" | "system" | null;
   actor_id: string | null;
   type: InboxItemType;
   severity: InboxSeverity;

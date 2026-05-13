@@ -2,6 +2,7 @@
 
 import { AlertCircle, WifiOff } from "lucide-react";
 import type { AgentAvailability } from "@multica/core/agents";
+import { useT } from "../../i18n";
 
 interface Props {
   /** Display name shown in the banner copy. */
@@ -18,24 +19,18 @@ interface Props {
 // reachable. Hides on `online`, `undefined`, or while presence is loading —
 // users get the silent default behaviour and only see copy when there's a
 // real-world implication for the message they're about to send.
-//
-// Sits outside the input card (sibling of ChatInput) so the hint reads as
-// a session-level signal rather than per-message context. The outer wrapper
-// (`px-5`) and the inner container (`mx-auto max-w-4xl`) mirror ChatInput's
-// own layout so the banner's edges line up with the input box on every
-// viewport size — without `max-w-4xl` the banner stretches wider than the
-// input on large screens and looks "loose".
 export function OfflineBanner({ agentName, availability }: Props) {
+  const { t } = useT("chat");
   if (availability !== "offline" && availability !== "unstable") return null;
 
-  const name = agentName?.trim() || "the agent";
+  const name = agentName?.trim() || t(($) => $.offline_banner.fallback_name);
   if (availability === "unstable") {
     return (
       <div className="px-5 mb-1.5">
         <div className="mx-auto flex w-full max-w-4xl items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 ring-1 ring-amber-200/60 dark:ring-amber-900/40">
           <AlertCircle className="size-3.5 shrink-0" />
           <span className="truncate">
-            {name}&apos;s connection is unstable — replies may be delayed.
+            {t(($) => $.offline_banner.unstable, { name })}
           </span>
         </div>
       </div>
@@ -46,7 +41,7 @@ export function OfflineBanner({ agentName, availability }: Props) {
       <div className="mx-auto flex w-full max-w-4xl items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs bg-muted text-muted-foreground ring-1 ring-border">
         <WifiOff className="size-3.5 shrink-0" />
         <span className="truncate">
-          {name} is offline — your message will be delivered when they&apos;re back.
+          {t(($) => $.offline_banner.offline, { name })}
         </span>
       </div>
     </div>

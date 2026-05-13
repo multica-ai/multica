@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { captureEvent } from "@multica/core/analytics";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import {
@@ -24,6 +25,7 @@ import { StepRuntimeConnect } from "./steps/step-runtime-connect";
 import { StepPlatformFork } from "./steps/step-platform-fork";
 import { StepAgent } from "./steps/step-agent";
 import { StepFirstIssue } from "./steps/step-first-issue";
+import { useT } from "../i18n";
 
 const EMPTY_QUESTIONNAIRE: QuestionnaireAnswers = {
   team_size: null,
@@ -55,6 +57,7 @@ export function OnboardingFlow({
   onComplete: (workspace?: Workspace) => void;
   runtimeInstructions?: React.ReactNode;
 }) {
+  const { t } = useT("onboarding");
   const user = useAuthStore((s) => s.user);
   if (!user) {
     throw new Error("OnboardingFlow requires an authenticated user");
@@ -91,6 +94,15 @@ export function OnboardingFlow({
   });
   const existingWorkspace = workspace ?? workspaces[0] ?? null;
   const canSkipWelcome = workspacesFetched && workspaces.length > 0;
+  const startedEmittedRef = useRef(false);
+  useEffect(() => {
+    if (startedEmittedRef.current || !workspacesFetched) return;
+    startedEmittedRef.current = true;
+    captureEvent("onboarding_started", {
+      source: "onboarding",
+      ...(existingWorkspace ? { workspace_id: existingWorkspace.id } : {}),
+    });
+  }, [existingWorkspace, workspacesFetched]);
 
   // The `runtimeInstructions` slot is only plumbed by the web shell
   // (desktop bundles a daemon, so a CLI install card would be noise
@@ -111,10 +123,10 @@ export function OnboardingFlow({
   // they never got a starter project and may want one now.
   const handleWelcomeSkip = useCallback(async () => {
     try {
-      await completeOnboarding("skip_existing");
+      await completeOnboarding("skip_existing", workspaces[0]?.id);
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Failed to finish onboarding",
+        err instanceof Error ? err.message : t(($) => $.errors.skip_failed),
       );
       return;
     }
@@ -277,6 +289,7 @@ export function OnboardingFlow({
             <StepFirstIssue
               onFinished={handleFinished}
               completionPath={completionPath}
+              workspaceId={workspace?.id}
             />
           )}
         </div>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -52,6 +53,93 @@ func TestNormalizeServerBaseURL(t *testing.T) {
 	}
 }
 
+func TestTriggerRestart_BrewLinuxCellarDeleted(t *testing.T) {
+	originalIsBrewInstall := isBrewInstall
+	originalGetBrewPrefix := getBrewPrefix
+	t.Cleanup(func() {
+		isBrewInstall = originalIsBrewInstall
+		getBrewPrefix = originalGetBrewPrefix
+	})
+
+	prefix := filepath.Join(t.TempDir(), "home", "linuxbrew", ".linuxbrew")
+	deletedCellarPath := filepath.Join(prefix, "Cellar", "multica", "0.2.9", "bin", "multica")
+	isBrewInstall = func() bool { return true }
+	getBrewPrefix = func() string { return prefix }
+
+	d := &Daemon{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	d.triggerRestart()
+
+	want := filepath.Join(prefix, "bin", "multica")
+	if got := d.RestartBinary(); got != want {
+		t.Fatalf("restart binary = %q, want %q", got, want)
+	}
+	if got := d.RestartBinary(); got == deletedCellarPath {
+		t.Fatalf("restart binary used deleted Cellar path %q", got)
+	}
+}
+
+// When `brew --prefix` is unavailable but the executable path is under a
+// known Cellar root, triggerRestart must recover the prefix from the
+// known-prefix list and target <prefix>/bin/multica.
+func TestTriggerRestart_BrewPrefixUnavailable_FallsBackToKnownPrefix(t *testing.T) {
+	originalIsBrewInstall := isBrewInstall
+	originalGetBrewPrefix := getBrewPrefix
+	originalMatchKnownBrewPrefix := matchKnownBrewPrefix
+	t.Cleanup(func() {
+		isBrewInstall = originalIsBrewInstall
+		getBrewPrefix = originalGetBrewPrefix
+		matchKnownBrewPrefix = originalMatchKnownBrewPrefix
+	})
+
+	const knownPrefix = "/home/linuxbrew/.linuxbrew"
+	isBrewInstall = func() bool { return true }
+	getBrewPrefix = func() string { return "" }
+	matchKnownBrewPrefix = func(string) string { return knownPrefix }
+
+	d := &Daemon{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	d.triggerRestart()
+
+	want := filepath.Join(knownPrefix, "bin", "multica")
+	if got := d.RestartBinary(); got != want {
+		t.Fatalf("restart binary = %q, want %q", got, want)
+	}
+}
+
+// When `brew --prefix` is unavailable AND the executable is not under any
+// known Cellar root, triggerRestart logs a warning and keeps the executable
+// path (no fabricated <prefix>/bin/multica path).
+func TestTriggerRestart_BrewPrefixUnavailable_NoKnownPrefix_KeepsExecutable(t *testing.T) {
+	originalIsBrewInstall := isBrewInstall
+	originalGetBrewPrefix := getBrewPrefix
+	originalMatchKnownBrewPrefix := matchKnownBrewPrefix
+	t.Cleanup(func() {
+		isBrewInstall = originalIsBrewInstall
+		getBrewPrefix = originalGetBrewPrefix
+		matchKnownBrewPrefix = originalMatchKnownBrewPrefix
+	})
+
+	isBrewInstall = func() bool { return true }
+	getBrewPrefix = func() string { return "" }
+	matchKnownBrewPrefix = func(string) string { return "" }
+
+	d := &Daemon{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	d.triggerRestart()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	if got := d.RestartBinary(); got != exe {
+		t.Fatalf("restart binary = %q, want unchanged executable %q", got, exe)
+	}
+}
+
 func TestNewTaskSlotSemaphoreReturnsStableSlotIndexes(t *testing.T) {
 	t.Parallel()
 
@@ -89,6 +177,31 @@ func TestNewTaskSlotSemaphoreReturnsStableSlotIndexes(t *testing.T) {
 	}
 }
 
+func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		provider string
+		want     bool
+	}{
+		{provider: "openclaw", want: true},
+		{provider: "hermes", want: true},
+		{provider: "kiro", want: true},
+		{provider: "kimi", want: true},
+		{provider: "codex", want: false},
+		{provider: "claude", want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Parallel()
+			if got := providerNeedsInlineSystemPrompt(tc.provider); got != tc.want {
+				t.Fatalf("providerNeedsInlineSystemPrompt(%q) = %v, want %v", tc.provider, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestBuildPromptContainsIssueID(t *testing.T) {
 	t.Parallel()
 
@@ -101,7 +214,7 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 				{Name: "Concise", Content: "Be concise."},
 			},
 		},
-	})
+	}, "claude")
 
 	// Prompt should contain the issue ID and CLI hint.
 	for _, want := range []string{
@@ -127,7 +240,7 @@ func TestBuildPromptNoIssueDetails(t *testing.T) {
 	prompt := BuildPrompt(Task{
 		IssueID: "test-id",
 		Agent:   &AgentData{Name: "Test"},
-	})
+	}, "claude")
 
 	// Prompt should not contain issue title/description (agent fetches via CLI).
 	for _, absent := range []string{"**Issue:**", "**Summary:**"} {
@@ -146,7 +259,7 @@ func TestBuildPromptAutopilotRunOnly(t *testing.T) {
 		AutopilotTitle:       "Daily dependency check",
 		AutopilotDescription: "Check dependencies and report outdated packages.",
 		AutopilotSource:      "manual",
-	})
+	}, "claude")
 
 	for _, want := range []string{
 		"run-only mode",
@@ -178,7 +291,7 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 		TriggerCommentID:      commentID,
 		TriggerCommentContent: commentContent,
 		Agent:                 &AgentData{Name: "Test"},
-	})
+	}, "claude")
 
 	// Prompt should contain the comment content, the trigger comment id, and
 	// the full reply command with --parent. Re-emitting --parent on every turn
@@ -223,7 +336,7 @@ func TestBuildPromptCommentTriggeredByAgent(t *testing.T) {
 		TriggerAuthorType:     "agent",
 		TriggerAuthorName:     "Atlas",
 		Agent:                 &AgentData{Name: "Test"},
-	})
+	}, "claude")
 
 	for _, want := range []string{
 		"Another agent (Atlas)",
@@ -249,7 +362,7 @@ func TestBuildPromptCommentTriggeredByMember(t *testing.T) {
 		TriggerAuthorType:     "member",
 		TriggerAuthorName:     "Alice",
 		Agent:                 &AgentData{Name: "Test"},
-	})
+	}, "claude")
 
 	if !strings.Contains(prompt, "A user just left a new comment") {
 		t.Fatalf("member-triggered prompt should label the author as a user\n---\n%s", prompt)
@@ -278,7 +391,7 @@ func TestBuildPromptCommentTriggeredNoContent(t *testing.T) {
 		IssueID:          "test-id",
 		TriggerCommentID: "comment-id",
 		Agent:            &AgentData{Name: "Test"},
-	})
+	}, "claude")
 
 	if !strings.Contains(prompt, "forge issue get") {
 		t.Fatal("prompt missing CLI hint")
@@ -300,6 +413,278 @@ func TestIsWorkspaceNotFoundError(t *testing.T) {
 
 	if isWorkspaceNotFoundError(&requestError{StatusCode: http.StatusInternalServerError, Body: `{"error":"workspace not found"}`}) {
 		t.Fatal("did not expect 500 to be treated as workspace not found")
+	}
+}
+
+func TestIsTaskNotFoundError(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "404 with task not found body",
+			err: &requestError{
+				Method:     http.MethodPost,
+				Path:       "/api/daemon/tasks/abc/messages",
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"task not found"}`,
+			},
+			want: true,
+		},
+		{
+			name: "404 with mixed-case body still matches",
+			err: &requestError{
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"Task Not Found"}`,
+			},
+			want: true,
+		},
+		{
+			name: "500 with same body is not task-not-found",
+			err: &requestError{
+				StatusCode: http.StatusInternalServerError,
+				Body:       `{"error":"task not found"}`,
+			},
+			want: false,
+		},
+		{
+			name: "404 with workspace-not-found body is not task-not-found",
+			err: &requestError{
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"workspace not found"}`,
+			},
+			want: false,
+		},
+		{
+			name: "non-requestError",
+			err:  errors.New("network down"),
+			want: false,
+		},
+		{
+			name: "nil",
+			err:  nil,
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isTaskNotFoundError(tc.err); got != tc.want {
+				t.Fatalf("isTaskNotFoundError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsRuntimeNotFoundError(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "404 with runtime not found body from heartbeat",
+			err: &requestError{
+				Method:     http.MethodPost,
+				Path:       "/api/daemon/heartbeat",
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"runtime not found"}`,
+			},
+			want: true,
+		},
+		{
+			name: "404 with runtime not found body from claim",
+			err: &requestError{
+				Method:     http.MethodPost,
+				Path:       "/api/daemon/runtimes/abc/tasks/claim",
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"runtime not found"}`,
+			},
+			want: true,
+		},
+		{
+			name: "mixed-case body still matches",
+			err: &requestError{
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"Runtime Not Found"}`,
+			},
+			want: true,
+		},
+		{
+			name: "500 with same body must NOT be treated as runtime-not-found",
+			err: &requestError{
+				StatusCode: http.StatusInternalServerError,
+				Body:       `{"error":"runtime not found"}`,
+			},
+			want: false,
+		},
+		{
+			name: "404 with task-not-found body is not runtime-not-found",
+			err: &requestError{
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"task not found"}`,
+			},
+			want: false,
+		},
+		{
+			name: "404 with workspace-not-found body is not runtime-not-found",
+			err: &requestError{
+				StatusCode: http.StatusNotFound,
+				Body:       `{"error":"workspace not found"}`,
+			},
+			want: false,
+		},
+		{
+			name: "non-requestError",
+			err:  errors.New("network down"),
+			want: false,
+		},
+		{
+			name: "nil",
+			err:  nil,
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isRuntimeNotFoundError(tc.err); got != tc.want {
+				t.Fatalf("isRuntimeNotFoundError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestShouldInterruptAgent(t *testing.T) {
+	t.Parallel()
+
+	notFound := &requestError{
+		StatusCode: http.StatusNotFound,
+		Body:       `{"error":"task not found"}`,
+	}
+	transient := &requestError{
+		StatusCode: http.StatusBadGateway,
+		Body:       `<html>...</html>`,
+	}
+
+	cases := []struct {
+		name   string
+		status string
+		err    error
+		want   bool
+	}{
+		{name: "status cancelled", status: "cancelled", err: nil, want: true},
+		{name: "task deleted (404)", status: "", err: notFound, want: true},
+		{name: "running normally", status: "running", err: nil, want: false},
+		{name: "transient 5xx is not a cancel signal", status: "", err: transient, want: false},
+		{name: "no information yet", status: "", err: nil, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := shouldInterruptAgent(tc.status, tc.err); got != tc.want {
+				t.Fatalf("shouldInterruptAgent(%q, %v) = %v, want %v", tc.status, tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWatchTaskCancellation_TaskDeleted reproduces the zombie-task bug:
+// when the server deletes a task while it is running (issue removed,
+// agent reassigned, etc.), GetTaskStatus starts returning 404. Before the
+// fix the daemon kept polling and never interrupted the running agent —
+// codex would keep emitting tool calls for minutes against a dead task.
+//
+// After the fix, watchTaskCancellation must close its channel within a
+// few poll intervals so the caller can cancel the agent context.
+func TestWatchTaskCancellation_TaskDeleted(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/status") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"task not found"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	cancelled := d.watchTaskCancellation(ctx, "task-deleted", 10*time.Millisecond, slog.Default())
+
+	select {
+	case <-cancelled:
+		// Expected: the watcher detected the 404 and signalled cancellation.
+	case <-time.After(2 * time.Second):
+		t.Fatal("watchTaskCancellation did not signal cancellation when task was deleted (404)")
+	}
+}
+
+// TestWatchTaskCancellation_StatusCancelled keeps the existing behaviour
+// (server transitions task status to "cancelled") working alongside the
+// new 404 path.
+func TestWatchTaskCancellation_StatusCancelled(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/status") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"cancelled"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	cancelled := d.watchTaskCancellation(ctx, "task-cancelled", 10*time.Millisecond, slog.Default())
+
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watchTaskCancellation did not signal cancellation when status=cancelled")
+	}
+}
+
+// TestWatchTaskCancellation_RunningTaskNotInterrupted ensures the watcher
+// does NOT trigger on transient errors or while the task is still running.
+func TestWatchTaskCancellation_RunningTaskNotInterrupted(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"running"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	cancelled := d.watchTaskCancellation(ctx, "task-running", 10*time.Millisecond, slog.Default())
+
+	select {
+	case <-cancelled:
+		t.Fatal("watchTaskCancellation should not signal cancellation while task is running")
+	case <-time.After(150 * time.Millisecond):
+	}
+	if calls.Load() < 5 {
+		t.Fatalf("expected the watcher to poll at least 5 times in 150ms, got %d", calls.Load())
 	}
 }
 
@@ -368,13 +753,19 @@ func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	return &Daemon{
+	d := &Daemon{
 		client:       NewClient(srv.URL),
 		repoCache:    repocache.New(t.TempDir(), slog.Default()),
 		logger:       slog.Default(),
 		workspaces:   make(map[string]*workspaceState),
 		runtimeIndex: make(map[string]Runtime),
 	}
+	// Drain background syncs (started by registerTaskRepos) before the
+	// t.TempDir cache root is cleaned up, otherwise an in-flight clone/fetch
+	// races against the deletion and the test fails with a misleading
+	// "directory not empty" cleanup error.
+	t.Cleanup(d.waitBackgroundSyncs)
+	return d
 }
 
 func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
@@ -854,5 +1245,147 @@ func TestDefaultArgsForProvider(t *testing.T) {
 	}
 	if got := defaultArgsForProvider(cfg, "gemini"); got != nil {
 		t.Fatalf("expected nil for unsupported provider, got %#v", got)
+	}
+}
+
+// reportTaskResultRecorder captures which terminal endpoint
+// (.../complete or .../fail) reportTaskResult hits and the body it
+// posts, so the tests can assert the disposition (success vs fail)
+// independently of the rest of handleTask.
+type reportTaskResultRecorder struct {
+	mu      sync.Mutex
+	path    string
+	method  string
+	payload map[string]any
+}
+
+func (r *reportTaskResultRecorder) handler(t *testing.T) http.HandlerFunc {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var payload map[string]any
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Errorf("decode body: %v", err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		r.mu.Lock()
+		r.path = req.URL.Path
+		r.method = req.Method
+		r.payload = payload
+		r.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
+func TestReportTaskResult_CompletedHitsCompleteEndpoint(t *testing.T) {
+	t.Parallel()
+
+	rec := &reportTaskResultRecorder{}
+	srv := httptest.NewServer(rec.handler(t))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(context.Background(), "task-1", TaskResult{
+		Status:     "completed",
+		Comment:    "all good",
+		BranchName: "agent/foo",
+		SessionID:  "ses-1",
+		WorkDir:    "/tmp/foo",
+	}, slog.Default())
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if rec.path != "/api/daemon/tasks/task-1/complete" {
+		t.Fatalf("expected /complete endpoint, got %s", rec.path)
+	}
+	if rec.payload["output"] != "all good" {
+		t.Errorf("output: got %v", rec.payload["output"])
+	}
+	if rec.payload["branch_name"] != "agent/foo" {
+		t.Errorf("branch_name: got %v", rec.payload["branch_name"])
+	}
+	if rec.payload["session_id"] != "ses-1" {
+		t.Errorf("session_id: got %v", rec.payload["session_id"])
+	}
+}
+
+// Pins the GitHub multica#1952 fail-closed behaviour: a task whose
+// agent run never produced a real result (blocked, cancelled, or any
+// future status we forget to enumerate) MUST go through FailTask, so
+// the UI never shows a green "Completed" badge for a run that didn't
+// actually do anything (e.g. provider 429 / out-of-credit).
+func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name              string
+		status            string
+		failureReasonIn   string
+		wantFailureReason string
+	}{
+		{
+			name:              "blocked with explicit reason preserves it",
+			status:            "blocked",
+			failureReasonIn:   "iteration_limit",
+			wantFailureReason: "iteration_limit",
+		},
+		{
+			name:              "blocked without reason defaults to agent_error",
+			status:            "blocked",
+			failureReasonIn:   "",
+			wantFailureReason: "agent_error",
+		},
+		{
+			name:              "cancelled defaults to cancelled reason",
+			status:            "cancelled",
+			failureReasonIn:   "",
+			wantFailureReason: "cancelled",
+		},
+		{
+			name:              "unknown status fails closed",
+			status:            "weird_new_status",
+			failureReasonIn:   "",
+			wantFailureReason: "agent_error",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &reportTaskResultRecorder{}
+			srv := httptest.NewServer(rec.handler(t))
+			t.Cleanup(srv.Close)
+
+			d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+			d.reportTaskResult(context.Background(), "task-x", TaskResult{
+				Status:        tc.status,
+				Comment:       "rate limit reached",
+				SessionID:     "ses-x",
+				WorkDir:       "/tmp/x",
+				FailureReason: tc.failureReasonIn,
+			}, slog.Default())
+
+			rec.mu.Lock()
+			defer rec.mu.Unlock()
+			if rec.path != "/api/daemon/tasks/task-x/fail" {
+				t.Fatalf("expected /fail endpoint for status=%q, got %s", tc.status, rec.path)
+			}
+			if rec.payload["error"] != "rate limit reached" {
+				t.Errorf("error body: got %v", rec.payload["error"])
+			}
+			if got := rec.payload["failure_reason"]; got != tc.wantFailureReason {
+				t.Errorf("failure_reason: got %v, want %q", got, tc.wantFailureReason)
+			}
+			if rec.payload["session_id"] != "ses-x" {
+				t.Errorf("session_id should be forwarded on failure paths so chat resume keeps working, got %v", rec.payload["session_id"])
+			}
+		})
 	}
 }

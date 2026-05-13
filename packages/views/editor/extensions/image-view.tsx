@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "../../i18n";
+import { useAttachmentDownloadResolver } from "../attachment-download-context";
 
 // ---------------------------------------------------------------------------
 // Lightbox — full-screen image preview (ESC or click backdrop to close)
@@ -55,10 +57,12 @@ function ImageLightbox({
 // ---------------------------------------------------------------------------
 
 function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
+  const { t } = useT("editor");
   const src = node.attrs.src as string;
   const alt = (node.attrs.alt as string) || "";
   const title = node.attrs.title as string | undefined;
   const uploading = node.attrs.uploading as boolean;
+  const { openByUrl } = useAttachmentDownloadResolver();
 
   const [lightbox, setLightbox] = useState(false);
   const isEditable = editor.isEditable;
@@ -68,16 +72,17 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
   const handleDownload = () => {
     // Cross-origin CDN images can't be fetched as blob (CORS),
     // and <a download> is ignored for cross-origin URLs.
-    // Open in new tab — user can right-click → Save As.
-    window.open(src, "_blank", "noopener,noreferrer");
+    // Re-sign through the provider when the src maps to a known
+    // attachment; otherwise just open externally.
+    openByUrl(src);
   };
 
   const handleCopyLink = async () => {
     try {
       await navigator.clipboard.writeText(src);
-      toast.success("Link copied");
+      toast.success(t(($) => $.image.link_copied));
     } catch {
-      toast.error("Failed to copy link");
+      toast.error(t(($) => $.image.copy_link_failed));
     }
   };
 
@@ -104,16 +109,16 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
-            <button type="button" onClick={handleView} title="View image">
+            <button type="button" onClick={handleView} title={t(($) => $.image.view)}>
               <Maximize2 className="size-3.5" />
             </button>
-            <button type="button" onClick={handleDownload} title="Download">
+            <button type="button" onClick={handleDownload} title={t(($) => $.image.download)}>
               <Download className="size-3.5" />
             </button>
             <button
               type="button"
               onClick={handleCopyLink}
-              title="Copy link"
+              title={t(($) => $.image.copy_link)}
             >
               <LinkIcon className="size-3.5" />
             </button>
@@ -121,7 +126,7 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
               <button
                 type="button"
                 onClick={() => deleteNode()}
-                title="Delete"
+                title={t(($) => $.image.delete)}
               >
                 <Trash2 className="size-3.5" />
               </button>

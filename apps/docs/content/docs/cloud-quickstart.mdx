@@ -99,7 +99,7 @@ Assign the issue to the agent you just created — click its avatar in the web U
 multica issue assign MUL-1 --to my-agent-name
 ```
 
-`--to` takes the **name** of an agent or member. A substring match works — if the agent is called `my-code-reviewer`, `reviewer` resolves to it.
+`--to` takes the **name** of an agent or member. A substring match works — if the agent is called `my-code-reviewer`, `reviewer` resolves to it. If your workspace has overlapping names, pass `--to-id <uuid>` instead (mutually exclusive with `--to`); look up the UUID via `multica agent list --output json` or `multica workspace members --output json`.
 
 **What happens next from the daemon**:
 

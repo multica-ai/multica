@@ -62,6 +62,7 @@ func init() {
 	labelCmd.AddCommand(labelDeleteCmd)
 
 	labelListCmd.Flags().String("output", "table", "Output format: table or json")
+	labelListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	labelGetCmd.Flags().String("output", "json", "Output format: table or json")
 
 	labelCreateCmd.Flags().String("name", "", "Label name (required)")
@@ -103,6 +104,7 @@ func runLabelList(cmd *cobra.Command, _ []string) error {
 		return cli.PrintJSON(os.Stdout, labelsRaw)
 	}
 
+	fullID, _ := cmd.Flags().GetBool("full-id")
 	headers := []string{"ID", "NAME", "COLOR", "CREATED"}
 	rows := make([][]string, 0, len(labelsRaw))
 	for _, raw := range labelsRaw {
@@ -115,7 +117,7 @@ func runLabelList(cmd *cobra.Command, _ []string) error {
 			created = created[:10]
 		}
 		rows = append(rows, []string{
-			truncateID(strVal(l, "id")),
+			displayID(strVal(l, "id"), fullID),
 			strVal(l, "name"),
 			strVal(l, "color"),
 			created,
@@ -133,8 +135,13 @@ func runLabelGet(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	labelRef, err := resolveLabelID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve label: %w", err)
+	}
+
 	var label map[string]any
-	if err := client.GetJSON(ctx, "/api/labels/"+args[0], &label); err != nil {
+	if err := client.GetJSON(ctx, "/api/labels/"+labelRef.ID, &label); err != nil {
 		return fmt.Errorf("get label: %w", err)
 	}
 
@@ -146,7 +153,7 @@ func runLabelGet(cmd *cobra.Command, args []string) error {
 			created = created[:10]
 		}
 		rows := [][]string{{
-			truncateID(strVal(label, "id")),
+			strVal(label, "id"),
 			strVal(label, "name"),
 			strVal(label, "color"),
 			created,
@@ -184,7 +191,7 @@ func runLabelCreate(cmd *cobra.Command, _ []string) error {
 	if output == "table" {
 		headers := []string{"ID", "NAME", "COLOR"}
 		rows := [][]string{{
-			truncateID(strVal(result, "id")),
+			strVal(result, "id"),
 			strVal(result, "name"),
 			strVal(result, "color"),
 		}}
@@ -202,6 +209,11 @@ func runLabelUpdate(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	labelRef, err := resolveLabelID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve label: %w", err)
+	}
+
 	body := map[string]any{}
 	if v, _ := cmd.Flags().GetString("name"); v != "" {
 		body["name"] = v
@@ -214,7 +226,7 @@ func runLabelUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/labels/"+args[0], body, &result); err != nil {
+	if err := client.PutJSON(ctx, "/api/labels/"+labelRef.ID, body, &result); err != nil {
 		return fmt.Errorf("update label: %w", err)
 	}
 
@@ -222,7 +234,7 @@ func runLabelUpdate(cmd *cobra.Command, args []string) error {
 	if output == "table" {
 		headers := []string{"ID", "NAME", "COLOR"}
 		rows := [][]string{{
-			truncateID(strVal(result, "id")),
+			strVal(result, "id"),
 			strVal(result, "name"),
 			strVal(result, "color"),
 		}}
@@ -240,13 +252,18 @@ func runLabelDelete(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	if err := client.DeleteJSON(ctx, "/api/labels/"+args[0]); err != nil {
+	labelRef, err := resolveLabelID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve label: %w", err)
+	}
+
+	if err := client.DeleteJSON(ctx, "/api/labels/"+labelRef.ID); err != nil {
 		return fmt.Errorf("delete label: %w", err)
 	}
 	// JSON consumers get machine-readable output; humans get natural language.
 	if output, _ := cmd.Flags().GetString("output"); output == "json" {
-		return cli.PrintJSON(os.Stdout, map[string]any{"id": args[0], "deleted": true})
+		return cli.PrintJSON(os.Stdout, map[string]any{"id": labelRef.ID, "deleted": true})
 	}
-	fmt.Fprintf(os.Stdout, "Label %s deleted.\n", args[0])
+	fmt.Fprintf(os.Stdout, "Label %s deleted.\n", labelRef.Display)
 	return nil
 }

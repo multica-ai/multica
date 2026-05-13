@@ -115,6 +115,37 @@ func (q *Queries) GetSkill(ctx context.Context, id pgtype.UUID) (Skill, error) {
 	return i, err
 }
 
+const getSkillByWorkspaceAndName = `-- name: GetSkillByWorkspaceAndName :one
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+WHERE workspace_id = $1 AND name = $2
+`
+
+type GetSkillByWorkspaceAndNameParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Name        string      `json:"name"`
+}
+
+// Used by agent-template materialization to implement find-or-create: when a
+// template references a skill by name that already exists in the workspace,
+// reuse the existing skill_id rather than INSERT (which would fail the
+// UNIQUE(workspace_id, name) constraint from migration 008).
+func (q *Queries) GetSkillByWorkspaceAndName(ctx context.Context, arg GetSkillByWorkspaceAndNameParams) (Skill, error) {
+	row := q.db.QueryRow(ctx, getSkillByWorkspaceAndName, arg.WorkspaceID, arg.Name)
+	var i Skill
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Config,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getSkillFile = `-- name: GetSkillFile :one
 SELECT id, skill_id, path, content, created_at, updated_at FROM skill_file
 WHERE id = $1
@@ -159,6 +190,56 @@ func (q *Queries) GetSkillInWorkspace(ctx context.Context, arg GetSkillInWorkspa
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listAgentSkillSummaries = `-- name: ListAgentSkillSummaries :many
+SELECT s.id, s.workspace_id, s.name, s.description, s.config, s.created_by, s.created_at, s.updated_at
+FROM skill s
+JOIN agent_skill ask ON ask.skill_id = s.id
+WHERE ask.agent_id = $1
+ORDER BY s.name ASC
+`
+
+type ListAgentSkillSummariesRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Config      []byte             `json:"config"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Summary variant for the agent skills list endpoint — omits `content` for
+// the same reason as ListSkillSummariesByWorkspace.
+func (q *Queries) ListAgentSkillSummaries(ctx context.Context, agentID pgtype.UUID) ([]ListAgentSkillSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listAgentSkillSummaries, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentSkillSummariesRow{}
+	for rows.Next() {
+		var i ListAgentSkillSummariesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Description,
+			&i.Config,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAgentSkills = `-- name: ListAgentSkills :many
@@ -262,6 +343,57 @@ func (q *Queries) ListSkillFiles(ctx context.Context, skillID pgtype.UUID) ([]Sk
 			&i.SkillID,
 			&i.Path,
 			&i.Content,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSkillSummariesByWorkspace = `-- name: ListSkillSummariesByWorkspace :many
+SELECT id, workspace_id, name, description, config, created_by, created_at, updated_at
+FROM skill
+WHERE workspace_id = $1
+ORDER BY name ASC
+`
+
+type ListSkillSummariesByWorkspaceRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Config      []byte             `json:"config"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Same as ListSkillsByWorkspace but omits the SKILL.md `content` column. Used
+// by list endpoints (CLI table, web list page) where the body is never read;
+// shipping it everywhere blew up payload size on workspaces with many skills
+// and caused 15s CLI timeouts from high-latency regions (GH multica-ai/multica#2174).
+func (q *Queries) ListSkillSummariesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListSkillSummariesByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listSkillSummariesByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSkillSummariesByWorkspaceRow{}
+	for rows.Next() {
+		var i ListSkillSummariesByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Description,
+			&i.Config,
+			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {

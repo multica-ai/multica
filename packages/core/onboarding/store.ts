@@ -42,9 +42,12 @@ export async function saveQuestionnaire(
  */
 export async function completeOnboarding(
   completionPath?: OnboardingCompletionPath,
+  workspaceId?: string,
 ): Promise<void> {
   await api.markOnboardingComplete(
-    completionPath ? { completion_path: completionPath } : undefined,
+    completionPath || workspaceId
+      ? { completion_path: completionPath, workspace_id: workspaceId }
+      : undefined,
   );
   await useAuthStore.getState().refreshMe();
 }

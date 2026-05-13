@@ -1,0 +1,44 @@
+{
+  "title": "搜索",
+  "description": "搜索页面、issue 和项目",
+  "placeholder": "输入命令或关键词搜索...",
+  "groups": {
+    "pages": "页面",
+    "commands": "命令",
+    "switch_workspace": "切换工作区",
+    "projects": "项目",
+    "issues": "issue",
+    "recent": "最近"
+  },
+  "pages": {
+    "inbox": "收件箱",
+    "my_issues": "我的 issue",
+    "issues": "issue",
+    "projects": "项目",
+    "agents": "智能体",
+    "runtimes": "运行时",
+    "skills": "skill",
+    "settings": "设置"
+  },
+  "commands": {
+    "current_theme_aria": "当前主题",
+    "new_issue": "新建 issue",
+    "new_project": "新建项目",
+    "copy_issue_link": "复制 issue 链接",
+    "copy_identifier": "复制标识符 ({{identifier}})",
+    "switch_to_light": "切换到浅色主题",
+    "switch_to_dark": "切换到深色主题",
+    "use_system_theme": "跟随系统主题"
+  },
+  "toast": {
+    "link_copied": "已复制链接",
+    "copied_identifier": "已复制 {{identifier}}"
+  },
+  "empty": {
+    "no_results": "未找到结果。",
+    "type_to_search": "输入关键词搜索 issue 和项目"
+  },
+  "trigger": {
+    "label": "搜索..."
+  }
+}

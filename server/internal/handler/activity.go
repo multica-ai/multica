@@ -25,95 +25,189 @@ type TimelineEntry struct {
 	Details json.RawMessage `json:"details,omitempty"`
 
 	// Comment-only fields
-	Content     *string              `json:"content,omitempty"`
-	ParentID    *string              `json:"parent_id,omitempty"`
-	UpdatedAt   *string              `json:"updated_at,omitempty"`
-	CommentType *string              `json:"comment_type,omitempty"`
-	Reactions   []ReactionResponse   `json:"reactions,omitempty"`
-	Attachments []AttachmentResponse `json:"attachments,omitempty"`
+	Content        *string              `json:"content,omitempty"`
+	ParentID       *string              `json:"parent_id,omitempty"`
+	UpdatedAt      *string              `json:"updated_at,omitempty"`
+	CommentType    *string              `json:"comment_type,omitempty"`
+	Reactions      []ReactionResponse   `json:"reactions,omitempty"`
+	Attachments    []AttachmentResponse `json:"attachments,omitempty"`
+	ResolvedAt     *string              `json:"resolved_at,omitempty"`
+	ResolvedByType *string              `json:"resolved_by_type,omitempty"`
+	ResolvedByID   *string              `json:"resolved_by_id,omitempty"`
 }
 
-// ListTimeline returns a merged, chronologically-sorted timeline of activities
-// and comments for a given issue.
+// timelineHardCap bounds the per-issue timeline payload. Sized as a defensive
+// safety net, not a UX page window: see commentHardCap in comment.go for the
+// data-shape rationale (#1929).
+const timelineHardCap = 2000
+
+// timelinePaginatedResponse mirrors the wrapper shape produced by the prior
+// cursor-paginated ListTimeline (#2128). It is preserved as a backward-compat
+// surface for installed Desktop builds and stale Web bundles between #2128 and
+// #1929 that send `?limit=`/`?before=`/`?after=`/`?around=` and parse the
+// response with the old TimelinePageSchema (entries + cursors). Cursors are
+// always nil and `has_more_*` are always false: the new server returns the
+// whole timeline in one shot.
+type timelinePaginatedResponse struct {
+	Entries       []TimelineEntry `json:"entries"`
+	NextCursor    *string         `json:"next_cursor"`
+	PrevCursor    *string         `json:"prev_cursor"`
+	HasMoreBefore bool            `json:"has_more_before"`
+	HasMoreAfter  bool            `json:"has_more_after"`
+	TargetIndex   *int            `json:"target_index,omitempty"`
+}
+
+// ListTimeline returns the full issue timeline (comments + activities merged).
+// Two response shapes coexist for boundary compatibility (#1929):
+//
+//   - No pagination params → flat ASC `TimelineEntry[]`. Matches the legacy
+//     desktop contract (Multica.app ≤ v0.2.25) and the new client.
+//   - Any of `limit` / `before` / `after` / `around` present → wrapped object
+//     with DESC entries + null cursors + has_more_*=false. Matches what a
+//     stale v0.2.26+ build expects when it parses the response with
+//     TimelinePageSchema; cursor-walking is now a no-op so the client just
+//     sees a single full page.
+//
+// Both shapes carry the same set of entries — paging and ordering differ.
+// Time-based pagination was removed because it split reply threads at page
+// boundaries, and at observed data sizes (p99 ~30 comments per issue) the
+// cursor machinery was pure overhead.
 func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
 	if !ok {
 		return
 	}
+	ctx := r.Context()
 
-	activities, err := h.Queries.ListActivities(r.Context(), db.ListActivitiesParams{
+	comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		Limit:       timelineHardCap,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list comments")
+		return
+	}
+	activities, err := h.Queries.ListActivitiesForIssue(ctx, db.ListActivitiesForIssueParams{
 		IssueID: issue.ID,
-		Limit:   200,
-		Offset:  0,
+		Limit:   timelineHardCap,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list activities")
 		return
 	}
 
-	comments, err := h.Queries.ListComments(r.Context(), db.ListCommentsParams{
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list comments")
+	q := r.URL.Query()
+	wantWrapped := q.Get("limit") != "" || q.Get("before") != "" ||
+		q.Get("after") != "" || q.Get("around") != ""
+
+	if wantWrapped {
+		entries := h.mergeTimeline(r, comments, activities, false)
+		if entries == nil {
+			entries = []TimelineEntry{}
+		}
+		resp := timelinePaginatedResponse{Entries: entries}
+		// `around=<id>`: locate the anchor in the DESC slice so the legacy
+		// client can scroll-to-highlight without a follow-up request.
+		if anchor := q.Get("around"); anchor != "" {
+			for i, e := range entries {
+				if e.ID == anchor {
+					idx := i
+					resp.TargetIndex = &idx
+					break
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 
-	timeline := make([]TimelineEntry, 0, len(activities)+len(comments))
+	entries := h.mergeTimeline(r, comments, activities, true)
+	if entries == nil {
+		entries = []TimelineEntry{}
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
 
+// mergeTimeline merges comments and activities and returns them sorted by
+// (created_at, id). When ascending=true, oldest first (the new flat-array
+// contract); otherwise newest first (the wrapped legacy contract).
+func (h *Handler) mergeTimeline(r *http.Request, comments []db.Comment, activities []db.ActivityLog, ascending bool) []TimelineEntry {
+	out := make([]TimelineEntry, 0, len(comments)+len(activities))
+	out = append(out, h.commentsToEntries(r, comments)...)
 	for _, a := range activities {
-		action := a.Action
-		actorType := ""
-		if a.ActorType.Valid {
-			actorType = a.ActorType.String
+		out = append(out, activityToEntry(a))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt != out[j].CreatedAt {
+			if ascending {
+				return out[i].CreatedAt < out[j].CreatedAt
+			}
+			return out[i].CreatedAt > out[j].CreatedAt
 		}
-		timeline = append(timeline, TimelineEntry{
-			Type:      "activity",
-			ID:        uuidToString(a.ID),
-			ActorType: actorType,
-			ActorID:   uuidToString(a.ActorID),
-			Action:    &action,
-			Details:   a.Details,
-			CreatedAt: timestampToString(a.CreatedAt),
-		})
-	}
+		if ascending {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].ID > out[j].ID
+	})
+	return out
+}
 
-	// Fetch reactions and attachments for all comments in one batch.
-	commentIDs := make([]pgtype.UUID, len(comments))
+// commentsToEntries fetches reactions + attachments for the given comments in
+// one batch each and returns enriched TimelineEntry slices preserving order.
+func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []TimelineEntry {
+	if len(comments) == 0 {
+		return nil
+	}
+	ids := make([]pgtype.UUID, len(comments))
 	for i, c := range comments {
-		commentIDs[i] = c.ID
+		ids[i] = c.ID
 	}
-	grouped := h.groupReactions(r, commentIDs)
-	groupedAtt := h.groupAttachments(r, commentIDs)
+	reactions := h.groupReactions(r, ids)
+	attachments := h.groupAttachments(r, ids)
 
-	for _, c := range comments {
+	out := make([]TimelineEntry, len(comments))
+	for i, c := range comments {
 		content := c.Content
 		commentType := c.Type
 		updatedAt := timestampToString(c.UpdatedAt)
 		cid := uuidToString(c.ID)
-		timeline = append(timeline, TimelineEntry{
-			Type:        "comment",
-			ID:          cid,
-			ActorType:   c.AuthorType,
-			ActorID:     uuidToString(c.AuthorID),
-			Content:     &content,
-			CommentType: &commentType,
-			ParentID:    uuidToPtr(c.ParentID),
-			CreatedAt:   timestampToString(c.CreatedAt),
-			UpdatedAt:   &updatedAt,
-			Reactions:   grouped[cid],
-			Attachments: groupedAtt[cid],
-		})
+		out[i] = TimelineEntry{
+			Type:           "comment",
+			ID:             cid,
+			ActorType:      c.AuthorType,
+			ActorID:        uuidToString(c.AuthorID),
+			Content:        &content,
+			CommentType:    &commentType,
+			ParentID:       uuidToPtr(c.ParentID),
+			CreatedAt:      timestampToString(c.CreatedAt),
+			UpdatedAt:      &updatedAt,
+			Reactions:      reactions[cid],
+			Attachments:    attachments[cid],
+			ResolvedAt:     timestampToPtr(c.ResolvedAt),
+			ResolvedByType: textToPtr(c.ResolvedByType),
+			ResolvedByID:   uuidToPtr(c.ResolvedByID),
+		}
 	}
+	return out
+}
 
-	// Sort chronologically (ascending by created_at)
-	sort.Slice(timeline, func(i, j int) bool {
-		return timeline[i].CreatedAt < timeline[j].CreatedAt
-	})
-
-	writeJSON(w, http.StatusOK, timeline)
+func activityToEntry(a db.ActivityLog) TimelineEntry {
+	action := a.Action
+	actorType := ""
+	if a.ActorType.Valid {
+		actorType = a.ActorType.String
+	}
+	return TimelineEntry{
+		Type:      "activity",
+		ID:        uuidToString(a.ID),
+		ActorType: actorType,
+		ActorID:   uuidToString(a.ActorID),
+		Action:    &action,
+		Details:   a.Details,
+		CreatedAt: timestampToString(a.CreatedAt),
+	}
 }
 
 // AssigneeFrequencyEntry represents how often a user assigns to a specific target.

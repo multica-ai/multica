@@ -7,17 +7,18 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     github: "GitHub",
     login: "Log in",
     dashboard: "Dashboard",
+    changelog: "Changelog",
   },
 
   hero: {
     headlineLine1: "Your next 10 hires",
     headlineLine2: "won\u2019t be human.",
     subheading:
-      "Forge is an open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills \u2014 manage your human + agent workforce in one place.",
+      "Multica is an open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills \u2014 manage your human + agent workforce in one place.",
     cta: "Start free trial",
     downloadDesktop: "Download Desktop",
     worksWith: "Works with",
-    imageAlt: "Forge board view \u2014 issues managed by humans and agents",
+    imageAlt: "Multica board view \u2014 issues managed by humans and agents",
   },
 
   features: {
@@ -94,7 +95,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       label: "RUNTIMES",
       title: "One dashboard for all your compute",
       description:
-        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects local CLIs \u2014 plug in and go.",
+        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 11 supported coding tools on your machine.",
       cards: [
         {
           title: "Unified runtime panel",
@@ -107,9 +108,9 @@ export function createEnDict(allowSignup: boolean): LandingDict {
             "Online/offline status, usage charts, and activity heatmaps. Know exactly what your compute is doing at any moment.",
         },
         {
-          title: "Auto-detection & plug-and-play",
+          title: "Auto-detection on first run",
           description:
-            "Forge detects available CLIs like Claude Code, Codex, OpenClaw, and OpenCode automatically. Connect a machine, and it\u2019s ready to work.",
+            "Multica scans for 11 supported coding tools \u2014 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -129,7 +130,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica setup to configure, authenticate, and start the daemon. It auto-detects Claude Code, Codex, OpenClaw, and OpenCode on your machine \u2014 plug in and go.",
+          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 11 supported coding tools (Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi). Whichever ones you already have installed get registered as runtimes automatically.",
       },
       {
         title: "Create your first agent",
@@ -152,13 +153,13 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     headlineLine1: "Open source",
     headlineLine2: "for all.",
     description:
-      "Forge is fully open source. Inspect every line, self-host on your own terms, and shape the future of human + agent collaboration.",
+      "Multica is fully open source. Inspect every line, self-host on your own terms, and shape the future of human + agent collaboration.",
     cta: "Star on GitHub",
     highlights: [
       {
         title: "Self-host anywhere",
         description:
-          "Run Forge on your own infrastructure. Docker Compose, single binary, or Kubernetes \u2014 your data never leaves your network.",
+          "Run Multica on your own infrastructure. Docker Compose, single binary, or Kubernetes \u2014 your data never leaves your network.",
       },
       {
         title: "No vendor lock-in",
@@ -183,30 +184,30 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     headline: "Questions & answers.",
     items: [
       {
-        question: "What coding agents does Forge support?",
+        question: "What coding agents does Multica support?",
         answer:
-          "Forge currently supports Claude Code, Codex, OpenClaw, and OpenCode out of the box. The daemon auto-detects whichever CLIs you have installed. Since it\u2019s open source, you can also add your own backends.",
+          "Multica supports 11 coding tools out of the box: Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
         answer:
-          "Both. You can self-host Forge on your own infrastructure with Docker Compose or Kubernetes, or use our hosted cloud version. Your data, your choice.",
+          "Both. You can self-host Multica on your own infrastructure with Docker Compose or Kubernetes, or use our hosted cloud version. Your data, your choice.",
       },
       {
         question:
           "How is this different from just using coding agents directly?",
         answer:
-          "Coding agents are great at executing. Forge adds the management layer: task queues, team coordination, skill reuse, runtime monitoring, and a unified view of what every agent is doing. Think of it as the project manager for your agents.",
+          "Coding agents are great at executing. Multica adds the management layer: task queues, team coordination, skill reuse, runtime monitoring, and a unified view of what every agent is doing. Think of it as the project manager for your agents.",
       },
       {
         question: "Can agents work on long-running tasks autonomously?",
         answer:
-          "Yes. Forge manages the full task lifecycle \u2014 enqueue, claim, execute, complete or fail. Agents report blockers proactively and stream progress in real time. You can check in whenever you want or let them run overnight.",
+          "Yes. Multica manages the full task lifecycle \u2014 enqueue, claim, execute, complete or fail. Agents report blockers proactively and stream progress in real time. You can check in whenever you want or let them run overnight.",
       },
       {
         question: "Is my code safe? Where does agent execution happen?",
         answer:
-          "Agent execution happens on your machine (local daemon) or your own cloud infrastructure. Code never passes through Forge servers. The platform only coordinates task state and broadcasts events.",
+          "Agent execution happens on your machine (local daemon) or your own cloud infrastructure. Code never passes through Multica servers. The platform only coordinates task state and broadcasts events.",
       },
       {
         question: "How many agents can I run?",
@@ -235,7 +236,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         links: [
           { label: "Documentation", href: "/docs" },
           { label: "API", href: githubUrl },
-          { label: "X (Twitter)", href: "https://x.com/ForgeAI" },
+          { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
         ],
       },
       company: {
@@ -247,13 +248,13 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         ],
       },
     },
-    copyright: "\u00a9 {year} Forge. All rights reserved.",
+    copyright: "\u00a9 {year} Multica. All rights reserved.",
   },
 
   about: {
-    title: "About Forge",
+    title: "About Multica",
     nameLine: {
-      prefix: "Forge \u2014 ",
+      prefix: "Multica \u2014 ",
       mul: "Mul",
       tiplexed: "tiplexed ",
       i: "I",
@@ -265,8 +266,8 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     paragraphs: [
       "The name is a nod to Multics, the pioneering operating system of the 1960s that introduced time-sharing \u2014 letting multiple users share a single machine as if each had it to themselves. Unix was born as a deliberate simplification of Multics: one user, one task, one elegant philosophy.",
-      "We think the same inflection is happening again. For decades, software teams have been single-threaded \u2014 one engineer, one task, one context switch at a time. AI agents change that equation. Forge brings time-sharing back, but for an era where the \u201cusers\u201d multiplexing the system are both humans and autonomous agents.",
-      "In Forge, agents are first-class teammates. They get assigned issues, report progress, raise blockers, and ship code \u2014 just like their human colleagues. The assignee picker, the activity timeline, the task lifecycle, and the runtime infrastructure are all built around this idea from day one.",
+      "We think the same inflection is happening again. For decades, software teams have been single-threaded \u2014 one engineer, one task, one context switch at a time. AI agents change that equation. Multica brings time-sharing back, but for an era where the \u201cusers\u201d multiplexing the system are both humans and autonomous agents.",
+      "In Multica, agents are first-class teammates. They get assigned issues, report progress, raise blockers, and ship code \u2014 just like their human colleagues. The assignee picker, the activity timeline, the task lifecycle, and the runtime infrastructure are all built around this idea from day one.",
       "Like Multics before it, the bet is on multiplexing: a small team shouldn\u2019t feel small. With the right system, two engineers and a fleet of agents can move like twenty.",
       "The platform is fully open source and self-hostable. Your data stays on your infrastructure. Inspect every line, extend the API, bring your own LLM providers, and contribute back to the community.",
     ],
@@ -275,7 +276,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
 
   changelog: {
     title: "Changelog",
-    subtitle: "New updates and improvements to Forge.",
+    subtitle: "New updates and improvements to Multica.",
     toc: "All releases",
     categories: {
       features: "New Features",
@@ -283,6 +284,240 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.2.32",
+        date: "2026-05-13",
+        title: "Usage Insights, Chat Renaming & Smoother Desktop Flows",
+        changes: [],
+        features: [
+          "Usage now shows workspace and project token activity, runtime trends, and per-agent rankings in one place",
+          "Chat sessions can be renamed directly from the chat header",
+          "Feedback reports can include screenshots or files so teams have the context they need",
+        ],
+        improvements: [
+          "The Usage page has clearer naming and a more dynamic agent leaderboard",
+          "New chats and completed chat responses update more smoothly with fewer loading flashes",
+          "Self-hosted GitHub setup is easier to configure and the setup docs point to the right cloud URL",
+          "User-installed Codex skills are available automatically when new tasks run",
+        ],
+        fixes: [
+          "Empty successful agent responses are marked completed instead of blocked",
+          "Pasted mentions in instruction editors keep their mention links",
+          "Desktop attachment downloads use the native Linux flow and tab closing no longer loops",
+          "Gemini and Windows runtime startup checks are more reliable in unattended runs",
+          "Long GitHub repository lists stay usable when adding project resources",
+        ],
+      },
+      {
+        version: "0.2.31",
+        date: "2026-05-12",
+        title: "GitHub Integration, Chat Attachments & Safer Issue Navigation",
+        changes: [],
+        features: [
+          "Connect GitHub so linked pull requests appear on Multica issues, sync their status, and close the Multica issue automatically when the PR closes",
+          "Chat messages can include file attachments and image previews",
+          "Agents and runtimes can now be kept public or private for clearer team access",
+          "Stopping a single agent task now asks for confirmation before it is terminated",
+          "New GitHub integration docs cover both hosted and self-hosted setup",
+        ],
+        improvements: [
+          "Issue links land more reliably on the exact comment or activity you opened",
+          "Long issue timelines scroll more smoothly",
+          "The feedback dialog now points contributors toward GitHub discussions and issues",
+          "Self-hosted Caddy guidance now calls out real-time connection requirements",
+          "Linux desktop packages show the Multica app icon again",
+        ],
+        fixes: [
+          "Downloaded attachments keep their original filenames",
+          "Local attachments are served more reliably, and upload controls stay disabled until files are ready",
+          "Issue creation dialogs keep their text fields at the correct height",
+          "Runtime documentation links point to the correct page",
+        ],
+      },
+      {
+        version: "0.2.30",
+        date: "2026-05-11",
+        title: "Mermaid in Issues, Per-Runtime Timezone & Workspace-Leave Runtime Revocation",
+        changes: [],
+        features: [
+          "Mermaid diagrams render inline in issue descriptions",
+          "Sub-issue rows gain inline status and assignee pickers, with batch select across rows",
+          "Per-runtime timezone for token-usage aggregation, so daily rollups respect your local day",
+          "Private agents are gated by an `allowed_principals` predicate, with fine-grained visibility",
+          "A member leaving or being removed from a workspace now revokes their runtimes automatically",
+          "Set custom per-token prices for unmaintained models so usage reflects real cost",
+          "Landing page header gains a Changelog link",
+        ],
+        improvements: [
+          "Daemon self-heals when a runtime is deleted server-side — no more zombie local entries",
+          "Chat and comment composer share the same `Mod+Enter` send shortcut",
+          "Copilot CLI model catalog expanded with correct dotted IDs",
+          "Copilot failure details now surface in the UI instead of a generic error",
+          "Daemon brief is inlined into the system prompt for providers that need it",
+          "Realtime WebSocket accepts same-origin upgrades from mobile and CLI",
+        ],
+        fixes: [
+          "Recent-issues list no longer leaks across workspaces",
+          "CloudFront attachment download URLs are re-signed at click time, fixing expired previews",
+          "Windows reply templates use `--content-file` across every provider so non-ASCII bodies survive",
+          "Daemon suppresses extra git console pop-ups on Windows",
+          "Pi extension tools are no longer filtered by a hardcoded `--tools` allowlist",
+          "Inbox scrolls to the target comment once the issue finishes loading",
+          "`autopilot create/update` accepts `--mode run_only`",
+          "Changelog header link styled to match the GitHub ghost button",
+          "OpenAI Codex / GPT model pricing populated — cost no longer shows $0",
+        ],
+      },
+      {
+        version: "0.2.29",
+        date: "2026-05-09",
+        title: "Project Picker in Quick Create, Resolvable Comments & Timeline Performance",
+        changes: [],
+        features: [
+          "Quick Create lets you pick a project, and remembers your last choice",
+          "Comment threads can be resolved and collapsed, keeping long discussions tidy",
+          "Issue live banner now shows agent tasks waiting in queue",
+          "Failed or cancelled tasks can be rerun in one click from the Execution Log",
+          "Agent Create modal gains an expand button for editing long descriptions",
+        ],
+        improvements: [
+          "Issue timeline no longer fully re-renders on every WebSocket event — long issues scroll smoothly",
+          "Editor skips parsing very large or JSON pastes, eliminating freezes",
+          "Autopilot skips dispatch when the assignee runtime is offline, avoiding empty runs",
+          "Inbox auto-archives `task_failed` rows once they reach a terminal state",
+          "Hermes sends agent instructions inline with each request",
+          "Timeline and Comment switched to client-side virtualization, dropping server-side pagination",
+          "Reserved slugs share a single JSON between front and back end, with CI guarding drift",
+          "ACP error messages include the JSON-RPC `error.data` field for clearer debugging",
+        ],
+        fixes: [
+          "429 / insufficient-balance agent runs are now marked `failed` instead of `completed`",
+          "Agent sessions stuck on poisoned images can recover, so the issue resumes",
+          "`pi --list-models` table format parses correctly, restoring model discovery",
+          "`pi` colon-to-slash normalization only applies to the legacy format",
+          "`kiro` and `kimi` added to the inline-system-prompt provider allowlist",
+          "Priority dropdown badge colors aligned with PriorityIcon semantic tokens",
+          "Long single-line agent messages now expand correctly",
+          "Desktop \"copy issue link\" uses the current connection URL instead of localhost",
+          "Mobile WebSocket handshake succeeds without cookies",
+          "Workspace slug creation validates reserved words; slug error messages are translated",
+          "Timeline correctly syncs `around` state when props flip to falsy",
+          "DropdownMenu popovers size to their content",
+        ],
+      },
+      {
+        version: "0.2.28",
+        date: "2026-05-08",
+        title: "Daemon Disk-Usage CLI, Timeline Polish & Task Usage Rollup",
+        changes: [],
+        features: [
+          "New `multica daemon disk-usage` CLI surfaces per-task and per-workspace disk footprint",
+          "Skill picker in agent settings has a search box for fast lookup",
+          "Daemon GC extends to chat, autopilot, and quick-create tasks",
+          "Issue detail breadcrumb now shows the MUL-xxxx identifier for quick reference",
+        ],
+        improvements: [
+          "Timeline page size bumped to 50, with per-pool keyset cursors for comments and activities",
+          "'Show older / newer' affordances now appear in edge cases and look clearly clickable",
+          "Server `task_usage` rolls up into a daily aggregate table, dropping DB load significantly",
+          "Daemon health check stays responsive while repo lookups are in flight",
+          "Runtime stats exclude archived agents for accurate active counts",
+        ],
+        fixes: [
+          "Linux daemon self-restart uses `brew prefix` symlinks, so Homebrew Cellar deletion no longer orphans runtimes",
+          "CLI short IDs now route correctly — copied prefixes no longer 404",
+          "Windows non-ASCII comment / description input lands via new `--content-file` / `--description-file` flags",
+          "Windows / Linux desktop replaces the Electron placeholder icon with the Multica asterisk",
+          "Orphaned timeline replies are now correctly surfaced",
+          "Timeline comment pagination budget excludes activities, so heavy activity no longer crowds out real comments",
+        ],
+      },
+      {
+        version: "0.2.27",
+        date: "2026-05-07",
+        title: "Smoother Chat, GitHub Skill Import & Stability Fixes",
+        changes: [],
+        features: [
+          "Import reusable skills directly from GitHub links",
+        ],
+        improvements: [
+          "Chat and Inbox feel smoother, with clearer history, easier reply copying, and faster triage after archiving",
+          "Issue actions keep more context, from easier access to the local folder to sub-issues inheriting the right project and status",
+          "Autopilots pause themselves after repeated failures, so noisy automations are easier to catch and fix",
+        ],
+        fixes: [
+          "Chinese input, desktop updates, long issue timelines, and live status updates are more reliable",
+        ],
+      },
+      {
+        version: "0.2.26",
+        date: "2026-05-06",
+        title: "Full i18n Rollout, Long-Issue Timeline & System Notifications Toggle",
+        changes: [],
+        features: [
+          "Web app fully translated to Simplified Chinese (21 namespaces), with per-user locale",
+          "System Notifications toggle in Settings",
+          "Delete chat sessions; History panel surfaced on the chat header",
+          "Runtime liveness backed by Redis, with DB fallback",
+          "Desktop loads runtime self-host config",
+          "CLI adds `--assignee-id` / `--to-id` / `--user-id` for unambiguous targeting",
+        ],
+        improvements: [
+          "Settings 'Appearance' tab is renamed to 'Preferences', and the active tab is reflected in the URL so deep links work",
+          "Long issues open instantly — Timeline switched to cursor-based keyset pagination, and repeated `task_completed` / `task_failed` activity entries are coalesced",
+          "Runtime poll and heartbeat schedules are isolated per-runtime, so one busy runtime can no longer starve others",
+          "CLI update requests persist in Redis, so a server restart no longer drops them",
+          "Runtime cost usage window narrowed from 180 days to 14 days, dropping query load",
+          "Project list returns a `resource_count` instead of inlining all resources, keeping responses lean",
+          "404 page redesigned, with the No-Access redirect loop fixed",
+          "Quick Create exempts git-describe daemons from the CLI version gate",
+          "CI now enforces lint on every PR, and the existing lint debt has been cleared",
+        ],
+        fixes: [
+          "Daemon cancels the running agent when the task is deleted server-side, eliminating orphan processes",
+          "Daemon refreshes a stale Codex `auth.json` when reusing an exec env, fixing intermittent auth errors",
+          "Daemon refuses to write `.gc_meta.json` when `issue_id` is empty",
+          "Session / resume across ACP backends now trusts the agent-reported session id, fixing cross-session bleed",
+          "OpenCode skills are written under `.opencode/skills/` so they are discovered natively",
+          "404 task-not-found semantics tightened on both server and the final guard",
+          "Pinned sidebar rows are auto-unpinned when the underlying entity disappears",
+          "Project detail page splits desktop and mobile sidebar state",
+          "Runtime detail page hides archived agents",
+          "Already-attached repos in Add Resource show a URL tooltip; empty project state has a New Issue button",
+          "S3 public URLs are region-qualified, fixing cross-region access",
+          "Windows installer parses version numbers and decodes checksums correctly",
+          "Quick Create submit button no longer shows a duplicate keyboard shortcut",
+        ],
+      },
+      {
+        version: "0.2.24",
+        date: "2026-05-03",
+        title: "Repo Checkout `--ref`, Hermes Replay Fix & Multi-Replica Model Picker",
+        changes: [],
+        features: [
+          "`multica repo checkout --ref` targets a branch, tag, or specific commit when pulling a repo into the workspace",
+          "`multica agent avatar` uploads an agent avatar straight from the CLI",
+          "Inbox shows an archive button on done tasks; the redundant mark-as-done hover button is gone",
+        ],
+        improvements: [
+          "Long-timeline issues open instantly from Inbox — the markdown render pipeline is memoized so unrelated WS events no longer re-render thousands of comments",
+          "Model picker works on multi-replica deployments — pending requests persist via Redis, with daemon retries on transient report failures",
+          "Daemon empty-claim cache TTL bumped, further reducing idle DB load",
+        ],
+        fixes: [
+          "Newly created agents show up everywhere immediately — the agent cache is hydrated on create",
+          "Hermes no longer replays the previous answer when a new turn starts — historical chunks are gated behind a per-turn flag",
+          "Codex runtime model picker exposes the GPT-5.5 family",
+          "`multica login --token <PAT>` accepts the PAT as a flag value instead of rejecting it",
+          "CLI update completion status is now reliable",
+          "Session resume is guarded by runtime, preventing cross-runtime resume",
+          "Kanban display settings survive when dragging issues across columns",
+          "Autopilot list is responsive on mobile viewports",
+          "Quick Create prompts produce higher-fidelity descriptions from the user's input",
+          "Skill upsert sanitizes null bytes, fixing a PostgreSQL UTF8 error",
+          "Connect Remote dialog points to the correct install script URL",
+        ],
+      },
       {
         version: "0.2.21",
         date: "2026-04-30",
@@ -296,7 +531,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         ],
         improvements: [
           "Daemon `/tasks/claim` polling uses a Redis empty-claim fast-path, dropping idle DB load and reclaiming disk on long-open issues",
-          "Forge Agent commits include a `Co-authored-by` trailer for proper Git attribution",
+          "Multica Agent commits include a `Co-authored-by` trailer for proper Git attribution",
           "Desktop blocks Cmd+R / Ctrl+R / F5 from reloading the app and shows the real version in dev and Updates settings",
         ],
         fixes: [
@@ -899,30 +1134,30 @@ export function createEnDict(allowSignup: boolean): LandingDict {
   download: {
     hero: {
       macArm64: {
-        title: "Forge for macOS",
+        title: "Multica for macOS",
         sub: "Apple Silicon · bundled daemon, zero setup",
         primary: "Download (.dmg)",
         altZip: "or download .zip",
       },
       macIntel: {
-        title: "Forge for macOS",
+        title: "Multica for macOS",
         sub: "Apple Silicon required — Intel Macs not yet supported.",
         disabledCta: "Apple Silicon required",
         intelHint:
           "On an Intel Mac? Use the CLI below — it runs the same daemon.",
       },
       winX64: {
-        title: "Forge for Windows",
+        title: "Multica for Windows",
         sub: "Bundled daemon, zero setup",
         primary: "Download (.exe)",
       },
       winArm64: {
-        title: "Forge for Windows",
+        title: "Multica for Windows",
         sub: "ARM · bundled daemon, zero setup",
         primary: "Download (.exe)",
       },
       linux: {
-        title: "Forge for Linux",
+        title: "Multica for Linux",
         sub: "Bundled daemon, zero setup",
         primary: "Download AppImage",
         altFormats: "or .deb / .rpm",

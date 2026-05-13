@@ -59,6 +59,7 @@ export function AuthInitializer({
             key: cfg.posthog_key,
             host: cfg.posthog_host || "",
             appVersion: identity?.version,
+            environment: cfg.analytics_environment,
           });
         }
       })

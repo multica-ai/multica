@@ -1,10 +1,16 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { Inter, Geist_Mono, Fraunces } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
-import { LocaleSync } from "@/components/locale-sync";
+import {
+  DEFAULT_LOCALE,
+  SUPPORTED_LOCALES,
+  type SupportedLocale,
+} from "@multica/core/i18n";
+import { RESOURCES } from "@multica/views/locales";
 import "./globals.css";
 
 // Font stack: Inter for Latin UI text + system Chinese fonts for zh content.
@@ -39,16 +45,19 @@ const geistMono = Geist_Mono({
   variable: "--font-mono",
   fallback: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
 });
-// Fraunces — Asymbl's brand display serif. Used for onboarding headlines,
-// login headings, and empty-state titles. Italic support for editorial em
-// accents. Layout-shift prevention handled by next/font's synthetic fallback.
+// Editorial serif used for onboarding headlines. Italic support for h1 em
+// accents (e.g. "...on one shared board."). Only loaded on routes that
+// render the font; layout-shift-prevention handled by next/font's synthetic
+// fallback metrics, same as Inter.
 const fraunces = Fraunces({
   subsets: ["latin"],
   style: ["normal", "italic"],
   variable: "--font-serif",
   fallback: [
     "ui-serif",
-    "Georgia",
+    "Iowan Old Style",
+    "Apple Garamond",
+    "Baskerville",
     "Times New Roman",
     "serif",
   ],
@@ -57,65 +66,77 @@ const fraunces = Fraunces({
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#ffffff",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#05070b" },
+  ],
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://forge.asymbl.app"),
+  metadataBase: new URL("https://www.multica.ai"),
   title: {
-    default: "Forge — Asymbl Agent Operations",
-    template: "%s | Forge",
+    default: "Multica — Project Management for Human + Agent Teams",
+    template: "%s | Multica",
   },
   description:
-    "Asymbl's internal platform for orchestrating AI coding agents alongside human teammates.",
+    "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
   icons: {
-    icon: [
-      { url: "/brand/favicon.png", type: "image/png", sizes: "any" },
-      { url: "/brand/favicon-32.png", type: "image/png", sizes: "32x32" },
-      { url: "/brand/favicon-16.png", type: "image/png", sizes: "16x16" },
-    ],
-    shortcut: ["/brand/favicon.png"],
-    apple: [{ url: "/brand/apple-touch-icon.png", sizes: "180x180" }],
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    shortcut: ["/favicon.svg"],
   },
   openGraph: {
     type: "website",
-    siteName: "Forge",
+    siteName: "Multica",
     locale: "en_US",
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
+    site: "@multica_hq",
+    creator: "@multica_hq",
   },
   alternates: {
     canonical: "/",
   },
-  // Internal tool — never index in search engines
   robots: {
-    index: false,
-    follow: false,
-    nocache: true,
-    googleBot: {
-      index: false,
-      follow: false,
-      noimageindex: true,
-    },
+    index: true,
+    follow: true,
   },
 };
 
-export default function RootLayout({
+function isSupportedLocale(value: string | null): value is SupportedLocale {
+  return value !== null && (SUPPORTED_LOCALES as readonly string[]).includes(value);
+}
+
+// HTML lang attribute uses BCP-47 region tags that screen readers and font
+// stacks recognize widely. i18next keeps `zh-Hans` as its internal locale
+// (script subtag is what we actually translate against), but the html element
+// expects a region-flavoured tag for accessibility tooling and CJK fallback.
+const HTML_LANG: Record<SupportedLocale, string> = {
+  en: "en",
+  "zh-Hans": "zh-CN",
+};
+
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const h = await headers();
+  const headerLocale = h.get("x-multica-locale");
+  const locale: SupportedLocale = isSupportedLocale(headerLocale)
+    ? headerLocale
+    : DEFAULT_LOCALE;
+  const resources = { [locale]: RESOURCES[locale] };
+
   return (
     <html
-      lang="en"
+      lang={HTML_LANG[locale]}
       suppressHydrationWarning
       className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, fraunces.variable)}
     >
       <body className="h-full overflow-hidden">
-        <LocaleSync />
         <ThemeProvider>
-          <WebProviders>
+          <WebProviders locale={locale} resources={resources}>
             {children}
           </WebProviders>
           <Toaster />

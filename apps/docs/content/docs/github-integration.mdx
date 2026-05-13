@@ -1,0 +1,183 @@
+---
+title: GitHub integration
+description: Connect a GitHub App once, then PRs whose branch, title, or body reference an issue identifier auto-attach to that issue — and merging the PR moves the issue to Done.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Connect a GitHub account or organization once in **Settings → Integrations**. After that, any pull request whose branch name, title, or body contains an issue identifier (for example `MUL-123`) is **auto-linked** to that [issue](/issues), appears under **Pull requests** in the issue sidebar, and — when the PR is merged — moves the issue to **Done**.
+
+There is no per-issue setup. The whole flow is identifier-driven.
+
+## What the integration does
+
+| Surface | Behavior |
+|---|---|
+| **Settings → Integrations** | Workspace admins see a GitHub card with a **Connect GitHub** button. Clicking it opens GitHub's App install page; after install you bounce back to Settings. |
+| **Issue sidebar → Pull requests** | Every PR auto-linked to this issue, with title, repo, state (`Open` / `Draft` / `Merged` / `Closed`), and author. Click a row to jump to the PR on GitHub. |
+| **Webhook (background)** | On every `pull_request` event, Multica upserts the PR row, scans the PR for issue identifiers, and (re)builds the link rows. Idempotent — replaying a delivery is a no-op. |
+| **Auto-status on merge** | When a PR transitions to `merged`, every linked issue not already `Done` or `Cancelled` is moved to `Done`. The status change is timeline-logged with source `github_pr_merged`. |
+
+Only the PR itself is mirrored. Commits, branch refs without an open PR, and CI check states are **not** modeled. The integration is intentionally narrow.
+
+## How identifiers are matched
+
+The webhook extracts identifiers from three fields, in this order: **PR head branch**, **PR title**, **PR body**. The matcher is:
+
+- Case-insensitive — `mul-123`, `MUL-123`, `Mul-123` all match.
+- Bounded — a `\b` on the left and a digit anchor on the right keep it from grabbing version numbers like `v1.2-3` or email-style strings.
+- Workspace-scoped — only matches the workspace's own [issue prefix](/workspaces). `FOO-1` in a workspace whose prefix is `MUL` is ignored, even if the integer matches another issue.
+- Deduplicated — listing `MUL-1, MUL-1` in the body links the issue once.
+
+You can reference **multiple issues** in one PR. `Closes MUL-1, MUL-2` links the PR to both, and merging it advances both to `Done`.
+
+## The auto-merge-to-Done rule
+
+When a PR's `merged` field flips to `true`, every linked issue is evaluated:
+
+| Issue current status | Result |
+|---|---|
+| `done` | No change (already terminal). |
+| `cancelled` | **No change** — cancelled means the user explicitly abandoned the work; the integration does not override that signal. |
+| Anything else (`todo`, `in_progress`, `in_review`, `blocked`, `backlog`) | Moved to `done`. |
+
+Closing a PR **without** merging it only updates the PR card's state to `Closed`. The linked issues stay where they were — the user is the one who decides what closing-without-merge means.
+
+<Callout type="info">
+The action is attributed to the `system` actor on the timeline. Subscribers of the issue receive an inbox notification for the status change, the same way they would if a human had moved it.
+</Callout>
+
+## What's not auto-linked
+
+- **Identifiers in commit messages** — only branch / title / body are scanned. A commit titled `MUL-123: fix login` does not auto-link unless the same string also appears in the PR title or body.
+- **Identifiers in PR comments** — only the PR's own metadata is scanned; later GitHub comments are ignored.
+- **PRs in repos the App isn't installed on** — without the App, Multica never receives the webhook.
+- **Manually linking a PR to an issue** — there is no UI for this yet. If your team's convention puts identifiers in a place Multica isn't reading, add them to the PR title or body.
+
+## Disconnecting
+
+In **Settings → Integrations** there is no installation list — you manage existing installations from GitHub directly:
+
+- **From GitHub** — uninstall the Multica GitHub App at `https://github.com/settings/installations` (personal) or `https://github.com/organizations/<org>/settings/installations` (org). Multica receives the `installation.deleted` webhook and drops the row in real time; any open Settings tab updates without a refresh.
+- **Disconnect from inside Multica is admin-only** — the Settings card is hidden for non-admins.
+
+After disconnect, mirrored PR rows stay in the database so historical issue sidebars still show what was linked, but no new webhook events from that installation will be accepted.
+
+## Permissions and visibility
+
+- **Connect / disconnect** require workspace **owner or admin**. Members see the card description but no Connect button.
+- The **Pull requests** sidebar on an issue is visible to anyone who can read the issue — same permissions as the rest of issue detail.
+- The GitHub App requests **read-only** access to pull requests and metadata. Multica never pushes commits, comments, or status checks back to GitHub.
+
+## Self-host setup
+
+If you're running Multica on Multica Cloud, the integration is already configured — skip this section.
+
+For self-host, you create one GitHub App, point it at your server, and set two environment variables. The whole flow is below.
+
+### 1. Create a GitHub App
+
+Go to one of:
+
+- Personal account → `https://github.com/settings/apps/new`
+- Organization → `https://github.com/organizations/<org>/settings/apps/new`
+
+Fill in:
+
+| Field | Value |
+|---|---|
+| **GitHub App name** | Anything recognizable, e.g. `Multica` or `Multica (staging)`. |
+| **Homepage URL** | Your Multica frontend, e.g. `https://multica.example.com`. |
+| **Callback URL** | Leave blank — Multica doesn't use OAuth user identity. |
+| **Setup URL** | `https://<api-host>/api/github/setup`. **Check "Redirect on update"**. |
+| **Webhook → Active** | Enabled. |
+| **Webhook URL** | `https://<api-host>/api/webhooks/github`. |
+| **Webhook secret** | Generate a long random string (e.g. `openssl rand -hex 32`). You'll paste the same value into Multica's env in step 2. |
+| **Permissions → Repository → Pull requests** | **Read-only**. |
+| **Permissions → Repository → Metadata** | Read-only (mandatory). |
+| **Subscribe to events** | Tick **Pull request**. |
+| **Where can this GitHub App be installed?** | Your choice. `Only on this account` is fine for single-org setups. |
+
+After **Create GitHub App**, note two things from the App's detail page:
+
+- The **public link** at the top — its tail is the slug. `https://github.com/apps/multica-acme` → slug = `multica-acme`.
+- The **webhook secret** you just generated (you can't read it back from GitHub later — save it now).
+
+<Callout type="warning">
+**Webhook secret ≠ Client secret.** The App settings page has both fields stacked together. The **Webhook secret** is what signs `pull_request` payloads — that's the one Multica needs. The **Client secret** is for OAuth and is not used by this integration. Mixing them up produces a confusing `401 invalid signature` on every webhook delivery.
+</Callout>
+
+### 2. Set environment variables
+
+On the API server:
+
+```dotenv
+GITHUB_APP_SLUG=multica-acme
+GITHUB_WEBHOOK_SECRET=<the webhook secret you generated>
+```
+
+Both variables are required. If either is missing:
+
+- `Connect GitHub` in Settings is **disabled** and shows a "not configured" hint.
+- The `/api/webhooks/github` endpoint returns **`503 github webhooks not configured`** — Multica refuses to process events with no secret, rather than silently treating every signature as valid.
+
+`FRONTEND_ORIGIN` must also be set (it already is for any production self-host); the setup callback bounces the user back to `<FRONTEND_ORIGIN>/settings` after install.
+
+Restart the API after setting the env vars.
+
+### 3. Run migrations
+
+The integration ships its tables in migration `079_github_integration`. If you're upgrading an older deployment:
+
+```bash
+make migrate-up
+```
+
+Three tables get created: `github_installation`, `github_pull_request`, `issue_pull_request`. They cascade-delete with their workspace, so removing a workspace cleans them up automatically.
+
+### 4. Connect from the UI
+
+In Multica:
+
+1. Open **Settings → Integrations** as an owner or admin.
+2. Click **Connect GitHub**. GitHub opens in a new tab.
+3. Pick the repositories to grant access to and **Install**.
+4. GitHub redirects back to `<api-host>/api/github/setup`, which records the installation and bounces you to `<FRONTEND_ORIGIN>/settings?github_connected=1`.
+
+After that, open any PR whose branch / title / body contains an issue identifier — within a few seconds the Pull requests block appears on that issue's detail page.
+
+### 5. Verify with a curl probe
+
+If GitHub's **Recent Deliveries** page reports `401 invalid signature` after install, the two sides have different secrets. The fastest way to find out which side is wrong is to bypass GitHub:
+
+```bash
+SECRET="<the value you put in GITHUB_WEBHOOK_SECRET>"
+BODY='{"zen":"test"}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $NF}')
+curl -i -X POST https://<api-host>/api/webhooks/github \
+  -H "X-Hub-Signature-256: sha256=$SIG" \
+  -H "X-GitHub-Event: ping" \
+  -H "Content-Type: application/json" \
+  -d "$BODY"
+```
+
+| HTTP status | Meaning | Fix |
+|---|---|---|
+| `200` `{"ok":"pong"}` | Server's loaded secret matches your `$SECRET`. The mismatch is on GitHub. | Edit the App → Webhook secret → **paste the same value** → **Save changes** (clicking out of the field without Save keeps the old secret). Redeliver. |
+| `401 invalid signature` | Server's loaded secret is **not** what you think it is. | Confirm the env var landed in the running process (e.g. `kubectl exec` → `echo -n "$GITHUB_WEBHOOK_SECRET" | wc -c`). Re-deploy. |
+| `503 github webhooks not configured` | `GITHUB_WEBHOOK_SECRET` is empty in the process. | Set the env var, restart the API. |
+
+## Limitations
+
+A few rough edges to be aware of today:
+
+- **No manual link UI yet** — the only way to link a PR is to have the identifier in its branch, title, or body.
+- **No CI / check state** — only the PR itself is mirrored. Build status, review comments, and reviewers are not surfaced in Multica.
+- **No workspace-level config** for the merge → Done rule — it's a fixed default (`merged → done`, unless `cancelled`). Workspace-customizable mappings are a future addition.
+- **Multi-PR-to-one-issue is conservative on merge** — if two PRs both reference `MUL-123` and the first one merges, the issue is moved to `Done` immediately. A follow-up change to wait for all linked PRs to resolve before advancing is in progress.
+
+## Next
+
+- [Issues](/issues) — the issue identifiers (`MUL-123`) referenced from PRs
+- [Workspaces](/workspaces) — where the workspace-specific issue prefix is set
+- [Environment variables](/environment-variables) — full env reference, including the GitHub variables above

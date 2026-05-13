@@ -14,6 +14,8 @@
 
 import posthog from "posthog-js";
 
+export const EVENT_SCHEMA_VERSION = 2;
+
 const SIGNUP_SOURCE_COOKIE = "multica_signup_source";
 // Per-value cap keeps a long utm_content from blowing the budget. We drop
 // the entire cookie if the JSON still exceeds the overall limit — partial
@@ -34,6 +36,8 @@ let initialized = false;
 // most recent pending identify (only one matters, since it's per-session)
 // and flush it inside initAnalytics.
 let pendingIdentify: { userId: string; props?: Record<string, unknown> } | null = null;
+let currentUserId: string | null = null;
+let analyticsEnvironment = "dev";
 // Likewise pageviews: the initial "/" pageview is the anchor of the
 // acquisition funnel, and the Next.js router fires it on mount before the
 // config fetch resolves. We keep the first pending pageview so that step
@@ -78,6 +82,7 @@ export interface AnalyticsConfig {
    * available.
    */
   appVersion?: string;
+  environment?: string;
 }
 
 export type ClientType = "desktop" | "web";
@@ -141,6 +146,7 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     },
     disable_surveys: true,
   });
+  analyticsEnvironment = normalizeEnvironment(config.environment);
   // Register super-properties — attached to every event emitted from this
   // client. `client_type` is the canonical split between desktop and web
   // (PostHog's own `$lib` reports "web" for both because Electron renderers
@@ -148,13 +154,19 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
   // builds without a version don't pollute the property.
   // We cache the set so resetAnalytics() can re-apply it after
   // posthog.reset() — reset() clears persisted super-properties otherwise.
-  superProperties = { client_type: detectClientType() };
+  superProperties = {
+    client_type: detectClientType(),
+    event_schema_version: EVENT_SCHEMA_VERSION,
+    environment: analyticsEnvironment,
+    is_demo: false,
+  };
   if (config.appVersion) superProperties.app_version = config.appVersion;
   posthog.register(superProperties);
   initialized = true;
 
   // Flush any identify() that arrived before init resolved.
   if (pendingIdentify) {
+    currentUserId = pendingIdentify.userId;
     posthog.identify(pendingIdentify.userId, pendingIdentify.props);
     pendingIdentify = null;
   }
@@ -170,7 +182,7 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
   while (pendingOps.length > 0) {
     const op = pendingOps.shift()!;
     if (op.kind === "event") {
-      posthog.capture(op.name, op.props);
+      posthog.capture(op.name, withClientEventProperties(op.props));
     } else {
       capturePersonSet(op.props);
     }
@@ -188,6 +200,7 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
  * config and user in parallel, so identify can arrive first.
  */
 export function identify(userId: string, userProperties?: Record<string, unknown>): void {
+  currentUserId = userId;
   if (!initialized) {
     pendingIdentify = { userId, props: userProperties };
     return;
@@ -200,6 +213,7 @@ export function identify(userId: string, userProperties?: Record<string, unknown
  * and doesn't bleed the previous user's events into a new session.
  */
 export function resetAnalytics(): void {
+  currentUserId = null;
   pendingIdentify = null;
   pendingPageview = null;
   pendingOps.length = 0;
@@ -231,7 +245,7 @@ export function captureEvent(
     pendingOps.push({ kind: "event", name, props });
     return;
   }
-  posthog.capture(name, props);
+  posthog.capture(name, withClientEventProperties(props));
 }
 
 /**
@@ -257,6 +271,43 @@ export function setPersonProperties(props: Record<string, unknown>): void {
 // and the capture form works uniformly.
 function capturePersonSet(props: Record<string, unknown>): void {
   posthog.capture("$set", { $set: props });
+}
+
+function withClientEventProperties(
+  props?: Record<string, unknown>,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...(props ?? {}) };
+  if (currentUserId && next.user_id === undefined) {
+    next.user_id = currentUserId;
+  }
+  if (next.event_schema_version === undefined) {
+    next.event_schema_version = EVENT_SCHEMA_VERSION;
+  }
+  if (next.environment === undefined) {
+    next.environment = analyticsEnvironment;
+  }
+  if (next.is_demo === undefined) {
+    next.is_demo = false;
+  }
+  return next;
+}
+
+function normalizeEnvironment(value: string | undefined): string {
+  switch ((value || "").trim().toLowerCase()) {
+    case "production":
+    case "prod":
+      return "production";
+    case "staging":
+    case "stage":
+      return "staging";
+    case "development":
+    case "dev":
+    case "test":
+    case "local":
+      return "dev";
+    default:
+      return "dev";
+  }
 }
 
 /**

@@ -1,17 +1,18 @@
 {
-  "name": "@asymbl/forge-desktop",
+  "name": "@multica/desktop",
+  "productName": "Multica",
   "version": "0.1.0",
   "private": true,
-  "description": "Forge Desktop — native desktop client for the Forge platform by Asymbl.",
-  "homepage": "https://forge.asymbl.app",
+  "description": "Multica Desktop — native desktop client for the Multica platform.",
+  "homepage": "https://multica.ai",
   "repository": {
     "type": "git",
-    "url": "https://github.com/shivasymbl/forge.git",
+    "url": "https://github.com/multica-ai/multica.git",
     "directory": "apps/desktop"
   },
   "author": {
-    "name": "Asymbl",
-    "email": "forge@asymbl.app"
+    "name": "Multica",
+    "email": "support@multica.ai"
   },
   "license": "UNLICENSED",
   "main": "./out/main/index.js",
@@ -39,7 +40,7 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@fontsource-variable/inter": "^5.2.5",
-    "@fontsource-variable/fraunces": "^5.2.9",
+    "@fontsource-variable/source-serif-4": "^5.2.9",
     "@fontsource/geist-mono": "^5.2.7",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
@@ -61,7 +62,6 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "^5.1.1",
-    "dmg-license": "^1.0.11",
     "electron": "^39.2.6",
     "electron-builder": "^26.0.12",
     "electron-vite": "^5.0.0",

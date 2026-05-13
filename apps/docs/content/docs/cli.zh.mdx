@@ -40,20 +40,25 @@ Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
 | `multica workspace list` | 列出你有权访问的所有工作区 |
 | `multica workspace get <slug>` | 查看一个工作区的详情 |
 | `multica workspace members` | 列出当前工作区的成员 |
+| `multica workspace update <id> --name "..." [--description "..."] [--context "..."] [--issue-prefix "..."]` | 修改 workspace 元数据（admin/owner 权限）。长文本可用 `--description-stdin` / `--context-stdin`。 |
 
 ## Issue 和 Project
 
+<Callout type="info">
+`list` 类命令（`multica issue list`、`autopilot list`、`project list` 等）表格里默认显示**可直接复制**的短 ID：issue 是 key（如 `MUL-123`），其余资源是 UUID 短前缀。下面表格里的 `<id>` 同时接受短 ID 和完整 UUID，所以典型用法是 `multica issue list` → 复制 key → `multica issue get MUL-123`。需要完整 UUID 时给 `list` 加 `--full-id`。
+</Callout>
+
 | 命令 | 用途 |
 |---|---|
-| `multica issue list` | 列出 issue |
-| `multica issue get <id>` | 查看单条 issue |
+| `multica issue list` | 列出 issue（默认显示可复制的 issue key） |
+| `multica issue get <id>` | 查看单条 issue（接受 issue key 或 UUID） |
 | `multica issue create --title "..."` | 创建新 issue |
 | `multica issue update <id> ...` | 修改 issue（状态、优先级、分配人等） |
 | `multica issue assign <id> --agent <slug>` | 分配给智能体（立即触发任务） |
 | `multica issue status <id> --set <status>` | 快捷改状态 |
 | `multica issue search <query>` | 关键字搜索 |
 | `multica issue runs <id>` | 查看 issue 上智能体跑过的任务 |
-| `multica issue rerun <id>` | 重跑最近一次智能体任务 |
+| `multica issue rerun <id>` | 给该 issue 当前的智能体分配人重新创建一条任务 |
 | `multica issue comment <id> ...` | 嵌套：看 / 发评论 |
 | `multica issue subscriber <id> ...` | 嵌套：订阅 / 取消订阅 |
 | `multica project list/get/create/update/delete/status` | Project CRUD |
@@ -98,7 +103,6 @@ Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
 | `multica runtime list` | 列出当前工作区的 runtime |
 | `multica runtime usage` | 查看资源使用情况 |
 | `multica runtime activity` | 近期活动记录 |
-| `multica runtime ping <id>` | 立即戳一次 runtime 检查在线 |
 | `multica runtime update <id> ...` | 更新 runtime 配置 |
 
 ## 杂项

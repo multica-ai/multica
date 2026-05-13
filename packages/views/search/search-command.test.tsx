@@ -1,9 +1,28 @@
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { I18nProvider } from "@multica/core/i18n/react";
 import { SearchCommand } from "./search-command";
 import { useSearchStore } from "./search-store";
+import enCommon from "../locales/en/common.json";
+import enAuth from "../locales/en/auth.json";
+import enSettings from "../locales/en/settings.json";
+import enSearch from "../locales/en/search.json";
+
+const TEST_RESOURCES = {
+  en: { common: enCommon, auth: enAuth, settings: enSettings, search: enSearch },
+};
+
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
+
+const renderSearch = () => render(<SearchCommand />, { wrapper: I18nWrapper });
 
 const {
   mockPush,
@@ -48,12 +67,23 @@ vi.mock("@multica/core/api", () => ({
   },
 }));
 
-vi.mock("@multica/core/issues/stores", () => ({
-  useRecentIssuesStore: (selector?: (state: { items: typeof mockRecentItems.current }) => unknown) => {
-    const state = { items: mockRecentItems.current };
-    return selector ? selector(state) : state;
-  },
-}));
+vi.mock("@multica/core/issues/stores", () => {
+  const EMPTY: Array<{ id: string; visitedAt: number }> = [];
+  return {
+    useRecentIssuesStore: (
+      selector?: (state: {
+        byWorkspace: Record<string, typeof mockRecentItems.current>;
+      }) => unknown,
+    ) => {
+      const state = { byWorkspace: { "ws-test": mockRecentItems.current } };
+      return selector ? selector(state) : state;
+    },
+    selectRecentIssues:
+      (wsId: string | null) =>
+      (state: { byWorkspace: Record<string, typeof mockRecentItems.current> }) =>
+        wsId ? (state.byWorkspace[wsId] ?? EMPTY) : EMPTY,
+  };
+});
 
 vi.mock("@multica/core", () => ({
   useWorkspaceId: () => "ws-test",
@@ -160,7 +190,7 @@ describe("SearchCommand", () => {
   it("closes on a single Escape press from the search input", async () => {
     const user = userEvent.setup();
 
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.click(input);
@@ -176,7 +206,7 @@ describe("SearchCommand", () => {
   });
 
   it("shows only New Issue by default and hides Pages / Switch Workspace / low-frequency commands until query", () => {
-    render(<SearchCommand />);
+    renderSearch();
 
     expect(screen.queryByText("Pages")).not.toBeInTheDocument();
     expect(screen.queryByText("Switch Workspace")).not.toBeInTheDocument();
@@ -194,7 +224,7 @@ describe("SearchCommand", () => {
 
   it("filters navigation pages by query", async () => {
     const user = userEvent.setup();
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "set");
@@ -208,7 +238,7 @@ describe("SearchCommand", () => {
 
   it("navigates to page on selection", async () => {
     const user = userEvent.setup();
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "settings");
@@ -230,7 +260,7 @@ describe("SearchCommand", () => {
       { id: "issue-2", identifier: "MUL-2", title: "Second issue", status: "done" },
     ];
 
-    render(<SearchCommand />);
+    renderSearch();
 
     expect(screen.getByText("Recent")).toBeInTheDocument();
     expect(screen.getByText("First issue")).toBeInTheDocument();
@@ -241,7 +271,7 @@ describe("SearchCommand", () => {
 
   it("shows New Issue / New Project under Commands and triggers the modal store", async () => {
     const user = userEvent.setup();
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "new");
@@ -268,7 +298,7 @@ describe("SearchCommand", () => {
   it("hides copy-link commands when not on an issue detail route", async () => {
     const user = userEvent.setup();
     mockPathname.current = "/ws-test/projects";
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "copy");
@@ -288,7 +318,7 @@ describe("SearchCommand", () => {
     mockAllIssues.current = [
       { id: "issue-1", identifier: "MUL-42", title: "Demo", status: "todo" },
     ];
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "copy");
@@ -321,7 +351,7 @@ describe("SearchCommand", () => {
 
   it("filters theme commands by query keywords", async () => {
     const user = userEvent.setup();
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "dark");
@@ -339,7 +369,7 @@ describe("SearchCommand", () => {
   it("applies the selected theme and closes the palette", async () => {
     const user = userEvent.setup();
     mockTheme.current = "light";
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "dark");
@@ -356,7 +386,7 @@ describe("SearchCommand", () => {
   it("matches theme action via generic 'theme' keyword and marks current theme", async () => {
     const user = userEvent.setup();
     mockTheme.current = "dark";
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "theme");
@@ -383,7 +413,7 @@ describe("SearchCommand", () => {
       { id: "ws-alpha", name: "Alpha Co", slug: "alpha" },
       { id: "ws-beta", name: "Beta Co", slug: "beta" },
     ];
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "alpha");
@@ -414,7 +444,7 @@ describe("SearchCommand", () => {
       { id: "ws-alpha", name: "Alpha Co", slug: "alpha" },
       { id: "ws-beta", name: "Beta Co", slug: "beta" },
     ];
-    render(<SearchCommand />);
+    renderSearch();
 
     const input = screen.getByPlaceholderText("Type a command or search...");
     await user.type(input, "workspace");
@@ -440,7 +470,7 @@ describe("SearchCommand", () => {
       { id: "issue-1", identifier: "MUL-1", title: "Existing issue", status: "in_progress" },
     ];
 
-    render(<SearchCommand />);
+    renderSearch();
 
     expect(screen.getByText("Recent")).toBeInTheDocument();
     expect(screen.getByText("Existing issue")).toBeInTheDocument();

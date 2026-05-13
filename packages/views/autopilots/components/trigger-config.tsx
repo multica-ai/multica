@@ -9,6 +9,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@multica/ui/components/ui/select";
+import { useT } from "../../i18n";
 
 export type TriggerFrequency = "hourly" | "daily" | "weekdays" | "weekly" | "custom";
 
@@ -21,18 +22,18 @@ export interface TriggerConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Constants
+// Constants — schema-level (not user-visible)
 // ---------------------------------------------------------------------------
 
-const FREQUENCIES: { value: TriggerFrequency; label: string }[] = [
-  { value: "hourly", label: "Hourly" },
-  { value: "daily", label: "Daily" },
-  { value: "weekdays", label: "Weekdays" },
-  { value: "weekly", label: "Days" },
-  { value: "custom", label: "Custom" },
+const FREQUENCY_KEYS: TriggerFrequency[] = [
+  "hourly",
+  "daily",
+  "weekdays",
+  "weekly",
+  "custom",
 ];
 
-const DAYS_OF_WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAY_SHORT_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 
 const COMMON_TIMEZONES = [
   "UTC",
@@ -112,12 +113,6 @@ function sortedDays(days: number[]): number[] {
   return [...new Set(days)].sort((a, b) => a - b);
 }
 
-function formatDayList(days: number[]): string {
-  const sorted = sortedDays(days);
-  if (sorted.length === 0) return "—";
-  return sorted.map((d) => DAYS_OF_WEEK[d]).join(", ");
-}
-
 export function toCronExpression(cfg: TriggerConfig): string {
   const [h, m] = cfg.time.split(":");
   const hour = parseInt(h ?? "9", 10);
@@ -173,39 +168,80 @@ export function parseCronExpression(cron: string, timezone: string): TriggerConf
   return { ...base, frequency: "custom" };
 }
 
-export function summarizeTrigger(cfg: TriggerConfig): string {
-  switch (cfg.frequency) {
-    case "hourly": {
-      const min = cfg.time.split(":")[1] ?? "00";
-      return `Hourly · :${min}`;
+// ---------------------------------------------------------------------------
+// Hooks (i18n-aware)
+// ---------------------------------------------------------------------------
+
+// Hook returning a function that produces the compact "Hourly · :15 / Daily 09:00"
+// summary. Was a pure module-level function before i18n; converted to a hook so
+// the strings can flow through useT.
+export function useSummarizeTrigger(): (cfg: TriggerConfig) => string {
+  const { t } = useT("autopilots");
+  return (cfg) => {
+    switch (cfg.frequency) {
+      case "hourly": {
+        const min = cfg.time.split(":")[1] ?? "00";
+        return t(($) => $.trigger_config.summary.hourly, { min });
+      }
+      case "daily":
+        return t(($) => $.trigger_config.summary.daily, { time: cfg.time });
+      case "weekdays":
+        return t(($) => $.trigger_config.summary.weekdays, { time: cfg.time });
+      case "weekly":
+        return t(($) => $.trigger_config.summary.weekly, {
+          days: formatDayList(cfg.daysOfWeek, t),
+          time: cfg.time,
+        });
+      case "custom":
+        return t(($) => $.trigger_config.summary.custom);
     }
-    case "daily":
-      return `Daily ${cfg.time}`;
-    case "weekdays":
-      return `Weekdays ${cfg.time}`;
-    case "weekly":
-      return `${formatDayList(cfg.daysOfWeek)} ${cfg.time}`;
-    case "custom":
-      return "Custom cron";
-  }
+  };
 }
 
-export function describeTrigger(cfg: TriggerConfig): string {
-  const offset = getTimezoneOffset(cfg.timezone);
-  switch (cfg.frequency) {
-    case "hourly": {
-      const min = parseInt(cfg.time.split(":")[1] ?? "0", 10);
-      return `Runs every hour at :${min.toString().padStart(2, "0")}`;
+// Hook returning a function that produces the longer "Runs daily at 9:00 AM PDT"
+// description. Same rationale as useSummarizeTrigger.
+export function useDescribeTrigger(): (cfg: TriggerConfig) => string {
+  const { t } = useT("autopilots");
+  return (cfg) => {
+    const offset = getTimezoneOffset(cfg.timezone);
+    switch (cfg.frequency) {
+      case "hourly": {
+        const min = parseInt(cfg.time.split(":")[1] ?? "0", 10).toString().padStart(2, "0");
+        return t(($) => $.trigger_config.describe.hourly, { min });
+      }
+      case "daily":
+        return t(($) => $.trigger_config.describe.daily, {
+          time: formatTime12h(cfg.time),
+          offset,
+        });
+      case "weekdays":
+        return t(($) => $.trigger_config.describe.weekdays, {
+          time: formatTime12h(cfg.time),
+          offset,
+        });
+      case "weekly":
+        return t(($) => $.trigger_config.describe.weekly, {
+          days: formatDayList(cfg.daysOfWeek, t),
+          time: formatTime12h(cfg.time),
+          offset,
+        });
+      case "custom":
+        return t(($) => $.trigger_config.describe.custom, {
+          cron: cfg.cronExpression,
+        });
     }
-    case "daily":
-      return `Runs daily at ${formatTime12h(cfg.time)} ${offset}`;
-    case "weekdays":
-      return `Runs weekdays at ${formatTime12h(cfg.time)} ${offset}`;
-    case "weekly":
-      return `Runs every ${formatDayList(cfg.daysOfWeek)} at ${formatTime12h(cfg.time)} ${offset}`;
-    case "custom":
-      return `Custom schedule: ${cfg.cronExpression}`;
-  }
+  };
+}
+
+// Helper that resolves day-short labels through t() — extracted so the two
+// hooks above can share the join logic without each grabbing its own t.
+type AutopilotsT = ReturnType<typeof useT<"autopilots">>["t"];
+function formatDayList(days: number[], t: AutopilotsT): string {
+  const sorted = sortedDays(days);
+  if (sorted.length === 0) return t(($) => $.trigger_config.summary.no_days);
+  return sorted
+    .map((d) => t(($) => $.trigger_config.days_short[DAY_SHORT_KEYS[d]!]))
+    .join(", ");
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +255,8 @@ export function TriggerConfigSection({
   config: TriggerConfig;
   onChange: (config: TriggerConfig) => void;
 }) {
+  const { t } = useT("autopilots");
+  const describeTrigger = useDescribeTrigger();
   const timezones = useMemo(() => {
     const local = getLocalTimezone();
     const set = new Set(COMMON_TIMEZONES);
@@ -229,19 +267,19 @@ export function TriggerConfigSection({
     <div className="space-y-3">
       {/* Frequency tabs */}
       <div className="flex flex-wrap gap-1">
-        {FREQUENCIES.map((f) => (
+        {FREQUENCY_KEYS.map((freq) => (
           <button
-            key={f.value}
+            key={freq}
             type="button"
             className={cn(
               "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-              config.frequency === f.value
+              config.frequency === freq
                 ? "bg-foreground text-background"
                 : "bg-muted text-muted-foreground hover:text-foreground",
             )}
-            onClick={() => onChange({ ...config, frequency: f.value })}
+            onClick={() => onChange({ ...config, frequency: freq })}
           >
-            {f.label}
+            {t(($) => $.trigger_config.frequencies[freq])}
           </button>
         ))}
       </div>
@@ -249,7 +287,9 @@ export function TriggerConfigSection({
       {config.frequency === "custom" ? (
         /* Custom cron input */
         <div>
-          <label className="text-xs text-muted-foreground">Cron Expression</label>
+          <label className="text-xs text-muted-foreground">
+            {t(($) => $.trigger_config.cron_label)}
+          </label>
           <input
             type="text"
             value={config.cronExpression}
@@ -258,7 +298,7 @@ export function TriggerConfigSection({
             className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-ring"
           />
           <p className="text-xs text-muted-foreground mt-1">
-            Standard 5-field cron (min hour dom month dow)
+            {t(($) => $.trigger_config.cron_hint)}
           </p>
         </div>
       ) : (
@@ -267,7 +307,9 @@ export function TriggerConfigSection({
           <div className="flex gap-3">
             {config.frequency === "hourly" ? (
               <div className="w-24">
-                <label className="text-xs text-muted-foreground">Minute</label>
+                <label className="text-xs text-muted-foreground">
+                  {t(($) => $.trigger_config.minute_label)}
+                </label>
                 <input
                   type="number"
                   min={0}
@@ -283,7 +325,9 @@ export function TriggerConfigSection({
             ) : (
               <>
                 <div className="w-28">
-                  <label className="text-xs text-muted-foreground">Time</label>
+                  <label className="text-xs text-muted-foreground">
+                    {t(($) => $.trigger_config.time_label)}
+                  </label>
                   <input
                     type="time"
                     value={config.time}
@@ -292,7 +336,9 @@ export function TriggerConfigSection({
                   />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <label className="text-xs text-muted-foreground">Timezone</label>
+                  <label className="text-xs text-muted-foreground">
+                    {t(($) => $.trigger_config.timezone_label)}
+                  </label>
                   <Select
                     value={config.timezone}
                     onValueChange={(v) => v && onChange({ ...config, timezone: v })}
@@ -318,13 +364,15 @@ export function TriggerConfigSection({
           {/* Day-of-week multi-selector for weekly */}
           {config.frequency === "weekly" && (
             <div>
-              <label className="text-xs text-muted-foreground">Days</label>
+              <label className="text-xs text-muted-foreground">
+                {t(($) => $.trigger_config.days_label)}
+              </label>
               <div className="flex gap-1 mt-1">
-                {DAYS_OF_WEEK.map((day, i) => {
+                {DAY_SHORT_KEYS.map((dayKey, i) => {
                   const selected = config.daysOfWeek.includes(i);
                   return (
                     <button
-                      key={day}
+                      key={dayKey}
                       type="button"
                       aria-pressed={selected}
                       className={cn(
@@ -344,7 +392,7 @@ export function TriggerConfigSection({
                         });
                       }}
                     >
-                      {day}
+                      {t(($) => $.trigger_config.days_short[dayKey])}
                     </button>
                   );
                 })}
