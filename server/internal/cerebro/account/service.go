@@ -38,6 +38,10 @@ func (s *Service) List(ctx context.Context, workspaceID pgtype.UUID) ([]cerebrod
 	return s.Cerebro.ListCerebroAccounts(ctx, workspaceID)
 }
 
+func (s *Service) ListWithAvailability(ctx context.Context, workspaceID pgtype.UUID) ([]cerebrodb.ListCerebroAccountsWithAvailabilityRow, error) {
+	return s.Cerebro.ListCerebroAccountsWithAvailability(ctx, workspaceID)
+}
+
 func (s *Service) Get(ctx context.Context, workspaceID, accountID pgtype.UUID) (cerebrodb.CerebroAccount, error) {
 	a, err := s.Cerebro.GetCerebroAccount(ctx, accountID)
 	if err != nil {

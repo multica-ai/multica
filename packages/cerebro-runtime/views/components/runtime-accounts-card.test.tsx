@@ -46,6 +46,10 @@ const account: CerebroAccount = {
   login_identity: "user@example.com",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
+  runtime_count: 1,
+  available_runtime_count: 1,
+  nearest_unpause_at: null,
+  status: "available",
 };
 
 beforeEach(() => {

@@ -101,6 +101,71 @@ func (q *Queries) ListCerebroAccounts(ctx context.Context, workspaceID pgtype.UU
 	return items, nil
 }
 
+const listCerebroAccountsWithAvailability = `-- name: ListCerebroAccountsWithAvailability :many
+SELECT
+    ca.id,
+    ca.workspace_id,
+    ca.provider,
+    ca.login_identity,
+    ca.created_at,
+    ca.updated_at,
+    COUNT(ar.id)::int                                                                         AS runtime_count,
+    COUNT(ar.id) FILTER (WHERE ar.paused_at IS NULL)::int                                    AS available_runtime_count,
+    (MIN(ar.unpause_at) FILTER (WHERE ar.paused_at IS NOT NULL AND ar.unpause_at IS NOT NULL))::timestamptz  AS nearest_unpause_at
+FROM cerebro_account ca
+LEFT JOIN agent_runtime ar
+    ON  ar.current_account_id = ca.id
+    AND ar.workspace_id       = ca.workspace_id
+WHERE ca.workspace_id = $1
+GROUP BY ca.id
+ORDER BY
+    COUNT(ar.id) FILTER (WHERE ar.paused_at IS NULL) DESC,
+    ca.provider ASC,
+    lower(ca.login_identity) ASC
+`
+
+type ListCerebroAccountsWithAvailabilityRow struct {
+	ID                    pgtype.UUID        `json:"id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	Provider              string             `json:"provider"`
+	LoginIdentity         string             `json:"login_identity"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	RuntimeCount          int32              `json:"runtime_count"`
+	AvailableRuntimeCount int32              `json:"available_runtime_count"`
+	NearestUnpauseAt      pgtype.Timestamptz `json:"nearest_unpause_at"`
+}
+
+func (q *Queries) ListCerebroAccountsWithAvailability(ctx context.Context, workspaceID pgtype.UUID) ([]ListCerebroAccountsWithAvailabilityRow, error) {
+	rows, err := q.db.Query(ctx, listCerebroAccountsWithAvailability, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCerebroAccountsWithAvailabilityRow{}
+	for rows.Next() {
+		var i ListCerebroAccountsWithAvailabilityRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Provider,
+			&i.LoginIdentity,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.RuntimeCount,
+			&i.AvailableRuntimeCount,
+			&i.NearestUnpauseAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertCerebroAccount = `-- name: UpsertCerebroAccount :one
 INSERT INTO cerebro_account (workspace_id, provider, login_identity)
 VALUES ($1, $2, $3)

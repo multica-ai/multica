@@ -21,6 +21,7 @@ export type CerebroFlagKey =
   | "cerebro_autopilot_scopes"
   | "cerebro_groups_enabled"
   | "cerebro_runtime_pause"
+  | "cerebro_runtime_accounts"
   | "cerebro_tasks"
   | "cerebro_pin_input"
   | "cerebro_workflows";
@@ -48,6 +49,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_autopilot_scopes: true,
   cerebro_groups_enabled: true,
   cerebro_runtime_pause: true,
+  cerebro_runtime_accounts: true,
   cerebro_tasks: false,
   cerebro_pin_input: true,
   cerebro_workflows: false,
@@ -147,6 +149,12 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Runtime pause / resume",
     description:
       "Pause and resume agent runtimes manually or automatically. When a provider returns 429, the runtime auto-pauses until the rate-limit window resets, then resumes interrupted work on its own.",
+  },
+  {
+    key: "cerebro_runtime_accounts",
+    label: "Runtime account availability",
+    description:
+      "Show availability status per account on the runtime detail card: how many runtimes are free, throttled, or paused. Coordinator agents use this to pick the right runtime.",
   },
   {
     key: "cerebro_tasks",

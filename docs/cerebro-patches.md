@@ -493,3 +493,5 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `reply-input-mobile-paperclip` | packages/views/issues/components/reply-input.tsx | ~10 | JEH-1065 — on mobile, move paperclip to the left to match CommentInput so pin/expand/send aren't cramped on the right. |
 | `reply-input-min-height` | packages/views/issues/components/reply-input.tsx | 3 | JEH-1065 — minimum 2 lines + always-reserved bottom padding so the placeholder + icon row don't share one cramped line. |
 | `comment-input-min-height` | packages/views/issues/components/comment-input.tsx | 1 | JEH-1065 — minimum 2 lines on the bottom comment input for the same reason. |
+
+| `cerebro-account-availability` | packages/core/api/client.ts | 4 | JEH-881 — adds `runtime_count`, `available_runtime_count`, `nearest_unpause_at`, `status` fields to `CerebroAccount` interface. Backend derives values from a LEFT JOIN between `cerebro_account` and `agent_runtime`. |
