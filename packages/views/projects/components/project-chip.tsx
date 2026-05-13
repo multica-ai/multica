@@ -54,9 +54,10 @@ export function ProjectChip({
   }
 
   return (
-    <span className={cls}>
+    // CEREBRO-PATCH(project-chip-readable): wrap long titles + tooltip instead of single-line truncate (JEH-1113)
+    <span className={cls} title={project.title}>
       <ProjectIcon project={project} size="md" />
-      <span className="text-foreground truncate">{project.title}</span>
+      <span className="text-foreground break-words">{project.title}</span>
     </span>
   );
 }
