@@ -1,20 +1,18 @@
-# See docker-bake.backend.hcl for context on the APP_IMAGE / IMG_SHA naming
-# (the same caveats about the workflow-level IMAGE_NAME override apply here).
-variable "APP_IMAGE" {
-  default = "ghcr.io/g2crowd/agentfarm-agentrunner-prod"
+# See docker-bake.backend.hcl for the full rationale on the
+# APP_IMAGE_BASE / ENVIRONMENT split (the same caveats about the workflow-level
+# IMAGE_NAME override apply here). Short version: publish.yml sets
+# environment=prod → agentfarm-agentrunner-prod; dev.yml sets environment=dev
+# → agentfarm-agentrunner-dev. Image Updater on dev points at the -dev repo.
+variable "APP_IMAGE_BASE" {
+  default = "ghcr.io/g2crowd/agentfarm-agentrunner"
+}
+
+variable "ENVIRONMENT" {
+  default = "prod"
 }
 
 variable "IMG_SHA" {
   default = "latest"
-}
-
-# DEV_TAG is injected by dev.yml as an env var (dev-<full-sha>). Same contract
-# as docker-bake.backend.hcl / docker-bake.web.hcl: when set we push a second
-# "dev-<sha>" tag so ArgoCD Image Updater on the development environment can
-# filter on the "^dev-" prefix without picking up tools/main builds. Empty
-# string in prod/tools, where docker/bake-action ignores the empty tag.
-variable "DEV_TAG" {
-  default = ""
 }
 
 # The agentrunner image is now a thin layer on top of
@@ -38,7 +36,7 @@ target "default" {
   # pool) but the image being multi-arch lets local dev on amd64 laptops
   # work without QEMU.
   platforms  = ["linux/amd64", "linux/arm64"]
-  tags       = compact(["${APP_IMAGE}:${IMG_SHA}", DEV_TAG != "" ? "${APP_IMAGE}:${DEV_TAG}" : ""])
+  tags       = ["${APP_IMAGE_BASE}-${ENVIRONMENT}:${IMG_SHA}"]
   args = {
     BASE_IMAGE = "${BASE_IMAGE}"
     BASE_TAG   = "${BASE_TAG}"

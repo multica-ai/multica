@@ -40,4 +40,11 @@ images:
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newTag: "5dd72cd8"
   - name: ghcr.io/g2crowd/agentfarm-agentrunner-prod
-    newTag: "latest"
+    # Same SHA the tools env runs (PR #96, the agent-runtime-base refactor).
+    # The agentrunner image is currently sourced from -prod alongside backend
+    # and web; a follow-up PR will switch all three to the new
+    # agentfarm-{backend,web,agentrunner}-dev repos once one dev-labeled PR
+    # has run dev.yml and populated those repos with at least one build.
+    # Image Updater on the agentfarm-development Application (in
+    # g2crowd/configuration) will then take over keeping these SHAs current.
+    newTag: "bc90fc3e"

@@ -4,9 +4,18 @@
 # docker/bake-action automatically surfaces as an HCL variable override,
 # silently replacing any IMAGE_NAME default declared here. That caused pushes
 # to go to `g2crowd/agentfarm:latest` (Docker Hub) instead of GHCR.
-# Using a distinct variable name (APP_IMAGE) avoids the collision.
-variable "APP_IMAGE" {
-  default = "ghcr.io/g2crowd/agentfarm-web-prod"
+# Using a distinct variable name (APP_IMAGE_BASE) avoids the collision.
+#
+# Same env-suffix scheme as docker-bake.backend.hcl — see the long comment
+# there for the full rationale. Short version: publish.yml passes
+# environment=prod, dev.yml passes environment=dev, and the bake target
+# composes `${APP_IMAGE_BASE}-${ENVIRONMENT}` to land in the right GHCR repo.
+variable "APP_IMAGE_BASE" {
+  default = "ghcr.io/g2crowd/agentfarm-web"
+}
+
+variable "ENVIRONMENT" {
+  default = "prod"
 }
 
 # IMG_SHA is injected by the reusable workflow
@@ -17,15 +26,6 @@ variable "APP_IMAGE" {
 # gitops/environments/tools/kustomization.yaml and trigger a sync.
 variable "IMG_SHA" {
   default = "latest"
-}
-
-# DEV_TAG is injected by dev.yml as an env var (dev-<full-sha>).
-# When present it causes a second tag to be pushed alongside the plain SHA tag
-# so that ArgoCD Image Updater on the dev environment can filter on the "^dev-"
-# prefix and never accidentally pick up a prod/main image.
-# Defaults to empty string — docker/bake-action ignores empty tags.
-variable "DEV_TAG" {
-  default = ""
 }
 
 variable "REMOTE_API_URL" {
@@ -54,7 +54,7 @@ target "default" {
   context    = "."
   dockerfile = "Dockerfile.web"
   platforms  = ["linux/arm64"]
-  tags       = compact(["${APP_IMAGE}:${IMG_SHA}", DEV_TAG != "" ? "${APP_IMAGE}:${DEV_TAG}" : ""])
+  tags       = ["${APP_IMAGE_BASE}-${ENVIRONMENT}:${IMG_SHA}"]
   args = {
     REMOTE_API_URL                 = "${REMOTE_API_URL}"
     NEXT_PUBLIC_GOOGLE_CLIENT_ID   = "${NEXT_PUBLIC_GOOGLE_CLIENT_ID}"

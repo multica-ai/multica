@@ -22,13 +22,16 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  # DEV_TAG is picked up by docker-bake.*.hcl as an HCL variable override.
-  # It causes each bakefile to emit a second "dev-<sha>" tag alongside the
-  # plain SHA tag so that ArgoCD Image Updater can filter dev builds by the
-  # "^dev-" prefix without accidentally picking up prod/main images.
-  # github.event.pull_request.head.sha is the actual PR head commit SHA
-  # (the same 40-char SHA the bake workflow truncates to 8 chars for IMG_SHA).
-  DEV_TAG: dev-${{ github.event.pull_request.head.sha }}
+  # Dev/prod image discrimination is done at the image-repo level, not via tag
+  # prefix: dev.yml passes `environment: dev` (line 56+) to the reusable bake
+  # workflow, which forwards it as the `ENVIRONMENT` env var into
+  # docker/bake-action. The three app bakefiles (docker-bake.{backend,web,
+  # agentrunner}.hcl) then compose the final image as
+  # `${APP_IMAGE_BASE}-${ENVIRONMENT}:${IMG_SHA}` so this workflow pushes to
+  # ghcr.io/g2crowd/agentfarm-{backend,web,agentrunner}-dev:<sha> while
+  # publish.yml continues pushing to the -prod repos. ArgoCD Image Updater on
+  # the agentfarm-development Application points at the -dev repos and picks
+  # newest SHA. No tag-format coordination across workflows is needed.
 
 jobs:
   # The shared agent-runtime base must build before any image that FROMs it.
