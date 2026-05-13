@@ -186,10 +186,6 @@ type AgentTaskResponse struct {
 	WorkDir                 string                `json:"work_dir,omitempty"`                // local working directory pinned for this task; populated once the daemon reports it
 	TriggerCommentID        *string               `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
 	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"` // content of the triggering comment
-	TriggerSource           string                `json:"trigger_source,omitempty"`
-	TriggerActorType        string                `json:"trigger_actor_type,omitempty"`
-	TriggerActorID          string                `json:"trigger_actor_id,omitempty"`
-	TriggerActorOwnerID     string                `json:"trigger_actor_owner_id,omitempty"`
 	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
@@ -251,9 +247,6 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		ParentTaskID:     uuidToPtr(t.ParentTaskID),
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
-		TriggerSource:    t.TriggerSource.String,
-		TriggerActorType: t.TriggerActorType.String,
-		TriggerActorID:   uuidToString(t.TriggerActorID),
 		TriggerSummary:   textToPtr(t.TriggerSummary),
 		WorkDir:          workDir,
 		// Surface task source so the UI can distinguish issue-linked tasks
