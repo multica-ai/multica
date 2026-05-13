@@ -116,6 +116,14 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false }
         <div
           {...dropZoneProps}
           data-testid="comment-input"
+          // CEREBRO-PATCH(comment-input-click-to-focus): JEH-1200 — clicks
+          // anywhere in the card focus the editor (skip when the target is
+          // itself interactive so buttons/links still work).
+          onMouseDown={(e) => {
+            if ((e.target as HTMLElement).closest("button, a, input, textarea, [contenteditable]")) return;
+            e.preventDefault();
+            editorRef.current?.focus();
+          }}
           // CEREBRO-PATCH(comment-input-min-height): JEH-1065 — minimum 2 lines
           // tall so the placeholder + icon row don't get crammed into one
           // line at the bottom of the issue page (was visibly squashed on

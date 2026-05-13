@@ -152,6 +152,14 @@ function ReplyInput({
           />
           <div
             {...dropZoneProps}
+            // CEREBRO-PATCH(reply-input-click-to-focus): JEH-1200 — clicks
+            // anywhere in the card focus the editor (skip when the target is
+            // itself interactive so buttons/links still work).
+            onMouseDown={(e) => {
+              if ((e.target as HTMLElement).closest("button, a, input, textarea, [contenteditable]")) return;
+              e.preventDefault();
+              editorRef.current?.focus();
+            }}
             className={cn(
               "relative min-w-0 flex-1 flex flex-col rounded-md bg-card min-h-20",
               isExpanded

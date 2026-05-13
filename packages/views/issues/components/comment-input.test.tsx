@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import { forwardRef, useImperativeHandle, type Ref } from "react";
+
+const focusSpy = vi.hoisted(() => vi.fn());
 
 // JEH-756: focus is now Tiptap-native, configured via the `autoFocus` prop
 // on ContentEditor. The comment-input layer only forwards the prop and
@@ -44,7 +46,7 @@ vi.mock("../../editor", () => {
         getMarkdown: () => "",
         clearContent: () => {},
         uploadFile: () => {},
-        focus: () => {},
+        focus: focusSpy,
       }));
       return <div data-testid="content-editor" />;
     },
@@ -61,6 +63,7 @@ import { CommentInput } from "./comment-input";
 
 beforeEach(() => {
   autoFocusEvents.length = 0;
+  focusSpy.mockClear();
 });
 
 describe("CommentInput — JEH-756 autofocus prop wiring", () => {
@@ -87,5 +90,21 @@ describe("CommentInput — JEH-756 autofocus prop wiring", () => {
     // Tiptap's `autofocus` for the new channel/DM.
     expect(autoFocusEvents.length).toBeGreaterThan(mountsBeforeSwitch);
     expect(autoFocusEvents[autoFocusEvents.length - 1]).toBe(true);
+  });
+});
+
+describe("CommentInput — JEH-1200 click-to-focus", () => {
+  it("focuses the editor when the user clicks the card padding", () => {
+    const { getByTestId } = render(<CommentInput issueId="c1" onSubmit={vi.fn()} />);
+    fireEvent.mouseDown(getByTestId("comment-input"));
+    expect(focusSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not steal focus when the click target is itself interactive", () => {
+    const { container } = render(<CommentInput issueId="c1" onSubmit={vi.fn()} />);
+    const submitButton = container.querySelector("button[aria-label='Submit comment']");
+    expect(submitButton).not.toBeNull();
+    fireEvent.mouseDown(submitButton!);
+    expect(focusSpy).not.toHaveBeenCalled();
   });
 });
