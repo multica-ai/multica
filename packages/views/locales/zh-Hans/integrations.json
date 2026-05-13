@@ -12,5 +12,7 @@
   "remove": "删除",
   "save": "保存",
   "saving": "保存中...",
-  "admin_only": "只有管理员和所有者可以管理集成。"
+  "admin_only": "只有管理员和所有者可以管理集成。",
+  "redmine_api_key_guide": "如需获取 API 密钥，请打开您的 Redmine 个人资料，滚动到底部，复制 <strong>API 访问密钥</strong> 下的值。",
+  "redmine_open_profile": "打开 Redmine 个人资料"
 }

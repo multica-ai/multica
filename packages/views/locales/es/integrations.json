@@ -12,5 +12,7 @@
   "remove": "Eliminar",
   "save": "Guardar",
   "saving": "Guardando...",
-  "admin_only": "Solo los administradores y propietarios pueden gestionar integraciones."
+  "admin_only": "Solo los administradores y propietarios pueden gestionar integraciones.",
+  "redmine_api_key_guide": "Para obtener tu clave de API, abre tu perfil de Redmine, desplázate hasta abajo y copia el valor de <strong>Clave de acceso API</strong>.",
+  "redmine_open_profile": "Abrir perfil de Redmine"
 }
