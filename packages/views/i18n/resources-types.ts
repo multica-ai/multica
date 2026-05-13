@@ -1,4 +1,8 @@
 import "i18next";
+// Pulls in the `ui` namespace augmentation owned by packages/ui — see
+// packages/ui/types/i18next.ts. Side-effect import is required for views'
+// typecheck program to see ui's contribution to `I18nResources`.
+import "@multica/ui/i18n-types";
 import type common from "../locales/en/common.json";
 import type auth from "../locales/en/auth.json";
 import type settings from "../locales/en/settings.json";
@@ -32,35 +36,45 @@ import type ship from "../locales/en/ship.json";
 // Adding a namespace: drop a JSON file under en/ and zh-Hans/, then add
 // the matching `import type` + entry below. Type inference on `t($ => $)`
 // follows automatically.
+//
+// The resource shape lives on a global `I18nResources` interface (not a
+// type literal inside CustomTypeOptions) so other packages can contribute
+// namespaces via declaration merging. See packages/ui/types/i18next.d.ts —
+// it adds the `ui` namespace there, which lets packages/ui typecheck the
+// selector form standalone without depending on @multica/views.
+declare global {
+  interface I18nResources {
+    common: typeof common;
+    auth: typeof auth;
+    settings: typeof settings;
+    issues: typeof issues;
+    agents: typeof agents;
+    editor: typeof editor;
+    onboarding: typeof onboarding;
+    invite: typeof invite;
+    labels: typeof labels;
+    members: typeof members;
+    "my-issues": typeof myIssues;
+    search: typeof search;
+    inbox: typeof inbox;
+    workspace: typeof workspace;
+    projects: typeof projects;
+    autopilots: typeof autopilots;
+    skills: typeof skills;
+    chat: typeof chat;
+    modals: typeof modals;
+    runtimes: typeof runtimes;
+    layout: typeof layout;
+    channels: typeof channels;
+    memory: typeof memory;
+    ship: typeof ship;
+  }
+}
+
 declare module "i18next" {
   interface CustomTypeOptions {
     defaultNS: "common";
-    resources: {
-      common: typeof common;
-      auth: typeof auth;
-      settings: typeof settings;
-      issues: typeof issues;
-      agents: typeof agents;
-      editor: typeof editor;
-      onboarding: typeof onboarding;
-      invite: typeof invite;
-      labels: typeof labels;
-      members: typeof members;
-      "my-issues": typeof myIssues;
-      search: typeof search;
-      inbox: typeof inbox;
-      workspace: typeof workspace;
-      projects: typeof projects;
-      autopilots: typeof autopilots;
-      skills: typeof skills;
-      chat: typeof chat;
-      modals: typeof modals;
-      runtimes: typeof runtimes;
-      layout: typeof layout;
-      channels: typeof channels;
-      memory: typeof memory;
-      ship: typeof ship;
-    };
+    resources: I18nResources;
     enableSelector: true;
   }
 }
