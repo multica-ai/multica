@@ -234,14 +234,6 @@ func requestUserID(r *http.Request) string {
 	return r.Header.Get("X-User-ID")
 }
 
-func buildTriggerActor(source, actorType, actorID string) service.TriggerActor {
-	return service.TriggerActor{
-		Source:    source,
-		ActorType: actorType,
-		ActorID:   parseUUID(actorID),
-	}
-}
-
 // resolveActor determines whether the request is from an agent or a human member.
 // If X-Agent-ID and X-Task-ID headers are both set, validates that the task
 // belongs to the claimed agent (defense-in-depth against manual header spoofing).

@@ -164,11 +164,7 @@ func tickScheduledAutopilots(ctx context.Context, queries *db.Queries, svc *serv
 		}
 
 		// Dispatch the autopilot run.
-		if _, err := svc.DispatchAutopilot(ctx, autopilot, t.ID, "schedule", nil, service.TriggerActor{
-			Source:    "autopilot_schedule",
-			ActorType: "system",
-			ActorID:   pgtype.UUID{},
-		}); err != nil {
+		if _, err := svc.DispatchAutopilot(ctx, autopilot, t.ID, "schedule", nil); err != nil {
 			slog.Warn("autopilot scheduler: dispatch failed",
 				"autopilot_id", util.UUIDToString(autopilot.ID),
 				"trigger_id", util.UUIDToString(t.ID),
