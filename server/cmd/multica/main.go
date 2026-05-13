@@ -62,6 +62,9 @@ func init() {
 	updateCmd.GroupID = groupAdditional
 	versionCmd.GroupID = groupAdditional
 
+	// CEREBRO-PATCH(cerebro-groups-cli): JEH-1172 group commands.
+	groupCmd.GroupID = groupCore
+
 	rootCmd.AddCommand(issueCmd)
 	rootCmd.AddCommand(projectCmd)
 	rootCmd.AddCommand(labelCmd)
@@ -70,6 +73,7 @@ func init() {
 	rootCmd.AddCommand(workspaceCmd)
 	rootCmd.AddCommand(repoCmd)
 	rootCmd.AddCommand(skillCmd)
+	rootCmd.AddCommand(groupCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(runtimeCmd)
 	rootCmd.AddCommand(authCmd)
