@@ -672,6 +672,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/agents", func(r chi.Router) {
 				r.Get("/", h.ListAgents)
 				r.Post("/", h.CreateAgent)
+				// Agent templates: pre-configured instructions + skill refs.
+				// Picking a template imports the referenced skills into the
+				// workspace (find-or-create by name) and creates the agent
+				// with the template's instructions in one transaction.
+				r.Post("/from-template", h.CreateAgentFromTemplate)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
@@ -692,6 +697,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListAgentTags)
 				r.Post("/", h.CreateAgentTag)
 				r.Delete("/{id}", h.DeleteAgentTag)
+			})
+
+			// Agent templates catalog (browse + detail). The Create flow
+			// lives under /api/agents/from-template above; this route is for
+			// the picker UI to list available templates.
+			r.Route("/api/agent-templates", func(r chi.Router) {
+				r.Get("/", h.ListAgentTemplates)
+				r.Get("/{slug}", h.GetAgentTemplate)
 			})
 
 			// Skills

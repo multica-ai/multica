@@ -208,7 +208,7 @@ export function AgentOverviewPane({
   );
 }
 
-// Centred, max-width container shared by every config tab. `h-full flex
+// Padded, full-width container shared by every config tab. `h-full flex
 // flex-col` lets a tab opt into "fill the viewport" by giving its root
 // element `flex-1 min-h-0` (Instructions does this so the editor expands
 // instead of pushing the Save row off-screen). Tabs that don't opt in
@@ -216,6 +216,6 @@ export function AgentOverviewPane({
 // list) still scrolls via the parent's overflow-y-auto.
 function TabContent({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-auto flex h-full max-w-2xl flex-col p-4 md:p-6">{children}</div>
+    <div className="flex h-full flex-col p-4 md:p-6">{children}</div>
   );
 }

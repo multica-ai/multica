@@ -218,7 +218,68 @@
     "create": "Create",
     "creating": "Creating...",
     "cancel": "Cancel",
-    "create_failed_toast": "Failed to create agent"
+    "create_failed_toast": "Failed to create agent",
+    "back_aria": "Back",
+    "no_runtime_toast": "No runtime available. Add a runtime first, then try again.",
+    "template_created_toast": "Agent \"{{name}}\" created",
+    "template_created_with_reuse_toast_one": "Agent \"{{name}}\" created. Reused {{count}} existing skill.",
+    "template_created_with_reuse_toast_other": "Agent \"{{name}}\" created. Reused {{count}} existing skills.",
+    "skill_attach_failed_toast": "Agent created, but failed to attach skills: {{error}}",
+    "chooser": {
+      "blank_title": "Start blank",
+      "blank_desc": "Write everything yourself.",
+      "template_title": "From template",
+      "template_desc": "Pre-configured agents with curated skills."
+    },
+    "template_picker": {
+      "title": "Pick a template",
+      "empty": "No templates available yet.",
+      "load_failed": "Failed to load templates",
+      "other_category": "Other"
+    },
+    "template_card": {
+      "skills_one": "{{count}} skill",
+      "skills_other": "{{count}} skills"
+    },
+    "template_detail": {
+      "load_failed": "Failed to load template",
+      "skill_count_one": "Includes {{count}} skill",
+      "skill_count_other": "Includes {{count}} skills",
+      "instructions_label": "Instructions",
+      "instructions_loading": "Loading instructions…",
+      "use": "Use this template",
+      "creating": "Creating…"
+    },
+    "template_failure": {
+      "title": "Some template skills are unavailable",
+      "body": "The template can't be applied because one or more upstream URLs returned an error. No changes were written. Ping the template maintainer with the URLs below."
+    },
+    "instructions": {
+      "label": "Instructions",
+      "placeholder_blank": "Click to write instructions…",
+      "placeholder_duplicate": "Click to view or edit the duplicated instructions",
+      "collapse": "Collapse",
+      "editor_placeholder": "Write what this agent should do, what to focus on, what to avoid…"
+    },
+    "skills_section": {
+      "label": "Skills",
+      "placeholder": "Add skills from workspace",
+      "selected_one": "{{count}} selected — click to edit",
+      "selected_other": "{{count}} selected — click to edit",
+      "collapse": "Collapse",
+      "list_empty_multi": "No skills in this workspace yet. Create or import one first.",
+      "list_loading": "Loading…",
+      "list_empty_default": "No skills available.",
+      "list_no_match": "No skills match.",
+      "search_placeholder": "Search skills…"
+    },
+    "avatar": {
+      "change_aria": "Change avatar",
+      "upload_aria": "Upload avatar",
+      "remove_aria": "Remove avatar",
+      "select_image_toast": "Please select an image file.",
+      "upload_failed_toast": "Avatar upload failed"
+    }
   },
   "tab_body": {
     "common": {
@@ -266,6 +327,11 @@
       "add_dialog_search_placeholder": "Search skills",
       "add_dialog_empty": "All workspace skills are already assigned.",
       "add_dialog_no_match": "No skills match your search.",
+      "add_dialog_empty_partial": "No more skills to add — this agent already has all of them.",
+      "add_dialog_saving": "Adding…",
+      "add_dialog_confirm_default": "Add",
+      "add_dialog_confirm_one": "Add {{count}} skill",
+      "add_dialog_confirm_other": "Add {{count}} skills",
       "add_dialog_cancel": "Cancel",
       "add_failed_toast": "Failed to add skill"
     },

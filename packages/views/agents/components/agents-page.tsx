@@ -280,35 +280,24 @@ export function AgentsPage() {
     if (view === "archived" && archivedCount === 0) setView("active");
   }, [view, archivedCount]);
 
-  const handleCreate = async (data: CreateAgentRequest) => {
+  const handleCreate = async (data: CreateAgentRequest): Promise<Agent> => {
     const agent = await api.createAgent(data);
-    let cachedAgent = agent;
-    // When duplicating, carry the source agent's skill assignments over.
-    // Skills aren't part of CreateAgentRequest (they're managed via
-    // setAgentSkills) so the create endpoint can't take them inline; we
-    // do a follow-up call. Failure here doesn't abort the duplicate —
-    // the agent already exists and the user can re-attach skills from
-    // the detail page.
-    if (duplicateTemplate?.skills.length) {
-      try {
-        await api.setAgentSkills(agent.id, {
-          skill_ids: duplicateTemplate.skills.map((s) => s.id),
-        });
-        cachedAgent = { ...agent, skills: duplicateTemplate.skills };
-      } catch {
-        // Surfaced softly; the agent itself is fine.
-      }
-    }
+    // Skill follow-up is now owned by the dialog (it reads the user's
+    // form selection, which already includes the duplicate source's
+    // skills as a default when applicable). The dialog will call
+    // setAgentSkills after we return; we just have to surface the
+    // created agent so it can.
     qc.setQueryData<Agent[]>(workspaceKeys.agents(wsId), (current = []) => {
-      const exists = current.some((a) => a.id === cachedAgent.id);
+      const exists = current.some((a) => a.id === agent.id);
       return exists
-        ? current.map((a) => (a.id === cachedAgent.id ? cachedAgent : a))
-        : [...current, cachedAgent];
+        ? current.map((a) => (a.id === agent.id ? agent : a))
+        : [...current, agent];
     });
     setShowCreate(false);
     setDuplicateTemplate(null);
     navigation.push(paths.agentDetail(agent.id));
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+    return agent;
   };
 
   const handleDuplicate = useCallback((agent: Agent) => {
@@ -467,6 +456,7 @@ export function AgentsPage() {
           members={members}
           currentUserId={currentUser?.id ?? null}
           template={duplicateTemplate}
+          existingAgentNames={agents.map((a) => a.name)}
           onClose={() => {
             setShowCreate(false);
             setDuplicateTemplate(null);
