@@ -33,7 +33,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
-import type { ProjectStatus, ProjectPriority } from "@multica/core/types";
+import type { Project, ProjectStatus, ProjectPriority, CreateProjectResourceRequest } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -103,7 +103,19 @@ function RepoUrlText({
   );
 }
 
-export function CreateProjectModal({ onClose }: { onClose: () => void }) {
+type CreateProjectModalProps = {
+  onClose: () => void;
+  initialResources?: CreateProjectResourceRequest[];
+  onCreated?: (project: Project) => void | Promise<void>;
+  navigateOnCreate?: boolean;
+};
+
+export function CreateProjectModal({
+  onClose,
+  initialResources,
+  onCreated,
+  navigateOnCreate = true,
+}: CreateProjectModalProps) {
   const { t } = useT("modals");
   const router = useNavigation();
   const workspace = useCurrentWorkspace();
@@ -166,6 +178,11 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     if (!title.trim() || submitting) return;
     setSubmitting(true);
     try {
+      const repoResources = selectedRepos.map((url) => ({
+        resource_type: "github_repo" as const,
+        resource_ref: { url },
+      }));
+      const resources = [...repoResources, ...(initialResources ?? [])];
       const project = await createProject.mutateAsync({
         title: title.trim(),
         description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
@@ -175,18 +192,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         lead_type: leadType,
         lead_id: leadId,
         // Server attaches these in the same transaction as the project.
-        resources:
-          selectedRepos.length > 0
-            ? selectedRepos.map((url) => ({
-                resource_type: "github_repo" as const,
-                resource_ref: { url },
-              }))
-            : undefined,
+        resources: resources.length > 0 ? resources : undefined,
       });
       clearDraft();
       onClose();
+      await onCreated?.(project);
       toast.success(t(($) => $.create_project.toast_created));
-      router.push(wsPaths.projectDetail(project.id));
+      if (navigateOnCreate) {
+        router.push(wsPaths.projectDetail(project.id));
+      }
     } catch {
       toast.error(t(($) => $.create_project.toast_failed));
     } finally {

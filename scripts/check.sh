@@ -102,7 +102,7 @@ echo ""
 echo "==> [3/5] Go tests..."
 echo "==> Running database migrations..."
 (cd server && go run ./cmd/migrate up) || { EXIT_CODE=1; exit 1; }
-(cd server && go test ./...) || { EXIT_CODE=1; exit 1; }
+bash scripts/go-test-safe.sh ./... || { EXIT_CODE=1; exit 1; }
 
 # --------------------------------------------------------------------------
 # Step 4: Start services for E2E (only if not already running)

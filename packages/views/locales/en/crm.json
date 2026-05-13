@@ -84,7 +84,8 @@
     "preferred_language": "Preferred language",
     "timezone": "Timezone",
     "is_primary": "Primary contact",
-    "notes": "Notes"
+    "notes": "Notes",
+    "delete_confirm": "Delete this contact?"
   },
   "profile": {
     "title": "Customer profile",
@@ -95,9 +96,7 @@
     "title": "Projects",
     "link_title": "Project link",
     "select": "Select project",
-    "link": "Link customer to project",
-    "link_error": "Failed to link project.",
-    "link_success": "Project linked.",
+    "link_error": "Failed to update project link.",
     "follow_up_title": "Follow-up issue",
     "follow_up_placeholder": "Follow up: {{name}}",
     "create_follow_up": "Create follow-up issue",
@@ -105,7 +104,13 @@
     "follow_up_success": "Follow-up issue created.",
     "create_linked_project": "Create linked project",
     "create_project_error": "Failed to create linked project.",
-    "create_project_success": "Linked project created."
+    "create_project_success": "Linked project created.",
+    "selector_help": "Click a project once to select it; click again to remove it.",
+    "empty": "No projects yet.",
+    "linked": "Linked",
+    "selected_count": "{{count}} selected",
+    "existing_issues": "Existing issues for this project",
+    "no_issues": "No open issues for this project."
   },
   "emails": {
     "title": "Emails",

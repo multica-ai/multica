@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, Pencil, Plus, Trash2 } from "lucide-react";
+import { Building2, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
 import { api } from "@multica/core/api";
+import { useProjectDraftStore } from "@multica/core/projects";
 import {
   crmAccountDetailOptions,
   crmCommunicationNoteListOptions,
@@ -12,7 +13,11 @@ import {
   crmKeys,
 } from "@multica/core/crm/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { issueKeys, useIssueDraftStore } from "@multica/core/issues";
+import { useModalStore } from "@multica/core/modals";
 import { projectKeys, projectListOptions } from "@multica/core/projects";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { useNavigation } from "../../navigation";
 import type {
   CRMAccount,
   CRMAccountPriority,
@@ -23,9 +28,11 @@ import type {
   CRMContact,
   CRMContactDecisionRole,
   CreateCRMContactRequest,
+  Issue,
   Project,
 } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -46,9 +53,10 @@ import {
 } from "@multica/ui/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { useT } from "../../i18n";
+import { CreateProjectModal } from "../../modals/create-project";
 import type crmResources from "../../locales/en/crm.json";
-import { PageHeader } from "../../layout/page-header";
-import { COUNTRY_OPTIONS, countryByCode, loadCityOptions, loadRegionOptions, localizedName, normalizeLocale, useLocationSelection } from "../geo";
+import { COUNTRY_OPTIONS, countryByCode, findCityCode, findRegionCode, loadCityOptions, loadRegionOptions, localizedName, localizedSort, normalizeLocale, useLocationSelection } from "../geo";
+import { appendTag, CRM_INDUSTRY_OPTIONS, industryLabel, optionLabel, splitTags, subIndustryOptions } from "../options";
 
 type CRMResources = typeof crmResources;
 type Translation = (
@@ -98,6 +106,8 @@ type ContactFormState = {
 
 const toDateTimeLocal = (value?: string | null) => value ? value.slice(0, 16) : "";
 const fromDateTimeLocal = (value: string) => value ? new Date(value).toISOString() : null;
+
+const tagSuggestions = (account?: CRMAccount | null) => account?.tags?.filter(Boolean).slice(0, 12) ?? [];
 
 function countryName(codeOrName: string | null | undefined, locale: Locale) {
   const country = countryByCode(codeOrName);
@@ -195,8 +205,10 @@ function FieldRow({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
-function AccountForm({ form, setForm, t, locale }: { form: AccountFormState; setForm: (next: AccountFormState) => void; t: Translation; locale: Locale }) {
-  const { regions, cities, regionsLoading, citiesLoading } = useLocationSelection(form.countryCode, form.regionCode);
+function AccountForm({ form, setForm, t, locale, suggestedTags = [] }: { form: AccountFormState; setForm: (next: AccountFormState) => void; t: Translation; locale: Locale; suggestedTags?: string[] }) {
+  const { regions, cities, regionsLoading, citiesLoading } = useLocationSelection(form.countryCode, form.regionCode, locale);
+  const countries = useMemo(() => localizedSort(COUNTRY_OPTIONS, locale), [locale]);
+  const subIndustries = subIndustryOptions(form.industry);
   return (
     <div className="grid max-h-[70vh] gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
       <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t(($) => $.customers.new_customer_name)} />
@@ -215,24 +227,39 @@ function AccountForm({ form, setForm, t, locale }: { form: AccountFormState; set
         <option value="inactive">{t(($) => $.statuses.inactive)}</option>
         <option value="archived">{t(($) => $.statuses.archived)}</option>
       </select>
-      <select className="h-9 rounded-md border bg-background px-3 text-sm" value={form.countryCode} onChange={(e) => setForm({ ...form, countryCode: e.target.value, regionCode: "", cityCode: "" })}>
+      <select aria-label={t(($) => $.customers.country)} className="h-9 rounded-md border bg-background px-3 text-sm" value={form.countryCode} onChange={(e) => setForm({ ...form, countryCode: e.target.value, regionCode: "", cityCode: "" })}>
         <option value="">{t(($) => $.customers.country)}</option>
-        {COUNTRY_OPTIONS.map((option) => <option key={option.code} value={option.code}>{localizedName(option.name, locale)}</option>)}
+        {countries.map((option) => <option key={option.code} value={option.code}>{localizedName(option.name, locale)}</option>)}
       </select>
-      <select className="h-9 rounded-md border bg-background px-3 text-sm" value={form.regionCode} onChange={(e) => setForm({ ...form, regionCode: e.target.value, cityCode: "" })} disabled={!form.countryCode || regionsLoading}>
+      <select aria-label={t(($) => $.customers.region)} className="h-9 rounded-md border bg-background px-3 text-sm" value={form.regionCode} onChange={(e) => setForm({ ...form, regionCode: e.target.value, cityCode: "" })} disabled={!form.countryCode || regionsLoading}>
         <option value="">{regionsLoading ? `${t(($) => $.customers.region)}...` : t(($) => $.customers.region)}</option>
         {regions.map((option) => <option key={option.code} value={option.code}>{localizedName(option.name, locale)}</option>)}
       </select>
-      <select className="h-9 rounded-md border bg-background px-3 text-sm" value={form.cityCode} onChange={(e) => setForm({ ...form, cityCode: e.target.value })} disabled={!form.regionCode || citiesLoading}>
+      <select aria-label={t(($) => $.customers.city)} className="h-9 rounded-md border bg-background px-3 text-sm" value={form.cityCode} onChange={(e) => setForm({ ...form, cityCode: e.target.value })} disabled={!form.regionCode || citiesLoading}>
         <option value="">{citiesLoading ? `${t(($) => $.customers.city)}...` : t(($) => $.customers.city)}</option>
         {cities.map((option) => <option key={option.code} value={option.code}>{localizedName(option.name, locale)}</option>)}
       </select>
-      <Input value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })} placeholder={t(($) => $.customers.industry)} />
-      <Input value={form.subIndustry} onChange={(e) => setForm({ ...form, subIndustry: e.target.value })} placeholder={t(($) => $.customers.sub_industry)} />
+      <select aria-label={t(($) => $.customers.industry)} className="h-9 rounded-md border bg-background px-3 text-sm" value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value, subIndustry: "" })}>
+        <option value="">{t(($) => $.customers.industry)}</option>
+        {CRM_INDUSTRY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{industryLabel(option.value, locale)}</option>)}
+      </select>
+      <select aria-label={t(($) => $.customers.sub_industry)} className="h-9 rounded-md border bg-background px-3 text-sm" value={form.subIndustry} onChange={(e) => setForm({ ...form, subIndustry: e.target.value })} disabled={!form.industry}>
+        <option value="">{t(($) => $.customers.sub_industry)}</option>
+        {subIndustries.map((option) => <option key={option.value} value={option.value}>{optionLabel(option, locale)}</option>)}
+      </select>
       <Input value={form.annualRevenue} onChange={(e) => setForm({ ...form, annualRevenue: e.target.value })} placeholder={t(($) => $.customers.annual_revenue)} />
       <Input value={form.employeeCount} onChange={(e) => setForm({ ...form, employeeCount: e.target.value })} placeholder={t(($) => $.customers.employee_count)} />
-      <Input className="sm:col-span-2" value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} placeholder={t(($) => $.customers.tags_placeholder)} />
-      <Input className="sm:col-span-2" type="datetime-local" value={form.nextFollowUpAt} onChange={(e) => setForm({ ...form, nextFollowUpAt: e.target.value })} />
+      <div className="space-y-2 sm:col-span-2">
+        <Input aria-label={t(($) => $.customers.tags)} value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} placeholder={t(($) => $.customers.tags_placeholder)} />
+        {suggestedTags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {suggestedTags.map((tag) => (
+              <button key={tag} type="button" className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent" onClick={() => setForm({ ...form, tags: appendTag(form.tags, tag) })}>{tag}</button>
+            ))}
+          </div>
+        )}
+      </div>
+      <Input aria-label={t(($) => $.customers.next_follow_up_at)} className="sm:col-span-2" type="datetime-local" value={form.nextFollowUpAt} onChange={(e) => setForm({ ...form, nextFollowUpAt: e.target.value })} />
       <textarea className="min-h-24 rounded-md border bg-background px-3 py-2 text-sm sm:col-span-2" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder={t(($) => $.customers.notes)} />
     </div>
   );
@@ -292,17 +319,42 @@ function contactPayload(form: ContactFormState): CreateCRMContactRequest {
   };
 }
 
-function projectLinkedToAccount(project: Project, accountId: string) {
+function crmAccountResource(project: Project, accountId: string) {
   const resources = project.resources ?? [];
-  return resources.some((resource) => {
+  return resources.find((resource) => {
     const ref = resource.resource_ref as { account_id?: string };
     return resource.resource_type === "crm_account" && ref.account_id === accountId;
   });
 }
 
+function projectLinkedToAccount(project: Project, accountId: string) {
+  return Boolean(crmAccountResource(project, accountId));
+}
+
+function formatIssueOption(issue: Issue) {
+  return [issue.identifier, issue.title].filter(Boolean).join(" · ") || issue.id;
+}
+
+function nextLinkedProjectTitle(accountName: string, projects: Project[]) {
+  const baseTitle = `CRM:${accountName}`;
+  const existingTitles = new Set(projects.map((project) => project.title.toLowerCase()));
+  if (!existingTitles.has(baseTitle.toLowerCase())) return baseTitle;
+  let suffix = 2;
+  while (existingTitles.has(`${baseTitle} ${suffix}`.toLowerCase())) suffix += 1;
+  return `${baseTitle} ${suffix}`;
+}
+
+function toggleProjectId(projectIds: string[], projectId: string) {
+  return projectIds.includes(projectId)
+    ? projectIds.filter((id) => id !== projectId)
+    : [...projectIds, projectId];
+}
+
 export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
   const wsId = useWorkspaceId();
   const queryClient = useQueryClient();
+  const navigation = useNavigation();
+  const paths = useWorkspacePaths();
   const { t: rawT, i18n } = useT("crm");
   const t = rawT as Translation;
   const locale = normalizeLocale(i18n.language);
@@ -318,24 +370,52 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
   const [noteBody, setNoteBody] = useState("");
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [selectedFollowUpProjectId, setSelectedFollowUpProjectId] = useState("");
-  const [followUpTitle, setFollowUpTitle] = useState("");
+  const [createLinkedProjectOpen, setCreateLinkedProjectOpen] = useState(false);
+  const setProjectDraft = useProjectDraftStore((s) => s.setDraft);
+  const clearProjectDraft = useProjectDraftStore((s) => s.clearDraft);
+  const openModal = useModalStore((s) => s.open);
+  const setIssueDraft = useIssueDraftStore((s) => s.setDraft);
+  const clearIssueDraft = useIssueDraftStore((s) => s.clearDraft);
+
+  const { data: followUpIssues = [] } = useQuery({
+    queryKey: [...issueKeys.all(wsId), "crm-follow-up", selectedFollowUpProjectId],
+    queryFn: async () => {
+      if (!selectedFollowUpProjectId) return [];
+      const response = await api.listIssues({ project_id: selectedFollowUpProjectId, open_only: true, limit: 50 });
+      return response.issues;
+    },
+    enabled: Boolean(selectedFollowUpProjectId),
+  });
 
   const linkedProjectIds = useMemo(
     () => projects.filter((project) => projectLinkedToAccount(project, accountId)).map((project) => project.id),
     [accountId, projects],
   );
+  const linkedProjects = useMemo(
+    () => projects.filter((project) => selectedProjectIds.includes(project.id)),
+    [projects, selectedProjectIds],
+  );
 
   useEffect(() => {
-    setSelectedProjectIds(linkedProjectIds);
+    setSelectedProjectIds((current) => {
+      const merged = Array.from(new Set([...current, ...linkedProjectIds]));
+      return merged.length === current.length && merged.every((id, index) => id === current[index]) ? current : merged;
+    });
   }, [linkedProjectIds]);
+
+  useEffect(() => {
+    if (selectedFollowUpProjectId && !selectedProjectIds.includes(selectedFollowUpProjectId)) {
+      setSelectedFollowUpProjectId("");
+    }
+  }, [selectedFollowUpProjectId, selectedProjectIds]);
 
   const updateAccount = useMutation({
     mutationFn: async () => {
       if (!accountForm) throw new Error("missing account form");
       const country = countryByCode(accountForm.countryCode);
-      const regions = await loadRegionOptions(accountForm.countryCode);
+      const regions = await loadRegionOptions(accountForm.countryCode, locale);
       const region = regions.find((option) => option.code === accountForm.regionCode);
-      const cities = await loadCityOptions(accountForm.countryCode, accountForm.regionCode);
+      const cities = await loadCityOptions(accountForm.countryCode, accountForm.regionCode, locale);
       const city = cities.find((option) => option.code === accountForm.cityCode);
       return api.updateCRMAccount(accountId, {
         name: accountForm.name,
@@ -355,7 +435,7 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
         priority: accountForm.priority,
         annual_revenue: accountForm.annualRevenue || null,
         employee_count: accountForm.employeeCount || null,
-        tags: accountForm.tags.split(",").map((tag) => tag.trim()).filter(Boolean),
+        tags: splitTags(accountForm.tags),
         next_follow_up_at: fromDateTimeLocal(accountForm.nextFollowUpAt),
         notes: accountForm.notes || null,
       });
@@ -369,7 +449,7 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
 
   const deleteAccount = useMutation({
     mutationFn: () => api.deleteCRMAccount(accountId),
-    onSuccess: () => window.close(),
+    onSuccess: () => navigation.push(paths.crmCustomers()),
   });
 
   const saveContact = useMutation({
@@ -403,44 +483,64 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
   });
 
   const linkProject = useMutation({
-    mutationFn: () => api.linkCRMAccountProject(accountId, { project_ids: selectedProjectIds }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: projectKeys.list(wsId) });
-    },
-  });
-
-  const createProject = useMutation({
-    mutationFn: async () => {
-      if (!account) throw new Error("missing account");
-      return api.createProject({
-        title: `CRM:${account.name}`,
-        description: account.notes ?? undefined,
-        status: "planned",
-        priority: "medium",
-        resources: [{
+    mutationFn: async ({ project, shouldLink }: { project: Project; shouldLink: boolean }) => {
+      if (shouldLink) {
+        return api.createProjectResource(project.id, {
           resource_type: "crm_account",
-          resource_ref: { account_id: account.id, name: account.name },
-          label: account.name,
-        }],
-      });
+          resource_ref: { account_id: accountId, name: account?.name ?? "" },
+          label: account?.name ?? undefined,
+        });
+      }
+      const resource = crmAccountResource(project, accountId);
+      if (!resource) return undefined;
+      await api.deleteProjectResource(project.id, resource.id);
+      return undefined;
     },
-    onSuccess: async (project) => {
-      await queryClient.invalidateQueries({ queryKey: projectKeys.list(wsId) });
-      setSelectedProjectIds((current) => Array.from(new Set([...current, project.id])));
-    },
-  });
-
-  const createFollowUp = useMutation({
-    mutationFn: () => api.createCRMFollowUpIssue(accountId, {
-      project_id: selectedFollowUpProjectId || null,
-      title: followUpTitle || t(($) => $.projects.follow_up_placeholder, { name: account?.name ?? "" }),
-      priority: "medium",
-    }),
     onSuccess: async () => {
-      setFollowUpTitle("");
+      await queryClient.invalidateQueries({ queryKey: projectKeys.list(wsId) });
       await queryClient.invalidateQueries({ queryKey: crmKeys.accountDetail(wsId, accountId) });
     },
+    onError: async () => {
+      setSelectedProjectIds(linkedProjectIds);
+      await queryClient.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+    },
   });
+
+  const handleProjectToggle = (project: Project) => {
+    const shouldLink = !selectedProjectIds.includes(project.id);
+    setSelectedProjectIds((current) => toggleProjectId(current, project.id));
+    linkProject.mutate({ project, shouldLink });
+  };
+
+  const openCreateLinkedProject = () => {
+    if (!account) return;
+    clearProjectDraft();
+    setProjectDraft({
+      title: nextLinkedProjectTitle(account.name, projects),
+      description: account.notes ?? "",
+      status: "planned",
+      priority: "medium",
+    });
+    setCreateLinkedProjectOpen(true);
+  };
+
+  const handleLinkedProjectCreated = async (project: Project) => {
+    await queryClient.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+    await queryClient.invalidateQueries({ queryKey: crmKeys.accountDetail(wsId, accountId) });
+    setSelectedProjectIds((current) => Array.from(new Set([...current, project.id])));
+    setSelectedFollowUpProjectId(project.id);
+  };
+
+  const openCreateFollowUpIssue = () => {
+    if (!account) return;
+    clearIssueDraft();
+    setIssueDraft({
+      title: t(($) => $.projects.follow_up_placeholder, { name: account.name }),
+      priority: "medium",
+    });
+    openModal("create-issue", { project_id: selectedFollowUpProjectId || undefined });
+  };
+
 
   if (accountLoading || !account) {
     return (
@@ -452,28 +552,46 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader className="justify-between px-5">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <Building2 className="size-4 text-muted-foreground" />
-            <h1 className="truncate text-sm font-medium">{account.name}</h1>
-            <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-700 dark:text-emerald-300">
-              <AccountStatusLabel status={account.status} t={t} />
-            </span>
+      <div className="shrink-0 border-b px-5 py-4">
+        <nav className="mb-3 flex items-center gap-1 text-xs" aria-label="Breadcrumb">
+          <button
+            type="button"
+            className="rounded px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            onClick={() => navigation.push(paths.crmCustomers())}
+          >
+            {t(($) => $.customers.title)}
+          </button>
+          <ChevronRight className="size-3 text-muted-foreground/60" />
+          <span className="max-w-[24rem] truncate px-1.5 py-1 font-medium text-foreground">{account.name}</span>
+        </nav>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Building2 className="size-4 text-muted-foreground" />
+              <h1 className="truncate text-sm font-medium">{account.name}</h1>
+              <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-700 dark:text-emerald-300">
+                <AccountStatusLabel status={account.status} t={t} />
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {[account.website, countryName(account.country_code || account.country_name || account.country, locale), account.region, account.industry].filter(Boolean).join(" · ") || t(($) => $.customers.basic_profile)}
+            </p>
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {[account.website, countryName(account.country_code || account.country_name || account.country, locale), account.region, account.industry].filter(Boolean).join(" · ") || t(($) => $.customers.basic_profile)}
-          </p>
+          <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={async () => {
+                const next = accountToForm(account);
+                next.regionCode = await findRegionCode(next.countryCode, account.region);
+                next.cityCode = await findCityCode(next.countryCode, next.regionCode, account.city);
+                setAccountForm(next);
+              }}>
+              <Pencil className="mr-1 size-4" /> {t(($) => $.actions.edit)}
+            </Button>
+            <Button size="sm" variant="outline" disabled={deleteAccount.isPending} onClick={() => window.confirm(t(($) => $.customers.delete_confirm)) && deleteAccount.mutate()}>
+              <Trash2 className="mr-1 size-4" /> {t(($) => $.actions.delete)}
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => setAccountForm(accountToForm(account))}>
-            <Pencil className="mr-1 size-4" /> {t(($) => $.actions.edit)}
-          </Button>
-          <Button size="sm" variant="outline" disabled={deleteAccount.isPending} onClick={() => window.confirm(t(($) => $.customers.delete_confirm)) && deleteAccount.mutate()}>
-            <Trash2 className="mr-1 size-4" /> {t(($) => $.actions.delete)}
-          </Button>
-        </div>
-      </PageHeader>
+      </div>
 
       <Tabs defaultValue="overview" className="min-h-0 flex-1 gap-0">
         <div className="border-b px-6 py-3">
@@ -539,8 +657,8 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
                         <TableCell>{contact.whatsapp || contact.whatsapp_id || "—"}</TableCell>
                         <TableCell>{contact.is_primary ? "✓" : "—"}</TableCell>
                         <TableCell className="text-right">
-                          <Button size="sm" variant="ghost" onClick={() => setContactForm(contactToForm(contact))}><Pencil className="size-4" /></Button>
-                          <Button size="sm" variant="ghost" disabled={deleteContact.isPending} onClick={() => window.confirm("Delete this contact?") && deleteContact.mutate(contact.id)}><Trash2 className="size-4" /></Button>
+                          <Button size="sm" variant="ghost" aria-label={t(($) => $.actions.edit)} onClick={() => setContactForm(contactToForm(contact))}><Pencil className="size-4" /></Button>
+                          <Button size="sm" variant="ghost" aria-label={t(($) => $.actions.delete)} disabled={deleteContact.isPending} onClick={() => window.confirm(t(($) => $.contacts.delete_confirm)) && deleteContact.mutate(contact.id)}><Trash2 className="size-4" /></Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -564,27 +682,52 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
           <TabsContent value="projects" className="grid gap-6 lg:grid-cols-2">
             <section className="rounded-lg border bg-card p-4">
               <h3 className="text-sm font-medium">{t(($) => $.projects.link_title)}</h3>
+              <p className="mt-1 text-xs text-muted-foreground">{t(($) => $.projects.selector_help)}</p>
               <div className="mt-4 space-y-3">
-                <select multiple className="min-h-40 w-full rounded-md border bg-background px-3 py-2 text-sm" value={selectedProjectIds} onChange={(e) => setSelectedProjectIds(Array.from(e.target.selectedOptions, (option) => option.value))}>
-                  {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
-                </select>
-                <Button className="w-full" variant="outline" disabled={linkProject.isPending} onClick={() => linkProject.mutate()}>{t(($) => $.projects.link)}</Button>
-                <Button className="w-full" disabled={createProject.isPending} onClick={() => createProject.mutate()}><Plus className="mr-1 size-4" /> {t(($) => $.projects.create_linked_project)}</Button>
+                <div className="max-h-56 overflow-y-auto rounded-md border bg-background">
+                  {projects.length === 0 ? (
+                    <div className="p-4 text-sm text-muted-foreground">{t(($) => $.projects.empty)}</div>
+                  ) : projects.map((project) => {
+                    const checked = selectedProjectIds.includes(project.id);
+                    return (
+                      <button
+                        key={project.id}
+                        type="button"
+                        className="flex w-full items-center gap-3 border-b px-3 py-2 text-left text-sm last:border-b-0 hover:bg-muted/60"
+                        onClick={() => handleProjectToggle(project)}
+                      >
+                        <Checkbox checked={checked} className="pointer-events-none" aria-label={project.title} />
+                        <span className="min-w-0 flex-1 truncate">{project.title}</span>
+                        {projectLinkedToAccount(project, accountId) && <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{t(($) => $.projects.linked)}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-muted-foreground">{t(($) => $.projects.selected_count, { count: selectedProjectIds.length })}</p>
+                <Button className="w-full" disabled={linkProject.isPending} onClick={openCreateLinkedProject}><Plus className="mr-1 size-4" /> {t(($) => $.projects.create_linked_project)}</Button>
                 {linkProject.isError && <p className="text-xs text-destructive">{t(($) => $.projects.link_error)}</p>}
-                {linkProject.isSuccess && <p className="text-xs text-emerald-600 dark:text-emerald-400">{t(($) => $.projects.link_success)}</p>}
-                {createProject.isError && <p className="text-xs text-destructive">{t(($) => $.projects.create_project_error)}</p>}
-                {createProject.isSuccess && <p className="text-xs text-emerald-600 dark:text-emerald-400">{t(($) => $.projects.create_project_success)}</p>}
               </div>
             </section>
             <section className="rounded-lg border bg-card p-4">
               <h3 className="text-sm font-medium">{t(($) => $.projects.follow_up_title)}</h3>
               <div className="mt-4 space-y-3">
-                <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={selectedFollowUpProjectId} onChange={(e) => setSelectedFollowUpProjectId(e.target.value)}>
+                <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" aria-label={t(($) => $.projects.select)} value={selectedFollowUpProjectId} onChange={(e) => setSelectedFollowUpProjectId(e.target.value)}>
                   <option value="">{t(($) => $.projects.select)}</option>
-                  {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+                  {linkedProjects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
                 </select>
-                <Input value={followUpTitle} onChange={(e) => setFollowUpTitle(e.target.value)} placeholder={t(($) => $.projects.follow_up_placeholder, { name: account.name })} />
-                <Button className="w-full" disabled={createFollowUp.isPending} onClick={() => createFollowUp.mutate()}>{t(($) => $.projects.create_follow_up)}</Button>
+                {selectedFollowUpProjectId && (
+                  <div className="rounded-md border bg-background/50 p-3">
+                    <div className="text-xs font-medium text-muted-foreground">{t(($) => $.projects.existing_issues)}</div>
+                    <div className="mt-2 space-y-1">
+                      {followUpIssues.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">{t(($) => $.projects.no_issues)}</p>
+                      ) : followUpIssues.map((issue) => (
+                        <p key={issue.id} className="truncate text-sm">{formatIssueOption(issue)}</p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <Button className="w-full" onClick={openCreateFollowUpIssue}>{t(($) => $.projects.create_follow_up)}</Button>
               </div>
             </section>
           </TabsContent>
@@ -610,7 +753,7 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
       <Dialog open={accountForm !== null} onOpenChange={(open) => !open && setAccountForm(null)}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader><DialogTitle>{t(($) => $.customers.edit_customer)}</DialogTitle><DialogDescription>{account.name}</DialogDescription></DialogHeader>
-          {accountForm && <AccountForm form={accountForm} setForm={setAccountForm} t={t} locale={locale} />}
+          {accountForm && <AccountForm form={accountForm} setForm={setAccountForm} t={t} locale={locale} suggestedTags={tagSuggestions(account)} />}
           {updateAccount.isError && <p className="text-xs text-destructive">{t(($) => $.customers.create_error)}</p>}
           <DialogFooter><Button variant="outline" onClick={() => setAccountForm(null)}>{t(($) => $.actions.cancel)}</Button><Button disabled={!accountForm?.name.trim() || updateAccount.isPending} onClick={() => updateAccount.mutate()}>{t(($) => $.actions.save)}</Button></DialogFooter>
         </DialogContent>
@@ -624,6 +767,19 @@ export function CRMAccountDetailPage({ accountId }: { accountId: string }) {
           <DialogFooter><Button variant="outline" onClick={() => setContactForm(null)}>{t(($) => $.actions.cancel)}</Button><Button disabled={!contactForm?.name.trim() || saveContact.isPending} onClick={() => saveContact.mutate()}>{t(($) => $.actions.save)}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {createLinkedProjectOpen && account && (
+        <CreateProjectModal
+          onClose={() => setCreateLinkedProjectOpen(false)}
+          navigateOnCreate={false}
+          onCreated={handleLinkedProjectCreated}
+          initialResources={[{
+            resource_type: "crm_account",
+            resource_ref: { account_id: account.id, name: account.name },
+            label: account.name,
+          }]}
+        />
+      )}
     </div>
   );
 }

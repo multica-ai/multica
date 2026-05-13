@@ -4,8 +4,10 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Plus, Search } from "lucide-react";
 import { api } from "@multica/core/api";
-import { crmAccountListOptions, crmKeys } from "@multica/core/crm/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { crmAccountListOptions, crmKeys } from "@multica/core/crm/queries";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { useNavigation } from "../../navigation";
 import type { CRMAccountPriority, CRMAccountRating, CRMAccountSource, CRMAccountStatus, CRMAccountType } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -29,7 +31,8 @@ import {
 import { useT } from "../../i18n";
 import type crmResources from "../../locales/en/crm.json";
 import { PageHeader } from "../../layout/page-header";
-import { COUNTRY_OPTIONS, countryByCode, localizedName, normalizeLocale, useLocationSelection } from "../geo";
+import { COUNTRY_OPTIONS, countryByCode, loadCityOptions, loadRegionOptions, localizedName, localizedSort, normalizeLocale, useLocationSelection } from "../geo";
+import { appendTag, CRM_INDUSTRY_OPTIONS, formatDateTimeLocal, industryLabel, optionLabel, splitTags, subIndustryOptions } from "../options";
 
 type CRMResources = typeof crmResources;
 type Translation = (
@@ -73,9 +76,24 @@ const blankAccountForm = (): AccountFormState => ({
   annualRevenue: "",
   employeeCount: "",
   tags: "",
-  nextFollowUpAt: "",
+  nextFollowUpAt: formatDateTimeLocal(),
   notes: "",
 });
+
+const tagSuggestions = (accounts: Array<{ tags?: string[] | null }>) => {
+  const counts = new Map<string, number>();
+  accounts.forEach((account) => {
+    account.tags?.forEach((tag) => {
+      const normalized = tag.trim();
+      if (!normalized) return;
+      counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+    });
+  });
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([tag]) => tag)
+    .slice(0, 12);
+};
 
 function AccountStatusLabel({ status, t }: { status: CRMAccountStatus; t: Translation }) {
   const labels: Record<CRMAccountStatus, string> = {
@@ -104,13 +122,17 @@ function AccountForm({
   setForm,
   t,
   locale,
+  suggestedTags,
 }: {
   form: AccountFormState;
   setForm: (next: AccountFormState) => void;
   t: Translation;
   locale: "en" | "zh-Hans";
+  suggestedTags: string[];
 }) {
-  const { regions, cities, regionsLoading, citiesLoading } = useLocationSelection(form.countryCode, form.regionCode);
+  const { regions, cities, regionsLoading, citiesLoading } = useLocationSelection(form.countryCode, form.regionCode, locale);
+  const countries = useMemo(() => localizedSort(COUNTRY_OPTIONS, locale), [locale]);
+  const subIndustries = subIndustryOptions(form.industry);
 
   return (
     <div className="grid max-h-[70vh] gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
@@ -151,24 +173,39 @@ function AccountForm({
         <option value="high">{t(($) => $.priorities.high)}</option>
         <option value="low">{t(($) => $.priorities.low)}</option>
       </select>
-      <select className="h-9 rounded-md border bg-background px-3 text-sm" value={form.countryCode} onChange={(e) => setForm({ ...form, countryCode: e.target.value, regionCode: "", cityCode: "" })}>
+      <select aria-label={t(($) => $.customers.country)} className="h-9 rounded-md border bg-background px-3 text-sm" value={form.countryCode} onChange={(e) => setForm({ ...form, countryCode: e.target.value, regionCode: "", cityCode: "" })}>
         <option value="">{t(($) => $.customers.country)}</option>
-        {COUNTRY_OPTIONS.map((option) => <option key={option.code} value={option.code}>{localizedName(option.name, locale)}</option>)}
+        {countries.map((option) => <option key={option.code} value={option.code}>{localizedName(option.name, locale)}</option>)}
       </select>
-      <select className="h-9 rounded-md border bg-background px-3 text-sm" value={form.regionCode} onChange={(e) => setForm({ ...form, regionCode: e.target.value, cityCode: "" })} disabled={!form.countryCode || regionsLoading}>
+      <select aria-label={t(($) => $.customers.region)} className="h-9 rounded-md border bg-background px-3 text-sm" value={form.regionCode} onChange={(e) => setForm({ ...form, regionCode: e.target.value, cityCode: "" })} disabled={!form.countryCode || regionsLoading}>
         <option value="">{regionsLoading ? `${t(($) => $.customers.region)}...` : t(($) => $.customers.region)}</option>
         {regions.map((option) => <option key={option.code} value={option.code}>{localizedName(option.name, locale)}</option>)}
       </select>
-      <select className="h-9 rounded-md border bg-background px-3 text-sm" value={form.cityCode} onChange={(e) => setForm({ ...form, cityCode: e.target.value })} disabled={!form.regionCode || citiesLoading}>
+      <select aria-label={t(($) => $.customers.city)} className="h-9 rounded-md border bg-background px-3 text-sm" value={form.cityCode} onChange={(e) => setForm({ ...form, cityCode: e.target.value })} disabled={!form.regionCode || citiesLoading}>
         <option value="">{citiesLoading ? `${t(($) => $.customers.city)}...` : t(($) => $.customers.city)}</option>
         {cities.map((option) => <option key={option.code} value={option.code}>{localizedName(option.name, locale)}</option>)}
       </select>
-      <Input value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })} placeholder={t(($) => $.customers.industry)} />
-      <Input value={form.subIndustry} onChange={(e) => setForm({ ...form, subIndustry: e.target.value })} placeholder={t(($) => $.customers.sub_industry)} />
+      <select aria-label={t(($) => $.customers.industry)} className="h-9 rounded-md border bg-background px-3 text-sm" value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value, subIndustry: "" })}>
+        <option value="">{t(($) => $.customers.industry)}</option>
+        {CRM_INDUSTRY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{industryLabel(option.value, locale)}</option>)}
+      </select>
+      <select aria-label={t(($) => $.customers.sub_industry)} className="h-9 rounded-md border bg-background px-3 text-sm" value={form.subIndustry} onChange={(e) => setForm({ ...form, subIndustry: e.target.value })} disabled={!form.industry}>
+        <option value="">{t(($) => $.customers.sub_industry)}</option>
+        {subIndustries.map((option) => <option key={option.value} value={option.value}>{optionLabel(option, locale)}</option>)}
+      </select>
       <Input value={form.annualRevenue} onChange={(e) => setForm({ ...form, annualRevenue: e.target.value })} placeholder={t(($) => $.customers.annual_revenue)} />
       <Input value={form.employeeCount} onChange={(e) => setForm({ ...form, employeeCount: e.target.value })} placeholder={t(($) => $.customers.employee_count)} />
-      <Input className="sm:col-span-2" value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} placeholder={t(($) => $.customers.tags_placeholder)} />
-      <Input className="sm:col-span-2" type="datetime-local" value={form.nextFollowUpAt} onChange={(e) => setForm({ ...form, nextFollowUpAt: e.target.value })} />
+      <div className="space-y-2 sm:col-span-2">
+        <Input aria-label={t(($) => $.customers.tags)} value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} placeholder={t(($) => $.customers.tags_placeholder)} />
+        {suggestedTags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {suggestedTags.map((tag) => (
+              <button key={tag} type="button" className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent" onClick={() => setForm({ ...form, tags: appendTag(form.tags, tag) })}>{tag}</button>
+            ))}
+          </div>
+        )}
+      </div>
+      <Input aria-label={t(($) => $.customers.next_follow_up_at)} className="sm:col-span-2" type="datetime-local" value={form.nextFollowUpAt} onChange={(e) => setForm({ ...form, nextFollowUpAt: e.target.value })} />
       <textarea className="min-h-24 rounded-md border bg-background px-3 py-2 text-sm sm:col-span-2" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder={t(($) => $.customers.notes)} />
     </div>
   );
@@ -177,6 +214,8 @@ function AccountForm({
 export function CRMPage() {
   const wsId = useWorkspaceId();
   const queryClient = useQueryClient();
+  const navigation = useNavigation();
+  const paths = useWorkspacePaths();
   const { t: rawT, i18n } = useT("crm");
   const t = rawT as Translation;
   const locale = normalizeLocale(i18n.language);
@@ -189,13 +228,14 @@ export function CRMPage() {
     () => [...accounts].sort((a, b) => a.name.localeCompare(b.name)),
     [accounts],
   );
+  const suggestedTags = useMemo(() => tagSuggestions(accounts), [accounts]);
 
   const createAccount = useMutation({
     mutationFn: async () => {
       const country = countryByCode(form.countryCode);
-      const regions = await import("../geo").then((geo) => geo.loadRegionOptions(form.countryCode));
+      const regions = await loadRegionOptions(form.countryCode, locale);
       const region = regions.find((option) => option.code === form.regionCode);
-      const cities = await import("../geo").then((geo) => geo.loadCityOptions(form.countryCode, form.regionCode));
+      const cities = await loadCityOptions(form.countryCode, form.regionCode, locale);
       const city = cities.find((option) => option.code === form.cityCode);
       return api.createCRMAccount({
         name: form.name,
@@ -214,8 +254,8 @@ export function CRMPage() {
         priority: form.priority,
         annual_revenue: form.annualRevenue || null,
         employee_count: form.employeeCount || null,
-        tags: form.tags.split(",").map((tag) => tag.trim()).filter(Boolean),
-        next_follow_up_at: form.nextFollowUpAt || null,
+        tags: splitTags(form.tags),
+        next_follow_up_at: form.nextFollowUpAt ? new Date(form.nextFollowUpAt).toISOString() : null,
         notes: form.notes || null,
       });
     },
@@ -271,7 +311,7 @@ export function CRMPage() {
                   <TableRow
                     key={account.id}
                     className="cursor-pointer"
-                    onClick={() => window.open(`./customers/${account.id}`, "_blank", "noopener,noreferrer")}
+                    onClick={() => navigation.push(paths.crmCustomerDetail(account.id))}
                   >
                     <TableCell className="font-medium">{account.name}</TableCell>
                     <TableCell><AccountTypeLabel type={account.account_type} t={t} /></TableCell>
@@ -294,7 +334,7 @@ export function CRMPage() {
             <DialogTitle>{t(($) => $.customers.add_customer)}</DialogTitle>
             <DialogDescription>{t(($) => $.customers.basic_profile)}</DialogDescription>
           </DialogHeader>
-          <AccountForm form={form} setForm={setForm} t={t} locale={locale} />
+          <AccountForm form={form} setForm={setForm} t={t} locale={locale} suggestedTags={suggestedTags} />
           {createAccount.isError && <p className="text-xs text-destructive">{t(($) => $.customers.create_error)}</p>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>{t(($) => $.actions.cancel)}</Button>

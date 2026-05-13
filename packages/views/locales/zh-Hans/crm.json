@@ -84,7 +84,8 @@
     "preferred_language": "偏好语言",
     "timezone": "时区",
     "is_primary": "主要联系人",
-    "notes": "备注"
+    "notes": "备注",
+    "delete_confirm": "确定删除这个联系人吗？"
   },
   "profile": {
     "title": "客户画像",
@@ -95,9 +96,7 @@
     "title": "项目跟进",
     "link_title": "关联项目",
     "select": "选择项目",
-    "link": "将客户关联到项目",
-    "link_error": "关联项目失败。",
-    "link_success": "项目已关联。",
+    "link_error": "更新项目关联失败。",
     "follow_up_title": "跟进 Issue",
     "follow_up_placeholder": "跟进：{{name}}",
     "create_follow_up": "创建跟进 Issue",
@@ -105,7 +104,13 @@
     "follow_up_success": "跟进 Issue 已创建。",
     "create_linked_project": "创建并关联项目",
     "create_project_error": "创建关联项目失败。",
-    "create_project_success": "关联项目已创建。"
+    "create_project_success": "关联项目已创建。",
+    "selector_help": "点击一次选中项目，再点一次取消选中。",
+    "empty": "暂无项目。",
+    "linked": "已关联",
+    "selected_count": "已选择 {{count}} 个",
+    "existing_issues": "该项目相关 Issue",
+    "no_issues": "该项目暂无未关闭 Issue。"
   },
   "emails": {
     "title": "邮件",

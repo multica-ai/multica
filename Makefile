@@ -281,11 +281,17 @@ build: ## Build the server, CLI, and migrate binaries into server/bin
 	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica ./cmd/multica
 	cd server && go build -o bin/migrate ./cmd/migrate
 
-test: ## Run Go tests after ensuring the target DB exists and migrations are applied
+test: ## Run resource-safe Go tests after ensuring the target DB exists and migrations are applied
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	cd server && go run ./cmd/migrate up
-	cd server && go test ./...
+	@bash scripts/go-test-safe.sh ./...
+
+test-go-safe: ## Run resource-safe Go tests; pass GO_TEST_ARGS='./pkg -run TestName -v'
+	$(REQUIRE_ENV)
+	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
+	cd server && go run ./cmd/migrate up
+	@bash scripts/go-test-safe.sh $${GO_TEST_ARGS:-./...}
 
 # Database
 ##@ Database

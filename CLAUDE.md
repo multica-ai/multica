@@ -105,8 +105,9 @@ pnpm --filter @multica/views exec vitest run auth/login-page.test.tsx
 pnpm --filter @multica/core exec vitest run runtimes/version.test.ts
 pnpm --filter @multica/web exec vitest run app/\(auth\)/login/page.test.tsx
 
-# Run a single Go test
-cd server && go test ./internal/handler/ -run TestName
+# Run Go tests safely on shared servers
+bash scripts/go-test-safe.sh ./internal/handler/ -run TestName -v
+make test-go-safe GO_TEST_ARGS='./internal/handler/ -run TestName -v'
 
 # Run a single E2E test (requires backend + frontend running)
 pnpm exec playwright test e2e/tests/specific-test.spec.ts
@@ -305,7 +306,14 @@ All test deps are in the pnpm catalog for unified versioning.
 
 ### Go tests
 
-Standard `go test`. Tests should create their own fixture data in a test database.
+Use the resource-safe wrapper on shared/self-hosted servers instead of raw broad `go test ./...`:
+
+```bash
+bash scripts/go-test-safe.sh ./internal/handler -run TestName -v
+make test-go-safe GO_TEST_ARGS='./internal/handler -run TestName -v'
+```
+
+The wrapper sets `GOMAXPROCS=1`, `GOFLAGS=-p=1`, `-parallel=1`, a short timeout, and leaves `REDIS_TEST_URL` empty by default to avoid accidental Redis `FlushDB` on shared services. Tests should create their own fixture data in a test database.
 
 ### E2E tests
 
