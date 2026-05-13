@@ -141,7 +141,7 @@ describe("ReadonlyContent file cards", () => {
       name: "Preview permission-config-design.md",
     });
     const downloadButton = screen.getByRole("button", {
-      name: "Download permission-config-design.md",
+      name: "Download",
     });
     expect(previewButton.compareDocumentPosition(downloadButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 

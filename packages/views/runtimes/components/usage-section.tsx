@@ -30,6 +30,7 @@ import { KpiCard } from "./shared";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
   DailyCostChart,
+  DailyTokensChart,
   HourlyActivityChart,
   ActivityHeatmap,
 } from "./charts";
@@ -245,6 +246,7 @@ export function UsageSection({ runtimeId }: { runtimeId: string }) {
 // ---------------------------------------------------------------------------
 
 type WhenTab = "daily" | "hourly" | "heatmap";
+type DailyMetric = "cost" | "tokens";
 
 function WhenChart({
   runtimeId,
@@ -259,6 +261,10 @@ function WhenChart({
 }) {
   const { t } = useT("runtimes");
   const [tab, setTab] = useState<WhenTab>("daily");
+  // Daily-tab metric toggle (Cost vs Tokens). Stored here rather than in
+  // DailyTab so the legend in the card header can react to the active
+  // metric without prop-drilling.
+  const [dailyMetric, setDailyMetric] = useState<DailyMetric>("cost");
   // Memo dep — the aggregates below run `estimateCost`, which now consults
   // the user override store. Without listing pricings here the memos cache
   // pre-override totals when query data hasn't changed.
@@ -271,7 +277,7 @@ function WhenChart({
     enabled: tab === "hourly",
   });
 
-  const { dailyCostStack } = useMemo(
+  const { dailyCostStack, dailyTokens } = useMemo(
     () => aggregateByDate(filtered),
     [filtered, pricings],
   );
@@ -300,8 +306,26 @@ function WhenChart({
               ] as const
             }
           />
+          {/* Cost/Tokens toggle lives next to the main tab control so all
+              chart-axis switches are in one place. Only meaningful on the
+              Daily tab — Hourly always renders cost; Heatmap has its own
+              caption. */}
+          {tab === "daily" && (
+            <Segmented
+              value={dailyMetric}
+              onChange={setDailyMetric}
+              options={
+                [
+                  { label: t(($) => $.usage.daily_metric_cost), value: "cost" },
+                  { label: t(($) => $.usage.daily_metric_tokens), value: "tokens" },
+                ] as const
+              }
+            />
+          )}
         </div>
-        {tab !== "heatmap" && <ChartLegend />}
+        {tab !== "heatmap" && (
+          <ChartLegend includeCacheRead={tab === "daily" && dailyMetric === "tokens"} />
+        )}
       </div>
 
       {/* Heatmap intentionally ignores the page period selector and always
@@ -317,7 +341,14 @@ function WhenChart({
           switching never collapses or stretches the card vertically (and
           the right-rail / lower sections never reflow as a side effect). */}
       <div className="min-h-[260px]">
-        {tab === "daily" && <DailyTab data={dailyCostStack} usage={filtered} />}
+        {tab === "daily" && (
+          <DailyTab
+            metric={dailyMetric}
+            costData={dailyCostStack}
+            tokensData={dailyTokens}
+            usage={filtered}
+          />
+        )}
         {tab === "hourly" && <HourlyTab data={hourlyCost} usage={filtered} />}
         {tab === "heatmap" && <ActivityHeatmap usage={usage} />}
       </div>
@@ -326,15 +357,30 @@ function WhenChart({
 }
 
 function DailyTab({
-  data,
+  metric,
+  costData,
+  tokensData,
   usage,
 }: {
-  data: { total: number }[];
+  metric: DailyMetric;
+  costData: Parameters<typeof DailyCostChart>[0]["data"];
+  tokensData: Parameters<typeof DailyTokensChart>[0]["data"];
   usage: RuntimeUsage[];
 }) {
-  const totalCost = data.reduce((s, d) => s + d.total, 0);
+  if (metric === "tokens") {
+    // Token chart fires its own empty state: if no tokens were recorded the
+    // chart is genuinely empty (independent of pricing — unmapped models
+    // still contribute raw token counts).
+    const totalTokens = tokensData.reduce(
+      (s, d) => s + d.input + d.output + d.cacheRead + d.cacheWrite,
+      0,
+    );
+    if (totalTokens === 0) return <EmptyChartState usage={usage} />;
+    return <DailyTokensChart data={tokensData} />;
+  }
+  const totalCost = costData.reduce((s, d) => s + d.total, 0);
   if (totalCost === 0) return <EmptyChartState usage={usage} />;
-  return <DailyCostChart data={data as Parameters<typeof DailyCostChart>[0]["data"]} />;
+  return <DailyCostChart data={costData} />;
 }
 
 function HourlyTab({
@@ -446,11 +492,17 @@ function UnmappedPricingNotice({ usage }: { usage: RuntimeUsage[] }) {
 // header so the chart body keeps its full vertical real estate.
 // ---------------------------------------------------------------------------
 
-function ChartLegend() {
+function ChartLegend({ includeCacheRead = false }: { includeCacheRead?: boolean }) {
   const { t } = useT("runtimes");
+  // Token-stack mode adds a cache-read pip between output and cache-write to
+  // match the four-segment stack of DailyTokensChart. The cost chart drops
+  // cache-read because at typical pricing it'd be ~0 px tall in the stack.
   const items = [
     { label: t(($) => $.usage.legend_input), color: "var(--color-chart-1)" },
     { label: t(($) => $.usage.legend_output), color: "var(--color-chart-2)" },
+    ...(includeCacheRead
+      ? [{ label: t(($) => $.usage.legend_cache_read), color: "var(--color-chart-4)" }]
+      : []),
     { label: t(($) => $.usage.legend_cache_write), color: "var(--color-chart-3)" },
   ];
   return (

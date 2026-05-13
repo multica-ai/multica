@@ -1,5 +1,6 @@
 {
   "name": "@multica/desktop",
+  "productName": "Multica",
   "version": "0.1.0",
   "private": true,
   "description": "Multica Desktop — native desktop client for the Multica platform.",

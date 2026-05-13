@@ -70,6 +70,7 @@ const (
 	EventChatDone           = "chat:done"
 	EventChatSessionRead    = "chat:session_read"
 	EventChatSessionDeleted = "chat:session_deleted"
+	EventChatSessionUpdated = "chat:session_updated"
 
 	// Project events
 	EventProjectCreated         = "project:created"
@@ -101,6 +102,11 @@ const (
 	EventAutopilotDeleted  = "autopilot:deleted"
 	EventAutopilotRunStart = "autopilot:run_start"
 	EventAutopilotRunDone  = "autopilot:run_done"
+
+	// Squad events
+	EventSquadCreated = "squad:created"
+	EventSquadUpdated = "squad:updated"
+	EventSquadDeleted = "squad:deleted"
 
 	// Daemon events
 	EventDaemonHeartbeat     = "daemon:heartbeat"

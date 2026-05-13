@@ -17,11 +17,13 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
-import { FileText, Loader2, Download } from "lucide-react";
+import { Eye, FileText, Loader2, Download } from "lucide-react";
 import { useT } from "../../i18n";
 import { isMarkdownFilename, MarkdownFilePreviewButton } from "../markdown-file-preview";
 import { ReadonlyContent } from "../readonly-content";
 import { useAttachmentDownloadResolver } from "../attachment-download-context";
+import { useAttachmentPreview } from "../attachment-preview-modal";
+import { isPreviewable } from "../utils/preview";
 
 
 // ---------------------------------------------------------------------------
@@ -38,11 +40,22 @@ function FileCardView({ node }: NodeViewProps) {
   const filename = (node.attrs.filename as string) || "";
   const uploading = node.attrs.uploading as boolean;
   const canPreview = !uploading && Boolean(href) && isMarkdownFilename(filename);
-  const { openByUrl } = useAttachmentDownloadResolver();
+  const { openByUrl, resolveAttachment } = useAttachmentDownloadResolver();
+  const preview = useAttachmentPreview();
 
   const openFile = () => {
     openByUrl(href);
   };
+
+  // The NodeView only holds href + filename. The full Attachment (with
+  // content_type / download_url) lives in the surrounding
+  // AttachmentDownloadProvider — resolve it lazily at click time so the
+  // eye button is only offered when we both know the record and the
+  // dispatcher recognizes the type.
+  const attachment = href ? resolveAttachment(href) : undefined;
+  const previewable = attachment
+    ? isPreviewable(attachment.content_type, attachment.filename)
+    : false;
 
   return (
     <NodeViewWrapper as="div" className="file-card-node" data-type="fileCard">
@@ -70,6 +83,21 @@ function FileCardView({ node }: NodeViewProps) {
             renderContent={(content) => <ReadonlyContent content={content} />}
           />
         )}
+        {!canPreview && !uploading && href && previewable && attachment && (
+          <button
+            type="button"
+            className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            title={t(($) => $.attachment.preview)}
+            aria-label={t(($) => $.attachment.preview)}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              preview.tryOpen(attachment);
+            }}
+          >
+            <Eye className="size-3.5" />
+          </button>
+        )}
         {!uploading && href && (
           <button
             type="button"
@@ -86,6 +114,7 @@ function FileCardView({ node }: NodeViewProps) {
           </button>
         )}
       </div>
+      {preview.modal}
     </NodeViewWrapper>
   );
 }

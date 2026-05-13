@@ -71,6 +71,11 @@ vi.mock("../../editor", () => ({
   copyMarkdown: vi.fn(),
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   useDownloadAttachment: () => vi.fn(),
+  useAttachmentPreview: () => ({
+    tryOpen: vi.fn(() => true),
+    modal: null,
+  }),
+  isPreviewable: () => false,
 }));
 
 vi.mock("./reply-input", () => ({
@@ -176,7 +181,7 @@ describe("CommentCard attachments", () => {
     renderComment(entry);
 
     const previewButton = screen.getByRole("button", { name: "Preview result.md" });
-    const downloadButton = screen.getByRole("button", { name: "Download result.md" });
+    const downloadButton = screen.getByRole("button", { name: "Download" });
     expect(previewButton.compareDocumentPosition(downloadButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     await user.click(previewButton);

@@ -106,6 +106,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AllowedEmails:                 splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
 		AllowedEmailDomains:           splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
 		UseDailyRollupForRuntimeUsage: os.Getenv("USAGE_DAILY_ROLLUP_ENABLED") == "true",
+		UseDailyRollupForDashboard:    os.Getenv("USAGE_DASHBOARD_ROLLUP_ENABLED") == "true",
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	if opts.DaemonWakeup != nil {
@@ -391,6 +392,24 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Squads
+			r.Route("/api/squads", func(r chi.Router) {
+				r.Get("/", h.ListSquads)
+				r.Post("/", h.CreateSquad)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetSquad)
+					r.Put("/", h.UpdateSquad)
+					r.Delete("/", h.DeleteSquad)
+					r.Get("/members", h.ListSquadMembers)
+					r.Post("/members", h.AddSquadMember)
+					r.Delete("/members", h.RemoveSquadMember)
+					r.Patch("/members/role", h.UpdateSquadMemberRole)
+				})
+			})
+
+			// Squad leader evaluation (writes to activity_log)
+			r.Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
+
 			// Autopilots
 			r.Route("/api/autopilots", func(r chi.Router) {
 				r.Get("/", h.ListAutopilots)
@@ -420,6 +439,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Attachments
 			r.Get("/api/attachments/preview", h.PreviewAttachmentMarkdown)
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)
+			r.Get("/api/attachments/{id}/content", h.GetAttachmentContent)
 			r.Delete("/api/attachments/{id}", h.DeleteAttachment)
 
 			// Comments
@@ -436,6 +456,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/agents", func(r chi.Router) {
 				r.Get("/", h.ListAgents)
 				r.Post("/", h.CreateAgent)
+				// Agent templates: pre-configured instructions + skill refs.
+				// Picking a template imports the referenced skills into the
+				// workspace (find-or-create by name) and creates the agent
+				// with the template's instructions in one transaction.
+				r.Post("/from-template", h.CreateAgentFromTemplate)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
@@ -446,6 +471,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
 				})
+			})
+
+			// Agent templates catalog (browse + detail). The Create flow
+			// lives under /api/agents/from-template above; this route is for
+			// the picker UI to list available templates.
+			r.Route("/api/agent-templates", func(r chi.Router) {
+				r.Get("/", h.ListAgentTemplates)
+				r.Get("/{slug}", h.GetAgentTemplate)
 			})
 
 			// Skills
@@ -467,6 +500,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/usage", func(r chi.Router) {
 				r.Get("/daily", h.GetWorkspaceUsageByDay)
 				r.Get("/summary", h.GetWorkspaceUsageSummary)
+			})
+
+			// Dashboard — workspace-wide token + run-time rollups for the
+			// "/{slug}/dashboard" page. Optional ?project_id filter scopes
+			// the rollup to a single project.
+			r.Route("/api/dashboard", func(r chi.Router) {
+				r.Get("/usage/daily", h.GetDashboardUsageDaily)
+				r.Get("/usage/by-agent", h.GetDashboardUsageByAgent)
+				r.Get("/agent-runtime", h.GetDashboardAgentRunTime)
 			})
 
 			// Runtimes
@@ -510,6 +552,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListChatSessions)
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
+					r.Patch("/", h.UpdateChatSession)
 					r.Delete("/", h.DeleteChatSession)
 					r.Post("/messages", h.SendChatMessage)
 					r.Get("/messages", h.ListChatMessages)

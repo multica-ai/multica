@@ -34,6 +34,7 @@ beforeEach(() => {
     onAuthToken: vi.fn(() => vi.fn()),
     onInviteOpen: vi.fn(() => vi.fn()),
     openExternal: vi.fn(() => Promise.resolve()),
+    downloadURL: vi.fn(() => Promise.resolve()),
     setImmersiveMode: vi.fn(() => Promise.resolve()),
     showNotification: vi.fn(),
     setUnreadBadge: vi.fn(),

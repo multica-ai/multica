@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useRef, useState } from "react";
-import { CheckCircle2, ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, Copy, Download, Eye, FileText, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -30,7 +30,7 @@ import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-pick
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
-import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment } from "../../editor";
+import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment, useAttachmentPreview, isPreviewable } from "../../editor";
 import { MarkdownFilePreviewButton } from "../../editor/markdown-file-preview";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -141,8 +141,11 @@ function AttachmentRow({
   attachment: Attachment;
   onDownload: (attachmentId: string) => void;
 }) {
-  const { t } = useT("issues");
-  const canPreview = Boolean(attachment.download_url) && isMarkdownAttachment(attachment);
+  const { t } = useT("editor");
+  const preview = useAttachmentPreview();
+  const canMarkdownPreview =
+    Boolean(attachment.download_url) && isMarkdownAttachment(attachment);
+  const canGenericPreview = isPreviewable(attachment.content_type, attachment.filename);
 
   return (
     <div className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
@@ -150,24 +153,36 @@ function AttachmentRow({
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm">{attachment.filename}</p>
       </div>
-      {canPreview && (
+      {canMarkdownPreview && (
         <MarkdownFilePreviewButton
           href={attachment.download_url}
           filename={attachment.filename}
           renderContent={(content) => <ReadonlyContent content={content} />}
         />
       )}
+      {!canMarkdownPreview && canGenericPreview && (
+        <button
+          type="button"
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          title={t(($) => $.attachment.preview)}
+          aria-label={t(($) => $.attachment.preview)}
+          onClick={() => preview.tryOpen(attachment)}
+        >
+          <Eye className="size-3.5" />
+        </button>
+      )}
       {attachment.download_url && (
         <button
           type="button"
           className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          aria-label={t(($) => $.comment.download_attachment, { filename: attachment.filename })}
-          title={t(($) => $.comment.download_attachment, { filename: attachment.filename })}
+          title={t(($) => $.image.download)}
+          aria-label={t(($) => $.image.download)}
           onClick={() => onDownload(attachment.id)}
         >
           <Download className="size-3.5" />
         </button>
       )}
+      {preview.modal}
     </div>
   );
 }

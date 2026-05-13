@@ -201,6 +201,31 @@ describe("useTabStore actions", () => {
     expect(s.byWorkspace.acme.tabs[0].id).not.toBe(onlyTabId); // fresh tab
   });
 
+  it("defers disposing the closed tab router until after the store update", () => {
+    vi.useFakeTimers();
+    try {
+      const store = useTabStore.getState();
+      store.switchWorkspace("acme");
+      const closedTabId = store.addTab("/acme/settings", "Settings", "Settings");
+      const closingTab = useTabStore
+        .getState()
+        .byWorkspace.acme.tabs.find((t) => t.id === closedTabId);
+      const dispose = vi.mocked(closingTab!.router.dispose);
+
+      store.closeTab(closedTabId);
+
+      expect(dispose).not.toHaveBeenCalled();
+      expect(
+        useTabStore.getState().byWorkspace.acme.tabs.some((t) => t.id === closedTabId),
+      ).toBe(false);
+
+      vi.runAllTimers();
+
+      expect(dispose).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("ignores router-sync updates from a tab after it has been closed", () => {
     const store = useTabStore.getState();
     store.switchWorkspace("acme");

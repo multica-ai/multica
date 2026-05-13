@@ -7,7 +7,13 @@ import { Rnd } from "react-rnd";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { Button } from "@multica/ui/components/ui/button";
-import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
 
@@ -130,6 +136,7 @@ function MarkdownPreviewDialogContent({
   return (
     <DialogContent
       showCloseButton={false}
+      overlayClassName="bg-black/80 supports-backdrop-filter:backdrop-blur-xs"
       className="!fixed !top-0 !left-0 h-screen w-screen max-w-none !translate-x-0 !translate-y-0 border-0 bg-transparent p-0 shadow-none ring-0"
     >
       <Rnd
