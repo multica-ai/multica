@@ -53,8 +53,8 @@ func releaseAssetCandidates(targetVersion, goos, goarch string) []string {
 	// Prefer the versioned name (current scheme); fall back to the legacy
 	// `multica_{os}_{arch}` name for releases that still ship it.
 	return []string{
-		fmt.Sprintf("multica-cli-%s-%s-%s.%s", version, goos, goarch, ext),
-		fmt.Sprintf("multica_%s_%s.%s", goos, goarch, ext),
+		fmt.Sprintf("forge-cli-%s-%s-%s.%s", version, goos, goarch, ext),
+		fmt.Sprintf("forge_%s_%s.%s", goos, goarch, ext),
 	}
 }
 
@@ -228,9 +228,9 @@ func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Dur
 	}
 
 	// Extract the binary from the archive.
-	binaryName := "multica"
+	binaryName := "forge"
 	if runtime.GOOS == "windows" {
-		binaryName = "multica.exe"
+		binaryName = "forge.exe"
 	}
 	var binaryData []byte
 	if runtime.GOOS == "windows" {
@@ -244,7 +244,7 @@ func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Dur
 
 	// Atomic replace: write to temp file, then rename over the original.
 	dir := filepath.Dir(exePath)
-	tmpFile, err := os.CreateTemp(dir, "multica-update-*")
+	tmpFile, err := os.CreateTemp(dir, "forge-update-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
