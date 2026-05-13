@@ -211,3 +211,41 @@ func TestRFCNanoConstant_RoundTrips(t *testing.T) {
 // column as interface{} again (the original draft before we cast to
 // ::timestamptz) this assertion fails at compile time.
 var _ pgtype.Timestamptz = (struct{ Field pgtype.Timestamptz }{}).Field
+
+func TestPayloadToMap_NormalizesStructValues(t *testing.T) {
+	// The event bus delivers the original Go value without JSON marshalling, so
+	// payload["issue"] may be a typed struct rather than map[string]any.
+	// payloadToMap must normalize it so the inner type assertions in the listener
+	// callbacks succeed in production (not just in tests that hand-craft maps).
+	type issueStub struct {
+		ID            string  `json:"id"`
+		Status        string  `json:"status"`
+		ParentIssueID *string `json:"parent_issue_id"`
+		ProjectID     *string `json:"project_id"`
+	}
+	parent := "55555555-5555-5555-5555-555555555555"
+	raw := map[string]any{
+		"issue":          issueStub{ID: "aaa", Status: "in_review", ParentIssueID: &parent},
+		"status_changed": true,
+		"prev_status":    "todo",
+	}
+
+	m, ok := payloadToMap(raw)
+	if !ok {
+		t.Fatal("payloadToMap returned !ok for a valid struct payload")
+	}
+
+	issue, ok := m["issue"].(map[string]any)
+	if !ok {
+		t.Fatalf("after payloadToMap, payload[\"issue\"] type = %T, want map[string]any", m["issue"])
+	}
+	if id, _ := issue["id"].(string); id != "aaa" {
+		t.Errorf("issue.id = %q, want \"aaa\"", id)
+	}
+	if status, _ := issue["status"].(string); status != "in_review" {
+		t.Errorf("issue.status = %q, want \"in_review\"", status)
+	}
+	if parentID, _ := issue["parent_issue_id"].(string); parentID != parent {
+		t.Errorf("issue.parent_issue_id = %q, want %q", parentID, parent)
+	}
+}

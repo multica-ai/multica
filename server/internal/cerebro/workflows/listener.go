@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
@@ -41,7 +42,7 @@ func (l *Listener) onIssueUpdated(e events.Event) {
 		return
 	}
 
-	payload, ok := e.Payload.(map[string]any)
+	payload, ok := payloadToMap(e.Payload)
 	if !ok {
 		return
 	}
@@ -164,7 +165,7 @@ func (l *Listener) onCommentCreated(e events.Event) {
 	if !l.svc.Enabled() {
 		return
 	}
-	payload, ok := e.Payload.(map[string]any)
+	payload, ok := payloadToMap(e.Payload)
 	if !ok {
 		return
 	}
@@ -203,7 +204,7 @@ func (l *Listener) onIssueCreated(e events.Event) {
 	if !l.svc.Enabled() {
 		return
 	}
-	payload, ok := e.Payload.(map[string]any)
+	payload, ok := payloadToMap(e.Payload)
 	if !ok {
 		return
 	}
@@ -237,6 +238,23 @@ func (l *Listener) onIssueCreated(e events.Event) {
 			"error", err,
 		)
 	}
+}
+
+// payloadToMap normalises an event payload to a fully-flattened map[string]any.
+// The in-process bus delivers Go values without a JSON round-trip, so nested
+// fields may be typed structs (e.g. IssueResponse, CommentResponse) rather than
+// map[string]any. Marshalling through JSON converts every nested struct so the
+// type assertions in the listener callbacks work regardless of payload origin.
+func payloadToMap(v any) (map[string]any, bool) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, false
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, false
+	}
+	return m, true
 }
 
 const rfcNano = "2006-01-02T15:04:05.999999999Z07:00"
