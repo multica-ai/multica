@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/internal/webhooks"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -180,6 +182,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// env var is unset the handler only serves loopback callers so local
 	// dev keeps working without exposing the metrics on a public listener.
 	r.Get("/health/realtime", realtimeMetricsHandler(os.Getenv("REALTIME_METRICS_TOKEN")))
+
+	// Cascade webhook ingress (PUL-102). Disabled by default; enabled
+	// per MULTICA_CASCADE_WEBHOOK_ENABLED env var. When off, the
+	// route literally does not exist on the parent router — vendors
+	// hitting /webhooks/{source} receive a 404 indistinguishable
+	// from a typo. PR3 will replace the GitHub stub with the real
+	// adapter; this wiring is a one-time call site that does not
+	// move.
+	if router := webhooks.MountFromEnv(r, nil); router != nil {
+		slog.Info("webhooks subsystem active", "source_count", router.SourceCount())
+	}
 
 	// WebSocket
 	mc := &membershipChecker{queries: queries}
