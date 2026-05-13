@@ -233,7 +233,7 @@ func TestListTimeline_HasMoreBefore_MixedCounts(t *testing.T) {
 	// exceeds it — the page must report has_more_before=true.
 	seedTimelineEntries(t, issueID, 7, 7)
 
-	resp, code := fetchTimeline(t, issueID, "limit=10")
+	resp, code := fetchTimelineWrapped(t, issueID, "limit=10")
 	if code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", code)
 	}
@@ -307,7 +307,7 @@ func TestListTimeline_Around_HasMore_MixedCounts(t *testing.T) {
 		}
 	}
 
-	resp, code := fetchTimeline(t, issueID, "around="+anchorID+"&limit=10")
+	resp, code := fetchTimelineWrapped(t, issueID, "around="+anchorID+"&limit=10")
 	if code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", code)
 	}

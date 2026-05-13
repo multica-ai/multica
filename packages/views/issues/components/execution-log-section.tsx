@@ -324,7 +324,15 @@ function activeTimeText(task: AgentTask): string {
 
 function useTriggerText(task: AgentTask): string {
   const { t } = useT("issues");
+  const { getMemberName } = useActorName();
   const isRetry = !!task.parent_task_id;
+
+  if (task.kind === "local_cli") {
+    const cli = task.cli_name || task.trigger_summary || "local CLI";
+    const owner = task.owner_id ? getMemberName(task.owner_id) : "";
+    const cwd = task.work_dir ? basename(task.work_dir) : "";
+    return [cli, owner, cwd].filter(Boolean).join(" · ");
+  }
 
   // Retry: label prefix + summary
   if (isRetry) {
@@ -344,6 +352,10 @@ function useTriggerText(task: AgentTask): string {
     return task.trigger_summary ? `${label} · ${task.trigger_summary}` : label;
   }
   return t(($) => $.execution_log.trigger_initial);
+}
+
+function basename(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
 }
 
 function useStatusLabel(status: AgentTask["status"]): string {
@@ -463,6 +475,10 @@ function PastRow({
     task.status === "failed" && task.failure_reason
       ? failureReasonLabel[task.failure_reason as TaskFailureReason]
       : null;
+  const exitCodeText =
+    task.kind === "local_cli" && task.exit_code != null
+      ? `exit ${task.exit_code}`
+      : null;
 
   const handleTriggerClick =
     task.trigger_comment_id && onHighlightComment
@@ -473,7 +489,7 @@ function PastRow({
     <RowShell task={task} runIndex={runIndex} colorClass={colorClass}>
       <TriggerText text={trigger} fullText={task.trigger_summary} onClick={handleTriggerClick} />
       <span className="shrink-0 whitespace-nowrap text-xs">
-        <span className={tone}>{failureLabel ?? label}</span>
+        <span className={tone}>{exitCodeText ?? failureLabel ?? label}</span>
         <span className="text-muted-foreground"> · {time}</span>
       </span>
       <RowActions>

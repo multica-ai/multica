@@ -17,23 +17,28 @@ import (
 )
 
 type CommentResponse struct {
-	ID             string               `json:"id"`
-	IssueID        string               `json:"issue_id"`
-	AuthorType     string               `json:"author_type"`
-	AuthorID       string               `json:"author_id"`
-	Content        string               `json:"content"`
-	Type           string               `json:"type"`
-	ParentID       *string              `json:"parent_id"`
-	CreatedAt      string               `json:"created_at"`
-	UpdatedAt      string               `json:"updated_at"`
-	ResolvedAt     *string              `json:"resolved_at"`
-	ResolvedByType *string              `json:"resolved_by_type"`
-	ResolvedByID   *string              `json:"resolved_by_id"`
-	Reactions      []ReactionResponse   `json:"reactions"`
-	Attachments    []AttachmentResponse `json:"attachments"`
+	ID                string               `json:"id"`
+	IssueID           string               `json:"issue_id"`
+	AuthorType        string               `json:"author_type"`
+	AuthorID          string               `json:"author_id"`
+	AuthorDisplayName *string              `json:"author_display_name,omitempty"`
+	Content           string               `json:"content"`
+	Type              string               `json:"type"`
+	ParentID          *string              `json:"parent_id"`
+	CreatedAt         string               `json:"created_at"`
+	UpdatedAt         string               `json:"updated_at"`
+	ResolvedAt        *string              `json:"resolved_at"`
+	ResolvedByType    *string              `json:"resolved_by_type"`
+	ResolvedByID      *string              `json:"resolved_by_id"`
+	Reactions         []ReactionResponse   `json:"reactions"`
+	Attachments       []AttachmentResponse `json:"attachments"`
 }
 
 func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments []AttachmentResponse) CommentResponse {
+	return commentToResponseWithDisplay(c, reactions, attachments, nil)
+}
+
+func commentToResponseWithDisplay(c db.Comment, reactions []ReactionResponse, attachments []AttachmentResponse, displayName *string) CommentResponse {
 	if reactions == nil {
 		reactions = []ReactionResponse{}
 	}
@@ -41,20 +46,21 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		attachments = []AttachmentResponse{}
 	}
 	return CommentResponse{
-		ID:             uuidToString(c.ID),
-		IssueID:        uuidToString(c.IssueID),
-		AuthorType:     c.AuthorType,
-		AuthorID:       uuidToString(c.AuthorID),
-		Content:        c.Content,
-		Type:           c.Type,
-		ParentID:       uuidToPtr(c.ParentID),
-		CreatedAt:      timestampToString(c.CreatedAt),
-		UpdatedAt:      timestampToString(c.UpdatedAt),
-		ResolvedAt:     timestampToPtr(c.ResolvedAt),
-		ResolvedByType: textToPtr(c.ResolvedByType),
-		ResolvedByID:   uuidToPtr(c.ResolvedByID),
-		Reactions:      reactions,
-		Attachments:    attachments,
+		ID:                uuidToString(c.ID),
+		IssueID:           uuidToString(c.IssueID),
+		AuthorType:        c.AuthorType,
+		AuthorID:          uuidToString(c.AuthorID),
+		AuthorDisplayName: displayName,
+		Content:           c.Content,
+		Type:              c.Type,
+		ParentID:          uuidToPtr(c.ParentID),
+		CreatedAt:         timestampToString(c.CreatedAt),
+		UpdatedAt:         timestampToString(c.UpdatedAt),
+		ResolvedAt:        timestampToPtr(c.ResolvedAt),
+		ResolvedByType:    textToPtr(c.ResolvedByType),
+		ResolvedByID:      uuidToPtr(c.ResolvedByID),
+		Reactions:         reactions,
+		Attachments:       attachments,
 	}
 }
 
@@ -113,11 +119,12 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	}
 	grouped := h.groupReactions(r, commentIDs)
 	groupedAtt := h.groupAttachments(r, commentIDs)
+	displayNames := h.localCLICommentDisplayNames(r.Context(), commentIDs)
 
 	resp := make([]CommentResponse, len(comments))
 	for i, c := range comments {
 		cid := uuidToString(c.ID)
-		resp[i] = commentToResponse(c, grouped[cid], groupedAtt[cid])
+		resp[i] = commentToResponseWithDisplay(c, grouped[cid], groupedAtt[cid], displayNames[cid])
 	}
 
 	writeJSON(w, http.StatusOK, resp)

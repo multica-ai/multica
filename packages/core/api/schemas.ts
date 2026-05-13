@@ -14,12 +14,12 @@ import type { ListIssuesResponse, TimelineEntry } from "../types";
 //     existing UI code already coerces them.
 //   - Arrays default to `[]` so a missing `reactions` / `attachments` /
 //     `entries` field doesn't take the page down.
-//   - Every object schema ends with `.loose()` so unknown server-side
-//     fields pass through unchanged. zod 4's `.object()` defaults to STRIP,
+//   - Every object schema ends with `.passthrough()` so unknown server-side
+//     fields pass through unchanged. zod's `.object()` defaults to STRIP,
 //     which would silently delete fields the schema didn't explicitly list
 //     — fine while the TS type doesn't claim them, but the moment a future
 //     PR adds a TS field without updating the schema, the cast `as T` lies
-//     and the field shows up as `undefined` at runtime. `.loose()` removes
+//     and the field shows up as `undefined` at runtime. `.passthrough()` removes
 //     that synchronisation hazard.
 //
 // These schemas are deliberately not typed as `z.ZodType<TimelineEntry>` /
@@ -40,13 +40,13 @@ const ReactionSchema = z.object({
 
 const AttachmentSchema = z.object({
   id: z.string(),
-}).loose();
+}).passthrough();
 
-// All object schemas use `.loose()` so unknown server-side fields pass
-// through unchanged. zod 4's `.object()` defaults to STRIP, which would
+// All object schemas use `.passthrough()` so unknown server-side fields pass
+// through unchanged. zod's `.object()` defaults to STRIP, which would
 // silently drop new fields and surface as a "field neither showed up in
 // the UI" mystery the next time the TS type adopted them but the schema
-// wasn't updated in lock-step. `.loose()` removes that synchronisation
+// wasn't updated in lock-step. `.passthrough()` removes that synchronisation
 // hazard — the schema validates the shape it knows about and leaves the
 // rest alone.
 const TimelineEntrySchema = z.object({
@@ -54,6 +54,7 @@ const TimelineEntrySchema = z.object({
   id: z.string(),
   actor_type: z.string(),
   actor_id: z.string(),
+  actor_display_name: z.string().nullable().optional(),
   created_at: z.string(),
   action: z.string().optional(),
   details: z.record(z.string(), z.unknown()).optional(),
@@ -64,7 +65,7 @@ const TimelineEntrySchema = z.object({
   reactions: z.array(ReactionSchema).optional(),
   attachments: z.array(AttachmentSchema).optional(),
   coalesced_count: z.number().optional(),
-}).loose();
+}).passthrough();
 
 // /timeline returns a flat array of TimelineEntry, oldest first. The
 // previously cursor-paginated wrapper was removed (#1929) — at observed data
@@ -78,6 +79,7 @@ export const CommentSchema = z.object({
   issue_id: z.string(),
   author_type: z.string(),
   author_id: z.string(),
+  author_display_name: z.string().nullable().optional(),
   content: z.string(),
   type: z.string(),
   parent_id: z.string().nullable(),
@@ -85,7 +87,7 @@ export const CommentSchema = z.object({
   attachments: z.array(AttachmentSchema).default([]),
   created_at: z.string(),
   updated_at: z.string(),
-}).loose();
+}).passthrough();
 
 export const CommentsListSchema = z.array(CommentSchema);
 
@@ -110,12 +112,12 @@ const IssueSchema = z.object({
   labels: z.array(z.unknown()).optional(),
   created_at: z.string(),
   updated_at: z.string(),
-}).loose();
+}).passthrough();
 
 export const ListIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
   total: z.number().default(0),
-}).loose();
+}).passthrough();
 
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
   issues: [],
@@ -128,10 +130,10 @@ const SubscriberSchema = z.object({
   user_id: z.string(),
   reason: z.string(),
   created_at: z.string(),
-}).loose();
+}).passthrough();
 
 export const SubscribersListSchema = z.array(SubscriberSchema);
 
 export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
-}).loose();
+}).passthrough();

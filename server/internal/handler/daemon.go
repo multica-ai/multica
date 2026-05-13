@@ -1876,8 +1876,20 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t)
 	}
+	localRuns, err := h.listLocalCLIRunsByIssue(r, issue)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list local runs")
+		return
+	}
+	combined := make([]any, 0, len(resp)+len(localRuns))
+	for _, task := range resp {
+		combined = append(combined, task)
+	}
+	for _, run := range localRuns {
+		combined = append(combined, localCLIRunToResponse(run))
+	}
 
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, combined)
 }
 
 // ListTaskMessagesByUser returns task messages for a task.
@@ -1888,6 +1900,22 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 
 	task, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
 	if err != nil {
+		runUUID, parseErr := util.ParseUUID(taskID)
+		wsUUID, wsErr := util.ParseUUID(middleware.WorkspaceIDFromContext(r.Context()))
+		if parseErr == nil && wsErr == nil {
+			row := h.DB.QueryRow(r.Context(), `
+				SELECT id, workspace_id, issue_id, owner_id, cli_name, status,
+					started_at, completed_at, exit_code, work_dir, context_dir,
+					comments_mode, top_comment_id, error, created_at, updated_at
+				FROM local_cli_run
+				WHERE id = $1 AND workspace_id = $2
+			`, runUUID, wsUUID)
+			run, scanErr := scanLocalCLIRun(row)
+			if scanErr == nil {
+				h.writeLocalCLIMessages(w, r, run)
+				return
+			}
+		}
 		writeError(w, http.StatusNotFound, "task not found")
 		return
 	}

@@ -30,7 +30,6 @@ import type {
   CreateAgentRequest,
   MemberWithUser,
   RuntimeDevice,
-  Skill,
   UpdateAgentRequest,
 } from "@multica/core/types";
 import {
@@ -837,7 +836,7 @@ function SkillRow({
   readOnly,
   onRemove,
 }: {
-  skill: Skill;
+  skill: SkillOption;
   readOnly: boolean;
   onRemove: () => void;
 }) {
@@ -1303,7 +1302,7 @@ function SkillPickerModal({
   onSelect: (skillId: string) => void;
   open: boolean;
   saving: boolean;
-  skills: Skill[];
+  skills: SkillOption[];
 }) {
   const { t } = useTranslation();
   return (
@@ -1316,7 +1315,7 @@ function SkillPickerModal({
             disabled={saving}
             key={skill.id}
             label={skill.name}
-            meta={skill.description}
+            meta={skill.description ?? undefined}
             onPress={() => onSelect(skill.id)}
             selected={false}
           />
@@ -1324,6 +1323,12 @@ function SkillPickerModal({
       )}
     </SheetModal>
   );
+}
+
+interface SkillOption {
+  id: string;
+  name: string;
+  description?: string | null;
 }
 
 function SheetModal({

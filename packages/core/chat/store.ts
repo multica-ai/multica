@@ -61,7 +61,7 @@ export const CHAT_DEFAULT_H = 600;
  */
 export interface ChatTimelineItem {
   seq: number;
-  type: "tool_use" | "tool_result" | "thinking" | "text" | "error";
+  type: "tool_use" | "tool_result" | "thinking" | "text" | "error" | "raw" | "final" | "user_input";
   tool?: string;
   content?: string;
   input?: Record<string, unknown>;
