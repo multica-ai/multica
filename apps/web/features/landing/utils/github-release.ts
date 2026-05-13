@@ -27,11 +27,11 @@ export interface LatestRelease {
   version: string | null;
   publishedAt: string | null;
   htmlUrl: string | null;
+  allReleasesUrl: string;
   assets: DownloadAssets;
 }
 
-const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/multica-ai/multica/releases?per_page=2";
+const DEFAULT_RELEASE_REPOSITORY = "kanfashidoufu/multica";
 
 const REVALIDATE_SECONDS = 300;
 
@@ -47,6 +47,9 @@ interface GitHubReleasePayload {
 }
 
 export async function fetchLatestRelease(): Promise<LatestRelease> {
+  const repository = resolveReleaseRepository();
+  const releasesApiUrl = `https://api.github.com/repos/${repository}/releases?per_page=2`;
+  const allReleasesUrl = `https://github.com/${repository}/releases`;
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
@@ -63,7 +66,7 @@ export async function fetchLatestRelease(): Promise<LatestRelease> {
   }
 
   try {
-    const res = await fetch(GITHUB_RELEASES_URL, {
+    const res = await fetch(releasesApiUrl, {
       next: { revalidate: REVALIDATE_SECONDS },
       headers,
     });
@@ -89,12 +92,24 @@ export async function fetchLatestRelease(): Promise<LatestRelease> {
       version: chosen.tag_name ?? null,
       publishedAt: chosen.published_at ?? null,
       htmlUrl: chosen.html_url ?? null,
+      allReleasesUrl,
       assets: parseReleaseAssets(chosen.assets ?? []),
     };
   } catch (err) {
     console.warn("[download] fetchLatestRelease failed:", err);
-    return emptyRelease();
+    return emptyRelease(allReleasesUrl);
   }
+}
+
+export function resolveReleaseRepository(): string {
+  const raw =
+    process.env.MULTICA_RELEASE_REPOSITORY ||
+    process.env.GITHUB_REPOSITORY ||
+    DEFAULT_RELEASE_REPOSITORY;
+  const normalized = raw.trim().replace(/^https:\/\/github\.com\//, "");
+  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(normalized)
+    ? normalized
+    : DEFAULT_RELEASE_REPOSITORY;
 }
 
 function isWithinFreshWindow(release: GitHubReleasePayload): boolean {
@@ -104,11 +119,14 @@ function isWithinFreshWindow(release: GitHubReleasePayload): boolean {
   return Date.now() - publishedAt < FRESH_RELEASE_WINDOW_MS;
 }
 
-function emptyRelease(): LatestRelease {
+function emptyRelease(
+  allReleasesUrl = `https://github.com/${resolveReleaseRepository()}/releases`,
+): LatestRelease {
   return {
     version: null,
     publishedAt: null,
     htmlUrl: null,
+    allReleasesUrl,
     assets: {},
   };
 }

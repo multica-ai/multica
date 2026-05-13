@@ -16,9 +16,6 @@ import {
 import type { LatestRelease } from "@/features/landing/utils/github-release";
 import { captureDownloadPageViewed } from "@multica/core/analytics";
 
-const ALL_RELEASES_URL =
-  "https://github.com/multica-ai/multica/releases";
-
 export function DownloadClient({ release }: { release: LatestRelease }) {
   const [detected, setDetected] = useState<DetectResult | null>(null);
   const versionUnavailable = release.version === null;
@@ -48,7 +45,7 @@ export function DownloadClient({ release }: { release: LatestRelease }) {
     };
   }, [versionUnavailable]);
 
-  const releaseHtmlUrl = release.htmlUrl ?? ALL_RELEASES_URL;
+  const releaseHtmlUrl = release.htmlUrl ?? release.allReleasesUrl;
 
   return (
     <>
@@ -70,7 +67,7 @@ export function DownloadClient({ release }: { release: LatestRelease }) {
 
       <AllPlatforms
         assets={release.assets}
-        fallbackHref={ALL_RELEASES_URL}
+        fallbackHref={release.allReleasesUrl}
         version={release.version}
         detected={detected}
       />
@@ -79,6 +76,7 @@ export function DownloadClient({ release }: { release: LatestRelease }) {
       <VersionInfoFooter
         version={release.version}
         releaseHtmlUrl={releaseHtmlUrl}
+        allReleasesUrl={release.allReleasesUrl}
       />
       <LandingFooter />
     </>
@@ -88,9 +86,11 @@ export function DownloadClient({ release }: { release: LatestRelease }) {
 function VersionInfoFooter({
   version,
   releaseHtmlUrl,
+  allReleasesUrl,
 }: {
   version: string | null;
   releaseHtmlUrl: string;
+  allReleasesUrl: string;
 }) {
   const { t } = useLocale();
   const d = t.download.footer;
@@ -127,7 +127,7 @@ function VersionInfoFooter({
           </>
         )}
         <Link
-          href={ALL_RELEASES_URL}
+          href={allReleasesUrl}
           className="underline decoration-[#0a0d12]/30 underline-offset-4 hover:text-[#0a0d12] hover:decoration-[#0a0d12]/70"
           target="_blank"
           rel="noreferrer"

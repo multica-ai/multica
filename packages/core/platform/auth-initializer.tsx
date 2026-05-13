@@ -53,6 +53,10 @@ export function AuthInitializer({
         configStore.getState().setAuthConfig({
           allowSignup: cfg.allow_signup,
           googleClientId: cfg.google_client_id,
+          larkAuthEnabled: cfg.lark_auth_enabled,
+          larkAppId: cfg.lark_app_id,
+          larkAuthorizeUrl: cfg.lark_authorize_url,
+          releaseRepository: cfg.release_repository,
         });
         if (cfg.posthog_key) {
           initAnalytics({

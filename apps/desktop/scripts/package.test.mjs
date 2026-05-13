@@ -5,6 +5,7 @@ import {
   envWithLocalBins,
   normalizeGitVersion,
   parsePackageArgs,
+  resolveReleaseRepository,
   resolveBuildMatrix,
   stripLeadingSeparator,
 } from "./package.mjs";
@@ -179,6 +180,8 @@ describe("builderArgsForTarget", () => {
       ),
     ).toEqual([
       "-c.extraMetadata.version=1.2.3",
+      "-c.publish.owner=kanfashidoufu",
+      "-c.publish.repo=multica",
       "-c.mac.notarize=false",
       "--win",
       "nsis",
@@ -206,6 +209,8 @@ describe("builderArgsForTarget", () => {
       ),
     ).toEqual([
       "-c.extraMetadata.version=1.2.3",
+      "-c.publish.owner=kanfashidoufu",
+      "-c.publish.repo=multica",
       "--win",
       "nsis",
       "--x64",
@@ -231,12 +236,42 @@ describe("builderArgsForTarget", () => {
       ),
     ).toEqual([
       "-c.extraMetadata.version=1.2.3",
+      "-c.publish.owner=kanfashidoufu",
+      "-c.publish.repo=multica",
       "--linux",
       "AppImage",
       "--x64",
       "--publish",
       "never",
     ]);
+  });
+});
+
+describe("resolveReleaseRepository", () => {
+  it("prefers MULTICA_RELEASE_REPOSITORY", () => {
+    expect(
+      resolveReleaseRepository({
+        MULTICA_RELEASE_REPOSITORY: "example/private-multica",
+        GITHUB_REPOSITORY: "ignored/repo",
+      }),
+    ).toEqual({ owner: "example", repo: "private-multica" });
+  });
+
+  it("falls back to GITHUB_REPOSITORY", () => {
+    expect(
+      resolveReleaseRepository({
+        MULTICA_RELEASE_REPOSITORY: "",
+        GITHUB_REPOSITORY: "current/repo",
+      }),
+    ).toEqual({ owner: "current", repo: "repo" });
+  });
+
+  it("rejects malformed repository values", () => {
+    expect(
+      resolveReleaseRepository({
+        MULTICA_RELEASE_REPOSITORY: "not a repo",
+      }),
+    ).toBeNull();
   });
 });
 

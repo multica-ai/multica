@@ -15,8 +15,7 @@ import { create } from "zustand";
 export type WindowOverlay =
   | { type: "new-workspace" }
   | { type: "invite"; invitationId: string }
-  | { type: "invitations" }
-  | { type: "onboarding" };
+  | { type: "invitations" };
 
 interface WindowOverlayStore {
   overlay: WindowOverlay | null;

@@ -9,7 +9,7 @@ ORDER BY name ASC;
 -- Same as ListSkillsByWorkspace but omits the SKILL.md `content` column. Used
 -- by list endpoints (CLI table, web list page) where the body is never read;
 -- shipping it everywhere blew up payload size on workspaces with many skills
--- and caused 15s CLI timeouts from high-latency regions (GH multica-ai/multica#2174).
+-- and caused 15s CLI timeouts from high-latency regions (GH kanfashidoufu/multica#2174).
 SELECT id, workspace_id, name, description, config, created_by, created_at, updated_at
 FROM skill
 WHERE workspace_id = $1

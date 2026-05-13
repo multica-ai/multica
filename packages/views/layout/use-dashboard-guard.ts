@@ -22,9 +22,8 @@ import { useNavigation } from "../navigation";
  *  - Logged in but workspace list not yet loaded → wait (don't bounce prematurely)
  *  - Logged in but URL slug doesn't resolve to any workspace →
  *    `resolvePostAuthDestination(list, hasOnboarded)`:
- *      • un-onboarded → /onboarding
- *      • onboarded with workspaces → first workspace
- *      • onboarded with zero workspaces → /workspaces/new
+ *      • has workspaces → first workspace
+ *      • zero workspaces → /workspaces/new
  *
  * The "un-onboarded but in workspace" state is now physically impossible:
  * CreateWorkspace and AcceptInvitation both atomically set `onboarded_at`

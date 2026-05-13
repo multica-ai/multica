@@ -22,6 +22,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import type { User } from "@multica/core/types";
+import { QrCode } from "lucide-react";
 import { useT } from "../i18n";
 
 // ---------------------------------------------------------------------------
@@ -32,6 +33,14 @@ interface GoogleAuthConfig {
   clientId: string;
   redirectUri: string;
   /** Opaque state passed through Google OAuth (e.g. "platform:desktop"). */
+  state?: string;
+}
+
+interface LarkAuthConfig {
+  appId: string;
+  authorizeUrl: string;
+  redirectUri: string;
+  /** Opaque state passed through Lark OAuth (e.g. "platform:desktop"). */
   state?: string;
 }
 
@@ -50,12 +59,18 @@ interface LoginPageProps {
   onSuccess: () => void;
   /** Google OAuth config. Omit to disable Google login. */
   google?: GoogleAuthConfig;
+  /** Lark OAuth config. Omit to disable Lark login. */
+  lark?: LarkAuthConfig;
   /** CLI callback config for authorizing CLI tools. */
   cliCallback?: CliCallbackConfig;
   /** Called after a token is obtained (e.g. to set cookies). */
   onTokenObtained?: () => void;
   /** Override Google login handler (e.g. desktop opens browser externally). When provided, renders the Google button even if `google` config is omitted. */
   onGoogleLogin?: () => void;
+  /** Override Lark login handler (e.g. desktop opens browser externally). */
+  onLarkLogin?: () => void;
+  /** When false, render only configured OAuth providers. */
+  showEmailLogin?: boolean;
   /** Slot rendered at the bottom of the sign-in card, below the
    *  Google button. The web shell uses it for a "Prefer the desktop
    *  app?" prompt; desktop omits it (a download prompt inside the app
@@ -101,9 +116,12 @@ export function LoginPage({
   logo,
   onSuccess,
   google,
+  lark,
   cliCallback,
   onTokenObtained,
   onGoogleLogin,
+  onLarkLogin,
+  showEmailLogin = true,
   extra,
 }: LoginPageProps) {
   const { t } = useT("auth");
@@ -286,6 +304,24 @@ export function LoginPage({
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   };
 
+  const handleLarkLogin = () => {
+    if (onLarkLogin) {
+      onLarkLogin();
+      return;
+    }
+    if (!lark) return;
+    const params = new URLSearchParams({
+      redirect_uri: lark.redirectUri,
+      response_type: "code",
+    });
+    const appIDParam = lark.authorizeUrl.includes("passport")
+      ? "client_id"
+      : "app_id";
+    params.set(appIDParam, lark.appId);
+    if (lark.state) params.set("state", lark.state);
+    window.location.href = `${lark.authorizeUrl}?${params}`;
+  };
+
   // -------------------------------------------------------------------------
   // CLI confirm step
   // -------------------------------------------------------------------------
@@ -405,6 +441,9 @@ export function LoginPage({
   // Email step
   // -------------------------------------------------------------------------
 
+  const showLarkLogin = Boolean(lark || onLarkLogin);
+  const showGoogleLogin = Boolean((google || onGoogleLogin) && showEmailLogin);
+
   return (
     <div className="flex min-h-svh items-center justify-center">
       <Card className="w-full max-w-sm">
@@ -414,41 +453,59 @@ export function LoginPage({
             {t(($) => $.signin.title)}
           </CardTitle>
           <CardDescription>
-            {t(($) => $.signin.description)}
+            {showLarkLogin && !showEmailLogin
+              ? t(($) => $.signin.lark_description)
+              : t(($) => $.signin.description)}
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <form id="login-form" onSubmit={handleSendCode} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="login-email">{t(($) => $.common.email)}</Label>
-              <Input
-                id="login-email"
-                type="email"
-                placeholder={t(($) => $.common.email_placeholder)}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoFocus
-                required
-              />
-            </div>
-            {error && (
-              <p className="text-sm text-destructive">{error}</p>
-            )}
-          </form>
-        </CardContent>
+        {showEmailLogin && (
+          <CardContent>
+            <form id="login-form" onSubmit={handleSendCode} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="login-email">{t(($) => $.common.email)}</Label>
+                <Input
+                  id="login-email"
+                  type="email"
+                  placeholder={t(($) => $.common.email_placeholder)}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoFocus
+                  required
+                />
+              </div>
+              {error && (
+                <p className="text-sm text-destructive">{error}</p>
+              )}
+            </form>
+          </CardContent>
+        )}
         <CardFooter className="flex flex-col gap-3">
-          <Button
-            type="submit"
-            form="login-form"
-            className="w-full"
-            size="lg"
-            disabled={!email || loading}
-          >
-            {loading
-              ? t(($) => $.signin.sending)
-              : t(($) => $.signin.continue)}
-          </Button>
-          {(google || onGoogleLogin) && (
+          {showLarkLogin && (
+            <Button
+              type="button"
+              className="w-full"
+              size="lg"
+              onClick={handleLarkLogin}
+              disabled={loading}
+            >
+              <QrCode className="mr-2 h-4 w-4" />
+              {t(($) => $.signin.lark)}
+            </Button>
+          )}
+          {showEmailLogin && (
+            <Button
+              type="submit"
+              form="login-form"
+              className="w-full"
+              size="lg"
+              disabled={!email || loading}
+            >
+              {loading
+                ? t(($) => $.signin.sending)
+                : t(($) => $.signin.continue)}
+            </Button>
+          )}
+          {showGoogleLogin && (
             <>
               <div className="relative w-full">
                 <div className="absolute inset-0 flex items-center">

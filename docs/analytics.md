@@ -4,7 +4,7 @@ This document is the source of truth for the analytics events Multica ships
 to PostHog. Events feed the acquisition → activation → expansion funnel that
 drives our weekly Active Workspaces (WAW) north-star metric.
 
-See [MUL-1122](https://github.com/multica-ai/multica) for the design context.
+See [MUL-1122](https://github.com/kanfashidoufu/multica) for the design context.
 
 ## Configuration
 

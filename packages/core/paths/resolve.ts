@@ -4,16 +4,12 @@ import { paths } from "./paths";
 
 /**
  * Priority:
- *   !hasOnboarded                         → /onboarding
- *   hasOnboarded && has workspace         → /<first.slug>/issues
- *   hasOnboarded && zero workspaces       → /workspaces/new
+ *   has workspace                         → /<first.slug>/issues
+ *   zero workspaces                       → /workspaces/new
  *
- * `onboarded_at` is the single source of truth for whether the user has
- * passed first-contact. Backend transactions (CreateWorkspace,
- * AcceptInvitation) atomically set this field whenever a user joins a
- * `member` row, so "has workspace but !onboarded" is now a
- * physically impossible state — see migration 065 for the existing-data
- * backfill that closed the door retroactively.
+ * First-run onboarding is intentionally bypassed. New users go straight to
+ * workspace creation, and users with an existing workspace go straight to
+ * their first workspace.
  *
  * Callers that need invitation-aware routing (callback / login) handle the
  * "un-onboarded with pending invites" branch themselves before calling
@@ -22,11 +18,8 @@ import { paths } from "./paths";
  */
 export function resolvePostAuthDestination(
   workspaces: Workspace[],
-  hasOnboarded: boolean,
+  _hasOnboarded: boolean,
 ): string {
-  if (!hasOnboarded) {
-    return paths.onboarding();
-  }
   const first = workspaces[0];
   if (first) {
     return paths.workspace(first.slug).issues();

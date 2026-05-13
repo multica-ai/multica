@@ -26,9 +26,6 @@ function MulticaMark() {
   );
 }
 
-// GitHub mark — inlined SVG (lucide-react dropped the Github icon for brand
-// trademark reasons). Path matches apps/web/features/landing/components/
-// shared.tsx GitHubMark.
 function GitHubMark() {
   return (
     <svg
@@ -43,8 +40,7 @@ function GitHubMark() {
 }
 
 // External links shown at the top of the sidebar (and in the top nav on
-// desktop). Leading icon = brand identity (GitHub mark / Multica asterisk);
-// trailing ArrowUpRight = "opens externally" glyph, same pattern as
+// desktop). Trailing ArrowUpRight = "opens externally" glyph, same pattern as
 // `packages/views/layout/help-launcher.tsx` from PR #1560.
 const externalLinkText = (label: string) => (
   <span className="inline-flex items-center gap-1">
@@ -63,7 +59,7 @@ export const baseOptions: BaseLayoutProps = {
     {
       icon: <GitHubMark />,
       text: externalLinkText("GitHub"),
-      url: "https://github.com/multica-ai/multica",
+      url: "https://github.com/kanfashidoufu/multica",
       external: true,
     },
     {

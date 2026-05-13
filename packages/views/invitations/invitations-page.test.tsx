@@ -127,12 +127,12 @@ describe("InvitationsPage", () => {
     });
   });
 
-  it("with no selections, submitting routes to /onboarding", async () => {
+  it("with no selections, submitting routes to /workspaces/new", async () => {
     listMyInvitations.mockResolvedValue([mkInvite("inv-1", "ws-1", "Acme")]);
     renderWithClient();
     await waitFor(() => screen.getByText("Acme"));
     fireEvent.click(screen.getByRole("button", { name: /skip/i }));
-    expect(navigate).toHaveBeenCalledWith("/onboarding");
+    expect(navigate).toHaveBeenCalledWith("/workspaces/new");
     // Empty submit doesn't accept anything or touch onboarding state.
     expect(acceptInvitation).not.toHaveBeenCalled();
     expect(markOnboardingComplete).not.toHaveBeenCalled();
@@ -163,7 +163,7 @@ describe("InvitationsPage", () => {
     });
   });
 
-  it("empty list falls through to onboarding via Continue button", async () => {
+  it("empty list falls through to workspace creation via Continue button", async () => {
     listMyInvitations.mockResolvedValue([]);
     renderWithClient();
 
@@ -173,6 +173,6 @@ describe("InvitationsPage", () => {
     fireEvent.click(
       screen.getByRole("button", { name: /continue to setup/i }),
     );
-    expect(navigate).toHaveBeenCalledWith("/onboarding");
+    expect(navigate).toHaveBeenCalledWith("/workspaces/new");
   });
 });

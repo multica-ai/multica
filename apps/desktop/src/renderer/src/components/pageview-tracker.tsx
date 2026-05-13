@@ -116,8 +116,6 @@ function overlayPath(overlay: WindowOverlay): string {
   switch (overlay.type) {
     case "new-workspace":
       return "/workspaces/new";
-    case "onboarding":
-      return "/onboarding";
     case "invite":
       return `/invite/${overlay.invitationId}`;
     case "invitations":

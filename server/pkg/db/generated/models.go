@@ -333,6 +333,40 @@ type NotificationPreference struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type NotificationDelivery struct {
+	ID              pgtype.UUID        `json:"id"`
+	InboxItemID     pgtype.UUID        `json:"inbox_item_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	RecipientUserID pgtype.UUID        `json:"recipient_user_id"`
+	Channel         string             `json:"channel"`
+	Status          string             `json:"status"`
+	DedupeKey       string             `json:"dedupe_key"`
+	RetryCount      int32              `json:"retry_count"`
+	NextAttemptAt   pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError       pgtype.Text        `json:"last_error"`
+	SentAt          pgtype.Timestamptz `json:"sent_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type LarkInvitationDelivery struct {
+	ID            pgtype.UUID        `json:"id"`
+	InvitationID  pgtype.UUID        `json:"invitation_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	TenantKey     string             `json:"tenant_key"`
+	InviteeEmail  string             `json:"invitee_email"`
+	LarkOpenID    pgtype.Text        `json:"lark_open_id"`
+	Status        string             `json:"status"`
+	DedupeKey     string             `json:"dedupe_key"`
+	RetryCount    int32              `json:"retry_count"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError     pgtype.Text        `json:"last_error"`
+	SentMessageID pgtype.Text        `json:"sent_message_id"`
+	SentAt        pgtype.Timestamptz `json:"sent_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type PersonalAccessToken struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`
@@ -472,6 +506,23 @@ type User struct {
 	CloudWaitlistReason     pgtype.Text        `json:"cloud_waitlist_reason"`
 	StarterContentState     pgtype.Text        `json:"starter_content_state"`
 	Language                pgtype.Text        `json:"language"`
+}
+
+type UserExternalIdentity struct {
+	ID             pgtype.UUID        `json:"id"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	Provider       string             `json:"provider"`
+	TenantKey      string             `json:"tenant_key"`
+	ExternalUserID pgtype.Text        `json:"external_user_id"`
+	OpenID         pgtype.Text        `json:"open_id"`
+	UnionID        pgtype.Text        `json:"union_id"`
+	Email          pgtype.Text        `json:"email"`
+	Name           pgtype.Text        `json:"name"`
+	AvatarUrl      pgtype.Text        `json:"avatar_url"`
+	RawProfile     []byte             `json:"raw_profile"`
+	LastSyncedAt   pgtype.Timestamptz `json:"last_synced_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type VerificationCode struct {

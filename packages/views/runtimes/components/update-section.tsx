@@ -8,29 +8,35 @@ import {
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { api } from "@multica/core/api";
+import { useConfigStore } from "@multica/core/config";
 import type { RuntimeUpdateStatus } from "@multica/core/types";
 import { useT } from "../../i18n";
 
-const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/multica-ai/multica/releases/latest";
+const DEFAULT_RELEASE_REPOSITORY = "kanfashidoufu/multica";
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-let cachedLatestVersion: string | null = null;
-let cachedAt = 0;
+const latestVersionCache = new Map<
+  string,
+  { version: string | null; cachedAt: number }
+>();
 
-async function fetchLatestVersion(): Promise<string | null> {
-  if (cachedLatestVersion && Date.now() - cachedAt < CACHE_TTL_MS) {
-    return cachedLatestVersion;
+async function fetchLatestVersion(repository: string): Promise<string | null> {
+  const cached = latestVersionCache.get(repository);
+  if (cached && cached.version && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
+    return cached.version;
   }
   try {
-    const resp = await fetch(GITHUB_RELEASES_URL, {
-      headers: { Accept: "application/vnd.github+json" },
-    });
+    const resp = await fetch(
+      `https://api.github.com/repos/${repository}/releases/latest`,
+      {
+        headers: { Accept: "application/vnd.github+json" },
+      },
+    );
     if (!resp.ok) return null;
     const data = await resp.json();
-    cachedLatestVersion = data.tag_name ?? null;
-    cachedAt = Date.now();
-    return cachedLatestVersion;
+    const version = data.tag_name ?? null;
+    latestVersionCache.set(repository, { version, cachedAt: Date.now() });
+    return version;
   } catch {
     return null;
   }
@@ -83,6 +89,8 @@ export function UpdateSection({
   launchedBy,
 }: UpdateSectionProps) {
   const { t } = useT("runtimes");
+  const releaseRepository =
+    useConfigStore((s) => s.releaseRepository) || DEFAULT_RELEASE_REPOSITORY;
   const isManaged = launchedBy === "desktop";
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [status, setStatus] = useState<RuntimeUpdateStatus | null>(null);
@@ -103,8 +111,8 @@ export function UpdateSection({
 
   // Fetch latest version on mount.
   useEffect(() => {
-    fetchLatestVersion().then(setLatestVersion);
-  }, []);
+    fetchLatestVersion(releaseRepository).then(setLatestVersion);
+  }, [releaseRepository]);
 
   const markCompleted = useCallback(
     (message: string) => {

@@ -59,7 +59,7 @@ function tryRouteToOverlay(path: string, router?: DataRouter): boolean {
     return true;
   }
   if (path === "/onboarding") {
-    overlay.open({ type: "onboarding" });
+    overlay.open({ type: "new-workspace" });
     if (router && router.state.location.pathname !== "/") {
       router.navigate("/", { replace: true });
     }

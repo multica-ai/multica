@@ -43,6 +43,10 @@ type dbExecutor interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+type InvitationNotifier interface {
+	EnqueueInvitation(ctx context.Context, invitationID, workspaceID pgtype.UUID, inviteeEmail string) error
+}
+
 type Config struct {
 	AllowSignup         bool
 	AllowedEmails       []string
@@ -69,6 +73,7 @@ type Handler struct {
 	TaskService           *service.TaskService
 	AutopilotService      *service.AutopilotService
 	EmailService          *service.EmailService
+	InvitationNotifier    InvitationNotifier
 	UpdateStore           UpdateStore
 	ModelListStore        ModelListStore
 	LocalSkillListStore   LocalSkillListStore

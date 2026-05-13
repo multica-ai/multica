@@ -69,9 +69,10 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 }
 
 type RouterOptions struct {
-	HTTPMetrics  *obsmetrics.HTTPMetrics
-	DaemonHub    *daemonws.Hub
-	DaemonWakeup service.TaskWakeupNotifier
+	HTTPMetrics        *obsmetrics.HTTPMetrics
+	DaemonHub          *daemonws.Hub
+	DaemonWakeup       service.TaskWakeupNotifier
+	InvitationNotifier handler.InvitationNotifier
 	// HeartbeatScheduler, when non-nil, replaces the default synchronous
 	// passthrough scheduler on the constructed Handler. main.go injects a
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
@@ -87,15 +88,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		daemonHub = daemonws.NewHub()
 	}
 
-	// Initialize storage with S3 as primary, fallback to local
+	// Initialize storage with OSS/S3 as cloud options, fallback to local.
 	var store storage.Storage
-	s3 := storage.NewS3StorageFromEnv()
-	if s3 != nil {
-		store = s3
+	oss := storage.NewOSSStorageFromEnv()
+	if oss != nil {
+		store = oss
 	} else {
-		local := storage.NewLocalStorageFromEnv()
-		if local != nil {
-			store = local
+		s3 := storage.NewS3StorageFromEnv()
+		if s3 != nil {
+			store = s3
+		} else {
+			local := storage.NewLocalStorageFromEnv()
+			if local != nil {
+				store = local
+			}
 		}
 	}
 
@@ -108,6 +114,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		UseDailyRollupForRuntimeUsage: os.Getenv("USAGE_DAILY_ROLLUP_ENABLED") == "true",
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	h.InvitationNotifier = opts.InvitationNotifier
 	if opts.DaemonWakeup != nil {
 		h.TaskService.Wakeup = opts.DaemonWakeup
 	}
@@ -208,6 +215,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Post("/auth/send-code", h.SendCode)
 	r.Post("/auth/verify-code", h.VerifyCode)
 	r.Post("/auth/google", h.GoogleLogin)
+	r.Post("/auth/lark", h.LarkLogin)
 	r.Post("/auth/logout", h.Logout)
 
 	// Public API

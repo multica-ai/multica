@@ -98,6 +98,48 @@ func TestFindReleaseAsset(t *testing.T) {
 	})
 }
 
+func TestNormalizeReleaseRepository(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "accepts owner repo slug",
+			raw:  "example/private-multica",
+			want: "example/private-multica",
+		},
+		{
+			name: "accepts github url",
+			raw:  "https://github.com/example/private-multica",
+			want: "example/private-multica",
+		},
+		{
+			name: "accepts clone url suffix",
+			raw:  "https://github.com/example/private-multica.git",
+			want: "example/private-multica",
+		},
+		{
+			name: "falls back for invalid value",
+			raw:  "not a repo",
+			want: defaultReleaseRepository,
+		},
+		{
+			name: "falls back for empty value",
+			raw:  "",
+			want: defaultReleaseRepository,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeReleaseRepository(tt.raw); got != tt.want {
+				t.Fatalf("repository = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestUpdateDownloadTimeoutOrDefault(t *testing.T) {
 	tests := []struct {
 		name    string

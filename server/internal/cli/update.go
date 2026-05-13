@@ -18,6 +18,7 @@ import (
 )
 
 const DefaultUpdateDownloadTimeout = 120 * time.Second
+const defaultReleaseRepository = "kanfashidoufu/multica"
 
 // GitHubRelease is the subset of the GitHub releases API response we need.
 type GitHubRelease struct {
@@ -58,6 +59,43 @@ func releaseAssetCandidates(targetVersion, goos, goarch string) []string {
 	}
 }
 
+func normalizeReleaseRepository(raw string) string {
+	repository := strings.TrimSpace(raw)
+	repository = strings.TrimPrefix(repository, "https://github.com/")
+	repository = strings.TrimSuffix(repository, ".git")
+	parts := strings.Split(repository, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return defaultReleaseRepository
+	}
+	for _, part := range parts {
+		for _, r := range part {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '.' || r == '-' {
+				continue
+			}
+			return defaultReleaseRepository
+		}
+	}
+	return repository
+}
+
+func releaseRepository() string {
+	if value := os.Getenv("MULTICA_RELEASE_REPOSITORY"); value != "" {
+		return normalizeReleaseRepository(value)
+	}
+	if value := os.Getenv("GITHUB_REPOSITORY"); value != "" {
+		return normalizeReleaseRepository(value)
+	}
+	return defaultReleaseRepository
+}
+
+func releaseAPIURL(path string) string {
+	return "https://api.github.com/repos/" + releaseRepository() + "/releases/" + path
+}
+
+func LatestReleasePageURL() string {
+	return "https://github.com/" + releaseRepository() + "/releases/latest"
+}
+
 func findReleaseAsset(assets []GitHubReleaseAsset, targetVersion, goos, goarch string) (*GitHubReleaseAsset, error) {
 	for _, candidate := range releaseAssetCandidates(targetVersion, goos, goarch) {
 		for i := range assets {
@@ -73,7 +111,7 @@ func findReleaseAsset(assets []GitHubReleaseAsset, targetVersion, goos, goarch s
 
 func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/tags/"+tag, nil)
+	req, err := http.NewRequest(http.MethodGet, releaseAPIURL("tags/"+tag), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -96,10 +134,10 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	return &release, nil
 }
 
-// FetchLatestRelease fetches the latest release tag from the multica GitHub repo.
+// FetchLatestRelease fetches the latest release tag from the configured Multica GitHub repo.
 func FetchLatestRelease() (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/latest", nil)
+	req, err := http.NewRequest(http.MethodGet, releaseAPIURL("latest"), nil)
 	if err != nil {
 		return nil, err
 	}

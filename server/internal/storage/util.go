@@ -28,3 +28,10 @@ func isInlineContentType(ct string) bool {
 		strings.HasPrefix(ct, "audio/") ||
 		ct == "application/pdf"
 }
+
+func fallbackKeyFromURL(rawURL string) string {
+	if i := strings.LastIndex(rawURL, "/"); i >= 0 {
+		return rawURL[i+1:]
+	}
+	return rawURL
+}

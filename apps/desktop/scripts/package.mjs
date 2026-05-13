@@ -120,6 +120,17 @@ function uniqueOrdered(values) {
   return [...new Set(values)];
 }
 
+export function resolveReleaseRepository(env = process.env) {
+  const raw =
+    env.MULTICA_RELEASE_REPOSITORY ||
+    env.GITHUB_REPOSITORY ||
+    "kanfashidoufu/multica";
+  const normalized = String(raw).trim().replace(/^https:\/\/github\.com\//, "");
+  const match = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(normalized);
+  if (!match) return null;
+  return { owner: match[1], repo: match[2] };
+}
+
 export function envWithLocalBins(env = process.env, root = desktopRoot) {
   const pathKey =
     Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
@@ -272,11 +283,16 @@ export function builderArgsForTarget(
   {
     disableMacNotarize = false,
     hostPlatform = process.platform,
+    releaseRepository = resolveReleaseRepository(),
     useScopedOutputDir = false,
   } = {},
 ) {
   const builderArgs = [];
   if (version) builderArgs.push(`-c.extraMetadata.version=${version}`);
+  if (releaseRepository) {
+    builderArgs.push(`-c.publish.owner=${releaseRepository.owner}`);
+    builderArgs.push(`-c.publish.repo=${releaseRepository.repo}`);
+  }
   if (disableMacNotarize) builderArgs.push("-c.mac.notarize=false");
   builderArgs.push(PLATFORM_CONFIG[target.platform].builderFlag);
   const requestedTargets = parsed.platformTargets[target.platform];

@@ -31,7 +31,7 @@ func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
 	// Gemini CLI has no `models list` subcommand, so we expose the
 	// CLI's own aliases (auto / pro / flash / flash-lite) plus
 	// explicit version pins including Gemini 3. Regression guard
-	// for multica-ai/multica#1503 — Gemini 3 must be selectable.
+	// for kanfashidoufu/multica#1503 — Gemini 3 must be selectable.
 	models := geminiStaticModels()
 	ids := map[string]Model{}
 	for _, m := range models {
@@ -60,7 +60,7 @@ func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
 
 func TestCodexStaticModelsExposesGPT55(t *testing.T) {
 	// Codex CLI has no `models list` subcommand so the catalog is
-	// hand-maintained. Regression guard for multica-ai/multica#2009 —
+	// hand-maintained. Regression guard for kanfashidoufu/multica#2009 —
 	// GPT-5.5 must be selectable, and the badge default must point at
 	// the latest release rather than lagging a version behind.
 	models := codexStaticModels()

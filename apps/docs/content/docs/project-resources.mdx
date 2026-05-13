@@ -45,7 +45,7 @@ From the **CLI**:
 # operation, so you never end up with a project that has half its resources.
 multica project create \
   --title "Agent UX 2026" \
-  --repo https://github.com/multica-ai/multica
+  --repo https://github.com/kanfashidoufu/multica
 
 # Manage resources later
 multica project resource list <project-id>
@@ -78,7 +78,7 @@ A structured pass-through of the API response, written into the agent's working 
       "id": "…",
       "resource_type": "github_repo",
       "resource_ref": {
-        "url": "https://github.com/multica-ai/multica",
+        "url": "https://github.com/kanfashidoufu/multica",
         "default_branch_hint": "main"
       }
     }
@@ -99,7 +99,7 @@ This issue belongs to **Agent UX 2026**.
 
 Project resources (also written to `.multica/project/resources.json`):
 
-- **GitHub repo**: https://github.com/multica-ai/multica (default branch: `main`)
+- **GitHub repo**: https://github.com/kanfashidoufu/multica (default branch: `main`)
 
 Resources are pointers — open them only when relevant to the task. For
 `github_repo` resources, use `multica repo checkout <url>` to fetch the code.

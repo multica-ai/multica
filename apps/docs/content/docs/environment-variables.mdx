@@ -60,7 +60,24 @@ Full setup (including Google Cloud Console steps) is in [Sign-in and signup conf
 
 ## File storage configuration
 
-Multica stores user-uploaded attachments (images and files in comments). **S3 is preferred**; if S3 is not configured, it falls back to local disk.
+Multica stores user-uploaded attachments (images and files in comments). **Alibaba Cloud OSS is used when configured**, then S3, then local disk.
+
+### Alibaba Cloud OSS
+
+| Variable | Default | Description |
+|---|---|---|
+| `OSS_BUCKET` | empty | Bucket name. Setting this enables OSS storage and takes precedence over S3 |
+| `OSS_REGION` | `cn-hangzhou` | OSS region, for example `cn-hangzhou` |
+| `OSS_ENDPOINT` | empty | Optional OSS endpoint override, for example `https://oss-cn-hangzhou.aliyuncs.com` |
+| `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` | empty | Static OSS credentials |
+| `OSS_SECURITY_TOKEN` | empty | Optional STS security token |
+| `OSS_PUBLIC_BASE_URL` | empty | CDN or custom domain used in attachment URLs. Leave empty to return `https://<bucket>.oss-<region>.aliyuncs.com/<key>` |
+
+### Release publishing
+
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_RELEASE_REPOSITORY` | current CI repository | Repository slug (`owner/repo`) used by the web download page and Desktop packaging for release assets |
 
 ### S3 / S3-compatible storage
 
@@ -71,7 +88,7 @@ Multica stores user-uploaded attachments (images and files in comments). **S3 is
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | empty | Static credentials. When both are unset, the AWS SDK default credential chain is used (IAM role / environment credentials) |
 | `AWS_ENDPOINT_URL` | empty | Custom S3-compatible endpoint (for example [MinIO](https://min.io/)). Setting this switches to path-style URLs |
 
-**When `S3_BUCKET` is unset**: the server logs `"S3_BUCKET not set, cloud upload disabled"` at startup, and all uploads fall back to local disk.
+**When both `OSS_BUCKET` and `S3_BUCKET` are unset**: all uploads fall back to local disk.
 
 **Public URLs** are constructed in this order of priority:
 

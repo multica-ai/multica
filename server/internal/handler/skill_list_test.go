@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// TestListSkills_OmitsContent guards the fix for GH multica-ai/multica#2174:
+// TestListSkills_OmitsContent guards the fix for GH kanfashidoufu/multica#2174:
 // the workspace skill list endpoint must not ship the SKILL.md `content`
 // blob, which used to bloat the payload past CLI timeouts on workspaces with
 // many large skills. The detail endpoint still returns content (covered by

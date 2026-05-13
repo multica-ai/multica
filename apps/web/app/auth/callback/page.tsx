@@ -7,6 +7,7 @@ import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
+import { validateCliCallback } from "@multica/views/auth";
 import {
   Card,
   CardHeader,
@@ -17,11 +18,20 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { Loader2 } from "lucide-react";
 
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function CallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle);
+  const loginWithLark = useAuthStore((s) => s.loginWithLark);
   const [error, setError] = useState("");
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
 
@@ -40,18 +50,55 @@ function CallbackContent() {
 
     const state = searchParams.get("state") || "";
     const stateParts = state.split(",");
+    const provider = searchParams.get("provider") === "lark" ? "lark" : "google";
     const isDesktop = stateParts.includes("platform:desktop");
     const nextPart = stateParts.find((p) => p.startsWith("next:"));
+    const cliPart = stateParts.find((p) => p.startsWith("cli:"));
+    const cliStatePart = stateParts.find((p) => p.startsWith("cli_state:"));
     // Strip "next:" prefix, then drop anything that isn't a safe relative path
     // so an attacker-controlled `state=next:https://evil` cannot redirect here.
-    const nextUrl = sanitizeNextUrl(nextPart ? nextPart.slice(5) : null);
+    const nextUrl = sanitizeNextUrl(
+      nextPart ? safeDecodeURIComponent(nextPart.slice(5)) : null,
+    );
+    const cliCallbackUrl = cliPart
+      ? safeDecodeURIComponent(cliPart.slice(4))
+      : "";
+    const cliState = cliStatePart
+      ? safeDecodeURIComponent(cliStatePart.slice(10))
+      : "";
 
-    const redirectUri = `${window.location.origin}/auth/callback`;
+    const redirectUri =
+      provider === "lark"
+        ? `${window.location.origin}/auth/callback?provider=lark`
+        : `${window.location.origin}/auth/callback`;
+    const oauthLogin =
+      provider === "lark"
+        ? (authCode: string, uri: string) => api.larkLogin(authCode, uri)
+        : (authCode: string, uri: string) => api.googleLogin(authCode, uri);
+    const storeLogin = provider === "lark" ? loginWithLark : loginWithGoogle;
+
+    if (cliCallbackUrl && !validateCliCallback(cliCallbackUrl)) {
+      setError("Invalid CLI callback URL");
+      return;
+    }
+
+    if (cliCallbackUrl) {
+      oauthLogin(code, redirectUri)
+        .then(({ token }) => {
+          localStorage.setItem("multica_token", token);
+          api.setToken(token);
+          const separator = cliCallbackUrl.includes("?") ? "&" : "?";
+          window.location.href = `${cliCallbackUrl}${separator}token=${encodeURIComponent(token)}&state=${encodeURIComponent(cliState)}`;
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : "Login failed");
+        });
+      return;
+    }
 
     if (isDesktop) {
       // Desktop flow: exchange code for token, then redirect via deep link
-      api
-        .googleLogin(code, redirectUri)
+      oauthLogin(code, redirectUri)
         .then(({ token }) => {
           setDesktopToken(token);
           window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
@@ -61,7 +108,7 @@ function CallbackContent() {
         });
     } else {
       // Normal web flow
-      loginWithGoogle(code, redirectUri)
+      storeLogin(code, redirectUri)
         .then(async (loggedInUser) => {
           const wsList = await api.listWorkspaces();
           qc.setQueryData(workspaceKeys.list(), wsList);
@@ -94,11 +141,11 @@ function CallbackContent() {
               // Network blip on the invite lookup is non-fatal — fall through
               // to the normal post-auth destination so the user isn't stuck
               // on a blank callback screen. Worst case they land on
-              // /onboarding and the sidebar will surface invites later.
+              // /workspaces/new and the sidebar will surface invites later.
             }
           }
 
-          // 3. Default: hand off to the resolver (onboarding for first-timers,
+          // 3. Default: hand off to the resolver (workspace creation for first-timers,
           //    first workspace for returning users, /workspaces/new for
           //    onboarded users with zero workspaces).
           router.push(resolvePostAuthDestination(wsList, onboarded));
@@ -107,7 +154,7 @@ function CallbackContent() {
           setError(err instanceof Error ? err.message : "Login failed");
         });
     }
-  }, [searchParams, loginWithGoogle, router, qc]);
+  }, [searchParams, loginWithGoogle, loginWithLark, router, qc]);
 
   if (desktopToken) {
     return (

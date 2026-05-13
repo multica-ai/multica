@@ -31,7 +31,7 @@ func TestProjectResourceLifecycle(t *testing.T) {
 	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/projects/"+project.ID+"/resources", map[string]any{
 		"resource_type": "github_repo",
-		"resource_ref":  map[string]any{"url": "https://github.com/multica-ai/multica"},
+		"resource_ref":  map[string]any{"url": "https://github.com/kanfashidoufu/multica"},
 	})
 	req = withURLParam(req, "id", project.ID)
 	testHandler.CreateProjectResource(w, req)
@@ -51,7 +51,7 @@ func TestProjectResourceLifecycle(t *testing.T) {
 	if err := json.Unmarshal(created.ResourceRef, &ref); err != nil {
 		t.Fatalf("decode resource_ref: %v", err)
 	}
-	if ref.URL != "https://github.com/multica-ai/multica" {
+	if ref.URL != "https://github.com/kanfashidoufu/multica" {
 		t.Errorf("created.ResourceRef.url = %q", ref.URL)
 	}
 
@@ -81,7 +81,7 @@ func TestProjectResourceLifecycle(t *testing.T) {
 	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/projects/"+project.ID+"/resources", map[string]any{
 		"resource_type": "github_repo",
-		"resource_ref":  map[string]any{"url": "https://github.com/multica-ai/multica"},
+		"resource_ref":  map[string]any{"url": "https://github.com/kanfashidoufu/multica"},
 	})
 	req = withURLParam(req, "id", project.ID)
 	testHandler.CreateProjectResource(w, req)
@@ -142,7 +142,7 @@ func TestCreateProjectAttachesResources(t *testing.T) {
 		"resources": []map[string]any{
 			{
 				"resource_type": "github_repo",
-				"resource_ref":  map[string]any{"url": "https://github.com/multica-ai/multica"},
+				"resource_ref":  map[string]any{"url": "https://github.com/kanfashidoufu/multica"},
 			},
 		},
 	})
@@ -341,4 +341,3 @@ func TestCreateProjectRollsBackOnInvalidResource(t *testing.T) {
 		}
 	}
 }
-

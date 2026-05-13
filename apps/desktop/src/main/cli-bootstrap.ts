@@ -14,8 +14,26 @@ import { selectPlatformReleaseAssetName } from "./cli-release-asset";
 // same-repo builds, but it can also repair or bootstrap a managed copy in
 // userData on first launch when the bundled binary is missing or unusable.
 
-const GITHUB_LATEST_BASE =
-  "https://github.com/multica-ai/multica/releases/latest/download";
+const DEFAULT_RELEASE_REPOSITORY = "kanfashidoufu/multica";
+
+function releaseRepository(): string {
+  const viteEnv = import.meta.env as ImportMetaEnv & {
+    readonly VITE_RELEASE_REPOSITORY?: string;
+  };
+  const raw =
+    viteEnv.VITE_RELEASE_REPOSITORY ||
+    process.env.MULTICA_RELEASE_REPOSITORY ||
+    process.env.GITHUB_REPOSITORY ||
+    DEFAULT_RELEASE_REPOSITORY;
+  const normalized = raw.trim().replace(/^https:\/\/github\.com\//, "");
+  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(normalized)
+    ? normalized
+    : DEFAULT_RELEASE_REPOSITORY;
+}
+
+function githubLatestBase(): string {
+  return `https://github.com/${releaseRepository()}/releases/latest/download`;
+}
 
 function binaryName(): string {
   return process.platform === "win32" ? "multica.exe" : "multica";
@@ -45,7 +63,7 @@ async function downloadToFile(url: string, dest: string): Promise<void> {
 // Fetch goreleaser's published checksums.txt and parse it into a
 // filename → sha256 lookup. Format is `<hex>  <filename>` per line.
 async function fetchChecksums(): Promise<Map<string, string>> {
-  const url = `${GITHUB_LATEST_BASE}/checksums.txt`;
+  const url = `${githubLatestBase()}/checksums.txt`;
   const res = await fetch(url, { redirect: "follow" });
   if (!res.ok) {
     throw new Error(
@@ -100,7 +118,7 @@ async function installFresh(): Promise<string> {
       `no checksum for ${assetName} in checksums.txt — refusing to install unverified binary`,
     );
   }
-  const url = `${GITHUB_LATEST_BASE}/${assetName}`;
+  const url = `${githubLatestBase()}/${assetName}`;
 
   const workDir = join(tmpdir(), `multica-cli-${Date.now()}`);
   await mkdir(workDir, { recursive: true });

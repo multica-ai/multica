@@ -1,16 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchLatestRelease } from "./github-release";
+import { fetchLatestRelease, resolveReleaseRepository } from "./github-release";
 
 const SAMPLE_LATEST_ASSET = {
   name: "multica-desktop-0.2.14-mac-arm64.dmg",
   browser_download_url:
-    "https://github.com/multica-ai/multica/releases/download/v0.2.14/multica-desktop-0.2.14-mac-arm64.dmg",
+    "https://github.com/kanfashidoufu/multica/releases/download/v0.2.14/multica-desktop-0.2.14-mac-arm64.dmg",
 };
 
 const SAMPLE_PREV_ASSET = {
   name: "multica-desktop-0.2.13-mac-arm64.dmg",
   browser_download_url:
-    "https://github.com/multica-ai/multica/releases/download/v0.2.13/multica-desktop-0.2.13-mac-arm64.dmg",
+    "https://github.com/kanfashidoufu/multica/releases/download/v0.2.13/multica-desktop-0.2.13-mac-arm64.dmg",
 };
 
 function releasePayload(overrides: {
@@ -26,7 +26,7 @@ function releasePayload(overrides: {
   return {
     tag_name: overrides.tag,
     published_at: published,
-    html_url: `https://github.com/multica-ai/multica/releases/tag/${overrides.tag}`,
+    html_url: `https://github.com/kanfashidoufu/multica/releases/tag/${overrides.tag}`,
     prerelease: overrides.prerelease ?? false,
     draft: overrides.draft ?? false,
     assets: overrides.asset ? [overrides.asset] : [],
@@ -130,6 +130,7 @@ describe("fetchLatestRelease", () => {
       version: null,
       publishedAt: null,
       htmlUrl: null,
+      allReleasesUrl: "https://github.com/kanfashidoufu/multica/releases",
       assets: {},
     });
     expect(warnSpy).toHaveBeenCalled();
@@ -145,5 +146,33 @@ describe("fetchLatestRelease", () => {
     const result = await fetchLatestRelease();
     expect(result.version).toBeNull();
     expect(result.assets).toEqual({});
+  });
+});
+
+describe("resolveReleaseRepository", () => {
+  const originalEnv = process.env;
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it("prefers the explicit release repository env", () => {
+    process.env = {
+      ...originalEnv,
+      MULTICA_RELEASE_REPOSITORY: "example/private-multica",
+      GITHUB_REPOSITORY: "ignored/repo",
+    };
+
+    expect(resolveReleaseRepository()).toBe("example/private-multica");
+  });
+
+  it("falls back to GITHUB_REPOSITORY", () => {
+    process.env = {
+      ...originalEnv,
+      MULTICA_RELEASE_REPOSITORY: "",
+      GITHUB_REPOSITORY: "current/repo",
+    };
+
+    expect(resolveReleaseRepository()).toBe("current/repo");
   });
 });

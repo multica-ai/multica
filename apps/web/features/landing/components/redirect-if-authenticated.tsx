@@ -16,7 +16,7 @@ import { resolvePostAuthDestination, useHasOnboarded } from "@multica/core/paths
  * login* — before the user has ever visited a workspace — the cookie is
  * absent, so the proxy falls through to the landing page. This component
  * covers that gap: once auth is resolved and the workspace list has loaded,
- * push the user into their workspace (or /onboarding if they have none).
+ * push the user into their workspace (or workspace creation if they have none).
  *
  * Renders nothing. Uses `router.replace` so the landing page never enters
  * browser history for authenticated users.

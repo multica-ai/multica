@@ -59,6 +59,9 @@ function LoginPageContent() {
   const qc = useQueryClient();
   const { t } = useT("auth");
   const googleClientId = useConfigStore((state) => state.googleClientId);
+  const larkAuthEnabled = useConfigStore((state) => state.larkAuthEnabled);
+  const larkAppId = useConfigStore((state) => state.larkAppId);
+  const larkAuthorizeUrl = useConfigStore((state) => state.larkAuthorizeUrl);
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
@@ -79,7 +82,7 @@ function LoginPageContent() {
   const hasOnboarded = useHasOnboarded();
 
   // Already authenticated — honor ?next= or fall back to first workspace
-  // (or /onboarding if the user has none). Skip this entire path when
+  // (or /workspaces/new if the user has none). Skip this entire path when
   // the user arrived to authorize the CLI.
   useEffect(() => {
     if (isLoading || !user || cliCallbackRaw) return;
@@ -131,6 +134,16 @@ function LoginPageContent() {
   const googleState = [
     platform === "desktop" ? "platform:desktop" : "",
     nextUrl ? `next:${nextUrl}` : "",
+  ]
+    .filter(Boolean)
+    .join(",") || undefined;
+  const larkState = [
+    platform === "desktop" ? "platform:desktop" : "",
+    nextUrl ? `next:${encodeURIComponent(nextUrl)}` : "",
+    cliCallbackRaw && validateCliCallback(cliCallbackRaw)
+      ? `cli:${encodeURIComponent(cliCallbackRaw)}`
+      : "",
+    cliState ? `cli_state:${encodeURIComponent(cliState)}` : "",
   ]
     .filter(Boolean)
     .join(",") || undefined;
@@ -189,11 +202,21 @@ function LoginPageContent() {
     <LoginPage
       onSuccess={handleSuccess}
       google={
-        googleClientId
+        googleClientId && !larkAuthEnabled
           ? {
               clientId: googleClientId,
               redirectUri: `${window.location.origin}/auth/callback`,
               state: googleState,
+            }
+          : undefined
+      }
+      lark={
+        larkAuthEnabled && larkAppId && larkAuthorizeUrl
+          ? {
+              appId: larkAppId,
+              authorizeUrl: larkAuthorizeUrl,
+              redirectUri: `${window.location.origin}/auth/callback?provider=lark`,
+              state: larkState,
             }
           : undefined
       }
@@ -203,6 +226,7 @@ function LoginPageContent() {
           : undefined
       }
       onTokenObtained={setLoggedInCookie}
+      showEmailLogin={!larkAuthEnabled}
       extra={
         <span className="text-xs text-muted-foreground">
           {t(($) => $.web.prefer_desktop)}{" "}

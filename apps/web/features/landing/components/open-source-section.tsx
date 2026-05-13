@@ -11,7 +11,6 @@ export function OpenSourceSection() {
     <section id="open-source" className="bg-white text-[#0a0d12]">
       <div className="mx-auto max-w-[1320px] px-4 py-24 sm:px-6 sm:py-32 lg:px-8 lg:py-40">
         <div className="flex flex-col gap-16 lg:flex-row lg:items-start lg:gap-24">
-          {/* Left column — heading + CTA */}
           <div className="lg:w-[480px] lg:shrink-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0a0d12]/40">
               {t.openSource.label}
@@ -37,7 +36,6 @@ export function OpenSourceSection() {
             </div>
           </div>
 
-          {/* Right column — highlight grid */}
           <div className="flex-1">
             <div className="grid gap-px overflow-hidden rounded-2xl border border-[#0a0d12]/8 bg-[#0a0d12]/8 sm:grid-cols-2">
               {t.openSource.highlights.map((item) => (

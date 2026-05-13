@@ -118,19 +118,9 @@ function AppContent() {
     : undefined;
   useDaemonIPCBridge(activeWsId);
 
-  // Pre-workspace overlay routing for desktop. Mirrors the web entry-point
-  // judgment in callback / login:
-  //   un-onboarded:
-  //     pending invites on email → /invitations overlay
-  //     no invites               → /onboarding overlay
-  //   already onboarded:
-  //     zero workspaces          → /workspaces/new overlay
-  //     ≥1 workspaces            → no overlay, fall through to dashboard
-  //
-  // The "un-onboarded but in workspace" state is now physically impossible
-  // because backend transactions atomically set onboarded_at when a user
-  // joins the `member` table. Anyone with workspaces is by definition
-  // onboarded.
+  // Pre-workspace overlay routing for desktop. First-run onboarding is
+  // bypassed: users with pending invites still see the invitation picker;
+  // everyone else with zero workspaces goes straight to workspace creation.
   useEffect(() => {
     if (!user || !workspaceListFetched) return undefined;
     const { overlay, open } = useWindowOverlayStore.getState();
@@ -138,9 +128,9 @@ function AppContent() {
     if (wsCount > 0) return undefined;
     if (!hasOnboarded) {
       // Look up pending invitations by email. Network blip is non-fatal —
-      // fall through to onboarding so the user isn't stuck on a blank
+      // fall through to workspace creation so the user isn't stuck on a blank
       // window. The sidebar's pending-invitations dropdown will surface
-      // missed invites later once they're onboarded.
+      // missed invites later once they're in the app.
       let cancelled = false;
       void api
         .listMyInvitations()
@@ -153,7 +143,7 @@ function AppContent() {
             qc.setQueryData(workspaceKeys.myInvitations(), invites);
             latestOpen({ type: "invitations" });
           } else {
-            latestOpen({ type: "onboarding" });
+            latestOpen({ type: "new-workspace" });
           }
         })
         .catch(() => {
@@ -161,7 +151,7 @@ function AppContent() {
           const { overlay: latestOverlay, open: latestOpen } =
             useWindowOverlayStore.getState();
           if (latestOverlay) return;
-          latestOpen({ type: "onboarding" });
+          latestOpen({ type: "new-workspace" });
         });
       return () => {
         cancelled = true;

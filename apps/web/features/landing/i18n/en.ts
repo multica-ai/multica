@@ -13,7 +13,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     headlineLine1: "Your next 10 hires",
     headlineLine2: "won\u2019t be human.",
     subheading:
-      "Multica is an open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills \u2014 manage your human + agent workforce in one place.",
+      "Multica turns coding agents into real teammates. Assign tasks, track progress, compound skills \u2014 manage your human + agent workforce in one place.",
     cta: "Start free trial",
     downloadDesktop: "Download Desktop",
     worksWith: "Works with",
@@ -153,7 +153,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     headlineLine2: "for all.",
     description:
       "Multica is fully open source. Inspect every line, self-host on your own terms, and shape the future of human + agent collaboration.",
-    cta: "Star on GitHub",
+    cta: "View on GitHub",
     highlights: [
       {
         title: "Self-host anywhere",
@@ -185,7 +185,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 11 coding tools out of the box: Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
+          "Multica supports 11 coding tools out of the box: Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -211,7 +211,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         question: "How many agents can I run?",
         answer:
-          "As many as your hardware supports. Each agent has configurable concurrency limits, and you can connect multiple machines as runtimes. There are no artificial caps in the open source version.",
+          "As many as your hardware supports. Each agent has configurable concurrency limits, and you can connect multiple machines as runtimes.",
       },
     ],
   },
@@ -1081,7 +1081,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       releaseNotes: "What’s new in {version}",
       allReleases: "View all releases",
       currentVersion: "Current version: {version}",
-      versionUnavailable: "Version unavailable — check GitHub",
+      versionUnavailable: "Version unavailable",
     },
   },
   };

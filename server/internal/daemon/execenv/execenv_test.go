@@ -156,7 +156,7 @@ func TestPrepareWithProjectResources(t *testing.T) {
 			{
 				ID:           "33333333-4444-5555-6666-777777777777",
 				ResourceType: "github_repo",
-				ResourceRef:  json.RawMessage(`{"url":"https://github.com/multica-ai/multica","default_branch_hint":"main"}`),
+				ResourceRef:  json.RawMessage(`{"url":"https://github.com/kanfashidoufu/multica","default_branch_hint":"main"}`),
 			},
 		},
 	}
@@ -214,7 +214,7 @@ func TestPrepareWithProjectResources(t *testing.T) {
 		"## Project Context",
 		"Agent UX 2026",
 		"GitHub repo",
-		"https://github.com/multica-ai/multica",
+		"https://github.com/kanfashidoufu/multica",
 		"default branch: `main`",
 		".multica/project/resources.json",
 	} {

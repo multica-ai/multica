@@ -43,7 +43,7 @@ type SkillResponse struct {
 // SkillSummaryResponse is the list-endpoint shape: everything SkillResponse
 // has except `content`. SKILL.md bodies routinely run 50–200KB and shipping
 // them in list payloads bloats responses past CLI timeouts on high-latency
-// links (GH multica-ai/multica#2174). Detail endpoints still return the full
+// links (GH kanfashidoufu/multica#2174). Detail endpoints still return the full
 // SkillResponse with content.
 type SkillSummaryResponse struct {
 	ID          string  `json:"id"`

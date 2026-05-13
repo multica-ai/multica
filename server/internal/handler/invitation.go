@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -160,6 +161,18 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		email,
 		"email",
 	))
+
+	if h.InvitationNotifier != nil {
+		invitationID := inv.ID
+		workspaceUUID := requester.WorkspaceID
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := h.InvitationNotifier.EnqueueInvitation(ctx, invitationID, workspaceUUID, email); err != nil {
+				slog.Warn("failed to enqueue invitation notification", "email", email, "error", err)
+			}
+		}()
+	}
 
 	// Send invitation email (fire-and-forget).
 	if h.EmailService != nil && workspaceName != "" {

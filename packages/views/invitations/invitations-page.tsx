@@ -31,7 +31,7 @@ import { LogOut, Mail, Users } from "lucide-react";
  *    into their workspace; new invites for those users surface in the
  *    sidebar's pending-invitations dropdown instead).
  *  - The user picks zero or more invitations to accept. "Submit" then:
- *      • zero selected → continue to /onboarding
+ *      • zero selected → continue to /workspaces/new
  *      • ≥1 selected → accept each, mark onboarding complete, navigate
  *        into the first accepted workspace.
  *  - Unselected invitations are intentionally left as `pending` in the DB.
@@ -66,10 +66,10 @@ export function InvitationsPage() {
   const handleSubmit = async () => {
     setError(null);
 
-    // Zero selected: hand off to onboarding. Pending invites stay pending and
-    // can be picked up later from the sidebar.
+    // Zero selected: hand off to workspace creation. Pending invites stay
+    // pending and can be picked up later from the sidebar.
     if (selected.size === 0) {
-      push(paths.onboarding());
+      push(paths.newWorkspace());
       return;
     }
 
@@ -152,7 +152,7 @@ export function InvitationsPage() {
     );
   }
 
-  // Empty / error: send the user on to onboarding so they're never stuck.
+  // Empty / error: send the user on to workspace creation so they're never stuck.
   // Genuine fetch failure is rare; treating it as "no invites" is safer than
   // trapping the user on an error screen they can't act on.
   if (fetchError || !invitations || invitations.length === 0) {
@@ -167,7 +167,7 @@ export function InvitationsPage() {
             <p className="text-sm text-muted-foreground text-center">
               {t(($) => $.batch.empty_hint)}
             </p>
-            <Button onClick={() => push(paths.onboarding())}>
+            <Button onClick={() => push(paths.newWorkspace())}>
               {t(($) => $.batch.empty_continue)}
             </Button>
           </CardContent>

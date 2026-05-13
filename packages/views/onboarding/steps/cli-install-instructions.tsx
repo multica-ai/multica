@@ -6,7 +6,7 @@ import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { useT } from "../../i18n";
 
 const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
+  "curl -fsSL https://raw.githubusercontent.com/kanfashidoufu/multica/main/scripts/install.sh | bash";
 const SETUP_CMD = "multica setup";
 
 function CopyButton({ text }: { text: string }) {

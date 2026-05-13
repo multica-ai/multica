@@ -13,10 +13,12 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	enterpriseLark "github.com/multica-ai/multica/server/internal/enterprise/lark"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/notifications"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -255,6 +257,13 @@ func main() {
 	registerSubscriberListeners(bus, queries)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+	notificationDispatcher := notifications.NewDispatcher(
+		queries,
+		notifications.ConfigFromEnv(),
+		enterpriseLark.NewNotificationChannelFromEnv(),
+	)
+	notificationDispatcher.RegisterInboxListener(bus)
+	invitationNotifier := enterpriseLark.NewInvitationNotifierFromEnv(queries)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
@@ -287,6 +296,7 @@ func main() {
 		HTTPMetrics:        httpMetrics,
 		DaemonHub:          daemonHub,
 		DaemonWakeup:       daemonWakeup,
+		InvitationNotifier: invitationNotifier,
 		HeartbeatScheduler: heartbeatScheduler,
 	})
 
@@ -317,6 +327,8 @@ func main() {
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
+	go notificationDispatcher.RunWorker(sweepCtx)
+	go invitationNotifier.RunWorker(sweepCtx)
 	go runDBStatsLogger(sweepCtx, pool)
 
 	if metricsServer != nil {

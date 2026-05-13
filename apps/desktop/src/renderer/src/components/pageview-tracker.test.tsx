@@ -208,10 +208,10 @@ describe("PageviewTracker", () => {
     const { rerender } = render(<PageviewTracker />);
     state.capturePageview.mockClear();
 
-    // Open onboarding overlay.
-    state.overlay = { type: "onboarding" };
+    // Open workspace-creation overlay.
+    state.overlay = { type: "new-workspace" };
     rerender(<PageviewTracker />);
-    expect(state.capturePageview).toHaveBeenLastCalledWith("/onboarding");
+    expect(state.capturePageview).toHaveBeenLastCalledWith("/workspaces/new");
 
     // Close overlay back to the tab — the tab is already observed on
     // /acme/issues so this is a re-activation, no pageview.
@@ -240,4 +240,3 @@ describe("PageviewTracker", () => {
     expect(state.capturePageview).not.toHaveBeenCalled();
   });
 });
-
