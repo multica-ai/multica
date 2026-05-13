@@ -8,6 +8,8 @@ export const autopilotKeys = {
     [...autopilotKeys.all(wsId), "detail", id] as const,
   runs: (wsId: string, id: string) =>
     [...autopilotKeys.all(wsId), "runs", id] as const,
+  run: (wsId: string, autopilotId: string, runId: string) =>
+    [...autopilotKeys.all(wsId), "runs", autopilotId, runId] as const,
 };
 
 export function autopilotListOptions(wsId: string) {
@@ -30,5 +32,22 @@ export function autopilotRunsOptions(wsId: string, id: string) {
     queryKey: autopilotKeys.runs(wsId, id),
     queryFn: () => api.listAutopilotRuns(id),
     select: (data) => data.runs,
+  });
+}
+
+// autopilotRunOptions fetches a single run with its full trigger_payload.
+// The list endpoint (autopilotRunsOptions) omits trigger_payload to keep
+// list responses small; callers (e.g. the run-detail dialog) use this
+// query on demand when the user opens a run.
+export function autopilotRunOptions(
+  wsId: string,
+  autopilotId: string,
+  runId: string,
+  options?: { enabled?: boolean },
+) {
+  return queryOptions({
+    queryKey: autopilotKeys.run(wsId, autopilotId, runId),
+    queryFn: () => api.getAutopilotRun(autopilotId, runId),
+    enabled: options?.enabled ?? true,
   });
 }

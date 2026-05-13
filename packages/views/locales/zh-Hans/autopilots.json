@@ -117,7 +117,8 @@
     "copy": "复制",
     "copied": "已复制 Webhook payload",
     "copied_short": "已复制",
-    "copy_failed": "复制失败"
+    "copy_failed": "复制失败",
+    "truncated_marker": "[已截断 — 点击「复制」获取完整 payload]"
   },
   "trigger_kind": {
     "schedule": "时间表",

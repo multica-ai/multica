@@ -30,7 +30,7 @@ export function WebhookPayloadPreview({
   const [open, setOpen] = useState(defaultOpen);
   const [copied, setCopied] = useState(false);
 
-  const { event, receivedAt, contentType, fullJSON } = useMemo(() => {
+  const { event, receivedAt, contentType, fullJSON, displayJSON, isTruncated } = useMemo(() => {
     let event: string | null = null;
     let eventPayload: unknown = null;
     let receivedAt: string | null = null;
@@ -53,7 +53,15 @@ export function WebhookPayloadPreview({
       eventPayload = payload;
     }
     const fullJSON = JSON.stringify(eventPayload, null, 2);
-    return { event, receivedAt, contentType, fullJSON };
+    // Truncate the in-DOM string so the dialog stays responsive even when a
+    // provider sent a 256 KiB envelope. The Copy button still yields the
+    // full string, so the user never loses the data. 4 KiB is large enough
+    // to show the envelope header + first object-level fields of a typical
+    // webhook payload.
+    const TRUNCATE_AT = 4096;
+    const isTruncated = fullJSON.length > TRUNCATE_AT;
+    const displayJSON = isTruncated ? fullJSON.slice(0, TRUNCATE_AT) : fullJSON;
+    return { event, receivedAt, contentType, fullJSON, displayJSON, isTruncated };
   }, [payload]);
 
   const handleCopy = async (e: React.MouseEvent) => {
@@ -119,7 +127,12 @@ export function WebhookPayloadPreview({
             </button>
           </div>
           <pre className="max-h-64 overflow-auto bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed">
-            {fullJSON}
+            {displayJSON}
+            {isTruncated && (
+              <span className="block pt-2 text-muted-foreground/70">
+                {t(($) => $.webhook_payload.truncated_marker)}
+              </span>
+            )}
           </pre>
         </div>
       )}

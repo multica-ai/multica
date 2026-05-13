@@ -7,7 +7,7 @@ import {
   Webhook, Copy, Check, RotateCw,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { autopilotDetailOptions, autopilotRunsOptions } from "@multica/core/autopilots/queries";
+import { autopilotDetailOptions, autopilotRunsOptions, autopilotRunOptions } from "@multica/core/autopilots/queries";
 import {
   useUpdateAutopilot,
   useDeleteAutopilot,
@@ -81,6 +81,24 @@ const RUN_VISUAL: Record<RunStatus, { color: string; icon: typeof CheckCircle2; 
   skipped: { color: "text-muted-foreground", icon: MinusCircle },
 };
 
+// WebhookPayloadSlot lazy-fetches the full run (incl. trigger_payload) once
+// the parent dialog actually mounts this slot. The list endpoint omits
+// trigger_payload to keep responses small (worst case 256 KiB × N runs),
+// so the detail-on-demand fetch lives here.
+function WebhookPayloadSlot({ autopilotId, runId }: { autopilotId: string; runId: string }) {
+  const wsId = useWorkspaceId();
+  const { data, isLoading } = useQuery(
+    autopilotRunOptions(wsId, autopilotId, runId),
+  );
+  if (isLoading) {
+    return <Skeleton className="h-9 w-full" />;
+  }
+  if (!data || data.trigger_payload == null) {
+    return null;
+  }
+  return <WebhookPayloadPreview payload={data.trigger_payload} />;
+}
+
 function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: string; agentName: string }) {
   const { t } = useT("autopilots");
   const wsPaths = useWorkspacePaths();
@@ -137,8 +155,8 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
           isLive={run.status === "running"}
           title={t(($) => $.run.view_log)}
           headerSlot={
-            run.source === "webhook" && run.trigger_payload != null ? (
-              <WebhookPayloadPreview payload={run.trigger_payload} />
+            run.source === "webhook" ? (
+              <WebhookPayloadSlot autopilotId={run.autopilot_id} runId={run.id} />
             ) : undefined
           }
         />

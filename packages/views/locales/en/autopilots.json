@@ -117,7 +117,8 @@
     "copy": "Copy",
     "copied": "Webhook payload copied",
     "copied_short": "Copied",
-    "copy_failed": "Failed to copy"
+    "copy_failed": "Failed to copy",
+    "truncated_marker": "[truncated — click Copy to get the full payload]"
   },
   "trigger_kind": {
     "schedule": "Schedule",
