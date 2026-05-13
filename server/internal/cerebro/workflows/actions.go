@@ -28,6 +28,8 @@ import (
 //                   extended create_sub_issue),
 //                 + ListSkillSummariesByWorkspace, ListAgentSkills, GetAgent,
 //                   CreateQuickCreateTask (run_skill resolution + enqueue).
+// PR 1 (phase-2 ext, JEH-1114): + ListLabels (route_by_domain resolves the
+//                   `<prefix><domain>` label by name within the workspace).
 type IssueActions interface {
 	UpdateIssueStatus(ctx context.Context, arg db.UpdateIssueStatusParams) (db.Issue, error)
 	CreateIssue(ctx context.Context, arg db.CreateIssueParams) (db.Issue, error)
@@ -40,6 +42,7 @@ type IssueActions interface {
 	ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]db.Skill, error)
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	CreateQuickCreateTask(ctx context.Context, arg db.CreateQuickCreateTaskParams) (db.AgentTaskQueue, error)
+	ListLabels(ctx context.Context, workspaceID pgtype.UUID) ([]db.IssueLabel, error)
 }
 
 // runAction dispatches on the workflow's action_type. Any non-nil error
@@ -57,6 +60,8 @@ func (s *Service) runAction(ctx context.Context, wf workflow, te TriggerEvent) e
 		return s.actionRunSkill(ctx, wf, te)
 	case ActionCommentOnIssue:
 		return s.actionCommentOnIssue(ctx, wf, te)
+	case ActionRouteByDomain:
+		return s.actionRouteByDomain(ctx, wf, te)
 	default:
 		return fmt.Errorf("unknown action_type %q", wf.actionType)
 	}
@@ -463,3 +468,214 @@ func renderTemplate(tpl string, raw map[string]any) string {
 func renderTitle(tpl string, raw map[string]any) string {
 	return renderTemplate(tpl, raw)
 }
+
+// actionRouteByDomain (JEH-1114, phase-2 ext) classifies the triggered issue
+// into one of four domains and attaches `<LabelPrefix><domain>`. Composes
+// with phase-1 conditions: a downstream workflow can filter on the resulting
+// label to invoke skills, escalate, or comment.
+//
+// The classifier is a deterministic keyword + extension heuristic. It never
+// calls an LLM in PR 1 — the JEH-1114 RFC commits to "fast and cheap default,
+// LLM fallback opt-in later". Wrong-classification is a recoverable mistake
+// (the next event re-classifies; user can override the label by hand) so
+// false positives are preferred over a missed action.
+//
+// Failure modes:
+//
+//   - Issue lookup fails              → action error (retried).
+//   - Workspace label catalog fails   → action error (retried).
+//   - Resolved label name not found   → action error (terminal-shaped, but
+//                                       still retried by the engine — operators
+//                                       fix the catalog and the next retry
+//                                       picks up). Message includes which
+//                                       label name we looked for so the fix
+//                                       is obvious.
+func (s *Service) actionRouteByDomain(ctx context.Context, wf workflow, te TriggerEvent) error {
+	if te.IssueID == "" {
+		return errors.New("route_by_domain: trigger event has no issue_id")
+	}
+	var cfg ActionConfigRouteByDomain
+	if len(wf.actionConfig) > 0 {
+		if err := json.Unmarshal(wf.actionConfig, &cfg); err != nil {
+			return fmt.Errorf("route_by_domain: parse config: %w", err)
+		}
+	}
+	prefix := cfg.LabelPrefix
+	if prefix == "" {
+		prefix = "domain:"
+	}
+	defaultDomain := cfg.DefaultDomain
+	if defaultDomain == "" {
+		defaultDomain = DomainBusiness
+	}
+	if !isKnownDomain(defaultDomain) {
+		return fmt.Errorf("route_by_domain: default_domain %q is not one of code/business/design/content", defaultDomain)
+	}
+
+	issueID, err := parseUUID(te.IssueID)
+	if err != nil {
+		return fmt.Errorf("route_by_domain: %w", err)
+	}
+	wsID, err := parseUUID(te.WorkspaceID)
+	if err != nil {
+		return fmt.Errorf("route_by_domain: %w", err)
+	}
+
+	issue, err := s.issues.GetIssue(ctx, issueID)
+	if err != nil {
+		return fmt.Errorf("route_by_domain: load issue: %w", err)
+	}
+
+	domain := classifyDomain(issue.Title, issue.Description.String, defaultDomain)
+	wantLabelName := prefix + domain
+
+	labels, err := s.issues.ListLabels(ctx, wsID)
+	if err != nil {
+		return fmt.Errorf("route_by_domain: list labels: %w", err)
+	}
+	var labelID pgtype.UUID
+	for _, l := range labels {
+		if strings.EqualFold(l.Name, wantLabelName) {
+			labelID = l.ID
+			break
+		}
+	}
+	if !labelID.Valid {
+		return fmt.Errorf("route_by_domain: workspace has no label %q (create it under Settings → Labels)", wantLabelName)
+	}
+
+	if err := s.issues.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+		IssueID:     issueID,
+		LabelID:     labelID,
+		WorkspaceID: wsID,
+	}); err != nil {
+		return fmt.Errorf("route_by_domain: attach %q: %w", wantLabelName, err)
+	}
+	slog.Debug("route_by_domain attached",
+		"workflow_id", uuidString(wf.id),
+		"issue_id", te.IssueID,
+		"label", wantLabelName,
+	)
+	return nil
+}
+
+// classifyDomain picks one of code/business/design/content based on simple
+// keyword + file-extension heuristics over title + description. The intent is
+// "right most of the time, fast every time" — wrong picks are corrected by
+// the next event or a manual label edit.
+//
+// Order matters: code patterns are checked first because file paths /
+// repo URLs are the strongest deterministic signal we have. Design and
+// content checks come next, with `defaultDomain` as the catch-all. The
+// rules favour precision over recall — if nothing matches confidently, we
+// fall back to the configured default rather than guessing wildly.
+func classifyDomain(title, description, defaultDomain string) string {
+	hay := strings.ToLower(title + "\n" + description)
+
+	if matchesAny(hay, codeFileExtensions) {
+		return DomainCode
+	}
+	if containsAnyWord(hay, codeKeywords) || strings.Contains(hay, "github.com/") {
+		return DomainCode
+	}
+	if containsAnyWord(hay, designKeywords) || strings.Contains(hay, "figma.com/") {
+		return DomainDesign
+	}
+	if containsAnyWord(hay, contentKeywords) {
+		return DomainContent
+	}
+	return defaultDomain
+}
+
+// containsAnyWord checks whether `hay` (already lower-cased) contains any of
+// the words as a whole-word match so "test" doesn't match "latest". The
+// boundary is non-letter-non-digit on both sides, including string edges.
+func containsAnyWord(hay string, words []string) bool {
+	for _, w := range words {
+		if w == "" {
+			continue
+		}
+		idx := 0
+		for {
+			pos := strings.Index(hay[idx:], w)
+			if pos < 0 {
+				break
+			}
+			absolute := idx + pos
+			before := byte(0)
+			if absolute > 0 {
+				before = hay[absolute-1]
+			}
+			after := byte(0)
+			if absolute+len(w) < len(hay) {
+				after = hay[absolute+len(w)]
+			}
+			if !isWordByte(before) && !isWordByte(after) {
+				return true
+			}
+			idx = absolute + 1
+			if idx >= len(hay) {
+				break
+			}
+		}
+	}
+	return false
+}
+
+// matchesAny is the substring variant — used for file extensions where word
+// boundaries don't help (".go" can legitimately appear inside paths).
+func matchesAny(hay string, needles []string) bool {
+	for _, n := range needles {
+		if n != "" && strings.Contains(hay, n) {
+			return true
+		}
+	}
+	return false
+}
+
+func isWordByte(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z':
+		return true
+	case b >= '0' && b <= '9':
+		return true
+	case b == '_':
+		return true
+	}
+	return false
+}
+
+func isKnownDomain(d string) bool {
+	switch d {
+	case DomainCode, DomainBusiness, DomainDesign, DomainContent:
+		return true
+	}
+	return false
+}
+
+// Heuristic vocabularies. Tuned for the firtal stack — file extensions
+// reflect real repos (Go backend, TS frontend, Python pipelines, SQL).
+// Keep these lower-case; classifyDomain lower-cases the haystack before
+// matching.
+var (
+	codeFileExtensions = []string{
+		".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".rs",
+		".sql", ".yaml", ".yml", ".sh", ".dockerfile",
+		".java", ".kt", ".rb", ".php",
+	}
+	codeKeywords = []string{
+		"pr", "pull request", "merge", "rebase", "commit", "branch",
+		"deploy", "build", "ci", "endpoint", "api", "function",
+		"class", "import", "migration", "schema", "refactor", "bug",
+		"crash", "stack trace", "regression",
+	}
+	designKeywords = []string{
+		"design", "designer", "figma", "mockup", "wireframe", "sketch",
+		"icon", "color", "palette", "spacing", "layout",
+		"prototype", "ui", "ux", "visual",
+	}
+	contentKeywords = []string{
+		"copy", "content", "blog", "post", "article", "marketing",
+		"newsletter", "headline", "tagline", "campaign", "seo",
+	}
+)

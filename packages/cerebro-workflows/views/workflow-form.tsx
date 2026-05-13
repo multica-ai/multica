@@ -60,6 +60,9 @@ export interface FormState {
   skillInputJSON: string;
   commentTarget: "self" | "parent";
   commentContent: string;
+  // Phase 2 ext (JEH-1114, route_by_domain).
+  routeLabelPrefix: string;
+  routeDefaultDomain: "code" | "business" | "design" | "content";
 }
 
 export const EMPTY_FORM: FormState = {
@@ -83,6 +86,8 @@ export const EMPTY_FORM: FormState = {
   skillInputJSON: "{}",
   commentTarget: "self",
   commentContent: "",
+  routeLabelPrefix: "domain:",
+  routeDefaultDomain: "business",
 };
 
 interface WorkflowFormProps {
@@ -422,6 +427,44 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
               </Field>
             </>
           )}
+
+          {form.actionType === "route_by_domain" && (
+            <>
+              <Field label="Label-præfiks">
+                <Input
+                  value={form.routeLabelPrefix}
+                  onChange={(e) =>
+                    setForm({ ...form, routeLabelPrefix: e.target.value })
+                  }
+                  placeholder="domain:"
+                  data-testid="route-label-prefix"
+                />
+              </Field>
+              <Field label="Default-domæne (når heuristikken ikke matcher)">
+                <NativeSelect
+                  value={form.routeDefaultDomain}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      routeDefaultDomain: e.target
+                        .value as FormState["routeDefaultDomain"],
+                    })
+                  }
+                  data-testid="route-default-domain"
+                >
+                  <option value="code">code</option>
+                  <option value="business">business</option>
+                  <option value="design">design</option>
+                  <option value="content">content</option>
+                </NativeSelect>
+              </Field>
+              <p className="text-[11px] text-muted-foreground">
+                Workspacet skal have et label per domæne (f.eks.{" "}
+                <code>domain:code</code>). Mangler labelet, fejler kørslen
+                med en klar besked — opret det under Settings → Labels.
+              </p>
+            </>
+          )}
         </Section>
 
         {error && (
@@ -518,7 +561,17 @@ export function formStateFromInput(input: WorkflowWriteInput): FormState {
         : safeStringifyJSON(ac.skill_input),
     commentTarget: (ac.target as "self" | "parent") ?? EMPTY_FORM.commentTarget,
     commentContent: (ac.content as string) ?? "",
+    routeLabelPrefix:
+      (ac.label_prefix as string) ?? EMPTY_FORM.routeLabelPrefix,
+    routeDefaultDomain:
+      isRouteDomain(ac.default_domain)
+        ? (ac.default_domain as FormState["routeDefaultDomain"])
+        : EMPTY_FORM.routeDefaultDomain,
   };
+}
+
+function isRouteDomain(v: unknown): v is FormState["routeDefaultDomain"] {
+  return v === "code" || v === "business" || v === "design" || v === "content";
 }
 
 // formStateFromWorkflow accepts a CerebroWorkflow row (subset of WriteInput
@@ -578,6 +631,11 @@ export function buildPayload(f: FormState): WorkflowWriteInput {
     actionConfig = {
       target: f.commentTarget,
       content: f.commentContent,
+    };
+  } else if (f.actionType === "route_by_domain") {
+    actionConfig = {
+      label_prefix: f.routeLabelPrefix || undefined,
+      default_domain: f.routeDefaultDomain,
     };
   }
 

@@ -527,6 +527,44 @@ function Inspector({
           </Field>
         </>
       )}
+
+      {form.actionType === "route_by_domain" && (
+        <>
+          <Field label="Label-præfiks">
+            <Input
+              value={form.routeLabelPrefix}
+              onChange={(e) =>
+                setForm({ ...form, routeLabelPrefix: e.target.value })
+              }
+              placeholder="domain:"
+              data-testid="canvas-route-prefix"
+            />
+          </Field>
+          <Field label="Default-domæne">
+            <NativeSelect
+              value={form.routeDefaultDomain}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  routeDefaultDomain: e.target
+                    .value as FormState["routeDefaultDomain"],
+                })
+              }
+              data-testid="canvas-route-default"
+            >
+              <option value="code">code</option>
+              <option value="business">business</option>
+              <option value="design">design</option>
+              <option value="content">content</option>
+            </NativeSelect>
+          </Field>
+          <p className="text-[11px] text-muted-foreground">
+            Krav: workspacet har et label pr. domæne (fx{" "}
+            <code>domain:code</code>). Heuristikken klassificerer ud fra
+            titel + beskrivelse.
+          </p>
+        </>
+      )}
     </div>
   );
 }

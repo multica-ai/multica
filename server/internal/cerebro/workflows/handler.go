@@ -170,7 +170,8 @@ func knownTrigger(t string) bool {
 func knownAction(a string) bool {
 	switch a {
 	case ActionSetStatus, ActionCreateSubIssue, ActionSendReminder,
-		ActionRunSkill, ActionCommentOnIssue:
+		ActionRunSkill, ActionCommentOnIssue,
+		ActionRouteByDomain:
 		return true
 	}
 	return false

@@ -69,6 +69,7 @@ func TestKnownEnums(t *testing.T) {
 	for _, a := range []string{
 		ActionSetStatus, ActionCreateSubIssue, ActionSendReminder,
 		ActionRunSkill, ActionCommentOnIssue,
+		ActionRouteByDomain,
 	} {
 		if !knownAction(a) {
 			t.Errorf("knownAction(%q) = false, want true", a)
@@ -93,6 +94,19 @@ func TestKnownEditorMode(t *testing.T) {
 func TestValidateWriteRequest_AcceptsPhase2Actions(t *testing.T) {
 	cases := []string{ActionRunSkill, ActionCommentOnIssue}
 	for _, a := range cases {
+		err := validateWriteRequest(writeWorkflowRequest{
+			Name:        "x",
+			TriggerType: TriggerStatusChanged,
+			ActionType:  a,
+		})
+		if err != nil {
+			t.Errorf("validateWriteRequest must accept %q, got %v", a, err)
+		}
+	}
+}
+
+func TestValidateWriteRequest_AcceptsPhase2ExtActions(t *testing.T) {
+	for _, a := range []string{ActionRouteByDomain} {
 		err := validateWriteRequest(writeWorkflowRequest{
 			Name:        "x",
 			TriggerType: TriggerStatusChanged,

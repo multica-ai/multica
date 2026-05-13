@@ -112,6 +112,29 @@ export const WORKFLOW_TEMPLATES: ReadonlyArray<WorkflowTemplate> = [
     },
   },
   {
+    // Phase-2 ext (JEH-1114, PR 1). Composes med phase-1 conditions:
+    // workflows der filtrerer på `issue.labels` kan nu reagere automatisk
+    // når et issue er klassificeret. Workspacet skal have et label per
+    // domæne (fx `domain:code`) før templaten er funktionsdygtig.
+    key: "route-by-domain",
+    label: "Status changed → Route by domain",
+    description:
+      "Når et issue går i todo, klassificér det til kode/business/design/indhold og attach et `domain:<x>` label.",
+    status: "active",
+    defaults: {
+      name: "Auto-route by domain",
+      enabled: true,
+      trigger_type: "status_changed",
+      trigger_config: { to_status: "todo" },
+      conditions: [],
+      action_type: "route_by_domain",
+      action_config: {
+        label_prefix: "domain:",
+        default_domain: "business",
+      },
+    },
+  },
+  {
     key: "all-children-done",
     label: "All children done → Update parent",
     description:

@@ -8,7 +8,8 @@ export type CerebroWorkflowActionType =
   | "create_sub_issue"
   | "send_reminder"
   | "run_skill"
-  | "comment_on_issue";
+  | "comment_on_issue"
+  | "route_by_domain";
 
 export type CerebroWorkflowRunStatus =
   | "queued"
@@ -136,6 +137,12 @@ export const ACTION_OPTIONS: ReadonlyArray<{
     value: "comment_on_issue",
     label: "Comment on issue",
     description: "Post a comment on the triggered issue or its parent.",
+  },
+  {
+    value: "route_by_domain",
+    label: "Route by domain",
+    description:
+      "Klassificér issuet (kode/business/design/indhold) og attach et `<prefix><domain>` label.",
   },
 ];
 

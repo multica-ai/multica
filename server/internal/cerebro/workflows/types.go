@@ -15,6 +15,18 @@ const (
 	// Phase-2 actions (JEH-1103).
 	ActionRunSkill        = "run_skill"
 	ActionCommentOnIssue  = "comment_on_issue"
+
+	// Phase-2 extension actions (JEH-1114).
+	ActionRouteByDomain = "route_by_domain"
+)
+
+// Domain values produced by the route_by_domain classifier. The label that
+// gets attached is `<LabelPrefix><domain>` (default prefix: "domain:").
+const (
+	DomainCode     = "code"
+	DomainBusiness = "business"
+	DomainDesign   = "design"
+	DomainContent  = "content"
 )
 
 // Editor modes for the workflow rule. Stored on cerebro_workflow.editor_mode
@@ -87,3 +99,24 @@ const (
 	CommentTargetSelf   = "self"
 	CommentTargetParent = "parent"
 )
+
+// ActionConfigRouteByDomain — classify the triggered issue into one of four
+// domains and attach a `<LabelPrefix><domain>` label so downstream workflows
+// (filtered by `issue.labels` conditions) can react. The classifier is a
+// keyword + extension heuristic; per the JEH-1114 RFC we pick deterministic
+// rules over an LLM call to keep the default fast and cheap. A future
+// `fallback_skill` field can opt in to LLM-based reclassification, but is
+// not implemented in PR 1.
+//
+// Defaults applied when the corresponding field is empty:
+//
+//	LabelPrefix    "domain:"
+//	DefaultDomain  "business"
+//
+// The label `<prefix><domain>` MUST already exist in the workspace; the
+// action does NOT auto-create labels (avoids polluting label catalogs in
+// shared workspaces).
+type ActionConfigRouteByDomain struct {
+	LabelPrefix   string `json:"label_prefix,omitempty"`
+	DefaultDomain string `json:"default_domain,omitempty"`
+}

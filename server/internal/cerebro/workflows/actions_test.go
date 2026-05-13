@@ -30,6 +30,10 @@ type fakeIssueActions struct {
 	CreateCommentErr error
 	ParentIssue      db.Issue
 	GetIssueErr      error
+
+	// Phase-2 ext (JEH-1114, route_by_domain).
+	Labels       []db.IssueLabel
+	ListLabelsErr error
 }
 
 func (f *fakeIssueActions) UpdateIssueStatus(_ context.Context, _ db.UpdateIssueStatusParams) (db.Issue, error) {
@@ -82,6 +86,12 @@ func (f *fakeIssueActions) CreateQuickCreateTask(_ context.Context, p db.CreateQ
 		return db.AgentTaskQueue{}, f.TaskQueueErr
 	}
 	return db.AgentTaskQueue{ID: mustUUID("33333333-3333-3333-3333-333333333333")}, nil
+}
+func (f *fakeIssueActions) ListLabels(_ context.Context, _ pgtype.UUID) ([]db.IssueLabel, error) {
+	if f.ListLabelsErr != nil {
+		return nil, f.ListLabelsErr
+	}
+	return f.Labels, nil
 }
 
 func mustUUID(s string) pgtype.UUID {
@@ -380,6 +390,156 @@ func TestBuildRunSkillPrompt_DeterministicJSON(t *testing.T) {
 	}
 	if !strings.Contains(first, `"a"`) || !strings.Contains(first, `"b"`) {
 		t.Errorf("prompt missing keys: %q", first)
+	}
+}
+
+func TestClassifyDomain(t *testing.T) {
+	cases := []struct {
+		name    string
+		title   string
+		desc    string
+		want    string
+	}{
+		{"empty falls back to default", "", "", DomainBusiness},
+		{"file extension wins", "Tweak handler", "fix in actions.go and types.ts", DomainCode},
+		{"github url is code", "Review PR", "https://github.com/firtal-group/foo", DomainCode},
+		{"figma url is design", "New onboarding", "see figma.com/file/abc", DomainDesign},
+		{"copy keyword routes to content", "Q3 newsletter", "draft the headline copy", DomainContent},
+		{"design keyword wins over generic word", "Update icon palette", "spacing tweak", DomainDesign},
+		{"word boundary respected for short words", "fluid runtime", "team updates", DomainBusiness},
+		{"PR is matched as a whole word, not inside other words", "Predict pricing", "improve pricing model", DomainBusiness},
+		{"refactor keyword routes to code", "Cleanup", "refactor the inbox view", DomainCode},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := classifyDomain(c.title, c.desc, DomainBusiness)
+			if got != c.want {
+				t.Errorf("classifyDomain(%q,%q) = %q, want %q", c.title, c.desc, got, c.want)
+			}
+		})
+	}
+}
+
+func TestActionRouteByDomain_HappyPath(t *testing.T) {
+	codeLabelID := mustUUID("44444444-4444-4444-4444-444444444444")
+	fake := &fakeIssueActions{
+		ParentIssue: db.Issue{
+			ID:          mustUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+			Title:       "Fix login bug in auth.ts",
+			Description: pgtype.Text{String: "stack trace + repro", Valid: true},
+		},
+		Labels: []db.IssueLabel{
+			{ID: codeLabelID, Name: "domain:code"},
+			{ID: mustUUID("55555555-5555-5555-5555-555555555555"), Name: "domain:business"},
+		},
+	}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionRouteByDomain, ActionConfigRouteByDomain{})
+
+	if err := svc.actionRouteByDomain(context.Background(), wf, testTriggerEvent()); err != nil {
+		t.Fatalf("actionRouteByDomain returned %v", err)
+	}
+	if len(fake.AttachedLabels) != 1 {
+		t.Fatalf("expected 1 label attached, got %d", len(fake.AttachedLabels))
+	}
+	if fake.AttachedLabels[0].LabelID != codeLabelID {
+		t.Errorf("attached wrong label: got %v, want code label", fake.AttachedLabels[0].LabelID)
+	}
+}
+
+func TestActionRouteByDomain_RespectsCustomPrefix(t *testing.T) {
+	customLabelID := mustUUID("66666666-6666-6666-6666-666666666666")
+	fake := &fakeIssueActions{
+		ParentIssue: db.Issue{
+			ID:    mustUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+			Title: "Hero section copy needs polish",
+		},
+		Labels: []db.IssueLabel{
+			{ID: customLabelID, Name: "track::content"},
+		},
+	}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionRouteByDomain, ActionConfigRouteByDomain{
+		LabelPrefix: "track::",
+	})
+
+	if err := svc.actionRouteByDomain(context.Background(), wf, testTriggerEvent()); err != nil {
+		t.Fatalf("actionRouteByDomain returned %v", err)
+	}
+	if len(fake.AttachedLabels) != 1 || fake.AttachedLabels[0].LabelID != customLabelID {
+		t.Errorf("expected custom-prefixed content label attached, got %+v", fake.AttachedLabels)
+	}
+}
+
+func TestActionRouteByDomain_FallsBackToDefaultDomain(t *testing.T) {
+	defaultLabelID := mustUUID("77777777-7777-7777-7777-777777777777")
+	fake := &fakeIssueActions{
+		ParentIssue: db.Issue{
+			ID:    mustUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+			Title: "Quarterly planning",
+		},
+		Labels: []db.IssueLabel{
+			{ID: defaultLabelID, Name: "domain:business"},
+		},
+	}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionRouteByDomain, ActionConfigRouteByDomain{
+		DefaultDomain: DomainBusiness,
+	})
+
+	if err := svc.actionRouteByDomain(context.Background(), wf, testTriggerEvent()); err != nil {
+		t.Fatalf("actionRouteByDomain returned %v", err)
+	}
+	if len(fake.AttachedLabels) != 1 || fake.AttachedLabels[0].LabelID != defaultLabelID {
+		t.Errorf("expected business label attached, got %+v", fake.AttachedLabels)
+	}
+}
+
+func TestActionRouteByDomain_RejectsMissingLabel(t *testing.T) {
+	fake := &fakeIssueActions{
+		ParentIssue: db.Issue{
+			ID:    mustUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+			Title: "Untriaged ticket",
+		},
+		Labels: []db.IssueLabel{}, // workspace has no domain:* labels
+	}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionRouteByDomain, ActionConfigRouteByDomain{})
+
+	err := svc.actionRouteByDomain(context.Background(), wf, testTriggerEvent())
+	if err == nil || !strings.Contains(err.Error(), "no label") {
+		t.Fatalf("expected no-label error, got %v", err)
+	}
+	if len(fake.AttachedLabels) != 0 {
+		t.Errorf("expected no labels attached on failure, got %d", len(fake.AttachedLabels))
+	}
+}
+
+func TestActionRouteByDomain_RejectsUnknownDefaultDomain(t *testing.T) {
+	fake := &fakeIssueActions{
+		ParentIssue: db.Issue{ID: mustUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")},
+	}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionRouteByDomain, ActionConfigRouteByDomain{
+		DefaultDomain: "growth",
+	})
+
+	err := svc.actionRouteByDomain(context.Background(), wf, testTriggerEvent())
+	if err == nil || !strings.Contains(err.Error(), "default_domain") {
+		t.Fatalf("expected default_domain error, got %v", err)
+	}
+}
+
+func TestActionRouteByDomain_PropagatesIssueLookupError(t *testing.T) {
+	fake := &fakeIssueActions{
+		GetIssueErr: errors.New("issue gone"),
+	}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionRouteByDomain, ActionConfigRouteByDomain{})
+
+	err := svc.actionRouteByDomain(context.Background(), wf, testTriggerEvent())
+	if err == nil || !strings.Contains(err.Error(), "load issue") {
+		t.Fatalf("expected load-issue error, got %v", err)
 	}
 }
 

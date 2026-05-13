@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import { WORKFLOW_TEMPLATES } from "./templates";
 
 describe("WORKFLOW_TEMPLATES", () => {
-  it("ships the eight startpakke entries (4 active + 4 coming) from JEH-1047/JEH-1103", () => {
+  it("ships the nine startpakke entries (5 active + 4 coming) from JEH-1047/JEH-1103/JEH-1114", () => {
     expect(WORKFLOW_TEMPLATES.map((t) => t.key)).toEqual([
       "status-change",
       "due-date-time",
       "run-skill",
       "comment-on-issue",
+      "route-by-domain",
       "all-children-done",
       "mention-agent",
       "cron",
@@ -15,10 +16,10 @@ describe("WORKFLOW_TEMPLATES", () => {
     ]);
   });
 
-  it("has four active templates and four coming-soon placeholders", () => {
+  it("has five active templates and four coming-soon placeholders", () => {
     const active = WORKFLOW_TEMPLATES.filter((t) => t.status === "active");
     const coming = WORKFLOW_TEMPLATES.filter((t) => t.status === "coming");
-    expect(active).toHaveLength(4);
+    expect(active).toHaveLength(5);
     expect(coming).toHaveLength(4);
   });
 
@@ -68,6 +69,22 @@ describe("WORKFLOW_TEMPLATES", () => {
     expect(cfg.skill_name).toBe("");
     expect(cfg.agent_id).toBe("");
     expect(cfg.skill_input).toMatchObject({ issue_title: "{{title}}" });
+  });
+
+  it("pins the route-by-domain template's classifier shape", () => {
+    // JEH-1114 phase-2 ext PR 1: pick this template, save (workspace must
+    // already have `domain:code|business|design|content` labels), and the
+    // engine attaches `domain:<x>` based on the issue title + description.
+    const t = WORKFLOW_TEMPLATES.find((x) => x.key === "route-by-domain");
+    expect(t).toBeDefined();
+    expect(t!.defaults!.trigger_type).toBe("status_changed");
+    expect(t!.defaults!.action_type).toBe("route_by_domain");
+    const cfg = t!.defaults!.action_config as {
+      label_prefix: string;
+      default_domain: string;
+    };
+    expect(cfg.label_prefix).toBe("domain:");
+    expect(cfg.default_domain).toBe("business");
   });
 
   it("pins the comment-on-issue template's status_changed → comment shape", () => {
