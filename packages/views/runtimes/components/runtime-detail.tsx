@@ -38,14 +38,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@multica/ui/components/ui/select";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { TimezoneSelect } from "../../common/timezone-select";
 import { AppLink } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
 import { formatLastSeen } from "../utils";
@@ -567,54 +561,6 @@ function DiagnosticsCard({
   );
 }
 
-// Common IANA zones offered as quick picks when Intl.supportedValuesOf is not
-// available, and promoted near the top otherwise.
-const COMMON_TIMEZONES = [
-  "UTC",
-  "America/Los_Angeles",
-  "America/Denver",
-  "America/Chicago",
-  "America/New_York",
-  "America/Sao_Paulo",
-  "Europe/London",
-  "Europe/Berlin",
-  "Europe/Paris",
-  "Europe/Moscow",
-  "Africa/Cairo",
-  "Asia/Dubai",
-  "Asia/Kolkata",
-  "Asia/Bangkok",
-  "Asia/Shanghai",
-  "Asia/Singapore",
-  "Asia/Tokyo",
-  "Australia/Sydney",
-  "Pacific/Auckland",
-];
-
-function browserTimezone(): string {
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return tz || "UTC";
-  } catch {
-    return "UTC";
-  }
-}
-
-type IntlWithSupportedValues = typeof Intl & {
-  supportedValuesOf?: (key: "timeZone") => string[];
-};
-
-function supportedTimezones(): string[] {
-  try {
-    const supported = (Intl as IntlWithSupportedValues).supportedValuesOf?.(
-      "timeZone",
-    );
-    return supported && supported.length > 0 ? supported : COMMON_TIMEZONES;
-  } catch {
-    return COMMON_TIMEZONES;
-  }
-}
-
 // VisibilityReadout renders a static "Private" / "Public" pill for users
 // who can't edit the runtime. The description used to sit under the chip;
 // it now lives in the hover tooltip so the Diagnostics column stays compact
@@ -755,12 +701,7 @@ function TimezoneEditor({ runtime }: { runtime: AgentRuntime }) {
   const wsId = useWorkspaceId();
   const updateRuntime = useUpdateRuntime(wsId);
   const current = runtime.timezone || "UTC";
-  const browser = browserTimezone();
-  const browserSuffix = t(($) => $.detail.timezone_browser_suffix);
 
-  const options = Array.from(
-    new Set([current, browser, ...COMMON_TIMEZONES, ...supportedTimezones()]),
-  ).filter(Boolean);
   const handleTimezoneChange = (next: string) => {
     if (next === current) return;
     updateRuntime.mutate(
@@ -776,26 +717,12 @@ function TimezoneEditor({ runtime }: { runtime: AgentRuntime }) {
 
   return (
     <div className="space-y-1.5">
-      <Select
+      <TimezoneSelect
         value={current}
+        onValueChange={handleTimezoneChange}
+        browserSuffix={t(($) => $.detail.timezone_browser_suffix)}
         disabled={updateRuntime.isPending}
-        onValueChange={(next) => {
-          if (next) handleTimezoneChange(next);
-        }}
-      >
-        <SelectTrigger size="sm" className="w-full rounded-md font-mono text-xs">
-          <SelectValue>
-            {current === browser ? `${current}${browserSuffix}` : current}
-          </SelectValue>
-        </SelectTrigger>
-        <SelectContent align="start" className="max-h-72">
-          {options.map((tz) => (
-            <SelectItem key={tz} value={tz} className="font-mono text-xs">
-              {tz === browser ? `${tz}${browserSuffix}` : tz}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      />
       <p className="text-[11px] leading-snug text-muted-foreground">
         {t(($) => $.detail.timezone_hint)}
       </p>

@@ -25,6 +25,10 @@ import { KpiCard } from "../../runtimes/components/shared";
 import { DailyCostChart } from "../../runtimes/components/charts";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
+import {
+  TimezoneSelect,
+  browserTimezone,
+} from "../../common/timezone-select";
 import { formatTokens } from "../../runtimes/utils";
 import { useT } from "../../i18n";
 import {
@@ -106,9 +110,14 @@ function Segmented<T extends string | number>({
  */
 export function DashboardPage() {
   const { t } = useT("usage");
+  const { t: tRuntimes } = useT("runtimes");
   const wsId = useWorkspaceId();
   const [days, setDays] = useState<TimeRange>(30);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
+  // Default to the browser's resolved zone so day-boundary buckets match the
+  // user's local clock on first render. Pure client-state — the rollup queries
+  // are zone-agnostic today; this is the UI affordance the user can pin.
+  const [timezone, setTimezone] = useState<string>(() => browserTimezone());
 
   // The user can save model prices from the runtimes page; re-render when
   // they do so the dashboard reflects the new rates.
@@ -191,6 +200,12 @@ export function DashboardPage() {
             value={days}
             onChange={setDays}
             options={TIME_RANGES.map((r) => ({ label: r.label, value: r.days }))}
+          />
+          <TimezoneSelect
+            value={timezone}
+            onValueChange={setTimezone}
+            browserSuffix={tRuntimes(($) => $.detail.timezone_browser_suffix)}
+            triggerClassName="min-w-[180px] rounded-md font-mono text-xs"
           />
         </div>
       </PageHeader>
