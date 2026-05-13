@@ -274,8 +274,8 @@ export function useIssueTimeline(
       setSubmitting(true);
       try {
         await createComment({ content, type, attachmentIds });
-      } catch {
-        toast.error(t(($) => $.comment.send_failed));
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t(($) => $.comment.send_failed));
       } finally {
         setSubmitting(false);
       }
@@ -297,8 +297,8 @@ export function useIssueTimeline(
           parentId,
           attachmentIds,
         });
-      } catch {
-        toast.error(t(($) => $.comment.send_reply_failed));
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t(($) => $.comment.send_reply_failed));
       }
     },
     [userId, createComment, t],

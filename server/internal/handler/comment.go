@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -142,6 +143,90 @@ func taskContextForCommentType(commentType string) []byte {
 	return data
 }
 
+func (h *Handler) resolveCommentTargetAgentIDs(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, authorType, authorID string) []string {
+	targets := make([]string, 0, 2)
+	seen := make(map[string]struct{}, 2)
+	addTarget := func(agentID string) {
+		if agentID == "" {
+			return
+		}
+		if _, exists := seen[agentID]; exists {
+			return
+		}
+		seen[agentID] = struct{}{}
+		targets = append(targets, agentID)
+	}
+
+	if authorType == "member" && h.shouldEnqueueOnComment(ctx, issue) &&
+		!h.commentMentionsOthersButNotAssignee(content, issue) &&
+		!h.isReplyToMemberThread(ctx, parentComment, content, issue) {
+		addTarget(uuidToString(issue.AssigneeID))
+	}
+
+	mentions := util.ParseMentions(content)
+	if shouldInheritParentMentions(parentComment, mentions, authorType) {
+		mentions = util.ParseMentions(parentComment.Content)
+	}
+	for _, m := range mentions {
+		if m.Type != "agent" {
+			continue
+		}
+		if authorType == "agent" && authorID == m.ID {
+			continue
+		}
+		agentUUID := parseUUID(m.ID)
+		agent, err := h.Queries.GetAgent(ctx, agentUUID)
+		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+			continue
+		}
+		if agent.Visibility == "private" {
+			targetOwner := uuidToString(agent.OwnerID)
+			switch authorType {
+			case "member":
+				if targetOwner != authorID {
+					continue
+				}
+			case "agent":
+				triggerAgent, err := h.Queries.GetAgent(ctx, parseUUID(authorID))
+				if err != nil || uuidToString(triggerAgent.OwnerID) != targetOwner {
+					continue
+				}
+			default:
+				continue
+			}
+		}
+		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+			IssueID: issue.ID,
+			AgentID: agentUUID,
+		})
+		if err != nil || hasPending {
+			continue
+		}
+		addTarget(m.ID)
+	}
+
+	return targets
+}
+
+func (h *Handler) validatePlanRequest(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, authorType, authorID string) error {
+	targetIDs := h.resolveCommentTargetAgentIDs(ctx, issue, content, parentComment, authorType, authorID)
+	switch len(targetIDs) {
+	case 0:
+		return fmt.Errorf("plan only requires exactly one eligible target agent, but this request resolved to none")
+	case 1:
+		agent, err := h.Queries.GetAgent(ctx, parseUUID(targetIDs[0]))
+		if err != nil {
+			return fmt.Errorf("load plan target agent: %w", err)
+		}
+		if !protocol.ResolveTraceEnabled(agent.RuntimeConfig) {
+			return fmt.Errorf("plan only requires Stream to be enabled on the target agent")
+		}
+		return nil
+	default:
+		return fmt.Errorf("plan only requires exactly one eligible target agent, but this request resolved to %d", len(targetIDs))
+	}
+}
+
 func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -192,6 +277,13 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+
+	if req.Type == "plan_request" {
+		if err := h.validatePlanRequest(r.Context(), issue, req.Content, parentComment, authorType, authorID); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+	}
 
 	// Defense against resumed-session drift: when an agent posts from inside a
 	// comment-triggered task AND the comment is being posted on that same
