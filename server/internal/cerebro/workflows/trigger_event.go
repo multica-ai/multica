@@ -27,6 +27,18 @@ type TriggerEvent struct {
 	FromStatus string
 	ToStatus   string
 
+	// Phase-3 helpers — populated when relevant, empty otherwise.
+	//
+	// CommentID identifies the comment row for TriggerCommentMention. It is
+	// also folded into the idempotency EventID so two listener calls for the
+	// same comment collapse on retry.
+	//
+	// ParentIssueID is the parent of the triggered issue for the
+	// TriggerSubIssueCreated and TriggerAllChildrenDone paths — convenient
+	// promoted access without a Raw["issue"]["parent_issue_id"] dive.
+	CommentID     string
+	ParentIssueID string
+
 	// Raw is the un-projected payload, used by condition lookup paths that
 	// dereference into nested issue fields (priority, labels, etc).
 	Raw map[string]any

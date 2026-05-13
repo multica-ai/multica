@@ -51,7 +51,16 @@ type IssueActions interface {
 	ListCommentsForIssue(ctx context.Context, arg db.ListCommentsForIssueParams) ([]db.Comment, error)
 	ListAttachmentsByIssue(ctx context.Context, arg db.ListAttachmentsByIssueParams) ([]db.Attachment, error)
 	ListAttachmentURLsByIssueOrComments(ctx context.Context, issueID pgtype.UUID) ([]string, error)
+	// Phase-3 (JEH-1108): assignee-only update for the reassign_issue action.
+	UpdateIssueAssignee(ctx context.Context, arg db.UpdateIssueAssigneeParams) (db.Issue, error)
 }
+
+// ErrWebhookOutboundUnimplemented is returned by actionWebhookOutbound until
+// PR 2 wires the outbound HTTP delivery worker. The action type is already
+// whitelisted by the CHECK constraint and the handler validator so workflows
+// can be created in this PR; execution simply fails with this sentinel until
+// the worker lands.
+var ErrWebhookOutboundUnimplemented = errors.New("webhook_outbound: not yet implemented (PR 2)")
 
 // runAction dispatches on the workflow's action_type. Any non-nil error
 // triggers the retry ladder in Service.Execute.
@@ -70,9 +79,68 @@ func (s *Service) runAction(ctx context.Context, wf workflow, te TriggerEvent) e
 		return s.actionCommentOnIssue(ctx, wf, te)
 	case ActionRouteByDomain:
 		return s.actionRouteByDomain(ctx, wf, te)
+	case ActionReassignIssue:
+		return s.actionReassignIssue(ctx, wf, te)
+	case ActionWebhookOutbound:
+		return s.actionWebhookOutbound(ctx, wf, te)
 	default:
 		return fmt.Errorf("unknown action_type %q", wf.actionType)
 	}
+}
+
+// actionReassignIssue re-points the triggered issue's assignee to the
+// configured (member|agent, uuid) pair. Phase 3 — issue-bound action so the
+// trigger event must carry an issue_id; cron-triggered reassignments are
+// out of scope (no issue context).
+func (s *Service) actionReassignIssue(ctx context.Context, wf workflow, te TriggerEvent) error {
+	if te.IssueID == "" {
+		return errors.New("reassign_issue: trigger event has no issue_id")
+	}
+	var cfg ActionConfigReassignIssue
+	if err := json.Unmarshal(wf.actionConfig, &cfg); err != nil {
+		return fmt.Errorf("reassign_issue: parse config: %w", err)
+	}
+	if cfg.AssigneeID == "" {
+		return errors.New("reassign_issue: assignee_id is required")
+	}
+	if cfg.AssigneeType != AssigneeTypeMember && cfg.AssigneeType != AssigneeTypeAgent {
+		return fmt.Errorf("reassign_issue: unsupported assignee_type %q", cfg.AssigneeType)
+	}
+
+	id, err := parseUUID(te.IssueID)
+	if err != nil {
+		return fmt.Errorf("reassign_issue: %w", err)
+	}
+	assigneeID, err := parseUUID(cfg.AssigneeID)
+	if err != nil {
+		return fmt.Errorf("reassign_issue: %w", err)
+	}
+	if _, err := s.issues.UpdateIssueAssignee(ctx, db.UpdateIssueAssigneeParams{
+		ID:           id,
+		AssigneeType: pgtype.Text{String: cfg.AssigneeType, Valid: true},
+		AssigneeID:   assigneeID,
+	}); err != nil {
+		return fmt.Errorf("reassign_issue: %w", err)
+	}
+	return nil
+}
+
+// actionWebhookOutbound is the placeholder for the PR-2 outbound delivery
+// worker. PR 1 ships the trigger/action whitelist, schema columns, and
+// listener wiring; PR 2 ships the actual HTTP-with-HMAC worker. Mirrors
+// fase-1 PR-1's handling of `send_reminder` before PR 2 wired the inbox.
+func (s *Service) actionWebhookOutbound(_ context.Context, wf workflow, _ TriggerEvent) error {
+	// Parse the config so misshapen rows surface a clear error rather than
+	// the generic "not implemented" — when PR 2 lands, this validation stays
+	// in place and the worker takes over from where the placeholder returns.
+	var cfg ActionConfigWebhookOutbound
+	if err := json.Unmarshal(wf.actionConfig, &cfg); err != nil {
+		return fmt.Errorf("webhook_outbound: parse config: %w", err)
+	}
+	if cfg.URL == "" {
+		return errors.New("webhook_outbound: url is required")
+	}
+	return ErrWebhookOutboundUnimplemented
 }
 
 // actionSendReminder writes a single inbox_item to the configured recipient

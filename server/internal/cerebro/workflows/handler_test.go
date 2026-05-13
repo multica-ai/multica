@@ -61,6 +61,8 @@ func TestValidateWriteRequest_RejectsUnknownEnumValues(t *testing.T) {
 func TestKnownEnums(t *testing.T) {
 	for _, tt := range []string{
 		TriggerStatusChanged, TriggerDueDateReached, TriggerDueTimeReached,
+		TriggerCron, TriggerWebhookInbound, TriggerCommentMention,
+		TriggerAllChildrenDone, TriggerSubIssueCreated,
 	} {
 		if !knownTrigger(tt) {
 			t.Errorf("knownTrigger(%q) = false, want true", tt)
@@ -70,6 +72,7 @@ func TestKnownEnums(t *testing.T) {
 		ActionSetStatus, ActionCreateSubIssue, ActionSendReminder,
 		ActionRunSkill, ActionCommentOnIssue,
 		ActionRouteByDomain,
+		ActionWebhookOutbound, ActionReassignIssue,
 	} {
 		if !knownAction(a) {
 			t.Errorf("knownAction(%q) = false, want true", a)

@@ -82,6 +82,186 @@ func TestRetryBackoffsMatchSpec(t *testing.T) {
 	}
 }
 
+// --- Phase-3 trigger match tests (JEH-1108) ---
+
+func TestTriggerMatches_CommentMentionAgent(t *testing.T) {
+	target := "11111111-1111-1111-1111-111111111111"
+	cfg, _ := json.Marshal(TriggerConfigCommentMention{
+		MatchMode: CommentMatchAgent,
+		Target:    target,
+	})
+	wf := workflow{triggerType: TriggerCommentMention, triggerConfig: cfg}
+
+	makeEvent := func(content string) TriggerEvent {
+		return TriggerEvent{
+			Type: TriggerCommentMention,
+			Raw: map[string]any{
+				"comment": map[string]any{"content": content},
+			},
+		}
+	}
+
+	yes := makeEvent("hi [@Rasp](mention://agent/" + target + ") fix this")
+	if !triggerMatches(wf, yes) {
+		t.Fatal("agent-mention with matching target must fire")
+	}
+	wrong := makeEvent("hi [@Other](mention://agent/22222222-2222-2222-2222-222222222222)")
+	if triggerMatches(wf, wrong) {
+		t.Fatal("agent-mention with non-matching target must not fire")
+	}
+	noMention := makeEvent("just a plain comment")
+	if triggerMatches(wf, noMention) {
+		t.Fatal("comment without mention must not fire")
+	}
+}
+
+func TestTriggerMatches_CommentMentionMember(t *testing.T) {
+	target := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	cfg, _ := json.Marshal(TriggerConfigCommentMention{
+		MatchMode: CommentMatchMember,
+		Target:    target,
+	})
+	wf := workflow{triggerType: TriggerCommentMention, triggerConfig: cfg}
+
+	te := TriggerEvent{
+		Type: TriggerCommentMention,
+		Raw: map[string]any{
+			"comment": map[string]any{
+				"content": "thanks [@Sara](mention://member/" + target + ")",
+			},
+		},
+	}
+	if !triggerMatches(wf, te) {
+		t.Fatal("member-mention with matching target must fire")
+	}
+	// Same UUID but as agent type → no match (mode is member).
+	te.Raw["comment"].(map[string]any)["content"] = "[@x](mention://agent/" + target + ")"
+	if triggerMatches(wf, te) {
+		t.Fatal("agent-typed mention must not match member mode")
+	}
+}
+
+func TestTriggerMatches_CommentMentionKeyword(t *testing.T) {
+	cfg, _ := json.Marshal(TriggerConfigCommentMention{
+		MatchMode: CommentMatchKeyword,
+		Target:    "URGENT",
+	})
+	wf := workflow{triggerType: TriggerCommentMention, triggerConfig: cfg}
+
+	makeEvent := func(content string) TriggerEvent {
+		return TriggerEvent{
+			Type: TriggerCommentMention,
+			Raw: map[string]any{
+				"comment": map[string]any{"content": content},
+			},
+		}
+	}
+
+	if !triggerMatches(wf, makeEvent("This is urgent please")) {
+		t.Fatal("keyword match must be case-insensitive")
+	}
+	if !triggerMatches(wf, makeEvent("URGENT!!!")) {
+		t.Fatal("exact keyword case must still match")
+	}
+	if triggerMatches(wf, makeEvent("nothing to see")) {
+		t.Fatal("non-matching content must not fire")
+	}
+}
+
+func TestTriggerMatches_CommentMentionRegex(t *testing.T) {
+	cfg, _ := json.Marshal(TriggerConfigCommentMention{
+		MatchMode: CommentMatchRegex,
+		Target:    `(?i)deploy(ed)?\b`,
+	})
+	wf := workflow{triggerType: TriggerCommentMention, triggerConfig: cfg}
+
+	makeEvent := func(content string) TriggerEvent {
+		return TriggerEvent{
+			Type: TriggerCommentMention,
+			Raw: map[string]any{
+				"comment": map[string]any{"content": content},
+			},
+		}
+	}
+
+	if !triggerMatches(wf, makeEvent("we deploy at 5")) {
+		t.Fatal("regex must match 'deploy'")
+	}
+	if !triggerMatches(wf, makeEvent("Just deployed!")) {
+		t.Fatal("regex must match 'deployed'")
+	}
+	if triggerMatches(wf, makeEvent("plain text")) {
+		t.Fatal("regex must not match unrelated content")
+	}
+
+	// Malformed regex must not fire (and must not panic).
+	badCfg, _ := json.Marshal(TriggerConfigCommentMention{
+		MatchMode: CommentMatchRegex,
+		Target:    `[unclosed`,
+	})
+	badWF := workflow{triggerType: TriggerCommentMention, triggerConfig: badCfg}
+	if triggerMatches(badWF, makeEvent("anything")) {
+		t.Fatal("malformed regex must fail closed")
+	}
+}
+
+func TestTriggerMatches_SubIssueCreated_AnyParent(t *testing.T) {
+	// Empty ParentIssueID → any sub-issue matches.
+	wf := workflow{triggerType: TriggerSubIssueCreated, triggerConfig: nil}
+	te := TriggerEvent{
+		Type:          TriggerSubIssueCreated,
+		ParentIssueID: "anything-uuid",
+		Raw:           map[string]any{"issue": map[string]any{"parent_issue_id": "anything-uuid"}},
+	}
+	if !triggerMatches(wf, te) {
+		t.Fatal("empty parent filter must match any sub-issue")
+	}
+}
+
+func TestTriggerMatches_SubIssueCreated_SpecificParent(t *testing.T) {
+	parent := "55555555-5555-5555-5555-555555555555"
+	other := "66666666-6666-6666-6666-666666666666"
+	cfg, _ := json.Marshal(TriggerConfigSubIssueCreated{ParentIssueID: parent})
+	wf := workflow{triggerType: TriggerSubIssueCreated, triggerConfig: cfg}
+
+	yes := TriggerEvent{
+		Type:          TriggerSubIssueCreated,
+		ParentIssueID: parent,
+		Raw:           map[string]any{"issue": map[string]any{"parent_issue_id": parent}},
+	}
+	if !triggerMatches(wf, yes) {
+		t.Fatal("parent match must fire")
+	}
+	no := TriggerEvent{
+		Type:          TriggerSubIssueCreated,
+		ParentIssueID: other,
+		Raw:           map[string]any{"issue": map[string]any{"parent_issue_id": other}},
+	}
+	if triggerMatches(wf, no) {
+		t.Fatal("parent mismatch must not fire")
+	}
+}
+
+func TestTriggerMatches_AllChildrenDone_TypeOnly(t *testing.T) {
+	// all_children_done has no per-config filter — it matches on type alone
+	// (Dispatch already filtered by trigger_type).
+	wf := workflow{triggerType: TriggerAllChildrenDone, triggerConfig: nil}
+	te := TriggerEvent{Type: TriggerAllChildrenDone}
+	if !triggerMatches(wf, te) {
+		t.Fatal("all_children_done must match on type alone")
+	}
+}
+
+func TestTriggerMatches_CronAndWebhookInbound_TypeOnly(t *testing.T) {
+	for _, trig := range []string{TriggerCron, TriggerWebhookInbound} {
+		wf := workflow{triggerType: trig}
+		te := TriggerEvent{Type: trig}
+		if !triggerMatches(wf, te) {
+			t.Errorf("trigger %q must match on type alone", trig)
+		}
+	}
+}
+
 func TestEnvFlagEnabled(t *testing.T) {
 	cases := map[string]bool{
 		"1":     true,

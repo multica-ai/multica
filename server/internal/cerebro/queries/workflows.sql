@@ -8,7 +8,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        action_type, action_config,
        created_by_id, created_by_type,
        created_at, updated_at,
-       editor_mode, editor_layout
+       editor_mode, editor_layout,
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
 FROM cerebro_workflow
 WHERE workspace_id = $1
   AND trigger_type = $2
@@ -20,7 +21,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        action_type, action_config,
        created_by_id, created_by_type,
        created_at, updated_at,
-       editor_mode, editor_layout
+       editor_mode, editor_layout,
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
 FROM cerebro_workflow
 WHERE workspace_id = $1
 ORDER BY created_at DESC;
@@ -31,7 +33,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        action_type, action_config,
        created_by_id, created_by_type,
        created_at, updated_at,
-       editor_mode, editor_layout
+       editor_mode, editor_layout,
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
 FROM cerebro_workflow
 WHERE id = $1;
 
@@ -49,9 +52,15 @@ RETURNING id, workspace_id, project_id, name, enabled,
           action_type, action_config,
           created_by_id, created_by_type,
           created_at, updated_at,
-          editor_mode, editor_layout;
+          editor_mode, editor_layout,
+          inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret;
 
 -- name: UpdateCerebroWorkflow :one
+-- Phase-3 note (JEH-1108): inbound_webhook_token / inbound_signing_secret /
+-- outbound_webhook_secret are deliberately NOT set here — they round-trip
+-- through PR 2's dedicated regenerate-token endpoint. The RETURNING clause
+-- includes them so callers see the existing values after an unrelated
+-- update without a follow-up SELECT.
 UPDATE cerebro_workflow
 SET name = $2,
     enabled = $3,
@@ -70,7 +79,8 @@ RETURNING id, workspace_id, project_id, name, enabled,
           action_type, action_config,
           created_by_id, created_by_type,
           created_at, updated_at,
-          editor_mode, editor_layout;
+          editor_mode, editor_layout,
+          inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret;
 
 -- name: SetCerebroWorkflowEnabled :exec
 UPDATE cerebro_workflow
@@ -174,6 +184,24 @@ WHERE issue_id = $1;
 
 -- name: DeleteCerebroIssueDueTime :exec
 DELETE FROM cerebro_issue_due_time WHERE issue_id = $1;
+
+-- name: CountNonDoneChildrenLocked :one
+-- Phase-3 helper for the all_children_done trigger (JEH-1108). Counts the
+-- still-open siblings of a freshly-closed child issue while taking a
+-- FOR UPDATE lock on the matching rows, so two concurrent
+-- "last child → done" transitions serialize and the listener never fires
+-- the trigger twice for the same all-done state.
+--
+-- The MAX(updated_at) over the parent's *done* children is what the EventID
+-- hashes against — deterministic per all-done state, so re-opening a child
+-- and re-closing it produces a new event_id and the trigger fires again.
+SELECT
+    COUNT(*) FILTER (WHERE status NOT IN ('done', 'cancelled'))::bigint AS open_count,
+    (MAX(updated_at) FILTER (WHERE status IN ('done', 'cancelled')))::timestamptz AS last_done_at
+FROM issue
+WHERE parent_issue_id = $1
+  AND workspace_id = $2
+FOR UPDATE;
 
 -- name: ListDueIssuesForSweeper :many
 -- Joins upstream issue.due_date with the optional per-issue clock override.

@@ -192,3 +192,16 @@ UPDATE issue
 SET first_executed_at = now()
 WHERE id = $1 AND first_executed_at IS NULL
 RETURNING id, workspace_id, creator_type, creator_id, first_executed_at;
+
+-- CEREBRO-PATCH(workflow-reassign-issue): JEH-1108 reassign_issue action needs an assignee-only UPDATE.
+-- name: UpdateIssueAssignee :one
+-- Narrow assignee-only mutation used by the cerebro workflow engine's
+-- reassign_issue action. Distinct from UpdateIssue (which clears nullable
+-- columns when args are nil) so the action cannot accidentally wipe an
+-- unrelated optional field while reassigning.
+UPDATE issue SET
+    assignee_type = $2,
+    assignee_id = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;

@@ -29,6 +29,42 @@ func (q *Queries) BumpCerebroWorkflowRunAttempt(ctx context.Context, arg BumpCer
 	return err
 }
 
+const countNonDoneChildrenLocked = `-- name: CountNonDoneChildrenLocked :one
+SELECT
+    COUNT(*) FILTER (WHERE status NOT IN ('done', 'cancelled'))::bigint AS open_count,
+    (MAX(updated_at) FILTER (WHERE status IN ('done', 'cancelled')))::timestamptz AS last_done_at
+FROM issue
+WHERE parent_issue_id = $1
+  AND workspace_id = $2
+FOR UPDATE
+`
+
+type CountNonDoneChildrenLockedParams struct {
+	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+}
+
+type CountNonDoneChildrenLockedRow struct {
+	OpenCount  int64              `json:"open_count"`
+	LastDoneAt pgtype.Timestamptz `json:"last_done_at"`
+}
+
+// Phase-3 helper for the all_children_done trigger (JEH-1108). Counts the
+// still-open siblings of a freshly-closed child issue while taking a
+// FOR UPDATE lock on the matching rows, so two concurrent
+// "last child → done" transitions serialize and the listener never fires
+// the trigger twice for the same all-done state.
+//
+// The MAX(updated_at) over the parent's *done* children is what the EventID
+// hashes against — deterministic per all-done state, so re-opening a child
+// and re-closing it produces a new event_id and the trigger fires again.
+func (q *Queries) CountNonDoneChildrenLocked(ctx context.Context, arg CountNonDoneChildrenLockedParams) (CountNonDoneChildrenLockedRow, error) {
+	row := q.db.QueryRow(ctx, countNonDoneChildrenLocked, arg.ParentIssueID, arg.WorkspaceID)
+	var i CountNonDoneChildrenLockedRow
+	err := row.Scan(&i.OpenCount, &i.LastDoneAt)
+	return i, err
+}
+
 const createCerebroWorkflow = `-- name: CreateCerebroWorkflow :one
 INSERT INTO cerebro_workflow (
     workspace_id, project_id, name, enabled,
@@ -43,7 +79,8 @@ RETURNING id, workspace_id, project_id, name, enabled,
           action_type, action_config,
           created_by_id, created_by_type,
           created_at, updated_at,
-          editor_mode, editor_layout
+          editor_mode, editor_layout,
+          inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
 `
 
 type CreateCerebroWorkflowParams struct {
@@ -96,6 +133,9 @@ func (q *Queries) CreateCerebroWorkflow(ctx context.Context, arg CreateCerebroWo
 		&i.UpdatedAt,
 		&i.EditorMode,
 		&i.EditorLayout,
+		&i.InboundWebhookToken,
+		&i.InboundSigningSecret,
+		&i.OutboundWebhookSecret,
 	)
 	return i, err
 }
@@ -194,7 +234,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        action_type, action_config,
        created_by_id, created_by_type,
        created_at, updated_at,
-       editor_mode, editor_layout
+       editor_mode, editor_layout,
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
 FROM cerebro_workflow
 WHERE id = $1
 `
@@ -219,6 +260,9 @@ func (q *Queries) GetCerebroWorkflow(ctx context.Context, id pgtype.UUID) (Cereb
 		&i.UpdatedAt,
 		&i.EditorMode,
 		&i.EditorLayout,
+		&i.InboundWebhookToken,
+		&i.InboundSigningSecret,
+		&i.OutboundWebhookSecret,
 	)
 	return i, err
 }
@@ -301,7 +345,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        action_type, action_config,
        created_by_id, created_by_type,
        created_at, updated_at,
-       editor_mode, editor_layout
+       editor_mode, editor_layout,
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
 FROM cerebro_workflow
 WHERE workspace_id = $1
 ORDER BY created_at DESC
@@ -333,6 +378,9 @@ func (q *Queries) ListCerebroWorkflows(ctx context.Context, workspaceID pgtype.U
 			&i.UpdatedAt,
 			&i.EditorMode,
 			&i.EditorLayout,
+			&i.InboundWebhookToken,
+			&i.InboundSigningSecret,
+			&i.OutboundWebhookSecret,
 		); err != nil {
 			return nil, err
 		}
@@ -350,7 +398,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        action_type, action_config,
        created_by_id, created_by_type,
        created_at, updated_at,
-       editor_mode, editor_layout
+       editor_mode, editor_layout,
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
 FROM cerebro_workflow
 WHERE workspace_id = $1
   AND trigger_type = $2
@@ -392,6 +441,9 @@ func (q *Queries) ListCerebroWorkflowsForTrigger(ctx context.Context, arg ListCe
 			&i.UpdatedAt,
 			&i.EditorMode,
 			&i.EditorLayout,
+			&i.InboundWebhookToken,
+			&i.InboundSigningSecret,
+			&i.OutboundWebhookSecret,
 		); err != nil {
 			return nil, err
 		}
@@ -654,7 +706,8 @@ RETURNING id, workspace_id, project_id, name, enabled,
           action_type, action_config,
           created_by_id, created_by_type,
           created_at, updated_at,
-          editor_mode, editor_layout
+          editor_mode, editor_layout,
+          inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
 `
 
 type UpdateCerebroWorkflowParams struct {
@@ -671,6 +724,11 @@ type UpdateCerebroWorkflowParams struct {
 	EditorLayout  []byte      `json:"editor_layout"`
 }
 
+// Phase-3 note (JEH-1108): inbound_webhook_token / inbound_signing_secret /
+// outbound_webhook_secret are deliberately NOT set here — they round-trip
+// through PR 2's dedicated regenerate-token endpoint. The RETURNING clause
+// includes them so callers see the existing values after an unrelated
+// update without a follow-up SELECT.
 func (q *Queries) UpdateCerebroWorkflow(ctx context.Context, arg UpdateCerebroWorkflowParams) (CerebroWorkflow, error) {
 	row := q.db.QueryRow(ctx, updateCerebroWorkflow,
 		arg.ID,
@@ -703,6 +761,9 @@ func (q *Queries) UpdateCerebroWorkflow(ctx context.Context, arg UpdateCerebroWo
 		&i.UpdatedAt,
 		&i.EditorMode,
 		&i.EditorLayout,
+		&i.InboundWebhookToken,
+		&i.InboundSigningSecret,
+		&i.OutboundWebhookSecret,
 	)
 	return i, err
 }

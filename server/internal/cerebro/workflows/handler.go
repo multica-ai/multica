@@ -161,7 +161,9 @@ func validateWriteRequest(req writeWorkflowRequest) error {
 
 func knownTrigger(t string) bool {
 	switch t {
-	case TriggerStatusChanged, TriggerDueDateReached, TriggerDueTimeReached:
+	case TriggerStatusChanged, TriggerDueDateReached, TriggerDueTimeReached,
+		TriggerCron, TriggerWebhookInbound, TriggerCommentMention,
+		TriggerAllChildrenDone, TriggerSubIssueCreated:
 		return true
 	}
 	return false
@@ -171,7 +173,8 @@ func knownAction(a string) bool {
 	switch a {
 	case ActionSetStatus, ActionCreateSubIssue, ActionSendReminder,
 		ActionRunSkill, ActionCommentOnIssue,
-		ActionRouteByDomain:
+		ActionRouteByDomain,
+		ActionWebhookOutbound, ActionReassignIssue:
 		return true
 	}
 	return false

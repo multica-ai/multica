@@ -867,6 +867,58 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 	return i, err
 }
 
+const updateIssueAssignee = `-- name: UpdateIssueAssignee :one
+UPDATE issue SET
+    assignee_type = $2,
+    assignee_id = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, kind, is_private
+`
+
+type UpdateIssueAssigneeParams struct {
+	ID           pgtype.UUID `json:"id"`
+	AssigneeType pgtype.Text `json:"assignee_type"`
+	AssigneeID   pgtype.UUID `json:"assignee_id"`
+}
+
+// CEREBRO-PATCH(workflow-reassign-issue): JEH-1108 reassign_issue action needs an assignee-only UPDATE.
+// Narrow assignee-only mutation used by the cerebro workflow engine's
+// reassign_issue action. Distinct from UpdateIssue (which clears nullable
+// columns when args are nil) so the action cannot accidentally wipe an
+// unrelated optional field while reassigning.
+func (q *Queries) UpdateIssueAssignee(ctx context.Context, arg UpdateIssueAssigneeParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, updateIssueAssignee, arg.ID, arg.AssigneeType, arg.AssigneeID)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.Kind,
+		&i.IsPrivate,
+	)
+	return i, err
+}
+
 const updateIssueStatus = `-- name: UpdateIssueStatus :one
 UPDATE issue SET
     status = $2,

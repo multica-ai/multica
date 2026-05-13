@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // retryBackoffs are the spec-locked delays applied to attempts 2, 3, 4. The
@@ -309,8 +311,8 @@ func (s *Service) sweepRetries(ctx context.Context) error {
 }
 
 // triggerMatches checks the trigger_config-side conditions (status-from/to
-// equality). Returns true when the workflow's trigger should fire for this
-// event.
+// equality, comment-content match, sub-issue parent scope). Returns true
+// when the workflow's trigger should fire for this event.
 func triggerMatches(wf workflow, te TriggerEvent) bool {
 	switch te.Type {
 	case TriggerStatusChanged:
@@ -325,10 +327,106 @@ func triggerMatches(wf workflow, te TriggerEvent) bool {
 			return false
 		}
 		return true
+
+	case TriggerCommentMention:
+		var cfg TriggerConfigCommentMention
+		if len(wf.triggerConfig) > 0 {
+			_ = json.Unmarshal(wf.triggerConfig, &cfg)
+		}
+		return commentMentionMatches(cfg, te)
+
+	case TriggerSubIssueCreated:
+		var cfg TriggerConfigSubIssueCreated
+		if len(wf.triggerConfig) > 0 {
+			_ = json.Unmarshal(wf.triggerConfig, &cfg)
+		}
+		if cfg.ParentIssueID == "" {
+			// Empty filter → any sub-issue in workspace matches.
+			return true
+		}
+		// Compare against the promoted ParentIssueID first, then fall back
+		// to Raw for resilience (older listener calls may not have set the
+		// promoted field).
+		if te.ParentIssueID == cfg.ParentIssueID {
+			return true
+		}
+		if issue, ok := te.Raw["issue"].(map[string]any); ok {
+			if pid, ok := issue["parent_issue_id"].(string); ok && pid == cfg.ParentIssueID {
+				return true
+			}
+		}
+		return false
+
 	default:
-		// Triggers that don't carry trigger_config conditionals match
-		// purely on type, which Dispatch already filtered on.
+		// cron / webhook_inbound / all_children_done — type-match alone.
+		// Dispatch already filtered on workflow.trigger_type.
 		return true
+	}
+}
+
+// commentMentionMatches evaluates the four match modes (agent/member/keyword/
+// regex) against the comment body in te.Raw["comment"]["content"]. A missing
+// or malformed payload returns false rather than firing every comment-mention
+// workflow on a broken event.
+func commentMentionMatches(cfg TriggerConfigCommentMention, te TriggerEvent) bool {
+	comment, _ := te.Raw["comment"].(map[string]any)
+	content, _ := comment["content"].(string)
+	if content == "" {
+		return false
+	}
+	switch cfg.MatchMode {
+	case CommentMatchAgent, CommentMatchMember:
+		if cfg.Target == "" {
+			return false
+		}
+		// Reuse the upstream mention parser so we don't drift from how
+		// comments are interpreted in the rest of the system.
+		mentions := util.ParseMentions(content)
+		for _, m := range mentions {
+			if m.Type == cfg.MatchMode && strings.EqualFold(m.ID, cfg.Target) {
+				return true
+			}
+		}
+		return false
+	case CommentMatchKeyword:
+		if cfg.Target == "" {
+			return false
+		}
+		return strings.Contains(strings.ToLower(content), strings.ToLower(cfg.Target))
+	case CommentMatchRegex:
+		if cfg.Target == "" {
+			return false
+		}
+		re, err := regexp.Compile(cfg.Target)
+		if err != nil {
+			// Bad regex — log and treat as no-match. Failing closed is
+			// safer than firing every comment workflow on a malformed
+			// expression.
+			slog.Warn("workflow comment_mention: invalid regex",
+				"target", cfg.Target,
+				"error", err,
+			)
+			return false
+		}
+		// Wrap match evaluation in a 1-second context so a pathological
+		// regex (catastrophic backtracking) can't lock up the listener.
+		// regexp uses RE2 which is bounded, but the deadline is a
+		// defense-in-depth guard.
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		done := make(chan bool, 1)
+		go func() { done <- re.MatchString(content) }()
+		select {
+		case ok := <-done:
+			return ok
+		case <-ctx.Done():
+			slog.Warn("workflow comment_mention: regex timed out",
+				"target", cfg.Target,
+			)
+			return false
+		}
+	default:
+		return false
 	}
 }
 

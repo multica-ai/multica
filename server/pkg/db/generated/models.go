@@ -327,22 +327,31 @@ type CerebroProjectGroupMember struct {
 }
 
 type CerebroWorkflow struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	ProjectID     pgtype.UUID        `json:"project_id"`
-	Name          string             `json:"name"`
-	Enabled       bool               `json:"enabled"`
-	TriggerType   string             `json:"trigger_type"`
-	TriggerConfig []byte             `json:"trigger_config"`
-	Conditions    []byte             `json:"conditions"`
-	ActionType    string             `json:"action_type"`
-	ActionConfig  []byte             `json:"action_config"`
-	CreatedByID   pgtype.UUID        `json:"created_by_id"`
-	CreatedByType string             `json:"created_by_type"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	EditorMode    string             `json:"editor_mode"`
-	EditorLayout  []byte             `json:"editor_layout"`
+	ID                    pgtype.UUID        `json:"id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	ProjectID             pgtype.UUID        `json:"project_id"`
+	Name                  string             `json:"name"`
+	Enabled               bool               `json:"enabled"`
+	TriggerType           string             `json:"trigger_type"`
+	TriggerConfig         []byte             `json:"trigger_config"`
+	Conditions            []byte             `json:"conditions"`
+	ActionType            string             `json:"action_type"`
+	ActionConfig          []byte             `json:"action_config"`
+	CreatedByID           pgtype.UUID        `json:"created_by_id"`
+	CreatedByType         string             `json:"created_by_type"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	EditorMode            string             `json:"editor_mode"`
+	EditorLayout          []byte             `json:"editor_layout"`
+	InboundWebhookToken   pgtype.Text        `json:"inbound_webhook_token"`
+	InboundSigningSecret  pgtype.Text        `json:"inbound_signing_secret"`
+	OutboundWebhookSecret pgtype.Text        `json:"outbound_webhook_secret"`
+}
+
+type CerebroWorkflowCronState struct {
+	WorkflowID  pgtype.UUID        `json:"workflow_id"`
+	LastFiredAt pgtype.Timestamptz `json:"last_fired_at"`
+	NextFireAt  pgtype.Timestamptz `json:"next_fire_at"`
 }
 
 type CerebroWorkflowIdempotencyKey struct {

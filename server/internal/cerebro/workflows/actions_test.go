@@ -32,7 +32,7 @@ type fakeIssueActions struct {
 	GetIssueErr      error
 
 	// Phase-2 ext (JEH-1114, route_by_domain).
-	Labels       []db.IssueLabel
+	Labels        []db.IssueLabel
 	ListLabelsErr error
 
 	// Phase-2 ext (JEH-1114, validate_evidence).
@@ -42,6 +42,11 @@ type fakeIssueActions struct {
 	ListAttachmentsErr    error
 	AttachmentURLs        []string
 	ListAttachmentURLsErr error
+
+	// Phase-3 (JEH-1108) — reassign_issue capture and canned error.
+	UpdatedAssignee    db.UpdateIssueAssigneeParams
+	UpdateAssigneeErr  error
+	UpdateAssigneeUsed bool
 }
 
 func (f *fakeIssueActions) UpdateIssueStatus(_ context.Context, _ db.UpdateIssueStatusParams) (db.Issue, error) {
@@ -118,6 +123,14 @@ func (f *fakeIssueActions) ListAttachmentURLsByIssueOrComments(_ context.Context
 		return nil, f.ListAttachmentURLsErr
 	}
 	return f.AttachmentURLs, nil
+}
+func (f *fakeIssueActions) UpdateIssueAssignee(_ context.Context, p db.UpdateIssueAssigneeParams) (db.Issue, error) {
+	f.UpdateAssigneeUsed = true
+	f.UpdatedAssignee = p
+	if f.UpdateAssigneeErr != nil {
+		return db.Issue{}, f.UpdateAssigneeErr
+	}
+	return db.Issue{ID: p.ID, AssigneeType: p.AssigneeType, AssigneeID: p.AssigneeID}, nil
 }
 
 func mustUUID(s string) pgtype.UUID {
@@ -566,6 +579,127 @@ func TestActionRouteByDomain_PropagatesIssueLookupError(t *testing.T) {
 	err := svc.actionRouteByDomain(context.Background(), wf, testTriggerEvent())
 	if err == nil || !strings.Contains(err.Error(), "load issue") {
 		t.Fatalf("expected load-issue error, got %v", err)
+	}
+}
+
+// --- Phase-3 action tests (JEH-1108) ---
+
+func TestActionReassignIssue_HappyPath(t *testing.T) {
+	fake := &fakeIssueActions{}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionReassignIssue, ActionConfigReassignIssue{
+		AssigneeID:   "77777777-7777-7777-7777-777777777777",
+		AssigneeType: AssigneeTypeAgent,
+	})
+
+	if err := svc.actionReassignIssue(context.Background(), wf, testTriggerEvent()); err != nil {
+		t.Fatalf("actionReassignIssue returned %v", err)
+	}
+	if !fake.UpdateAssigneeUsed {
+		t.Fatal("expected UpdateIssueAssignee to be called")
+	}
+	if fake.UpdatedAssignee.AssigneeType.String != AssigneeTypeAgent {
+		t.Errorf("assignee_type = %q, want %q", fake.UpdatedAssignee.AssigneeType.String, AssigneeTypeAgent)
+	}
+	if !fake.UpdatedAssignee.AssigneeType.Valid {
+		t.Fatal("assignee_type must be a valid pgtype.Text")
+	}
+}
+
+func TestActionReassignIssue_RejectsUnsupportedAssigneeType(t *testing.T) {
+	fake := &fakeIssueActions{}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionReassignIssue, ActionConfigReassignIssue{
+		AssigneeID:   "77777777-7777-7777-7777-777777777777",
+		AssigneeType: "external_uuid",
+	})
+	err := svc.actionReassignIssue(context.Background(), wf, testTriggerEvent())
+	if err == nil || !strings.Contains(err.Error(), "unsupported assignee_type") {
+		t.Fatalf("expected unsupported assignee_type error, got %v", err)
+	}
+	if fake.UpdateAssigneeUsed {
+		t.Fatal("UpdateIssueAssignee must not be called on invalid type")
+	}
+}
+
+func TestActionReassignIssue_RejectsBadUUID(t *testing.T) {
+	fake := &fakeIssueActions{}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionReassignIssue, ActionConfigReassignIssue{
+		AssigneeID:   "not-a-uuid",
+		AssigneeType: AssigneeTypeMember,
+	})
+	err := svc.actionReassignIssue(context.Background(), wf, testTriggerEvent())
+	if err == nil || !strings.Contains(err.Error(), "reassign_issue") {
+		t.Fatalf("expected parse error, got %v", err)
+	}
+}
+
+func TestActionReassignIssue_RequiresIssueID(t *testing.T) {
+	fake := &fakeIssueActions{}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionReassignIssue, ActionConfigReassignIssue{
+		AssigneeID:   "77777777-7777-7777-7777-777777777777",
+		AssigneeType: AssigneeTypeAgent,
+	})
+	te := testTriggerEvent()
+	te.IssueID = ""
+	err := svc.actionReassignIssue(context.Background(), wf, te)
+	if err == nil || !strings.Contains(err.Error(), "no issue_id") {
+		t.Fatalf("expected no issue_id error, got %v", err)
+	}
+}
+
+func TestActionWebhookOutbound_PlaceholderReturnsUnimplemented(t *testing.T) {
+	fake := &fakeIssueActions{}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionWebhookOutbound, ActionConfigWebhookOutbound{
+		URL: "https://example.com/hook",
+	})
+	err := svc.actionWebhookOutbound(context.Background(), wf, testTriggerEvent())
+	if err == nil {
+		t.Fatal("placeholder must return an error until PR 2 lands")
+	}
+	if !errors.Is(err, ErrWebhookOutboundUnimplemented) {
+		t.Fatalf("expected ErrWebhookOutboundUnimplemented, got %v", err)
+	}
+}
+
+func TestActionWebhookOutbound_ValidatesURL(t *testing.T) {
+	fake := &fakeIssueActions{}
+	svc := newServiceWithFake(fake)
+	// Missing URL is a config error, not the unimplemented sentinel.
+	wf := testWorkflow(ActionWebhookOutbound, ActionConfigWebhookOutbound{})
+	err := svc.actionWebhookOutbound(context.Background(), wf, testTriggerEvent())
+	if err == nil || !strings.Contains(err.Error(), "url is required") {
+		t.Fatalf("expected url-required error, got %v", err)
+	}
+	if errors.Is(err, ErrWebhookOutboundUnimplemented) {
+		t.Fatal("url-required must surface before the unimplemented sentinel")
+	}
+}
+
+func TestRunAction_DispatchesPhase3Actions(t *testing.T) {
+	fake := &fakeIssueActions{}
+	svc := newServiceWithFake(fake)
+
+	// reassign_issue routes through runAction.
+	wf := testWorkflow(ActionReassignIssue, ActionConfigReassignIssue{
+		AssigneeID:   "77777777-7777-7777-7777-777777777777",
+		AssigneeType: AssigneeTypeMember,
+	})
+	if err := svc.runAction(context.Background(), wf, testTriggerEvent()); err != nil {
+		t.Fatalf("runAction(reassign_issue) returned %v", err)
+	}
+	if !fake.UpdateAssigneeUsed {
+		t.Fatal("runAction must invoke UpdateIssueAssignee for reassign_issue")
+	}
+
+	// webhook_outbound routes through runAction and surfaces the sentinel.
+	wf = testWorkflow(ActionWebhookOutbound, ActionConfigWebhookOutbound{URL: "https://example.com"})
+	err := svc.runAction(context.Background(), wf, testTriggerEvent())
+	if !errors.Is(err, ErrWebhookOutboundUnimplemented) {
+		t.Fatalf("runAction(webhook_outbound) must surface the unimplemented sentinel, got %v", err)
 	}
 }
 
