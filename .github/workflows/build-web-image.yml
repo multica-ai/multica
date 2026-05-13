@@ -64,6 +64,7 @@ jobs:
           pull: true
           push: true
           platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=crm-web-amd64
           cache-to: type=gha,mode=max,scope=crm-web-amd64
