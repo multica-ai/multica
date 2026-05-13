@@ -25,7 +25,8 @@ export type CerebroFlagKey =
   | "cerebro_tasks"
   | "cerebro_pin_input"
   | "cerebro_workflows"
-  | "cerebro_persona_permissions";
+  | "cerebro_persona_permissions"
+  | "cerebro_skill_mention";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -55,6 +56,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_pin_input: true,
   cerebro_workflows: false,
   cerebro_persona_permissions: false,
+  cerebro_skill_mention: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -181,5 +183,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Persona permissions",
     description:
       "Enable the workspace permissions admin page at /:workspace/permissions — list, create, edit, and audit Persona grants (subject × resource × capability). Hidden until the Persona grant API (JEH-1179) is live in this environment.",
+  },
+  {
+    key: "cerebro_skill_mention",
+    label: "Skill mentions",
+    description:
+      "Enable the /skill trigger in editor inputs. Selecting a skill from the popover inserts a reference link to the skill detail page — no side effect, no skill execution.",
   },
 ];

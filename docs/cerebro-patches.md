@@ -505,3 +505,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `comment-input-min-height` | packages/views/issues/components/comment-input.tsx | 1 | JEH-1065 — minimum 2 lines on the bottom comment input for the same reason. |
 
 | `cerebro-account-availability` | packages/core/api/client.ts | 4 | JEH-881 — adds `runtime_count`, `available_runtime_count`, `nearest_unpause_at`, `status` fields to `CerebroAccount` interface. Backend derives values from a LEFT JOIN between `cerebro_account` and `agent_runtime`. |
+| `skill-mention-prefix` | packages/views/editor/extensions/mention-extension.ts | 5 | JEH-1094 — `skill` mention type renders bare (no `@` prefix), matching the existing `issue` carve-out, so a skill chip shows the skill name not `@SkillName`. |
+| `skill-mention-view` | packages/views/editor/extensions/mention-view.tsx | 8 | JEH-1094 — adds a `type === "skill"` branch that renders `SkillMentionChip` from `@multica/cerebro-skill-mention`. |
+| `skill-mention-readonly` | packages/views/editor/readonly-content.tsx | 2 | JEH-1094 — imports `SkillMentionChip` for readonly rendering of skill mentions. |
+| `skill-mention-readonly-route` | packages/views/editor/readonly-content.tsx | 11 | JEH-1094 — extends the mention href regex to accept `skill`, and routes `mention://skill/<id>` to a `SkillMentionChip` instead of a plain mention span. |
+| `skill-mention-register` | packages/views/editor/extensions/index.ts | 7 | JEH-1094 — imports and registers `createSkillMentionExtension` next to `BaseMentionExtension` so the `/skill` trigger fires in every editor that already supports `@`. Feature-flagged inside the extension. |
