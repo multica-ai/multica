@@ -262,6 +262,8 @@ type CRMEmailThreadResponse struct {
 	WorkspaceID      string  `json:"workspace_id"`
 	AccountID        *string `json:"account_id"`
 	ContactID        *string `json:"contact_id"`
+	ProjectID        *string `json:"project_id"`
+	IssueID          *string `json:"issue_id"`
 	Subject          string  `json:"subject"`
 	ExternalThreadID *string `json:"external_thread_id"`
 	Mailbox          *string `json:"mailbox"`
@@ -278,6 +280,8 @@ type crmEmailThreadRow struct {
 	WorkspaceID      pgtype.UUID
 	AccountID        pgtype.UUID
 	ContactID        pgtype.UUID
+	ProjectID        pgtype.UUID
+	IssueID          pgtype.UUID
 	Subject          string
 	ExternalThreadID pgtype.Text
 	Mailbox          pgtype.Text
@@ -349,6 +353,8 @@ type CreateCRMEmailThreadRequest struct {
 type UpdateCRMEmailThreadAssociationRequest struct {
 	AccountID *string `json:"account_id"`
 	ContactID *string `json:"contact_id"`
+	ProjectID *string `json:"project_id"`
+	IssueID   *string `json:"issue_id"`
 }
 
 type CreateCRMEmailMessageRequest struct {
@@ -375,6 +381,8 @@ func crmEmailThreadToResponse(row crmEmailThreadRow) CRMEmailThreadResponse {
 		WorkspaceID:      uuidToString(row.WorkspaceID),
 		AccountID:        uuidToPtr(row.AccountID),
 		ContactID:        uuidToPtr(row.ContactID),
+		ProjectID:        uuidToPtr(row.ProjectID),
+		IssueID:          uuidToPtr(row.IssueID),
 		Subject:          row.Subject,
 		ExternalThreadID: textToPtr(row.ExternalThreadID),
 		Mailbox:          textToPtr(row.Mailbox),
@@ -1219,7 +1227,7 @@ func (h *Handler) scanCRMContact(row pgx.Row) (crmContactRow, error) {
 func (h *Handler) scanCRMEmailThread(row pgx.Row) (crmEmailThreadRow, error) {
 	var thread crmEmailThreadRow
 	err := row.Scan(
-		&thread.ID, &thread.WorkspaceID, &thread.AccountID, &thread.ContactID,
+		&thread.ID, &thread.WorkspaceID, &thread.AccountID, &thread.ContactID, &thread.ProjectID, &thread.IssueID,
 		&thread.Subject, &thread.ExternalThreadID, &thread.Mailbox, &thread.Direction,
 		&thread.Status, &thread.LastMessageAt, &thread.CreatedAt, &thread.UpdatedAt,
 		&thread.MessageCount,
@@ -1241,7 +1249,7 @@ func (h *Handler) scanCRMEmailMessage(row pgx.Row) (crmEmailMessageRow, error) {
 
 func (h *Handler) getCRMEmailThread(w http.ResponseWriter, r *http.Request, threadID pgtype.UUID, workspaceID pgtype.UUID) (crmEmailThreadRow, bool) {
 	thread, err := h.scanCRMEmailThread(h.DB.QueryRow(r.Context(), `
-		SELECT t.id, t.workspace_id, t.account_id, t.contact_id, t.subject,
+		SELECT t.id, t.workspace_id, t.account_id, t.contact_id, t.project_id, t.issue_id, t.subject,
 		       t.external_thread_id, t.mailbox, t.direction, t.status, t.last_message_at,
 		       t.created_at, t.updated_at, COUNT(m.id)::bigint AS message_count
 		FROM crm_email_thread t
@@ -1270,7 +1278,7 @@ func (h *Handler) ListCRMEmailThreads(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := h.DB.Query(r.Context(), `
-		SELECT t.id, t.workspace_id, t.account_id, t.contact_id, t.subject,
+		SELECT t.id, t.workspace_id, t.account_id, t.contact_id, t.project_id, t.issue_id, t.subject,
 		       t.external_thread_id, t.mailbox, t.direction, t.status, t.last_message_at,
 		       t.created_at, t.updated_at, COUNT(m.id)::bigint AS message_count
 		FROM crm_email_thread t
@@ -1338,13 +1346,38 @@ func (h *Handler) UpdateCRMEmailThreadAssociation(w http.ResponseWriter, r *http
 	if !ok {
 		return
 	}
+	projectID, ok := optionalUUID(w, req.ProjectID, "project_id")
+	if !ok {
+		return
+	}
+	if projectID.Valid {
+		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{ID: projectID, WorkspaceID: workspaceID}); err != nil {
+			writeError(w, http.StatusBadRequest, "project not found in this workspace")
+			return
+		}
+	}
+	issueID, ok := optionalUUID(w, req.IssueID, "issue_id")
+	if !ok {
+		return
+	}
+	if issueID.Valid {
+		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: issueID, WorkspaceID: workspaceID})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "issue not found in this workspace")
+			return
+		}
+		if projectID.Valid && issue.ProjectID.Valid && issue.ProjectID.Bytes != projectID.Bytes {
+			writeError(w, http.StatusBadRequest, "issue does not belong to selected project")
+			return
+		}
+	}
 	thread, err := h.scanCRMEmailThread(h.DB.QueryRow(r.Context(), `
 		UPDATE crm_email_thread
-		SET account_id = $3, contact_id = $4, updated_at = now()
+		SET account_id = $3, contact_id = $4, project_id = $5, issue_id = $6, updated_at = now()
 		WHERE id = $1 AND workspace_id = $2
-		RETURNING id, workspace_id, account_id, contact_id, subject, external_thread_id, mailbox, direction, status, last_message_at, created_at, updated_at,
+		RETURNING id, workspace_id, account_id, contact_id, project_id, issue_id, subject, external_thread_id, mailbox, direction, status, last_message_at, created_at, updated_at,
 		          (SELECT COUNT(*)::bigint FROM crm_email_message m WHERE m.thread_id = crm_email_thread.id AND m.workspace_id = crm_email_thread.workspace_id)
-	`, threadID, workspaceID, accountID, contactID))
+	`, threadID, workspaceID, accountID, contactID, projectID, issueID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update CRM email thread association")
 		return
@@ -1390,7 +1423,7 @@ func (h *Handler) CreateCRMEmailThread(w http.ResponseWriter, r *http.Request) {
 	thread, err := h.scanCRMEmailThread(h.DB.QueryRow(r.Context(), `
 		INSERT INTO crm_email_thread (workspace_id, account_id, contact_id, subject, external_thread_id, mailbox, direction, status, last_message_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, workspace_id, account_id, contact_id, subject, external_thread_id, mailbox, direction, status, last_message_at, created_at, updated_at, 0::bigint
+		RETURNING id, workspace_id, account_id, contact_id, project_id, issue_id, subject, external_thread_id, mailbox, direction, status, last_message_at, created_at, updated_at, 0::bigint
 	`, workspaceID, accountID, contactID, subject, cleanOptionalText(req.ExternalThreadID), cleanOptionalText(req.Mailbox), cleanDefault(req.Direction, "inbound"), cleanDefault(req.Status, "open"), lastMessageAt))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create CRM email thread")

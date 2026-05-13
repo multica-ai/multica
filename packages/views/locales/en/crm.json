@@ -184,7 +184,9 @@
     "secret_reference": "Secret reference",
     "secret_reference_placeholder": "Secret or vault reference, not the raw password",
     "imap_security_note": "Credentials are not saved by this UI yet. The backend settings API will store only a secret reference, never return raw passwords, and keep sync disabled by default.",
-    "test_connection": "Test connection"
+    "test_connection": "Test connection",
+    "no_project_link": "No project link",
+    "no_issue_link": "No issue link"
   },
   "notes": {
     "title": "Notes & activity",

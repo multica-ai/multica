@@ -184,7 +184,9 @@
     "secret_reference": "密钥引用",
     "secret_reference_placeholder": "密钥或 vault 引用，不填写原始密码",
     "imap_security_note": "当前 UI 暂不保存凭证。后端配置接口只保存密钥引用，不返回原始密码，并默认关闭同步。",
-    "test_connection": "测试连接"
+    "test_connection": "测试连接",
+    "no_project_link": "不关联项目",
+    "no_issue_link": "不关联 Issue"
   },
   "notes": {
     "title": "备注与动态",

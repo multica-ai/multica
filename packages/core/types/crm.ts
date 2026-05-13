@@ -203,6 +203,8 @@ export interface CRMEmailThread {
   workspace_id: string;
   account_id?: string | null;
   contact_id?: string | null;
+  project_id?: string | null;
+  issue_id?: string | null;
   subject: string;
   external_thread_id?: string | null;
   mailbox?: string | null;
@@ -250,6 +252,8 @@ export interface ListCRMEmailMessagesResponse {
 export interface UpdateCRMEmailThreadAssociationRequest {
   account_id?: string | null;
   contact_id?: string | null;
+  project_id?: string | null;
+  issue_id?: string | null;
 }
 
 export interface CreateCRMEmailThreadRequest {

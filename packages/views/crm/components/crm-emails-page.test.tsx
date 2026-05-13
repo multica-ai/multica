@@ -116,7 +116,7 @@ beforeEach(() => {
 });
 
 describe("CRMEmailsPage", () => {
-  it("renders a CRM-style email workspace with folders, detail, context, and message body", async () => {
+  it("renders a CRM-style email workspace with folders, wide detail pane, and message body", async () => {
     renderEmailsPage();
 
     expect(await screen.findByText("Email workspace")).toBeInTheDocument();
@@ -124,9 +124,9 @@ describe("CRMEmailsPage", () => {
     expect(screen.getByRole("button", { name: /Inbox/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Mailbox settings/ })).toBeInTheDocument();
     expect((await screen.findAllByText("New quotation request")).length).toBeGreaterThan(0);
-    expect(screen.getByText("CRM context")).toBeInTheDocument();
-    expect(screen.getByText("Related project")).toBeInTheDocument();
-    expect(screen.getByText("Related issue")).toBeInTheDocument();
+    expect(screen.queryByText("CRM context")).not.toBeInTheDocument();
+    expect(screen.queryByText("Related project")).not.toBeInTheDocument();
+    expect(screen.queryByText("Related issue")).not.toBeInTheDocument();
     expect(screen.getAllByText(/sales@example.com/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/inbound/).length).toBeGreaterThan(0);
     expect(screen.getByText(/2 messages/)).toBeInTheDocument();
@@ -204,6 +204,8 @@ describe("CRMEmailsPage", () => {
     expect(mockApi.updateCRMEmailThreadAssociation).toHaveBeenCalledWith("thread-2", {
       account_id: "account-1",
       contact_id: "contact-2",
+      project_id: null,
+      issue_id: null,
     });
   });
 });

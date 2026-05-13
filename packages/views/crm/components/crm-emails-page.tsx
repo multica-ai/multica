@@ -7,7 +7,7 @@ import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { crmAccountListOptions, crmContactListOptions, crmEmailMessageListOptions, crmEmailThreadListOptions, crmKeys } from "@multica/core/crm/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
-import type { CRMAccount, CRMContact, CRMEmailThread, CreateCRMContactRequest } from "@multica/core/types";
+import type { CRMAccount, CRMContact, CRMEmailThread, CreateCRMContactRequest, Issue, Project } from "@multica/core/types";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -29,6 +29,8 @@ type AssociationDraft = {
   contactId: string;
   contactName: string;
   contactEmail: string;
+  projectId: string;
+  issueId: string;
 };
 
 function messageTime(value?: string | null) {
@@ -130,6 +132,14 @@ export function CRMEmailsPage() {
     ...crmEmailMessageListOptions(wsId, selectedThread?.id ?? ""),
     enabled: Boolean(selectedThread?.id),
   });
+  const { data: projects = [] } = useQuery({
+    queryKey: ["projects", wsId, "crm-email-link-picker"],
+    queryFn: async () => (await api.listProjects()).projects,
+  });
+  const { data: issues = [] } = useQuery({
+    queryKey: ["issues", wsId, "crm-email-link-picker", associationDraft?.projectId ?? ""],
+    queryFn: async () => (await api.listIssues({ project_id: associationDraft?.projectId || undefined, limit: 100 })).issues,
+  });
 
   const selectedAccount = accounts.find((account) => account.id === linkedAccountId) ?? null;
   const selectedContact = contacts.find((contact) => contact.id === (selectedThread?.contact_id ?? "")) ?? null;
@@ -141,6 +151,8 @@ export function CRMEmailsPage() {
       contactId: selectedThread?.contact_id ?? "",
       contactName: selectedContact?.name ?? inferred.contactName,
       contactEmail: selectedContact?.email ?? inferred.contactEmail,
+      projectId: selectedThread?.project_id ?? "",
+      issueId: selectedThread?.issue_id ?? "",
     });
   };
 
@@ -161,6 +173,8 @@ export function CRMEmailsPage() {
       return api.updateCRMEmailThreadAssociation(selectedThread.id, {
         account_id: associationDraft.accountId || null,
         contact_id: contactId,
+        project_id: associationDraft.projectId || null,
+        issue_id: associationDraft.issueId || null,
       });
     },
     onSuccess: async (thread) => {
@@ -292,8 +306,7 @@ export function CRMEmailsPage() {
                 </div>
                 {updateAssociation.isError && <p className="mt-2 text-xs text-destructive">{t(($) => $.emails.association_error)}</p>}
               </div>
-              <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_300px]">
-                <div className="min-h-0 overflow-y-auto bg-muted/20 p-5">
+              <div className="min-h-0 flex-1 overflow-y-auto bg-muted/20 p-5">
                 {messagesLoading ? (
                   <div className="space-y-3">
                     <Skeleton className="h-24 w-full" />
@@ -317,19 +330,6 @@ export function CRMEmailsPage() {
                     ))}
                   </div>
                 )}
-                </div>
-                <aside className="border-l bg-card/60 p-4">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t(($) => $.emails.crm_context)}</div>
-                  <div className="mt-3 space-y-3">
-                    <DetailRow label={t(($) => $.emails.linked_customer)} value={selectedAccount?.name ?? t(($) => $.emails.no_customer)} />
-                    <DetailRow label={t(($) => $.emails.linked_contact)} value={selectedContact?.name ?? t(($) => $.emails.no_contact)} />
-                    <DetailRow label={t(($) => $.emails.related_project)} value={t(($) => $.emails.not_linked_yet)} />
-                    <DetailRow label={t(($) => $.emails.related_issue)} value={t(($) => $.emails.not_linked_yet)} />
-                  </div>
-                  <div className="mt-4 rounded-lg border border-dashed bg-background p-3 text-xs text-muted-foreground">
-                    {t(($) => $.emails.profile_automation_hint)}
-                  </div>
-                </aside>
               </div>
             </div>
           )}
@@ -401,6 +401,22 @@ export function CRMEmailsPage() {
                   </select>
                 </label>
               )}
+              <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-2">
+                <label className="space-y-1 text-sm">
+                  <span className="text-xs font-medium text-muted-foreground">{t(($) => $.emails.related_project)}</span>
+                  <select aria-label={t(($) => $.emails.related_project)} className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={associationDraft.projectId} onChange={(event) => setAssociationDraft({ ...associationDraft, projectId: event.target.value, issueId: "" })}>
+                    <option value="">{t(($) => $.emails.no_project_link)}</option>
+                    {projects.map((project: Project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+                  </select>
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className="text-xs font-medium text-muted-foreground">{t(($) => $.emails.related_issue)}</span>
+                  <select aria-label={t(($) => $.emails.related_issue)} className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={associationDraft.issueId} onChange={(event) => setAssociationDraft({ ...associationDraft, issueId: event.target.value })}>
+                    <option value="">{t(($) => $.emails.no_issue_link)}</option>
+                    {issues.map((issue: Issue) => <option key={issue.id} value={issue.id}>{issue.identifier} · {issue.title}</option>)}
+                  </select>
+                </label>
+              </div>
               {associationDraft.accountId && !associationDraft.contactId && (
                 <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-2">
                   <div className="sm:col-span-2 text-xs font-medium text-muted-foreground">{t(($) => $.emails.new_contact_title)}</div>
