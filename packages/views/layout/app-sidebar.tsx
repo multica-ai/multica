@@ -860,13 +860,20 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             return (
                               <React.Fragment key={item.id}>
                                 <SidebarMenuItem>
-                                  {/* CEREBRO-PATCH(nested-projects-guide-line): v3 mockup shows continuous left guide line at all levels, not only nested children. */}
+                                  {/* CEREBRO-PATCH(nested-projects-guide-line): subtree-spine — line on each child anchored at parent's chevron column, extending half a row up so it visually emerges from the parent. */}
                                   <div
                                     className={cn(
-                                      "relative border-l border-sidebar-border/70",
+                                      "relative",
                                     )}
                                     style={nestedStyle}
                                   >
+                                    {level > 0 && (
+                                      <span
+                                        aria-hidden="true"
+                                        className="pointer-events-none absolute -top-3.5 bottom-0 w-px bg-sidebar-border/70"
+                                        style={{ left: 8 * level - 12 }}
+                                      />
+                                    )}
                                     <SidebarMenuButton
                                       isActive={isActive}
                                       render={<AppLink href={href} />}
