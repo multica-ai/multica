@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 
 // Hoisted holder so tests can mutate the "current user" between renders
@@ -17,8 +17,31 @@ vi.mock("@multica/core/auth", () => ({
 
 import { useSubmitOnEnter, SUBMIT_ON_ENTER_KEY } from "./use-submit-on-enter";
 
+// matchMedia stub. Driven by `coarsePointer` so each test can pretend to be
+// on a touch-primary device or a fine-pointer (mouse / trackpad) device.
+const coarsePointer = { current: false };
+const originalMatchMedia = window.matchMedia;
+
 beforeEach(() => {
   authState.user = null;
+  coarsePointer.current = false;
+  window.matchMedia = ((query: string) => {
+    const matches = query === "(pointer: coarse)" ? coarsePointer.current : false;
+    return {
+      matches,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    } as unknown as MediaQueryList;
+  }) as typeof window.matchMedia;
+});
+
+afterEach(() => {
+  window.matchMedia = originalMatchMedia;
 });
 
 describe("useSubmitOnEnter", () => {
@@ -53,10 +76,20 @@ describe("useSubmitOnEnter", () => {
     expect(result.current).toBe(false);
   });
 
-  it("returns true when key is exactly boolean true", () => {
+  it("returns true when key is exactly boolean true on a fine pointer device", () => {
     authState.user = { preferences: { submit_on_enter: true } };
     const { result } = renderHook(() => useSubmitOnEnter());
     expect(result.current).toBe(true);
+  });
+
+  it("returns false on a touch-primary device even when the preference is opted in", () => {
+    // On mobile / touch-primary devices there's no easy Shift/Cmd+Enter
+    // affordance, so Enter must keep inserting newlines regardless of the
+    // user's preference. The submit button stays available.
+    authState.user = { preferences: { submit_on_enter: true } };
+    coarsePointer.current = true;
+    const { result } = renderHook(() => useSubmitOnEnter());
+    expect(result.current).toBe(false);
   });
 
   it("exports the storage key string used by the settings UI", () => {
