@@ -142,7 +142,17 @@
     "association_error": "保存邮件关联失败。",
     "open_customer": "打开客户",
     "no_messages": "该线程暂无邮件内容。",
-    "no_body": "暂无邮件正文。"
+    "no_body": "暂无邮件正文。",
+    "unlinked_badge": "未关联",
+    "change_association": "调整关联",
+    "link_customer_contact": "关联客户",
+    "link_help": "为这个邮件线程选择客户，然后关联已有联系人，或根据发件人一键新建联系人。",
+    "customer_detail": "CRM 客户详情。",
+    "contact_detail": "CRM 联系人详情。",
+    "existing_contact": "已有联系人",
+    "create_new_contact": "新建联系人",
+    "new_contact_title": "根据邮件发件人新建联系人",
+    "to_label": "收件人"
   },
   "notes": {
     "title": "备注与动态",

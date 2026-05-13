@@ -142,7 +142,17 @@
     "association_error": "Failed to save email association.",
     "open_customer": "Open customer",
     "no_messages": "No messages in this thread yet.",
-    "no_body": "No message body."
+    "no_body": "No message body.",
+    "unlinked_badge": "Unlinked",
+    "change_association": "Change link",
+    "link_customer_contact": "Link customer",
+    "link_help": "Choose the customer for this email thread, then link an existing contact or create a new contact from the sender.",
+    "customer_detail": "Customer details from CRM.",
+    "contact_detail": "Contact details from CRM.",
+    "existing_contact": "Existing contact",
+    "create_new_contact": "Create new contact",
+    "new_contact_title": "New contact from email sender",
+    "to_label": "To"
   },
   "notes": {
     "title": "Notes & activity",
