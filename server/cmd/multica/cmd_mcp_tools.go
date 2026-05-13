@@ -100,6 +100,9 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	registerArtifactTools(srv, client)
 	// CEREBRO-PATCH(cerebro-groups-mcp): JEH-1172 register group MCP tools.
 	registerCerebroGroupTools(srv, client)
+	// CEREBRO-PATCH(mcp-cli-cmd-mcp-tools-grants-wire): JEH-1181 Persona grant control plane MCP tools.
+	actorID, actorType := resolveMCPActor(client)
+	registerGrantTools(srv, workspaceID, actorID, actorType)
 
 	// -----------------------------------------------------------------------
 	// list_issues

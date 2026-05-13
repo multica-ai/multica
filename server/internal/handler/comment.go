@@ -122,6 +122,9 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		resp[i] = commentToResponse(c, grouped[cid], groupedAtt[cid])
 	}
 
+	// CEREBRO-PATCH(persona-mask-comment-list): JEH-1173 redaction.
+	resp = h.maskCommentsForCaller(r, issue, comments, resp)
+
 	writeJSON(w, http.StatusOK, resp)
 }
 

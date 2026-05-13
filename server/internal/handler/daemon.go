@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	cerebropersona "github.com/multica-ai/multica/server/internal/cerebro/persona"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/profile"
@@ -1208,14 +1209,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
 		resp.Agent = &TaskAgentData{
-			ID:           uuidToString(agent.ID),
-			Name:         agent.Name,
-			Instructions: agent.Instructions,
-			Skills:       skills,
-			CustomEnv:    customEnv,
-			CustomArgs:   customArgs,
-			McpConfig:    mcpConfig,
-			Model:        agent.Model.String,
+			ID:             uuidToString(agent.ID),
+			Name:           agent.Name,
+			Instructions:   agent.Instructions,
+			Skills:         skills,
+			CustomEnv:      customEnv,
+			CustomArgs:     customArgs,
+			McpConfig:      mcpConfig,
+			Model:          agent.Model.String,
+			PersonaSandbox: agent.PersonaSandbox.String,
 		}
 	}
 
@@ -1229,6 +1231,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
+			// CEREBRO-PATCH(persona-spawn-subject): JEH-1080 — resolve the spawning user + groups for the persona-hook facts.
+			sub := cerebropersona.ResolveSpawnSubject(r.Context(), h.GroupPermissions, issue)
+			resp.PersonaSpawnUserID = sub.UserID
+			resp.PersonaSpawnGroupIDs = sub.GroupIDs
 
 			var projectRepos []RepoData
 			if issue.ProjectID.Valid {

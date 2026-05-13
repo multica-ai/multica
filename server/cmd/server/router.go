@@ -37,6 +37,8 @@ import (
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler import
 	cerebrotasks "github.com/multica-ai/multica/server/internal/cerebro/tasks"
+	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler import
+	cerebrosharetoken "github.com/multica-ai/multica/server/internal/cerebro/sharetoken"
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow engine REST handler import
 	cerebroworkflows "github.com/multica-ai/multica/server/internal/cerebro/workflows"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -220,8 +222,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// registration so RecordRuntimeAccount in runtime_account_cerebro.go can
 	// delegate to the cerebro service via the RuntimeAccountInvoker seam.
 	h.RuntimeAccount = cerebroruntime.NewAccountService(cerebroQueries, cerebroAccountHandler.Service, bus)
+	// CEREBRO-PATCH(router-persona-mask): JEH-1079 mount the field-level
+	// redaction service. Falls through to no-op when persona env is
+	// unset — handlers behave as before for non-persona deployments.
+	h.PersonaMask = newPersonaMaskInvoker()
+	// CEREBRO-PATCH(router-persona-mask-audit): JEH-1173 mount the
+	// redaction-audit writer. Always wired (independent of persona env)
+	// so a future persona enablement starts logging from the first read.
+	h.PersonaMaskAudit = newPersonaMaskAuditWriter(cerebroQueries)
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
+	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler
+	cerebroShareTokenHandler := cerebrosharetoken.NewHandler(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).WithService(opts.WorkflowService)
 
@@ -301,11 +313,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Get("/install-runtime.sh", h.ServeInstallRuntimeScript)
 	r.Post("/api/runtime-setup/exchange", h.ExchangeRuntimeSetupToken)
 
+	// CEREBRO-PATCH(sharetoken-public-route): JEH-1076 anonymous public-link
+	// visitor path. Persona-gated; persona's /v1/check is called without a
+	// bearer token and the share-token id is recorded as anonymous_context.
+	r.Get("/api/cerebro/public/share/{token}", cerebroShareTokenHandler.PublicGet)
 	// CEREBRO-PATCH(cerebro-workflows-webhook-ingress): JEH-1108 PR 2 public inbound webhook endpoint. Token-in-URL is the auth surface; HMAC + timestamp window are layered defenses. Mounted OUTSIDE the auth-required groups by design. When opts.WorkflowService is nil (tests), the route returns 503.
 	if opts.WorkflowService != nil {
 		webhookInbound := cerebroworkflows.NewWebhookInboundHandler(cerebroQueries, opts.WorkflowService, queries)
 		r.Post("/api/cerebro/workflows/webhook/{token}", webhookInbound.ServeHTTP)
 	}
+	// CEREBRO-PATCH(sharetoken-public-route): JEH-1076 anonymous public-link
+	// visitor path. Persona-gated; persona's /v1/check is called without a
+	// bearer token and the share-token id is recorded as anonymous_context.
+	r.Get("/api/cerebro/public/share/{token}", cerebroShareTokenHandler.PublicGet)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -443,6 +463,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/push/unsubscribe", h.UnsubscribePush)
 		// /api/upload-file is registered in the task-allowlist group above
 		// so agents can upload attachments while running a task.
+
+		// Persona pass-through for the agent settings UI. Returns []
+		// when persona is not configured server-side so the dropdown
+		// silently hides.
+		r.Get("/api/persona/sandboxes", h.ListPersonaSandboxes)
+
+		// CEREBRO-PATCH(persona-approvals): JEH-1078 approval inbox +
+		// approve/deny proxy. List returns the calling Multica user's
+		// "kræver din godkendelse" pool-matched requests; approve/deny
+		// resolve on behalf of the user against persona.
+		r.Get("/api/persona/approvals", h.ListPersonaApprovals)
+		r.Post("/api/persona/approvals/{id}/approve", h.ApprovePersonaApproval)
+		r.Post("/api/persona/approvals/{id}/deny", h.DenyPersonaApproval)
 
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
@@ -861,6 +894,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Patch("/{refId}", cerebroReferencesHandler.Update)
 				r.Delete("/{refId}", cerebroReferencesHandler.Delete)
 			})
+			// CEREBRO-PATCH(sharetoken-routes): JEH-1076 mint + revoke a
+			// public share-token for an issue. Public GET is mounted on the
+			// unauth tree above.
+			r.Post("/api/cerebro/issues/{id}/share-tokens", cerebroShareTokenHandler.Create)
+			r.Delete("/api/cerebro/share-tokens/{tokenId}", cerebroShareTokenHandler.Revoke)
 			// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 cross-agent tasks list endpoint
 			r.Get("/api/cerebro/tasks", cerebroTasksHandler.List)
 			// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow engine REST surface (PR 2/3).

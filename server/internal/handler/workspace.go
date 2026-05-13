@@ -660,6 +660,10 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// CEREBRO-PATCH(persona-mask-list-members): JEH-1079 field-level
+	// redaction. Strips email/phone for actors without pii grant.
+	resp = h.maskMembersListForCaller(r, uuidToString(wsUUID), resp)
+
 	writeJSON(w, http.StatusOK, resp)
 }
 

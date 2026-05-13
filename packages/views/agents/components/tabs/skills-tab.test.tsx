@@ -55,6 +55,7 @@ const agent: Agent = {
   updated_at: "2026-04-16T00:00:00Z",
   archived_at: null,
   archived_by: null,
+  persona_sandbox: "",
 };
 
 function renderSkillsTab() {

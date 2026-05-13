@@ -99,7 +99,13 @@ type Handler struct {
 	// CEREBRO-PATCH(handler-runtime-account): cerebro daemon-driven account
 	// registration service. Wired by the router after construction.
 	RuntimeAccount RuntimeAccountInvoker
-	cfg            Config
+	// CEREBRO-PATCH(handler-persona-mask): JEH-1079 mask checker. Wired by
+	// the router after construction; nil = persona not configured (no redaction).
+	PersonaMask PersonaMaskInvoker
+	// CEREBRO-PATCH(handler-persona-mask-audit): JEH-1173 redaction ledger.
+	// Wired by the router after construction; nil = no audit row written.
+	PersonaMaskAudit PersonaMaskAuditWriter
+	cfg              Config
 }
 
 // RuntimePauseInvoker is the upstream-side seam that the cerebro runtime

@@ -49,6 +49,15 @@ func (s *Server) RegisterTool(tool Tool, handler ToolHandler) {
 	s.handlers[tool.Name] = handler
 }
 
+// CEREBRO-PATCH(mcp-tools-inventory): JEH-1171 expose registered tools so the
+// permguard regression test can enumerate them without speaking JSON-RPC.
+// Returns a fresh slice so callers cannot mutate the server's internal list.
+func (s *Server) Tools() []Tool {
+	out := make([]Tool, len(s.tools))
+	copy(out, s.tools)
+	return out
+}
+
 // Call invokes a registered tool handler by name. Useful for tests that want
 // to exercise the tool dispatch path without piping JSON-RPC over stdio.
 // Returns the same CallToolResult the JSON-RPC `tools/call` path would produce.

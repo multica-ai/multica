@@ -59,6 +59,7 @@ function makeAgent(overrides: Partial<Agent> & { id: string; name: string }): Ag
     updated_at: "2026-05-12T00:00:00Z",
     archived_at: null,
     archived_by: null,
+    persona_sandbox: "",
     ...overrides,
   };
 }

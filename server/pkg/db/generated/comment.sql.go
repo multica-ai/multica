@@ -31,7 +31,7 @@ func (q *Queries) CountComments(ctx context.Context, arg CountCommentsParams) (i
 const createComment = `-- name: CreateComment :one
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, classification
 `
 
 type CreateCommentParams struct {
@@ -69,6 +69,7 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 		&i.ResolvedAt,
 		&i.ResolvedByType,
 		&i.ResolvedByID,
+		&i.Classification,
 	)
 	return i, err
 }
@@ -83,7 +84,7 @@ func (q *Queries) DeleteComment(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getComment = `-- name: GetComment :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, classification FROM comment
 WHERE id = $1
 `
 
@@ -104,12 +105,13 @@ func (q *Queries) GetComment(ctx context.Context, id pgtype.UUID) (Comment, erro
 		&i.ResolvedAt,
 		&i.ResolvedByType,
 		&i.ResolvedByID,
+		&i.Classification,
 	)
 	return i, err
 }
 
 const getCommentInWorkspace = `-- name: GetCommentInWorkspace :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, classification FROM comment
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -135,6 +137,7 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 		&i.ResolvedAt,
 		&i.ResolvedByType,
 		&i.ResolvedByID,
+		&i.Classification,
 	)
 	return i, err
 }
@@ -183,7 +186,7 @@ func (q *Queries) HasAgentRepliedInThread(ctx context.Context, arg HasAgentRepli
 }
 
 const listCommentsForIssue = `-- name: ListCommentsForIssue :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, classification FROM comment
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC, id ASC
 LIMIT $3
@@ -221,6 +224,7 @@ func (q *Queries) ListCommentsForIssue(ctx context.Context, arg ListCommentsForI
 			&i.ResolvedAt,
 			&i.ResolvedByType,
 			&i.ResolvedByID,
+			&i.Classification,
 		); err != nil {
 			return nil, err
 		}
@@ -233,7 +237,7 @@ func (q *Queries) ListCommentsForIssue(ctx context.Context, arg ListCommentsForI
 }
 
 const listCommentsSinceForIssue = `-- name: ListCommentsSinceForIssue :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, classification FROM comment
 WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
 ORDER BY created_at ASC, id ASC
 LIMIT $4
@@ -276,6 +280,7 @@ func (q *Queries) ListCommentsSinceForIssue(ctx context.Context, arg ListComment
 			&i.ResolvedAt,
 			&i.ResolvedByType,
 			&i.ResolvedByID,
+			&i.Classification,
 		); err != nil {
 			return nil, err
 		}
@@ -294,7 +299,7 @@ UPDATE comment SET
     resolved_by_id = COALESCE(resolved_by_id, $3),
     updated_at = CASE WHEN resolved_at IS NULL THEN now() ELSE updated_at END
 WHERE id = $1
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, classification
 `
 
 type ResolveCommentParams struct {
@@ -322,6 +327,7 @@ func (q *Queries) ResolveComment(ctx context.Context, arg ResolveCommentParams) 
 		&i.ResolvedAt,
 		&i.ResolvedByType,
 		&i.ResolvedByID,
+		&i.Classification,
 	)
 	return i, err
 }
@@ -333,7 +339,7 @@ UPDATE comment SET
     resolved_by_id = NULL,
     updated_at = CASE WHEN resolved_at IS NOT NULL THEN now() ELSE updated_at END
 WHERE id = $1
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, classification
 `
 
 // Idempotent: a no-op clear (already unresolved) just returns the row.
@@ -354,6 +360,7 @@ func (q *Queries) UnresolveComment(ctx context.Context, id pgtype.UUID) (Comment
 		&i.ResolvedAt,
 		&i.ResolvedByType,
 		&i.ResolvedByID,
+		&i.Classification,
 	)
 	return i, err
 }
@@ -363,7 +370,7 @@ UPDATE comment SET
     content = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, classification
 `
 
 type UpdateCommentParams struct {
@@ -388,6 +395,7 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (C
 		&i.ResolvedAt,
 		&i.ResolvedByType,
 		&i.ResolvedByID,
+		&i.Classification,
 	)
 	return i, err
 }

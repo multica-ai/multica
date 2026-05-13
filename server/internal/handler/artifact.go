@@ -299,7 +299,12 @@ func (h *Handler) GetArtifact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "artifact not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, artifactToResponse(artifact))
+	resp := artifactToResponse(artifact)
+	// CEREBRO-PATCH(persona-mask-artifact-get): JEH-1173 redaction.
+	if !h.maskArtifactForCaller(w, r, artifact, &resp) {
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ---------------------------------------------------------------------------

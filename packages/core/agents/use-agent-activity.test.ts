@@ -52,6 +52,7 @@ const fullHistoryAgent: Agent = {
   updated_at: new Date(NOW).toISOString(),
   archived_at: null,
   archived_by: null,
+  persona_sandbox: "",
 };
 
 describe("deriveAgentActivity", () => {

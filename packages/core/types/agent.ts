@@ -166,6 +166,12 @@ export interface Agent {
   archived_at: string | null;
   archived_by: string | null;
   /**
+   * Name of the persona sandbox that gates this agent's tool calls
+   * (e.g. "claude-developer"). Empty string means no persona gating —
+   * the daemon falls back to its existing per-runtime sandbox config.
+   */
+  persona_sandbox: string;
+  /**
    * CEREBRO-PATCH(agent-can-trigger): JEH-1066 — true when the caller is
    * allowed to trigger this agent under the cerebro group-permission model.
    * Workspace members can SEE every agent in the workspace, but trigger
@@ -222,6 +228,11 @@ export interface UpdateAgentRequest {
   status?: AgentStatus;
   max_concurrent_tasks?: number;
   model?: string;
+  /**
+   * Persona sandbox name (e.g. "claude-developer"). Empty string clears
+   * the assignment; omit the field to leave it unchanged.
+   */
+  persona_sandbox?: string;
 }
 
 // Skills

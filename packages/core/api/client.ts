@@ -1146,6 +1146,13 @@ export class ApiClient {
     });
   }
 
+  // Persona pass-through: lists sandboxes the operator can attach to an
+  // agent. Returns an empty list when persona is not configured server-side.
+  async listPersonaSandboxes(): Promise<{ name: string; description: string; system_owned: boolean }[]> {
+    const res = await this.fetch<{ sandboxes?: { name: string; description: string; system_owned: boolean }[] }>("/api/persona/sandboxes");
+    return res.sandboxes ?? [];
+  }
+
   async archiveAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}/archive`, { method: "POST" });
   }

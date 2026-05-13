@@ -41,6 +41,7 @@ type Agent struct {
 	CustomArgs         []byte             `json:"custom_args"`
 	McpConfig          []byte             `json:"mcp_config"`
 	Model              pgtype.Text        `json:"model"`
+	PersonaSandbox     pgtype.Text        `json:"persona_sandbox"`
 }
 
 type AgentBudgetOverride struct {
@@ -140,18 +141,19 @@ type ArtifactFolder struct {
 }
 
 type Attachment struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	IssueID       pgtype.UUID        `json:"issue_id"`
-	CommentID     pgtype.UUID        `json:"comment_id"`
-	UploaderType  string             `json:"uploader_type"`
-	UploaderID    pgtype.UUID        `json:"uploader_id"`
-	Filename      string             `json:"filename"`
-	Url           string             `json:"url"`
-	ContentType   string             `json:"content_type"`
-	SizeBytes     int64              `json:"size_bytes"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	ChatMessageID pgtype.UUID        `json:"chat_message_id"`
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	CommentID      pgtype.UUID        `json:"comment_id"`
+	UploaderType   string             `json:"uploader_type"`
+	UploaderID     pgtype.UUID        `json:"uploader_id"`
+	Filename       string             `json:"filename"`
+	Url            string             `json:"url"`
+	ContentType    string             `json:"content_type"`
+	SizeBytes      int64              `json:"size_bytes"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
+	Classification string             `json:"classification"`
 }
 
 type Autopilot struct {
@@ -361,11 +363,40 @@ type CerebroIssueReference struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroPersonaMaskAudit struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ActorType      string             `json:"actor_type"`
+	ActorID        string             `json:"actor_id"`
+	Action         string             `json:"action"`
+	ResourceKind   string             `json:"resource_kind"`
+	ResourceID     string             `json:"resource_id"`
+	Classification string             `json:"classification"`
+	Decision       string             `json:"decision"`
+	MaskedFields   []byte             `json:"masked_fields"`
+	DecisionID     string             `json:"decision_id"`
+	Reason         string             `json:"reason"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type CerebroProjectGroupMember struct {
 	ProjectID pgtype.UUID        `json:"project_id"`
 	GroupID   pgtype.UUID        `json:"group_id"`
 	AddedBy   pgtype.UUID        `json:"added_by"`
 	AddedAt   pgtype.Timestamptz `json:"added_at"`
+}
+
+type CerebroShareToken struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Token          string             `json:"token"`
+	ResourceKind   string             `json:"resource_kind"`
+	ResourceID     pgtype.UUID        `json:"resource_id"`
+	Action         string             `json:"action"`
+	PersonaGrantID string             `json:"persona_grant_id"`
+	CreatedByID    pgtype.UUID        `json:"created_by_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	RevokedAt      pgtype.Timestamptz `json:"revoked_at"`
 }
 
 type CerebroWorkflow struct {
@@ -466,6 +497,7 @@ type Comment struct {
 	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
 	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
 	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
+	Classification string             `json:"classification"`
 }
 
 type CommentReaction struct {
@@ -552,6 +584,7 @@ type Issue struct {
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
 	Kind               string             `json:"kind"`
 	IsPrivate          bool               `json:"is_private"`
+	Classification     string             `json:"classification"`
 }
 
 type IssueDependency struct {

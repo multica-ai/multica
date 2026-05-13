@@ -1917,10 +1917,41 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			agentEnv[k] = v
 		}
 	}
+	// Persona integration (D3): when the agent has persona_sandbox set AND
+	// the daemon is configured for persona, prepare actor + settings.json
+	// before spawn. Adds env vars and a Claude-Code --settings file that
+	// wires the PreToolUse hook. No-op when either side is absent.
+	//
+	// JEH-1080: forward the spawning user + group memberships the server
+	// resolved at claim time. An empty subject is fine — the hook just
+	// won't carry group facts and any group-grant evaluates to no-match.
+	personaSubject := spawnPersonaSubject{
+		UserID:   task.PersonaSpawnUserID,
+		GroupIDs: task.PersonaSpawnGroupIDs,
+	}
+	if personaSpawn, perr := d.preparePersonaSpawn(ctx, task.Agent, personaSubject, env.WorkDir, taskLog); perr != nil {
+		return TaskResult{}, fmt.Errorf("persona prep: %w", perr)
+	} else if personaSpawn != nil {
+		for k, v := range personaSpawn.Env {
+			agentEnv[k] = v
+		}
+		// Claude Code reads --settings as a CLI flag; passing the path here
+		// keeps the daemon's handling of provider-specific args local. Each
+		// provider that wants persona integration can opt in similarly.
+		if provider == "claude" && personaSpawn.SettingsPath != "" {
+			extraArgs := []string{"--settings", personaSpawn.SettingsPath}
+			if existing, ok := agentEnv["MULTICA_CLAUDE_EXTRA_ARGS"]; ok && existing != "" {
+				agentEnv["MULTICA_CLAUDE_EXTRA_ARGS"] = existing + " --settings " + personaSpawn.SettingsPath
+			} else {
+				agentEnv["MULTICA_CLAUDE_EXTRA_ARGS"] = extraArgs[0] + " " + extraArgs[1]
+			}
+		}
+	}
 	// CEREBRO-PATCH(claude-account-alias): CLAUDE_ACCOUNT=<email> → CLAUDE_CONFIG_DIR=$HOME/.claude-accounts/<email>
 	if email := agentEnv["CLAUDE_ACCOUNT"]; email != "" && agentEnv["CLAUDE_CONFIG_DIR"] == "" {
 		agentEnv["CLAUDE_CONFIG_DIR"] = filepath.Join(os.Getenv("HOME"), ".claude-accounts", email)
 	}
+
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,

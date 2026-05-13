@@ -94,9 +94,13 @@ jobs:
 
       - name: Run migrations
         run: cd server && go run ./cmd/migrate up
+        env:
+          GONOSUMDB: github.com/hvejsel/firtal-persona
 
       - name: Test
         run: cd server && go test ./...
+        env:
+          GONOSUMDB: github.com/hvejsel/firtal-persona
 
   cerebro-inference:
     runs-on: ubuntu-latest

@@ -2,6 +2,10 @@ module github.com/multica-ai/multica/server
 
 go 1.26.1
 
+// CEREBRO-PATCH(persona-sdk-local): persona SDK vendored into packages/cerebro-persona-sdk/
+// so CI can access it without cross-repo credentials. Matches hvejsel/firtal-persona@firtal-persona-cerebro-integration (a3fc8e2).
+replace github.com/hvejsel/firtal-persona/sdk/go => ../packages/cerebro-persona-sdk
+
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/aws/aws-sdk-go-v2 v1.41.5
@@ -14,6 +18,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/hvejsel/firtal-persona/sdk/go v0.0.0-00010101000000-000000000000
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/lmittmann/tint v1.1.3
 	github.com/mattn/go-shellwords v1.0.13

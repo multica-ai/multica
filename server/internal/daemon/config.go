@@ -73,6 +73,20 @@ type Config struct {
 	// SandboxAllowlist) is embedded so callers continue to access fields
 	// directly via cfg.EnableSandbox / cfg.SandboxAllowlist.
 	cerebroruntime.SandboxConfig
+
+	// PersonaURL is the firtal-persona endpoint (e.g. http://localhost:4500).
+	// When set together with PersonaToken, agents whose persona_sandbox is
+	// non-empty get a PreToolUse hook wired in at spawn time. Empty = no
+	// persona integration at all (existing behaviour).
+	PersonaURL string
+	// PersonaToken is the bearer token for the system:cerebro service-actor
+	// in persona. Only that actor has the narrow rights to read sandbox
+	// profiles and check on behalf of agents.
+	PersonaToken string
+	// PersonaHookBin is the absolute path to cerebro-persona-hook. Defaults
+	// to a sibling of the daemon binary. Empty disables persona regardless
+	// of URL/token.
+	PersonaHookBin string
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -316,6 +330,16 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// See server/internal/cerebro/runtime/config.go.
 	cerebroSandbox := cerebroruntime.LoadSandboxConfig()
 
+	personaURL := strings.TrimSpace(os.Getenv("MULTICA_PERSONA_URL"))
+	personaToken := strings.TrimSpace(os.Getenv("MULTICA_PERSONA_TOKEN"))
+	personaHookBin := strings.TrimSpace(os.Getenv("MULTICA_PERSONA_HOOK_BIN"))
+	if personaHookBin == "" && personaURL != "" {
+		// Default: sibling of the daemon binary in the same install dir.
+		if self, err := os.Executable(); err == nil {
+			personaHookBin = filepath.Join(filepath.Dir(self), "cerebro-persona-hook")
+		}
+	}
+
 	// GC config: env > defaults
 	gcEnabled := true
 	if v := os.Getenv("MULTICA_GC_ENABLED"); v == "false" || v == "0" {
@@ -365,6 +389,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexArgs:                      codexArgs,
 		// CEREBRO-PATCH(daemon-config): embedded sandbox config.
 		SandboxConfig: cerebroSandbox,
+		PersonaURL:    personaURL,
+		PersonaToken:  personaToken,
+		PersonaHookBin: personaHookBin,
 	}, nil
 }
 

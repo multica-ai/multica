@@ -89,6 +89,9 @@ type Task struct {
 	// admin's UI toggle takes effect at the next claim — no daemon restart
 	// needed.
 	SandboxEnabled *bool `json:"sandbox_enabled,omitempty"`
+	// CEREBRO-PATCH(daemon-task-persona-spawn): JEH-1080 — spawning user + group memberships piped to the persona-hook as facts.
+	PersonaSpawnUserID   string   `json:"persona_spawn_user_id,omitempty"`
+	PersonaSpawnGroupIDs []string `json:"persona_spawn_group_ids,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.
@@ -106,6 +109,10 @@ type AgentData struct {
 	// allowed to reach when the macOS sandbox is enabled. Merged on top of
 	// the daemon-wide allowlist.
 	SandboxAllowlist []string `json:"sandbox_allowlist,omitempty"`
+	// PersonaSandbox is the name of the persona sandbox to gate this
+	// agent's tool calls (e.g. "claude-developer"). Empty = no persona
+	// gating; the daemon falls back to its existing behaviour.
+	PersonaSandbox string `json:"persona_sandbox,omitempty"`
 }
 
 // SkillData represents a structured skill for task execution.

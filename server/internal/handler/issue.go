@@ -829,8 +829,14 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 		for i, a := range attachments {
 			resp.Attachments[i] = h.attachmentToResponse(a)
 		}
+		// CEREBRO-PATCH(persona-mask-issue-attachments): JEH-1173 redaction.
+		resp.Attachments = h.maskAttachmentsForCaller(r, uuidToString(issue.WorkspaceID), attachments, resp.Attachments)
 	}
 
+	// CEREBRO-PATCH(persona-mask-issue-get): JEH-1173 redaction.
+	if !h.maskIssueForCaller(w, r, issue, &resp) {
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

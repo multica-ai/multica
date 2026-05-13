@@ -420,7 +420,12 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
+	resp := h.attachmentToResponse(att)
+	// CEREBRO-PATCH(persona-mask-attachment-get): JEH-1173 redaction.
+	if !h.maskAttachmentForCaller(w, r, att, &resp) {
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ---------------------------------------------------------------------------

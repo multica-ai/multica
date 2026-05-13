@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -53,6 +54,10 @@ type AgentResponse struct {
 	UpdatedAt          string              `json:"updated_at"`
 	ArchivedAt         *string             `json:"archived_at"`
 	ArchivedBy         *string             `json:"archived_by"`
+	// PersonaSandbox is the name of the persona sandbox this agent runs in,
+	// or empty when no persona gating is configured. The daemon uses it at
+	// spawn time to fetch the matching profile and wire the PreToolUse hook.
+	PersonaSandbox string `json:"persona_sandbox"`
 	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — visibility/trigger split.
 	// True iff the caller is allowed to trigger this agent under the cerebro
 	// group permission model. Non-cerebro deployments default to true (the
@@ -119,6 +124,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		UpdatedAt:          timestampToString(a.UpdatedAt),
 		ArchivedAt:         timestampToPtr(a.ArchivedAt),
 		ArchivedBy:         uuidToPtr(a.ArchivedBy),
+		PersonaSandbox:     a.PersonaSandbox.String,
 	}
 }
 
@@ -205,19 +211,25 @@ type AgentTaskResponse struct {
 	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
 	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	Kind                    string          `json:"kind"`                                // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	// CEREBRO-PATCH(persona-spawn-subject): JEH-1080 — the human user the agent is acting on behalf of, plus that user's group memberships at claim time.
+	PersonaSpawnUserID   string   `json:"persona_spawn_user_id,omitempty"`
+	PersonaSpawnGroupIDs []string `json:"persona_spawn_group_ids,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID           string                   `json:"id"`
-	Name         string                   `json:"name"`
-	Instructions string                   `json:"instructions"`
-	Skills       []service.AgentSkillData `json:"skills,omitempty"`
-	CustomEnv    map[string]string        `json:"custom_env,omitempty"`
-	CustomArgs   []string                 `json:"custom_args,omitempty"`
-	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
-	Model        string                   `json:"model,omitempty"`
+	ID             string                   `json:"id"`
+	Name           string                   `json:"name"`
+	Instructions   string                   `json:"instructions"`
+	Skills         []service.AgentSkillData `json:"skills,omitempty"`
+	CustomEnv      map[string]string        `json:"custom_env,omitempty"`
+	CustomArgs     []string                 `json:"custom_args,omitempty"`
+	McpConfig      json.RawMessage          `json:"mcp_config,omitempty"`
+	Model          string                   `json:"model,omitempty"`
+	// PersonaSandbox is the agent's persona sandbox name (e.g. "claude-developer")
+	// passed to the daemon at task spawn time. Empty = no persona gating.
+	PersonaSandbox string `json:"persona_sandbox,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
@@ -419,6 +431,10 @@ type CreateAgentRequest struct {
 	// event still fires with `template=""`, which is the correct signal
 	// for "manually authored agent".
 	Template string `json:"template"`
+	// PersonaSandbox names a persona sandbox (e.g. "claude-developer") to
+	// gate this agent's tool calls. Empty = no persona gating; the daemon
+	// falls back to its existing per-runtime sandbox config.
+	PersonaSandbox string `json:"persona_sandbox"`
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -548,6 +564,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		CustomArgs:         ca,
 		McpConfig:          mc,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		PersonaSandbox:     personaSandboxToText(req.PersonaSandbox),
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -601,6 +618,21 @@ type UpdateAgentRequest struct {
 	Status             *string            `json:"status"`
 	MaxConcurrentTasks *int32             `json:"max_concurrent_tasks"`
 	Model              *string            `json:"model"`
+	// PersonaSandbox: empty-string clears the assignment (no persona gating);
+	// "claude-developer" or similar attaches the named sandbox.
+	PersonaSandbox *string `json:"persona_sandbox"`
+}
+
+// personaSandboxToText converts the API form (empty = unset) into the
+// pgtype.Text shape sqlc expects. Unset values become an invalid pgtype.Text
+// so the COALESCE in CreateAgent / UpdateAgent leaves the column NULL or
+// untouched respectively.
+func personaSandboxToText(name string) pgtype.Text {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return pgtype.Text{Valid: false}
+	}
+	return pgtype.Text{String: name, Valid: true}
 }
 
 // canViewAgentEnv checks whether the requesting user is allowed to see the
@@ -734,12 +766,29 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Model != nil {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
 	}
+	// persona_sandbox: nil pointer = leave alone, "" = clear (handled below
+	// because COALESCE can't set NULL), otherwise = update to the named value.
+	rawPersonaSandbox, hasPersonaSandbox := rawFields["persona_sandbox"]
+	shouldClearPersonaSandbox := hasPersonaSandbox && (bytes.Equal(bytes.TrimSpace(rawPersonaSandbox), []byte("null")) || bytes.Equal(bytes.TrimSpace(rawPersonaSandbox), []byte(`""`)))
+	if req.PersonaSandbox != nil && !shouldClearPersonaSandbox {
+		params.PersonaSandbox = personaSandboxToText(*req.PersonaSandbox)
+	}
 
 	agent, err = h.Queries.UpdateAgent(r.Context(), params)
 	if err != nil {
 		slog.Warn("update agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update agent: "+err.Error())
 		return
+	}
+
+	// persona_sandbox: empty string in the request means explicitly clear.
+	if shouldClearPersonaSandbox {
+		agent, err = h.Queries.ClearAgentPersonaSandbox(r.Context(), parseUUID(id))
+		if err != nil {
+			slog.Warn("clear agent persona_sandbox failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear persona_sandbox: "+err.Error())
+			return
+		}
 	}
 
 	// mcp_config: null in the request means explicitly clear the field.

@@ -329,8 +329,14 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `mcp-cli-cmd-mcp-test` | server/cmd/multica/cmd_mcp_test.go | 126 | Cerebro MCP CLI subcommand |
 | `mcp-cli-cmd-mcp-tools` | server/cmd/multica/cmd_mcp_tools.go | 959 | Cerebro MCP CLI subcommand |
 | `mcp-cli-cmd-mcp-tools-artifact` | server/cmd/multica/cmd_mcp_tools_artifact.go | 526 | Cerebro MCP CLI subcommand |
+| `mcp-cli-cmd-mcp-tools-grants` | server/cmd/multica/cmd_mcp_tools_grants.go | 320 | Persona grant control plane MCP tools (JEH-1181); in-memory mock backend until JEH-1179 lands the HTTP API |
+| `mcp-cli-cmd-mcp-tools-grants-wire` | server/cmd/multica/cmd_mcp_tools.go | 3 | JEH-1181 — registerTools() call site that wires the Persona grant tools into the upstream MCP tools registration |
+| `mcp-cli-cmd-mcp-tools-grants-test` | server/cmd/multica/cmd_mcp_tools_grants_test.go | 195 | JEH-1181 — Go test file for the Persona grant MCP tools; header marker because `*.test.*` exclusion in cerebro-zones.txt is for JS/TS, not Go's `_test.go` |
 | `mcp-repo-config` | server/internal/mcp/repo_config.go | 132 | MCP server additions |
 | `mcp-server` | server/internal/mcp/server.go | 212 | MCP server additions |
+| `mcp-tools-inventory` | server/internal/mcp/server.go | 9 | JEH-1171 — expose registered tools via `Server.Tools()` so the permguard regression test can enumerate them without speaking JSON-RPC |
+| `permguard-http-test` | server/cmd/server/permission_guard_cerebro_test.go | 50 | JEH-1171 — HTTP route inventory regression test. Walks the live chi router and diffs against `server/internal/cerebro/permguard/inventory.json` |
+| `permguard-mcp-cli-test` | server/cmd/multica/permission_guard_cerebro_test.go | 100 | JEH-1171 — MCP tool + CLI command inventory regression tests. Enumerate via `Server.Tools()` and cobra's command tree |
 | `mcp-types` | server/internal/mcp/types.go | 93 | MCP server additions |
 | `member-detail-handler` | server/internal/handler/member_detail.go | 156 | Member-detail handler (cerebro feature) |
 | `members-tab-cerebro` | packages/views/settings/components/members-tab.tsx | 10 | Settings page cerebro additions |
@@ -425,6 +431,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `realtime-handlers` | packages/core/realtime/use-realtime-sync.ts | 0 | Wires cerebro realtime handlers |
 | `realtime-setup-jwt-test` | server/internal/realtime/setup_jwt_test.go | 9 | Realtime additions |
 | `references-routes` | server/cmd/server/router.go | 4 | JEH-837 — mounts `/api/issues/{id}/references` (list/create) and `/api/cerebro/references` (reverse-lookup, patch, delete). Two patch lines: one import (`cerebroreferences`) and one handler instantiation; two route blocks. Handler lives in `server/internal/cerebro/references/`. |
+| `sharetoken-routes` | server/cmd/server/router.go | 4 | JEH-1076 — public-link share-token mint/revoke + unauth GET. One import line, one handler-init line, one POST + one DELETE inside the auth tree. The public GET sits with the other unauth `sharetoken-public-route` marker. Handler lives in `server/internal/cerebro/sharetoken/`. |
+| `sharetoken-public-route` | server/cmd/server/router.go | 1 | JEH-1076 — anonymous visitor route `GET /api/cerebro/public/share/{token}`. Mounted in the unauth tree because persona's anonymous-tolerant `/v1/check` is the only authority. |
 | `reply-input-cerebro` | packages/views/issues/components/reply-input.tsx | 7 | Reply-input cerebro additions |
 | `restricted-lock` | packages/views/common/restricted-lock.tsx | 37 | Privacy/restricted-access UI primitives |
 | `restricted-ref` | packages/views/common/restricted-ref.tsx | 56 | Privacy/restricted-access UI primitives |
