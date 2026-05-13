@@ -424,12 +424,12 @@ func runDaemonForeground(cmd *cobra.Command) error {
 				if err := child.Start(); err != nil {
 					logFile.Close()
 					logger.Error("failed to start new daemon (no breakaway)", "error", err)
-					return nil
+					return fmt.Errorf("failed to start new daemon at %s without breakaway: %w", restartBin, err)
 				}
 			} else {
 				logFile.Close()
 				logger.Error("failed to start new daemon", "error", err)
-				return nil
+				return fmt.Errorf("failed to start new daemon at %s: %w", restartBin, err)
 			}
 		}
 		logFile.Close()
