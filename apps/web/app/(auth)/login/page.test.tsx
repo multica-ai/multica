@@ -98,7 +98,7 @@ describe("LoginPage", () => {
     render(<LoginPage />, { wrapper: createWrapper() });
 
     expect(screen.getByText("Sign in to Forge")).toBeInTheDocument();
-    expect(screen.getByText("Enter your Asymbl email to get a sign-in code")).toBeInTheDocument();
+    expect(screen.getByText("Enter your Asymbl email to get a login code")).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Continue" })
