@@ -1,5 +1,7 @@
 package daemon
 
+// CEREBRO-PATCH(daemon-daemon): cerebro modification of upstream file
+
 import (
 	"context"
 	"encoding/json"
@@ -2187,6 +2189,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			agentEnv[k] = v
 		}
 	}
+	// CEREBRO-PATCH(claude-account-alias): CLAUDE_ACCOUNT=<email> -> CLAUDE_CONFIG_DIR=$HOME/.claude-accounts/<email>
+	if email := agentEnv["CLAUDE_ACCOUNT"]; email != "" && agentEnv["CLAUDE_CONFIG_DIR"] == "" {
+		agentEnv["CLAUDE_CONFIG_DIR"] = filepath.Join(os.Getenv("HOME"), ".claude-accounts", email)
+	}
+
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
@@ -2299,9 +2306,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Convert agent usage map to task usage entries.
 	var usageEntries []TaskUsageEntry
 	for model, u := range result.Usage {
-		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
+		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 && u.CostCents == 0 {
 			continue
 		}
+		// CEREBRO-PATCH(daemon-daemon-firtal-gateway-usage-cost): include exact managed gateway spend when reported.
 		usageEntries = append(usageEntries, TaskUsageEntry{
 			Provider:         provider,
 			Model:            model,
@@ -2309,6 +2317,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			OutputTokens:     u.OutputTokens,
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
+			CostCents:        u.CostCents,
 		})
 	}
 

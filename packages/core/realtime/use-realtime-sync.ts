@@ -12,6 +12,8 @@ import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
+// CEREBRO-PATCH(realtime-handlers): cerebro WS handlers registered from cerebro-realtime
+import { registerCerebroHandlers } from "@multica/cerebro-realtime";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
 import {
@@ -785,6 +787,9 @@ export function useRealtimeSync(
       }
     });
 
+    // CEREBRO-PATCH(realtime-handlers): cerebro WS handlers registered from cerebro-realtime
+    const unsubCerebro = registerCerebroHandlers(ws, qc);
+
     return () => {
       unsubAny();
       unsubIssueUpdated();
@@ -822,6 +827,7 @@ export function useRealtimeSync(
       unsubChatSessionRead();
       unsubChatSessionDeleted();
       unsubChatSessionUpdated();
+      unsubCerebro();
       timers.forEach(clearTimeout);
       timers.clear();
     };

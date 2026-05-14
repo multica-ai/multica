@@ -1,5 +1,7 @@
 package daemon
 
+// CEREBRO-PATCH(daemon-prompt): cerebro modification of upstream file
+
 import (
 	"fmt"
 	"strings"
@@ -189,6 +191,10 @@ func buildChatPrompt(task Task) string {
 	return b.String()
 }
 
+// buildGatewayChatPrompt includes an explicit transcript because the managed
+// HTTP gateway is stateless from the daemon's perspective and cannot resume a
+// provider-local CLI session.
+// CEREBRO-PATCH(daemon-prompt-firtal-gateway-chat): synthesize transcript prompts for stateless managed gateway chat.
 func buildGatewayChatPrompt(task Task) string {
 	if len(task.ChatHistory) == 0 {
 		return buildChatPrompt(task)
