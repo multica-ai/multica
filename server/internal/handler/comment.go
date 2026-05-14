@@ -598,7 +598,12 @@ func (h *Handler) enqueueSquadLeaderMention(ctx context.Context, issue db.Issue,
 		return
 	}
 	leaderID := squad.LeaderID
-	if authorType == "agent" && authorID == uuidToString(leaderID) {
+	// Prevent self-trigger only when the agent's last activity on this issue
+	// was itself a leader task. An agent that holds both the leader and a
+	// worker role in the squad must still wake its leader role after posting
+	// a comment from its worker task (MUL-2218).
+	if authorType == "agent" && authorID == uuidToString(leaderID) &&
+		h.lastTaskWasLeader(ctx, issue.ID, leaderID) {
 		return
 	}
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
@@ -618,7 +623,7 @@ func (h *Handler) enqueueSquadLeaderMention(ctx context.Context, issue db.Issue,
 	if err != nil || hasPending {
 		return
 	}
-	if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, leaderID, comment.ID); err != nil {
+	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, leaderID, comment.ID); err != nil {
 		slog.Warn("enqueue squad leader mention task failed", "issue_id", uuidToString(issue.ID), "squad_id", squadID, "error", err)
 	}
 }
