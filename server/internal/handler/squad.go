@@ -546,8 +546,20 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	taskID := r.Header.Get("X-Task-ID")
+	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task id")
+	if !ok {
+		return
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
+	if err != nil || !task.IssueID.Valid || uuidToString(task.IssueID) != uuidToString(issue.ID) {
+		writeError(w, http.StatusBadRequest, "task does not belong to issue")
+		return
+	}
+
 	details, _ := json.Marshal(map[string]string{
 		"squad_id": uuidToString(squad.ID),
+		"task_id":  util.UUIDToString(taskUUID),
 		"outcome":  req.Outcome,
 		"reason":   req.Reason,
 	})
