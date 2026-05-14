@@ -1207,7 +1207,10 @@ var errGitHubAPIBlocked = errors.New("github API blocked (rate limit or auth)")
 // GITHUB_TOKEN bearer header when the env var is set. Unauthenticated GitHub
 // API requests are capped at 60/hour per IP, which is trivially exhausted on
 // shared self-hosted servers and surfaces to users as 403 errors during
-// skill imports. Setting GITHUB_TOKEN raises the limit to 5000/hour.
+// skill imports. Setting GITHUB_TOKEN raises the limit to 5000/hour and is
+// also what makes private-repo imports possible: GitHub returns 404 to
+// unauthenticated callers on private resources, which propagates as a
+// confusing "could not resolve ref" error from resolveGitHubRefAndPath.
 func doGitHubAPIGet(httpClient *http.Client, apiURL string) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
@@ -1511,8 +1514,23 @@ func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, er
 // fetchRawFile downloads a URL and returns the body bytes. Returns an error
 // if the response exceeds maxImportFileSize so we never silently truncate a
 // half-downloaded skill file into the workspace.
+//
+// For raw.githubusercontent.com URLs the GITHUB_TOKEN bearer header is
+// attached when the env var is set. This is what unlocks private-repo skill
+// imports: unauthenticated raw requests against a private repo return 404,
+// which surfaces to the caller as "SKILL.md not found" even when the file
+// exists. Authenticated requests resolve correctly. Other hosts (clawhub.ai,
+// skills.sh, etc.) are untouched so we never leak a GitHub PAT to a
+// third-party origin.
 func fetchRawFile(httpClient *http.Client, fileURL string) ([]byte, error) {
-	resp, err := httpClient.Get(fileURL)
+	req, err := http.NewRequest(http.MethodGet, fileURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if isGitHubRawHost(req.URL.Host) {
+		addGitHubAuthHeader(req)
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1528,6 +1546,14 @@ func fetchRawFile(httpClient *http.Client, fileURL string) ([]byte, error) {
 		return nil, fmt.Errorf("%w: file exceeds %d byte limit", errImportCapExceeded, maxImportFileSize)
 	}
 	return body, nil
+}
+
+// isGitHubRawHost reports whether host serves raw GitHub blob content.
+// Used by fetchRawFile to decide whether to attach the GITHUB_TOKEN bearer
+// header; non-GitHub hosts (clawhub.ai, etc.) must never see the token.
+func isGitHubRawHost(host string) bool {
+	host = strings.ToLower(host)
+	return host == "raw.githubusercontent.com"
 }
 
 // escapeRefPath percent-encodes each segment of a git ref individually so
