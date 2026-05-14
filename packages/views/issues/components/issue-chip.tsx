@@ -1,7 +1,9 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { issueListOptions, issueDetailOptions } from "@multica/core/issues/queries";
+// CEREBRO-PATCH(issue-chip-run-indicator): import issueKeys + api for active-run indicator (JEH-1253)
+import { issueListOptions, issueDetailOptions, issueKeys } from "@multica/core/issues/queries";
+import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { StatusIcon } from "./status-icon";
 
@@ -27,8 +29,9 @@ export interface IssueChipProps {
   className?: string;
 }
 
+// CEREBRO-PATCH(issue-chip-multilne): single-line inline layout — no max-w cap, title stays on one line (JEH-1253)
 const BASE_CLASS =
-  "issue-mention inline-flex items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-xs max-w-72";
+  "issue-mention inline-flex items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-xs";
 
 export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps) {
   const wsId = useWorkspaceId();
@@ -44,6 +47,18 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
   const issue = listIssue ?? detailIssue;
   const cls = className ? `${BASE_CLASS} ${className}` : BASE_CLASS;
 
+  // CEREBRO-PATCH(issue-chip-run-indicator): active-run detection for run-status dot (JEH-1253)
+  const { data: tasks = [] } = useQuery({
+    queryKey: issueKeys.tasks(issueId),
+    queryFn: () => api.listTasksByIssue(issueId),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    enabled: !!issue,
+  });
+  const hasActiveRun = tasks.some(
+    (t) => t.status === "queued" || t.status === "dispatched" || t.status === "running",
+  );
+
   if (!issue) {
     return (
       <span className={cls}>
@@ -56,12 +71,16 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
 
   return (
     // CEREBRO-PATCH(issue-chip-readable): wrap long titles + tooltip instead of single-line truncate (JEH-1113)
+    // CEREBRO-PATCH(issue-chip-multilne): identifier-secondary + full-title + run-indicator layout (JEH-1253)
     <span className={cls} title={issue.title}>
-      <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
-      <span className="font-medium text-muted-foreground shrink-0">
-        {issue.identifier}
+      <span className="flex items-center gap-1 shrink-0">
+        <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
+        {hasActiveRun && (
+          <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+        )}
+        <span className="font-medium text-muted-foreground text-[10px]">{issue.identifier}</span>
       </span>
-      <span className="text-foreground break-words">{issue.title}</span>
+      <span className="text-foreground whitespace-nowrap">{issue.title}</span>
     </span>
   );
 }
