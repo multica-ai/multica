@@ -749,6 +749,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/tasks", h.ListAgentTasks)
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
+					// CEREBRO-PATCH(agent-tools-routes): cerebro tool grant admin endpoints.
+					r.Get("/tools", h.ListAgentTools)
+					r.Route("/tools/{name}", func(r chi.Router) {
+						r.Put("/", h.UpsertAgentTool)
+					})
 				})
 			})
 

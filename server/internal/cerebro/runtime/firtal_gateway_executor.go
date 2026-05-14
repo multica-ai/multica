@@ -35,6 +35,7 @@ type FirtalGatewayExecutor struct {
 	budgetSvc     *service.BudgetService
 	bus           *events.Bus
 	gateway       *GatewayClient
+	registry      *Registry
 	sem           chan struct{}
 	logger        *slog.Logger
 	publishedOnce map[string]struct{}
@@ -48,10 +49,15 @@ func NewFirtalGatewayExecutor(
 	bus *events.Bus,
 	gateway *GatewayClient,
 	logger *slog.Logger,
+	registry ...*Registry,
 ) *FirtalGatewayExecutor {
 	cfg = withFirtalGatewayDefaults(cfg)
 	if logger == nil {
 		logger = slog.Default()
+	}
+	var reg *Registry
+	if len(registry) > 0 {
+		reg = registry[0]
 	}
 	return &FirtalGatewayExecutor{
 		cfg:           cfg,
@@ -61,6 +67,7 @@ func NewFirtalGatewayExecutor(
 		budgetSvc:     service.NewBudgetService(queries),
 		bus:           bus,
 		gateway:       gateway,
+		registry:      reg,
 		sem:           make(chan struct{}, cfg.MaxConcurrency),
 		logger:        logger,
 		publishedOnce: map[string]struct{}{},
@@ -410,27 +417,55 @@ func (e *FirtalGatewayExecutor) completeGatewayWithTools(ctx context.Context, cf
 	return NewGatewayClient(cfg, nil).CompleteWithTools(ctx, model, messages, tools, meta)
 }
 
-// runToolLoop runs the model in a get_issue → list_comments → add_comment
-// style loop. Up to firtalGatewayMaxToolRounds rounds dispatch tools; each
-// round sends the running transcript plus tool definitions, and if the model
-// emits tool_calls they are dispatched in-process against the executor's DB,
-// results are appended as role:tool messages, and the next round runs. The
-// first round without tool_calls becomes the final output. When the cap is
-// reached after a tool dispatch, the loop makes one final gateway call with
-// tools omitted so the model is forced to produce a text answer instead of
-// failing the task. Usage is summed across all calls so budget rollups see
-// the full cost of the loop.
+// runToolLoop runs the model in an Anthropic-native tool-call loop. Up to
+// firtalGatewayMaxToolRounds (or cfg.MaxToolRounds when set) rounds dispatch
+// tools; each round sends the running transcript plus tool definitions, and if
+// the model emits tool_use blocks they are dispatched in-process against the
+// registry or the MCP server, results are appended, and the next round runs.
+// The first round without tool calls becomes the final output. Budget is
+// checked before each tool dispatch. Usage is summed across all rounds.
 func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID pgtype.UUID) (GatewayCompletion, error) {
-	toolSrv := NewFirtalGatewayToolServer(e.queries, ToolContext{
-		AgentID:     agentID,
-		WorkspaceID: workspaceID,
-	})
-	return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, toolSrv, GatewayToolDefs())
+	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID}
+
+	// Determine tools: registry-backed when available, else fall back to the
+	// hardcoded MCP server (POC compatibility).
+	var (
+		anthropicTools []AnthropicTool
+		toolSrv        *mcp.Server
+		useRegistry    bool
+	)
+	if e.registry != nil {
+		enabledTools := e.registry.GetEnabledToolsForAgent(ctx, agentID)
+		if len(enabledTools) > 0 {
+			// Also register the MCP-backed tools (get_issue, list_comments,
+			// add_comment) that the Registry wraps via its Call method.
+			// For backward compat, create an MCP server and also expose its
+			// tools — the registry dispatch handles the extended tools.
+			anthropicTools = e.registry.ToAnthropicTools(enabledTools)
+			useRegistry = true
+		}
+	}
+	if !useRegistry {
+		// POC fallback: MCP server with hardcoded 3 tools.
+		toolSrv = NewFirtalGatewayToolServer(e.queries, tctx)
+		for _, def := range GatewayToolDefs() {
+			anthropicTools = append(anthropicTools, AnthropicTool{
+				Name:        def.Function.Name,
+				Description: def.Function.Description,
+				InputSchema: def.Function.Parameters,
+			})
+		}
+		if len(anthropicTools) > 0 {
+			anthropicTools[len(anthropicTools)-1].CacheControl = &AnthropicCacheControl{Type: "ephemeral"}
+		}
+	}
+
+	return e.runAnthropicToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, anthropicTools, tctx, toolSrv, useRegistry)
 }
 
-// runToolLoopWithServer is the testable inner form of runToolLoop. Tests can
-// register their own handlers on toolSrv so the loop's control flow can be
-// exercised without a real database.
+// runToolLoopWithServer is the testable inner form of the legacy OpenAI-compat
+// tool loop. Tests can register their own handlers on toolSrv so the loop's
+// control flow can be exercised without a real database.
 func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, toolSrv *mcp.Server, tools []GatewayToolDef) (GatewayCompletion, error) {
 	history := withToolUsageHint(initialMessages)
 
@@ -444,7 +479,12 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 		acc.Usage.CostCents += c.Usage.CostCents
 	}
 
-	for round := 0; round < firtalGatewayMaxToolRounds; round++ {
+	maxRounds := firtalGatewayMaxToolRounds
+	if cfg.MaxToolRounds > 0 {
+		maxRounds = cfg.MaxToolRounds
+	}
+
+	for round := 0; round < maxRounds; round++ {
 		completion, err := e.completeGatewayWithTools(ctx, cfg, agent.Model.String, history, tools, meta)
 		if err != nil {
 			return GatewayCompletion{}, err
@@ -482,16 +522,12 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 	}
 
 	// Tool-round budget exhausted. Make one final gateway call WITHOUT tools
-	// so the model has to produce a text answer. This is what closes the
-	// `get_issue` → `list_comments` → `add_comment` acceptance flow: the
-	// three rounds dispatched the tools, and this final call lets the model
-	// emit its confirmation text. The history already carries the tool
-	// results, so the model has everything it needs to summarise.
+	// so the model has to produce a text answer.
 	e.logger.Info("firtal gateway tool loop forcing final no-tool call",
 		"task_id", meta.TaskID,
 		"agent_id", meta.AgentID,
 		"workspace_id", meta.WorkspaceID,
-		"max_tool_rounds", firtalGatewayMaxToolRounds,
+		"max_tool_rounds", maxRounds,
 	)
 	final, err := e.completeGateway(ctx, cfg, agent.Model.String, history, meta)
 	if err != nil {
@@ -500,6 +536,213 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 	accumulate(final)
 	acc.Output = final.Output
 	return acc, nil
+}
+
+// runAnthropicToolLoop is the production Anthropic-native tool loop. It
+// converts the initial OpenAI-compat messages to Anthropic format, sends
+// requests to /v1/messages with tool definitions, dispatches tool calls via
+// the Registry (or MCP server fallback), and accumulates usage across rounds.
+// Budget is checked before each tool dispatch; if the budget is exhausted the
+// loop stops and forces a final text-only call.
+func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
+	ctx context.Context,
+	cfg FirtalGatewayRuntimeConfig,
+	agent db.Agent,
+	initialMessages []GatewayMessage,
+	meta GatewayRequestMeta,
+	agentID, workspaceID pgtype.UUID,
+	tools []AnthropicTool,
+	tctx ToolContext,
+	toolSrv *mcp.Server,
+	useRegistry bool,
+) (GatewayCompletion, error) {
+	// Extract system prompt from the first message if present.
+	systemText := ""
+	msgStart := 0
+	if len(initialMessages) > 0 && initialMessages[0].Role == "system" {
+		systemText = initialMessages[0].Content
+		msgStart = 1
+	}
+	// Patch system prompt to list available tools.
+	if len(tools) > 0 {
+		toolNames := make([]string, len(tools))
+		for i, t := range tools {
+			toolNames[i] = t.Name
+		}
+		systemText = strings.TrimRight(systemText, "\n") +
+			"\n\nYou have the following tools available: " + strings.Join(toolNames, ", ") + "." +
+			" Use them to accomplish the task. Post your final answer as a comment when asked."
+		// TODO(persona): enforce persona policy-engine when ready.
+	}
+
+	history := ConvertGatewayMessagesToAnthropic(initialMessages[msgStart:])
+
+	maxRounds := firtalGatewayMaxToolRounds
+	if cfg.MaxToolRounds > 0 {
+		maxRounds = cfg.MaxToolRounds
+	}
+
+	var acc GatewayCompletion
+	accumulate := func(c GatewayCompletion) {
+		acc.Model = c.Model
+		acc.Usage.InputTokens += c.Usage.InputTokens
+		acc.Usage.OutputTokens += c.Usage.OutputTokens
+		acc.Usage.CacheReadTokens += c.Usage.CacheReadTokens
+		acc.Usage.CacheWriteTokens += c.Usage.CacheWriteTokens
+		acc.Usage.CostCents += c.Usage.CostCents
+	}
+
+	gwClient := e.gateway
+	if gwClient == nil {
+		gwClient = NewGatewayClient(cfg, nil)
+	}
+
+	for round := 0; round < maxRounds; round++ {
+		completion, err := gwClient.CompleteAnthropicWithTools(ctx, agent.Model.String, systemText, history, tools, meta)
+		if err != nil {
+			return GatewayCompletion{}, err
+		}
+		accumulate(completion)
+
+		if len(completion.ToolCalls) == 0 {
+			acc.Output = completion.Output
+			return acc, nil
+		}
+
+		// Append assistant turn with tool_use blocks.
+		history = append(history, AnthropicMessage{
+			Role:    "assistant",
+			Content: buildAnthropicAssistantContent(completion),
+		})
+
+		// Dispatch each tool call. Budget check before first dispatch each round.
+		if e.budgetSvc != nil {
+			decision := e.budgetSvc.CheckPreClaim(ctx, workspaceID, agentID)
+			if !decision.Allowed {
+				e.logger.Info("firtal gateway tool loop budget blocked",
+					"task_id", meta.TaskID,
+					"agent_id", meta.AgentID,
+					"reason", decision.Reason,
+				)
+				break
+			}
+		}
+
+		toolResultBlocks := make([]AnthropicContentBlock, 0, len(completion.ToolCalls))
+		for _, call := range completion.ToolCalls {
+			start := time.Now()
+			var (
+				resultText string
+				isError    bool
+			)
+			if useRegistry && e.registry != nil {
+				args := map[string]any{}
+				if raw := strings.TrimSpace(call.Function.Arguments); raw != "" {
+					if err := json.Unmarshal([]byte(raw), &args); err != nil {
+						resultText = fmt.Sprintf("invalid tool arguments JSON: %v", err)
+						isError = true
+					}
+				}
+				if !isError {
+					resultText, err = e.registry.Call(ctx, call.Function.Name, args)
+					if err != nil {
+						// Fall through to MCP server if registry doesn't know this tool.
+						if toolSrv != nil {
+							mcpResult, dur := e.dispatchTool(ctx, toolSrv, call)
+							e.logger.Info("firtal gateway anthropic tool call (mcp fallback)",
+								"task_id", meta.TaskID,
+								"agent_id", meta.AgentID,
+								"round", round+1,
+								"tool", call.Function.Name,
+								"duration_ms", dur.Milliseconds(),
+								"is_error", mcpResult.IsError,
+							)
+							resultText = toolResultText(mcpResult)
+							isError = mcpResult.IsError
+						} else {
+							resultText = fmt.Sprintf("tool error: %v", err)
+							isError = true
+						}
+					}
+				}
+			} else if toolSrv != nil {
+				mcpResult, _ := e.dispatchTool(ctx, toolSrv, call)
+				resultText = toolResultText(mcpResult)
+				isError = mcpResult.IsError
+			} else {
+				resultText = fmt.Sprintf("tool %q not available", call.Function.Name)
+				isError = true
+			}
+
+			dur := time.Since(start)
+			e.logger.Info("firtal gateway anthropic tool call",
+				"task_id", meta.TaskID,
+				"agent_id", meta.AgentID,
+				"workspace_id", meta.WorkspaceID,
+				"round", round+1,
+				"tool_name", call.Function.Name,
+				"tool_call_id", call.ID,
+				"duration_ms", dur.Milliseconds(),
+				"is_error", isError,
+			)
+
+			toolResultBlocks = append(toolResultBlocks, AnthropicContentBlock{
+				Type:      "tool_result",
+				ToolUseID: call.ID,
+				Content: []AnthropicContentBlock{
+					{Type: "text", Text: resultText},
+				},
+			})
+		}
+
+		// Append tool results as a user turn.
+		history = append(history, AnthropicMessage{
+			Role:    "user",
+			Content: toolResultBlocks,
+		})
+	}
+
+	// Tool-round budget exhausted. Make one final call without tools so the
+	// model can emit a text summary.
+	e.logger.Info("firtal gateway anthropic tool loop forcing final no-tool call",
+		"task_id", meta.TaskID,
+		"agent_id", meta.AgentID,
+		"workspace_id", meta.WorkspaceID,
+		"max_tool_rounds", maxRounds,
+	)
+	final, err := gwClient.CompleteAnthropicWithTools(ctx, agent.Model.String, systemText, history, nil, meta)
+	if err != nil {
+		return GatewayCompletion{}, err
+	}
+	accumulate(final)
+	acc.Output = final.Output
+	return acc, nil
+}
+
+// buildAnthropicAssistantContent converts a GatewayCompletion (which may have
+// both text output and tool_calls) into the content array expected for an
+// assistant message in the Anthropic messages protocol.
+func buildAnthropicAssistantContent(c GatewayCompletion) []AnthropicContentBlock {
+	var blocks []AnthropicContentBlock
+	if c.Output != "" {
+		blocks = append(blocks, AnthropicContentBlock{Type: "text", Text: c.Output})
+	}
+	for _, tc := range c.ToolCalls {
+		var input map[string]any
+		if raw := strings.TrimSpace(tc.Function.Arguments); raw != "" {
+			_ = json.Unmarshal([]byte(raw), &input)
+		}
+		if input == nil {
+			input = map[string]any{}
+		}
+		blocks = append(blocks, AnthropicContentBlock{
+			Type:  "tool_use",
+			ID:    tc.ID,
+			Name:  tc.Function.Name,
+			Input: input,
+		})
+	}
+	return blocks
 }
 
 func (e *FirtalGatewayExecutor) dispatchTool(ctx context.Context, srv *mcp.Server, call GatewayToolCall) (mcp.CallToolResult, time.Duration) {
