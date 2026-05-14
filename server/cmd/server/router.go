@@ -355,6 +355,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetIssue)
 					r.Put("/", h.UpdateIssue)
 					r.Delete("/", h.DeleteIssue)
+					// PUL-102: /plan-and-implement skill approval flip.
+					// Agent calls this once on first "погнали" to mark
+					// the cascade as approved; subsequent PR4 worker
+					// spawns run autonomously without per-PR confirmation.
+					r.Post("/cascade/approve", h.ApproveCascade)
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)
 					r.Get("/timeline", h.ListTimeline)
