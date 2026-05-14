@@ -1071,7 +1071,14 @@ function SquadMembersTab({
       <div className="space-y-2">
         {members.map((m) => (
           <div key={m.id} className="group flex items-start gap-3 rounded-lg border p-3">
-            <ActorAvatar actorType={m.member_type} actorId={m.member_id} size={32} showStatusDot />
+            <ActorAvatar
+              actorType={m.member_type}
+              actorId={m.member_id}
+              size={32}
+              showStatusDot
+              enableHoverCard={m.member_type === "agent"}
+              hoverCardVariant="live"
+            />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">{getEntityName(m.member_type, m.member_id)}</span>

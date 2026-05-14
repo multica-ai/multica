@@ -402,6 +402,13 @@
     "owner_label": "Owner",
     "unknown_runtime": "Unknown runtime"
   },
+  "live_peek": {
+    "current_issue_label": "Now on",
+    "no_current_issue": "No task",
+    "last_activity_label": "Last seen",
+    "no_recent_activity": "No recent activity",
+    "failed_indicator": "Failed"
+  },
   "transcript": {
     "dialog_title": "Agent Execution Transcript",
     "status_running": "Running",

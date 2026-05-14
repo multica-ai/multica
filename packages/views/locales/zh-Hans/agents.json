@@ -391,6 +391,13 @@
     "owner_label": "所有者",
     "unknown_runtime": "未知运行时"
   },
+  "live_peek": {
+    "current_issue_label": "正在处理",
+    "no_current_issue": "暂无任务",
+    "last_activity_label": "最近活动",
+    "no_recent_activity": "暂无活动",
+    "failed_indicator": "失败"
+  },
   "transcript": {
     "dialog_title": "智能体执行记录",
     "status_running": "进行中",
