@@ -1741,6 +1741,18 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(agent-tools-api): JEH-1284/1290 — tool grant list + toggle via W3 admin API
+  async getAgentTools(agentId: string): Promise<import("@multica/cerebro-types").AgentTool[]> {
+    return this.fetch(`/api/agents/${agentId}/tools`);
+  }
+
+  async updateAgentTool(agentId: string, toolName: string, data: { enabled: boolean; config?: Record<string, unknown> }): Promise<void> {
+    await this.fetch(`/api/agents/${agentId}/tools/${encodeURIComponent(toolName)}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
   // Skill ownership / versioning / change requests / forks (JEH-216)
   async updateSkillOwnership(id: string, data: UpdateSkillOwnershipRequest): Promise<Skill> {
     return this.fetch(`/api/skills/${id}/ownership`, {

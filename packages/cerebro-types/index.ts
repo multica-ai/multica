@@ -11,3 +11,6 @@ export type {
 // scope should depend on @multica/cerebro-types; importing this index pulls
 // the augmentation into the typecheck.
 import "./augment";
+
+// JEH-1290 W8 — agent tool grant types (cerebro-only, not in upstream)
+export type { AgentTool } from "./augment";

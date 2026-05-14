@@ -7,6 +7,7 @@ import {
   FileText,
   KeyRound,
   Terminal,
+  Wrench, // CEREBRO-PATCH(agent-tools-tab): W8 tools tab icon
 } from "lucide-react";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import {
@@ -24,6 +25,7 @@ import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
+import { CerebroToolsTab } from "./tabs/cerebro-tools-tab"; // CEREBRO-PATCH(agent-tools-tab): W8 tools tab
 import { useT } from "../../i18n";
 
 type DetailTab =
@@ -31,14 +33,17 @@ type DetailTab =
   | "instructions"
   | "skills"
   | "env"
-  | "custom_args";
+  | "custom_args"
+  | "tools"; // CEREBRO-PATCH(agent-tools-tab): W8 tools tab
 
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "instructions" | "skills" | "environment" | "custom_args"> = {
+// CEREBRO-PATCH(agent-tools-tab): extended with "tools" key for W8
+const TAB_LABEL_KEY: Record<DetailTab, "activity" | "instructions" | "skills" | "environment" | "custom_args" | "tools"> = {
   activity: "activity",
   instructions: "instructions",
   skills: "skills",
   env: "environment",
   custom_args: "custom_args",
+  tools: "tools",
 };
 
 const detailTabs: {
@@ -50,6 +55,7 @@ const detailTabs: {
   { id: "skills", icon: BookOpenText },
   { id: "env", icon: KeyRound },
   { id: "custom_args", icon: Terminal },
+  { id: "tools", icon: Wrench }, // CEREBRO-PATCH(agent-tools-tab): W8 tools tab entry
 ];
 
 interface AgentOverviewPaneProps {
@@ -174,6 +180,12 @@ export function AgentOverviewPane({
               onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}
             />
+          </TabContent>
+        )}
+        {/* CEREBRO-PATCH(agent-tools-tab): W8 — tools tab render block */}
+        {activeTab === "tools" && (
+          <TabContent>
+            <CerebroToolsTab agent={agent} />
           </TabContent>
         )}
       </div>
