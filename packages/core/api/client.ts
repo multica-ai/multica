@@ -734,9 +734,12 @@ export class ApiClient {
   // CEREBRO-PATCH(cerebro-tasks-client): JEH-900 cross-agent tasks list endpoint
   async getCerebroTasks<T = unknown>(filter: {
     agent_id?: string | null;
+    issue_id?: string | null; // CEREBRO-PATCH(cerebro-tasks-issue-filter): JEH-1297
+    project_id?: string | null; // CEREBRO-PATCH(cerebro-tasks-project-filter): JEH-1297
     status?: string | null;
     type?: "issue" | "chat" | null;
     since?: string | null;
+    until?: string | null; // CEREBRO-PATCH(cerebro-tasks-until): JEH-1297 custom date range end
     limit?: number;
     offset?: number;
     // CEREBRO-PATCH(cerebro-tasks-search): JEH-1237 server-side full-page search param
@@ -744,9 +747,12 @@ export class ApiClient {
   }): Promise<T> {
     const params = new URLSearchParams();
     if (filter.agent_id) params.set("agent_id", filter.agent_id);
+    if (filter.issue_id) params.set("issue_id", filter.issue_id);
+    if (filter.project_id) params.set("project_id", filter.project_id);
     if (filter.status) params.set("status", filter.status);
     if (filter.type) params.set("type", filter.type);
     if (filter.since) params.set("since", filter.since);
+    if (filter.until) params.set("until", filter.until);
     if (filter.limit !== undefined) params.set("limit", String(filter.limit));
     if (filter.offset !== undefined) params.set("offset", String(filter.offset));
     if (filter.q) params.set("q", filter.q);

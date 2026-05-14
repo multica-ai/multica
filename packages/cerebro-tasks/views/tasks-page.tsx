@@ -22,9 +22,13 @@ export function TasksPage() {
   // each render would loop. See packages/core/CLAUDE.md "Common Zustand
   // footguns".
   const agentId = useCerebroTasksStore((s) => s.agentId);
+  const issueId = useCerebroTasksStore((s) => s.issueId);
+  const projectId = useCerebroTasksStore((s) => s.projectId);
   const status = useCerebroTasksStore((s) => s.status);
   const type = useCerebroTasksStore((s) => s.type);
   const range = useCerebroTasksStore((s) => s.range);
+  const customFrom = useCerebroTasksStore((s) => s.customFrom);
+  const customTo = useCerebroTasksStore((s) => s.customTo);
   const limit = useCerebroTasksStore((s) => s.limit);
   const offset = useCerebroTasksStore((s) => s.offset);
   const search = useCerebroTasksStore((s) => s.search);
@@ -32,7 +36,19 @@ export function TasksPage() {
 
   const wsId = workspace?.id ?? "";
   const list = useQuery(
-    cerebroTasksListOptions(wsId, { agentId, status, type, range, search, limit, offset }),
+    cerebroTasksListOptions(wsId, {
+      agentId,
+      issueId,
+      projectId,
+      status,
+      type,
+      range,
+      customFrom,
+      customTo,
+      search,
+      limit,
+      offset,
+    }),
   );
 
   if (!enabled) return null;

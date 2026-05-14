@@ -1,6 +1,7 @@
 // Package tasks exposes the cerebro tasks page HTTP endpoint. The page
 // shows every agent task across the workspace (any agent, any status,
-// optional time-range / type filters) with cursor-free offset pagination.
+// optional time-range / type / issue / project filters) with cursor-free
+// offset pagination.
 //
 // Backed by the queries in server/internal/cerebro/queries/tasks.sql which
 // generate into the cerebrodb package.
@@ -8,6 +9,7 @@ package tasks
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -16,6 +18,7 @@ import (
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/pkg/pricing"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -48,20 +51,22 @@ func validStatus(s string) bool {
 }
 
 type taskResponse struct {
-	TaskID         string `json:"task_id"`
-	AgentID        string `json:"agent_id"`
-	AgentName      string `json:"agent_name"`
-	AgentAvatarURL string `json:"agent_avatar_url,omitempty"`
-	TaskTitle      string `json:"task_title,omitempty"`
-	IssueID        string `json:"issue_id,omitempty"`
-	IssueTitle     string `json:"issue_title,omitempty"`
-	IssueNumber    int32  `json:"issue_number,omitempty"`
-	ChatSessionID  string `json:"chat_session_id,omitempty"`
-	Status         string `json:"status"`
-	DispatchedAt   string `json:"dispatched_at,omitempty"`
-	StartedAt      string `json:"started_at,omitempty"`
-	CompletedAt    string `json:"completed_at,omitempty"`
-	CreatedAt      string `json:"created_at"`
+	TaskID          string `json:"task_id"`
+	AgentID         string `json:"agent_id"`
+	AgentName       string `json:"agent_name"`
+	AgentAvatarURL  string `json:"agent_avatar_url,omitempty"`
+	TaskTitle       string `json:"task_title,omitempty"`
+	IssueID         string `json:"issue_id,omitempty"`
+	IssueTitle      string `json:"issue_title,omitempty"`
+	IssueNumber     int32  `json:"issue_number,omitempty"`
+	ChatSessionID   string `json:"chat_session_id,omitempty"`
+	Status          string `json:"status"`
+	DispatchedAt    string `json:"dispatched_at,omitempty"`
+	StartedAt       string `json:"started_at,omitempty"`
+	CompletedAt     string `json:"completed_at,omitempty"`
+	CreatedAt       string `json:"created_at"`
+	CostCents       int64  `json:"cost_cents"`
+	TriggeredByName string `json:"triggered_by_name,omitempty"`
 }
 
 type listResponse struct {
@@ -73,13 +78,16 @@ type listResponse struct {
 
 // List handles GET /api/cerebro/tasks. Supported query params:
 //
-//	agent_id   — UUID of a single agent
-//	status     — one of queued/dispatched/running/completed/failed/cancelled
-//	type       — "issue" (chat_session_id IS NULL) or "chat" (IS NOT NULL)
-//	since      — RFC3339 timestamp; only tasks newer than this point
-//	limit      — page size, default 50, capped at 200
-//	offset     — pagination offset, default 0
-//	q          — free-text search on agent name, task title, and issue title (ILIKE)
+//	agent_id         — UUID of a single agent
+//	issue_id         — UUID of a single issue
+//	project_id       — UUID of a project (filters to tasks whose issue belongs to it)
+//	status           — one of queued/dispatched/running/completed/failed/cancelled
+//	type             — "issue" (chat_session_id IS NULL) or "chat" (IS NOT NULL)
+//	since            — RFC3339 timestamp; only tasks newer than this point
+//	until            — RFC3339 timestamp; only tasks older than this point
+//	limit            — page size, default 50, capped at 200
+//	offset           — pagination offset, default 0
+//	q                — free-text search on agent name, task title, and issue title (ILIKE)
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireUserID(w, r); !ok {
 		return
@@ -101,6 +109,26 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		agentID = parsed
+	}
+
+	var filterIssueID pgtype.UUID
+	if raw := q.Get("issue_id"); raw != "" {
+		parsed, err := util.ParseUUID(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid issue_id")
+			return
+		}
+		filterIssueID = parsed
+	}
+
+	var filterProjectID pgtype.UUID
+	if raw := q.Get("project_id"); raw != "" {
+		parsed, err := util.ParseUUID(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid project_id")
+			return
+		}
+		filterProjectID = parsed
 	}
 
 	var status pgtype.Text
@@ -131,6 +159,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		since = pgtype.Timestamptz{Time: t, Valid: true}
 	}
 
+	var until pgtype.Timestamptz
+	if raw := q.Get("until"); raw != "" {
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid until (expected RFC3339)")
+			return
+		}
+		until = pgtype.Timestamptz{Time: t, Valid: true}
+	}
+
 	limit := parseIntOr(q.Get("limit"), defaultLimit)
 	if limit <= 0 {
 		limit = defaultLimit
@@ -151,14 +189,17 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	rows, err := h.Cerebro.ListCerebroTasks(ctx, cerebrodb.ListCerebroTasksParams{
-		WorkspaceID: wsUUID,
-		Limit:       int32(limit),
-		Offset:      int32(offset),
-		AgentID:     agentID,
-		Status:      status,
-		TaskType:    taskType,
-		Since:       since,
-		Q:           search,
+		WorkspaceID:     wsUUID,
+		Limit:           int32(limit),
+		Offset:          int32(offset),
+		AgentID:         agentID,
+		FilterIssueID:   filterIssueID,
+		FilterProjectID: filterProjectID,
+		Status:          status,
+		TaskType:        taskType,
+		Since:           since,
+		Until:           until,
+		Q:               search,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list tasks")
@@ -166,12 +207,15 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	total, err := h.Cerebro.CountCerebroTasks(ctx, cerebrodb.CountCerebroTasksParams{
-		WorkspaceID: wsUUID,
-		AgentID:     agentID,
-		Status:      status,
-		TaskType:    taskType,
-		Since:       since,
-		Q:           search,
+		WorkspaceID:     wsUUID,
+		AgentID:         agentID,
+		FilterIssueID:   filterIssueID,
+		FilterProjectID: filterProjectID,
+		Status:          status,
+		TaskType:        taskType,
+		Since:           since,
+		Until:           until,
+		Q:               search,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count tasks")
@@ -218,6 +262,23 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		if row.CompletedAt.Valid {
 			t.CompletedAt = row.CompletedAt.Time.UTC().Format(time.RFC3339)
+		}
+		if row.TriggeredByName.Valid {
+			t.TriggeredByName = row.TriggeredByName.String
+		}
+		// Compute cost from aggregated token usage. UsageModel is interface{}
+		// (MAX(model) from Postgres) — cast it to string; nil means no usage rows.
+		model := ""
+		if row.UsageModel != nil {
+			model = fmt.Sprintf("%v", row.UsageModel)
+		}
+		if model != "" {
+			t.CostCents = pricing.ComputeCents(model, pricing.Usage{
+				InputTokens:      row.UsageInputTokens,
+				OutputTokens:     row.UsageOutputTokens,
+				CacheReadTokens:  row.UsageCacheReadTokens,
+				CacheWriteTokens: row.UsageCacheWriteTokens,
+			})
 		}
 		out.Tasks = append(out.Tasks, t)
 	}

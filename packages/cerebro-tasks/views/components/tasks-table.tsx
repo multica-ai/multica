@@ -63,6 +63,8 @@ export function TasksTable({
             {visibleColumns.status && <th className="px-3 py-2 text-left font-medium">Status</th>}
             {visibleColumns.started && <th className="px-3 py-2 text-left font-medium">Started</th>}
             {visibleColumns.duration && <th className="px-3 py-2 text-left font-medium">Varighed</th>}
+            {visibleColumns.cost && <th className="px-3 py-2 text-right font-medium">Kost</th>}
+            {visibleColumns.triggered_by && <th className="px-3 py-2 text-left font-medium">Startet af</th>}
           </tr>
         </thead>
         <tbody>
@@ -155,6 +157,16 @@ function Row({
           {formatDuration(startedISO, endedISO)}
         </td>
       )}
+      {visibleColumns.cost && (
+        <td className="px-3 py-2 text-right text-muted-foreground">
+          {formatCost(task.cost_cents)}
+        </td>
+      )}
+      {visibleColumns.triggered_by && (
+        <td className="px-3 py-2 text-muted-foreground">
+          {task.triggered_by_name ?? "—"}
+        </td>
+      )}
     </tr>
   );
 }
@@ -232,4 +244,11 @@ function formatDuration(startISO: string | undefined, endISO: string | undefined
   } catch {
     return "—";
   }
+}
+
+function formatCost(cents: number | undefined): string {
+  if (cents === undefined || cents === 0) return "—";
+  if (cents < 100) return `$0.${String(cents).padStart(2, "0")}`;
+  const dollars = cents / 100;
+  return `$${dollars.toFixed(2)}`;
 }

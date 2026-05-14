@@ -2,11 +2,19 @@
 
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Columns3, Search } from "lucide-react";
+import { Columns3, Search, X } from "lucide-react";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { projectListOptions } from "@multica/core/projects";
+import { issueListOptions } from "@multica/core/issues/queries";
 import { cn } from "@multica/ui/lib/utils";
 import { useCerebroTasksStore } from "../../core/store";
-import { COLUMN_DEFS, type ColumnId, type TaskStatus, type TaskTimeRange, type TaskType } from "../../core/types";
+import {
+  COLUMN_DEFS,
+  type ColumnId,
+  type TaskStatus,
+  type TaskTimeRange,
+  type TaskType,
+} from "../../core/types";
 
 const STATUSES: { value: TaskStatus | "all"; label: string }[] = [
   { value: "all", label: "Alle" },
@@ -29,6 +37,7 @@ const RANGES: { value: TaskTimeRange; label: string }[] = [
   { value: "24h", label: "24h" },
   { value: "7d", label: "7d" },
   { value: "30d", label: "30d" },
+  { value: "custom", label: "Custom" },
 ];
 
 interface TasksFiltersProps {
@@ -37,23 +46,42 @@ interface TasksFiltersProps {
 
 export function TasksFilters({ wsId }: TasksFiltersProps) {
   const agentId = useCerebroTasksStore((s) => s.agentId);
+  const issueId = useCerebroTasksStore((s) => s.issueId);
+  const projectId = useCerebroTasksStore((s) => s.projectId);
   const status = useCerebroTasksStore((s) => s.status);
   const type = useCerebroTasksStore((s) => s.type);
   const range = useCerebroTasksStore((s) => s.range);
+  const customFrom = useCerebroTasksStore((s) => s.customFrom);
+  const customTo = useCerebroTasksStore((s) => s.customTo);
   const search = useCerebroTasksStore((s) => s.search);
   const visibleColumns = useCerebroTasksStore((s) => s.visibleColumns);
   const setAgentId = useCerebroTasksStore((s) => s.setAgentId);
+  const setIssueId = useCerebroTasksStore((s) => s.setIssueId);
+  const setProjectId = useCerebroTasksStore((s) => s.setProjectId);
   const setStatus = useCerebroTasksStore((s) => s.setStatus);
   const setType = useCerebroTasksStore((s) => s.setType);
   const setRange = useCerebroTasksStore((s) => s.setRange);
+  const setCustomFrom = useCerebroTasksStore((s) => s.setCustomFrom);
+  const setCustomTo = useCerebroTasksStore((s) => s.setCustomTo);
   const setSearch = useCerebroTasksStore((s) => s.setSearch);
   const setColumnVisible = useCerebroTasksStore((s) => s.setColumnVisible);
   const reset = useCerebroTasksStore((s) => s.reset);
 
   const agents = useQuery(agentListOptions(wsId));
+  const projects = useQuery(projectListOptions(wsId));
+  const issues = useQuery(issueListOptions(wsId));
   const agentOptions = agents.data ?? [];
+  const projectOptions = projects.data ?? [];
+  const issueOptions = issues.data ?? [];
 
-  const hasFilters = !!agentId || !!status || !!type || range !== "24h" || !!search;
+  const hasFilters =
+    !!agentId ||
+    !!issueId ||
+    !!projectId ||
+    !!status ||
+    !!type ||
+    range !== "24h" ||
+    !!search;
 
   return (
     <div className="flex flex-col gap-2">
@@ -99,6 +127,30 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
           </select>
         </FilterGroup>
 
+        <FilterGroup label="Issue">
+          <IssueCombobox
+            issues={issueOptions}
+            value={issueId}
+            onChange={setIssueId}
+          />
+        </FilterGroup>
+
+        <FilterGroup label="Projekt">
+          <select
+            aria-label="Filter on project"
+            value={projectId ?? ""}
+            onChange={(e) => setProjectId(e.target.value === "" ? null : e.target.value)}
+            className="h-7 rounded-md border bg-background px-2 text-xs"
+          >
+            <option value="">Alle projekter</option>
+            {projectOptions.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.title}
+              </option>
+            ))}
+          </select>
+        </FilterGroup>
+
         <FilterGroup label="Status">
           <PillRow
             ariaLabel="Filter on status"
@@ -124,8 +176,149 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
             value={range}
             onChange={(v) => setRange(v as TaskTimeRange)}
           />
+          {range === "custom" && (
+            <div className="flex items-center gap-1">
+              <input
+                type="date"
+                aria-label="Fra dato"
+                value={customFrom ? customFrom.slice(0, 10) : ""}
+                onChange={(e) =>
+                  setCustomFrom(e.target.value ? new Date(e.target.value).toISOString() : null)
+                }
+                className="h-7 rounded-md border bg-background px-2 text-xs"
+              />
+              <span className="text-xs text-muted-foreground">—</span>
+              <input
+                type="date"
+                aria-label="Til dato"
+                value={customTo ? customTo.slice(0, 10) : ""}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    const d = new Date(e.target.value);
+                    d.setHours(23, 59, 59, 999);
+                    setCustomTo(d.toISOString());
+                  } else {
+                    setCustomTo(null);
+                  }
+                }}
+                className="h-7 rounded-md border bg-background px-2 text-xs"
+              />
+            </div>
+          )}
         </FilterGroup>
       </div>
+    </div>
+  );
+}
+
+interface Issue {
+  id: string;
+  title?: string;
+  number?: number;
+}
+
+function IssueCombobox({
+  issues,
+  value,
+  onChange,
+}: {
+  issues: Issue[];
+  value: string | null;
+  onChange: (id: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const selectedIssue = value ? issues.find((i) => i.id === value) : null;
+  const displayValue = selectedIssue
+    ? `#${selectedIssue.number} ${selectedIssue.title ?? ""}`.trim()
+    : "";
+
+  const filtered = query.trim()
+    ? issues.filter(
+        (i) =>
+          i.title?.toLowerCase().includes(query.toLowerCase()) ||
+          String(i.number).includes(query),
+      )
+    : issues;
+
+  const visibleOptions = filtered.slice(0, 50);
+
+  function selectIssue(id: string | null) {
+    onChange(id);
+    setQuery("");
+    setOpen(false);
+  }
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <div className="relative flex h-7 items-center">
+        <input
+          ref={inputRef}
+          type="text"
+          placeholder="Alle issues"
+          value={open ? query : displayValue}
+          onChange={(e) => setQuery(e.target.value)}
+          onFocus={() => {
+            setOpen(true);
+            setQuery("");
+          }}
+          onBlur={() => {
+            setTimeout(() => setOpen(false), 150);
+          }}
+          className="h-7 w-44 rounded-md border bg-background pl-2 pr-6 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+        {value && (
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              selectIssue(null);
+            }}
+            className="absolute right-1 flex h-4 w-4 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1 max-h-48 w-64 overflow-y-auto rounded-md border bg-popover shadow-md">
+          <div
+            className="px-2 py-1 text-xs text-muted-foreground hover:bg-accent cursor-pointer"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              selectIssue(null);
+            }}
+          >
+            Alle issues
+          </div>
+          {visibleOptions.length === 0 ? (
+            <div className="px-2 py-1 text-xs text-muted-foreground">Ingen resultater</div>
+          ) : (
+            visibleOptions.map((issue) => (
+              <div
+                key={issue.id}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  selectIssue(issue.id);
+                }}
+                className={cn(
+                  "flex cursor-pointer items-center gap-1.5 px-2 py-1 text-xs hover:bg-accent",
+                  value === issue.id && "bg-accent",
+                )}
+              >
+                <span className="shrink-0 rounded-sm bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  #{issue.number}
+                </span>
+                <span className="truncate">{issue.title}</span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }

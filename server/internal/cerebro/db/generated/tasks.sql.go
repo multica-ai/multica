@@ -18,36 +18,46 @@ JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE a.workspace_id = $1
   AND ($2::uuid IS NULL OR atq.agent_id = $2::uuid)
-  AND ($3::text IS NULL OR atq.status = $3::text)
+  AND ($3::uuid IS NULL OR atq.issue_id = $3::uuid)
+  AND ($4::uuid IS NULL OR i.project_id = $4::uuid)
+  AND ($5::text IS NULL OR atq.status = $5::text)
   AND (
-    $4::text IS NULL
-    OR ($4::text = 'chat' AND atq.chat_session_id IS NOT NULL)
-    OR ($4::text = 'issue' AND atq.chat_session_id IS NULL)
+    $6::text IS NULL
+    OR ($6::text = 'chat' AND atq.chat_session_id IS NOT NULL)
+    OR ($6::text = 'issue' AND atq.chat_session_id IS NULL)
   )
-  AND ($5::timestamptz IS NULL OR
-       COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $5::timestamptz)
-  AND ($6::text IS NULL
-       OR a.name ILIKE ('%' || $6::text || '%')
-       OR atq.title ILIKE ('%' || $6::text || '%')
-       OR i.title ILIKE ('%' || $6::text || '%'))
+  AND ($7::timestamptz IS NULL OR
+       COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $7::timestamptz)
+  AND ($8::timestamptz IS NULL OR
+       COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) <= $8::timestamptz)
+  AND ($9::text IS NULL
+       OR a.name ILIKE ('%' || $9::text || '%')
+       OR atq.title ILIKE ('%' || $9::text || '%')
+       OR i.title ILIKE ('%' || $9::text || '%'))
 `
 
 type CountCerebroTasksParams struct {
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	AgentID     pgtype.UUID        `json:"agent_id"`
-	Status      pgtype.Text        `json:"status"`
-	TaskType    pgtype.Text        `json:"task_type"`
-	Since       pgtype.Timestamptz `json:"since"`
-	Q           pgtype.Text        `json:"q"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	AgentID         pgtype.UUID        `json:"agent_id"`
+	FilterIssueID   pgtype.UUID        `json:"filter_issue_id"`
+	FilterProjectID pgtype.UUID        `json:"filter_project_id"`
+	Status          pgtype.Text        `json:"status"`
+	TaskType        pgtype.Text        `json:"task_type"`
+	Since           pgtype.Timestamptz `json:"since"`
+	Until           pgtype.Timestamptz `json:"until"`
+	Q               pgtype.Text        `json:"q"`
 }
 
 func (q *Queries) CountCerebroTasks(ctx context.Context, arg CountCerebroTasksParams) (int32, error) {
 	row := q.db.QueryRow(ctx, countCerebroTasks,
 		arg.WorkspaceID,
 		arg.AgentID,
+		arg.FilterIssueID,
+		arg.FilterProjectID,
 		arg.Status,
 		arg.TaskType,
 		arg.Since,
+		arg.Until,
 		arg.Q,
 	)
 	var column_1 int32
@@ -61,71 +71,106 @@ SELECT atq.id::uuid AS task_id, atq.agent_id, atq.issue_id, atq.status,
        atq.dispatched_at, atq.started_at, atq.completed_at, atq.created_at,
        atq.chat_session_id, atq.title AS task_title,
        a.name AS agent_name, a.avatar_url AS agent_avatar_url,
-       i.title AS issue_title, i.number AS issue_number
+       i.title AS issue_title, i.number AS issue_number,
+       task_cost.input_tokens AS usage_input_tokens,
+       task_cost.output_tokens AS usage_output_tokens,
+       task_cost.cache_read_tokens AS usage_cache_read_tokens,
+       task_cost.cache_write_tokens AS usage_cache_write_tokens,
+       task_cost.model AS usage_model,
+       trg_user.name AS triggered_by_name
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
+LEFT JOIN LATERAL (
+    SELECT
+        COALESCE(SUM(tu.input_tokens), 0)::bigint  AS input_tokens,
+        COALESCE(SUM(tu.output_tokens), 0)::bigint AS output_tokens,
+        COALESCE(SUM(tu.cache_read_tokens), 0)::bigint  AS cache_read_tokens,
+        COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS cache_write_tokens,
+        MAX(tu.model) AS model
+    FROM task_usage tu WHERE tu.task_id = atq.id
+) AS task_cost ON true
+LEFT JOIN comment trg_comment ON trg_comment.id = atq.trigger_comment_id
+LEFT JOIN member trg_member ON trg_member.id = trg_comment.author_id
+    AND trg_comment.author_type = 'member'
+LEFT JOIN "user" trg_user ON trg_user.id = trg_member.user_id
 WHERE a.workspace_id = $1
   AND ($4::uuid IS NULL OR atq.agent_id = $4::uuid)
-  AND ($5::text IS NULL OR atq.status = $5::text)
+  AND ($5::uuid IS NULL OR atq.issue_id = $5::uuid)
+  AND ($6::uuid IS NULL OR i.project_id = $6::uuid)
+  AND ($7::text IS NULL OR atq.status = $7::text)
   AND (
-    $6::text IS NULL
-    OR ($6::text = 'chat' AND atq.chat_session_id IS NOT NULL)
-    OR ($6::text = 'issue' AND atq.chat_session_id IS NULL)
+    $8::text IS NULL
+    OR ($8::text = 'chat' AND atq.chat_session_id IS NOT NULL)
+    OR ($8::text = 'issue' AND atq.chat_session_id IS NULL)
   )
-  AND ($7::timestamptz IS NULL OR
-       COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $7::timestamptz)
-  AND ($8::text IS NULL
-       OR a.name ILIKE ('%' || $8::text || '%')
-       OR atq.title ILIKE ('%' || $8::text || '%')
-       OR i.title ILIKE ('%' || $8::text || '%'))
+  AND ($9::timestamptz IS NULL OR
+       COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $9::timestamptz)
+  AND ($10::timestamptz IS NULL OR
+       COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) <= $10::timestamptz)
+  AND ($11::text IS NULL
+       OR a.name ILIKE ('%' || $11::text || '%')
+       OR atq.title ILIKE ('%' || $11::text || '%')
+       OR i.title ILIKE ('%' || $11::text || '%'))
 ORDER BY COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) DESC,
          atq.id DESC
 LIMIT $2 OFFSET $3
 `
 
 type ListCerebroTasksParams struct {
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Limit       int32              `json:"limit"`
-	Offset      int32              `json:"offset"`
-	AgentID     pgtype.UUID        `json:"agent_id"`
-	Status      pgtype.Text        `json:"status"`
-	TaskType    pgtype.Text        `json:"task_type"`
-	Since       pgtype.Timestamptz `json:"since"`
-	Q           pgtype.Text        `json:"q"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Limit           int32              `json:"limit"`
+	Offset          int32              `json:"offset"`
+	AgentID         pgtype.UUID        `json:"agent_id"`
+	FilterIssueID   pgtype.UUID        `json:"filter_issue_id"`
+	FilterProjectID pgtype.UUID        `json:"filter_project_id"`
+	Status          pgtype.Text        `json:"status"`
+	TaskType        pgtype.Text        `json:"task_type"`
+	Since           pgtype.Timestamptz `json:"since"`
+	Until           pgtype.Timestamptz `json:"until"`
+	Q               pgtype.Text        `json:"q"`
 }
 
 type ListCerebroTasksRow struct {
-	TaskID         pgtype.UUID        `json:"task_id"`
-	AgentID        pgtype.UUID        `json:"agent_id"`
-	IssueID        pgtype.UUID        `json:"issue_id"`
-	Status         string             `json:"status"`
-	DispatchedAt   pgtype.Timestamptz `json:"dispatched_at"`
-	StartedAt      pgtype.Timestamptz `json:"started_at"`
-	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
-	TaskTitle      pgtype.Text        `json:"task_title"`
-	AgentName      string             `json:"agent_name"`
-	AgentAvatarUrl pgtype.Text        `json:"agent_avatar_url"`
-	IssueTitle     pgtype.Text        `json:"issue_title"`
-	IssueNumber    pgtype.Int4        `json:"issue_number"`
+	TaskID                pgtype.UUID        `json:"task_id"`
+	AgentID               pgtype.UUID        `json:"agent_id"`
+	IssueID               pgtype.UUID        `json:"issue_id"`
+	Status                string             `json:"status"`
+	DispatchedAt          pgtype.Timestamptz `json:"dispatched_at"`
+	StartedAt             pgtype.Timestamptz `json:"started_at"`
+	CompletedAt           pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	ChatSessionID         pgtype.UUID        `json:"chat_session_id"`
+	TaskTitle             pgtype.Text        `json:"task_title"`
+	AgentName             string             `json:"agent_name"`
+	AgentAvatarUrl        pgtype.Text        `json:"agent_avatar_url"`
+	IssueTitle            pgtype.Text        `json:"issue_title"`
+	IssueNumber           pgtype.Int4        `json:"issue_number"`
+	UsageInputTokens      int64              `json:"usage_input_tokens"`
+	UsageOutputTokens     int64              `json:"usage_output_tokens"`
+	UsageCacheReadTokens  int64              `json:"usage_cache_read_tokens"`
+	UsageCacheWriteTokens int64              `json:"usage_cache_write_tokens"`
+	UsageModel            interface{}        `json:"usage_model"`
+	TriggeredByName       pgtype.Text        `json:"triggered_by_name"`
 }
 
 // Cerebro tasks page (JEH-900). Workspace-wide list of agent tasks with
-// filters for agent, status, time range, and type (issue / chat). Backs the
-// /api/cerebro/tasks endpoint consumed by the cerebro-tasks frontend
-// package. Mirrors DashboardRecentTasks but adds pagination, type, status,
-// and time-window filters.
+// filters for agent, status, time range, type (issue / chat), issue, and
+// project. Backs the /api/cerebro/tasks endpoint consumed by the
+// cerebro-tasks frontend package. Mirrors DashboardRecentTasks but adds
+// pagination, type, status, time-window, issue, and project filters.
 func (q *Queries) ListCerebroTasks(ctx context.Context, arg ListCerebroTasksParams) ([]ListCerebroTasksRow, error) {
 	rows, err := q.db.Query(ctx, listCerebroTasks,
 		arg.WorkspaceID,
 		arg.Limit,
 		arg.Offset,
 		arg.AgentID,
+		arg.FilterIssueID,
+		arg.FilterProjectID,
 		arg.Status,
 		arg.TaskType,
 		arg.Since,
+		arg.Until,
 		arg.Q,
 	)
 	if err != nil {
@@ -150,6 +195,12 @@ func (q *Queries) ListCerebroTasks(ctx context.Context, arg ListCerebroTasksPara
 			&i.AgentAvatarUrl,
 			&i.IssueTitle,
 			&i.IssueNumber,
+			&i.UsageInputTokens,
+			&i.UsageOutputTokens,
+			&i.UsageCacheReadTokens,
+			&i.UsageCacheWriteTokens,
+			&i.UsageModel,
+			&i.TriggeredByName,
 		); err != nil {
 			return nil, err
 		}
