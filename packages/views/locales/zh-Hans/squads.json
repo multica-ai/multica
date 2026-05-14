@@ -37,6 +37,7 @@
     "section_count_one": "该小队有 {{count}} 名成员",
     "section_count_other": "该小队有 {{count}} 名成员",
     "add_member_button": "添加成员",
+    "create_agent_button": "创建智能体",
     "leader_chip": "负责人"
   },
   "instructions_tab": {

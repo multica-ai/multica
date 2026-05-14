@@ -220,6 +220,7 @@
     "template_created_toast": "智能体「{{name}}」已创建",
     "template_created_with_reuse_toast_other": "智能体「{{name}}」已创建。复用了 {{count}} 个现有 skill。",
     "skill_attach_failed_toast": "智能体已创建，但 skill 关联失败：{{error}}",
+    "squad_join_failed_toast": "智能体「{{name}}」已创建，但加入小队失败：{{error}}。你可以在 Members 标签里手动添加。",
     "chooser": {
       "blank_title": "从零开始",
       "blank_desc": "全部由你来填写。",

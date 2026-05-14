@@ -225,6 +225,7 @@
     "template_created_with_reuse_toast_one": "Agent \"{{name}}\" created. Reused {{count}} existing skill.",
     "template_created_with_reuse_toast_other": "Agent \"{{name}}\" created. Reused {{count}} existing skills.",
     "skill_attach_failed_toast": "Agent created, but failed to attach skills: {{error}}",
+    "squad_join_failed_toast": "Agent \"{{name}}\" was created but couldn't join the squad: {{error}}. You can add it manually from Members.",
     "chooser": {
       "blank_title": "Start blank",
       "blank_desc": "Write everything yourself.",

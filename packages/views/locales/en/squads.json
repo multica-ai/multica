@@ -37,6 +37,7 @@
     "section_count_one": "{{count}} member in this squad",
     "section_count_other": "{{count}} members in this squad",
     "add_member_button": "Add Member",
+    "create_agent_button": "Create Agent",
     "leader_chip": "Leader"
   },
   "instructions_tab": {

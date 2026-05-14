@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
+import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { isImeComposing, timeAgo } from "@multica/core/utils";
 import { agentListOptions, memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { runtimeListOptions } from "@multica/core/runtimes";
+import { CreateAgentDialog } from "../../agents/components/create-agent-dialog";
 import { useNavigation } from "../../navigation";
 import { AppLink } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
@@ -48,7 +51,7 @@ import {
 } from "../../issues/components/pickers/property-picker";
 import { ChevronDown, UserPlus } from "lucide-react";
 import { toast } from "sonner";
-import type { Squad, SquadMember, Agent, MemberWithUser } from "@multica/core/types";
+import type { Squad, SquadMember, Agent, CreateAgentRequest, MemberWithUser } from "@multica/core/types";
 import { useT } from "../../i18n";
 
 export function SquadDetailPage() {
@@ -75,7 +78,24 @@ export function SquadDetailPage() {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: wsMembers = [] } = useQuery(memberListOptions(wsId));
 
+  // Runtimes are only fetched when the Create Agent dialog might open;
+  // gating on isWorkspaceAdmin below means non-admins never trigger the
+  // request. The runtime list mirrors the agents page so the picker
+  // (and the "only my runtimes" filter) behaves identically here.
+  const currentUser = useAuthStore((s) => s.user);
+  const myRole = useMemo(() => {
+    if (!currentUser) return null;
+    return wsMembers.find((m) => m.user_id === currentUser.id)?.role ?? null;
+  }, [wsMembers, currentUser]);
+  const isWorkspaceAdmin = myRole === "owner" || myRole === "admin";
+
+  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: !!wsId && isWorkspaceAdmin,
+  });
+
   const [showAddMember, setShowAddMember] = useState(false);
+  const [showCreateAgent, setShowCreateAgent] = useState(false);
 
   const updateSquadMut = useMutation({
     mutationFn: (data: { name?: string; description?: string; instructions?: string; avatar_url?: string; leader_id?: string }) => api.updateSquad(squadId, data),
@@ -130,6 +150,25 @@ export function SquadDetailPage() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) }); push(p.squads()); toast.success("Squad archived"); },
     onError: () => toast.error("Failed to archive squad"),
   });
+
+  // CreateAgentDialog's onCreate contract: hit POST /api/agents and
+  // return the created agent so the dialog can run its skill follow-up.
+  // We deliberately do NOT navigate to the agent detail page (that's
+  // the agents-page behaviour) — the user clicked Create Agent from
+  // inside this squad, so the dialog will stay open just long enough
+  // to also call addSquadMember (handled by the dialog when squadId
+  // is set), then close the user back to Members where they can
+  // verify the new agent appeared. Cache-update keeps the agents list
+  // fresh for any pickers that read from it.
+  const handleCreateAgent = async (data: CreateAgentRequest): Promise<Agent> => {
+    const agent = await api.createAgent(data);
+    queryClient.setQueryData<Agent[]>(workspaceKeys.agents(wsId), (current = []) => {
+      const exists = current.some((a) => a.id === agent.id);
+      return exists ? current.map((a) => (a.id === agent.id ? agent : a)) : [...current, agent];
+    });
+    queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+    return agent;
+  };
 
   const getEntityName = (type: string, id: string) => {
     if (type === "agent") return agents.find((a: Agent) => a.id === id)?.name ?? id.slice(0, 8);
@@ -188,6 +227,7 @@ export function SquadDetailPage() {
           isLeader={isLeader}
           getEntityName={getEntityName}
           onAddMemberClick={() => setShowAddMember(true)}
+          onCreateAgentClick={isWorkspaceAdmin ? () => setShowCreateAgent(true) : undefined}
           onSetLeader={(id) => setLeaderMut.mutate(id)}
           onRemoveMember={(m) => removeMemberMut.mutate(m)}
           onUpdateRole={async (m, role) => { await updateRoleMut.mutateAsync({ member: m, role }); }}
@@ -202,6 +242,25 @@ export function SquadDetailPage() {
           availableAgents={availableAgents}
           onClose={() => setShowAddMember(false)}
           onSubmit={async (input) => { await addMemberMut.mutateAsync(input); }}
+        />
+      )}
+
+      {/* Squad-scoped create flow: same dialog as the Agents page but
+          with squadId set, so the dialog runs addSquadMember after
+          createAgent / createAgentFromTemplate and skips the
+          agent-detail navigation. Only mounted for workspace
+          owner/admin since AddSquadMember is owner/admin-gated
+          server-side; for everyone else the trigger never renders. */}
+      {showCreateAgent && isWorkspaceAdmin && (
+        <CreateAgentDialog
+          runtimes={runtimes}
+          runtimesLoading={runtimesLoading}
+          members={wsMembers}
+          currentUserId={currentUser?.id ?? null}
+          existingAgentNames={agents.map((a: Agent) => a.name)}
+          squadId={squadId}
+          onClose={() => setShowCreateAgent(false)}
+          onCreate={handleCreateAgent}
         />
       )}
     </div>
@@ -846,6 +905,7 @@ function SquadOverviewPane({
   isLeader,
   getEntityName,
   onAddMemberClick,
+  onCreateAgentClick,
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
@@ -857,6 +917,10 @@ function SquadOverviewPane({
   isLeader: (m: SquadMember) => boolean;
   getEntityName: (type: string, id: string) => string;
   onAddMemberClick: () => void;
+  // Optional — only passed when the current user can manage the squad
+  // (workspace owner/admin). Hidden otherwise so plain members don't
+  // see a button they can't action.
+  onCreateAgentClick?: () => void;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
@@ -910,6 +974,7 @@ function SquadOverviewPane({
               isLeader={isLeader}
               getEntityName={getEntityName}
               onAddMemberClick={onAddMemberClick}
+              onCreateAgentClick={onCreateAgentClick}
               onSetLeader={onSetLeader}
               onRemoveMember={onRemoveMember}
               onUpdateRole={onUpdateRole}
@@ -956,6 +1021,7 @@ function SquadMembersTab({
   isLeader,
   getEntityName,
   onAddMemberClick,
+  onCreateAgentClick,
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
@@ -965,6 +1031,8 @@ function SquadMembersTab({
   isLeader: (m: SquadMember) => boolean;
   getEntityName: (type: string, id: string) => string;
   onAddMemberClick: () => void;
+  // Hidden for non-admins — see SquadOverviewPane.
+  onCreateAgentClick?: () => void;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
@@ -980,10 +1048,18 @@ function SquadMembersTab({
             {t(($) => $.members_tab.section_count, { count: members.length })}
           </p>
         </div>
-        <Button size="sm" variant="outline" onClick={onAddMemberClick}>
-          <Plus className="size-3.5 mr-1.5" />
-          {t(($) => $.members_tab.add_member_button)}
-        </Button>
+        <div className="flex items-center gap-2">
+          {onCreateAgentClick && (
+            <Button size="sm" variant="outline" onClick={onCreateAgentClick}>
+              <Plus className="size-3.5 mr-1.5" />
+              {t(($) => $.members_tab.create_agent_button)}
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={onAddMemberClick}>
+            <Plus className="size-3.5 mr-1.5" />
+            {t(($) => $.members_tab.add_member_button)}
+          </Button>
+        </div>
       </div>
 
       <div className="space-y-2">
