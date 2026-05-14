@@ -2,6 +2,9 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/util"
@@ -177,5 +180,82 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyAgent(t *te
 					tc.description, tc.content, tc.authorType, tc.authorID, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestCreateComment_SquadLeaderSkipOnlyInspectsCurrentMention drives the
+// full CreateComment handler to lock the call-site wiring (comment.go) for
+// the squad-leader-skip rule. Specifically it proves that:
+//
+//   - A member top-level comment that @mentions another agent does NOT
+//     enqueue the squad leader (the mentioned agent owns the next step).
+//   - A subsequent member REPLY in the same thread, containing no mentions
+//     of its own, DOES enqueue the squad leader — i.e. the parent's
+//     @agent mention is not inherited into the leader-skip decision.
+//
+// The matching unit test above exercises the helper in isolation; this
+// test catches a class of regression where someone refactors comment.go
+// to pass the parent's content (or the merged thread content) by mistake.
+func TestCreateComment_SquadLeaderSkipOnlyInspectsCurrentMention(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSquadCommentTriggerFixture(t)
+	issueID := uuidToString(fx.Issue.ID)
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+	})
+
+	countQueued := func(agentID string) int {
+		var n int
+		if err := testPool.QueryRow(ctx,
+			`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+			issueID, agentID,
+		).Scan(&n); err != nil {
+			t.Fatalf("count tasks for %s: %v", agentID, err)
+		}
+		return n
+	}
+
+	postMemberComment := func(body map[string]any) CommentResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := newRequest("POST", "/api/issues/"+issueID+"/comments", body)
+		r = withURLParam(r, "id", issueID)
+		testHandler.CreateComment(w, r)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp CommentResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode comment: %v", err)
+		}
+		return resp
+	}
+
+	// 1. Member top-level comment mentions OtherAgent.
+	//    Leader must be skipped; OtherAgent must be enqueued via the mention path.
+	parent := postMemberComment(map[string]any{
+		"content": "[@Other](mention://agent/" + fx.OtherID + ") please take this",
+	})
+	if got := countQueued(fx.LeaderID); got != 0 {
+		t.Fatalf("after parent (@OtherAgent): expected 0 leader tasks (skipped), got %d", got)
+	}
+	if got := countQueued(fx.OtherID); got != 1 {
+		t.Fatalf("after parent (@OtherAgent): expected 1 OtherAgent task (mention path), got %d", got)
+	}
+
+	// 2. Member posts a reply in the same thread with NO mentions.
+	//    The leader-skip helper must inspect only the reply's body (empty),
+	//    NOT the parent's @OtherAgent mention. Leader must wake up.
+	postMemberComment(map[string]any{
+		"content":   "any update?",
+		"parent_id": parent.ID,
+	})
+	if got := countQueued(fx.LeaderID); got != 1 {
+		t.Fatalf("after plain reply: expected 1 leader task (no parent inheritance), got %d", got)
 	}
 }
