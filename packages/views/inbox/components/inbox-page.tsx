@@ -22,6 +22,12 @@ import {
 } from "@multica/core/inbox/mutations";
 
 import { IssueDetail } from "../../issues/components";
+import { IssuesFilterMenu } from "../../issues/components/issues-header";
+import { filterIssues } from "../../issues/utils/filter";
+import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
+import { useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
+import { useInboxViewStore } from "@multica/core/inbox/stores/view-store";
+import { issueListOptions } from "@multica/core/issues/queries";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { useNavigation } from "../../navigation";
 import { toast } from "sonner";
@@ -34,7 +40,7 @@ import {
   ListChecks,
   ArrowLeft,
 } from "lucide-react";
-import type { InboxItem } from "@multica/core/types";
+import type { Issue, InboxItem } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   ResizablePanelGroup,
@@ -71,9 +77,58 @@ export function InboxPage() {
 
   const wsId = useWorkspaceId();
   const { data: rawItems = [], isLoading: loading } = useQuery(inboxListOptions(wsId));
+  const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
+  const statusFilters = useInboxViewStore((s) => s.statusFilters);
+  const priorityFilters = useInboxViewStore((s) => s.priorityFilters);
+  const assigneeFilters = useInboxViewStore((s) => s.assigneeFilters);
+  const includeNoAssignee = useInboxViewStore((s) => s.includeNoAssignee);
+  const creatorFilters = useInboxViewStore((s) => s.creatorFilters);
+  const projectFilters = useInboxViewStore((s) => s.projectFilters);
+  const includeNoProject = useInboxViewStore((s) => s.includeNoProject);
+  const labelFilters = useInboxViewStore((s) => s.labelFilters);
+  useClearFiltersOnWorkspaceChange(useInboxViewStore, wsId);
 
-  const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
+  const issueById = useMemo(() => {
+    const map = new Map<string, Issue>();
+    for (const issue of allIssues) map.set(issue.id, issue);
+    return map;
+  }, [allIssues]);
+  const filterableIssues = useMemo(() => {
+    return items
+      .map((item) => issueById.get(item.issue_id ?? ""))
+      .filter((issue): issue is Issue => !!issue);
+  }, [items, issueById]);
+  const filteredIssueIds = useMemo(() => {
+    const filtered = filterIssues(filterableIssues, {
+      statusFilters,
+      priorityFilters,
+      assigneeFilters,
+      includeNoAssignee,
+      creatorFilters,
+      projectFilters,
+      includeNoProject,
+      labelFilters,
+    });
+    return new Set(filtered.map((issue) => issue.id));
+  }, [filterableIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters]);
+  const hasActiveIssueFilters = useMemo(() => {
+    return (
+      statusFilters.length > 0 ||
+      priorityFilters.length > 0 ||
+      assigneeFilters.length > 0 ||
+      includeNoAssignee ||
+      creatorFilters.length > 0 ||
+      projectFilters.length > 0 ||
+      includeNoProject ||
+      labelFilters.length > 0
+    );
+  }, [statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters]);
+  const filteredItems = useMemo(() => {
+    if (!hasActiveIssueFilters) return items;
+    return items.filter((item) => item.issue_id && filteredIssueIds.has(item.issue_id));
+  }, [items, hasActiveIssueFilters, filteredIssueIds]);
+  const selected = filteredItems.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
 
   // Track the last key we actually resolved against the inbox list. Lets the
   // fallback effect distinguish "shared-link to a notification not in our
@@ -145,15 +200,15 @@ export function InboxPage() {
   };
 
   const handleArchive = (id: string) => {
-    const idx = items.findIndex((i) => i.id === id);
-    const archived = idx >= 0 ? items[idx] : null;
+    const idx = filteredItems.findIndex((i) => i.id === id);
+    const archived = idx >= 0 ? filteredItems[idx] : null;
     const wasSelected =
       !!archived && (archived.issue_id ?? archived.id) === selectedKey;
     if (wasSelected) {
       // List is sorted newest-first; prefer the next (older) item, fall back
       // to the previous (newer) one when archiving at the bottom, and only
       // clear the selection when nothing else is left.
-      const next = items[idx + 1] ?? items[idx - 1] ?? null;
+      const next = filteredItems[idx + 1] ?? filteredItems[idx - 1] ?? null;
       setSelectedKey(next ? (next.issue_id ?? next.id) : "");
     }
     archiveMutation.mutate(id, {
@@ -202,49 +257,54 @@ export function InboxPage() {
           </span>
         )}
       </div>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="text-muted-foreground"
-            />
-          }
-        >
-          <MoreHorizontal className="h-4 w-4" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-auto">
-          <DropdownMenuItem onClick={handleMarkAllRead}>
-            <CheckCheck className="h-4 w-4" />
-            {t(($) => $.menu.mark_all_read)}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={handleArchiveAll}>
-            <Archive className="h-4 w-4" />
-            {t(($) => $.menu.archive_all)}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={handleArchiveAllRead}>
-            <BookCheck className="h-4 w-4" />
-            {t(($) => $.menu.archive_all_read)}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={handleArchiveCompleted}>
-            <ListChecks className="h-4 w-4" />
-            {t(($) => $.menu.archive_completed)}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <div className="flex items-center gap-1">
+        <ViewStoreProvider store={useInboxViewStore}>
+          <IssuesFilterMenu scopedIssues={filterableIssues} />
+        </ViewStoreProvider>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground"
+              />
+            }
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto">
+            <DropdownMenuItem onClick={handleMarkAllRead}>
+              <CheckCheck className="h-4 w-4" />
+              {t(($) => $.menu.mark_all_read)}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleArchiveAll}>
+              <Archive className="h-4 w-4" />
+              {t(($) => $.menu.archive_all)}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleArchiveAllRead}>
+              <BookCheck className="h-4 w-4" />
+              {t(($) => $.menu.archive_all_read)}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleArchiveCompleted}>
+              <ListChecks className="h-4 w-4" />
+              {t(($) => $.menu.archive_completed)}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </PageHeader>
   );
 
-  const listBody = items.length === 0 ? (
+  const listBody = filteredItems.length === 0 ? (
     <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
       <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
       <p className="text-sm">{t(($) => $.list.empty)}</p>
     </div>
   ) : (
     <div>
-      {items.map((item) => (
+      {filteredItems.map((item) => (
         <InboxListItem
           key={item.id}
           item={item}
@@ -442,7 +502,7 @@ export function InboxPage() {
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
             <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
             <p className="text-sm">
-              {items.length === 0
+              {filteredItems.length === 0
                 ? t(($) => $.detail.empty)
                 : t(($) => $.detail.select_prompt)}
             </p>
