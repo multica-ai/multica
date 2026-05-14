@@ -18,7 +18,7 @@ const DefaultBackoff = 5 * time.Minute
 var rateLimitDetectorRe = regexp.MustCompile(
 	`rate[ -]?limit(?:ed|ing)?|ratelimit|limiting requests|\b429\b|` +
 		`quota exceeded|insufficient_quota|monthly usage limit|` +
-		`org's monthly usage|out of tokens|401 invalid authentication`,
+		`org's monthly usage|out of tokens|out of extra usage|401 invalid authentication`,
 )
 
 // ParseReset extracts a runtime-unpause timestamp from a free-form
@@ -28,9 +28,10 @@ var rateLimitDetectorRe = regexp.MustCompile(
 //
 //  1. Unix epoch seconds
 //  2. ISO-8601 timestamp
-//  3. Wall-clock time
-//  4. Relative duration
-//  5. Fallback — text matches a rate-limit-shaped error → now + DefaultBackoff.
+//  3. Absolute month-day (e.g. "resets May 16 at 3pm (Europe/Copenhagen)")
+//  4. Wall-clock time (same-day/next-day)
+//  5. Relative duration
+//  6. Fallback — text matches a rate-limit-shaped error → now + DefaultBackoff.
 func ParseReset(errText string, now time.Time) (time.Time, bool) {
 	if strings.TrimSpace(errText) == "" {
 		return time.Time{}, false
@@ -41,6 +42,9 @@ func ParseReset(errText string, now time.Time) (time.Time, bool) {
 		return t, true
 	}
 	if t, ok := parseISO8601(errText); ok {
+		return t, true
+	}
+	if t, ok := parseAbsoluteMonthDay(errText, now); ok {
 		return t, true
 	}
 	if t, ok := parseWallClock(lower, now); ok {
@@ -174,4 +178,89 @@ func parseRelativeDuration(lower string, now time.Time) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return now.Add(d), true
+}
+
+// absMonthDayRe matches "resets May 16 at 3pm (Europe/Copenhagen)" style reset
+// strings. Uses (?i) so month names and am/pm are case-insensitive while
+// preserving original casing for the IANA timezone capture group.
+var absMonthDayRe = regexp.MustCompile(
+	`(?i)(?:resets?|available)\s+` +
+		`(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)` +
+		`\s+(\d{1,2})\s+at\s+` +
+		`(\d{1,2})(?::(\d{2}))?\s*(am|pm)?` +
+		`(?:\s*\(\s*([^)]+?)\s*\))?`,
+)
+
+var monthNames = map[string]time.Month{
+	"jan": time.January, "january": time.January,
+	"feb": time.February, "february": time.February,
+	"mar": time.March, "march": time.March,
+	"apr": time.April, "april": time.April,
+	"may": time.May,
+	"jun": time.June, "june": time.June,
+	"jul": time.July, "july": time.July,
+	"aug": time.August, "august": time.August,
+	"sep": time.September, "sept": time.September, "september": time.September,
+	"oct": time.October, "october": time.October,
+	"nov": time.November, "november": time.November,
+	"dec": time.December, "december": time.December,
+}
+
+// parseAbsoluteMonthDay handles errors like "resets May 16 at 3pm (Europe/Copenhagen)".
+// Preserves original errText (not lowercased) so the IANA timezone name keeps
+// its casing for time.LoadLocation. Falls back to time.Local when the timezone
+// is absent or unrecognised.
+func parseAbsoluteMonthDay(errText string, now time.Time) (time.Time, bool) {
+	m := absMonthDayRe.FindStringSubmatch(errText)
+	if m == nil {
+		return time.Time{}, false
+	}
+	month, ok := monthNames[strings.ToLower(m[1])]
+	if !ok {
+		return time.Time{}, false
+	}
+	day, err := strconv.Atoi(m[2])
+	if err != nil || day < 1 || day > 31 {
+		return time.Time{}, false
+	}
+	hour, err := strconv.Atoi(m[3])
+	if err != nil || hour < 0 || hour > 23 {
+		return time.Time{}, false
+	}
+	min := 0
+	if m[4] != "" {
+		v, err := strconv.Atoi(m[4])
+		if err != nil || v < 0 || v > 59 {
+			return time.Time{}, false
+		}
+		min = v
+	}
+	switch strings.ToLower(m[5]) {
+	case "pm":
+		if hour < 12 {
+			hour += 12
+		}
+	case "am":
+		if hour == 12 {
+			hour = 0
+		}
+	}
+	if hour > 23 {
+		return time.Time{}, false
+	}
+	loc := time.Local
+	if m[6] != "" {
+		if loaded, err := time.LoadLocation(strings.TrimSpace(m[6])); err == nil {
+			loc = loaded
+		}
+	}
+	year := now.Year()
+	candidate := time.Date(year, month, day, hour, min, 0, 0, loc)
+	if !candidate.After(now) {
+		candidate = time.Date(year+1, month, day, hour, min, 0, 0, loc)
+	}
+	if candidate.Sub(now) > 400*24*time.Hour {
+		return time.Time{}, false
+	}
+	return candidate.UTC(), true
 }

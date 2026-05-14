@@ -169,6 +169,22 @@ func TestParseRateLimitReset(t *testing.T) {
 			wantOK: true,
 		},
 		{
+			// Multica budget exhaustion without a parseable reset time.
+			name:   "out of extra usage fallback",
+			input:  "You're out of extra usage",
+			want:   now.Add(DefaultRateLimitBackoff),
+			wantOK: true,
+		},
+		{
+			// Exact error from Mia's failed run on 2026-05-14 (JEH-1248).
+			// "resets May 16 at 3pm (Europe/Copenhagen)" → 2026-05-16 13:00 UTC
+			// (Copenhagen in May is CEST = UTC+2).
+			name:   "out of extra usage with absolute date and IANA timezone",
+			input:  "You're out of extra usage · resets May 16 at 3pm (Europe/Copenhagen)",
+			want:   time.Date(2026, 5, 16, 13, 0, 0, 0, time.UTC),
+			wantOK: true,
+		},
+		{
 			// 401 without "Invalid authentication" must NOT match — a 401
 			// from a normal API call (wrong workspace, revoked invite) is
 			// not a pause-worthy condition, only an expired provider
