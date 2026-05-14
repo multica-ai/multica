@@ -375,7 +375,15 @@ export function useRealtimeSync(
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment } = p as CommentCreatedPayload;
-      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      if (comment?.issue_id) {
+        invalidateTimeline(comment.issue_id);
+        // CEREBRO-PATCH(channel-unread-detail-sync): JEH-1249 — also stale the
+        // per-channel detail so unread_count stays in sync. Without this,
+        // ChannelDetail reads a cached detail with unread_count=0 while the list
+        // shows >0 — the auto-mark-read effect never fires.
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.detail(wsId, comment.issue_id) });
+      }
       invalidateChannelList();
     });
 

@@ -86,12 +86,17 @@ export function ChannelDetail({ channelId, initialChannel, onArchive }: ChannelD
   // notifications-routed rows — so CountUnreadInboxForChannel drops to zero
   // and the badge in the inbox list clears.
   const markChannelRead = useMarkChannelRead();
-  const seenChannelRef = useRef<string | null>(null);
+  // CEREBRO-PATCH(channel-unread-mark-read-guard): JEH-1249 — track (id, count)
+  // instead of just id so mark-as-read re-fires when new messages arrive after
+  // the channel was previously marked read. Count equality prevents infinite
+  // retries when the API fails (onError restores count; won't re-fire until count changes).
+  const seenChannelRef = useRef<{ id: string; count: number } | null>(null);
 
   useEffect(() => {
     if (!channelId || !channel || channel.unread_count === 0) return;
-    if (seenChannelRef.current === channelId) return;
-    seenChannelRef.current = channelId;
+    const last = seenChannelRef.current;
+    if (last?.id === channelId && last.count === channel.unread_count) return;
+    seenChannelRef.current = { id: channelId, count: channel.unread_count };
     markChannelRead.mutate(channelId);
   }, [channelId, channel, markChannelRead]);
 
