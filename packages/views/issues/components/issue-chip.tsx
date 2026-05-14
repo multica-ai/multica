@@ -29,9 +29,9 @@ export interface IssueChipProps {
   className?: string;
 }
 
-// CEREBRO-PATCH(issue-chip-multilne): flex-wrap + gap-y for multi-line title layout (JEH-1253)
+// CEREBRO-PATCH(issue-chip-multilne): single-line inline layout — no max-w cap, title stays on one line (JEH-1253)
 const BASE_CLASS =
-  "issue-mention inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-md border mx-0.5 px-2 py-1 text-xs max-w-72";
+  "issue-mention inline-flex items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-xs";
 
 export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps) {
   const wsId = useWorkspaceId();
@@ -80,7 +80,7 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
         )}
         <span className="font-medium text-muted-foreground text-[10px]">{issue.identifier}</span>
       </span>
-      <span className="text-foreground break-words min-w-0">{issue.title}</span>
+      <span className="text-foreground whitespace-nowrap">{issue.title}</span>
     </span>
   );
 }
