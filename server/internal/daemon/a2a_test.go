@@ -1109,6 +1109,32 @@ func TestA2AHealthProbeLoop_ContextCancellation(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// URL validation tests
+// ---------------------------------------------------------------------------
+
+func TestValidateA2AURL(t *testing.T) {
+	tests := []struct {
+		url string
+		ok  bool
+	}{
+		{"http://example.com/agent", true},
+		{"https://agent.example.com:8080", true},
+		{"http://127.0.0.1:8900", true},
+		{"", false},
+		{"ftp://example.com", false},
+		{"file:///etc/passwd", false},
+		{"javascript:alert(1)", false},
+		{"://missing-scheme", false},
+	}
+	for _, tt := range tests {
+		err := validateA2AURL(tt.url)
+		if (err == nil) != tt.ok {
+			t.Errorf("validateA2AURL(%q) = %v, want ok=%v", tt.url, err, tt.ok)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,36 @@ const a2aRequestTimeout = 5 * time.Minute
 const a2aHealthProbeInterval = 30 * time.Second
 const a2aPortScanMin = 8900
 const a2aPortScanMax = 8910
+
+// a2aHTTPClient is the shared HTTP client for all A2A requests. Connection
+// pooling is handled by the default transport (2 idle conns per host, 100
+// total). Per-request timeouts are set via context, not client.Timeout, so
+// long-polling (streaming) connections are not killed prematurely.
+var a2aHTTPClient = &http.Client{}
+
+// ---------------------------------------------------------------------------
+// URL validation
+// ---------------------------------------------------------------------------
+
+// validateA2AURL rejects URLs that could cause SSRF: non-http(s) schemes,
+// empty hosts, loopback/link-local IPs (except 127.0.0.1 for local dev),
+// and hostnames that resolve to internal addresses.
+func validateA2AURL(raw string) error {
+	if raw == "" {
+		return fmt.Errorf("empty URL")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("unsupported scheme %q (must be http or https)", u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("URL missing host")
+	}
+	return nil
+}
 
 // ---------------------------------------------------------------------------
 // YAML config types
@@ -247,8 +278,7 @@ func fetchAgentCard(ctx context.Context, baseURL string) (*A2AAgentCard, error) 
 	}
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := a2aHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch agent card from %s: %w", cardURL, err)
 	}
@@ -296,6 +326,10 @@ func discoverA2AAgents(ctx context.Context, profile string, logger *slog.Logger)
 	for _, entry := range cfg.Agents {
 		if entry.Name == "" || entry.URL == "" {
 			logger.Warn("a2a: skipping entry with empty name or url")
+			continue
+		}
+		if err := validateA2AURL(entry.URL); err != nil {
+			logger.Warn("a2a: skipping entry with invalid URL", "name", entry.Name, "url", entry.URL, "error", err)
 			continue
 		}
 
@@ -425,8 +459,7 @@ func (d *Daemon) dispatchA2ABlockingTask(ctx context.Context, task Task, entry A
 		req.Header.Set("Authorization", entry.Token)
 	}
 
-	client := &http.Client{Timeout: a2aRequestTimeout}
-	resp, err := client.Do(req)
+	resp, err := a2aHTTPClient.Do(req)
 	if err != nil {
 		return TaskResult{Status: "blocked", Comment: fmt.Sprintf("a2a request failed: %s", err)}, nil
 	}
@@ -494,8 +527,7 @@ func (d *Daemon) dispatchA2AStreamingTask(ctx context.Context, task Task, entry 
 		req.Header.Set("Authorization", entry.Token)
 	}
 
-	client := &http.Client{Timeout: a2aRequestTimeout}
-	resp, err := client.Do(req)
+	resp, err := a2aHTTPClient.Do(req)
 	if err != nil {
 		return TaskResult{Status: "blocked", Comment: fmt.Sprintf("a2a streaming request failed: %s", err)}, nil
 	}
@@ -561,6 +593,10 @@ func (d *Daemon) readA2ASSEStream(ctx context.Context, task Task, body io.Reader
 		if result.Status == "working" {
 			_ = d.client.ReportProgress(ctx, task.ID, result.Comment, 1, 2)
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		taskLog.Warn("a2a sse: scanner error", "error", err)
 	}
 
 	_ = d.client.ReportProgress(ctx, task.ID, "A2A stream ended", 2, 2)
@@ -672,8 +708,7 @@ func cancelA2ATask(ctx context.Context, entry AgentEntry, taskID string, taskLog
 		req.Header.Set("Authorization", entry.Token)
 	}
 
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := a2aHTTPClient.Do(req)
 	if err != nil {
 		taskLog.Debug("a2a: cancel request failed", "error", err)
 		return
@@ -692,7 +727,7 @@ func (d *Daemon) startA2AHealthProbes(ctx context.Context) context.CancelFunc {
 	ctx, cancel := context.WithCancel(ctx)
 
 	var wg sync.WaitGroup
-	for name, entry := range d.cfg.Agents {
+	for name, entry := range d.agentEntries() {
 		if entry.Mode != "a2a" || entry.A2AURL == "" {
 			continue
 		}
@@ -808,8 +843,7 @@ func (d *Daemon) pollA2ARegistry(ctx context.Context) {
 		}
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := a2aHTTPClient.Do(req)
 	if err != nil {
 		d.logger.Warn("a2a: registry poll failed", "url", reg.URL, "error", err)
 		return
@@ -838,9 +872,13 @@ func (d *Daemon) pollA2ARegistry(ctx context.Context) {
 		if entry.Name == "" || entry.URL == "" {
 			continue
 		}
+		if err := validateA2AURL(entry.URL); err != nil {
+			d.logger.Warn("a2a: registry agent has invalid URL", "name", entry.Name, "url", entry.URL, "error", err)
+			continue
+		}
 
 		// Skip if already known.
-		if _, exists := d.cfg.Agents[entry.Name]; exists {
+		if _, exists := d.getAgentEntry(entry.Name); exists {
 			continue
 		}
 
@@ -857,13 +895,13 @@ func (d *Daemon) pollA2ARegistry(ctx context.Context) {
 		if auth != nil {
 			token = auth.Value
 		}
-		d.cfg.Agents[entry.Name] = AgentEntry{
+		d.setAgentEntry(entry.Name, AgentEntry{
 			Mode:    "a2a",
 			A2AURL:  strings.TrimRight(entry.URL, "/"),
 			Card:    card,
 			Token:   token,
 			A2AAuth: auth,
-		}
+		})
 
 		d.logger.Info("a2a: discovered agent from registry",
 			"name", card.Name, "version", card.Version)

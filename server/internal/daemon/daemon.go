@@ -70,6 +70,7 @@ type Daemon struct {
 	repoCache repoCacheBackend
 	logger    *slog.Logger
 
+	agentsMu     sync.RWMutex      // guards cfg.Agents for concurrent read/write (registry poll)
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
@@ -130,8 +131,33 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	}
 }
 
-// setAgentVersion records the detected CLI version for an agent provider so
-// later task-dispatch code (e.g. Codex sandbox policy) can read it.
+// getAgentEntry returns the AgentEntry for the given provider name and true,
+// or a zero value and false if not found. Thread-safe.
+func (d *Daemon) getAgentEntry(provider string) (AgentEntry, bool) {
+	d.agentsMu.RLock()
+	defer d.agentsMu.RUnlock()
+	e, ok := d.cfg.Agents[provider]
+	return e, ok
+}
+
+// setAgentEntry adds or replaces an AgentEntry. Used by registry polling.
+func (d *Daemon) setAgentEntry(name string, entry AgentEntry) {
+	d.agentsMu.Lock()
+	defer d.agentsMu.Unlock()
+	d.cfg.Agents[name] = entry
+}
+
+// agentEntries returns a snapshot of all configured agent entries.
+func (d *Daemon) agentEntries() map[string]AgentEntry {
+	d.agentsMu.RLock()
+	defer d.agentsMu.RUnlock()
+	out := make(map[string]AgentEntry, len(d.cfg.Agents))
+	for k, v := range d.cfg.Agents {
+		out[k] = v
+	}
+	return out
+}
+
 func (d *Daemon) setAgentVersion(provider, version string) {
 	d.versionsMu.Lock()
 	defer d.versionsMu.Unlock()
@@ -493,8 +519,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 
-	agentNames := make([]string, 0, len(d.cfg.Agents))
-	for name := range d.cfg.Agents {
+	agentNames := make([]string, 0, len(d.agentEntries()))
+	for name := range d.agentEntries() {
 		agentNames = append(agentNames, name)
 	}
 	logFields := []any{"version", d.cfg.CLIVersion, "agents", agentNames, "server", d.cfg.ServerBaseURL}
@@ -604,17 +630,26 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
 	var runtimes []map[string]string
-	for name, entry := range d.cfg.Agents {
-		version, err := detectAgentVersion(ctx, entry.Path)
-		if err != nil {
-			d.logger.Warn("skip registering runtime", "name", name, "error", err)
-			continue
+	for name, entry := range d.agentEntries() {
+		var version string
+		if entry.Mode == "a2a" {
+			// A2A agents don't have a local binary; use Agent Card version.
+			if entry.Card != nil {
+				version = entry.Card.Version
+			}
+		} else {
+			v, err := detectAgentVersion(ctx, entry.Path)
+			if err != nil {
+				d.logger.Warn("skip registering runtime", "name", name, "error", err)
+				continue
+			}
+			if err := checkAgentMinVersion(name, v); err != nil {
+				d.logger.Warn("skip registering runtime: version too old", "name", name, "version", v, "error", err)
+				continue
+			}
+			version = v
+			d.setAgentVersion(name, version)
 		}
-		if err := checkAgentMinVersion(name, version); err != nil {
-			d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
-			continue
-		}
-		d.setAgentVersion(name, version)
 		displayName := strings.ToUpper(name[:1]) + name[1:]
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
@@ -1190,7 +1225,7 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID string) {
 	d.logger.Info("model list requested", "runtime_id", rt.ID, "request_id", requestID, "provider", rt.Provider)
 
-	entry, ok := d.cfg.Agents[rt.Provider]
+	entry, ok := d.getAgentEntry(rt.Provider)
 	if !ok {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
@@ -1965,7 +2000,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// bound at the workspace level.
 	d.registerTaskRepos(task.WorkspaceID, task.Repos)
 
-	entry, ok := d.cfg.Agents[provider]
+	entry, ok := d.getAgentEntry(provider)
 	if !ok {
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
 	}
