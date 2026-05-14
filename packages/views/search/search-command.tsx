@@ -443,6 +443,7 @@ export function SearchCommand() {
     [push, setOpen],
   );
 
+  // CEREBRO-PATCH(search-page-1326): JEH-1326 — "open page" action carries query to /search
   const handleOpenSearchPage = useCallback(() => {
     const q = query.trim();
     setOpen(false);

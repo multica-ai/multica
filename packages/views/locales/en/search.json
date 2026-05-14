@@ -2,6 +2,7 @@
   "title": "Search",
   "description": "Search pages, issues, and projects",
   "placeholder": "Type a command or search...",
+  "_comment_1326": "CEREBRO-PATCH(search-page-1326): JEH-1326 — open_page key for full search page action",
   "open_page": "Open page",
   "groups": {
     "pages": "Pages",

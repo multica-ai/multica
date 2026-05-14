@@ -38,7 +38,7 @@ function workspaceScoped(slug: string) {
     agents: () => `${ws}/agents`,
     agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,
     inbox: () => `${ws}/inbox`,
-    search: () => `${ws}/search`,
+    search: () => `${ws}/search`, // CEREBRO-PATCH(search-page-1326): JEH-1326 dedicated search page path
     notifications: () => `${ws}/notifications`,
     myIssues: () => `${ws}/my-issues`,
     runtimes: () => `${ws}/runtimes`,

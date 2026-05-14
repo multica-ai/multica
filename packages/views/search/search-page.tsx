@@ -1,3 +1,4 @@
+// CEREBRO-PATCH(search-page-1326): JEH-1326 — dedicated full-page search with scope tabs and filters
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
