@@ -1146,6 +1146,90 @@ func TestFetchFromGitHub_SendsAuthHeaderWhenTokenSet(t *testing.T) {
 	}
 }
 
+// Private-repo skill import depends on raw.githubusercontent.com receiving
+// the GITHUB_TOKEN bearer header; without it, GitHub returns 404 and the
+// import fails with a misleading "could not resolve ref" message. This test
+// pins that contract: every raw.githubusercontent.com request must carry
+// the bearer header when GITHUB_TOKEN is set.
+func TestFetchFromGitHub_SendsAuthHeaderOnRawGitHubURLs(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_raw_token_456")
+	var (
+		mu         sync.Mutex
+		rawAuthHdr []string
+	)
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Test-Original-Host") == "raw.githubusercontent.com" {
+			mu.Lock()
+			rawAuthHdr = append(rawAuthHdr, r.Header.Get("Authorization"))
+			mu.Unlock()
+		}
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/private-skills/commits/main/skills/foo",
+				"/repos/acme/private-skills/commits/main/skills":
+				http.NotFound(w, r)
+			case "/repos/acme/private-skills/commits/main":
+				w.Write([]byte("deadbeef"))
+			case "/repos/acme/private-skills/contents/skills/foo":
+				writeJSON(w, http.StatusOK, []githubContentEntry{})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/private-skills/main/skills/foo/SKILL.md":
+				w.Write([]byte("---\nname: foo\n---\nbody"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	if _, err := fetchFromGitHub(client, "https://github.com/acme/private-skills/tree/main/skills/foo"); err != nil {
+		t.Fatalf("fetchFromGitHub: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(rawAuthHdr) == 0 {
+		t.Fatal("expected at least one raw.githubusercontent.com request")
+	}
+	for i, h := range rawAuthHdr {
+		if h != "Bearer ghp_raw_token_456" {
+			t.Fatalf("raw request %d Authorization = %q, want Bearer ghp_raw_token_456", i, h)
+		}
+	}
+}
+
+// fetchRawFile must never leak the GitHub PAT to non-GitHub origins like
+// clawhub.ai. The skill import endpoint accepts URLs from multiple sources
+// and the same helper is used to download files from all of them.
+func TestFetchRawFile_DoesNotLeakTokenToNonGitHubHost(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_should_not_leak")
+	var (
+		mu       sync.Mutex
+		gotAuths []string
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotAuths = append(gotAuths, r.Header.Get("Authorization"))
+		mu.Unlock()
+		w.Write([]byte("ok"))
+	}))
+	t.Cleanup(server.Close)
+	if _, err := fetchRawFile(server.Client(), server.URL+"/skills/foo/file"); err != nil {
+		t.Fatalf("fetchRawFile: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for i, h := range gotAuths {
+		if h != "" {
+			t.Fatalf("non-GitHub request %d carried Authorization = %q, want empty", i, h)
+		}
+	}
+}
+
 type rewriteGitHubTransport struct {
 	target *url.URL
 	base   http.RoundTripper
