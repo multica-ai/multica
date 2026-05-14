@@ -61,11 +61,17 @@ function fakeQc(data: {
     visibility?: "workspace" | "private";
     owner_id?: string | null;
   }>;
+  squads?: Array<{
+    id: string;
+    name: string;
+    archived_at: string | null;
+  }>;
   issues?: Array<{ id: string; identifier: string; title: string; status: string }>;
 }): QueryClient {
   const map = new Map<string, unknown>();
   map.set(JSON.stringify(workspaceKeys.members("ws-1")), data.members ?? []);
   map.set(JSON.stringify(workspaceKeys.agents("ws-1")), data.agents ?? []);
+  map.set(JSON.stringify(workspaceKeys.squads("ws-1")), data.squads ?? []);
   const byStatus: ListIssuesCache["byStatus"] = {};
   for (const status of PAGINATED_STATUSES) {
     const bucket = (data.issues ?? []).filter((i) => i.status === status);
@@ -243,5 +249,40 @@ describe("createMentionSuggestion", () => {
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "issue" && i.id === "i1")).toBe(true);
+  });
+
+  it("includes all non-archived squads in the mention list", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      squads: [
+        { id: "s1", name: "Jiayuan's Coding Team", archived_at: null },
+        { id: "s2", name: "独立团", archived_at: null },
+        { id: "s3", name: "Archived Squad", archived_at: "2026-01-01T00:00:00Z" },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "", editor: {} as never });
+
+    const items = result as MentionItem[];
+    expect(items.filter((i) => i.type === "squad")).toHaveLength(2);
+    expect(items.some((i) => i.type === "squad" && i.label === "Jiayuan's Coding Team")).toBe(true);
+    expect(items.some((i) => i.type === "squad" && i.label === "独立团")).toBe(true);
+    expect(items.some((i) => i.type === "squad" && i.label === "Archived Squad")).toBe(false);
+  });
+
+  it("returns no squads when the squads cache is empty (not yet fetched)", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      // squads not provided — simulates cache miss
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "", editor: {} as never });
+
+    const items = result as MentionItem[];
+    expect(items.filter((i) => i.type === "squad")).toHaveLength(0);
   });
 });
