@@ -528,6 +528,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.taskWakeupLoop(ctx, taskWakeups)
 	go d.heartbeatLoop(ctx)
 	go d.gcLoop(ctx)
+
+	// Start A2A background loops: health probing and registry polling.
+	stopA2AHealth := d.startA2AHealthProbes(ctx)
+	defer stopA2AHealth()
+	stopA2ARegistry := d.startA2ARegistryPoll(ctx)
+	defer stopA2ARegistry()
+
 	go d.serveHealth(ctx, healthLn, time.Now())
 	return d.pollLoop(ctx, taskWakeups)
 }
@@ -1965,6 +1972,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	// A2A agents are dispatched via JSON-RPC; skip local env preparation.
 	if entry.Mode == "a2a" {
+		// Send CancelTask to the A2A agent when daemon context is cancelled.
+		go func() {
+			<-ctx.Done()
+			cancelCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			cancelA2ATask(cancelCtx, entry, task.ID, taskLog)
+		}()
 		return d.dispatchA2ATask(ctx, task, entry, taskLog)
 	}
 

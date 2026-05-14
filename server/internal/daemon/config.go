@@ -65,6 +65,7 @@ type Config struct {
 	CodexSemanticInactivityTimeout time.Duration
 	ClaudeArgs                     []string
 	CodexArgs                      []string
+	a2aRegistry                    *a2aRegistryConf
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -186,7 +187,13 @@ func LoadConfigWithContext(ctx context.Context, overrides Overrides) (Config, er
 			Model: strings.TrimSpace(os.Getenv("MULTICA_KIRO_MODEL")),
 		}
 	}
-	// Discover A2A agents from config file.
+	// Load A2A config to extract registry settings.
+	var regConf *a2aRegistryConf
+	if a2aCfg, err := loadA2AConfig(profile); err == nil && a2aCfg != nil {
+		regConf = a2aCfg.Registry
+	}
+
+	// Discover A2A agents from config file + port scan.
 	a2aAgents := discoverA2AAgents(ctx, profile, slog.Default())
 	for name, entry := range a2aAgents {
 		if _, exists := agents[name]; exists {
@@ -363,6 +370,7 @@ func LoadConfigWithContext(ctx context.Context, overrides Overrides) (Config, er
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
+		a2aRegistry:                    regConf,
 	}, nil
 }
 
