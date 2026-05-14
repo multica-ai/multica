@@ -13,14 +13,17 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// applyCommentMask zeros every field in `masked` on resp. Content is
-// the only sensitive field on the comment response shape today; future
-// labels can promote attachments / reactions by extending the switch.
+// applyCommentMask nils every field in `masked` on resp. Content is the
+// only sensitive field on the comment response shape today; future labels
+// can promote attachments / reactions by extending the switch. Setting
+// the pointer to nil serialises as `"content": null` (JEH-1215) — the
+// previous `""` overload was indistinguishable from a legitimately empty
+// body and leaked the fact that a real value once existed.
 func applyCommentMask(resp *CommentResponse, masked []string) {
 	for _, f := range masked {
 		switch strings.ToLower(f) {
 		case personaFieldContent:
-			resp.Content = ""
+			resp.Content = nil
 		}
 	}
 }
@@ -114,4 +117,66 @@ func commentFieldClasses(classification string) map[string]string {
 		return nil
 	}
 	return map[string]string{personaFieldContent: classification}
+}
+
+// applyCommentEntryMask is the TimelineEntry counterpart to
+// applyCommentMask. Timeline entries use *string for Content (so activity
+// entries can omit it), so a masked comment-entry sets Content to nil
+// rather than an empty string. Behaviourally aligned with the issue mask
+// (Description set to nil) — the field disappears from the JSON payload.
+func applyCommentEntryMask(entry *TimelineEntry, masked []string) {
+	for _, f := range masked {
+		switch strings.ToLower(f) {
+		case personaFieldContent:
+			entry.Content = nil
+		}
+	}
+}
+
+// maskCommentEntriesForCaller is the timeline-side mirror of
+// maskCommentsForCaller. The timeline endpoint returns a heterogeneous
+// stream (comments + activities), so the helper operates on the
+// already-built TimelineEntry slice — deny drops the entry from the
+// stream entirely (same JEH-1079 reasoning: a redacted-comment shape
+// would still leak the existence of a sensitive comment), while masked
+// fields are zeroed in place. `entries` must be the slice produced by
+// commentsToEntries(r, comments) so indices line up 1:1.
+func (h *Handler) maskCommentEntriesForCaller(r *http.Request, issue db.Issue, comments []db.Comment, entries []TimelineEntry) []TimelineEntry {
+	if h == nil || h.PersonaMask == nil || len(comments) == 0 {
+		return entries
+	}
+	if len(entries) != len(comments) {
+		return entries
+	}
+	workspaceID := uuidToString(issue.WorkspaceID)
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if actorID == "" {
+		actorID = "anonymous"
+	}
+
+	out := entries[:0]
+	for i, c := range comments {
+		classification := c.Classification
+		if classification == "" {
+			classification = "internal"
+		}
+		dec := h.maskDecide(r.Context(),
+			actorID, personaActionRead, personaKindComment, uuidToString(c.ID),
+			classification, commentFieldClasses(classification))
+		if !dec.Allowed {
+			h.recordPersonaMaskRedaction(r.Context(), dec,
+				workspaceID, actorType, actorID, personaActionRead,
+				personaKindComment, uuidToString(c.ID), classification)
+			continue
+		}
+		if len(dec.MaskedFields) > 0 {
+			h.recordPersonaMaskRedaction(r.Context(), dec,
+				workspaceID, actorType, actorID, personaActionRead,
+				personaKindComment, uuidToString(c.ID), classification)
+			applyCommentEntryMask(&entries[i], dec.MaskedFields)
+		}
+		out = append(out, entries[i])
+	}
+	return out
 }

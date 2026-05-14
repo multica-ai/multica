@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
+// CEREBRO-PATCH(agent-test): persona integration additions.
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -272,5 +274,213 @@ func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 	testHandler.CreateAgent(w2, newRequest(http.MethodPost, "/api/agents", body))
 	if w2.Code != http.StatusConflict {
 		t.Fatalf("second CreateAgent with duplicate name: expected 409, got %d: %s", w2.Code, w2.Body.String())
+	}
+}
+
+// TestUpdateAgentPersonaSandboxRequiresWorkspaceAdmin (E2) verifies that the
+// persona_sandbox field can only be set by a workspace owner/admin. An agent
+// owner who is a plain workspace member can update other fields but not the
+// sandbox — otherwise they could self-elevate by switching to a more
+// permissive named sandbox.
+func TestUpdateAgentPersonaSandboxRequiresWorkspaceAdmin(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	// Create a non-admin user and add them as a plain workspace member.
+	memberEmail := "e2-member-" + uuid.NewString() + "@multica.ai"
+	var memberUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+	`, "E2 Member", memberEmail).Scan(&memberUserID); err != nil {
+		t.Fatalf("create member user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, memberUserID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')
+	`, testWorkspaceID, memberUserID); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+
+	// Create an agent owned by the non-admin member.
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4)
+		RETURNING id
+	`, testWorkspaceID, "e2-test-agent-"+uuid.NewString()[:8], handlerTestRuntimeID(t), memberUserID).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	// Sanity: the agent owner CAN update non-sandbox fields.
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"description": "agent owner can edit description",
+	})
+	req.Header.Set("X-User-ID", memberUserID)
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("agent owner non-sandbox update: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Agent owner WITHOUT workspace admin role: must NOT be able to set persona_sandbox.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"persona_sandbox": "claude-power",
+	})
+	req.Header.Set("X-User-ID", memberUserID)
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("agent owner setting persona_sandbox: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Workspace owner: must be able to set persona_sandbox.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"persona_sandbox": "claude-power",
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("workspace owner setting persona_sandbox: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.PersonaSandbox != "claude-power" {
+		t.Fatalf("expected persona_sandbox=claude-power, got %q", resp.PersonaSandbox)
+	}
+
+	// Workspace owner: clearing the sandbox via empty string must also work.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"persona_sandbox": "",
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("workspace owner clearing persona_sandbox: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestUpdateAgentPersonaSandbox_AuditLogged (W4.6) verifies that a
+// successful persona_sandbox change writes an activity_log row so the
+// workspace audit feed in Multica's UI shows who flipped the policy.
+func TestUpdateAgentPersonaSandbox_AuditLogged(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4)
+		RETURNING id
+	`, testWorkspaceID, "audit-agent-"+uuid.NewString()[:8], handlerTestRuntimeID(t), testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE workspace_id = $1 AND action = 'agent_persona_sandbox_changed'`, testWorkspaceID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{"persona_sandbox": "claude-developer"})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent: %d %s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM activity_log
+		WHERE workspace_id = $1 AND action = 'agent_persona_sandbox_changed'
+		  AND details->>'agent_id' = $2 AND details->>'new' = 'claude-developer'
+	`, testWorkspaceID, agentID).Scan(&count); err != nil {
+		t.Fatalf("count activity rows: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly 1 audit row, got %d", count)
+	}
+}
+
+// TestListWorkspaceActivity (W4.6) verifies that the audit feed
+// endpoint returns persona_sandbox change events and gates non-admin
+// callers with 403.
+func TestListWorkspaceActivity(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	// Seed a couple of audit rows directly so we don't depend on
+	// UpdateAgent's path being green (covered by the test above).
+	for i := 0; i < 2; i++ {
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO activity_log (workspace_id, actor_type, actor_id, action, details)
+			VALUES ($1, 'member', $2, 'agent_persona_sandbox_changed', $3::jsonb)
+		`, testWorkspaceID, testUserID, `{"new": "claude-developer"}`); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE workspace_id = $1 AND action = 'agent_persona_sandbox_changed'`, testWorkspaceID)
+	})
+
+	// Owner can read.
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/workspaces/"+testWorkspaceID+"/activity", nil)
+	req = withURLParam(req, "workspaceId", testWorkspaceID)
+	testHandler.ListWorkspaceActivity(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("owner read: %d %s", w.Code, w.Body.String())
+	}
+	var entries []WorkspaceActivityEntry
+	if err := json.NewDecoder(w.Body).Decode(&entries); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(entries) < 2 {
+		t.Fatalf("expected at least 2 entries, got %d", len(entries))
+	}
+
+	// Non-admin member: 403.
+	memberEmail := "audit-member-" + uuid.NewString() + "@multica.ai"
+	var memberUserID string
+	if err := testPool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,
+		"audit member", memberEmail).Scan(&memberUserID); err != nil {
+		t.Fatalf("create member user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, memberUserID) })
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`,
+		testWorkspaceID, memberUserID); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/workspaces/"+testWorkspaceID+"/activity", nil)
+	req.Header.Set("X-User-ID", memberUserID)
+	req = withURLParam(req, "workspaceId", testWorkspaceID)
+	testHandler.ListWorkspaceActivity(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("non-admin read: expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 }

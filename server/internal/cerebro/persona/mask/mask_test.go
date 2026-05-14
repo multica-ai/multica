@@ -91,6 +91,12 @@ func TestFieldClassifications_StaticMap(t *testing.T) {
 	if FieldClassifications(KindAttachment) != nil {
 		t.Errorf("kinds without per-field labels should return nil, got %v", FieldClassifications(KindAttachment))
 	}
+
+	// JEH-1187: invitation labels both email fields as pii.
+	inv := FieldClassifications(KindInvitation)
+	if inv["invitee_email"] != "pii" || inv["inviter_email"] != "pii" {
+		t.Errorf("invitation field map must label both email fields as pii, got %v", inv)
+	}
 }
 
 func TestApplyToJSON_RedactsListedFields(t *testing.T) {

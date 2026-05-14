@@ -26,7 +26,8 @@ export type CerebroFlagKey =
   | "cerebro_pin_input"
   | "cerebro_workflows"
   | "cerebro_persona_permissions"
-  | "cerebro_skill_mention";
+  | "cerebro_skill_mention"
+  | "cerebro_grants";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -57,6 +58,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_workflows: false,
   cerebro_persona_permissions: false,
   cerebro_skill_mention: true,
+  cerebro_grants: false,
 };
 
 export interface CerebroFlagDefinition {
@@ -189,5 +191,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Skill mentions",
     description:
       "Enable the /skill trigger in editor inputs. Selecting a skill from the popover inserts a reference link to the skill detail page — no side effect, no skill execution.",
+  },
+  {
+    key: "cerebro_grants",
+    label: "Grant control plane",
+    description:
+      "Enable the Persona grant control plane API and CLI (POST/PATCH/DELETE /api/workspaces/{id}/grants and `multica grant` commands).",
   },
 ];

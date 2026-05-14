@@ -92,6 +92,13 @@ type Task struct {
 	// CEREBRO-PATCH(daemon-task-persona-spawn): JEH-1080 — spawning user + group memberships piped to the persona-hook as facts.
 	PersonaSpawnUserID   string   `json:"persona_spawn_user_id,omitempty"`
 	PersonaSpawnGroupIDs []string `json:"persona_spawn_group_ids,omitempty"`
+	// RuntimePersonaSandbox is the runtime-level persona sandbox upper
+// CEREBRO-PATCH(types): persona integration additions.
+	// bound (E1). Empty = no upper bound; the agent's PersonaSandbox
+	// decides alone. Non-empty = preparePersonaSpawn must use this name
+	// and ignore the agent-level value so an operator's runtime-wide cap
+	// can't be bypassed by an agent owner picking a permissive sandbox.
+	RuntimePersonaSandbox string `json:"runtime_persona_sandbox,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

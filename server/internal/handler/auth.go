@@ -421,9 +421,12 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("user logged in", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	userResp := userToResponse(user)
+	// CEREBRO-PATCH(persona-mask-verify-code): JEH-1186 redaction.
+	h.maskUserForCaller(r, user, &userResp)
 	writeJSON(w, http.StatusOK, LoginResponse{
 		Token: tokenString,
-		User:  userToResponse(user),
+		User:  userResp,
 	})
 }
 
@@ -439,7 +442,10 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, userToResponse(user))
+	resp := userToResponse(user)
+	// CEREBRO-PATCH(persona-mask-get-me): JEH-1186 redaction.
+	h.maskUserForCaller(r, user, &resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type UpdateMeRequest struct {
@@ -612,9 +618,12 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("user logged in via google", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	userResp := userToResponse(user)
+	// CEREBRO-PATCH(persona-mask-google-login): JEH-1186 redaction.
+	h.maskUserForCaller(r, user, &userResp)
 	writeJSON(w, http.StatusOK, LoginResponse{
 		Token: tokenString,
-		User:  userToResponse(user),
+		User:  userResp,
 	})
 }
 
@@ -697,5 +706,8 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, userToResponse(updatedUser))
+	resp := userToResponse(updatedUser)
+	// CEREBRO-PATCH(persona-mask-update-me): JEH-1186 redaction.
+	h.maskUserForCaller(r, updatedUser, &resp)
+	writeJSON(w, http.StatusOK, resp)
 }

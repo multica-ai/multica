@@ -1224,6 +1224,20 @@ export class ApiClient {
     });
   }
 
+  // updateRuntimePersonaSandbox sets (or clears, via empty string) the
+// CEREBRO-PATCH(client): persona integration additions.
+  // runtime-level persona sandbox cap (E1). Server-side the field is gated to
+  // workspace owner/admin; non-admins get a 403 the UI surfaces inline.
+  async updateRuntimePersonaSandbox(
+    runtimeId: string,
+    personaSandbox: string,
+  ): Promise<AgentRuntime> {
+    return this.fetch(`/api/runtimes/${runtimeId}/persona-sandbox`, {
+      method: "PATCH",
+      body: JSON.stringify({ persona_sandbox: personaSandbox }),
+    });
+  }
+
   async getRuntimeUsage(runtimeId: string, params?: { days?: number }): Promise<RuntimeUsage[]> {
     const search = new URLSearchParams();
     if (params?.days) search.set("days", String(params.days));

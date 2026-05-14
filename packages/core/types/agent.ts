@@ -20,6 +20,15 @@ export interface RuntimeDevice {
   // Per-runtime sandbox override (JEH-418). null = inherit the daemon's
   // MULTICA_ENABLE_SANDBOX env var; true/false = explicit on/off override.
   sandbox_enabled: boolean | null;
+  // Runtime-level persona sandbox upper bound (E1). Empty string means
+// CEREBRO-PATCH(agent): persona integration additions.
+  // the agent's own sandbox decides alone; non-empty (e.g. "claude-readonly")
+  // caps every agent on this runtime regardless of their per-agent setting.
+  persona_sandbox: string;
+  // Daemon-reported capability snapshot (E3). Shape is loose — different
+  // providers report what they have (Claude Code's tool list, MCP servers,
+  // etc.) without requiring a schema migration per provider.
+  capabilities: Record<string, unknown>;
   last_seen_at: string | null;
   // CEREBRO-PATCH(runtime-pause-fields): pause fields surfaced by the
   // cerebro pause/auto-pause feature (server side: 9016_cerebro_runtime_pause

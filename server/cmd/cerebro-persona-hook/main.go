@@ -67,6 +67,73 @@ func (h hookInput) Dir() string {
 	return h.Workdir
 }
 
+// resourceIDFromInput pulls the operator-meaningful identifier out of a
+// CEREBRO-PATCH(main): persona integration changes.
+// Claude tool_input object so sandbox grants can refine via
+// resource_pattern (W4.7). The mapping is per-tool because Claude's
+// tool_input shape differs:
+//
+//	Bash         → command
+//	Edit/Write   → file_path
+//	Read         (default-allow today; included for forward-compat)
+//	NotebookEdit → notebook_path
+//	WebFetch     → url
+//	WebSearch    → query
+//	Task         → description
+//	mcp__*       → first string-valued arg, or "" (caller falls back)
+//
+// Returns "" when the field is missing or non-string; the caller then
+// falls back to spawnID so pattern="*" still matches and the existing
+// allow-all behaviour is preserved when no refined pattern exists.
+func resourceIDFromInput(tool string, args map[string]any) string {
+	pick := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := args[k].(string); ok && v != "" {
+				return v
+			}
+		}
+		return ""
+	}
+	switch {
+	case tool == "Bash":
+		return pick("command")
+	case tool == "Edit", tool == "Write", tool == "Read":
+		return pick("file_path", "path")
+	case tool == "NotebookEdit":
+		return pick("notebook_path", "file_path")
+	case tool == "WebFetch":
+		return pick("url")
+	case tool == "WebSearch":
+		return pick("query")
+	case tool == "Task":
+		return pick("description", "subagent_type")
+	case strings.HasPrefix(tool, "mcp__"):
+		// MCP tools have varying shapes; pick the first non-empty string
+		// arg so a per-server grant pattern can still narrow.
+		for _, v := range args {
+			if s, ok := v.(string); ok && s != "" {
+				return s
+			}
+		}
+		return ""
+	}
+	return ""
+}
+
+// mcpResourceKind reverses Claude's mcp__<server>__<tool> naming into a
+// per-server persona kind ("claude.tool.mcp.<server>"). When the input
+// is malformed (no server segment), returns the catch-all
+// "claude.tool.mcp" so the gating still applies — better to deny on a
+// missing grant than to slip through.
+func mcpResourceKind(tool string) string {
+	rest := strings.TrimPrefix(tool, "mcp__")
+	server, _, ok := strings.Cut(rest, "__")
+	if !ok || server == "" {
+		return "claude.tool.mcp"
+	}
+	return "claude.tool.mcp." + server
+}
+
 // toolToKind maps a Claude Code tool name to the persona resource_kind
 // registered in policies/claude-code-tools.yaml. Tools not in this map are
 // "default-allow" per the plan — Read, Grep, Glob, TodoWrite, ToolSearch,
@@ -137,10 +204,19 @@ func run() error {
 		return fmt.Errorf("missing tool_name (or tool) in stdin payload")
 	}
 
-	// MCP tools share one resource kind. Anything beginning with mcp__ → mcp.
+	// MCP tools are gated per-server, not globally. Claude Code names MCP
+	// tools "mcp__<server>__<tool>" (e.g. mcp__supabase__execute_sql), so
+	// the resource_kind becomes "claude.tool.mcp.<server>". This lets an
+	// operator grant access to one MCP server in a sandbox without
+	// implicitly granting every other server too.
+	//
+	// When the server segment is missing (malformed mcp__* without a
+	// double-underscore separator), fall back to the global
+	// "claude.tool.mcp" kind so the call still gets gated rather than
+	// slipping through default-allow.
 	kind, gated := toolToKind[tool]
 	if !gated && strings.HasPrefix(tool, "mcp__") {
-		kind = "claude.tool.mcp"
+		kind = mcpResourceKind(tool)
 		gated = true
 	}
 	if !gated {
@@ -156,6 +232,16 @@ func run() error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), personaTimeout)
 	defer cancel()
+
+	// W4.7: pull a meaningful resource_id out of the tool input so
+	// sandbox grants can refine via resource_pattern. For Bash that's
+	// the command; for Read/Edit/Write it's the file_path; for WebFetch
+	// it's the URL. When we can't derive one, fall back to spawnID so
+	// pattern="*" grants still match (the existing wildcard-allow path).
+	resourceID := resourceIDFromInput(tool, input.InputArgs())
+	if resourceID == "" {
+		resourceID = spawnID
+	}
 
 	attrs := map[string]any{
 		"tool":    tool,
@@ -182,7 +268,7 @@ func run() error {
 		}
 	}
 
-	res, err := client.CheckResource(ctx, actorID, "call-tool", kind, spawnID, attrs)
+	res, err := client.CheckResource(ctx, actorID, "call-tool", kind, resourceID, attrs)
 	if err != nil {
 		return fmt.Errorf("persona check failed (deny by default): %w", err)
 	}

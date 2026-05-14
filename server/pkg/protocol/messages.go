@@ -113,6 +113,16 @@ type DaemonHeartbeatRequestPayload struct {
 	// detected login identity on the heartbeat so the server can upsert
 	// cerebro_account + link agent_runtime.current_account_id idempotently.
 	Account *DaemonHeartbeatAccount `json:"account,omitempty"`
+	// CEREBRO-PATCH(heartbeat-cli-version): W4.2 CLI version + capabilities fields on heartbeat payload.
+	// CLIVersion is the daemon-detected agent CLI version at heartbeat time
+	// (W4.2). When it differs from the server's stored value, the server
+	// persists the new version and (if Capabilities is non-nil) refreshes
+	// the runtime's capabilities snapshot in the same transaction.
+	CLIVersion string `json:"cli_version,omitempty"`
+	// Capabilities is an optional capabilities snapshot the daemon advertises
+	// when CLI version drift is detected (W4.2). Empty/nil leaves the existing
+	// row untouched.
+	Capabilities map[string]any `json:"capabilities,omitempty"`
 }
 
 // DaemonHeartbeatAccount carries the runtime's detected login identity.

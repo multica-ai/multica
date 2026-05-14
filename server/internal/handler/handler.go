@@ -60,6 +60,11 @@ type Config struct {
 	//   2) backfill_task_usage_daily ran successfully,
 	//   3) cron job scheduled and task_usage_rollup_lag_seconds() < 900.
 	UseDailyRollupForRuntimeUsage bool
+	// ScannerDiscoveryToken protects the cross-workspace
+// CEREBRO-PATCH(handler): persona integration additions.
+	// /api/scanner-discovery/runtimes endpoint consumed by persona's scanner.
+	// Empty disables the endpoint entirely.
+	ScannerDiscoveryToken string
 }
 
 type Handler struct {

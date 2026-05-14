@@ -704,7 +704,7 @@ func TestRouting_MentionBumping(t *testing.T) {
 				IssueID:    issueID,
 				AuthorType: "member",
 				AuthorID:   commenterID,
-				Content:    "hey [@user](mention://member/" + mentionedID + ") take a look",
+				Content:    stringPtr("hey [@user](mention://member/" + mentionedID + ") take a look"),
 				Type:       "comment",
 			},
 			"issue_title":  "mention-bump",

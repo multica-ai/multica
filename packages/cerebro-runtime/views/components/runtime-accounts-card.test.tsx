@@ -34,6 +34,8 @@ const baseRuntime: AgentRuntime = {
   metadata: {},
   owner_id: null,
   sandbox_enabled: null,
+  persona_sandbox: "",
+  capabilities: {},
   last_seen_at: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",

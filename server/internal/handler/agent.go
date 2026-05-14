@@ -214,6 +214,14 @@ type AgentTaskResponse struct {
 	// CEREBRO-PATCH(persona-spawn-subject): JEH-1080 — the human user the agent is acting on behalf of, plus that user's group memberships at claim time.
 	PersonaSpawnUserID   string   `json:"persona_spawn_user_id,omitempty"`
 	PersonaSpawnGroupIDs []string `json:"persona_spawn_group_ids,omitempty"`
+	// RuntimePersonaSandbox is the runtime-level persona sandbox upper
+// CEREBRO-PATCH(agent): persona integration additions.
+	// bound (E1). Empty = no upper bound, the agent's persona_sandbox
+	// decides alone. Non-empty (e.g. "claude-readonly") = the daemon must
+	// use this sandbox at spawn time and ignore the agent-level value, so
+	// an admin's runtime-wide cap can't be bypassed by an agent owner who
+	// picked a more permissive sandbox on their agent.
+	RuntimePersonaSandbox string `json:"runtime_persona_sandbox,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -669,20 +677,22 @@ func redactMcpConfig(resp *AgentResponse) {
 
 // canManageAgent checks whether the current user can update or archive an agent.
 // Only the agent owner or workspace owner/admin can manage any agent,
-// regardless of whether it is public or private.
-func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) bool {
+// regardless of whether it is public or private. Returns the resolved member
+// so callers can do additional role-scoped checks (e.g. workspace-admin-only
+// fields like persona_sandbox) without re-loading.
+func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) (db.Member, bool) {
 	wsID := uuidToString(agent.WorkspaceID)
 	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
 	if !ok {
-		return false
+		return db.Member{}, false
 	}
 	isAdmin := roleAllowed(member.Role, "owner", "admin")
 	isAgentOwner := uuidToString(agent.OwnerID) == requestUserID(r)
 	if !isAdmin && !isAgentOwner {
 		writeError(w, http.StatusForbidden, "only the agent owner can manage this agent")
-		return false
+		return db.Member{}, false
 	}
-	return true
+	return member, true
 }
 
 func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
@@ -691,7 +701,8 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.canManageAgent(w, r, agent) {
+	member, ok := h.canManageAgent(w, r, agent)
+	if !ok {
 		return
 	}
 
@@ -700,6 +711,17 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+
+	// E2: persona_sandbox is workspace-scoped policy, not per-agent config.
+	// canManageAgent above lets either the agent owner or a workspace
+	// owner/admin pass; restrict the sandbox field to admins so an agent
+	// owner cannot self-elevate by switching to a more permissive sandbox.
+	if _, hasPersonaSandboxField := rawFields["persona_sandbox"]; hasPersonaSandboxField {
+		if !roleAllowed(member.Role, "owner", "admin") {
+			writeError(w, http.StatusForbidden, "only workspace owner/admin can change persona_sandbox")
+			return
+		}
 	}
 
 	params := db.UpdateAgentParams{
@@ -791,6 +813,31 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// W4.6: audit-log persona_sandbox changes so workspace owners can see
+	// "who switched my agent off claude-readonly?" in Multica's UI without
+	// digging through stdout. We emit on either an explicit value change
+	// or a clear, and only when the field was actually present in the
+	// request body (rawFields check below).
+	if hasPersonaSandbox {
+		newValue := ""
+		if !shouldClearPersonaSandbox && req.PersonaSandbox != nil {
+			newValue = *req.PersonaSandbox
+		}
+		details, _ := json.Marshal(map[string]any{
+			"agent_id":   id,
+			"agent_name": agent.Name,
+			"new":        newValue,
+		})
+		_, _ = h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
+			WorkspaceID: agent.WorkspaceID,
+			IssueID:     pgtype.UUID{},
+			ActorType:   pgtype.Text{String: "member", Valid: true},
+			ActorID:     parseUUID(requestUserID(r)),
+			Action:      "agent_persona_sandbox_changed",
+			Details:     details,
+		})
+	}
+
 	// mcp_config: null in the request means explicitly clear the field.
 	// COALESCE in UpdateAgent cannot set a column to NULL, so we use a dedicated query.
 	if shouldClearMcpConfig {
@@ -818,7 +865,7 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.canManageAgent(w, r, agent) {
+	if _, ok := h.canManageAgent(w, r, agent); !ok {
 		return
 	}
 	if agent.ArchivedAt.Valid {
@@ -863,7 +910,7 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.canManageAgent(w, r, agent) {
+	if _, ok := h.canManageAgent(w, r, agent); !ok {
 		return
 	}
 	if !agent.ArchivedAt.Valid {
@@ -911,7 +958,7 @@ func (h *Handler) CancelAgentTasks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.canManageAgent(w, r, agent) {
+	if _, ok := h.canManageAgent(w, r, agent); !ok {
 		return
 	}
 

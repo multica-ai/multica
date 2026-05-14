@@ -16,6 +16,18 @@ INSERT INTO activity_log (
 ) VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
+-- CEREBRO-PATCH(activity-workspace-feed): W4.6 workspace-scoped activity feed.
+-- name: ListWorkspaceActivities :many
+-- W4.6: workspace-scoped activity feed (no issue_id required) so the
+-- Multica UI can render audit events that are not tied to an issue —
+-- agent persona_sandbox changes, runtime persona_sandbox changes, and
+-- similar admin-only operations. Ordered newest-first.
+SELECT * FROM activity_log
+WHERE workspace_id = $1
+  AND ($2::text[] IS NULL OR action = ANY($2::text[]))
+ORDER BY created_at DESC
+LIMIT $3 OFFSET $4;
+
 -- name: CountAssigneeChangesByActor :many
 -- Count how many times a user assigned each target via assignee_changed activities.
 SELECT

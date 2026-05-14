@@ -283,7 +283,18 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			// S3 upload succeeded but DB record failed — still return the link
 			// so the file is usable. Log the error for investigation.
 		} else {
-			writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
+			uploadResp := h.attachmentToResponse(att)
+			// CEREBRO-PATCH(persona-mask-upload-file): JEH-1189 redaction.
+			// Self-upload is expected to receive pii via policy. A deny outcome
+			// means the policy disallows even the uploader from seeing the
+			// response — fail closed with 403 so the full filename/url/
+			// download_url is NOT echoed back. Rasp review feedback on PR #272.
+			masked := h.maskAttachmentsForCaller(r, workspaceID, []db.Attachment{att}, []AttachmentResponse{uploadResp})
+			if len(masked) == 0 {
+				writeError(w, http.StatusForbidden, "upload not visible to caller")
+				return
+			}
+			writeJSON(w, http.StatusOK, masked[0])
 			return
 		}
 
@@ -334,6 +345,8 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 	for i, a := range attachments {
 		resp[i] = h.attachmentToResponse(a)
 	}
+	// CEREBRO-PATCH(persona-mask-list-attachments): JEH-1189 redaction.
+	resp = h.maskAttachmentsForCaller(r, uuidToString(issue.WorkspaceID), attachments, resp)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -387,6 +400,8 @@ func (h *Handler) ListChatMessageAttachments(w http.ResponseWriter, r *http.Requ
 	for i, a := range attachments {
 		resp[i] = h.attachmentToResponse(a)
 	}
+	// CEREBRO-PATCH(persona-mask-list-chat-attachments): JEH-1189 redaction.
+	resp = h.maskAttachmentsForCaller(r, workspaceID, attachments, resp)
 	writeJSON(w, http.StatusOK, resp)
 }
 

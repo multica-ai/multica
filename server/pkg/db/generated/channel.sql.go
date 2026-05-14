@@ -281,7 +281,7 @@ SET kind = 'channel',
     updated_at = now()
 WHERE id = $1
   AND kind = 'dm'
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, kind, is_private
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, kind, is_private, classification
 `
 
 type PromoteDMToChannelParams struct {
@@ -326,6 +326,7 @@ func (q *Queries) PromoteDMToChannel(ctx context.Context, arg PromoteDMToChannel
 		&i.FirstExecutedAt,
 		&i.Kind,
 		&i.IsPrivate,
+		&i.Classification,
 	)
 	return i, err
 }

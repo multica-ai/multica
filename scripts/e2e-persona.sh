@@ -286,6 +286,41 @@ if ! grep -qiE "(denied|blokeret|blocked|no grant|policy)" "$BLOCKED_OUT"; then
 fi
 green "demo-blocked spawn: Bash blocked (agent acknowledged the deny)"
 
+# ---------- E1: runtime-level sandbox cap is the hard upper bound ----------
+#
+# Even though demo-allowed currently has claude-developer (which DOES grant
+# Bash), passing --runtime-persona-sandbox claude-readonly to the daemon's
+# spawn helper must reassign the actor to claude-readonly and have Bash
+# denied. This is the real daemon flow: cerebro_service token (not
+# bootstrap-admin) calls persona's assign-sandbox endpoint via the spawn
+# helper. The cerebro-service-can-assign-sandboxes Cerbos policy in
+# firtal-persona makes the call return 200 — without that policy the spawn
+# helper would 403 here.
+#
+# This proves the upper-bound outcome end-to-end: an agent owner's
+# permissive sandbox cannot escape an admin-set runtime cap, because the
+# daemon's precedence rule reassigns the actor to the cap before spawn
+# (see chooseEffectivePersonaSandbox unit test for the precedence logic).
+
+step "E1 — runtime cap claude-readonly overrides agent's claude-developer (via daemon flow)"
+
+CAP_OUT="$STATE_DIR/cap.out"
+PERSONA_SERVICE_TOKEN="$SVC_TOKEN" "$SPAWN_HELPER" agent e2e-spawn \
+    --persona-actor "$ALLOWED_ACTOR_ID" \
+    --runtime-persona-sandbox "claude-readonly" \
+    --prompt "Run the command: ls -la" \
+    >"$CAP_OUT" 2>&1 \
+    || true  # Tool-deny may surface as non-zero; output is what matters.
+# The reassignment line is logged to stderr by the spawn helper. Check it
+# appeared so a regression where the flag is silently dropped surfaces here.
+if ! grep -q 'runtime cap active: reassigning' "$CAP_OUT"; then
+    fail "E1" "spawn helper did not log runtime-cap reassignment — flag may not be wired: $(tail -20 "$CAP_OUT")"
+fi
+if ! grep -qiE "(denied|blokeret|blocked|no grant|policy)" "$CAP_OUT"; then
+    fail "E1" "runtime cap did not block Bash for demo-allowed: $(tail -20 "$CAP_OUT")"
+fi
+green "Runtime cap claude-readonly: Bash blocked via daemon flow (upper bound enforced)"
+
 # ---------- C1: activity-feed shows both decisions ----------
 
 step "C1 — activity feed contains both decisions with correct actor names"

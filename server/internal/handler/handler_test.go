@@ -892,8 +892,12 @@ func TestCommentCRUD(t *testing.T) {
 	if len(comments) != 1 {
 		t.Fatalf("ListComments: expected 1 comment, got %d", len(comments))
 	}
-	if comments[0].Content != "Test comment from Go test" {
-		t.Fatalf("ListComments: expected content 'Test comment from Go test', got '%s'", comments[0].Content)
+	if comments[0].Content == nil || *comments[0].Content != "Test comment from Go test" {
+		got := ""
+		if comments[0].Content != nil {
+			got = *comments[0].Content
+		}
+		t.Fatalf("ListComments: expected content 'Test comment from Go test', got %q", got)
 	}
 
 	// Cleanup

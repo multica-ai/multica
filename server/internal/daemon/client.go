@@ -268,17 +268,49 @@ type (
 	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
 )
 
-func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, account *protocol.DaemonHeartbeatAccount) (*HeartbeatResponse, error) {
-	// CEREBRO-PATCH(daemon-client-heartbeat-account): JEH-997 piggybacks the
-	// runtime's detected login identity on the heartbeat body. Pass account
-	// = nil when the daemon could not derive an identity yet — the server
-	// then skips its account-registration hook entirely.
-	body := protocol.DaemonHeartbeatRequestPayload{RuntimeID: runtimeID, Account: account}
+// SendHeartbeatOpts bundles optional fields the daemon attaches to a
+// CEREBRO-PATCH(client): persona integration additions.
+// heartbeat. Each field is independently optional — the zero value of
+// SendHeartbeatOpts gives the original `(runtime_id only)` wire shape.
+type SendHeartbeatOpts struct {
+	// Account piggybacks the runtime's detected login identity (JEH-997).
+	// nil = daemon could not derive an identity yet; the server skips its
+	// account-registration hook entirely.
+	Account *protocol.DaemonHeartbeatAccount
+	// CLIVersion is the daemon-detected agent CLI version (W4.2).
+	// Empty = no advertised version; server keeps its stored value.
+	CLIVersion string
+	// Capabilities is an optional snapshot of the runtime's tool surface
+	// (W4.2). Server refreshes the runtime's capabilities row when set.
+	Capabilities map[string]any
+}
+
+// SendHeartbeat posts a runtime liveness ping. opts carries the optional
+// account piggyback (JEH-997) and CLI-version + capabilities snapshot
+// (W4.2). Zero-value opts keeps the wire shape minimal.
+func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, opts SendHeartbeatOpts) (*HeartbeatResponse, error) {
+	body := protocol.DaemonHeartbeatRequestPayload{
+		RuntimeID:    runtimeID,
+		Account:      opts.Account,
+		CLIVersion:   opts.CLIVersion,
+		Capabilities: opts.Capabilities,
+	}
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// RefreshCapabilities is the operator-triggered manual path (W4.2).
+// Daemons send a fresh capabilities snapshot to the runtime row
+// without waiting for the next heartbeat.
+func (c *Client) RefreshCapabilities(ctx context.Context, runtimeID, cliVersion string, capabilities map[string]any) error {
+	body := map[string]any{"capabilities": capabilities}
+	if cliVersion != "" {
+		body["cli_version"] = cliVersion
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/refresh-capabilities", runtimeID), body, nil)
 }
 
 // CEREBRO-PATCH(daemon-client-report-ping-result): cerebro-only ping result
@@ -410,6 +442,31 @@ func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterRes
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// PersonaAgent mirrors handler.PersonaAgentEntry — every agent in a
+// workspace whose persona_sandbox is set, joined with its runtime row.
+type PersonaAgent struct {
+	ID                    string          `json:"id"`
+	Name                  string          `json:"name"`
+	PersonaSandbox        string          `json:"persona_sandbox"`
+	RuntimeID             string          `json:"runtime_id"`
+	RuntimeName           string          `json:"runtime_name"`
+	Provider              string          `json:"provider"`
+	RuntimePersonaSandbox string          `json:"runtime_persona_sandbox"`
+	McpConfig             json.RawMessage `json:"mcp_config,omitempty"`
+}
+
+// ListWorkspacePersonaAgents fetches the agents-with-persona for a workspace.
+// Daemon uses it at start to seed persona-actor attributes (E3 part 3).
+func (c *Client) ListWorkspacePersonaAgents(ctx context.Context, workspaceID string) ([]PersonaAgent, error) {
+	var resp struct {
+		Agents []PersonaAgent `json:"agents"`
+	}
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/agents/persona", workspaceID), &resp); err != nil {
+		return nil, err
+	}
+	return resp.Agents, nil
 }
 
 type WorkspaceReposResponse struct {

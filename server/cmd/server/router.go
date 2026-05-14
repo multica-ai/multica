@@ -27,6 +27,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/feature_flags"
 	// CEREBRO-PATCH(cerebro-groups-routes): JEH-721 group handler import
 	cerebrogroups "github.com/multica-ai/multica/server/internal/cerebro/groups"
+	// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant control plane handler import
+	cerebrogrants "github.com/multica-ai/multica/server/internal/cerebro/grants"
 	// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 permission model handler import
 	cerebrogrouppermissions "github.com/multica-ai/multica/server/internal/cerebro/grouppermissions"
 	cerebroinbox "github.com/multica-ai/multica/server/internal/cerebro/inbox"
@@ -140,6 +142,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AllowedEmails:                 splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
 		AllowedEmailDomains:           splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
 		UseDailyRollupForRuntimeUsage: os.Getenv("USAGE_DAILY_ROLLUP_ENABLED") == "true",
+		ScannerDiscoveryToken:         os.Getenv("MULTICA_SCANNER_DISCOVERY_TOKEN"),
+// CEREBRO-PATCH(router): persona integration additions.
 	}
 	// CEREBRO-PATCH(handler-push-service): pushSvc passed into handler so
 	// Web Push delivery shares the same connection pool and config as
@@ -203,6 +207,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroGroupsHandler := cerebrogroups.New(cerebroQueries, queries, bus)
 	// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 group permission model handler
 	cerebroGroupPermissionsHandler := cerebrogrouppermissions.New(cerebroQueries, queries, bus)
+	// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant control plane handler + JEH-1212 upstream queries for subject validation
+	cerebroGrantsHandler := cerebrogrants.NewHandler(cerebrogrants.New(cerebroQueries, queries, pool, bus)) // CEREBRO-PATCH(cerebro-grants-routes): JEH-1213
 	// CEREBRO-PATCH(router-group-permissions-seam): JEH-1009 wire capability gate into the upstream handler
 	h.GroupPermissions = cerebrogrouppermissions.NewHandlerSeam(cerebroGroupPermissionsHandler.Service)
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 workspace accounts handler
@@ -327,6 +333,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// bearer token and the share-token id is recorded as anonymous_context.
 	r.Get("/api/cerebro/public/share/{token}", cerebroShareTokenHandler.PublicGet)
 
+	// Scanner discovery (cross-workspace, service-token gated). Persona's
+	// scanner consumes this to enumerate runtimes + their tools so its
+	// coverage report can flag ungoverned tools per runtime.
+	r.Get("/api/scanner-discovery/runtimes", h.GetScannerDiscoveryRuntimes)
+
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache))
@@ -336,6 +347,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/heartbeat", h.DaemonHeartbeat)
 		r.Get("/ws", h.DaemonWebSocket)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
+		r.Get("/workspaces/{workspaceId}/agents/persona", h.ListWorkspacePersonaAgents)
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
@@ -343,6 +355,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/{requestId}/result", h.ReportLocalSkillListResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/import/{requestId}/result", h.ReportLocalSkillImportResult)
+		r.Post("/runtimes/{runtimeId}/refresh-capabilities", h.RefreshRuntimeCapabilities)
 
 		r.Get("/tasks/{taskId}/status", h.GetTaskStatus)
 		r.Post("/tasks/{taskId}/start", h.StartTask)
@@ -477,6 +490,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/persona/approvals/{id}/approve", h.ApprovePersonaApproval)
 		r.Post("/api/persona/approvals/{id}/deny", h.DenyPersonaApproval)
 
+
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
 			r.Post("/", h.CreateWorkspace)
@@ -494,6 +508,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/feature-flags/{key}", featureFlagsHandler.Upsert)
 					// CEREBRO-PATCH(cerebro-groups-routes): workspace group list (member-level).
 					r.Get("/groups", cerebroGroupsHandler.List)
+					// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant reads (any member).
+					r.Get("/grants", cerebroGrantsHandler.List)
+					r.Get("/grants/{grantId}", cerebroGrantsHandler.Get)
 					// CEREBRO-PATCH(cerebro-account-routes): workspace accounts CRUD + JEH-998 controls patch.
 					r.Get("/accounts", cerebroAccountHandler.List)
 					r.Post("/accounts", cerebroAccountHandler.Create)
@@ -524,6 +541,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
 					// CEREBRO-PATCH(cerebro-groups-routes): group create requires admin/owner (JEH-1172).
 					r.Post("/groups", cerebroGroupsHandler.Create)
+					// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant writes (admin/owner only).
+					r.Post("/grants", cerebroGrantsHandler.Create)
+					r.Patch("/grants/{grantId}", cerebroGrantsHandler.Update)
+					r.Delete("/grants/{grantId}", cerebroGrantsHandler.Delete)
+					// W4.6: audit feed for sandbox + admin actions.
+					r.Get("/activity", h.ListWorkspaceActivity)
 				})
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
@@ -782,6 +805,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/local-skills/{requestId}", h.GetLocalSkillListRequest)
 					r.Post("/local-skills/import", h.InitiateImportLocalSkill)
 					r.Get("/local-skills/import/{requestId}", h.GetLocalSkillImportRequest)
+					r.Patch("/persona-sandbox", h.UpdateAgentRuntimePersonaSandbox)
 					r.Delete("/", h.DeleteAgentRuntime)
 				})
 			})

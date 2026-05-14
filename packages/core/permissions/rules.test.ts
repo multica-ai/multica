@@ -99,6 +99,8 @@ function makeRuntime(ownerId: string | null): RuntimeDevice {
     owner_id: ownerId,
     last_seen_at: null,
     sandbox_enabled: null,
+    persona_sandbox: "",
+    capabilities: {},
     paused_at: null,
     unpause_at: null,
     pause_reason: null,

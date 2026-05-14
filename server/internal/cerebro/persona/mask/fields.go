@@ -11,6 +11,7 @@ const (
 	KindIssue      = "multica.issue"
 	KindComment    = "multica.comment"
 	KindAttachment = "multica.attachment"
+	KindInvitation = "multica.invitation"
 )
 
 // staticFieldClassifications holds per-kind, per-field labels for
@@ -27,10 +28,12 @@ const (
 // classification against the firing grant's MaxClassification.
 //
 // v1 scope (per Sara's 23:04 scope precision):
-//   - members.email = pii
-//   - members.phone = pii
-//   - users.email   = pii
-//   - users.phone   = pii
+//   - members.email             = pii
+//   - members.phone             = pii
+//   - users.email               = pii
+//   - users.phone               = pii
+//   - invitations.invitee_email = pii (JEH-1187)
+//   - invitations.inviter_email = pii (JEH-1187)
 //
 // agent and per-row-classified kinds are intentionally empty maps.
 var staticFieldClassifications = map[string]map[string]string{
@@ -46,6 +49,10 @@ var staticFieldClassifications = map[string]map[string]string{
 	KindIssue:      {},
 	KindComment:    {},
 	KindAttachment: {},
+	KindInvitation: {
+		"invitee_email": "pii",
+		"inviter_email": "pii",
+	},
 }
 
 // FieldClassifications returns the static per-field labels for a

@@ -1793,7 +1793,8 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.canManageAgent(w, r, agent) {
+	// CEREBRO-PATCH(skill-canmanage-return-fix): canManageAgent now returns (agent, ok); destructure.
+	if _, ok := h.canManageAgent(w, r, agent); !ok {
 		return
 	}
 

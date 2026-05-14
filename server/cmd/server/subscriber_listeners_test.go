@@ -323,7 +323,7 @@ func commentEvent(issueID, commenterID string) events.Event {
 				IssueID:    issueID,
 				AuthorType: "member",
 				AuthorID:   commenterID,
-				Content:    "test comment",
+				Content:    stringPtr("test comment"),
 				Type:       "comment",
 			},
 		},

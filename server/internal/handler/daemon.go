@@ -208,6 +208,15 @@ type DaemonRegisterRequest struct {
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
 		Status  string `json:"status"`
+		// Capabilities is a daemon-reported snapshot of what this runtime
+// CEREBRO-PATCH(daemon): persona integration additions.
+		// can actually do — tools the provider exposes, configured MCP
+		// servers, supported providers. Loose JSON so different providers
+		// report what fits without a schema migration. Persona's UI uses
+		// this to show "what your runtime can actually do" alongside the
+		// abstract sandbox. Optional; absent means "report nothing", which
+		// the server stores as an empty object.
+		Capabilities json.RawMessage `json:"capabilities,omitempty"`
 	} `json:"runtimes"`
 }
 
@@ -428,6 +437,23 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// the stale row so there's only ever one runtime per machine.
 		h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
 
+		// E3.1: persist the daemon's capability snapshot. UpsertAgentRuntime
+		// can't carry capabilities (the upsert preserves admin-set fields on
+		// re-register and capabilities don't fit that semantics — daemons own
+		// this field). A failure here doesn't abort registration: the runtime
+		// is still usable, capabilities just stay empty until the next
+		// register cycle.
+		if len(runtime.Capabilities) > 0 {
+			if err := h.Queries.UpdateAgentRuntimeCapabilities(r.Context(), db.UpdateAgentRuntimeCapabilitiesParams{
+				ID:           registered.ID,
+				Capabilities: runtime.Capabilities,
+			}); err != nil {
+				slog.Warn("failed to write runtime capabilities", "runtime_id", uuidToString(registered.ID), "error", err)
+			} else {
+				registered.Capabilities = runtime.Capabilities
+			}
+		}
+
 		resp = append(resp, runtimeToResponse(registered))
 	}
 
@@ -551,6 +577,90 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos))
 }
 
+// PersonaAgentEntry is the shape returned by ListWorkspacePersonaAgents.
+// Slim on purpose: the daemon only needs identity + the runtime that's
+// claimed for it, plus the configured persona_sandbox so attributes can be
+// rebuilt without a second roundtrip.
+type PersonaAgentEntry struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	PersonaSandbox string `json:"persona_sandbox"`
+	RuntimeID      string `json:"runtime_id"`
+	RuntimeName    string `json:"runtime_name"`
+	Provider       string `json:"provider"`
+	// RuntimePersonaSandbox is the runtime-level cap (E1) that wins over
+	// the per-agent value at spawn time. Surfacing it here lets the daemon
+	// build accurate "effective_sandbox" attributes at start without
+	// having to fetch the runtime row separately.
+	RuntimePersonaSandbox string `json:"runtime_persona_sandbox"`
+	// McpConfig is the agent's raw MCP configuration JSON (standard
+	// {"mcpServers": {...}} shape). Surfaced so refreshPersonaActorAttrs
+	// can extract the server-name list at daemon start without a second
+	// roundtrip per agent. Sent omitempty so older daemons see the same
+	// payload they always did.
+	McpConfig json.RawMessage `json:"mcp_config,omitempty"`
+}
+
+// ListWorkspacePersonaAgents returns every agent in a workspace whose
+// persona_sandbox is set, joined with its runtime's persona context. Used by
+// the daemon at start (E3 part 3, "fornyes ved hver start"): the daemon
+// pushes fresh actor attributes to persona for each entry so persona's UI
+// reflects "what the runtime currently supports" without waiting for the
+// next spawn.
+func (h *Handler) ListWorkspacePersonaAgents(w http.ResponseWriter, r *http.Request) {
+	workspaceID := strings.TrimSpace(chi.URLParam(r, "workspaceId"))
+	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
+		return
+	}
+
+	agents, err := h.Queries.ListAgents(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list agents")
+		return
+	}
+
+	// Pull runtimes once and index by id so we don't N+1 inside the loop.
+	runtimes, err := h.Queries.ListAgentRuntimes(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list runtimes")
+		return
+	}
+	runtimeByID := make(map[string]db.AgentRuntime, len(runtimes))
+	for _, rt := range runtimes {
+		runtimeByID[uuidToString(rt.ID)] = rt
+	}
+
+	out := make([]PersonaAgentEntry, 0, len(agents))
+	for _, a := range agents {
+		if !a.PersonaSandbox.Valid || a.PersonaSandbox.String == "" {
+			continue
+		}
+		rt, ok := runtimeByID[uuidToString(a.RuntimeID)]
+		if !ok {
+			// Agent points at a runtime not in the workspace's list — skip
+			// rather than returning a half-populated row the daemon would
+			// have to special-case.
+			continue
+		}
+		var mcp json.RawMessage
+		if len(a.McpConfig) > 0 {
+			mcp = json.RawMessage(a.McpConfig)
+		}
+		out = append(out, PersonaAgentEntry{
+			ID:                    uuidToString(a.ID),
+			Name:                  a.Name,
+			PersonaSandbox:        a.PersonaSandbox.String,
+			RuntimeID:             uuidToString(rt.ID),
+			RuntimeName:           rt.Name,
+			Provider:              rt.Provider,
+			RuntimePersonaSandbox: rt.PersonaSandbox.String,
+			McpConfig:             mcp,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"agents": out})
+}
+
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
 func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -613,12 +723,74 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// RefreshRuntimeCapabilitiesRequest is the operator-triggered manual
+// refresh path. The daemon-side helper rebuilds the capabilities JSON
+// from the live CLI binary and POSTs the result here. Operators can
+// invoke this from the UI when they suspect the runtime view is stale
+// without waiting for the next heartbeat.
+type RefreshRuntimeCapabilitiesRequest struct {
+	CLIVersion   string          `json:"cli_version,omitempty"`
+	Capabilities json.RawMessage `json:"capabilities"`
+}
+
+// RefreshRuntimeCapabilities accepts a fresh capabilities payload from
+// the daemon and persists it on the runtime row. Auth uses the daemon
+// token (same as register/heartbeat); operators trigger it through the
+// UI which proxies through their cerebro session.
+func (h *Handler) RefreshRuntimeCapabilities(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
+		return
+	}
+
+	var req RefreshRuntimeCapabilitiesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Capabilities) == 0 {
+		writeError(w, http.StatusBadRequest, "capabilities is required")
+		return
+	}
+
+	if err := h.Queries.UpdateAgentRuntimeCapabilities(r.Context(), db.UpdateAgentRuntimeCapabilitiesParams{
+		ID:           parseUUID(runtimeID),
+		Capabilities: req.Capabilities,
+	}); err != nil {
+		slog.Warn("manual refresh capabilities failed", "runtime_id", runtimeID, "error", err)
+		writeError(w, http.StatusInternalServerError, "refresh failed")
+		return
+	}
+
+	if req.CLIVersion != "" {
+		if err := h.Queries.UpdateAgentRuntimeCliVersion(r.Context(), db.UpdateAgentRuntimeCliVersionParams{
+			ID:         parseUUID(runtimeID),
+			CliVersion: pgtype.Text{String: req.CLIVersion, Valid: true},
+		}); err != nil {
+			slog.Warn("manual refresh cli_version failed", "runtime_id", runtimeID, "error", err)
+		}
+	}
+
+	slog.Info("runtime capabilities manually refreshed", "runtime_id", runtimeID, "cli_version", req.CLIVersion)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type DaemonHeartbeatRequest struct {
 	RuntimeID string `json:"runtime_id"`
 	// CEREBRO-PATCH(heartbeat-account-request): JEH-997 mirrors the
 	// Account field on protocol.DaemonHeartbeatRequestPayload so HTTP
 	// and WS heartbeat carry the same shape.
 	Account *protocol.DaemonHeartbeatAccount `json:"account,omitempty"`
+	// CLIVersion lets the daemon advertise its current Claude/Codex CLI
+	// version on every heartbeat (W4.2). When the value differs from
+	// what the runtime row already has, the server treats it as a CLI
+	// upgrade and asks the daemon to re-report capabilities (the CLI's
+	// tool list may have changed). Empty string skips the check.
+	CLIVersion string `json:"cli_version,omitempty"`
+	// Capabilities is the optional snapshot the daemon may include on
+	// heartbeat to short-circuit the refresh round-trip. Same shape as
+	// the registration payload.
+	Capabilities json.RawMessage `json:"capabilities,omitempty"`
 }
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
@@ -752,6 +924,32 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	// upserts cerebro_account + links agent_runtime.current_account_id. Best-
 	// effort; failures are logged but never block the heartbeat ack.
 	h.recordHeartbeatAccount(r.Context(), rt, req.Account)
+	// W4.2: detect CLI-version drift. When the daemon's reported CLI version
+	// differs from the row, the runtime's tool surface may have changed and
+	// persona's scanner-discovery view is now stale. Persist any capabilities
+	// the daemon included on this heartbeat.
+	if req.CLIVersion != "" && rt.CliVersion.String != req.CLIVersion {
+		if err := h.Queries.UpdateAgentRuntimeCliVersion(r.Context(), db.UpdateAgentRuntimeCliVersionParams{
+			ID:         parseUUID(req.RuntimeID),
+			CliVersion: pgtype.Text{String: req.CLIVersion, Valid: true},
+		}); err != nil {
+			slog.Warn("update runtime cli_version failed", "runtime_id", req.RuntimeID, "error", err)
+		}
+		if len(req.Capabilities) > 0 {
+			if err := h.Queries.UpdateAgentRuntimeCapabilities(r.Context(), db.UpdateAgentRuntimeCapabilitiesParams{
+				ID:           parseUUID(req.RuntimeID),
+				Capabilities: req.Capabilities,
+			}); err != nil {
+				slog.Warn("update runtime capabilities on cli upgrade failed", "runtime_id", req.RuntimeID, "error", err)
+			}
+		}
+		slog.Info("runtime cli upgrade detected",
+			"runtime_id", req.RuntimeID,
+			"old_version", rt.CliVersion.String,
+			"new_version", req.CLIVersion,
+			"capabilities_refreshed", len(req.Capabilities) > 0,
+		)
+	}
 	// Preserve the existing HTTP response shape: the runtime_id field is new
 	// in the WS path and would be redundant noise on the HTTP path where the
 	// caller already knows which runtime it asked about.
@@ -1186,6 +1384,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// the override defaults to safe-by-default sandboxing.
 	if rt, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID); err == nil {
 		resp.SandboxEnabled = boolToPtr(rt.SandboxEnabled)
+		resp.RuntimePersonaSandbox = rt.PersonaSandbox.String
 	} else {
 		slog.Warn("failed to load runtime for sandbox override", "runtime_id", uuidToString(task.RuntimeID), "error", err)
 	}

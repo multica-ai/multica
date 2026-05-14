@@ -23,7 +23,12 @@ type CommentResponse struct {
 	IssueID        string               `json:"issue_id"`
 	AuthorType     string               `json:"author_type"`
 	AuthorID       string               `json:"author_id"`
-	Content        string               `json:"content"`
+	// CEREBRO-PATCH(comment-content-nullable): JEH-1215 — *string so that
+	// a persona-redacted row serialises as `"content": null`. The previous
+	// `string` type forced the empty string `""`, which the UI cannot
+	// distinguish from a legitimately empty body and which leaks the fact
+	// that a real value once existed (any non-null is a known-shape leak).
+	Content        *string              `json:"content"`
 	Type           string               `json:"type"`
 	ParentID       *string              `json:"parent_id"`
 	CreatedAt      string               `json:"created_at"`
@@ -33,6 +38,11 @@ type CommentResponse struct {
 	ResolvedByID   *string              `json:"resolved_by_id"`
 	Reactions      []ReactionResponse   `json:"reactions"`
 	Attachments    []AttachmentResponse `json:"attachments"`
+	// CEREBRO-PATCH(comment-classification): JEH-1188 — exposes the
+	// per-row classification so the UI can render a "pii"/"internal"
+	// badge next to a comment. Default rows are "internal" and unchanged
+	// in the rendered shape.
+	Classification string `json:"classification"`
 }
 
 func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments []AttachmentResponse) CommentResponse {
@@ -42,12 +52,20 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 	if attachments == nil {
 		attachments = []AttachmentResponse{}
 	}
+	classification := c.Classification
+	if classification == "" {
+		classification = "internal"
+	}
+	// CEREBRO-PATCH(comment-content-nullable): JEH-1215 — copy into a
+	// local so we can take its address; the *string field lets the mask
+	// helper nil it without inventing a sentinel value.
+	content := c.Content
 	return CommentResponse{
 		ID:             uuidToString(c.ID),
 		IssueID:        uuidToString(c.IssueID),
 		AuthorType:     c.AuthorType,
 		AuthorID:       uuidToString(c.AuthorID),
-		Content:        c.Content,
+		Content:        &content,
 		Type:           c.Type,
 		ParentID:       uuidToPtr(c.ParentID),
 		CreatedAt:      timestampToString(c.CreatedAt),
@@ -57,6 +75,7 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		ResolvedByID:   uuidToPtr(c.ResolvedByID),
 		Reactions:      reactions,
 		Attachments:    attachments,
+		Classification: classification,
 	}
 }
 
@@ -244,6 +263,13 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Fetch linked attachments so the response includes them.
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
+	// CEREBRO-PATCH(persona-mask-create-comment): JEH-1188 redaction.
+	// Self-authorship is expected to receive pii via policy; a deny here
+	// would mean the author can't read what they just wrote — which is
+	// the same "policy mis-configured" defensive zero JEH-1186 applies.
+	if !h.maskSingleCommentForCaller(w, r, comment, &resp) {
+		return
+	}
 	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
 	h.publishToAudience(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
 		"comment":             resp,
@@ -547,6 +573,10 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	cid := uuidToString(comment.ID)
 	resp := commentToResponse(comment, grouped[cid], groupedAtt[cid])
+	// CEREBRO-PATCH(persona-mask-update-comment): JEH-1188 redaction.
+	if !h.maskSingleCommentForCaller(w, r, comment, &resp) {
+		return
+	}
 	slog.Info("comment updated", append(logger.RequestAttrs(r), "comment_id", commentId)...)
 	parentIssue, _ := h.Queries.GetIssue(r.Context(), comment.IssueID)
 	h.publishToAudience(protocol.EventCommentUpdated, workspaceID, actorType, actorID, map[string]any{"comment": resp}, h.audienceForIssue(r.Context(), parentIssue))

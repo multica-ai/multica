@@ -13,6 +13,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+// CEREBRO-PATCH(daemon-test): persona integration additions.
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -124,6 +126,163 @@ func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	rt := runtimes[0].(map[string]any)
 	runtimeID := rt["id"].(string)
 	testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+}
+
+// TestDaemonRegister_PersistsCapabilities (E3.1) verifies that capability
+// payloads sent by the daemon are written to agent_runtime.capabilities and
+// surface back in the response. The shape is loose by design — the handler
+// must accept whatever JSON the daemon ships and not strip fields.
+func TestDaemonRegister_PersistsCapabilities(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	caps := map[string]any{
+		"providers":   []string{"claude"},
+		"tools":       []string{"Bash", "Read", "Write"},
+		"mcp_servers": []string{},
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "test-daemon-caps",
+		"device_name":  "test-device",
+		"runtimes": []map[string]any{
+			{
+				"name":         "caps-runtime",
+				"type":         "claude",
+				"version":      "1.0.0",
+				"status":       "online",
+				"capabilities": caps,
+			},
+		},
+	}, testWorkspaceID, "test-daemon-caps")
+
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	runtimes := resp["runtimes"].([]any)
+	rt := runtimes[0].(map[string]any)
+	runtimeID := rt["id"].(string)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	// Response should echo capabilities.
+	gotCaps, ok := rt["capabilities"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected capabilities object in response, got %v", rt["capabilities"])
+	}
+	tools, _ := gotCaps["tools"].([]any)
+	if len(tools) != 3 {
+		t.Fatalf("expected 3 tools in capabilities, got %v", tools)
+	}
+
+	// DB should also have them — proves the JSONB column round-trip.
+	var stored []byte
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT capabilities FROM agent_runtime WHERE id = $1`, runtimeID,
+	).Scan(&stored); err != nil {
+		t.Fatalf("read capabilities from DB: %v", err)
+	}
+	var roundTrip map[string]any
+	if err := json.Unmarshal(stored, &roundTrip); err != nil {
+		t.Fatalf("unmarshal stored capabilities: %v", err)
+	}
+	if got, _ := roundTrip["tools"].([]any); len(got) != 3 {
+		t.Fatalf("expected 3 tools persisted, got %v (raw=%s)", got, string(stored))
+	}
+}
+
+// TestUpdateAgentRuntimePersonaSandbox (E1) verifies the new PATCH endpoint
+// sets the runtime-level persona sandbox cap and surfaces it back via the
+// runtime response. Permission gating to workspace owner/admin is verified
+// in a separate test.
+func TestUpdateAgentRuntimePersonaSandbox(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := handlerTestRuntimeID(t)
+
+	// Set the cap.
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/runtimes/"+runtimeID+"/persona-sandbox",
+		map[string]any{"persona_sandbox": "claude-readonly"})
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.UpdateAgentRuntimePersonaSandbox(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgentRuntimePersonaSandbox: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if got, _ := resp["persona_sandbox"].(string); got != "claude-readonly" {
+		t.Fatalf("expected persona_sandbox=claude-readonly, got %q", got)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`UPDATE agent_runtime SET persona_sandbox = NULL WHERE id = $1`, runtimeID)
+	})
+
+	// Clear via empty string.
+	w = httptest.NewRecorder()
+	req = newRequest("PATCH", "/api/runtimes/"+runtimeID+"/persona-sandbox",
+		map[string]any{"persona_sandbox": ""})
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.UpdateAgentRuntimePersonaSandbox(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("clear sandbox: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if got, _ := resp["persona_sandbox"].(string); got != "" {
+		t.Fatalf("expected empty persona_sandbox after clear, got %q", got)
+	}
+}
+
+// TestUpdateAgentRuntimePersonaSandbox_RequiresAdmin (E1+E2) verifies that
+// non-admin members can't set the runtime cap. Same threat model as the
+// per-agent persona_sandbox: it's workspace policy, not per-resource config.
+func TestUpdateAgentRuntimePersonaSandbox_RequiresAdmin(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := handlerTestRuntimeID(t)
+
+	// Create a plain workspace member (non-admin) and try to update.
+	memberEmail := "e1-member-" + runtimeID[:8] + "@multica.ai"
+	var memberUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+	`, "E1 Member", memberEmail).Scan(&memberUserID); err != nil {
+		t.Fatalf("create member user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, memberUserID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')
+	`, testWorkspaceID, memberUserID); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/runtimes/"+runtimeID+"/persona-sandbox",
+		map[string]any{"persona_sandbox": "claude-power"})
+	req.Header.Set("X-User-ID", memberUserID)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.UpdateAgentRuntimePersonaSandbox(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("non-admin runtime cap update: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
 }
 
 func TestDaemonRegister_WithDaemonToken_WorkspaceMismatch(t *testing.T) {
@@ -260,6 +419,131 @@ func TestDaemonHeartbeat_EmptyQueueSkipsPopPending(t *testing.T) {
 	}
 	if importSpy.popCalls != 0 {
 		t.Fatalf("expected 0 PopPending calls on empty import queue, got %d", importSpy.popCalls)
+	}
+}
+
+// TestDaemonHeartbeat_CLIVersionDrift locks in W4.2: when the daemon
+// reports a different cli_version on heartbeat, the runtime row gets
+// the new version persisted AND its capabilities are refreshed if a
+// snapshot was included. Without this, an operator who upgrades Claude
+// CLI sees stale tools in persona's UI until the next daemon restart.
+func TestDaemonHeartbeat_CLIVersionDrift(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	// Register a runtime with v1.0.0.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "test-cli-drift",
+		"device_name":  "test-cli-drift",
+		"cli_version":  "1.0.0",
+		"runtimes": []map[string]any{
+			{"name": "drift-runtime", "type": "claude", "version": "1.0.0", "status": "online", "capabilities": map[string]any{"tools": []string{"Bash"}}},
+		},
+	})
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("setup register: %d %s", w.Code, w.Body.String())
+	}
+	var regResp map[string]any
+	json.NewDecoder(w.Body).Decode(&regResp)
+	runtimeID := regResp["runtimes"].([]any)[0].(map[string]any)["id"].(string)
+	defer testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+
+	// Pre-populate cli_version so the drift check has something to compare to.
+	// The current register handler doesn't persist cli_version per-runtime;
+	// we set it directly to simulate a previous heartbeat having stored it.
+	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET cli_version = '1.0.0' WHERE id = $1`, runtimeID); err != nil {
+		t.Fatalf("seed cli_version: %v", err)
+	}
+
+	// Heartbeat with a NEW cli_version + new capabilities.
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/heartbeat", map[string]any{
+		"runtime_id":   runtimeID,
+		"cli_version":  "2.0.0",
+		"capabilities": map[string]any{"tools": []string{"Bash", "Edit", "Write"}},
+	}, testWorkspaceID, "test-cli-drift")
+
+	testHandler.DaemonHeartbeat(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("heartbeat: %d %s", w.Code, w.Body.String())
+	}
+
+	var stored struct {
+		CliVersion   pgtype.Text
+		Capabilities []byte
+	}
+	if err := testPool.QueryRow(ctx, `SELECT cli_version, capabilities FROM agent_runtime WHERE id = $1`, runtimeID).
+		Scan(&stored.CliVersion, &stored.Capabilities); err != nil {
+		t.Fatalf("read updated row: %v", err)
+	}
+	if stored.CliVersion.String != "2.0.0" {
+		t.Errorf("cli_version: got %q, want 2.0.0", stored.CliVersion.String)
+	}
+	if !strings.Contains(string(stored.Capabilities), "Edit") || !strings.Contains(string(stored.Capabilities), "Write") {
+		t.Errorf("capabilities did not refresh on drift: %s", stored.Capabilities)
+	}
+}
+
+// TestRefreshRuntimeCapabilities locks in the operator-triggered manual
+// refresh path. POST /api/daemon/runtimes/{id}/refresh-capabilities
+// updates capabilities (and optionally cli_version) without waiting for
+// the next heartbeat.
+func TestRefreshRuntimeCapabilities(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "test-manual-refresh",
+		"device_name":  "test-manual-refresh",
+		"runtimes": []map[string]any{
+			{"name": "refresh-runtime", "type": "claude", "version": "1.0.0", "status": "online", "capabilities": map[string]any{"tools": []string{"Bash"}}},
+		},
+	})
+	testHandler.DaemonRegister(w, req)
+	var regResp map[string]any
+	json.NewDecoder(w.Body).Decode(&regResp)
+	runtimeID := regResp["runtimes"].([]any)[0].(map[string]any)["id"].(string)
+	defer testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST",
+		"/api/daemon/runtimes/"+runtimeID+"/refresh-capabilities",
+		map[string]any{
+			"cli_version":  "3.0.0",
+			"capabilities": map[string]any{"tools": []string{"Bash", "Read", "Write"}},
+		},
+		testWorkspaceID, "test-manual-refresh")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("runtimeId", runtimeID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	testHandler.RefreshRuntimeCapabilities(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("refresh: %d %s", w.Code, w.Body.String())
+	}
+
+	var stored struct {
+		CliVersion   pgtype.Text
+		Capabilities []byte
+	}
+	if err := testPool.QueryRow(ctx, `SELECT cli_version, capabilities FROM agent_runtime WHERE id = $1`, runtimeID).
+		Scan(&stored.CliVersion, &stored.Capabilities); err != nil {
+		t.Fatalf("read updated row: %v", err)
+	}
+	if stored.CliVersion.String != "3.0.0" {
+		t.Errorf("cli_version: got %q, want 3.0.0", stored.CliVersion.String)
+	}
+	if !strings.Contains(string(stored.Capabilities), "Read") {
+		t.Errorf("capabilities did not refresh: %s", stored.Capabilities)
 	}
 }
 

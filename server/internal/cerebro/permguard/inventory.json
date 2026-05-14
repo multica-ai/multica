@@ -25,11 +25,11 @@
       "gate": "workspace_member"
     },
     {
-      "id": "DELETE /api/cerebro/workflows/{id}",
+      "id": "DELETE /api/cerebro/share-tokens/{tokenId}",
       "gate": "workspace_member"
     },
     {
-      "id": "DELETE /api/cerebro/share-tokens/{tokenId}",
+      "id": "DELETE /api/cerebro/workflows/{id}",
       "gate": "workspace_member"
     },
     {
@@ -149,6 +149,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/workspaces/{id}/grants/{grantId}",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "DELETE /api/workspaces/{id}/invitations/{invitationId}",
       "gate": "workspace_admin"
     },
@@ -193,6 +197,10 @@
       "gate": "project_access"
     },
     {
+      "id": "PATCH /api/runtimes/{runtimeId}/persona-sandbox",
+      "gate": "cerebro_runtime_access"
+    },
+    {
       "id": "PATCH /api/runtimes/{runtimeId}/sandbox",
       "gate": "cerebro_runtime_access"
     },
@@ -207,6 +215,10 @@
     {
       "id": "PATCH /api/workspaces/{id}/credentials/{credId}",
       "gate": "workspace_member"
+    },
+    {
+      "id": "PATCH /api/workspaces/{id}/grants/{grantId}",
+      "gate": "workspace_admin"
     },
     {
       "id": "PATCH /api/workspaces/{id}/members/{memberId}/",
@@ -357,6 +369,10 @@
       "gate": "daemon_auth"
     },
     {
+      "id": "POST /api/daemon/runtimes/{runtimeId}/refresh-capabilities",
+      "gate": "daemon_auth"
+    },
+    {
       "id": "POST /api/daemon/runtimes/{runtimeId}/tasks/claim",
       "gate": "daemon_auth"
     },
@@ -445,11 +461,11 @@
       "gate": "self_only"
     },
     {
-      "id": "POST /api/inbox/{id}/unarchive",
+      "id": "POST /api/inbox/{id}/read",
       "gate": "self_only"
     },
     {
-      "id": "POST /api/inbox/{id}/read",
+      "id": "POST /api/inbox/{id}/unarchive",
       "gate": "self_only"
     },
     {
@@ -673,6 +689,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/workspaces/{id}/grants",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "POST /api/workspaces/{id}/groups",
       "gate": "workspace_admin"
     },
@@ -709,10 +729,6 @@
       "gate": "cerebro_agent_access"
     },
     {
-      "id": "PUT /api/cerebro/workflows/{id}",
-      "gate": "workspace_member"
-    },
-    {
       "id": "PUT /api/agents/{id}/skills",
       "gate": "cerebro_agent_access"
     },
@@ -730,6 +746,10 @@
     },
     {
       "id": "PUT /api/artifacts/{id}/scope",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/cerebro/workflows/{id}",
       "gate": "workspace_member"
     },
     {
@@ -848,7 +868,7 @@
     },
     {
       "id": "create_grant",
-      "exempt": "local-only stub \u2014 in-memory mock per mcp-serve process, no HTTP until JEH-1179"
+      "gate": "via:POST /api/workspaces/{id}/grants"
     },
     {
       "id": "create_group",
@@ -888,7 +908,7 @@
     },
     {
       "id": "delete_grant",
-      "exempt": "local-only stub \u2014 in-memory mock per mcp-serve process, no HTTP until JEH-1179"
+      "gate": "via:DELETE /api/workspaces/{id}/grants/{grantId}"
     },
     {
       "id": "delete_group",
@@ -896,7 +916,7 @@
     },
     {
       "id": "evaluate_policy",
-      "exempt": "local-only stub \u2014 in-memory mock per mcp-serve process, no HTTP until JEH-1179"
+      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/grants policy check"
     },
     {
       "id": "fork_session",
@@ -1036,7 +1056,7 @@
     },
     {
       "id": "update_grant",
-      "exempt": "local-only stub \u2014 in-memory mock per mcp-serve process, no HTTP until JEH-1179"
+      "gate": "via:PATCH /api/workspaces/{id}/grants/{grantId}"
     },
     {
       "id": "update_group",
@@ -1223,6 +1243,26 @@
     {
       "id": "daemon stop",
       "exempt": "local-only \u2014 controls local daemon process"
+    },
+    {
+      "id": "grant create",
+      "gate": "via:POST /api/workspaces/{id}/grants"
+    },
+    {
+      "id": "grant delete",
+      "gate": "via:DELETE /api/workspaces/{id}/grants/{grantId}"
+    },
+    {
+      "id": "grant get",
+      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/grants/{grantId}"
+    },
+    {
+      "id": "grant list",
+      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/grants"
+    },
+    {
+      "id": "grant update",
+      "gate": "via:PATCH /api/workspaces/{id}/grants/{grantId}"
     },
     {
       "id": "group agent add",

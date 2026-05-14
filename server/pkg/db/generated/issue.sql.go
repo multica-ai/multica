@@ -881,7 +881,7 @@ UPDATE issue SET
     assignee_id = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, kind, is_private
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, kind, is_private, classification
 `
 
 type UpdateIssueAssigneeParams struct {
@@ -923,6 +923,7 @@ func (q *Queries) UpdateIssueAssignee(ctx context.Context, arg UpdateIssueAssign
 		&i.FirstExecutedAt,
 		&i.Kind,
 		&i.IsPrivate,
+		&i.Classification,
 	)
 	return i, err
 }

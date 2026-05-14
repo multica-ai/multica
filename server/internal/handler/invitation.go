@@ -175,6 +175,11 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
+	// CEREBRO-PATCH(persona-mask-invitation-create): JEH-1187 redaction.
+	if !h.maskInvitationForCaller(w, r, uuidToString(requester.WorkspaceID), uuidToString(inv.ID), &resp) {
+		return
+	}
+
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -213,6 +218,9 @@ func (h *Handler) ListWorkspaceInvitations(w http.ResponseWriter, r *http.Reques
 			InviterEmail:  row.InviterEmail,
 		}
 	}
+
+	// CEREBRO-PATCH(persona-mask-invitation-list-workspace): JEH-1187 redaction.
+	resp = h.maskInvitationsListForCaller(r, uuidToString(workspaceUUID), resp)
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -301,6 +309,11 @@ func (h *Handler) GetMyInvitation(w http.ResponseWriter, r *http.Request) {
 		resp.InviterEmail = inviter.Email
 	}
 
+	// CEREBRO-PATCH(persona-mask-invitation-get): JEH-1187 redaction.
+	if !h.maskInvitationForCaller(w, r, uuidToString(inv.WorkspaceID), uuidToString(inv.ID), &resp) {
+		return
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -348,6 +361,9 @@ func (h *Handler) ListMyInvitations(w http.ResponseWriter, r *http.Request) {
 			InviterEmail:  row.InviterEmail,
 		}
 	}
+
+	// CEREBRO-PATCH(persona-mask-invitation-list-mine): JEH-1187 redaction.
+	resp = h.maskInvitationsListForCaller(r, "", resp)
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -447,6 +463,14 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 
 	wsID := uuidToString(accepted.WorkspaceID)
 	memberResp := memberWithUserResponse(member, user)
+	// CEREBRO-PATCH(persona-mask-accept-invitation): JEH-1186 redaction. Self-
+	// acceptance returns the member row for the invitee themselves — persona
+	// policy is expected to grant pii on self-reads, but we still run the
+	// decision so a mis-configured policy can't leak pii through this path.
+	maskedSelf := h.maskMembersListForCaller(r, wsID, []MemberWithUserResponse{memberResp})
+	if len(maskedSelf) > 0 {
+		memberResp = maskedSelf[0]
+	}
 
 	// Broadcast member:added so existing clients update their member lists.
 	eventPayload := map[string]any{"member": memberResp}

@@ -103,10 +103,13 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		q.Get("after") != "" || q.Get("around") != ""
 
 	if wantWrapped {
-		entries := h.mergeTimeline(r, comments, activities, false)
+		// CEREBRO-PATCH(persona-mask-timeline): JEH-1216 pass issue so embedded comments get the same per-row mask as ListComments.
+		entries := h.mergeTimeline(r, issue, comments, activities, false)
 		if entries == nil {
 			entries = []TimelineEntry{}
 		}
+		// CEREBRO-PATCH(persona-mask-timeline-wrapped): JEH-1190 redaction.
+		entries = h.maskTimelineForCaller(r, issue, comments, activities, entries)
 		resp := timelinePaginatedResponse{Entries: entries}
 		// `around=<id>`: locate the anchor in the DESC slice so the legacy
 		// client can scroll-to-highlight without a follow-up request.
@@ -123,19 +126,25 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries := h.mergeTimeline(r, comments, activities, true)
+	// CEREBRO-PATCH(persona-mask-timeline): JEH-1216 same flat-array path.
+	entries := h.mergeTimeline(r, issue, comments, activities, true)
 	if entries == nil {
 		entries = []TimelineEntry{}
 	}
+	// CEREBRO-PATCH(persona-mask-timeline-flat): JEH-1190 redaction.
+	entries = h.maskTimelineForCaller(r, issue, comments, activities, entries)
 	writeJSON(w, http.StatusOK, entries)
 }
 
 // mergeTimeline merges comments and activities and returns them sorted by
 // (created_at, id). When ascending=true, oldest first (the new flat-array
 // contract); otherwise newest first (the wrapped legacy contract).
-func (h *Handler) mergeTimeline(r *http.Request, comments []db.Comment, activities []db.ActivityLog, ascending bool) []TimelineEntry {
-	out := make([]TimelineEntry, 0, len(comments)+len(activities))
-	out = append(out, h.commentsToEntries(r, comments)...)
+// CEREBRO-PATCH(persona-mask-timeline): JEH-1216 — issue threaded through so embedded comment-entries can be passed through maskCommentEntriesForCaller (per-row Persona decision, denies drop the entry, mask zeros content).
+func (h *Handler) mergeTimeline(r *http.Request, issue db.Issue, comments []db.Comment, activities []db.ActivityLog, ascending bool) []TimelineEntry {
+	commentEntries := h.commentsToEntries(r, comments)
+	commentEntries = h.maskCommentEntriesForCaller(r, issue, comments, commentEntries)
+	out := make([]TimelineEntry, 0, len(commentEntries)+len(activities))
+	out = append(out, commentEntries...)
 	for _, a := range activities {
 		out = append(out, activityToEntry(a))
 	}
@@ -208,6 +217,83 @@ func activityToEntry(a db.ActivityLog) TimelineEntry {
 		Details:   a.Details,
 		CreatedAt: timestampToString(a.CreatedAt),
 	}
+}
+
+// WorkspaceActivityEntry is the wire shape for the workspace-level
+// CEREBRO-PATCH(activity): persona integration changes.
+// audit feed (W4.6). Persona-sandbox changes (agent + runtime) and
+// other admin operations land here so a workspace owner can see who
+// did what without digging through stdout.
+type WorkspaceActivityEntry struct {
+	ID        string          `json:"id"`
+	ActorType string          `json:"actor_type"`
+	ActorID   string          `json:"actor_id"`
+	Action    string          `json:"action"`
+	Details   json.RawMessage `json:"details"`
+	CreatedAt string          `json:"created_at"`
+}
+
+// ListWorkspaceActivity returns recent workspace-scoped audit events.
+// Restricted to workspace owner/admin via the RequireWorkspaceRoleFromURL
+// middleware in the router; the handler is reached only when the caller
+// already passed that gate. URL param is "id" because the endpoint is
+// nested under /api/workspaces/{id}/activity.
+//
+// In tests where the middleware doesn't run, requireWorkspaceMember
+// fills the gap so direct-handler calls still enforce membership +
+// role.
+func (h *Handler) ListWorkspaceActivity(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	if workspaceID == "" {
+		// Backwards-compat: the test suite previously used "workspaceId".
+		workspaceID = chi.URLParam(r, "workspaceId")
+	}
+	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
+	if !ok {
+		return
+	}
+	if !roleAllowed(member.Role, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "only workspace owner/admin can read the audit feed")
+		return
+	}
+
+	// Filter to the audit-relevant action set so the response is small
+	// and focused. Operators on ListWorkspaceActivities can pass an empty
+	// list to skip filtering, which we surface as "no actions" so the
+	// query returns nothing — explicit allow-list keeps the surface
+	// auditable. Persona-sandbox events are the W4.6 baseline.
+	actions := []string{
+		"agent_persona_sandbox_changed",
+		"runtime_persona_sandbox_changed",
+	}
+
+	rows, err := h.Queries.ListWorkspaceActivities(r.Context(), db.ListWorkspaceActivitiesParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Column2:     actions,
+		Limit:       100,
+		Offset:      0,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list activities")
+		return
+	}
+
+	out := make([]WorkspaceActivityEntry, 0, len(rows))
+	for _, a := range rows {
+		actorType := ""
+		if a.ActorType.Valid {
+			actorType = a.ActorType.String
+		}
+		out = append(out, WorkspaceActivityEntry{
+			ID:        uuidToString(a.ID),
+			ActorType: actorType,
+			ActorID:   uuidToString(a.ActorID),
+			Action:    a.Action,
+			Details:   a.Details,
+			CreatedAt: timestampToString(a.CreatedAt),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // AssigneeFrequencyEntry represents how often a user assigns to a specific target.

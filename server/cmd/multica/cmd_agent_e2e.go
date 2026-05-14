@@ -14,6 +14,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/hvejsel/firtal-persona/sdk/go"
+	"github.com/multica-ai/multica/server/internal/daemon"
+// CEREBRO-PATCH(cmd-agent-e2e): persona integration changes.
 )
 
 // agentE2ESpawnCmd is the local-test entry point for the persona ↔ cerebro
@@ -38,12 +40,13 @@ verify the per-call gating end-to-end.`,
 }
 
 var (
-	e2ePersonaActor string
-	e2ePersonaURL   string
-	e2ePersonaToken string
-	e2eHookBin      string
-	e2eClaudeBin    string
-	e2ePrompt       string
+	e2ePersonaActor          string
+	e2ePersonaURL            string
+	e2ePersonaToken          string
+	e2eHookBin               string
+	e2eClaudeBin             string
+	e2ePrompt                string
+	e2eRuntimePersonaSandbox string
 )
 
 func init() {
@@ -53,6 +56,13 @@ func init() {
 	agentE2ESpawnCmd.Flags().StringVar(&e2eHookBin, "hook-bin", "", "path to cerebro-persona-hook binary (defaults to sibling of multica)")
 	agentE2ESpawnCmd.Flags().StringVar(&e2eClaudeBin, "claude-bin", "claude", "path or name of claude CLI to spawn")
 	agentE2ESpawnCmd.Flags().StringVar(&e2ePrompt, "prompt", "", "prompt to send to the agent")
+	// E1: simulate the runtime-level upper bound. When set, the actor's
+	// currently-assigned sandbox is overwritten with this name before the
+	// spawn — same behaviour as the daemon's preparePersonaSpawn when a
+	// runtime cap is in effect. This is what makes the e2e probe actually
+	// exercise the upper-bound path, since the test actor was created with
+	// a more permissive sandbox at setup time.
+	agentE2ESpawnCmd.Flags().StringVar(&e2eRuntimePersonaSandbox, "runtime-persona-sandbox", "", "runtime-level persona sandbox cap (E1 simulation)")
 	_ = agentE2ESpawnCmd.MarkFlagRequired("persona-actor")
 	_ = agentE2ESpawnCmd.MarkFlagRequired("prompt")
 	agentCmd.AddCommand(agentE2ESpawnCmd)
@@ -94,6 +104,25 @@ func runAgentE2ESpawn(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("fetch sandbox profile for %s: %w", e2ePersonaActor, err)
 	}
+
+	// E1 simulation: if a runtime-cap was passed, reassign before the spawn.
+	// This mirrors what daemon.preparePersonaSpawn does when the runtime has
+	// an admin-set sandbox — the agent-level value is shadowed by the cap.
+	// Without this step the e2e probe can't exercise the upper-bound path
+	// because the actor was set up with the agent-level sandbox at fixture
+	// time. The daemon does the same call there.
+	if e2eRuntimePersonaSandbox != "" && profile.SandboxName != e2eRuntimePersonaSandbox {
+		fmt.Fprintf(os.Stderr, "→ runtime cap active: reassigning %s → %q (was %q)\n",
+			e2ePersonaActor, e2eRuntimePersonaSandbox, profile.SandboxName)
+		if err := daemon.AssignSandboxByName(ctx, e2ePersonaURL, token, e2ePersonaActor, e2eRuntimePersonaSandbox); err != nil {
+			return fmt.Errorf("apply runtime persona-sandbox cap: %w", err)
+		}
+		profile, err = pc.GetSandboxProfile(ctx, e2ePersonaActor)
+		if err != nil {
+			return fmt.Errorf("re-fetch sandbox profile after cap: %w", err)
+		}
+	}
+
 	fmt.Fprintf(os.Stderr, "→ spawning as %q (sandbox: %s; allowed_tools: %v)\n",
 		profile.ActorName, defaultIfEmpty(profile.SandboxName, "<none>"), profile.AllowedTools)
 

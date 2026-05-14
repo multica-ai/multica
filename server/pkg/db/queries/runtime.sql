@@ -4,6 +4,23 @@ SELECT * FROM agent_runtime
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
+-- CEREBRO-PATCH(runtime-cli-version-query): W4.2 CLI version tracking queries.
+-- name: UpdateAgentRuntimeCliVersion :exec
+-- W4.2: persist the daemon's CLI version on the runtime row so the
+-- next heartbeat can compare and trigger a capabilities refresh on
+-- drift.
+UPDATE agent_runtime
+SET cli_version = $2,
+    updated_at = NOW()
+WHERE id = $1;
+
+-- name: ListAllAgentRuntimes :many
+-- Cross-workspace runtime listing for the scanner-discovery endpoint
+-- (E3 / scanner integration). Caller is authenticated through a separate
+-- service token, not a user token, so workspace scoping does not apply.
+SELECT * FROM agent_runtime
+ORDER BY created_at ASC;
+
 -- name: GetAgentRuntime :one
 SELECT * FROM agent_runtime
 WHERE id = $1;
@@ -132,6 +149,22 @@ ORDER BY created_at ASC;
 
 -- name: DeleteAgentRuntime :exec
 DELETE FROM agent_runtime WHERE id = $1;
+
+-- name: UpdateAgentRuntimePersonaSandbox :one
+-- Sets the runtime-level persona sandbox upper bound (D5-runtime). The
+-- empty value clears it. The daemon at spawn time uses the most-restrictive
+-- of (agent.persona_sandbox, runtime.persona_sandbox).
+UPDATE agent_runtime
+SET persona_sandbox = NULLIF($2, ''), updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateAgentRuntimeCapabilities :exec
+-- Replaces the runtime's capability snapshot. Called by the daemon on
+-- registration; the JSONB column carries provider-specific shape.
+UPDATE agent_runtime
+SET capabilities = $2, updated_at = now()
+WHERE id = $1;
 
 -- name: UpdateAgentRuntimeSandbox :one
 -- Sets the per-runtime sandbox override (JEH-418). NULL clears the override

@@ -884,7 +884,12 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 		case handler.CommentResponse:
 			issueID = c.IssueID
 			commentID = c.ID
-			commentContent = c.Content
+			// CEREBRO-PATCH(comment-content-nullable): JEH-1215 — Content
+			// is *string so a redacted comment reads as nil; deref safely
+			// so notification body falls back to "".
+			if c.Content != nil {
+				commentContent = *c.Content
+			}
 		case map[string]any:
 			issueID, _ = c["issue_id"].(string)
 			commentID, _ = c["id"].(string)

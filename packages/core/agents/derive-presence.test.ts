@@ -52,6 +52,8 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
     owner_id: null,
     last_seen_at: "2026-04-27T11:59:50Z",
     sandbox_enabled: null,
+    persona_sandbox: "",
+    capabilities: {},
     paused_at: null,
     unpause_at: null,
     pause_reason: null,

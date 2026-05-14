@@ -146,19 +146,19 @@ func TestMaskCommentsForCaller_DenyDropsRowMaskBlanks(t *testing.T) {
 		{ID: pgtype.UUID{Bytes: [16]byte{3}, Valid: true}, WorkspaceID: ws, Content: "C3", Classification: "internal"},
 	}
 	resp := []CommentResponse{
-		{ID: "c1", Content: "C1"},
-		{ID: "c2", Content: "C2"},
-		{ID: "c3", Content: "C3"},
+		{ID: "c1", Content: textPtr("C1")},
+		{ID: "c2", Content: textPtr("C2")},
+		{ID: "c3", Content: textPtr("C3")},
 	}
 	issue := db.Issue{WorkspaceID: ws}
 	out := h.maskCommentsForCaller(newReqWithUser("u1"), issue, comments, resp)
 	if len(out) != 2 {
 		t.Fatalf("deny should drop the row, got %d remaining", len(out))
 	}
-	if out[0].ID != "c2" || out[0].Content != "" {
-		t.Errorf("mask row should be blanked, got %+v", out[0])
+	if out[0].ID != "c2" || out[0].Content != nil {
+		t.Errorf("mask row should null content (JEH-1215), got %+v", out[0])
 	}
-	if out[1].ID != "c3" || out[1].Content != "C3" {
+	if out[1].ID != "c3" || out[1].Content == nil || *out[1].Content != "C3" {
 		t.Errorf("pass-through row should be intact, got %+v", out[1])
 	}
 	if len(audit.events) != 2 {

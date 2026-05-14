@@ -1,3 +1,5 @@
+// CEREBRO-PATCH(cerebro-persona-mask): persona integration changes.
+//
 // JEH-1079: persona mask wiring for the router.
 //
 // Reads the same MULTICA_PERSONA_URL / MULTICA_PERSONA_TOKEN env vars

@@ -33,8 +33,20 @@ type AgentRuntimeResponse struct {
 	// SandboxEnabled is the per-runtime override for the macOS sandbox
 	// (JEH-418). nil = inherit the daemon's MULTICA_ENABLE_SANDBOX value;
 	// true/false = force on/off for this runtime regardless of env.
-	SandboxEnabled *bool   `json:"sandbox_enabled"`
-	LastSeenAt     *string `json:"last_seen_at"`
+	SandboxEnabled *bool `json:"sandbox_enabled"`
+// CEREBRO-PATCH(runtime): persona integration additions.
+	// PersonaSandbox is the runtime-scoped persona sandbox (E1). When set it
+	// is the hard upper bound for every agent on this runtime — at spawn
+	// time the daemon uses it instead of the agent's own sandbox if both
+	// differ. Empty/null = no upper bound, agent-level sandbox decides alone.
+	PersonaSandbox string `json:"persona_sandbox"`
+	// Capabilities is the daemon-reported snapshot of what this runtime can
+	// actually do (Claude Code's tool list, MCP servers, etc.). The shape is
+	// loose so different providers can report what fits without a schema
+	// migration. Set on every register; persona's UI reads this to surface
+	// "what your runtime can actually do" alongside the abstract sandbox.
+	Capabilities any     `json:"capabilities"`
+	LastSeenAt   *string `json:"last_seen_at"`
 	// CEREBRO-PATCH(runtime-pause-response): pause state for the cerebro runtime-pause feature.
 	PausedAt    *string `json:"paused_at"`
 	UnpauseAt   *string `json:"unpause_at"`
@@ -52,6 +64,14 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		metadata = map[string]any{}
 	}
 
+	var capabilities any
+	if len(rt.Capabilities) > 0 {
+		json.Unmarshal(rt.Capabilities, &capabilities)
+	}
+	if capabilities == nil {
+		capabilities = map[string]any{}
+	}
+
 	return AgentRuntimeResponse{
 		ID:             uuidToString(rt.ID),
 		WorkspaceID:    uuidToString(rt.WorkspaceID),
@@ -65,6 +85,8 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		Metadata:       metadata,
 		OwnerID:        uuidToPtr(rt.OwnerID),
 		SandboxEnabled: boolToPtr(rt.SandboxEnabled),
+		PersonaSandbox: rt.PersonaSandbox.String,
+		Capabilities:   capabilities,
 		LastSeenAt:     timestampToPtr(rt.LastSeenAt),
 		// CEREBRO-PATCH(runtime-pause-response): expose pause state on the runtime API response.
 		PausedAt:    timestampToPtr(rt.PausedAt),
@@ -589,6 +611,87 @@ func (h *Handler) UpdateAgentRuntimeSandbox(w http.ResponseWriter, r *http.Reque
 	)
 
 	// Notify the frontend to refresh runtime list/details.
+	h.publish(protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
+		"action":     "update",
+		"runtime_id": runtimeID,
+	})
+
+	writeJSON(w, http.StatusOK, runtimeToResponse(updated))
+}
+
+// UpdateRuntimePersonaSandboxRequest carries the runtime-level persona sandbox
+// upper bound (E1). A nil pointer leaves the field alone; an empty string
+// clears it (no upper bound, agent-level sandbox decides alone); a non-empty
+// string names the sandbox (e.g. "claude-developer") that caps every agent on
+// this runtime.
+type UpdateRuntimePersonaSandboxRequest struct {
+	PersonaSandbox *string `json:"persona_sandbox"`
+}
+
+// UpdateAgentRuntimePersonaSandbox sets or clears the runtime-level persona
+// sandbox. Restricted to workspace owner/admin: this is a workspace-scoped
+// security policy, same threat model as the per-agent sandbox in E2 — a
+// runtime owner shouldn't be able to silently widen what their runtime can
+// do. The daemon picks up the new value at the next claim or pending-ping.
+func (h *Handler) UpdateAgentRuntimePersonaSandbox(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), parseUUID(runtimeID))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	wsID := uuidToString(rt.WorkspaceID)
+	member, ok := h.requireWorkspaceMember(w, r, wsID, "runtime not found")
+	if !ok {
+		return
+	}
+	if !roleAllowed(member.Role, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "only workspace owners and admins can change persona_sandbox")
+		return
+	}
+
+	var req UpdateRuntimePersonaSandboxRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.PersonaSandbox == nil {
+		writeError(w, http.StatusBadRequest, "persona_sandbox is required (use empty string to clear)")
+		return
+	}
+
+	updated, err := h.Queries.UpdateAgentRuntimePersonaSandbox(r.Context(), db.UpdateAgentRuntimePersonaSandboxParams{
+		ID:      rt.ID,
+		Column2: *req.PersonaSandbox,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update persona_sandbox")
+		return
+	}
+
+	slog.Info("runtime persona_sandbox updated",
+		"runtime_id", runtimeID,
+		"updated_by", uuidToString(member.UserID),
+		"persona_sandbox", *req.PersonaSandbox,
+	)
+
+	// W4.6: audit-log so the change is visible in Multica's UI.
+	auditDetails, _ := json.Marshal(map[string]any{
+		"runtime_id":   runtimeID,
+		"runtime_name": rt.Name,
+		"new":          *req.PersonaSandbox,
+	})
+	_, _ = h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
+		WorkspaceID: rt.WorkspaceID,
+		IssueID:     pgtype.UUID{},
+		ActorType:   pgtype.Text{String: "member", Valid: true},
+		ActorID:     member.UserID,
+		Action:      "runtime_persona_sandbox_changed",
+		Details:     auditDetails,
+	})
+
 	h.publish(protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
 		"action":     "update",
 		"runtime_id": runtimeID,
