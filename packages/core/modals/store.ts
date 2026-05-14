@@ -12,6 +12,8 @@ type ModalType =
   | "issue-add-child"
   | "issue-delete-confirm"
   | "issue-backlog-agent-hint"
+  // CEREBRO-PATCH(sidebar-new-message-modal): JEH-1296 global new-message modal for sidebar shortcut
+  | "new-message"
   | null;
 
 interface ModalStore {

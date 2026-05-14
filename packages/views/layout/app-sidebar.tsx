@@ -35,6 +35,9 @@ import {
   FolderKanban,
   Hash,
   FileText,
+  // CEREBRO-PATCH(sidebar-new-message-header): JEH-1296 new-message + notification badge icons
+  MessageSquarePlus,
+  Bell,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -151,22 +154,21 @@ type NavLabelKey =
   | "skills"
   | "settings";
 
-const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
-  { key: "inbox", labelKey: "inbox", icon: Inbox },
-  { key: "myIssues", labelKey: "my_issues", icon: CircleUser },
-];
-
+// CEREBRO-PATCH(sidebar-workspace-reorder): JEH-1296 — Inbox+new-message move to
+// header; My Issues added to workspace group; agents/autopilots/workflows move to
+// configure group. personalNav removed; workspace/configure arrays updated.
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
+  { key: "myIssues", labelKey: "my_issues", icon: CircleUser },
   { key: "issues", labelKey: "issues", icon: ListTodo },
   // CEREBRO-PATCH(no-duplicate-projects-nav): JEH-1004 — Projects entry moved to the nested-projects Collapsible block below.
   // CEREBRO-PATCH(sidebar-documents-nav): workspace documents page
   { key: "documents", labelKey: "documents", icon: FileText },
-  { key: "autopilots", labelKey: "autopilots", icon: Zap },
-  { key: "agents", labelKey: "agents", icon: Bot },
 ];
 
 const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
+  { key: "agents", labelKey: "agents", icon: Bot },
   { key: "runtimes", labelKey: "runtimes", icon: Monitor },
+  { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "skills", labelKey: "skills", icon: BookOpenText },
   { key: "settings", labelKey: "settings", icon: Settings },
 ];
@@ -725,40 +727,44 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 <kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">{t(($) => $.sidebar.new_issue_shortcut)}</kbd>
               </SidebarMenuButton>
             </SidebarMenuItem>
+            {/* CEREBRO-PATCH(sidebar-new-message-header): JEH-1296 New message button (channels feature) */}
+            {channelsEnabled && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  className="text-muted-foreground"
+                  onClick={() => useModalStore.getState().open("new-message")}
+                >
+                  <MessageSquarePlus />
+                  <span>{t(($) => $.sidebar.new_message)}</span>
+                  <span className="ml-auto text-[10px] font-medium text-brand">New</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
+            {/* CEREBRO-PATCH(sidebar-inbox-header): JEH-1296 Inbox moved from personal group to header */}
+            {wsId && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={isNavActive(pathname, p.inbox())}
+                  render={<AppLink href={p.inbox()} />}
+                  onClick={handleNavClick}
+                  className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                >
+                  <Inbox />
+                  <span>{t(($) => $.nav.inbox)}</span>
+                  {unreadCount > 0 && (
+                    <span className="ml-auto text-xs">
+                      {unreadCount > 99 ? t(($) => $.sidebar.unread_overflow) : unreadCount}
+                    </span>
+                  )}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
           </SidebarMenu>
         </SidebarHeader>
 
         {/* Navigation */}
+        {/* CEREBRO-PATCH(sidebar-workspace-reorder): JEH-1296 personal group removed; inbox+my-issues relocated */}
         <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                {personalNav.map((item) => {
-                  const href = p[item.key]();
-                  const isActive = isNavActive(pathname, href);
-                  return (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<AppLink href={href} />}
-                        onClick={handleNavClick}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                      >
-                        <item.icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
-                        {item.key === "inbox" && unreadCount > 0 && (
-                          <span className="ml-auto text-xs">
-                            {unreadCount > 99 ? "99+" : unreadCount}
-                          </span>
-                        )}
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-
           {localPinned.length > 0 && (
             <Collapsible defaultOpen>
               <SidebarGroup className="group/pinned">
@@ -798,32 +804,34 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           <SidebarGroup>
             <SidebarGroupLabel>{t(($) => $.sidebar.workspace_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
+              {/* CEREBRO-PATCH(sidebar-workspace-reorder): JEH-1296 workspace group reordered:
+                  My Issues, Dashboard, Issues, Tasks, Documents, Permissions, Projects.
+                  Agents/Autopilot/Workflows moved to configure group. */}
               <SidebarMenu className="gap-0.5">
-                {/* CEREBRO-PATCH(dashboard-nav): JEH-684 cerebro dashboard entry in workspace group */}
-                <DashboardNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
-                {/* CEREBRO-PATCH(cerebro-tasks-sidebar): JEH-900 cerebro tasks entry in workspace group */}
-                <TasksNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
-                {/* CEREBRO-PATCH(cerebro-workflows-sidebar): JEH-1047 cerebro workflows entry in workspace group */}
-                <WorkflowsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
-                {/* CEREBRO-PATCH(cerebro-permissions-sidebar): JEH-1180 cerebro permissions entry in workspace group */}
-                <PermissionsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {workspaceNav.map((item) => {
                   const href = p[item.key]();
                   const isActive = isNavActive(pathname, href);
                   return (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<AppLink href={href} />}
-                        onClick={handleNavClick}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                      >
-                        <item.icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    <React.Fragment key={item.key}>
+                      <SidebarMenuItem>
+                        <SidebarMenuButton isActive={isActive} render={<AppLink href={href} />} onClick={handleNavClick} className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground">
+                          <item.icon />
+                          <span>{t(($) => $.nav[item.labelKey])}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                      {/* CEREBRO-PATCH(dashboard-nav): JEH-684 cerebro dashboard after My Issues */}
+                      {item.key === "myIssues" && (
+                        <DashboardNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
+                      )}
+                      {/* CEREBRO-PATCH(cerebro-tasks-sidebar): JEH-900 tasks after Issues */}
+                      {item.key === "issues" && (
+                        <TasksNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
+                      )}
+                    </React.Fragment>
                   );
                 })}
+                {/* CEREBRO-PATCH(cerebro-permissions-sidebar): JEH-1180 cerebro permissions entry in workspace group */}
+                <PermissionsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* Projects — collapsible nav item with sub-items */}
                 <Collapsible defaultOpen>
                   <SidebarMenuItem>
@@ -924,6 +932,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             </SidebarGroupContent>
           </SidebarGroup>
 
+          {/* CEREBRO-PATCH(sidebar-configure-reorder): JEH-1296 configure group: Agents,
+              Runtimes, Autopilot, Workflows (feature-flagged), Skills, Settings */}
           <SidebarGroup>
             <SidebarGroupLabel>{t(($) => $.sidebar.configure_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
@@ -932,20 +942,26 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   const href = p[item.key]();
                   const isActive = isNavActive(pathname, href);
                   return (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<AppLink href={href} />}
-                        onClick={handleNavClick}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                      >
-                        <item.icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
-                        {item.key === "runtimes" && hasRuntimeUpdates && (
-                          <span className="ml-auto size-1.5 rounded-full bg-destructive" />
-                        )}
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    <React.Fragment key={item.key}>
+                      <SidebarMenuItem>
+                        <SidebarMenuButton
+                          isActive={isActive}
+                          render={<AppLink href={href} />}
+                          onClick={handleNavClick}
+                          className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                        >
+                          <item.icon />
+                          <span>{t(($) => $.nav[item.labelKey])}</span>
+                          {item.key === "runtimes" && hasRuntimeUpdates && (
+                            <span className="ml-auto size-1.5 rounded-full bg-destructive" />
+                          )}
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                      {/* CEREBRO-PATCH(cerebro-workflows-sidebar): JEH-1047/JEH-1296 workflows after autopilot in configure */}
+                      {item.key === "autopilots" && (
+                        <WorkflowsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </SidebarMenu>
@@ -953,56 +969,29 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           </SidebarGroup>
         </SidebarContent>
 
+        {/* CEREBRO-PATCH(sidebar-notification-badge): JEH-1296 notifications moved from
+            standalone footer link into the user-avatar popover; grey count badge
+            overlaid on avatar in top-right corner. */}
         <SidebarFooter className="p-2">
-          {/* CEREBRO-PATCH(sidebar-notifications-footer): notification link + user popover */}
-          {wsId && (
-            <AppLink
-              href={p.notifications()}
-              data-testid="sidebar-notifications-link"
-              onClick={handleNavClick}
-              className={cn(
-                "group/notif flex items-center justify-between gap-2 rounded-md px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors",
-                pathname === p.notifications()
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-foreground",
-              )}
-            >
-              <span className="flex items-center gap-2">
-                Notifications
-                {visibleNotifications.length > 0 && (
-                  <span
-                    data-testid="sidebar-notifications-count"
-                    className="rounded-full bg-muted px-1.5 text-[10px] font-semibold normal-case tracking-normal text-muted-foreground"
-                  >
-                    {visibleNotifications.length}
-                  </span>
-                )}
-              </span>
-              {visibleNotifications.length > 0 && (
-                <button
-                  type="button"
-                  data-testid="sidebar-notifications-clear"
-                  className="text-[11px] font-medium normal-case tracking-normal text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/notif:opacity-100"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    archiveAllNotifications.mutate();
-                  }}
-                >
-                  Clear
-                </button>
-              )}
-            </AppLink>
-          )}
-          <div className="flex items-center gap-2 border-t pt-2">
+          <div className="flex items-center gap-2">
             <Popover>
               <PopoverTrigger className="flex flex-1 min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-accent transition-colors cursor-pointer">
-                <ActorAvatar
-                  name={user?.name ?? ""}
-                  initials={(user?.name ?? "U").charAt(0).toUpperCase()}
-                  avatarUrl={user?.avatar_url}
-                  size={28}
-                />
+                <span className="relative shrink-0">
+                  <ActorAvatar
+                    name={user?.name ?? ""}
+                    initials={(user?.name ?? "U").charAt(0).toUpperCase()}
+                    avatarUrl={user?.avatar_url}
+                    size={28}
+                  />
+                  {wsId && visibleNotifications.length > 0 && (
+                    <span
+                      data-testid="sidebar-notifications-count"
+                      className="pointer-events-none absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-muted px-1 text-[10px] font-semibold leading-none text-muted-foreground ring-1 ring-sidebar"
+                    >
+                      {visibleNotifications.length > 99 ? "99+" : visibleNotifications.length}
+                    </span>
+                  )}
+                </span>
                 <div className="min-w-0 flex-1 text-left">
                   <p className="truncate text-sm font-medium leading-tight">
                     {user?.name}
@@ -1012,7 +1001,46 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   </p>
                 </div>
               </PopoverTrigger>
-              <PopoverContent side="top" sideOffset={8} align="start" className="w-48 p-0">
+              <PopoverContent side="top" sideOffset={8} align="start" className="w-56 p-0">
+                {wsId && (
+                  <div className="group/notif border-b">
+                    <AppLink
+                      href={p.notifications()}
+                      data-testid="sidebar-notifications-link"
+                      onClick={handleNavClick}
+                      className={cn(
+                        "flex items-center justify-between gap-2 px-2.5 py-2 text-sm transition-colors",
+                        pathname === p.notifications()
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                          : "text-foreground hover:bg-accent",
+                      )}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Bell className="h-3.5 w-3.5 shrink-0" />
+                        {t(($) => $.sidebar.notifications)}
+                        {visibleNotifications.length > 0 && (
+                          <span className="rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
+                            {visibleNotifications.length}
+                          </span>
+                        )}
+                      </span>
+                      {visibleNotifications.length > 0 && (
+                        <button
+                          type="button"
+                          data-testid="sidebar-notifications-clear"
+                          className="text-[11px] font-medium text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/notif:opacity-100"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            archiveAllNotifications.mutate();
+                          }}
+                        >
+                          {t(($) => $.sidebar.notifications_clear)}
+                        </button>
+                      )}
+                    </AppLink>
+                  </div>
+                )}
                 <div className="flex items-center gap-2.5 px-2.5 py-2 border-b">
                   <ActorAvatar
                     name={user?.name ?? ""}
@@ -1035,7 +1063,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
                   >
                     <LogOut className="h-3.5 w-3.5" />
-                    Log out
+                    {t(($) => $.sidebar.log_out)}
                   </button>
                 </div>
               </PopoverContent>

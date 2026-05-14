@@ -35,6 +35,10 @@
     "pinned_label": "Pinned",
     "workspace_group": "Workspace",
     "configure_group": "Configure",
-    "unread_overflow": "99+"
+    "unread_overflow": "99+",
+    "_comment_1296": "CEREBRO-PATCH(i18n-sidebar-1296): JEH-1296 — new_message, notifications, notifications_clear for sidebar restructure",
+    "new_message": "New message",
+    "notifications": "Notifications",
+    "notifications_clear": "Clear"
   }
 }
