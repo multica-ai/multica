@@ -56,7 +56,7 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For Codex:    writes {workDir}/AGENTS.md  (skills discovered natively via CODEX_HOME)
 // For Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .opencode/skills/)
-// For OpenClaw: writes {workDir}/AGENTS.md  (skills discovered natively from .openclaw/skills/)
+// For OpenClaw: writes {workDir}/AGENTS.md  (skills fall back to .agent_context/skills/; OpenClaw does not auto-discover from workdir)
 // For Hermes:   writes {workDir}/AGENTS.md  (skills fall back to .agent_context/skills/; AGENTS.md points there)
 // For Gemini:   writes {workDir}/GEMINI.md  (discovered natively by the Gemini CLI)
 // For Pi:       writes {workDir}/AGENTS.md  (skills discovered natively from .pi/skills/)
@@ -305,12 +305,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		case "claude":
 			// Claude discovers skills natively from .claude/skills/ — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro":
-			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, and Kiro discover skills natively from their respective paths — just list names.
+		case "codex", "copilot", "opencode", "pi", "cursor", "kimi", "kiro":
+			// Codex, Copilot, OpenCode, Pi, Cursor, Kimi, and Kiro discover skills natively from their respective paths — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "gemini", "hermes":
-			// Gemini reads GEMINI.md directly; Hermes has no native skills discovery path
-			// wired up in resolveSkillsDir, so both fall back to .agent_context/skills/.
+		case "gemini", "hermes", "openclaw":
+			// Gemini reads GEMINI.md directly. Hermes has no native skills discovery
+			// path wired up in resolveSkillsDir. OpenClaw scans its own workspaceDir
+			// (resolved from the openclaw config, not the task workdir) so per-task
+			// skills written by Multica are not visible to its native loader; we
+			// fall back to .agent_context/skills/ and reference the files explicitly.
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 		default:
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
