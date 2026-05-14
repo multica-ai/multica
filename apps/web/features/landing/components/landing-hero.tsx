@@ -12,6 +12,7 @@ import {
   GeminiCliLogo,
   OpenClawLogo,
   OpenCodeLogo,
+  TraecliLogo,
   heroButtonClassName,
 } from "./shared";
 
@@ -78,6 +79,10 @@ export function LandingHero() {
               <div className="flex items-center gap-2.5 text-white/80">
                 <OpenCodeLogo className="size-5" />
                 <span className="text-[15px] font-medium">OpenCode</span>
+              </div>
+              <div className="flex items-center gap-2.5 text-white/80">
+                <TraecliLogo className="size-5" />
+                <span className="text-[15px] font-medium">Trae CLI</span>
               </div>
             </div>
           </div>

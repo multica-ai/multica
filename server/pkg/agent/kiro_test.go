@@ -30,6 +30,7 @@ func TestKiroToolNameFromTitle(t *testing.T) {
 		{"Read file: /tmp/foo.go", "read_file"},
 		{"Write: /tmp/bar.go", "write_file"},
 		{"Patch: /tmp/x", "edit_file"},
+		{"Replace: /tmp/x", "edit_file"},
 		{"Shell: ls -la", "terminal"},
 		{"Run command: pwd", "terminal"},
 		{"grep", "search_files"},
@@ -40,9 +41,9 @@ func TestKiroToolNameFromTitle(t *testing.T) {
 		{"", ""},
 	}
 	for _, tt := range tests {
-		got := kiroToolNameFromTitle(tt.title)
+		got := acpToolNameFromTitle(tt.title)
 		if got != tt.want {
-			t.Errorf("kiroToolNameFromTitle(%q) = %q, want %q", tt.title, got, tt.want)
+			t.Errorf("acpToolNameFromTitle(%q) = %q, want %q", tt.title, got, tt.want)
 		}
 	}
 }

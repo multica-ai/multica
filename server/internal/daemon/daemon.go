@@ -2104,7 +2104,7 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
-	case "openclaw", "kiro", "kimi":
+	case "openclaw", "kiro", "kimi", "traecli":
 		return true
 	default:
 		return false
