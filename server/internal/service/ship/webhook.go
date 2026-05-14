@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -142,7 +143,7 @@ func (s *Service) processPullRequest(ctx context.Context, ev WebhookEvent) (Webh
 	// outcome instead of fetching it twice.
 	ws, wsErr := s.Q.GetWorkspace(ctx, ev.WorkspaceID)
 	if wsErr == nil {
-		linkage, _ := s.DetectMultiicaReferences(ctx, ev.WorkspaceID, ws.IssuePrefix, pr, /*commitMessage*/ "")
+		linkage, _ := s.DetectMultiicaReferences(ctx, ev.WorkspaceID, ws.IssuePrefix, pr, "")
 		updated, applyErr := s.ApplyLinkage(ctx, row.ID, linkage)
 		if applyErr == nil {
 			row = updated
@@ -184,6 +185,7 @@ func (s *Service) processPullRequest(ctx context.Context, ev WebhookEvent) (Webh
 			slog.Warn("ship: handle merge failed",
 				"pr_id", uuidString(row.ID), "error", err)
 		}
+		s.syncReleasePRMergeState(ctx, row)
 	}
 
 	return WebhookOutcome{
@@ -196,6 +198,33 @@ func (s *Service) processPullRequest(ctx context.Context, ev WebhookEvent) (Webh
 		PRAction:  payload.Action,
 		PR:        row,
 	}, nil
+}
+
+// syncReleasePRMergeState updates release membership state when GitHub
+// tells us a PR was merged but the merge train row is stale. This covers
+// externally merged PRs and server restarts that kill an in-flight merge
+// train goroutine after GitHub merged the PR.
+func (s *Service) syncReleasePRMergeState(ctx context.Context, pr db.PullRequest) {
+	release, err := s.Q.GetActiveReleaseForPullRequest(ctx, pr.ID)
+	if err != nil {
+		return
+	}
+	if release.Stage != db.ReleaseStageMerging {
+		return
+	}
+	now := time.Now()
+	if _, err := s.Q.SetReleasePRMergeState(ctx, db.SetReleasePRMergeStateParams{
+		ReleaseID:     release.ID,
+		PullRequestID: pr.ID,
+		MergeState:    db.PrMergeStateMerged,
+		MergedSha:     pgtype.Text{String: pr.HeadSha, Valid: pr.HeadSha != ""},
+		MergedAt:      pgtype.Timestamptz{Time: now, Valid: true},
+	}); err != nil {
+		slog.Warn("ship: sync release merge state failed",
+			"pr_id", uuidString(pr.ID),
+			"release_id", uuidString(release.ID),
+			"error", err)
+	}
 }
 
 // recomputeStackParent walks the project's other open PRs and finds the

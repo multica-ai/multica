@@ -115,6 +115,37 @@ func runShipHubReleaseFinalizerOnce(
 			continue
 		}
 	}
+
+	inProd, err := queries.ListInProductionReleases(ctx)
+	if err != nil {
+		slog.Warn("ship hub release finalizer: list in_production failed", "error", err)
+	} else {
+		for _, rel := range inProd {
+			if _, done, err := svc.TryMarkReleaseDoneIfAllMerged(ctx, rel.ID, deps); err != nil {
+				slog.Warn("ship hub release finalizer: try mark done failed",
+					"release_id", util.UUIDToString(rel.ID), "error", err)
+			} else if done {
+				slog.Info("ship hub release finalizer: closed in_production release with all PRs merged",
+					"release_id", util.UUIDToString(rel.ID))
+			}
+		}
+	}
+
+	mergeTrainDeps := &ship.MergeTrainDeps{
+		ParentCtx: ctx,
+		Publisher: finalizerMergePublisher{bus: bus},
+	}
+	stalled, err := queries.ListActiveMergingReleases(ctx)
+	if err != nil {
+		slog.Warn("ship hub release finalizer: list merging releases failed", "error", err)
+	} else {
+		for _, rel := range stalled {
+			if err := svc.ReconcileStalledMergeTrain(ctx, rel.ID, pgtype.UUID{}, mergeTrainDeps); err != nil {
+				slog.Warn("ship hub release finalizer: reconcile stalled merge train failed",
+					"release_id", util.UUIDToString(rel.ID), "error", err)
+			}
+		}
+	}
 }
 
 type finalizerMergePublisher struct {

@@ -725,6 +725,73 @@ func (q *Queries) InsertReleaseEvent(ctx context.Context, arg InsertReleaseEvent
 	return i, err
 }
 
+const listActiveMergingReleases = `-- name: ListActiveMergingReleases :many
+SELECT id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method, smoke_run_id, smoke_run_url, smoke_status, smoke_completed_at, qa_verified_at, qa_verified_by, merged_main_sha, promoted_by, production_main_sha, rolled_back_by, rolled_back_completed_at FROM ship_release
+WHERE stage = 'merging'
+  AND merge_paused = FALSE
+ORDER BY created_at ASC
+`
+
+// Used by the release finalizer to detect orphaned merge trains.
+// Returns merging releases that are not paused. These are candidates
+// for goroutine-death recovery: if all their PRs are actually merged
+// on GitHub (pull_request.state = 'merged') but merge_state is stale,
+// the finalizer can complete them.
+func (q *Queries) ListActiveMergingReleases(ctx context.Context) ([]ShipRelease, error) {
+	rows, err := q.db.Query(ctx, listActiveMergingReleases)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ShipRelease{}
+	for rows.Next() {
+		var i ShipRelease
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.Title,
+			&i.Description,
+			&i.Stage,
+			&i.RiskLevel,
+			&i.ChannelID,
+			&i.IssueID,
+			&i.ApproverID,
+			&i.SecondApproverID,
+			&i.StagingDeployID,
+			&i.ProductionDeployID,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.MergedAt,
+			&i.StagedAt,
+			&i.PromotedAt,
+			&i.DoneAt,
+			&i.RollbackReason,
+			&i.MergePaused,
+			&i.MergeMethod,
+			&i.SmokeRunID,
+			&i.SmokeRunUrl,
+			&i.SmokeStatus,
+			&i.SmokeCompletedAt,
+			&i.QaVerifiedAt,
+			&i.QaVerifiedBy,
+			&i.MergedMainSha,
+			&i.PromotedBy,
+			&i.ProductionMainSha,
+			&i.RolledBackBy,
+			&i.RolledBackCompletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActiveReleasesByWorkspace = `-- name: ListActiveReleasesByWorkspace :many
 SELECT id, workspace_id, project_id, title, description, stage, risk_level, channel_id, issue_id, approver_id, second_approver_id, staging_deploy_id, production_deploy_id, created_by, created_at, updated_at, merged_at, staged_at, promoted_at, done_at, rollback_reason, merge_paused, merge_method, smoke_run_id, smoke_run_url, smoke_status, smoke_completed_at, qa_verified_at, qa_verified_by, merged_main_sha, promoted_by, production_main_sha, rolled_back_by, rolled_back_completed_at FROM ship_release
 WHERE workspace_id = $1

@@ -548,6 +548,17 @@ SELECT * FROM ship_release
 WHERE stage = 'in_production'
 ORDER BY promoted_at DESC NULLS LAST;
 
+-- name: ListActiveMergingReleases :many
+-- Used by the release finalizer to detect orphaned merge trains.
+-- Returns merging releases that are not paused. These are candidates
+-- for goroutine-death recovery: if all their PRs are actually merged
+-- on GitHub (pull_request.state = 'merged') but merge_state is stale,
+-- the finalizer can complete them.
+SELECT * FROM ship_release
+WHERE stage = 'merging'
+  AND merge_paused = FALSE
+ORDER BY created_at ASC;
+
 -- name: UpdatePRRevertState :one
 -- Used by a future revert orchestrator. v1 calls this once on
 -- rollback initiation to mark every still-merged PR as 'pending', so
@@ -614,4 +625,3 @@ RETURNING *;
 -- the monitor hasn't written one yet (release just promoted).
 SELECT * FROM ship_release_health
 WHERE release_id = $1;
-
