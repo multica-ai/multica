@@ -27,7 +27,8 @@ export type CerebroFlagKey =
   | "cerebro_workflows"
   | "cerebro_persona_permissions"
   | "cerebro_skill_mention"
-  | "cerebro_grants";
+  | "cerebro_grants"
+  | "cerebro_move_comment_to_subissue";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -59,6 +60,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_persona_permissions: false,
   cerebro_skill_mention: true,
   cerebro_grants: false,
+  cerebro_move_comment_to_subissue: true,
 };
 
 export interface CerebroFlagDefinition {
@@ -197,5 +199,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Grant control plane",
     description:
       "Enable the Persona grant control plane API and CLI (POST/PATCH/DELETE /api/workspaces/{id}/grants and `multica grant` commands).",
+  },
+  {
+    key: "cerebro_move_comment_to_subissue",
+    label: "Move comment thread to sub-issue",
+    description:
+      "Show a 'Move to sub-issue' action on root comments. Lifts the thread (root + replies) into a new sub-issue and leaves a 'Moved to MUL-NN' breadcrumb on the original comment. JEH-1309.",
   },
 ];

@@ -337,6 +337,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/comments/{commentId}/move-to-subissue",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/daemon/accounts/{id}/usage",
       "gate": "daemon_auth"
     },

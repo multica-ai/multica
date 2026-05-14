@@ -19,6 +19,8 @@ import (
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 account handler import
 	cerebroaccount "github.com/multica-ai/multica/server/internal/cerebro/account"
 	cerebrochannels "github.com/multica-ai/multica/server/internal/cerebro/channels"
+	// CEREBRO-PATCH(comments-move-to-subissue): JEH-1309 move-comment-to-sub-issue handler import.
+	cerebrocomments "github.com/multica-ai/multica/server/internal/cerebro/comments"
 	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196 credential registry handler import
 	cerebrocredentials "github.com/multica-ai/multica/server/internal/cerebro/credentials"
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler import
@@ -217,6 +219,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroCredentialsHandler := cerebrocredentials.New(cerebroQueries, cerebrocredentials.MustNewCipherFromEnv(), bus).WithPolicy(newCredentialsPolicy(queries))
 	// CEREBRO-PATCH(references-routes): JEH-837 issue references handler instance.
 	cerebroReferencesHandler := cerebroreferences.New(cerebroQueries, queries, bus)
+	// CEREBRO-PATCH(comments-move-to-subissue): JEH-1309 lift a comment thread into a sub-issue.
+	cerebroCommentsHandler := cerebrocomments.New(queries, pool, bus)
 	// CEREBRO-PATCH(router-runtime-pause): mount cerebro pause/unpause service so
 	// PauseRuntime / UnpauseRuntime in runtime_pause_cerebro.go can delegate to it.
 	runtimePauseSvc := cerebroruntime.New(cerebroQueries, h.TaskService, bus)
@@ -743,6 +747,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/resolve", h.UnresolveComment)
 				r.Post("/reactions", h.AddReaction)
 				r.Delete("/reactions", h.RemoveReaction)
+				// CEREBRO-PATCH(comments-move-to-subissue): JEH-1309 thread → sub-issue.
+				r.Post("/move-to-subissue", cerebroCommentsHandler.MoveToSubIssue)
 			})
 
 			// Agents
