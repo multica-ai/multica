@@ -81,6 +81,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKiroModels(ctx, executablePath)
 		})
+	case "qoder":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverQoderModels(ctx, executablePath)
+		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -492,6 +496,16 @@ func discoverCopilotModels(ctx context.Context, executablePath string) ([]Model,
 	return models, nil
 }
 
+// discoverQoderModels spins up `qodercli --yolo --acp` and parses models from session/new.
+func discoverQoderModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "qodercli",
+		clientName:   "multica-model-discovery",
+		acpArgs:      []string{"--yolo", "--acp"},
+		tmpdirPrefix: "multica-qoder-discovery-",
+	})
+}
+
 // acpDiscoveryProvider configures how discoverACPModels launches an
 // ACP-speaking agent CLI. The shared helper drives every CLI in
 // the same way (initialize → session/new → parse models block) — the
@@ -513,9 +527,8 @@ type acpDiscoveryProvider struct {
 // discoverACPModels runs the ACP handshake for any agent CLI that
 // implements the standard `initialize` + `session/new` flow and
 // advertises its model catalog in the response under
-// `models.availableModels` / `models.currentModelId`. This covers
-// Hermes and Kimi today; future ACP backends can plug in by adding
-// an acpDiscoveryProvider entry instead of duplicating the loop.
+// `models.availableModels` / `models.currentModelId`. Provider-specific
+// `launchArgs` select ACP mode (e.g. `acp` vs `--acp`).
 func discoverACPModels(ctx context.Context, executablePath string, p acpDiscoveryProvider) ([]Model, error) {
 	if executablePath == "" {
 		executablePath = p.defaultBin
