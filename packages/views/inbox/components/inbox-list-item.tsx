@@ -13,6 +13,7 @@ import { useChannelDisplay } from "../../channels";
 import { InboxDetailLabel } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
 import { useT } from "../../i18n";
+import { AgentRunPip, type AgentRunState } from "../../common/agent-run-pip"; // CEREBRO-PATCH(inbox-run-state-pip): active vs queued indicator (JEH-1332)
 
 // Hook returning a localized relative-time formatter — the i18n equivalent
 // of the previous static `timeAgo` function. Returning a function (rather
@@ -33,7 +34,7 @@ export function useTimeAgo() {
 
 interface InboxListItemBaseProps {
   isSelected: boolean;
-  isAgentActive?: boolean;
+  agentRunState?: AgentRunState;
   unread: boolean;
   onClick: () => void;
   onArchive: () => void;
@@ -91,14 +92,14 @@ function InboxListItemShell({
 export function InboxListItem({
   item,
   isSelected,
-  isAgentActive,
+  agentRunState,
   onClick,
   onArchive,
   onUnarchive, // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
 }: {
   item: InboxItem;
   isSelected: boolean;
-  isAgentActive?: boolean;
+  agentRunState?: AgentRunState;
   onClick: () => void;
   onArchive: () => void;
   onUnarchive?: () => void; // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
@@ -144,15 +145,7 @@ export function InboxListItem({
         <p
           className={`mt-0.5 flex items-start gap-1.5 text-xs leading-snug line-clamp-2 ${unread ? "text-foreground" : "text-muted-foreground/70"}`}
         >
-          {isAgentActive && (
-            <span
-              title="Agent is working"
-              className="relative mt-1 inline-flex size-2 shrink-0 items-center justify-center"
-            >
-              <span className="absolute inline-flex size-2 animate-ping rounded-full bg-emerald-500/60" />
-              <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
-            </span>
-          )}
+          {agentRunState && <AgentRunPip state={agentRunState} className="mt-1" />}
           <span className="line-clamp-2">
             <InboxDetailLabel item={item} />
           </span>

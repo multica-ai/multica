@@ -6,6 +6,7 @@ import { issueListOptions, issueDetailOptions, issueKeys } from "@multica/core/i
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { StatusIcon } from "./status-icon";
+import { AgentRunPip, taskStatusToRunState, type AgentRunState } from "../../common/agent-run-pip"; // CEREBRO-PATCH(issue-chip-run-state-pip): active vs queued indicator (JEH-1332)
 
 /**
  * Compact, presentation-only representation of an issue —
@@ -55,9 +56,13 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
     refetchOnWindowFocus: true,
     enabled: !!issue,
   });
-  const hasActiveRun = tasks.some(
-    (t) => t.status === "queued" || t.status === "dispatched" || t.status === "running",
-  );
+  const runState = tasks.reduce<AgentRunState | undefined>((state, task) => {
+    if (task.status !== "queued" && task.status !== "dispatched" && task.status !== "running") {
+      return state;
+    }
+    const next = taskStatusToRunState(task.status);
+    return next === "active" ? "active" : state ?? next;
+  }, undefined);
 
   if (!issue) {
     return (
@@ -75,9 +80,7 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
     <span className={cls} title={issue.title}>
       <span className="flex items-center gap-1 shrink-0">
         <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
-        {hasActiveRun && (
-          <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
-        )}
+        {runState && <AgentRunPip state={runState} />}
         <span className="font-medium text-muted-foreground text-[10px]">{issue.identifier}</span>
       </span>
       <span className="text-foreground whitespace-nowrap">{issue.title}</span>

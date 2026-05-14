@@ -1476,7 +1476,8 @@ export class ApiClient {
     return this.fetch(`/api/inbox${query ? `?${query}` : ""}`);
   }
 
-  async listActiveIssueTasks(): Promise<{ issue_ids: string[] }> {
+  // CEREBRO-PATCH(active-issue-tasks-status): extended response with per-task status for run-state pip (JEH-1332)
+  async listActiveIssueTasks(): Promise<{ issue_ids: string[]; tasks?: { issue_id: string; status: string }[] }> {
     return this.fetch("/api/inbox/active-issue-tasks");
   }
 

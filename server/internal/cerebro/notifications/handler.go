@@ -45,17 +45,26 @@ func (h *Handler) ListActiveIssueTasks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid workspace id")
 		return
 	}
-	ids, err := h.Queries.ListActiveIssueIDsInWorkspace(r.Context(), wsUUID)
+	tasks, err := h.Queries.ListActiveIssueTaskStatusesInWorkspace(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list active issue tasks")
 		return
 	}
 
-	out := make([]string, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, util.UUIDToString(id))
+	ids := make([]string, 0, len(tasks))
+	out := make([]map[string]string, 0, len(tasks))
+	for _, task := range tasks {
+		issueID := util.UUIDToString(task.IssueID)
+		ids = append(ids, issueID)
+		out = append(out, map[string]string{
+			"issue_id": issueID,
+			"status":   task.Status,
+		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"issue_ids": out})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"issue_ids": ids,
+		"tasks":     out,
+	})
 }
 
 // requireUserID mirrors handler.requireUserID — kept private here so the

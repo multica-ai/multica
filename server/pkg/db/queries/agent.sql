@@ -446,6 +446,27 @@ WHERE iss.workspace_id = $1
   AND atq.issue_id IS NOT NULL
   AND atq.status IN ('queued', 'dispatched', 'running');
 
+-- name: ListActiveIssueTaskStatusesInWorkspace :many
+-- CEREBRO-PATCH(active-issue-task-statuses): per-issue task status for active vs queued run-pip (JEH-1332)
+-- Returns one in-flight task status per issue. Running/dispatched tasks win
+-- over queued tasks so row indicators show "active" once work has actually
+-- started, while still showing a queued signal before a runtime claims it.
+SELECT DISTINCT ON (atq.issue_id)
+  atq.issue_id,
+  atq.status
+FROM agent_task_queue atq
+JOIN issue iss ON iss.id = atq.issue_id
+WHERE iss.workspace_id = $1
+  AND atq.issue_id IS NOT NULL
+  AND atq.status IN ('queued', 'dispatched', 'running')
+ORDER BY atq.issue_id,
+  CASE atq.status
+    WHEN 'running' THEN 0
+    WHEN 'dispatched' THEN 1
+    ELSE 2
+  END,
+  atq.created_at DESC;
+
 
 -- name: GetWorkspaceAgentRunCounts :many
 -- Total task runs per agent over the trailing 30 days, used by the Agents

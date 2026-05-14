@@ -83,6 +83,7 @@ import {
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
 import { ChannelListItem, InboxListItem, useTimeAgo } from "./inbox-list-item";
+import { AgentRunPip, taskStatusToRunState } from "../../common/agent-run-pip"; // CEREBRO-PATCH(inbox-run-state-pip): active vs queued indicator (JEH-1332)
 import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
 import { useT } from "../../i18n";
@@ -160,13 +161,18 @@ export function InboxPage() {
   // currently have an in-flight task. Used to render the small live indicator
   // on each row in the inbox list.
   const { data: activeIssueTasksData } = useQuery(activeIssueTasksOptions(wsId));
-  const activeIssueIds = useMemo(
-    () => new Set(activeIssueTasksData?.issue_ids ?? []),
+  const issueRunStates = useMemo(
+    () =>
+      new Map(
+        activeIssueTasksData?.tasks?.length
+          ? activeIssueTasksData.tasks.map((task) => [task.issue_id, taskStatusToRunState(task.status)])
+          : (activeIssueTasksData?.issue_ids ?? []).map((issueId) => [issueId, "active" as const]),
+      ),
     [activeIssueTasksData],
   );
   const { data: pendingChatTasksData } = useQuery(pendingChatTasksOptions(wsId));
-  const activeChatSessionIds = useMemo(
-    () => new Set((pendingChatTasksData?.tasks ?? []).map((t) => t.chat_session_id)),
+  const chatRunStates = useMemo(
+    () => new Map((pendingChatTasksData?.tasks ?? []).map((task) => [task.chat_session_id, taskStatusToRunState(task.status)])),
     [pendingChatTasksData],
   );
 
@@ -706,7 +712,7 @@ export function InboxPage() {
     if (entry.kind === "chat") {
       const session = entry.session;
       const agent = agentMap.get(session.agent_id);
-      const isAgentActive = activeChatSessionIds.has(session.id);
+      const agentRunState = chatRunStates.get(session.id);
       return (
         <div
           key={`chat:${session.id}`}
@@ -735,7 +741,7 @@ export function InboxPage() {
               </span>
             </div>
             <span className={`flex items-center gap-1.5 text-xs ${session.has_unread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
-              {isAgentActive && <AgentRunningPip />}
+              {agentRunState && <AgentRunPip state={agentRunState} />}
               {agent?.name} · {timeAgo(session.updated_at)}
             </span>
           </div>
@@ -762,13 +768,13 @@ export function InboxPage() {
       );
     }
     const item = entry.item;
-    const isAgentActive = !!item.issue_id && activeIssueIds.has(item.issue_id);
+    const agentRunState = item.issue_id ? issueRunStates.get(item.issue_id) : undefined;
     return (
       <InboxListItem
         key={`notif:${item.id}`}
         item={item}
         isSelected={(item.issue_id ?? item.id) === selectedKey}
-        isAgentActive={isAgentActive}
+        agentRunState={agentRunState}
         onClick={() => handleSelect(item)}
         onArchive={() => handleArchive(item.id)}
         // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166 — archived view wires
@@ -1252,20 +1258,4 @@ function matchesView(
       // CEREBRO-PATCH(inbox-muted-filter): JEH-663 — only notifs have muted_until.
       return entry.kind === "notif" && isMuted(entry.item.muted_until);
   }
-}
-
-// -----------------------------------------------------------------------------
-// Active agent indicator — tiny pulsing dot
-// -----------------------------------------------------------------------------
-
-function AgentRunningPip() {
-  return (
-    <span
-      title="Agent is working"
-      className="relative inline-flex size-2 shrink-0 items-center justify-center"
-    >
-      <span className="absolute inline-flex size-2 animate-ping rounded-full bg-emerald-500/60" />
-      <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
-    </span>
-  );
 }

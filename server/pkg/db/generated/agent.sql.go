@@ -1449,6 +1449,52 @@ func (q *Queries) ListActiveIssueIDsInWorkspace(ctx context.Context, workspaceID
 	return items, nil
 }
 
+const listActiveIssueTaskStatusesInWorkspace = `-- name: ListActiveIssueTaskStatusesInWorkspace :many
+SELECT DISTINCT ON (atq.issue_id)
+  atq.issue_id,
+  atq.status
+FROM agent_task_queue atq
+JOIN issue iss ON iss.id = atq.issue_id
+WHERE iss.workspace_id = $1
+  AND atq.issue_id IS NOT NULL
+  AND atq.status IN ('queued', 'dispatched', 'running')
+ORDER BY atq.issue_id,
+  CASE atq.status
+    WHEN 'running' THEN 0
+    WHEN 'dispatched' THEN 1
+    ELSE 2
+  END,
+  atq.created_at DESC
+`
+
+type ListActiveIssueTaskStatusesInWorkspaceRow struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	Status  string      `json:"status"`
+}
+
+// Returns one in-flight task status per issue. Running/dispatched tasks win
+// over queued tasks so row indicators show "active" once work has actually
+// started, while still showing a queued signal before a runtime claims it.
+func (q *Queries) ListActiveIssueTaskStatusesInWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListActiveIssueTaskStatusesInWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listActiveIssueTaskStatusesInWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveIssueTaskStatusesInWorkspaceRow{}
+	for rows.Next() {
+		var i ListActiveIssueTaskStatusesInWorkspaceRow
+		if err := rows.Scan(&i.IssueID, &i.Status); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActiveTasksByIssue = `-- name: ListActiveTasksByIssue :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, title FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
