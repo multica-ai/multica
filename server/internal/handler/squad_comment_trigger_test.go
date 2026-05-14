@@ -419,6 +419,61 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 	}
 }
 
+// TestCreateRetryTask_InheritsIsLeaderTask locks the retry-clone contract for
+// MUL-2218: auto-retry of a leader-role task must produce a child task that is
+// also is_leader_task=true. Without this, MaybeRetryFailedTask silently
+// demotes a retried leader task to a worker task, and the self-trigger guard
+// in shouldEnqueueSquadLeaderOnComment / comment.go stops recognising the
+// retried leader's own comments — re-opening the bug this issue fixes.
+func TestCreateRetryTask_InheritsIsLeaderTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSquadCommentTriggerFixture(t)
+	issueID := uuidToString(fx.Issue.ID)
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+	})
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load runtime: %v", err)
+	}
+
+	cases := []struct {
+		name     string
+		isLeader bool
+	}{
+		{name: "leader task retry stays leader", isLeader: true},
+		{name: "worker task retry stays worker", isLeader: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var parentID string
+			if err := testPool.QueryRow(ctx, `
+				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, attempt, max_attempts, is_leader_task)
+				VALUES ($1, $2, $3, 'failed', 1, 3, $4)
+				RETURNING id
+			`, fx.LeaderID, runtimeID, issueID, tc.isLeader).Scan(&parentID); err != nil {
+				t.Fatalf("seed parent task: %v", err)
+			}
+			t.Cleanup(func() {
+				testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1 OR parent_task_id = $1`, parentID)
+			})
+
+			child, err := testHandler.Queries.CreateRetryTask(ctx, util.MustParseUUID(parentID))
+			if err != nil {
+				t.Fatalf("CreateRetryTask: %v", err)
+			}
+			if child.IsLeaderTask != tc.isLeader {
+				t.Fatalf("child.IsLeaderTask = %v, want %v (parent role must be inherited)", child.IsLeaderTask, tc.isLeader)
+			}
+		})
+	}
+}
+
 // TestCreateComment_SquadMentionPrivateLeaderBlocksPlainMember verifies that
 // a plain workspace member cannot trigger a private squad leader via @squad
 // mention. This is the regression test for the P1 finding: without the

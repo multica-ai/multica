@@ -812,13 +812,13 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
-    attempt, max_attempts, parent_task_id
+    attempt, max_attempts, parent_task_id, is_leader_task
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
     'queued', p.priority, p.trigger_comment_id, p.trigger_summary, p.context,
     p.session_id, p.work_dir,
-    p.attempt + 1, p.max_attempts, p.id
+    p.attempt + 1, p.max_attempts, p.id, p.is_leader_task
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task
@@ -827,7 +827,10 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 // Clones a parent task into a fresh queued attempt. Carries forward the
 // agent's resume context (session_id/work_dir) so the child can continue
 // the conversation when the backend supports it. attempt is incremented;
-// max_attempts and trigger_comment_id are inherited.
+// max_attempts, trigger_comment_id, and is_leader_task are inherited so
+// the retried task keeps the same squad-role provenance as its parent and
+// the self-trigger guard in shouldEnqueueSquadLeaderOnComment continues to
+// recognise it as a leader task.
 func (q *Queries) CreateRetryTask(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createRetryTask, id)
 	var i AgentTaskQueue
