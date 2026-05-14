@@ -310,12 +310,19 @@ func truncateForError(s string, limit int) string {
 // a hard-coded fallback list, because a parallel static catalog drifts
 // from the gateway's reality and silently masks misconfiguration.
 func discoverFirtalGatewayModels(ctx context.Context) ([]Model, error) {
-	baseURL := strings.TrimRight(firstEnv(nil,
+	return DiscoverFirtalGatewayModels(ctx, nil)
+}
+
+// CEREBRO-PATCH(firtal-gateway-model-discovery): let server-owned runtimes discover models without daemon env.
+// DiscoverFirtalGatewayModels fetches the live model catalog from the
+// Data Registry AI Gateway using optional environment overrides.
+func DiscoverFirtalGatewayModels(ctx context.Context, env map[string]string) ([]Model, error) {
+	baseURL := strings.TrimRight(firstEnv(env,
 		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_URL",
 		"FIRTAL_AE_GATEWAY_URL",
 		"FIRTAL_DATA_REGISTRY_URL",
 	), "/")
-	apiKey := firstEnv(nil,
+	apiKey := firstEnv(env,
 		"FIRTAL_DATA_REGISTRY_AI_GATEWAY_KEY",
 		"FIRTAL_AE_GATEWAY_KEY",
 		"FIRTAL_DATA_REGISTRY_API_KEY",
