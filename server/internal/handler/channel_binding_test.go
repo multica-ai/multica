@@ -24,14 +24,30 @@ import (
 func createTestBinding(t *testing.T, workspaceID, provider, externalChatID, chatType string, isPrimary bool, boundByUserID string) string {
 	t.Helper()
 
-	connID := fmt.Sprintf("conn-test-binding-%d", time.Now().UnixNano())
+	connID := createTestConnection(t, provider, "conn-test-binding")
+	return createTestBindingWithConnection(t, workspaceID, connID, provider, externalChatID, chatType, isPrimary, boundByUserID)
+}
+
+func createTestConnection(t *testing.T, provider, prefix string) string {
+	t.Helper()
+
+	connID := fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 	if _, err := testPool.Exec(t.Context(), `
 		INSERT INTO channel_connection (id, provider, display_name, enabled, is_default, config, secret_config, status)
 		VALUES ($1, $2, $3, true, false, '{}', '{}', 'connected')
 	`, connID, provider, "Test "+connID); err != nil {
 		t.Fatalf("failed to create channel connection: %v", err)
 	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = testPool.Exec(ctx, `DELETE FROM channel_connection WHERE id = $1`, connID)
+	})
 
+	return connID
+}
+
+func createTestBindingWithConnection(t *testing.T, workspaceID, connID, provider, externalChatID, chatType string, isPrimary bool, boundByUserID string) string {
+	t.Helper()
 	wsUUID := parseUUID(workspaceID)
 	userUUID := parseUUID(boundByUserID)
 
@@ -55,7 +71,6 @@ func createTestBinding(t *testing.T, workspaceID, provider, externalChatID, chat
 	t.Cleanup(func() {
 		ctx := context.Background()
 		_, _ = testPool.Exec(ctx, `DELETE FROM channel_chat_binding WHERE id = $1`, binding.ID)
-		_, _ = testPool.Exec(ctx, `DELETE FROM channel_connection WHERE id = $1`, connID)
 	})
 
 	return uuidToString(binding.ID)
@@ -548,22 +563,11 @@ func TestDeleteChannelBinding_NotFound(t *testing.T) {
 }
 
 func TestDeleteChannelBinding_OtherUserForbidden(t *testing.T) {
-	// Create another user
-	var otherUserID string
-	if err := testPool.QueryRow(t.Context(), `
-		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
-	`, "Other User", "other@example.com").Scan(&otherUserID); err != nil {
-		t.Fatalf("failed to create other user: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(t.Context(), `DELETE FROM "user" WHERE id = $1`, otherUserID)
-	})
-
-	// Create binding as other user
-	bindingID := createTestBinding(t, testWorkspaceID, "feishu", "oc_test_del_other", "group", true, otherUserID)
+	memberID := createNonOwnerTestUser(t, "member")
+	bindingID := createTestBinding(t, testWorkspaceID, "feishu", "oc_test_del_other", "group", true, testUserID)
 
 	w := httptest.NewRecorder()
-	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/channel-bindings/"+bindingID, nil)
+	req := channelBindingRequestAsUser(memberID, "DELETE", "/api/workspaces/"+testWorkspaceID+"/channel-bindings/"+bindingID, nil)
 	req = withURLParam(req, "id", testWorkspaceID)
 	req = withURLParam(req, "bindingId", bindingID)
 	testHandler.DeleteChannelBinding(w, req)
@@ -628,8 +632,9 @@ func TestDeleteChannelBinding_PrimaryWithOthersBlocked(t *testing.T) {
 		t.Fatalf("add member: %v", err)
 	}
 
-	primaryID := createTestBinding(t, wsID, "feishu", "oc_test_pri", "group", true, testUserID)
-	createTestBinding(t, wsID, "feishu", "oc_test_sec", "group", false, testUserID)
+	connID := createTestConnection(t, "feishu", "conn-delete-primary")
+	primaryID := createTestBindingWithConnection(t, wsID, connID, "feishu", "oc_test_pri", "group", true, testUserID)
+	createTestBindingWithConnection(t, wsID, connID, "feishu", "oc_test_sec", "group", false, testUserID)
 
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+wsID+"/channel-bindings/"+primaryID, nil)
@@ -647,8 +652,9 @@ func TestDeleteChannelBinding_PrimaryWithOthersBlocked(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSetPrimaryChannelBinding_Success(t *testing.T) {
-	primaryID := createTestBinding(t, testWorkspaceID, "feishu", "oc_test_pri1", "group", true, testUserID)
-	secondaryID := createTestBinding(t, testWorkspaceID, "feishu", "oc_test_pri2", "group", false, testUserID)
+	connID := createTestConnection(t, "feishu", "conn-set-primary")
+	primaryID := createTestBindingWithConnection(t, testWorkspaceID, connID, "feishu", "oc_test_pri1", "group", true, testUserID)
+	secondaryID := createTestBindingWithConnection(t, testWorkspaceID, connID, "feishu", "oc_test_pri2", "group", false, testUserID)
 
 	w := httptest.NewRecorder()
 	req := newRequest("PATCH", "/api/workspaces/"+testWorkspaceID+"/channel-bindings/"+secondaryID, map[string]any{
@@ -701,21 +707,11 @@ func TestSetPrimaryChannelBinding_NotFound(t *testing.T) {
 }
 
 func TestSetPrimaryChannelBinding_OtherUserForbidden(t *testing.T) {
-	// Create another user
-	var otherUserID string
-	if err := testPool.QueryRow(t.Context(), `
-		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
-	`, "Other User 2", "other2@example.com").Scan(&otherUserID); err != nil {
-		t.Fatalf("failed to create other user: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(t.Context(), `DELETE FROM "user" WHERE id = $1`, otherUserID)
-	})
-
-	bindingID := createTestBinding(t, testWorkspaceID, "feishu", "oc_test_pri_other", "group", false, otherUserID)
+	memberID := createNonOwnerTestUser(t, "member")
+	bindingID := createTestBinding(t, testWorkspaceID, "feishu", "oc_test_pri_other", "group", false, testUserID)
 
 	w := httptest.NewRecorder()
-	req := newRequest("PATCH", "/api/workspaces/"+testWorkspaceID+"/channel-bindings/"+bindingID, map[string]any{
+	req := channelBindingRequestAsUser(memberID, "PATCH", "/api/workspaces/"+testWorkspaceID+"/channel-bindings/"+bindingID, map[string]any{
 		"is_primary": true,
 	})
 	req = withURLParam(req, "id", testWorkspaceID)
