@@ -464,7 +464,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 {t(($) => $.create_project.repos_heading)}
               </div>
               {workspaceRepos.length > 0 ? (
-                <div className="space-y-1">
+                <div className="space-y-1 max-h-48 overflow-y-auto">
                   {workspaceRepos.map((repo) => {
                     const checked = selectedRepos.includes(repo.url);
                     return (

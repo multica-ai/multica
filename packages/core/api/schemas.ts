@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ListIssuesResponse, TimelineEntry } from "../types";
+import type { Attachment, ListIssuesResponse, TimelineEntry } from "../types";
 
 // ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
@@ -38,9 +38,43 @@ const ReactionSchema = z.object({
   created_at: z.string(),
 });
 
+// Nested attachments embedded in timeline/comment responses stay lenient on
+// purpose: a single malformed attachment must not knock the whole timeline
+// into the fallback `[]`.
 const AttachmentSchema = z.object({
   id: z.string(),
 }).loose();
+
+// Standalone attachment lookup (`GET /api/attachments/{id}`) is the source of
+// truth for click-time download URLs. The two fields the download flow opens
+// in a new tab — `download_url` and `url` — must be strings, otherwise we'd
+// happily `window.open(undefined)`. `filename` gates the toast/title and is
+// also enforced so a missing value falls back to the empty record below.
+export const AttachmentResponseSchema = z.object({
+  id: z.string(),
+  url: z.string(),
+  download_url: z.string(),
+  filename: z.string(),
+  chat_session_id: z.string().nullable().optional(),
+  chat_message_id: z.string().nullable().optional(),
+}).loose();
+
+export const EMPTY_ATTACHMENT: Attachment = {
+  id: "",
+  workspace_id: "",
+  issue_id: null,
+  comment_id: null,
+  chat_session_id: null,
+  chat_message_id: null,
+  uploader_type: "",
+  uploader_id: "",
+  filename: "",
+  url: "",
+  download_url: "",
+  content_type: "",
+  size_bytes: 0,
+  created_at: "",
+};
 
 // All object schemas use `.loose()` so unknown server-side fields pass
 // through unchanged. zod 4's `.object()` defaults to STRIP, which would
@@ -135,3 +169,46 @@ export const SubscribersListSchema = z.array(SubscriberSchema);
 export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
 }).loose();
+
+// ---------------------------------------------------------------------------
+// Workspace dashboard schemas
+//
+// The dashboard hits three independent rollup endpoints. Each returns a flat
+// array, and every field is consumed by chart / KPI math — a missing number
+// silently degrades to NaN downstream, so we coerce missing numbers to 0.
+// String fields stay lenient (no enum narrowing) to survive future model /
+// agent ID drift.
+// ---------------------------------------------------------------------------
+
+const DashboardUsageDailySchema = z.object({
+  date: z.string(),
+  model: z.string(),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  task_count: z.number().default(0),
+}).loose();
+
+export const DashboardUsageDailyListSchema = z.array(DashboardUsageDailySchema);
+
+const DashboardUsageByAgentSchema = z.object({
+  agent_id: z.string(),
+  model: z.string(),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  task_count: z.number().default(0),
+}).loose();
+
+export const DashboardUsageByAgentListSchema = z.array(DashboardUsageByAgentSchema);
+
+const DashboardAgentRunTimeSchema = z.object({
+  agent_id: z.string(),
+  total_seconds: z.number().default(0),
+  task_count: z.number().default(0),
+  failed_count: z.number().default(0),
+}).loose();
+
+export const DashboardAgentRunTimeListSchema = z.array(DashboardAgentRunTimeSchema);

@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import {
   ArrowUpCircle,
+  Globe,
+  Lock,
   MoreHorizontal,
   Trash2,
 } from "lucide-react";
@@ -248,8 +250,43 @@ function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
             <TooltipContent>{hostname}</TooltipContent>
           </Tooltip>
         )}
+        <VisibilityBadge runtime={runtime} />
       </div>
     </div>
+  );
+}
+
+// VisibilityBadge — small chip next to the runtime name showing whether
+// the runtime is shareable (public) or owner-only (private). Older backends
+// that don't ship the visibility field render the strict default (private).
+function VisibilityBadge({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  const isPublic = runtime.visibility === "public";
+  const Icon = isPublic ? Globe : Lock;
+  const label = isPublic
+    ? t(($) => $.detail.visibility_label.public)
+    : t(($) => $.detail.visibility_label.private);
+  const tooltip = isPublic
+    ? t(($) => $.detail.visibility_hint.public)
+    : t(($) => $.detail.visibility_hint.private);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className={`shrink-0 inline-flex items-center gap-0.5 rounded px-1 text-[10px] font-medium ${
+              isPublic
+                ? "bg-info/10 text-info"
+                : "bg-muted text-muted-foreground"
+            }`}
+          >
+            <Icon className="h-2.5 w-2.5" />
+            {label}
+          </span>
+        }
+      />
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
   );
 }
 

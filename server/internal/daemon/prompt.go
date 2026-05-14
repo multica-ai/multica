@@ -137,7 +137,7 @@ func buildCommentPrompt(task Task, runMode string) string {
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
 	fmt.Fprintf(&b, "If you need comment history, `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). Pass `--since <RFC3339>` to fetch only comments newer than a known cursor.\n\n", task.IssueID)
-	b.WriteString(execenv.BuildCommentReplyInstructions(task.IssueID, task.TriggerCommentID))
+	b.WriteString(execenv.BuildCommentReplyInstructions("", task.IssueID, task.TriggerCommentID))
 	return b.String()
 }
 
@@ -148,6 +148,23 @@ func buildChatPrompt(task Task) string {
 	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
 	writeLanguageInstruction(&b)
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
+	// List attachments by id + filename so the agent can fetch them via
+	// the CLI. We deliberately do NOT inline the URL: chat attachments
+	// live behind a signed CDN with a short TTL, so by the time the agent
+	// has finished thinking the URL embedded in the markdown body may
+	// have expired. `multica attachment download <id>` re-signs at click
+	// time and is the only reliable path.
+	if len(task.ChatMessageAttachments) > 0 {
+		b.WriteString("\nAttachments on this message:\n")
+		for _, a := range task.ChatMessageAttachments {
+			if a.ContentType != "" {
+				fmt.Fprintf(&b, "- id=%s filename=%q content_type=%s\n", a.ID, a.Filename, a.ContentType)
+			} else {
+				fmt.Fprintf(&b, "- id=%s filename=%q\n", a.ID, a.Filename)
+			}
+		}
+		b.WriteString("Use `multica attachment download <id>` to fetch each file locally before referring to it.\n")
+	}
 	return b.String()
 }
 

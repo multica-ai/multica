@@ -63,6 +63,22 @@
     "no_agents": "还没有智能体绑定到这个运行时。",
     "diagnostics_title": "诊断",
     "diagnostics_cli": "CLI",
+    "diagnostics_visibility": "可见性",
+    "diagnostics_timezone": "时区",
+    "visibility_label": {
+      "private": "私有",
+      "public": "公开"
+    },
+    "visibility_hint": {
+      "private": "仅你和工作区管理员可以在此运行时上创建智能体。",
+      "public": "工作区内任何成员都可以在此运行时上创建智能体。"
+    },
+    "visibility_toast_updated": "可见性已设为「{{visibility}}」",
+    "visibility_toast_failed": "更新可见性失败",
+    "timezone_browser_suffix": "（浏览器）",
+    "timezone_hint": "该 Runtime 的 Token 用量图表会按此时区进行日期分桶。",
+    "timezone_toast_updated": "时区已更新为 {{tz}}",
+    "timezone_toast_failed": "更新时区失败",
     "delete_dialog": {
       "title": "删除运行时",
       "description": "确定要删除\"{{name}}\"吗？此操作不可撤销。",
@@ -170,8 +186,23 @@
     "legend_cache_write": "缓存写入",
     "empty_no_usage": "此期间无使用记录。",
     "empty_pricing_missing": "记录到 token，但缺少这些模型的价格：",
-    "empty_pricing_hint": "请在 packages/views/runtimes/utils.ts 的 MODEL_PRICING 中补充",
+    "empty_pricing_hint": "可以设置自定义价格，把它们也纳入费用统计。",
     "empty_zero_cost": "记录到 token，但费用计算结果为 $0。",
+    "unmapped_notice_other": "有 {{count}} 个模型没有维护价格，相关 token 未计入费用统计。",
+    "custom_pricing": {
+      "open_button": "设置自定义价格",
+      "title": "自定义模型价格",
+      "description": "为我们未维护官方价格的模型填入每百万 token 的费率。仅保存在本机。",
+      "empty": "目前没有需要设置价格的模型。",
+      "field_input": "输入",
+      "field_output": "输出",
+      "field_cache_read": "缓存读取",
+      "field_cache_write": "缓存写入",
+      "unit_hint": "所有费率单位为美元 / 百万 token。清空所有字段即可移除该自定义价格。",
+      "remove_aria": "移除自定义价格",
+      "cancel": "取消",
+      "save": "保存"
+    },
     "cost_by_title_agent": "按智能体分摊",
     "cost_by_title_model": "按模型分摊",
     "cost_by_tab_agent": "按智能体",

@@ -54,6 +54,11 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 }
 
 // requireDaemonRuntimeAccess looks up a runtime and verifies the caller owns its workspace.
+//
+// Only pgx.ErrNoRows is treated as a real "runtime gone" 404 — the daemon uses
+// that response to drop the stale runtime from its in-memory map and re-register,
+// so collapsing transient DB errors into the same 404 would force the daemon to
+// self-cleanup on a hiccup. Other DB errors become 500.
 func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (db.AgentRuntime, bool) {
 	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
 	if !ok {
@@ -61,7 +66,12 @@ func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Requ
 	}
 	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "runtime not found")
+			return db.AgentRuntime{}, false
+		}
+		slog.Warn("get agent runtime failed", "runtime_id", runtimeID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load runtime")
 		return db.AgentRuntime{}, false
 	}
 	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(rt.WorkspaceID)) {
@@ -134,6 +144,15 @@ type DaemonRegisterRequest struct {
 	DeviceName      string   `json:"device_name"`
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
+	// Timezone is the daemon host's IANA timezone (e.g. "Asia/Shanghai"),
+	// detected client-side from time.Local. The server stores it on each
+	// agent_runtime row created for this daemon so token-usage rollups
+	// bucket by the operator's local calendar day instead of UTC. Empty
+	// or invalid values fall back to "UTC". The value is set ONLY on
+	// first-time registration; once a user overrides the tz via the web
+	// UI, the upsert query preserves that override on subsequent
+	// daemon reconnects (see UpsertAgentRuntime in runtime.sql).
+	Timezone string `json:"timezone"`
 	HealthPort      int      `json:"health_port"` // local daemon health/trace port
 	Runtimes        []struct {
 		Name    string `json:"name"`
@@ -147,6 +166,24 @@ type daemonWorkspaceReposResponse struct {
 	WorkspaceID  string     `json:"workspace_id"`
 	Repos        []RepoData `json:"repos"`
 	ReposVersion string     `json:"repos_version"`
+}
+
+// normalizeRuntimeTimezone validates and normalizes the IANA timezone string
+// reported by a daemon during registration. The stored column is NOT NULL with
+// a 'UTC' default so any unparseable, blank, or trivially-invalid value is
+// quietly downgraded to "UTC" rather than rejected: a misconfigured daemon
+// host shouldn't take down registration just because its tz string is junk.
+// Real validation happens on the user-driven PATCH path where we surface the
+// error.
+func normalizeRuntimeTimezone(tz string) string {
+	tz = strings.TrimSpace(tz)
+	if tz == "" {
+		return "UTC"
+	}
+	if _, err := time.LoadLocation(tz); err != nil {
+		return "UTC"
+	}
+	return tz
 }
 
 func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
@@ -298,6 +335,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			DeviceInfo:  deviceInfo,
 			Metadata:    metadata,
 			OwnerID:     ownerID,
+			Timezone:    normalizeRuntimeTimezone(req.Timezone),
 		})
 		if err != nil {
 			h.Analytics.Capture(analytics.RuntimeFailed(
@@ -328,6 +366,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:      row.UpdatedAt,
 			OwnerID:        row.OwnerID,
 			LegacyDaemonID: row.LegacyDaemonID,
+			Timezone:       row.Timezone,
 		}
 
 		// Inserted is false for normal daemon reconnects/upserts, so
@@ -645,8 +684,18 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	rt, lookupErr := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
 	runtimeLookupMs = time.Since(lookupStart).Milliseconds()
 	if lookupErr != nil {
-		outcome = "runtime_not_found"
-		writeError(w, http.StatusNotFound, "runtime not found")
+		// Only pgx.ErrNoRows means the runtime row is gone. Daemon reads this
+		// 404 as a signal to drop the stale runtime locally; treating a
+		// transient DB error the same way would force daemons to self-cleanup
+		// on a hiccup.
+		if isNotFound(lookupErr) {
+			outcome = "runtime_not_found"
+			writeError(w, http.StatusNotFound, "runtime not found")
+			return
+		}
+		outcome = "runtime_lookup_error"
+		slog.Warn("get agent runtime failed", "runtime_id", req.RuntimeID, "error", lookupErr)
+		writeError(w, http.StatusInternalServerError, "failed to load runtime")
 		return
 	}
 	wsCheckStart := time.Now()
@@ -702,6 +751,13 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // Workspace authorization is re-checked on every heartbeat instead of trusted
 // from the upgrade-time check because runtime ownership can change (e.g. a
 // runtime is reassigned to another workspace mid-connection).
+//
+// When the runtime row is missing (pgx.ErrNoRows), the function returns a
+// successful ack with Status=HeartbeatStatusRuntimeGone and RuntimeGone=true
+// instead of an error. That keeps the hub from logging every beat at Warn,
+// and tells the daemon to drop the stale runtime and re-register. Other DB
+// errors still propagate as errors so they keep their existing Warn logging
+// and the daemon does not mistake a hiccup for a deletion.
 func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string) (*protocol.DaemonHeartbeatAckPayload, error) {
 	runtimeUUID, err := util.ParseUUID(runtimeID)
 	if err != nil {
@@ -709,7 +765,14 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	}
 	rt, err := h.Queries.GetAgentRuntime(ctx, runtimeUUID)
 	if err != nil {
-		return nil, fmt.Errorf("runtime not found: %w", err)
+		if isNotFound(err) {
+			return &protocol.DaemonHeartbeatAckPayload{
+				RuntimeID:   runtimeID,
+				Status:      protocol.HeartbeatStatusRuntimeGone,
+				RuntimeGone: true,
+			}, nil
+		}
+		return nil, fmt.Errorf("get agent runtime: %w", err)
 	}
 	if identity.WorkspaceID != "" && identity.WorkspaceID != uuidToString(rt.WorkspaceID) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
@@ -1226,12 +1289,29 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.PriorWorkDir = prior.WorkDir.String
 				}
 			}
-			// Load the latest user message for the chat prompt.
+			// Load the latest user message for the chat prompt, plus any
+			// attachments linked to that exact message. Without the structured
+			// attachment list the agent only sees the markdown URL in
+			// `ChatMessage` — fine for vision models inline but unusable when
+			// the agent wants to `multica attachment download <id>` (URL is
+			// signed and 30-min expiring on private CDN).
 			if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
-				// Find the last user message.
 				for i := len(msgs) - 1; i >= 0; i-- {
 					if msgs[i].Role == "user" {
 						resp.ChatMessage = msgs[i].Content
+						if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
+							ChatMessageID: msgs[i].ID,
+							WorkspaceID:   parseUUID(resp.WorkspaceID),
+						}); attErr == nil && len(atts) > 0 {
+							resp.ChatMessageAttachments = make([]ChatAttachmentMeta, len(atts))
+							for j, a := range atts {
+								resp.ChatMessageAttachments[j] = ChatAttachmentMeta{
+									ID:          uuidToString(a.ID),
+									Filename:    a.Filename,
+									ContentType: a.ContentType,
+								}
+							}
+						}
 						break
 					}
 				}

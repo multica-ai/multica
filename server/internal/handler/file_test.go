@@ -5,22 +5,78 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 )
 
-type mockStorage struct{}
+// createHandlerTestChatSession seeds a chat_session row owned by testUserID
+// targeting the given agent and returns the session UUID. Cleanup runs after
+// the test. Used by attachment / chat tests that need an existing session.
+func createHandlerTestChatSession(t *testing.T, agentID string) string {
+	t.Helper()
 
-func (m *mockStorage) Upload(_ context.Context, key string, _ []byte, _ string, _ string) (string, error) {
+	var sessionID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
+		VALUES ($1, $2, $3, $4, 'active')
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID, "Handler Test Chat Session").Scan(&sessionID); err != nil {
+		t.Fatalf("failed to create handler test chat session: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, sessionID)
+	})
+	return sessionID
+}
+
+// mockStorage is a tiny in-memory Storage stand-in. Upload records the bytes
+// keyed by the storage key so GetReader can round-trip them in tests; KeyFromURL
+// strips the synthetic CDN host so consumers can pass either the URL or the
+// raw key.
+type mockStorage struct {
+	mu    sync.Mutex
+	files map[string][]byte
+}
+
+func (m *mockStorage) Upload(_ context.Context, key string, data []byte, _ string, _ string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.files == nil {
+		m.files = map[string][]byte{}
+	}
+	m.files[key] = append([]byte(nil), data...)
 	return fmt.Sprintf("https://cdn.example.com/%s", key), nil
 }
 
-func (m *mockStorage) Delete(_ context.Context, _ string)       {}
+func (m *mockStorage) Delete(_ context.Context, key string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.files, key)
+}
 func (m *mockStorage) DeleteKeys(_ context.Context, _ []string) {}
-func (m *mockStorage) KeyFromURL(rawURL string) string          { return rawURL }
-func (m *mockStorage) CdnDomain() string                        { return "cdn.example.com" }
+func (m *mockStorage) KeyFromURL(rawURL string) string {
+	const prefix = "https://cdn.example.com/"
+	if strings.HasPrefix(rawURL, prefix) {
+		return strings.TrimPrefix(rawURL, prefix)
+	}
+	return rawURL
+}
+func (m *mockStorage) CdnDomain() string { return "cdn.example.com" }
+func (m *mockStorage) GetReader(_ context.Context, key string) (io.ReadCloser, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if data, ok := m.files[key]; ok {
+		return io.NopCloser(bytes.NewReader(data)), nil
+	}
+	return nil, fmt.Errorf("mockStorage GetReader: key not found: %q", key)
+}
 
 func TestUploadFileForeignWorkspace(t *testing.T) {
 	origStorage := testHandler.Storage
@@ -161,64 +217,205 @@ func TestUploadFileResolvesWorkspaceViaIDHeaderStill(t *testing.T) {
 	}
 }
 
-func TestListAttachmentsOnlyReturnsIssueLevelAttachments(t *testing.T) {
-	ctx := context.Background()
+// TestUploadFile_AttachesToChatSession verifies that a multipart upload with
+// a chat_session_id form field creates an attachment row linked to that chat
+// session (chat_message_id remains NULL — it is back-filled on send).
+func TestUploadFile_AttachesToChatSession(t *testing.T) {
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
+	defer func() { testHandler.Storage = origStorage }()
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type)
-		VALUES ($1, 'attachment list scope test', $2, 'member')
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("create issue: %v", err)
+	agentID := createHandlerTestAgent(t, "ChatUploadAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "chat-upload.png")
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
-	})
-
-	var commentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
-		VALUES ($1, $2, 'member', $3, 'comment with attachment')
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID).Scan(&commentID); err != nil {
-		t.Fatalf("create comment: %v", err)
+	// Minimal PNG signature so content-type sniffs as image/png.
+	part.Write([]byte("\x89PNG\r\n\x1a\nrest-of-bytes"))
+	if err := writer.WriteField("chat_session_id", sessionID); err != nil {
+		t.Fatal(err)
 	}
+	writer.Close()
 
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO attachment (
-			workspace_id, issue_id, comment_id, uploader_type, uploader_id,
-			filename, url, content_type, size_bytes
-		)
-		VALUES
-			($1, $2, NULL, 'member', $3, 'issue-only.txt', 'https://cdn.example.com/issue-only.txt', 'text/plain', 10),
-			($1, $2, $4, 'member', $3, 'comment-linked.txt', 'https://cdn.example.com/comment-linked.txt', 'text/plain', 20)
-	`, testWorkspaceID, issueID, testUserID, commentID); err != nil {
-		t.Fatalf("create attachments: %v", err)
-	}
-
-	req := httptest.NewRequest("GET", "/api/issues/"+issueID+"/attachments", nil)
-	req = withURLParam(req, "id", issueID)
+	req := httptest.NewRequest("POST", "/api/upload-file", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("X-User-ID", testUserID)
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)
 
 	w := httptest.NewRecorder()
-	testHandler.ListAttachments(w, req)
+	testHandler.UploadFile(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("ListAttachments: expected 200, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("UploadFile with chat_session_id: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var resp []AttachmentResponse
+	var resp AttachmentResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v; body: %s", err, w.Body.String())
 	}
-	if len(resp) != 1 {
-		t.Fatalf("expected only issue-level attachment, got %d: %#v", len(resp), resp)
+	if resp.ChatSessionID == nil || *resp.ChatSessionID != sessionID {
+		t.Fatalf("chat_session_id in response: want %s, got %v", sessionID, resp.ChatSessionID)
 	}
-	if resp[0].Filename != "issue-only.txt" {
-		t.Fatalf("expected issue-only attachment, got %q", resp[0].Filename)
+	if resp.ChatMessageID != nil {
+		t.Fatalf("chat_message_id should be NULL before send, got %v", resp.ChatMessageID)
 	}
-	if resp[0].CommentID != nil {
-		t.Fatalf("expected issue-level attachment comment_id to be nil, got %v", *resp[0].CommentID)
+	if resp.IssueID != nil || resp.CommentID != nil {
+		t.Fatalf("issue_id/comment_id should be NULL for chat-only upload: %+v", resp)
 	}
+	if resp.URL == "" {
+		t.Fatal("expected non-empty url")
+	}
+
+	// Verify the DB row directly.
+	var dbSession, dbMessage *string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT chat_session_id::text, chat_message_id::text FROM attachment WHERE id = $1`,
+		resp.ID,
+	).Scan(&dbSession, &dbMessage); err != nil {
+		t.Fatalf("query attachment row: %v", err)
+	}
+	if dbSession == nil || *dbSession != sessionID {
+		t.Fatalf("DB chat_session_id mismatch: want %s, got %v", sessionID, dbSession)
+	}
+	if dbMessage != nil {
+		t.Fatalf("DB chat_message_id should be NULL, got %v", dbMessage)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, resp.ID)
+	})
+}
+
+// TestUploadFile_RejectsForeignChatSession verifies a chat_session in another
+// workspace (or owned by another user) is rejected with 403/404, preventing
+// cross-tenant attachment binding.
+func TestUploadFile_RejectsForeignChatSession(t *testing.T) {
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
+	defer func() { testHandler.Storage = origStorage }()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormFile("file", "evil.txt")
+	part.Write([]byte("payload"))
+	// Random non-existent UUID.
+	writer.WriteField("chat_session_id", "00000000-0000-0000-0000-0000deadbeef")
+	writer.Close()
+
+	req := httptest.NewRequest("POST", "/api/upload-file", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	testHandler.UploadFile(w, req)
+	if w.Code != http.StatusNotFound && w.Code != http.StatusForbidden && w.Code != http.StatusBadRequest {
+		t.Fatalf("UploadFile with unknown chat_session_id: expected 4xx, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GetAttachmentContent tests (preview proxy)
+// ---------------------------------------------------------------------------
+
+// seedPreviewAttachment inserts an attachment row + writes the bytes into the
+// active mockStorage. Returns the new attachment id. Caller is responsible for
+// installing the mockStorage on testHandler before calling.
+func seedPreviewAttachment(t *testing.T, store *mockStorage, key, filename, contentType string, body []byte) string {
+	t.Helper()
+	// Register the body so GetReader can find it via KeyFromURL → key.
+	url, err := store.Upload(context.Background(), key, body, contentType, filename)
+	if err != nil {
+		t.Fatalf("seed Upload: %v", err)
+	}
+
+	var id string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
+		VALUES ($1, 'member', $2, $3, $4, $5, $6)
+		RETURNING id::text
+	`, testWorkspaceID, testUserID, filename, url, contentType, len(body)).Scan(&id); err != nil {
+		t.Fatalf("seed attachment row: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, id)
+	})
+	return id
+}
+
+func newPreviewRequest(t *testing.T, attachmentID, workspaceID string) (*http.Request, *httptest.ResponseRecorder) {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/api/attachments/"+attachmentID+"/content", nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", workspaceID)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", attachmentID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	return req, httptest.NewRecorder()
+}
+
+func TestListAttachmentsOnlyReturnsIssueLevelAttachments(t *testing.T) {
+ctx := context.Background()
+
+var issueID string
+if err := testPool.QueryRow(ctx, `
+INSERT INTO issue (workspace_id, title, creator_id, creator_type)
+VALUES ($1, 'attachment list scope test', $2, 'member')
+RETURNING id
+`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+t.Fatalf("create issue: %v", err)
+}
+t.Cleanup(func() {
+testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+})
+
+var commentID string
+if err := testPool.QueryRow(ctx, `
+INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
+VALUES ($1, $2, 'member', $3, 'comment with attachment')
+RETURNING id
+`, issueID, testWorkspaceID, testUserID).Scan(&commentID); err != nil {
+t.Fatalf("create comment: %v", err)
+}
+
+if _, err := testPool.Exec(ctx, `
+INSERT INTO attachment (
+workspace_id, issue_id, comment_id, uploader_type, uploader_id,
+filename, url, content_type, size_bytes
+)
+VALUES
+($1, $2, NULL, 'member', $3, 'issue-only.txt', 'https://cdn.example.com/issue-only.txt', 'text/plain', 10),
+($1, $2, $4, 'member', $3, 'comment-linked.txt', 'https://cdn.example.com/comment-linked.txt', 'text/plain', 20)
+`, testWorkspaceID, issueID, testUserID, commentID); err != nil {
+t.Fatalf("create attachments: %v", err)
+}
+
+req := httptest.NewRequest("GET", "/api/issues/"+issueID+"/attachments", nil)
+req = withURLParam(req, "id", issueID)
+req.Header.Set("X-User-ID", testUserID)
+req.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+w := httptest.NewRecorder()
+testHandler.ListAttachments(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("ListAttachments: expected 200, got %d: %s", w.Code, w.Body.String())
+}
+
+var resp []AttachmentResponse
+if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+t.Fatalf("decode response: %v; body: %s", err, w.Body.String())
+}
+if len(resp) != 1 {
+t.Fatalf("expected only issue-level attachment, got %d: %#v", len(resp), resp)
+}
+if resp[0].Filename != "issue-only.txt" {
+t.Fatalf("expected issue-only attachment, got %q", resp[0].Filename)
+}
+if resp[0].CommentID != nil {
+t.Fatalf("expected issue-level attachment comment_id to be nil, got %v", *resp[0].CommentID)
+}
 }
