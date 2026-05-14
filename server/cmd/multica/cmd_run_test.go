@@ -26,6 +26,23 @@ func TestRunLocalCLIEndToEndWithFakeAPI(t *testing.T) {
 	if err := os.Symlink("/bin/sh", codexPath); err != nil {
 		t.Fatalf("symlink codex shim: %v", err)
 	}
+	origExecute := executeLocalCLIForRun
+	executeLocalCLIForRun = func(args []string, cwd, cliName string, env localCLIEnv, initialPrompt string, reporter *localRunReporter) (int, error) {
+		if cliName != "codex" {
+			t.Fatalf("cliName = %q, want codex", cliName)
+		}
+		if len(args) == 0 || args[0] != codexPath {
+			t.Fatalf("args = %v, want codex path first", args)
+		}
+		if env.RunID != "run-1" || env.IssueID != "issue-1" {
+			t.Fatalf("env = %+v, want run and issue metadata", env)
+		}
+		if !strings.Contains(initialPrompt, "Assigned issue ID: issue-1") {
+			t.Fatalf("initialPrompt missing issue context: %q", initialPrompt)
+		}
+		return 0, nil
+	}
+	defer func() { executeLocalCLIForRun = origExecute }()
 	var (
 		createBody map[string]any
 		patches    []map[string]any
@@ -1461,6 +1478,98 @@ func TestExecuteLocalCLIInitialPromptTerminalFallbackIsSilent(t *testing.T) {
 	}
 	if finals := finalMessages(messages); len(finals) != 0 {
 		t.Fatalf("finals = %+v, want no bootstrap final", finals)
+	}
+}
+
+func TestShouldUseCodexRemoteRunnerOnlyForRealCodexCommand(t *testing.T) {
+	if !shouldUseCodexRemoteRunner([]string{"/usr/local/bin/codex"}, "codex") {
+		t.Fatalf("real codex command did not use remote runner")
+	}
+	if shouldUseCodexRemoteRunner([]string{"/bin/sh"}, "codex") {
+		t.Fatalf("non-codex executable used remote runner")
+	}
+	if shouldUseCodexRemoteRunner([]string{"/usr/local/bin/claude"}, "claude") {
+		t.Fatalf("non-codex provider used remote runner")
+	}
+}
+
+func TestValidateCodexRemoteArgsRejectsManagedFlags(t *testing.T) {
+	for _, args := range [][]string{
+		{"--remote", "ws://127.0.0.1:1"},
+		{"--remote=ws://127.0.0.1:1"},
+		{"app-server"},
+	} {
+		if err := validateCodexRemoteArgs(args); err == nil {
+			t.Fatalf("validateCodexRemoteArgs(%v) = nil, want error", args)
+		}
+	}
+	if err := validateCodexRemoteArgs([]string{"--model", "gpt-5.5"}); err != nil {
+		t.Fatalf("validateCodexRemoteArgs ordinary args: %v", err)
+	}
+}
+
+func TestCodexAppServerMapperMapsUserAndFinal(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	mapper := newCodexAppServerMapper(reporter, "bootstrap prompt")
+
+	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"user-1","type":"userMessage","content":[{"type":"text","text":"你好"}]}}}`))
+	mapper.Observe(false, []byte(`{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"agent-1","delta":"你好"}}`))
+	mapper.Observe(false, []byte(`{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"agent-1","delta":"。"}}`))
+	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"agent-1","type":"agentMessage","phase":"final_answer","text":""}}}`))
+	reporter.Close()
+
+	messages := poster.messages()
+	inputs := userInputMessages(messages)
+	if len(inputs) != 1 || inputs[0].Content != "你好" || inputs[0].Source != codexAppServerSource {
+		t.Fatalf("inputs = %+v, want codex app-server user input", inputs)
+	}
+	finals := finalMessages(messages)
+	if len(finals) != 1 || finals[0].Content != "你好。" || finals[0].SourceKey == "" {
+		t.Fatalf("finals = %+v, want accumulated final", finals)
+	}
+}
+
+func TestCodexAppServerMapperSkipsBootstrapComments(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	mapper := newCodexAppServerMapper(reporter, "bootstrap prompt")
+
+	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"user-1","type":"userMessage","text":"bootstrap prompt"}}}`))
+	mapper.Observe(false, []byte(`{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"agent-1","type":"agentMessage","phase":"final_answer","text":"should stay silent"}}}`))
+	reporter.Close()
+
+	if inputs := userInputMessages(poster.messages()); len(inputs) != 0 {
+		t.Fatalf("inputs = %+v, want bootstrap user skipped", inputs)
+	}
+	if finals := finalMessages(poster.messages()); len(finals) != 0 {
+		t.Fatalf("finals = %+v, want bootstrap final skipped", finals)
+	}
+}
+
+func TestCodexAppServerMapperTracksClearAndResumeThreads(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	mapper := newCodexAppServerMapper(reporter, "")
+
+	mapper.Observe(true, []byte(`{"id":9,"method":"thread/start","params":{"sessionStartSource":"clear"}}`))
+	mapper.Observe(false, []byte(`{"id":9,"result":{"thread":{"id":"thread-clear","sessionId":"thread-clear","path":"/tmp/clear.jsonl","cwd":"/tmp"}}}`))
+	mapper.Observe(true, []byte(`{"id":13,"method":"thread/resume","params":{"threadId":"thread-old"}}`))
+	mapper.Observe(false, []byte(`{"id":13,"result":{"thread":{"id":"thread-old","sessionId":"thread-old","path":"/tmp/old.jsonl","cwd":"/tmp"}}}`))
+	reporter.Close()
+
+	messages := poster.messages()
+	var lifecycle []localCLIMessage
+	for _, msg := range messages {
+		if msg.Type == "event" {
+			lifecycle = append(lifecycle, msg)
+		}
+	}
+	if len(lifecycle) != 2 {
+		t.Fatalf("lifecycle = %+v, want clear start and resume", lifecycle)
+	}
+	if !strings.Contains(lifecycle[0].Content, "clear") || !strings.Contains(lifecycle[1].Content, "resumed") {
+		t.Fatalf("lifecycle = %+v, want clear and resumed content", lifecycle)
 	}
 }
 

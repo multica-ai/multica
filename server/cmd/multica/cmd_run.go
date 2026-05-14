@@ -54,6 +54,8 @@ type localCLIMessage struct {
 const invalidLocalRunMulticaToken = "multica-local-run-token-disabled"
 const localRunHeartbeatInterval = 30 * time.Second
 
+var executeLocalCLIForRun = executeLocalCLI
+
 func runLocalCLI(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -115,7 +117,7 @@ func runLocalCLI(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "Multica local run %s started.\n", run.ID)
 	reporter := newLocalRunReporter(client, run.ID)
 	stopHeartbeat := startLocalRunHeartbeat(client, run.ID, localRunHeartbeatInterval)
-	exitCode, runErr := executeLocalCLI(childArgs, cwd, cliName, localCLIEnv{
+	exitCode, runErr := executeLocalCLIForRun(childArgs, cwd, cliName, localCLIEnv{
 		RunID:     run.ID,
 		IssueID:   issueRef.ID,
 		ServerURL: resolveServerURL(cmd),
@@ -286,17 +288,22 @@ func (r *localRunReporter) loop() {
 }
 
 type transcriptStream struct {
-	reporter   *localRunReporter
-	capture    *terminalTurnCapture
-	raw        []byte
-	rawScreen  *terminalScreen
-	rawVisible string
-	line       strings.Builder
-	last       time.Time
+	reporter    *localRunReporter
+	capture     *terminalTurnCapture
+	suppressRaw bool
+	raw         []byte
+	rawScreen   *terminalScreen
+	rawVisible  string
+	line        strings.Builder
+	last        time.Time
 }
 
 func newTranscriptStream(reporter *localRunReporter, capture *terminalTurnCapture) *transcriptStream {
 	return &transcriptStream{reporter: reporter, capture: capture, rawScreen: newTerminalScreen(), last: time.Now()}
+}
+
+func newStructuredTranscriptStream(reporter *localRunReporter) *transcriptStream {
+	return &transcriptStream{reporter: reporter, suppressRaw: true, rawScreen: newTerminalScreen(), last: time.Now()}
 }
 
 func (s *transcriptStream) Write(p []byte) (int, error) {
@@ -390,6 +397,9 @@ func (s *transcriptStream) flushRawBytes(raw []byte) {
 	if content == "" || isStatusOnly(content) {
 		return
 	}
+	if s.suppressRaw {
+		return
+	}
 	if s.capture != nil && s.capture.HasProviderTranscript() {
 		return
 	}
@@ -439,6 +449,10 @@ type localCLIEnv struct {
 }
 
 func executeLocalCLI(args []string, cwd, cliName string, env localCLIEnv, initialPrompt string, reporter *localRunReporter) (int, error) {
+	if shouldUseCodexRemoteRunner(args, cliName) {
+		return executeCodexRemoteCLI(args, cwd, env, initialPrompt, reporter)
+	}
+
 	startTime := time.Now()
 	childArgs := args[1:]
 	writePromptToPTY := initialPrompt
