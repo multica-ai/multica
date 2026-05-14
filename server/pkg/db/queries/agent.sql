@@ -77,12 +77,13 @@ ORDER BY created_at DESC;
 -- name: CreateAgentTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
-    trigger_summary, force_fresh_session
+    trigger_summary, force_fresh_session, is_leader_task
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
     sqlc.narg(trigger_summary),
-    COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE)
+    COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
+    COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE)
 )
 RETURNING *;
 
@@ -400,6 +401,18 @@ WHERE issue_id = $1 AND status IN ('queued', 'dispatched');
 -- for the given issue. Used by @mention trigger dedup.
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched');
+
+-- name: GetLatestTaskIsLeaderForIssueAndAgent :one
+-- Returns the is_leader_task flag of the agent's most recent task on this
+-- issue, or NULL if the agent has never had a task on this issue. Used by
+-- the squad-leader self-trigger guard to tell whether the agent's last
+-- activity on the issue was in the leader role or the worker role (an
+-- agent that holds both roles in a squad would otherwise be skipped by
+-- the role-blind authorID == leaderID check).
+SELECT is_leader_task FROM agent_task_queue
+WHERE issue_id = $1 AND agent_id = $2
+ORDER BY created_at DESC
+LIMIT 1;
 
 -- name: ListPendingTasksByRuntime :many
 SELECT * FROM agent_task_queue
