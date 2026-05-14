@@ -22,6 +22,7 @@ on is the entrypoint that boots `opencode serve`.
 
 | Var                 | Default     | Notes                                                                    |
 |---------------------|-------------|--------------------------------------------------------------------------|
+| `GH_TOKEN`          | (empty)     | GitHub PAT. When present, the entrypoint runs `gh auth setup-git --hostname github.com` so plain `git clone https://github.com/<org>/<repo>` against private repos works without prompting. SSH-style remotes (`git@github.com:…`, `ssh://git@github.com/…`) are also rewritten to HTTPS so they pick up the same credential helper. The token is never written to disk — `gh` is wired as the credential helper and reads `GH_TOKEN` from the process env on demand. |
 | `OPENCODE_HOST`     | `0.0.0.0`   | Bind address. Defaults to `0.0.0.0` (overriding upstream's `127.0.0.1`) so the Kubernetes Service can reach the pod. |
 | `OPENCODE_PORT`     | `4096`      | Matches the upstream `opencode serve` default.                           |
 | `OPENCODE_EXTRA_ARGS` | (empty)    | Appended verbatim, e.g. `--cors https://devenv-jshuff.development.g2.com`. |
