@@ -504,7 +504,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       ];
       if (tagFilter) {
         return broadcastItems.filter(
-          (i) => i.id === "all" || i.id.toLowerCase().startsWith(tagFilter),
+          (i) => i.id !== "all" && i.id.toLowerCase().startsWith(tagFilter),
         );
       }
       return broadcastItems;
