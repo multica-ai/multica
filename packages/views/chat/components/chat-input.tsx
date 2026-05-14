@@ -21,6 +21,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { Maximize2, Minimize2, Square } from "lucide-react";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { useWorkspaceId } from "@multica/core/hooks"; // CEREBRO-PATCH(chat-input-dictation-streaming): workspace-scoped dictation stream URL (JEH-729).
 import { api } from "@multica/core/api";
 import { createLogger } from "@multica/core/logger";
 import { useSubmitOnEnter } from "@multica/cerebro-preferences/views";
@@ -71,6 +72,7 @@ export function ChatInput({
   const { t } = useT("chat");
   const editorRef = useRef<ContentEditorRef>(null);
   const submitOnEnter = useSubmitOnEnter();
+  const workspaceId = useWorkspaceId();
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   // Scope the new-chat draft by agent:
@@ -134,6 +136,18 @@ export function ChatInput({
     clearInputDraft(keyAtSend);
     setIsEmpty(true);
   };
+
+  const handleDictationPartial = useCallback((text: string) => {
+    editorRef.current?.replaceDictationPreview(text);
+  }, []);
+
+  const handleDictationFinal = useCallback((text: string) => {
+    editorRef.current?.commitDictationPreview(text);
+  }, []);
+
+  const handleDictationError = useCallback(() => {
+    editorRef.current?.clearDictationPreview();
+  }, []);
 
   const placeholder = noAgent
     ? t(($) => $.input.placeholder_no_agent)
@@ -219,7 +233,10 @@ export function ChatInput({
           />
           <MicButton
             disabled={!!disabled || !!noAgent}
-            onTranscribed={(text) => editorRef.current?.insertText(text)}
+            streamUrl={`/api/workspaces/${workspaceId}/cerebro/dictation/stream`}
+            onPartialTranscribed={handleDictationPartial}
+            onTranscribed={handleDictationFinal}
+            onError={handleDictationError}
           />
           {rightAdornment}
           {/* CEREBRO-PATCH(chat-input-expand): JEH-887 — expand toggle.

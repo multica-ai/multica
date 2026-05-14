@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { Mic, Square } from "lucide-react";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { Button } from "@multica/ui/components/ui/button";
@@ -10,7 +10,8 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { useDictation } from "../use-dictation";
-import type { Transcriber } from "../types";
+import { createWebSocketStreamingTranscriber } from "../streaming-transcriber";
+import type { DictationError, StreamingTranscriber, Transcriber } from "../types";
 
 const backendNotDeployedTranscriber: Transcriber = async () => {
   throw new Error("Dictation backend is not deployed yet.");
@@ -19,20 +20,35 @@ const backendNotDeployedTranscriber: Transcriber = async () => {
 export interface MicButtonProps {
   disabled?: boolean;
   transcribe?: Transcriber;
+  streamTranscribe?: StreamingTranscriber;
+  streamUrl?: string;
+  onPartialTranscribed?: (text: string) => void;
   onTranscribed: (text: string) => void;
+  onError?: (error: DictationError) => void;
 }
 
 export function MicButton({
   disabled = false,
-  transcribe = backendNotDeployedTranscriber,
+  transcribe,
+  streamTranscribe,
+  streamUrl,
+  onPartialTranscribed,
   onTranscribed,
+  onError,
 }: MicButtonProps) {
   const enabled = useFeatureFlag("cerebro_voice_dictation_enabled");
   const pointerRecordingRef = useRef(false);
   const suppressClickRef = useRef(false);
+  const defaultStreamTranscribe = useMemo(
+    () => (streamUrl ? createWebSocketStreamingTranscriber(streamUrl) : undefined),
+    [streamUrl],
+  );
   const { status, error, isSupported, start, stop } = useDictation({
-    transcribe,
+    transcribe: transcribe ?? backendNotDeployedTranscriber,
+    streamTranscribe: streamTranscribe ?? defaultStreamTranscribe,
+    onPartial: onPartialTranscribed,
     onTranscribed,
+    onError,
   });
 
   const isRecording = status === "recording";

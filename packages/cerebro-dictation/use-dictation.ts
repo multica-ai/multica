@@ -6,6 +6,7 @@ import type {
   DictationStatus,
   UseDictationOptions,
   UseDictationReturn,
+  StreamingTranscriberSession,
 } from "./types";
 
 /**
@@ -30,15 +31,18 @@ const DEFAULT_MAX_DURATION_MS = 60_000;
  * read `lastTranscript` (or use `onTranscribed`) to insert the result.
  *
  * The transcribe function is injected so this package stays free of HTTP
- * concerns. Slice 3 will pass an implementation that POSTs to
- * `/api/cerebro/dictation/transcribe`.
+ * concerns. Slice 3 can inject a streaming transcriber that talks to the
+ * WebSocket proxy while keeping the one-shot transcriber path for tests and
+ * fallback callers.
  */
 export function useDictation(options: UseDictationOptions): UseDictationReturn {
   const {
     transcribe,
+    streamTranscribe,
     mimeType,
     maxDurationMs = DEFAULT_MAX_DURATION_MS,
     onTranscribed,
+    onPartial,
     onError,
   } = options;
 
@@ -51,6 +55,8 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
   const chunksRef = useRef<Blob[]>([]);
   const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const streamingSessionRef = useRef<StreamingTranscriberSession | null>(null);
+  const streamingFinalRef = useRef<string | null>(null);
   const stopResolveRef = useRef<(() => void) | null>(null);
   const cancelledRef = useRef(false);
   // Forward reference so the max-duration timer in `start` can call the
@@ -61,14 +67,22 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
   // Refs for the latest callbacks so the start/stop closures don't capture
   // stale callers and force consumers to wrap them in useCallback.
   const transcribeRef = useRef(transcribe);
+  const streamTranscribeRef = useRef(streamTranscribe);
   const onTranscribedRef = useRef(onTranscribed);
+  const onPartialRef = useRef(onPartial);
   const onErrorRef = useRef(onError);
   useEffect(() => {
     transcribeRef.current = transcribe;
   }, [transcribe]);
   useEffect(() => {
+    streamTranscribeRef.current = streamTranscribe;
+  }, [streamTranscribe]);
+  useEffect(() => {
     onTranscribedRef.current = onTranscribed;
   }, [onTranscribed]);
+  useEffect(() => {
+    onPartialRef.current = onPartial;
+  }, [onPartial]);
   useEffect(() => {
     onErrorRef.current = onError;
   }, [onError]);
@@ -105,6 +119,8 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
       streamRef.current = null;
     }
     chunksRef.current = [];
+    streamingSessionRef.current = null;
+    streamingFinalRef.current = null;
     stopResolveRef.current = null;
   }, []);
 
@@ -149,6 +165,7 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     setLastTranscript(null);
     setStatus("requesting-permission");
     cancelledRef.current = false;
+    streamingFinalRef.current = null;
 
     let stream: MediaStream;
     try {
@@ -202,10 +219,40 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
       return;
     }
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const streamingSession = streamTranscribeRef.current?.({
+      mimeType: chosenMime || recorder.mimeType,
+      signal: controller.signal,
+      onPartial: (text) => {
+        onPartialRef.current?.(text);
+      },
+      onFinal: (text) => {
+        if (cancelledRef.current) return;
+        streamingFinalRef.current = text;
+        setLastTranscript(text);
+        setStatus("idle");
+        onTranscribedRef.current?.(text);
+      },
+      onError: (cause) => {
+        if (cancelledRef.current) return;
+        reportError({
+          kind: "streaming-failed",
+          message: cause.message,
+          cause,
+        });
+      },
+    });
+    streamingSessionRef.current = streamingSession ?? null;
+
     recorderRef.current = recorder;
     recorder.addEventListener("dataavailable", (event) => {
       if (event.data && event.data.size > 0) {
-        chunksRef.current.push(event.data);
+        if (streamingSessionRef.current) {
+          streamingSessionRef.current.sendAudio(event.data);
+        } else {
+          chunksRef.current.push(event.data);
+        }
       }
     });
     recorder.addEventListener("error", (event) => {
@@ -225,8 +272,9 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     });
 
     try {
-      recorder.start();
+      recorder.start(streamingSession ? 500 : undefined);
     } catch (cause) {
+      streamingSession?.cancel();
       teardown();
       reportError({
         kind: "recording-failed",
@@ -257,10 +305,12 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     }
 
     setStatus("transcribing");
+    const streamingSession = streamingSessionRef.current;
 
     await new Promise<void>((resolve) => {
       stopResolveRef.current = resolve;
       try {
+        recorder.requestData?.();
         recorder.stop();
       } catch {
         resolve();
@@ -269,6 +319,28 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
 
     if (cancelledRef.current) {
       teardown();
+      return;
+    }
+
+    if (streamingSession) {
+      streamingSession.endUtterance();
+      teardown();
+      try {
+        await streamingSession.finished;
+      } catch (cause) {
+        if (cancelledRef.current) return;
+        reportError({
+          kind: "streaming-failed",
+          message: cause instanceof Error ? cause.message : "Dictation stream failed.",
+          cause,
+        });
+        return;
+      } finally {
+        abortRef.current = null;
+      }
+      if (!streamingFinalRef.current && !cancelledRef.current) {
+        setStatus("idle");
+      }
       return;
     }
 
@@ -289,6 +361,9 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
+      if (!transcribeRef.current) {
+        throw new Error("Dictation transcriber is not configured.");
+      }
       const text = await transcribeRef.current(audio, controller.signal);
       if (cancelledRef.current) {
         return;
@@ -319,6 +394,7 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
   const cancel = useCallback(() => {
     cancelledRef.current = true;
     abortRef.current?.abort();
+    streamingSessionRef.current?.cancel();
     teardown();
     setStatus("idle");
   }, [teardown]);

@@ -125,6 +125,9 @@ interface ContentEditorRef {
   clearContent: () => void;
   focus: () => void;
   insertText: (text: string) => void; // CEREBRO-PATCH(content-editor-dictation-insert): expose plain text insertion for dictation.
+  replaceDictationPreview: (text: string) => void; // CEREBRO-PATCH(content-editor-dictation-streaming): replace live dictation partial text in-place.
+  commitDictationPreview: (text: string) => void; // CEREBRO-PATCH(content-editor-dictation-streaming): finalize live dictation preview text.
+  clearDictationPreview: () => void; // CEREBRO-PATCH(content-editor-dictation-streaming): remove an abandoned dictation preview.
   /** Drop focus from the editor — used by chat after send so the caret
    *  stops competing with the StatusPill / streaming reply for the user's
    *  attention. */
@@ -165,6 +168,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onBlurRef = useRef(onBlur);
     const onUploadFileRef = useRef(onUploadFile);
     const lastEmittedRef = useRef<string | null>(null);
+    const dictationPreviewRangeRef = useRef<{ from: number; to: number } | null>(null);
 
     // Current workspace slug kept in a ref so the click handler always sees the
     // latest value without recreating the editor. Used by openLink to prefix
@@ -249,6 +253,29 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       };
     }, []);
 
+    const replaceDictationPreviewText = (text: string) => {
+      if (!editor) return;
+
+      const existing = dictationPreviewRangeRef.current;
+      const docEnd = editor.state.doc.content.size;
+      const from = existing && existing.from <= existing.to && existing.to <= docEnd
+        ? existing.from
+        : editor.state.selection.from;
+      const to = existing && existing.from <= existing.to && existing.to <= docEnd
+        ? existing.to
+        : from;
+
+      editor.commands.focus();
+      const tr = editor.state.tr.insertText(text, from, to);
+      editor.view.dispatch(tr);
+
+      if (text) {
+        dictationPreviewRangeRef.current = { from, to: from + text.length };
+      } else {
+        dictationPreviewRangeRef.current = null;
+      }
+    };
+
     // CEREBRO-PATCH(input-autofocus): JEH-756 — focus after the editor exists,
     // then wait briefly for closing dialogs/dropdowns to finish focus-restore.
     // The guard is checked at execution time, not mount time: the New Message
@@ -289,13 +316,31 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       getMarkdown: () => stripBlobUrls(editor?.getMarkdown() ?? ""),
       clearContent: () => {
         editor?.commands.clearContent();
+        dictationPreviewRangeRef.current = null;
       },
       focus: () => {
         editor?.commands.focus();
       },
       insertText: (text: string) => {
         if (!editor || !text) return;
+        dictationPreviewRangeRef.current = null;
         editor.chain().focus().insertContent(text).run();
+      },
+      replaceDictationPreview: (text: string) => {
+        replaceDictationPreviewText(text);
+      },
+      commitDictationPreview: (text: string) => {
+        if (dictationPreviewRangeRef.current) {
+          replaceDictationPreviewText(text);
+          dictationPreviewRangeRef.current = null;
+          return;
+        }
+        if (!editor || !text) return;
+        editor.chain().focus().insertContent(text).run();
+      },
+      clearDictationPreview: () => {
+        if (!dictationPreviewRangeRef.current) return;
+        replaceDictationPreviewText("");
       },
       blur: () => {
         editor?.commands.blur();
