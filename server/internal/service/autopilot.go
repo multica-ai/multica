@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -118,14 +119,21 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 
 	qtx := s.Queries.WithTx(tx)
 
-	// Get next issue number.
+	title := s.interpolateTemplate(ap)
+	description := s.buildIssueDescription(ap)
+
+	duplicate, foundDuplicate, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, ap.WorkspaceID, pgtype.UUID{}, pgtype.UUID{}, title, false)
+	if err != nil {
+		return fmt.Errorf("check duplicate issue: %w", err)
+	}
+	if foundDuplicate {
+		return issueguard.NewActiveDuplicateError(duplicate, s.getIssuePrefix(ap.WorkspaceID))
+	}
+
 	issueNumber, err := qtx.IncrementIssueCounter(ctx, ap.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("increment issue counter: %w", err)
 	}
-
-	title := s.interpolateTemplate(ap)
-	description := s.buildIssueDescription(ap)
 
 	issue, err := qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 		WorkspaceID:   ap.WorkspaceID,
