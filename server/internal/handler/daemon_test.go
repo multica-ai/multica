@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -2910,5 +2911,88 @@ func TestGetTaskGCCheck(t *testing.T) {
 	}
 	if resp.CompletedAt == "" {
 		t.Fatal("expected completed_at to be set for completed task")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Membership Cache Integration Tests
+// ---------------------------------------------------------------------------
+
+func TestRequireDaemonWorkspaceAccess_CacheHit(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	rdb := newRedisTestClient(t)
+	origCache := testHandler.MembershipCache
+	testHandler.MembershipCache = auth.NewMembershipCache(rdb)
+	t.Cleanup(func() { testHandler.MembershipCache = origCache })
+
+	ctx := context.Background()
+	testHandler.MembershipCache.Set(ctx, testUserID, testWorkspaceID)
+
+	// Request with user context (PAT/JWT path, not daemon token).
+	req := newRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil)
+	w := httptest.NewRecorder()
+
+	// Should succeed via cache hit without needing a full handler call.
+	ok := testHandler.requireDaemonWorkspaceAccess(w, req, testWorkspaceID)
+	if !ok {
+		t.Fatalf("expected access granted via cache hit, got denied (status %d)", w.Code)
+	}
+}
+
+func TestRequireDaemonWorkspaceAccess_CacheMissBackfills(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	rdb := newRedisTestClient(t)
+	origCache := testHandler.MembershipCache
+	testHandler.MembershipCache = auth.NewMembershipCache(rdb)
+	t.Cleanup(func() { testHandler.MembershipCache = origCache })
+
+	ctx := context.Background()
+
+	// Cache is empty — verify miss.
+	if testHandler.MembershipCache.Get(ctx, testUserID, testWorkspaceID) {
+		t.Fatal("expected cache miss before request")
+	}
+
+	// Make a request that triggers DB lookup.
+	req := newRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil)
+	w := httptest.NewRecorder()
+	ok := testHandler.requireDaemonWorkspaceAccess(w, req, testWorkspaceID)
+	if !ok {
+		t.Fatalf("expected access granted via DB lookup, got denied (status %d)", w.Code)
+	}
+
+	// Cache should now be backfilled.
+	if !testHandler.MembershipCache.Get(ctx, testUserID, testWorkspaceID) {
+		t.Fatal("expected cache to be backfilled after DB hit")
+	}
+}
+
+func TestMembershipCache_InvalidatedOnMemberRemoval(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	rdb := newRedisTestClient(t)
+	origCache := testHandler.MembershipCache
+	testHandler.MembershipCache = auth.NewMembershipCache(rdb)
+	t.Cleanup(func() { testHandler.MembershipCache = origCache })
+
+	ctx := context.Background()
+
+	// Pre-populate cache.
+	testHandler.MembershipCache.Set(ctx, testUserID, testWorkspaceID)
+	if !testHandler.MembershipCache.Get(ctx, testUserID, testWorkspaceID) {
+		t.Fatal("expected cache hit after set")
+	}
+
+	// Directly call Invalidate (simulates what DeleteMember/LeaveWorkspace do).
+	testHandler.MembershipCache.Invalidate(ctx, testUserID, testWorkspaceID)
+
+	// Cache entry should be gone.
+	if testHandler.MembershipCache.Get(ctx, testUserID, testWorkspaceID) {
+		t.Fatal("expected cache miss after invalidation")
 	}
 }

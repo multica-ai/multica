@@ -48,8 +48,18 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 		return true
 	}
 
-	// PAT/JWT fallback: verify user is a member of the workspace.
+	// PAT/JWT fallback: check membership cache before hitting DB.
+	userID := requestUserID(r)
+	if userID != "" {
+		if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
+			return true
+		}
+	}
+
 	_, ok := h.requireWorkspaceMember(w, r, workspaceID, "not found")
+	if ok && userID != "" {
+		h.MembershipCache.Set(r.Context(), userID, workspaceID)
+	}
 	return ok
 }
 
@@ -125,8 +135,15 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 	if userID == "" {
 		return false
 	}
+	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
+		return true
+	}
 	_, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
-	return err == nil
+	if err != nil {
+		return false
+	}
+	h.MembershipCache.Set(r.Context(), userID, workspaceID)
+	return true
 }
 
 // ---------------------------------------------------------------------------
