@@ -4,7 +4,7 @@ import {
   FILE_CARD_URL_PATTERN,
   isAllowedFileCardHref,
   preprocessFileCards,
-} from "./file-cards";
+} from "@multica/ui/markdown";
 
 describe("isAllowedFileCardHref", () => {
   it.each([
