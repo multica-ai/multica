@@ -4,8 +4,10 @@ import "encoding/json"
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
-	Path  string // path to CLI binary
-	Model string // model override (optional)
+	Path    string // path to CLI binary, or remote runtime URL
+	Model   string // model override (optional)
+	Token   string // remote runtime token (optional)
+	Profile string // remote runtime profile (optional)
 }
 
 // Runtime represents a registered daemon runtime.

@@ -27,6 +27,17 @@ func TestNewReturnsCodexBackend(t *testing.T) {
 	}
 }
 
+func TestNewReturnsAoneCloudCLIBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New(AoneCloudCLIProvider, Config{ExecutablePath: "http://127.0.0.1:3001"})
+	if err != nil {
+		t.Fatalf("New(aone_cloud_cli) error: %v", err)
+	}
+	if _, ok := b.(*aoneCloudCLIBackend); !ok {
+		t.Fatalf("expected *aoneCloudCLIBackend, got %T", b)
+	}
+}
+
 func TestNewReturnsCopilotBackend(t *testing.T) {
 	t.Parallel()
 	b, err := New("copilot", Config{ExecutablePath: "/nonexistent/copilot"})
@@ -71,6 +82,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// runtime the daemon actually spawns. If a new backend is added, add an
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
+		AoneCloudCLIProvider,
 		"claude", "codex", "copilot", "cursor", "gemini",
 		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
 	}
