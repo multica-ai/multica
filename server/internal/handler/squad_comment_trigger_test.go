@@ -11,10 +11,11 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// TestCommentMentionsAnyAgent covers the pure helper that drives the new
-// "skip leader on @agent" behavior. Kept as a unit test so it runs without
-// a database connection.
-func TestCommentMentionsAnyAgent(t *testing.T) {
+// TestCommentMentionsAnyone covers the pure helper that drives the
+// "skip leader on @<anyone>" behavior. Routing-style mentions
+// (agent/member/squad/all) count; issue cross-references do not. Kept as a
+// unit test so it runs without a database connection.
+func TestCommentMentionsAnyone(t *testing.T) {
 	cases := []struct {
 		name    string
 		content string
@@ -24,16 +25,18 @@ func TestCommentMentionsAnyAgent(t *testing.T) {
 		{name: "plain text", content: "please take a look", want: false},
 		{name: "literal at sign only", content: "ping @alice", want: false},
 		{name: "agent mention", content: "[@A](mention://agent/11111111-1111-1111-1111-111111111111) handle this", want: true},
-		{name: "member mention only", content: "[@Bob](mention://member/22222222-2222-2222-2222-222222222222)", want: false},
+		{name: "member mention", content: "[@Bob](mention://member/22222222-2222-2222-2222-222222222222)", want: true},
+		{name: "squad mention", content: "[@Squad](mention://squad/44444444-4444-4444-4444-444444444444)", want: true},
+		{name: "mention all", content: "[@all](mention://all/all)", want: true},
 		{name: "issue mention only", content: "see [MUL-1](mention://issue/33333333-3333-3333-3333-333333333333)", want: false},
-		{name: "squad mention only", content: "[@Squad](mention://squad/44444444-4444-4444-4444-444444444444)", want: false},
-		{name: "mention all", content: "[@all](mention://all/all)", want: false},
+		{name: "issue + plain text", content: "see [MUL-1](mention://issue/33333333-3333-3333-3333-333333333333) for context", want: false},
 		{name: "agent plus member", content: "[@A](mention://agent/11111111-1111-1111-1111-111111111111) cc [@B](mention://member/22222222-2222-2222-2222-222222222222)", want: true},
+		{name: "issue plus member", content: "blocks [MUL-1](mention://issue/33333333-3333-3333-3333-333333333333) — [@Bob](mention://member/22222222-2222-2222-2222-222222222222)", want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := commentMentionsAnyAgent(tc.content); got != tc.want {
-				t.Fatalf("commentMentionsAnyAgent(%q) = %v, want %v", tc.content, got, tc.want)
+			if got := commentMentionsAnyone(tc.content); got != tc.want {
+				t.Fatalf("commentMentionsAnyone(%q) = %v, want %v", tc.content, got, tc.want)
 			}
 		})
 	}
@@ -102,12 +105,12 @@ func newSquadCommentTriggerFixture(t *testing.T) squadCommentTriggerFixture {
 	}
 }
 
-// TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyAgent
-// encodes Bohan's rule (MUL-2170): a human comment that explicitly @mentions
-// any agent — whether the leader, another squad member, or an unrelated
-// workspace agent — must not also wake the leader. The mentioned agent owns
-// the next step, so the leader stays asleep to cut queue noise.
-func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyAgent(t *testing.T) {
+// TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone
+// encodes Bohan's rule (MUL-2170): a member comment that explicitly @mentions
+// anyone — agent, member, squad, or @all — must NOT wake the squad leader.
+// Issue cross-references are not routing and do not suppress the leader.
+// Agent-authored comments are exempt: the leader still coordinates threads.
+func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -128,15 +131,23 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyAgent(t *te
 			authorType:  "member",
 			authorID:    testUserID,
 			want:        true,
-			description: "no @agent in body → leader must coordinate as today",
+			description: "no @ in body → leader must coordinate as today",
 		},
 		{
-			name:        "member member-only mention still triggers leader",
-			content:     "[@" + testUserID[:8] + "](mention://member/" + testUserID + ") please weigh in",
+			name:        "member issue cross-reference only triggers leader",
+			content:     "blocked by [MUL-1](mention://issue/" + testUserID + ")",
 			authorType:  "member",
 			authorID:    testUserID,
 			want:        true,
-			description: "@member is not @agent — leader still owns routing",
+			description: "issue mentions are not routing — leader still owns dispatch",
+		},
+		{
+			name:        "member mentions another member skips leader",
+			content:     "[@self](mention://member/" + testUserID + ") please weigh in",
+			authorType:  "member",
+			authorID:    testUserID,
+			want:        false,
+			description: "user routed at a human — leader stays out (extended rule)",
 		},
 		{
 			name:        "member mentions non-leader agent skips leader",
@@ -144,7 +155,7 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyAgent(t *te
 			authorType:  "member",
 			authorID:    testUserID,
 			want:        false,
-			description: "user routed directly to an agent → leader stays asleep",
+			description: "user routed at an agent — leader stays out",
 		},
 		{
 			name:        "member mentions leader skips leader on comment path",
@@ -153,6 +164,22 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyAgent(t *te
 			authorID:    testUserID,
 			want:        false,
 			description: "even @leader is dispatched via the mention path; comment path must not double-enqueue",
+		},
+		{
+			name:        "member mention all skips leader",
+			content:     "[@all](mention://all/all) heads up",
+			authorType:  "member",
+			authorID:    testUserID,
+			want:        false,
+			description: "@all is a broadcast — leader does not need to wake to evaluate routing",
+		},
+		{
+			name:        "member mentions a squad skips leader",
+			content:     "handing to [@Other Squad](mention://squad/" + fx.SquadID + ")",
+			authorType:  "member",
+			authorID:    testUserID,
+			want:        false,
+			description: "@squad routes the issue to that squad's leader — current leader stays out",
 		},
 		{
 			name:        "agent comment with @agent still triggers leader",

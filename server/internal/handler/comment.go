@@ -274,8 +274,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Squad trigger: if the issue is assigned to a squad, trigger the squad leader.
-	// Skip when the comment author is a squad member (prevent internal loops),
-	// or when a member explicitly @mentions any agent (that agent handles it).
+	// Skip when the comment author is the leader (prevent internal loops), or
+	// when a member explicitly @mentions anyone (agent/member/squad/all) — that
+	// counts as deliberate routing and the leader stays out.
 	if h.shouldEnqueueSquadLeaderOnComment(r.Context(), issue, comment.Content, authorType, authorID) {
 		h.enqueueSquadLeaderTask(r.Context(), issue, comment.ID, authorType, authorID)
 	}

@@ -585,10 +585,12 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 // shouldEnqueueSquadLeaderOnComment returns true if the issue is assigned to a
 // squad and the comment author is NOT a member of that squad (anti-loop).
 // commentContent is the new comment's markdown body; when a member explicitly
-// @mentions any agent in that body, the leader is skipped so the @mentioned
-// agent handles the request directly. Agent-authored comments always go through
-// the leader (subject to the leader self-trigger guard) so agent updates still
-// drive coordination.
+// @mentions anyone (agent, member, squad, or @all) in that body, the leader
+// is skipped — the @ marks deliberate routing and the leader would otherwise
+// just observe and record no_action. Issue cross-reference mentions
+// (mention://issue/...) are NOT a routing signal and do not suppress the
+// leader. Agent-authored comments always go through the leader (subject to
+// the leader self-trigger guard) so agent updates still drive coordination.
 func (h *Handler) shouldEnqueueSquadLeaderOnComment(ctx context.Context, issue db.Issue, commentContent, authorType, authorID string) bool {
 	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
 		return false
@@ -610,11 +612,12 @@ func (h *Handler) shouldEnqueueSquadLeaderOnComment(ctx context.Context, issue d
 		return false
 	}
 
-	// Member explicitly @mentioned an agent → that agent owns the next step,
-	// skip the leader. Agent-authored comments are intentionally exempt: when
-	// an agent posts a result that @mentions another agent, the leader still
-	// needs to coordinate the thread.
-	if authorType == "member" && commentMentionsAnyAgent(commentContent) {
+	// Member explicitly @mentioned someone → that someone owns the next step,
+	// skip the leader. Covers @agent / @member / @squad / @all; issue
+	// cross-references do NOT count as routing. Agent-authored comments are
+	// intentionally exempt: when an agent posts a result that @mentions
+	// another agent, the leader still needs to coordinate the thread.
+	if authorType == "member" && commentMentionsAnyone(commentContent) {
 		return false
 	}
 
@@ -627,12 +630,15 @@ func (h *Handler) shouldEnqueueSquadLeaderOnComment(ctx context.Context, issue d
 	return true
 }
 
-// commentMentionsAnyAgent returns true when the comment body contains at least
-// one [@Name](mention://agent/<id>) link. Only the current comment is
-// inspected — parent (thread root) mentions are NOT inherited here.
-func commentMentionsAnyAgent(content string) bool {
+// commentMentionsAnyone returns true when the comment body contains at least
+// one routing-style mention — [@Name](mention://agent|member|squad|all/<id>).
+// Issue cross-references (mention://issue/...) are ignored because they are
+// not directed at a participant. Only the current comment is inspected —
+// parent (thread root) mentions are NOT inherited here.
+func commentMentionsAnyone(content string) bool {
 	for _, m := range util.ParseMentions(content) {
-		if m.Type == "agent" {
+		switch m.Type {
+		case "agent", "member", "squad", "all":
 			return true
 		}
 	}
