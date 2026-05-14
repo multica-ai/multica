@@ -1,13 +1,6 @@
 package inbound_test
 
-// Red-phase tests for the inbound pipeline orchestrator.
-//
-// These tests pin the public contract of inbound.Pipeline before any
-// production code is written. They will fail to compile until the Green
-// phase introduces the symbols (inbound.Step, inbound.Decision,
-// inbound.Pipeline, inbound.NewPipeline, inbound.Outcome, etc.).
-//
-// Source of truth: STA-8 §"5 步 Pipeline" + QA §12 row T6 (TC-inb-1).
+// Tests for the inbound pipeline orchestrator.
 
 import (
 	"context"
@@ -49,7 +42,7 @@ func (s *spyStep) Run(_ context.Context, evt port.InboundEvent) (port.InboundEve
 }
 
 // ---------------------------------------------------------------------------
-// TC-inb-1 (a): Continue all the way → all 5 steps run once, in order.
+// Continue all the way -> all steps run once, in order.
 // ---------------------------------------------------------------------------
 
 func TestPipeline_RunsAllStepsInOrder_WhenEachReturnsContinue(t *testing.T) {
@@ -61,7 +54,6 @@ func TestPipeline_RunsAllStepsInOrder_WhenEachReturnsContinue(t *testing.T) {
 		newSpy("identity-bind", inbound.DecisionContinue, &log),
 		newSpy("intent-recog", inbound.DecisionContinue, &log),
 		newSpy("dispatch", inbound.DecisionContinue, &log),
-		newSpy("reply", inbound.DecisionContinue, &log),
 	}
 
 	p := inbound.NewPipeline(steps...)
@@ -74,7 +66,7 @@ func TestPipeline_RunsAllStepsInOrder_WhenEachReturnsContinue(t *testing.T) {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
 
-	wantOrder := []string{"normalize", "identity-bind", "intent-recog", "dispatch", "reply"}
+	wantOrder := []string{"normalize", "identity-bind", "intent-recog", "dispatch"}
 	if !equalStrings(log, wantOrder) {
 		t.Fatalf("call order = %v, want %v", log, wantOrder)
 	}
@@ -84,8 +76,8 @@ func TestPipeline_RunsAllStepsInOrder_WhenEachReturnsContinue(t *testing.T) {
 			t.Errorf("step[%d] %q calls = %d, want 1", i, s.Name(), got)
 		}
 	}
-	if outcome.Terminal != "reply" {
-		t.Errorf("outcome.Terminal = %q, want %q", outcome.Terminal, "reply")
+	if outcome.Terminal != "dispatch" {
+		t.Errorf("outcome.Terminal = %q, want %q", outcome.Terminal, "dispatch")
 	}
 	if outcome.Decision != inbound.DecisionContinue {
 		t.Errorf("outcome.Decision = %v, want Continue", outcome.Decision)
@@ -93,10 +85,8 @@ func TestPipeline_RunsAllStepsInOrder_WhenEachReturnsContinue(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TC-inb-1 (b): Skip short-circuit. Step 2 returns Skip → steps 3..5 must
+// Skip short-circuit. Step 2 returns Skip -> later steps must
 // have zero invocations and the pipeline returns cleanly.
-//
-// QA §12 T6 phrasing: "其中一步返回 Skip → 后续步骤 mock 调用次数 = 0".
 // ---------------------------------------------------------------------------
 
 func TestPipeline_SkipShortCircuitsSubsequentSteps(t *testing.T) {
@@ -107,15 +97,14 @@ func TestPipeline_SkipShortCircuitsSubsequentSteps(t *testing.T) {
 	step2 := newSpy("identity-bind", inbound.DecisionSkip, &log) // <-- Skip here
 	step3 := newSpy("intent-recog", inbound.DecisionContinue, &log)
 	step4 := newSpy("dispatch", inbound.DecisionContinue, &log)
-	step5 := newSpy("reply", inbound.DecisionContinue, &log)
 
-	p := inbound.NewPipeline(step1, step2, step3, step4, step5)
+	p := inbound.NewPipeline(step1, step2, step3, step4)
 	outcome, err := p.Run(context.Background(), port.InboundEvent{EventID: "evt-skip"})
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
 
-	// Steps 1 and 2 ran; 3-5 must not have been called.
+	// Steps 1 and 2 ran; later steps must not have been called.
 	if step1.calls != 1 {
 		t.Errorf("step1 calls = %d, want 1", step1.calls)
 	}
@@ -128,10 +117,6 @@ func TestPipeline_SkipShortCircuitsSubsequentSteps(t *testing.T) {
 	if step4.calls != 0 {
 		t.Errorf("step4 (after Skip) calls = %d, want 0", step4.calls)
 	}
-	if step5.calls != 0 {
-		t.Errorf("step5 (after Skip) calls = %d, want 0", step5.calls)
-	}
-
 	if outcome.Terminal != "identity-bind" {
 		t.Errorf("outcome.Terminal = %q, want %q", outcome.Terminal, "identity-bind")
 	}

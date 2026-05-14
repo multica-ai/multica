@@ -247,11 +247,9 @@ func TestPipeline_SlashDoneEndToEnd(t *testing.T) {
 	p := inbound.NewPipeline(
 		inbound.NewNormalizeStep(),
 		inbound.NewDedupStep(store),
-		inbound.NewIdentityBindStep(),
 		inbound.NewSlashStep(inbound.SlashConfig{}),
 		ruleIntentStep{},
 		inbound.NewDispatchStep(cfg),
-		inbound.NewReplyStep(),
 	)
 
 	out, err := p.Run(context.Background(), port.InboundEvent{
@@ -265,7 +263,7 @@ func TestPipeline_SlashDoneEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Terminal != "reply" {
+	if out.Terminal != "dispatch" {
 		t.Fatalf("terminal = %q", out.Terminal)
 	}
 	if len(issueSvc.setStatus) != 1 {
@@ -288,14 +286,12 @@ func TestPipeline_SlashHelp_StopsBeforeIntent(t *testing.T) {
 	p := inbound.NewPipeline(
 		inbound.NewNormalizeStep(),
 		inbound.NewDedupStep(store),
-		inbound.NewIdentityBindStep(),
 		inbound.NewSlashStep(inbound.SlashConfig{
 			ReplySink:   cfg.ReplySink,
 			SendReplies: true,
 		}),
 		ruleIntentStep{},
 		inbound.NewDispatchStep(cfg),
-		inbound.NewReplyStep(),
 	)
 	out, err := p.Run(context.Background(), port.InboundEvent{
 		ChannelName: "feishu",

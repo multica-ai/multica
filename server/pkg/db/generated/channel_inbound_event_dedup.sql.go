@@ -11,6 +11,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cleanupOldInboundEventDedup = `-- name: CleanupOldInboundEventDedup :exec
+DELETE FROM channel_inbound_event_dedup
+WHERE processed_at < now() - interval '7 days'
+`
+
+func (q *Queries) CleanupOldInboundEventDedup(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, cleanupOldInboundEventDedup)
+	return err
+}
+
 const tryRecordInboundEvent = `-- name: TryRecordInboundEvent :one
 INSERT INTO channel_inbound_event_dedup (provider, connection_id, event_id)
 VALUES ($1, $2, $3)

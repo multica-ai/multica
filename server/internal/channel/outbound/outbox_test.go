@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/channel/port"
 )
 
 type fakeNotificationStore struct {
@@ -54,6 +55,22 @@ func (f *fakeNotificationStore) MarkDead(_ context.Context, ids []pgtype.UUID, _
 }
 
 func (f *fakeNotificationStore) Cleanup(context.Context) error { return nil }
+
+type mockRetrySender struct {
+	err   error
+	calls []mockRetrySendCall
+}
+
+type mockRetrySendCall struct {
+	ConnectionID string
+	Target       port.OutboundTarget
+	Payload      RetryPayload
+}
+
+func (m *mockRetrySender) SendCard(_ context.Context, connectionID string, target port.OutboundTarget, card RetryPayload) error {
+	m.calls = append(m.calls, mockRetrySendCall{ConnectionID: connectionID, Target: target, Payload: card})
+	return m.err
+}
 
 func TestOutboxWorker_MergesDueNotificationsAndMarksSent(t *testing.T) {
 	t.Parallel()

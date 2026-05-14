@@ -9,9 +9,8 @@ package main
 // same testPool / fakeChannel infrastructure.
 //
 // Per the STA-46 Phase B directive: helpers used only by the M2
-// integration tests (production-shaped DispatchConfig wiring, the
-// in-test ChatBindingLookup / UserInfoResolver implementations, and the
-// outbound CardSender double for the 60s aggregator window) are kept
+// integration tests (production-shaped DispatchConfig wiring and the
+// in-test ChatBindingLookup / UserInfoResolver implementations) are kept
 // out of channel_integration_helpers_test.go so the M1 acceptance
 // helpers stay reviewable in isolation.
 
@@ -19,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -30,7 +28,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/channel/facade"
 	"github.com/multica-ai/multica/server/internal/channel/gateway"
 	"github.com/multica-ai/multica/server/internal/channel/inbound"
-	"github.com/multica-ai/multica/server/internal/channel/outbound"
 	"github.com/multica-ai/multica/server/internal/channel/port"
 )
 
@@ -271,71 +268,6 @@ func (noopCommentService) AddComment(_ context.Context, _ facade.AddCommentReq) 
 	return facade.Comment{}, errors.New("noopCommentService: not implemented for M2 tests")
 }
 
-// ---------------------------------------------------------------------------
-// recordingCardSender — outbound.CardSender double used by TC-int-5 to
-// observe what the 60s aggregator flushes after the window expires.
-// Concurrency-safe so a flush goroutine running off time.AfterFunc can
-// write while the test goroutine reads.
-// ---------------------------------------------------------------------------
-
-type recordingCardSender struct {
-	mu    sync.Mutex
-	calls []recordedCard
-	err   error
-}
-
-type recordedCard struct {
-	ExternalUserID string
-	Card           port.OutboundCardMessage
-}
-
-func newRecordingCardSender() *recordingCardSender {
-	return &recordingCardSender{}
-}
-
-func (s *recordingCardSender) SendCard(externalUserID string, card port.OutboundCardMessage, _ outbound.AggregationMeta) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.calls = append(s.calls, recordedCard{ExternalUserID: externalUserID, Card: card})
-	return s.err
-}
-
-func (s *recordingCardSender) snapshot() []recordedCard {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]recordedCard, len(s.calls))
-	copy(out, s.calls)
-	return out
-}
-
-// ---------------------------------------------------------------------------
-// failingCardSender — outbound.CardSender that always returns an error.
-// Used by TC-risk-5 to demonstrate that an outbound failure does not
-// propagate back to a Web write path (the aggregator counts the drop
-// and continues).
-// ---------------------------------------------------------------------------
-
-type failingCardSender struct {
-	mu    sync.Mutex
-	calls int
-}
-
-func newFailingCardSender() *failingCardSender { return &failingCardSender{} }
-
-func (s *failingCardSender) SendCard(_ string, _ port.OutboundCardMessage, _ outbound.AggregationMeta) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.calls++
-	return errors.New("failingCardSender: simulated outbound failure")
-}
-
-func (s *failingCardSender) callCount() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.calls
-}
-
-// ---------------------------------------------------------------------------
 // staticIntentStep — test-time intent-recog step. Production (T9/T10)
 // has rule + chat resolvers; the M2 integration tests do not exercise
 // classification accuracy (that lives in TC-risk-1~3 in STA-65 and the
@@ -432,15 +364,6 @@ func newProductionDispatchStep(
 		ProjectValidator: inbound.NewDBProjectWorkspaceValidator(pool),
 	})
 }
-
-// ---------------------------------------------------------------------------
-// Compile-time interface conformance — drift in CardSender surfaces
-// here, not at the (aggregator, sender) call site inside individual
-// tests.
-// ---------------------------------------------------------------------------
-
-var _ outbound.CardSender = (*recordingCardSender)(nil)
-var _ outbound.CardSender = (*failingCardSender)(nil)
 
 // uuidFromString parses a canonical UUID string (the form pgtype.UUID
 // produces when scanned into a Go `string`) into pgtype.UUID. Tests

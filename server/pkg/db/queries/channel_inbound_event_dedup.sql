@@ -18,3 +18,7 @@ INSERT INTO channel_inbound_event_dedup (provider, connection_id, event_id)
 VALUES ($1, $2, $3)
 ON CONFLICT (connection_id, event_id) DO NOTHING
 RETURNING processed_at;
+
+-- name: CleanupOldInboundEventDedup :exec
+DELETE FROM channel_inbound_event_dedup
+WHERE processed_at < now() - interval '7 days';

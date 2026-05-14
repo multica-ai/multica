@@ -19,6 +19,7 @@ RETURNING *;
 SELECT * FROM channel_bind_token
 WHERE token_hash = $1;
 
--- name: DeleteExpiredChannelBindTokens :exec
+-- name: CleanupExpiredBindTokens :exec
 DELETE FROM channel_bind_token
-WHERE expires_at < now() - interval '1 day';
+WHERE (consumed_at IS NOT NULL AND consumed_at < now() - interval '1 day')
+   OR (consumed_at IS NULL AND expires_at < now() - interval '1 day');

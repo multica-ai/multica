@@ -61,19 +61,19 @@ func requirePool(t *testing.T) {
 //
 // Scenario (PRD AC3.1–3.4, TestCase §10 TC-int-1):
 //
-//   1. A new external user (open_id "ou_int1_alice") @-mentions the bot in
-//      a *bound* group chat. Identity-bind misses → it issues a binding
-//      token, sends the one-shot link via the registered fake channel,
-//      and returns Skip so the rest of the pipeline does not fire.
-//   2. The user "clicks" the link — simulated here by calling
-//      binding.TokenConsumer.Consume with the plaintext we captured from
-//      the outbound Send call, then writing the resulting
-//      channel_user_binding row exactly the way the real M2 link-handler
-//      will (provider, external_user_id, user_id).
-//   3. The same user @-mentions the bot a second time. Identity-bind now
-//      hits, populates evt.SenderID with the Multica user_id, and the
-//      pipeline reaches the dispatch step. We assert the dispatch step
-//      ran (Outcome.Terminal == "dispatch") instead of short-circuiting.
+//  1. A new external user (open_id "ou_int1_alice") @-mentions the bot in
+//     a *bound* group chat. Identity-bind misses → it issues a binding
+//     token, sends the one-shot link via the registered fake channel,
+//     and returns Skip so the rest of the pipeline does not fire.
+//  2. The user "clicks" the link — simulated here by calling
+//     binding.TokenConsumer.Consume with the plaintext we captured from
+//     the outbound Send call, then writing the resulting
+//     channel_user_binding row exactly the way the real M2 link-handler
+//     will (provider, external_user_id, user_id).
+//  3. The same user @-mentions the bot a second time. Identity-bind now
+//     hits, populates evt.SenderID with the Multica user_id, and the
+//     pipeline reaches the dispatch step. We assert the dispatch step
+//     ran (Outcome.Terminal == "dispatch") instead of short-circuiting.
 //
 // PRD ACs covered:
 //
@@ -81,7 +81,7 @@ func requirePool(t *testing.T) {
 //   - AC3.2 (link is one-shot)
 //   - AC3.3 (binding writes channel_user_binding)
 //   - AC3.4 (link expires after 10 minutes — inherited from
-//           binding.DefaultTokenTTL; not re-asserted here)
+//     binding.DefaultTokenTTL; not re-asserted here)
 func TestChannelIntegration_TC_int_1_BindingFlow_EndToEnd(t *testing.T) {
 	requirePool(t)
 
@@ -317,13 +317,13 @@ func TestChannelIntegration_TC_int_2_GroupCreatesIssue(t *testing.T) {
 //
 // Scenario (PRD AC4.1, AC7.x, TestCase §10 TC-int-3):
 //
-//   1. Create a fresh, dedicated workspace (so we don't blow away the
-//      shared testWorkspaceID used by other tests). Bind a chat to it.
-//   2. DELETE the workspace. ON DELETE CASCADE on channel_chat_binding
-//      means the binding row goes away atomically.
-//   3. Send a group message addressed to the now-orphan chat. The
-//      dispatch step must classify the chat as unbound and reply with
-//      the WS_NOT_BOUND template; no issue rows must be created.
+//  1. Create a fresh, dedicated workspace (so we don't blow away the
+//     shared testWorkspaceID used by other tests). Bind a chat to it.
+//  2. DELETE the workspace. ON DELETE CASCADE on channel_chat_binding
+//     means the binding row goes away atomically.
+//  3. Send a group message addressed to the now-orphan chat. The
+//     dispatch step must classify the chat as unbound and reply with
+//     the WS_NOT_BOUND template; no issue rows must be created.
 func TestChannelIntegration_TC_int_3_UnbindCascadeAndStopResponse(t *testing.T) {
 	requirePool(t)
 
@@ -507,7 +507,7 @@ func TestChannelIntegration_TC_int_4_StrangerCannotDispatch(t *testing.T) {
 	}
 }
 
-// recordingStep is a dispatch placeholder used by tests that want to
+// recordingStep is a dispatch test double used by tests that want to
 // observe whether the pipeline reached the dispatch slot. It records
 // each event it sees and always returns Continue so the pipeline keeps
 // rolling (subsequent steps, if any, still run). It is concurrency-safe

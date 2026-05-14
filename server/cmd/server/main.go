@@ -301,8 +301,6 @@ func main() {
 		ActionTaskTimeout:      envDuration("CHANNEL_ACTION_TASK_TIMEOUT", defaultChannelActionTaskTimeout),
 		ClarificationTimeout:   envDuration("CHANNEL_CLARIFICATION_TIMEOUT", defaultChannelClarificationTimeout),
 		ProcessingLease:        envDuration("CHANNEL_INBOUND_PROCESSING_LEASE", defaultChannelInboundProcessingLease),
-		RetryWorkerEnabled:     os.Getenv("CHANNEL_RETRY_WORKER_ENABLED") != "false",
-		NotificationOutbox:     true,
 		OutboundCleanupEnabled: true,
 	})
 	analyticsClient := analytics.NewFromEnv()

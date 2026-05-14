@@ -79,11 +79,6 @@ type Observer interface {
 // InboundEvent. The list is captured at construction time and is
 // immutable thereafter; Pipeline is therefore safe for concurrent use
 // as long as every Step it holds is itself safe for concurrent use.
-//
-// The intent-recog and dispatch placeholders shipped in M1 (T6) are
-// drop-in replaceable in T9–T11 by registering different Step
-// implementations against the same constructor — the orchestration
-// here does not need to change when intent recognition lands.
 type Pipeline struct {
 	steps    []Step
 	observer Observer
@@ -126,9 +121,7 @@ func (p *Pipeline) SetObserver(observer Observer) {
 //
 // `evt` is rebound on each iteration so a Step can mutate the event
 // in-flight (e.g. identity-bind enriching SenderID with a Multica user
-// id, once that step grows real behaviour in T8); the rebinding is
-// the entire mechanism by which downstream Steps see upstream
-// modifications.
+// id); the rebinding is how downstream Steps see upstream modifications.
 func (p *Pipeline) Run(ctx context.Context, evt port.InboundEvent) (Outcome, error) {
 	_, outcome, err := p.RunEvent(ctx, evt)
 	return outcome, err

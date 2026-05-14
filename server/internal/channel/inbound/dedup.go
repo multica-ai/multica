@@ -17,7 +17,7 @@ import (
 // tests pass a fake satisfying DedupStore directly. Keeping the
 // interface narrow — strings in, bool out — keeps the dedup Step
 // itself free of pgx / sqlc types and mirrors the pattern used by
-// binding.TokenStore (T4).
+// binding.TokenStore.
 //
 // TryRecordInboundEvent attempts to insert (provider, eventID) into the
 // dedup table. It returns inserted=true when the row is newly written
@@ -47,8 +47,7 @@ type dedupStep struct {
 // and short-circuits the pipeline when a duplicate is observed. The
 // Step uses the event's ChannelName as the dedup table's `provider`
 // column and EventID as the dedup key — both fields are populated by
-// the adapter layer (T5) during normalisation, so by the time an
-// event reaches this Step it is guaranteed to carry both.
+// the adapter layer before the event reaches this Step.
 func NewDedupStep(store DedupStore) Step {
 	return &dedupStep{store: store}
 }
@@ -57,9 +56,8 @@ func NewDedupStep(store DedupStore) Step {
 func (s *dedupStep) Name() string { return "dedup" }
 
 // Run records the (provider, eventID) pair. On a fresh insertion the
-// pipeline continues; on a collision it Skips so downstream Steps
-// (identity-bind, intent-recog, dispatch, reply) do not re-process a
-// replayed event.
+// pipeline continues; on a collision it Skips so downstream Steps do
+// not re-process a replayed event.
 func (s *dedupStep) Run(ctx context.Context, evt port.InboundEvent) (port.InboundEvent, Decision, error) {
 	if evt.ChannelName == "" || evt.EventID == "" {
 		return evt, DecisionContinue, errors.New("dedup: missing channel_name or event_id")

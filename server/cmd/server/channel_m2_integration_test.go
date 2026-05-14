@@ -5,8 +5,6 @@ package main
 // Scope (per STA-64):
 //
 //	TC-int-4 (M2)        Group QueryIssue + SetStatus end-to-end (PRD F5).
-//	TC-int-5 (M2)        Outbound 60s aggregation merges two updates into
-//	                     a single CardSender call (PRD AC6.1).
 //	TC-int-6 (M2)        Private chat CreateIssue replies with the new
 //	                     identifier (PRD E5).
 //	TC-int-7 (M2)        Inbound dedup is idempotent under replay (the
@@ -17,8 +15,6 @@ package main
 //	                     IMAGE_UNSUPPORTED rejection template (PRD E10).
 //	TC-risk-4            Same-chat concurrent inbound delivery does not
 //	                     race on the dedup table (PRD E8).
-//	TC-risk-5            Outbound CardSender failure does NOT block the
-//	                     Web write path (PRD AC6.4).
 //
 // Naming: every TC-int test in this file is suffixed `_M2` so it does
 // not collide with the M1 acceptance tests in
@@ -31,7 +27,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -43,7 +38,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/channel"
 	"github.com/multica-ai/multica/server/internal/channel/facade"
 	"github.com/multica-ai/multica/server/internal/channel/inbound"
-	"github.com/multica-ai/multica/server/internal/channel/outbound"
 	"github.com/multica-ai/multica/server/internal/channel/port"
 )
 
@@ -302,76 +296,6 @@ func TestChannelIntegration_TC_int_9_M3a_GroupSetAssignee(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// TC-int-5 (M2) · Outbound 60s aggregator merges two updates into one
-// card.
-//
-// Scenario (PRD AC6.1, STA-64 TC-int-5):
-//
-//   - The aggregator is configured with a short flush interval (the
-//     production default is 60s; we use 200ms here so the test does
-//     not actually block for a minute — the aggregator is stateless
-//     w.r.t. wall-clock semantics, and existing aggregator unit tests
-//     already cover the 60s default constant).
-//   - We Add two notifications for the same external user within the
-//     window.
-//   - Assert: CardSender is called exactly once after the window
-//     elapses, and the merged card body contains both update titles.
-// ---------------------------------------------------------------------------
-
-func TestChannelIntegration_TC_int_5_M2_OutboundMergesWithinWindow(t *testing.T) {
-	requirePool(t)
-
-	const externalUserID = "ou_m2int5_lin"
-	const flushWindow = 200 * time.Millisecond
-
-	sender := newRecordingCardSender()
-	agg := outbound.NewAggregator(sender, flushWindow)
-	t.Cleanup(agg.Stop)
-
-	// First update: STA-100 状态变更
-	agg.Add(externalUserID, port.OutboundCardMessage{
-		ChatID: externalUserID,
-		Title:  "STA-100 状态变更",
-		Body:   "todo → in_progress",
-	}, false)
-
-	// Second update inside the window: STA-100 新评论
-	agg.Add(externalUserID, port.OutboundCardMessage{
-		ChatID: externalUserID,
-		Title:  "STA-100 新评论",
-		Body:   "请审阅",
-	}, false)
-
-	// Within the window, no card has been sent.
-	if got := len(sender.snapshot()); got != 0 {
-		t.Fatalf("pre-flush: expected 0 sends, got %d", got)
-	}
-
-	// Wait for the timer to fire. 4× window leaves ample room for
-	// goroutine scheduling on a slow CI node without becoming flaky.
-	time.Sleep(4 * flushWindow)
-
-	calls := sender.snapshot()
-	if len(calls) != 1 {
-		t.Fatalf("expected exactly 1 merged card, got %d", len(calls))
-	}
-	if calls[0].ExternalUserID != externalUserID {
-		t.Fatalf("merged card external_user_id = %q, want %q", calls[0].ExternalUserID, externalUserID)
-	}
-	if want := "Multica 有 2 条新通知"; calls[0].Card.Title != want {
-		t.Fatalf("merged title = %q, want %q", calls[0].Card.Title, want)
-	}
-	body := calls[0].Card.Body
-	if !strings.Contains(body, "STA-100 状态变更") {
-		t.Fatalf("merged body missing first update: %q", body)
-	}
-	if !strings.Contains(body, "STA-100 新评论") {
-		t.Fatalf("merged body missing second update: %q", body)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // TC-int-6 (M2) · Private (DM) chat path: CreateIssue replies with the
 // new identifier.
 //
@@ -788,91 +712,6 @@ func TestChannelIntegration_TC_risk_4_ConcurrentInboundIsRaceFree(t *testing.T) 
 	}
 }
 
-// ---------------------------------------------------------------------------
-// TC-risk-5 · Outbound CardSender failure does NOT block the Web write
-// path.
-//
-// Scenario (PRD AC6.4, STA-64 TC-risk-5):
-//
-//   - The aggregator is configured with a CardSender that always
-//     errors. A user submits a Web write (POST /api/issues) — the
-//     aggregator is fed with a notification for the affected user as
-//     a side effect (which would be the case in production via
-//     subscriber + listener).
-//   - The Web path returns 201 regardless of the outbound failure.
-//   - The aggregator's prometheus drop counter increments (the
-//     observable evidence that the failure was recorded but did not
-//     escalate).
-//
-// In this test we drive the side effect by Add()-ing into a failing
-// aggregator directly rather than going through the listener wiring
-// (which is integration-tested by the listener unit tests). The
-// crucial assertion is that the Web POST returns 201 even though we
-// then exercise the failing aggregator from the same goroutine — the
-// two are decoupled by design (the listener reaches the aggregator
-// async; the HTTP handler does not).
-// ---------------------------------------------------------------------------
-
-func TestChannelIntegration_TC_risk_5_OutboundFailureDoesNotBlockWeb(t *testing.T) {
-	requirePool(t)
-
-	// 1. Web write succeeds even when an aggregator with a failing
-	//    CardSender exists. We construct the aggregator in this test
-	//    so the test itself owns the failure surface.
-	failing := newFailingCardSender()
-	const flushWindow = 100 * time.Millisecond
-	agg := outbound.NewAggregator(failing, flushWindow)
-	t.Cleanup(agg.Stop)
-
-	// Web write (the canonical "fast path" that must not be blocked
-	// by outbound delivery).
-	resp := authRequest(t, http.MethodPost, "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":    "TC-risk-5 web write must not block",
-		"status":   "todo",
-		"priority": "high",
-	})
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("Web write blocked by outbound: got %d, want 201", resp.StatusCode)
-	}
-	var created struct {
-		ID string `json:"id"`
-	}
-	readJSON(t, resp, &created)
-	t.Cleanup(func() {
-		_ = authRequest(t, http.MethodDelete, "/api/issues/"+created.ID, nil)
-	})
-
-	// 2. Drive the aggregator with a notification. Its sender errors,
-	//    but the aggregator must not panic; the drop is logged + the
-	//    prometheus counter increments. The contract under test is
-	//    "outbound failure does not propagate" — i.e. Add() does not
-	//    return an error, and the goroutine in time.AfterFunc that
-	//    flushes does not crash.
-	agg.Add("ext-user-tc-risk-5", port.OutboundCardMessage{
-		ChatID: "ext-user-tc-risk-5",
-		Title:  "STA-? created",
-		Body:   "Web write should still have succeeded",
-	}, false)
-
-	// Wait for the flush goroutine.
-	time.Sleep(4 * flushWindow)
-
-	if got := failing.callCount(); got != 1 {
-		t.Fatalf("CardSender expected to be called once after flush, got %d", got)
-	}
-
-	// 3. Web write still works after the outbound failure path has
-	//    been exercised. This second probe rules out any global state
-	//    (panic-once-and-stuck) that would let a single failure
-	//    poison the Web layer.
-	resp2 := authRequest(t, http.MethodGet, "/api/issues/"+created.ID, nil)
-	if resp2.StatusCode != http.StatusOK {
-		t.Fatalf("Web read post-failure blocked: got %d, want 200", resp2.StatusCode)
-	}
-	resp2.Body.Close()
-}
-
-// ---------------------------------------------------------------------------
 // helpers (file-local)
 // ---------------------------------------------------------------------------
 

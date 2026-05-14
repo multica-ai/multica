@@ -1782,7 +1782,7 @@ func TestDispatchStep_UserResolverError_ReturnsInternalError(t *testing.T) {
 // Pipeline integration
 // ---------------------------------------------------------------------------
 
-func TestDispatchStep_InPipeline_AllPlaceholderStepsRunInOrder(t *testing.T) {
+func TestDispatchStep_InPipeline_DispatchIsTerminalStep(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeDedupStore{responses: []dedupResp{{Inserted: true}}}
@@ -1791,10 +1791,7 @@ func TestDispatchStep_InPipeline_AllPlaceholderStepsRunInOrder(t *testing.T) {
 	p := inbound.NewPipeline(
 		inbound.NewNormalizeStep(),
 		inbound.NewDedupStep(store),
-		inbound.NewIdentityBindStep(),
-		inbound.NewIntentRecogStep(),
 		inbound.NewDispatchStep(cfg),
-		inbound.NewReplyStep(),
 	)
 	out, err := p.Run(context.Background(), port.InboundEvent{
 		ChannelName: "feishu",
@@ -1807,8 +1804,8 @@ func TestDispatchStep_InPipeline_AllPlaceholderStepsRunInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if out.Terminal != "reply" {
-		t.Errorf("Terminal = %q, want reply", out.Terminal)
+	if out.Terminal != "dispatch" {
+		t.Errorf("Terminal = %q, want dispatch", out.Terminal)
 	}
 	if out.Decision != inbound.DecisionContinue {
 		t.Errorf("Decision = %v, want Continue", out.Decision)

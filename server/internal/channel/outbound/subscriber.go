@@ -14,7 +14,6 @@ import (
 	channelmetrics "github.com/multica-ai/multica/server/internal/channel/metrics"
 	"github.com/multica-ai/multica/server/internal/channel/port"
 	"github.com/multica-ai/multica/server/internal/events"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -39,12 +38,6 @@ type BindingStore interface {
 	// FindPrimaryChatID returns the external chat id for the primary group
 	// bound to (connection_id, workspace_id).
 	FindPrimaryChatID(ctx context.Context, connectionID string, workspaceID pgtype.UUID) (string, error)
-}
-
-// FailureRecorder records retryable outbound send failures. *db.Queries
-// satisfies this interface.
-type FailureRecorder interface {
-	InsertOutboundFailure(ctx context.Context, arg db.InsertOutboundFailureParams) (db.ChannelOutboundFailure, error)
 }
 
 // DBPool is the minimal pgx interface we need.
@@ -115,12 +108,11 @@ func (s *DBBindingStore) FindPrimaryChatID(ctx context.Context, connectionID str
 }
 
 // Subscriber subscribes to events.Bus and forwards qualifying events to
-// the channel adapter as card messages. It implements the outbound
-// notification pipeline for M2 T13.
+// the durable channel notification outbox.
 //
 // Event flow:
 //
-//	events.Bus -> Subscriber -> binding lookup -> pref filter -> channel.SendCard
+//	events.Bus -> Subscriber -> binding lookup -> pref filter -> channel_outbound_notification
 //
 // The subscriber can be workspace-scoped. When workspaceID is empty it
 // processes all workspaces, which is the production event-bus wiring.
@@ -130,10 +122,7 @@ type Subscriber struct {
 	bindings    BindingStore
 	prefs       PrefStore
 	workspaceID string
-	aggregator  *Aggregator
-	failures    FailureRecorder
 	outbox      NotificationEnqueuer
-	activeFunc  func() bool
 
 	mu            sync.Mutex
 	started       bool
@@ -203,23 +192,8 @@ func (s *Subscriber) Start() {
 	}
 }
 
-func (s *Subscriber) SetAggregator(aggregator *Aggregator) {
-	s.aggregator = aggregator
-}
-
-func (s *Subscriber) SetFailureRecorder(failures FailureRecorder) {
-	s.failures = failures
-}
-
 func (s *Subscriber) SetNotificationEnqueuer(outbox NotificationEnqueuer) {
 	s.outbox = outbox
-}
-
-// SetActiveFunc gates direct outbound delivery. Durable outbox enqueue is not
-// gated so every API node can persist notifications; workers/senders decide
-// which process is allowed to talk to the external channel.
-func (s *Subscriber) SetActiveFunc(activeFunc func() bool) {
-	s.activeFunc = activeFunc
 }
 
 func (s *Subscriber) Stop() {
@@ -235,9 +209,6 @@ func (s *Subscriber) Stop() {
 			unsubscribe()
 		}
 	}
-	if s.aggregator != nil {
-		s.aggregator.Stop()
-	}
 }
 
 func (s *Subscriber) isStopped() bool {
@@ -246,15 +217,11 @@ func (s *Subscriber) isStopped() bool {
 	return s.stopped
 }
 
-func (s *Subscriber) isActive() bool {
-	return s.activeFunc == nil || s.activeFunc()
-}
-
 func (s *Subscriber) shouldHandleEvent() bool {
 	if s.isStopped() {
 		return false
 	}
-	return s.outbox != nil || s.isActive()
+	return s.outbox != nil
 }
 
 // handleCommentCreated processes comment:created events.
@@ -542,67 +509,34 @@ func (s *Subscriber) sendToUser(workspaceID, userID, eventKind, title, body stri
 		Mentions: mentionList(mentionExternalUserID),
 	}
 
-	if s.outbox != nil {
-		if err := s.outbox.EnqueueNotification(ctx, NotificationEnqueueRequest{
-			Provider:              providerName,
-			ConnectionID:          connectionID,
-			EventKind:             eventKind,
-			TargetUserID:          userUUID,
-			TargetType:            string(port.OutboundTargetChat),
-			TargetChatID:          targetChatID,
-			MentionExternalUserID: mentionExternalUserID,
-			TargetExternalUserID:  mentionExternalUserID,
-			Title:                 card.Title,
-			Body:                  body,
-			WorkspaceID:           wsUUID,
-			IssueID:               parseOptionalUUID(ctxMeta.IssueID),
-			IssueIdentifier:       ctxMeta.IssueIdentifier,
-			IssueTitle:            firstNonEmpty(ctxMeta.IssueTitle, title),
-			InboxItemID:           parseOptionalUUID(ctxMeta.InboxItemID),
-			Replyable:             ctxMeta.Replyable,
-		}); err != nil {
-			channelmetrics.M.RecordOutboundFailure(providerName, eventKind, "outbox_enqueue", true)
-			slog.Error("outbound: enqueue notification", "user_id", userID, "error", err)
-			return
-		}
-		channelmetrics.M.RecordOutboundCard(providerName, eventKind, "queued")
-		channelmetrics.M.RecordOutboundOutbox(providerName, "queued", 1)
+	if s.outbox == nil {
+		channelmetrics.M.RecordOutboundCard(providerName, eventKind, "outbox_missing")
 		return
 	}
-
-	if !s.isActive() {
-		channelmetrics.M.RecordOutboundCard(providerName, eventKind, "inactive")
+	if err := s.outbox.EnqueueNotification(ctx, NotificationEnqueueRequest{
+		Provider:              providerName,
+		ConnectionID:          connectionID,
+		EventKind:             eventKind,
+		TargetUserID:          userUUID,
+		TargetType:            string(port.OutboundTargetChat),
+		TargetChatID:          targetChatID,
+		MentionExternalUserID: mentionExternalUserID,
+		TargetExternalUserID:  mentionExternalUserID,
+		Title:                 card.Title,
+		Body:                  body,
+		WorkspaceID:           wsUUID,
+		IssueID:               parseOptionalUUID(ctxMeta.IssueID),
+		IssueIdentifier:       ctxMeta.IssueIdentifier,
+		IssueTitle:            firstNonEmpty(ctxMeta.IssueTitle, title),
+		InboxItemID:           parseOptionalUUID(ctxMeta.InboxItemID),
+		Replyable:             ctxMeta.Replyable,
+	}); err != nil {
+		channelmetrics.M.RecordOutboundFailure(providerName, eventKind, "outbox_enqueue", true)
+		slog.Error("outbound: enqueue notification", "user_id", userID, "error", err)
 		return
 	}
-
-	if s.aggregator != nil {
-		s.aggregator.AddWithMeta(targetChatID, card, AggregationMeta{
-			Provider:     providerName,
-			ConnectionID: connectionID,
-			EventKind:    eventKind,
-			TargetUserID: userUUID,
-		}, false)
-		channelmetrics.M.RecordOutboundCard(providerName, eventKind, "queued")
-		return
-	}
-
-	result, err := s.channel.SendCard(ctx, card)
-	if err != nil {
-		channelmetrics.M.RecordOutboundCard(providerName, eventKind, "error")
-		channelmetrics.M.RecordOutboundFailure(providerName, eventKind, "send", result.Retryable)
-		if result.Retryable {
-			s.recordFailure(ctx, providerName, connectionID, eventKind, userUUID, card, err)
-		}
-		slog.Error("outbound: send card", "user_id", userID, "error", err)
-		return
-	}
-
-	channelmetrics.M.RecordOutboundCard(providerName, eventKind, "sent")
-	slog.Info("outbound: card sent",
-		"user_id", userID,
-		"platform_msg_id", result.PlatformMessageID,
-		"event_kind", eventKind,
-	)
+	channelmetrics.M.RecordOutboundCard(providerName, eventKind, "queued")
+	channelmetrics.M.RecordOutboundOutbox(providerName, "queued", 1)
 }
 
 func notificationContextFromInboxItem(workspaceID, title string, item map[string]any) notificationContext {
@@ -657,6 +591,15 @@ func stringFromAny(v any) string {
 	default:
 		return ""
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func stringFromDetails(v any, key string) string {
@@ -725,42 +668,6 @@ func notificationTitle(title string, meta notificationContext) string {
 		return firstNonEmpty(title, identifier)
 	}
 	return fmt.Sprintf("[%s] %s", identifier, title)
-}
-
-func (s *Subscriber) recordFailure(ctx context.Context, providerName, connectionID, eventKind string, targetUserID pgtype.UUID, card port.OutboundCardMessage, sendErr error) {
-	if s.failures == nil {
-		return
-	}
-	payload, err := json.Marshal(RetryPayload{
-		Title:      card.Title,
-		Body:       card.Body,
-		TargetType: string(card.Target.Type),
-		Mentions:   card.Mentions,
-	})
-	if err != nil {
-		channelmetrics.M.RecordOutboundFailure(providerName, eventKind, "retry_payload_marshal", true)
-		slog.Error("outbound: marshal retry payload", "user_id", uuidStr(targetUserID), "error", err)
-		return
-	}
-	if _, err := s.failures.InsertOutboundFailure(ctx, db.InsertOutboundFailureParams{
-		Provider:             providerName,
-		ConnectionID:         connectionID,
-		EventKind:            eventKind,
-		TargetUserID:         targetUserID,
-		TargetExternalUserID: pgtype.Text{String: card.Target.ID, Valid: card.Target.ID != ""},
-		Payload:              payload,
-		MaxAttempts:          3,
-	}); err != nil {
-		channelmetrics.M.RecordOutboundFailure(providerName, eventKind, "failure_insert", true)
-		slog.Error("outbound: insert failure",
-			"user_id", uuidStr(targetUserID),
-			"event_kind", eventKind,
-			"send_error", sendErr,
-			"error", err,
-		)
-	} else {
-		channelmetrics.M.RecordOutboundFailure(providerName, eventKind, "failure_recorded", true)
-	}
 }
 
 // R4: parseUUID returns (pgtype.UUID, error) for fail-closed behavior.

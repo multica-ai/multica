@@ -17,7 +17,6 @@ const (
 // CleanupWorker periodically removes stale rows from channel-related tables:
 //   - channel_inbound_event_dedup: entries older than 7 days
 //   - channel_bind_token: consumed or expired tokens older than 1 day
-//   - channel_outbound_failure: dead entries older than 7 days
 //
 // TOCTOU note (T4 Rec-3): The DELETE statements in this worker are
 // idempotent and operate on non-overlapping time windows. Between the
@@ -56,7 +55,6 @@ func (w *CleanupWorker) Run(ctx context.Context) {
 func (w *CleanupWorker) runAll(ctx context.Context) {
 	w.cleanupDedup(ctx)
 	w.cleanupBindTokens(ctx)
-	w.cleanupDeadFailures(ctx)
 }
 
 func (w *CleanupWorker) cleanupDedup(ctx context.Context) {
@@ -73,12 +71,4 @@ func (w *CleanupWorker) cleanupBindTokens(ctx context.Context) {
 		return
 	}
 	slog.Debug("cleanup worker: bind token cleanup done")
-}
-
-func (w *CleanupWorker) cleanupDeadFailures(ctx context.Context) {
-	if err := w.queries.DeleteOldDeadOutboundFailures(ctx); err != nil {
-		slog.Error("cleanup worker: dead failure cleanup failed", "error", err)
-		return
-	}
-	slog.Debug("cleanup worker: dead failure cleanup done")
 }

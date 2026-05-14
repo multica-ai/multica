@@ -2,7 +2,7 @@ package inbound_test
 
 // Red-phase tests for the inbound dedup step.
 //
-// QA §12 T6 row TC-inb-2: "去重表幂等" — given a mocked TryRecordInboundEvent,
+// Dedup idempotency: given a mocked TryRecordInboundEvent,
 // the first invocation for a given event_id reports inserted=true and the
 // pipeline continues; the second invocation reports inserted=false and the
 // pipeline returns Skip without invoking the rest of the step chain.

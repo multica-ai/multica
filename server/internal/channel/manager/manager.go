@@ -59,8 +59,6 @@ type Config struct {
 	ActionTaskTimeout      time.Duration
 	ClarificationTimeout   time.Duration
 	ProcessingLease        time.Duration
-	RetryWorkerEnabled     bool
-	NotificationOutbox     bool
 	OutboundCleanupEnabled bool
 }
 
@@ -631,7 +629,7 @@ func truncateStatusError(err error) string {
 	return msg
 }
 
-func (m *Manager) startOutbound(cfg provider.ConnectionConfig, ready *atomic.Bool) *outbound.Subscriber {
+func (m *Manager) startOutbound(cfg provider.ConnectionConfig, _ *atomic.Bool) *outbound.Subscriber {
 	if m.cfg.Bus == nil || m.cfg.Queries == nil || m.cfg.Pool == nil || m.cfg.Registry == nil {
 		return nil
 	}
@@ -643,11 +641,7 @@ func (m *Manager) startOutbound(cfg provider.ConnectionConfig, ready *atomic.Boo
 		outbound.NewDBPrefStore(m.cfg.Queries),
 		"",
 	)
-	sub.SetFailureRecorder(m.cfg.Queries)
-	if m.cfg.NotificationOutbox {
-		sub.SetNotificationEnqueuer(notificationStore)
-	}
-	sub.SetActiveFunc(ready.Load)
+	sub.SetNotificationEnqueuer(notificationStore)
 	sub.Start()
 	slog.Info("channel manager: outbound subscriber started", "provider", cfg.Provider, "connection_id", cfg.ConnectionID)
 	return sub
@@ -657,20 +651,11 @@ func (m *Manager) startOutbox(ctx context.Context) {
 	if m.cfg.Pool == nil || m.cfg.Queries == nil || m.cfg.Registry == nil {
 		return
 	}
-	if m.cfg.NotificationOutbox {
-		outboxCtx, cancel := context.WithCancel(ctx)
-		m.cancels = append(m.cancels, cancel)
-		worker := outbound.NewOutboxWorker(outbound.NewDBNotificationStore(m.cfg.Pool), newRegistryRetrySender(m.cfg.Registry))
-		worker.SetReadyConnectionsFunc(m.readyConnectionIDs)
-		go worker.Run(outboxCtx)
-	}
-	if m.cfg.RetryWorkerEnabled {
-		retryCtx, cancel := context.WithCancel(ctx)
-		m.cancels = append(m.cancels, cancel)
-		worker := outbound.NewRetryWorker(m.cfg.Pool, m.cfg.Queries, newRegistryRetrySender(m.cfg.Registry))
-		worker.SetReadyConnectionsFunc(m.readyConnectionIDs)
-		go worker.Run(retryCtx)
-	}
+	outboxCtx, cancel := context.WithCancel(ctx)
+	m.cancels = append(m.cancels, cancel)
+	worker := outbound.NewOutboxWorker(outbound.NewDBNotificationStore(m.cfg.Pool), newRegistryRetrySender(m.cfg.Registry))
+	worker.SetReadyConnectionsFunc(m.readyConnectionIDs)
+	go worker.Run(outboxCtx)
 	if m.cfg.OutboundCleanupEnabled {
 		cleanupCtx, cancel := context.WithCancel(ctx)
 		m.cancels = append(m.cancels, cancel)

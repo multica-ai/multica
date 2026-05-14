@@ -152,7 +152,7 @@ func pgtypeUUIDToString(u pgtype.UUID) string {
 
 // --- Tests ---
 
-func TestSubscriber_InactiveDoesNotHandleEvents(t *testing.T) {
+func TestSubscriber_WithoutOutboxDoesNotHandleEvents(t *testing.T) {
 	bus := events.New()
 	ch := &mockChannel{name: "feishu"}
 	bindingStore := &mockBindingStore{bindings: map[string]map[string]string{
@@ -163,7 +163,6 @@ func TestSubscriber_InactiveDoesNotHandleEvents(t *testing.T) {
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
-	sub.SetActiveFunc(func() bool { return false })
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -178,7 +177,7 @@ func TestSubscriber_InactiveDoesNotHandleEvents(t *testing.T) {
 	})
 
 	if got := len(ch.Messages()); got != 0 {
-		t.Fatalf("messages = %d, want 0 when subscriber is inactive", got)
+		t.Fatalf("messages = %d, want 0 when subscriber has no outbox", got)
 	}
 }
 
@@ -215,7 +214,7 @@ func TestSubscriber_StopUnsubscribesAndSuppressesOutbox(t *testing.T) {
 	}
 }
 
-func TestSubscriber_OutboxEnqueuesWhenDirectDeliveryInactive(t *testing.T) {
+func TestSubscriber_OutboxEnqueuesNotification(t *testing.T) {
 	bus := events.New()
 	ch := &mockChannel{name: "feishu"}
 	userID := "00000000-0000-0000-0000-000000000001"
@@ -228,7 +227,6 @@ func TestSubscriber_OutboxEnqueuesWhenDirectDeliveryInactive(t *testing.T) {
 	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
-	sub.SetActiveFunc(func() bool { return false })
 	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
@@ -264,8 +262,10 @@ func TestSubscriber_UnboundUser_SendsGroupCardWithoutMention(t *testing.T) {
 	ch := &mockChannel{name: "feishu"}
 	bindingStore := &mockBindingStore{bindings: map[string]map[string]string{}}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -284,15 +284,15 @@ func TestSubscriber_UnboundUser_SendsGroupCardWithoutMention(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 1 {
-		t.Fatalf("TC-out-2: expected 1 group message for unbound user, got %d", len(msgs))
+	requests := outbox.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("TC-out-2: expected 1 outbox request for unbound user, got %d", len(requests))
 	}
-	if msgs[0].Target.Type != port.OutboundTargetChat || msgs[0].ChatID != "group-chat-1" {
-		t.Fatalf("TC-out-2: target = %#v chat_id=%q, want group-chat-1", msgs[0].Target, msgs[0].ChatID)
+	if requests[0].TargetType != string(port.OutboundTargetChat) || requests[0].TargetChatID != "group-chat-1" {
+		t.Fatalf("TC-out-2: target = %s/%q, want chat/group-chat-1", requests[0].TargetType, requests[0].TargetChatID)
 	}
-	if len(msgs[0].Mentions) != 0 {
-		t.Fatalf("TC-out-2: mentions = %#v, want none", msgs[0].Mentions)
+	if requests[0].MentionExternalUserID != "" {
+		t.Fatalf("TC-out-2: mention external user = %q, want none", requests[0].MentionExternalUserID)
 	}
 }
 
@@ -307,9 +307,10 @@ func TestSubscriber_BoundUser_SendsCard(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
-	// We need a custom subscriber that can resolve external IDs from mock
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	start := time.Now()
@@ -332,18 +333,18 @@ func TestSubscriber_BoundUser_SendsCard(t *testing.T) {
 		t.Errorf("TC-out-1: enqueue took %v, must be <= 5s", elapsed)
 	}
 
-	msgs := ch.Messages()
-	if len(msgs) != 1 {
-		t.Fatalf("TC-out-1: expected 1 message, got %d", len(msgs))
+	requests := outbox.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("TC-out-1: expected 1 outbox request, got %d", len(requests))
 	}
-	if msgs[0].Target.Type != port.OutboundTargetChat || msgs[0].ChatID != "group-chat-1" {
-		t.Errorf("TC-out-1: expected group-chat-1, got target=%#v chat_id=%s", msgs[0].Target, msgs[0].ChatID)
+	if requests[0].TargetType != string(port.OutboundTargetChat) || requests[0].TargetChatID != "group-chat-1" {
+		t.Errorf("TC-out-1: expected group-chat-1, got target=%s chat_id=%s", requests[0].TargetType, requests[0].TargetChatID)
 	}
-	if len(msgs[0].Mentions) != 1 || msgs[0].Mentions[0].ID != "ext-user-1" {
-		t.Errorf("TC-out-1: expected mention ext-user-1, got %#v", msgs[0].Mentions)
+	if requests[0].MentionExternalUserID != "ext-user-1" {
+		t.Errorf("TC-out-1: expected mention ext-user-1, got %q", requests[0].MentionExternalUserID)
 	}
-	if msgs[0].Body != "Notification body" {
-		t.Errorf("TC-out-1: body = %q, want notification body", msgs[0].Body)
+	if requests[0].Body != "Notification body" {
+		t.Errorf("TC-out-1: body = %q, want notification body", requests[0].Body)
 	}
 }
 
@@ -357,8 +358,10 @@ func TestSubscriber_InboxItemBodySendsCardBody(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	body := "在新的评论中@我，而不是回复我的评论"
@@ -378,12 +381,12 @@ func TestSubscriber_InboxItemBodySendsCardBody(t *testing.T) {
 		},
 	})
 
-	msgs := ch.Messages()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
+	requests := outbox.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("expected 1 outbox request, got %d", len(requests))
 	}
-	if msgs[0].Body != body {
-		t.Fatalf("body = %q, want %q", msgs[0].Body, body)
+	if requests[0].Body != body {
+		t.Fatalf("body = %q, want %q", requests[0].Body, body)
 	}
 }
 
@@ -398,8 +401,10 @@ func TestSubscriber_NoPrimaryChat_DropsWithoutPrivateFallback(t *testing.T) {
 		primaryChatErr: ErrNoPrimaryChat,
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -417,8 +422,8 @@ func TestSubscriber_NoPrimaryChat_DropsWithoutPrivateFallback(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	if msgs := ch.Messages(); len(msgs) != 0 {
-		t.Fatalf("messages = %d, want 0 without primary chat", len(msgs))
+	if got := len(outbox.Requests()); got != 0 {
+		t.Fatalf("outbox requests = %d, want 0 without primary chat", got)
 	}
 }
 
@@ -439,8 +444,10 @@ func TestSubscriber_PrefMuted_DropsEvent(t *testing.T) {
 			},
 		},
 	}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -458,9 +465,8 @@ func TestSubscriber_PrefMuted_DropsEvent(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 0 {
-		t.Errorf("TC-out-3: expected 0 messages when pref muted, got %d", len(msgs))
+	if got := len(outbox.Requests()); got != 0 {
+		t.Errorf("TC-out-3: expected 0 outbox requests when pref muted, got %d", got)
 	}
 }
 
@@ -475,8 +481,10 @@ func TestSubscriber_CommentCreated_SendsCard(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -496,9 +504,8 @@ func TestSubscriber_CommentCreated_SendsCard(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message for comment:created, got %d", len(msgs))
+	if got := len(outbox.Requests()); got != 1 {
+		t.Fatalf("expected 1 outbox request for comment:created, got %d", got)
 	}
 }
 
@@ -513,8 +520,10 @@ func TestSubscriber_SubscriberAdded_SendsCard(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -531,9 +540,8 @@ func TestSubscriber_SubscriberAdded_SendsCard(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message for subscriber:added, got %d", len(msgs))
+	if got := len(outbox.Requests()); got != 1 {
+		t.Fatalf("expected 1 outbox request for subscriber:added, got %d", got)
 	}
 }
 
@@ -548,8 +556,10 @@ func TestSubscriber_WrongWorkspace_DropsEvent(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -567,9 +577,8 @@ func TestSubscriber_WrongWorkspace_DropsEvent(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 0 {
-		t.Errorf("expected 0 messages for wrong workspace, got %d", len(msgs))
+	if got := len(outbox.Requests()); got != 0 {
+		t.Errorf("expected 0 outbox requests for wrong workspace, got %d", got)
 	}
 }
 
@@ -587,8 +596,10 @@ func TestSubscriber_StatusInReview_SendsCard(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -609,19 +620,19 @@ func TestSubscriber_StatusInReview_SendsCard(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message for in_review status, got %d", len(msgs))
+	requests := outbox.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("expected 1 outbox request for in_review status, got %d", len(requests))
 	}
-	if msgs[0].Target.Type != port.OutboundTargetChat || msgs[0].ChatID != "group-chat-1" {
-		t.Errorf("expected group-chat-1, got target=%#v chat_id=%s", msgs[0].Target, msgs[0].ChatID)
+	if requests[0].TargetType != string(port.OutboundTargetChat) || requests[0].TargetChatID != "group-chat-1" {
+		t.Errorf("expected group-chat-1, got target=%s chat_id=%s", requests[0].TargetType, requests[0].TargetChatID)
 	}
-	if len(msgs[0].Mentions) != 1 || msgs[0].Mentions[0].ID != "ext-user-1" {
-		t.Errorf("expected mention ext-user-1, got %#v", msgs[0].Mentions)
+	if requests[0].MentionExternalUserID != "ext-user-1" {
+		t.Errorf("expected mention ext-user-1, got %q", requests[0].MentionExternalUserID)
 	}
 	wantBody := "Issue MUL-1 状态已变更为 评审中"
-	if msgs[0].Body != wantBody {
-		t.Errorf("expected body %q, got %q", wantBody, msgs[0].Body)
+	if requests[0].Body != wantBody {
+		t.Errorf("expected body %q, got %q", wantBody, requests[0].Body)
 	}
 }
 
@@ -637,8 +648,10 @@ func TestSubscriber_StatusDone_SendsCard(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -659,13 +672,13 @@ func TestSubscriber_StatusDone_SendsCard(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message for done status, got %d", len(msgs))
+	requests := outbox.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("expected 1 outbox request for done status, got %d", len(requests))
 	}
 	wantBody := "Issue MUL-1 状态已变更为 已完成"
-	if msgs[0].Body != wantBody {
-		t.Errorf("expected body %q, got %q", wantBody, msgs[0].Body)
+	if requests[0].Body != wantBody {
+		t.Errorf("expected body %q, got %q", wantBody, requests[0].Body)
 	}
 }
 
@@ -681,8 +694,10 @@ func TestSubscriber_StatusBlocked_SendsCard(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -703,13 +718,13 @@ func TestSubscriber_StatusBlocked_SendsCard(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message for blocked status, got %d", len(msgs))
+	requests := outbox.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("expected 1 outbox request for blocked status, got %d", len(requests))
 	}
 	wantBody := "Issue MUL-1 状态已变更为 已阻塞"
-	if msgs[0].Body != wantBody {
-		t.Errorf("expected body %q, got %q", wantBody, msgs[0].Body)
+	if requests[0].Body != wantBody {
+		t.Errorf("expected body %q, got %q", wantBody, requests[0].Body)
 	}
 }
 
@@ -731,8 +746,10 @@ func TestSubscriber_StatusInReview_PrefMuted_DropsEvent(t *testing.T) {
 			},
 		},
 	}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -753,9 +770,8 @@ func TestSubscriber_StatusInReview_PrefMuted_DropsEvent(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 0 {
-		t.Errorf("expected 0 messages when status_in_review pref muted, got %d", len(msgs))
+	if got := len(outbox.Requests()); got != 0 {
+		t.Errorf("expected 0 outbox requests when status_in_review pref muted, got %d", got)
 	}
 }
 
@@ -770,8 +786,10 @@ func TestSubscriber_StatusDone_NoAssignee_DropsEvent(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -792,9 +810,8 @@ func TestSubscriber_StatusDone_NoAssignee_DropsEvent(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 0 {
-		t.Errorf("expected 0 messages when no assignee, got %d", len(msgs))
+	if got := len(outbox.Requests()); got != 0 {
+		t.Errorf("expected 0 outbox requests when no assignee, got %d", got)
 	}
 }
 
@@ -809,8 +826,10 @@ func TestSubscriber_StatusBlocked_SelfNotification_DropsEvent(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -831,9 +850,8 @@ func TestSubscriber_StatusBlocked_SelfNotification_DropsEvent(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 0 {
-		t.Errorf("expected 0 messages for self-notification on status change, got %d", len(msgs))
+	if got := len(outbox.Requests()); got != 0 {
+		t.Errorf("expected 0 outbox requests for self-notification on status change, got %d", got)
 	}
 }
 
@@ -849,8 +867,10 @@ func TestSubscriber_StatusTodo_NotNotifyWorthy_DropsEvent(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -871,9 +891,8 @@ func TestSubscriber_StatusTodo_NotNotifyWorthy_DropsEvent(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 0 {
-		t.Errorf("expected 0 messages for non-notify status, got %d", len(msgs))
+	if got := len(outbox.Requests()); got != 0 {
+		t.Errorf("expected 0 outbox requests for non-notify status, got %d", got)
 	}
 }
 
@@ -888,8 +907,10 @@ func TestSubscriber_SelfNotification_DropsEvent(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -907,8 +928,7 @@ func TestSubscriber_SelfNotification_DropsEvent(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 0 {
-		t.Errorf("expected 0 messages for self-notification, got %d", len(msgs))
+	if got := len(outbox.Requests()); got != 0 {
+		t.Errorf("expected 0 outbox requests for self-notification, got %d", got)
 	}
 }

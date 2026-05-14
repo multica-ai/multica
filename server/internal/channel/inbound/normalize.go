@@ -6,12 +6,10 @@ import (
 	"github.com/multica-ai/multica/server/internal/channel/port"
 )
 
-// normalizeStep is the first step of the inbound pipeline. In M1 (T6)
-// the adapter layer (T5) has already done the heavy lifting of mapping
-// the platform-specific event payload into a port.InboundEvent and
-// stripping mention markers, so this step is a defensive validator
-// rather than a transformer: it Skips events that are missing fields
-// the rest of the pipeline assumes are non-empty.
+// normalizeStep is the first step of the inbound pipeline. The adapter
+// layer has already mapped the platform-specific payload into a
+// port.InboundEvent and stripped mention markers, so this step is a
+// defensive validator rather than a transformer.
 type normalizeStep struct{}
 
 // NewNormalizeStep returns the normalize Step.

@@ -1,6 +1,6 @@
 package main
 
-// Helpers for cmd/server/channel_integration_test.go (T8 M1 acceptance).
+// Helpers for cmd/server/channel_integration_test.go.
 //
 // The split between this file and channel_integration_test.go is by
 // concern: scenario assertions live in the _test.go counterpart, while
@@ -113,10 +113,8 @@ func (f *fakeChannel) snapshotSends() []port.OutboundMessage {
 var _ port.Channel = (*fakeChannel)(nil)
 
 // ---------------------------------------------------------------------------
-// Test-only inbound steps. They live here because identity-bind and
-// dispatch are still placeholders in the production code (DESIGN §4.4
-// pinned for M1); the M2 implementations land in T11. Until then, the
-// integration tests need real impls so the flow is observable end-to-end.
+// Test-only inbound steps. They keep the integration fixtures small and
+// observable without depending on the full server assembly.
 // ---------------------------------------------------------------------------
 
 // identityBindStep is the test-time real implementation of identity-bind.
@@ -222,8 +220,7 @@ func (s *createIssueDispatchStep) Run(ctx context.Context, evt port.InboundEvent
 	// treated as a CreateIssue command.
 	const prefix = "create issue: "
 	if !strings.HasPrefix(evt.Text, prefix) {
-		// Not a recognised command; M1 falls back to a no-op reply so
-		// the path is observable. (Real intent recognition lands in T9.)
+		// Not a recognised command; leave it to the caller to continue.
 		return evt, inbound.DecisionContinue, nil
 	}
 	title := strings.TrimSpace(strings.TrimPrefix(evt.Text, prefix))
@@ -551,7 +548,7 @@ func freshEventID(t *testing.T, provider, prefix string) string {
 }
 
 // newChannelTestPipeline composes the standard three-step inbound
-// pipeline used by the M1 acceptance tests:
+// pipeline used by these integration tests:
 //
 //	dedup  →  identity-bind  →  dispatch (caller-supplied)
 //
@@ -562,9 +559,7 @@ func freshEventID(t *testing.T, provider, prefix string) string {
 // the "did the pipeline produce a real side effect?" tests).
 //
 // Returning a *inbound.Pipeline (vs the steps individually) keeps every
-// TC-int-* call site to one line and makes future step insertions
-// (e.g. an outbound logger after dispatch in M2) a single-edit change
-// here rather than a sweep across four tests.
+// TC-int-* call site to one line.
 func newChannelTestPipeline(pool *pgxpool.Pool, registry *channel.Registry, dispatch inbound.Step) *inbound.Pipeline {
 	queries := db.New(pool)
 	return inbound.NewPipeline(

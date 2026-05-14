@@ -191,6 +191,7 @@ type ChannelBindToken struct {
 	TokenHash        []byte             `json:"token_hash"`
 	Purpose          string             `json:"purpose"`
 	Provider         string             `json:"provider"`
+	ConnectionID     string             `json:"connection_id"`
 	ExternalUserID   string             `json:"external_user_id"`
 	ExternalChatID   pgtype.Text        `json:"external_chat_id"`
 	ExternalChatType pgtype.Text        `json:"external_chat_type"`
@@ -198,24 +199,23 @@ type ChannelBindToken struct {
 	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
 	ConsumedAt       pgtype.Timestamptz `json:"consumed_at"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	ConnectionID     string             `json:"connection_id"`
 }
 
 type ChannelChatBinding struct {
 	ID               pgtype.UUID        `json:"id"`
 	Provider         string             `json:"provider"`
+	ConnectionID     string             `json:"connection_id"`
 	ExternalChatID   string             `json:"external_chat_id"`
 	ChatType         string             `json:"chat_type"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
 	IsPrimary        bool               `json:"is_primary"`
 	BoundByUserID    pgtype.UUID        `json:"bound_by_user_id"`
 	ExternalChatName pgtype.Text        `json:"external_chat_name"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	DefaultProjectID pgtype.UUID        `json:"default_project_id"`
-	ConnectionID     string             `json:"connection_id"`
 	ListenMode       string             `json:"listen_mode"`
 	AgentID          pgtype.UUID        `json:"agent_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ChannelConnection struct {
@@ -234,6 +234,7 @@ type ChannelConnection struct {
 
 type ChannelConversation struct {
 	Provider         string             `json:"provider"`
+	ConnectionID     string             `json:"connection_id"`
 	ConversationKey  string             `json:"conversation_key"`
 	ChatID           string             `json:"chat_id"`
 	ChatType         string             `json:"chat_type"`
@@ -242,12 +243,12 @@ type ChannelConversation struct {
 	ActiveSince      pgtype.Timestamptz `json:"active_since"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	ConnectionID     string             `json:"connection_id"`
 }
 
 type ChannelInboundEvent struct {
 	ID                  pgtype.UUID        `json:"id"`
 	Provider            string             `json:"provider"`
+	ConnectionID        string             `json:"connection_id"`
 	EventID             string             `json:"event_id"`
 	EventType           string             `json:"event_type"`
 	ConversationKey     string             `json:"conversation_key"`
@@ -279,44 +280,29 @@ type ChannelInboundEvent struct {
 	LastError           pgtype.Text        `json:"last_error"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
-	ConnectionID        string             `json:"connection_id"`
 }
 
 type ChannelInboundEventDedup struct {
 	Provider     string             `json:"provider"`
+	ConnectionID string             `json:"connection_id"`
 	EventID      string             `json:"event_id"`
 	ProcessedAt  pgtype.Timestamptz `json:"processed_at"`
 	Status       string             `json:"status"`
 	Attempts     int32              `json:"attempts"`
 	LastError    pgtype.Text        `json:"last_error"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	ConnectionID string             `json:"connection_id"`
-}
-
-type ChannelOutboundFailure struct {
-	ID                   pgtype.UUID        `json:"id"`
-	Provider             string             `json:"provider"`
-	EventKind            string             `json:"event_kind"`
-	TargetUserID         pgtype.UUID        `json:"target_user_id"`
-	TargetExternalUserID pgtype.Text        `json:"target_external_user_id"`
-	Payload              []byte             `json:"payload"`
-	Status               string             `json:"status"`
-	Attempts             int32              `json:"attempts"`
-	MaxAttempts          int32              `json:"max_attempts"`
-	NextRetryAt          pgtype.Timestamptz `json:"next_retry_at"`
-	LastError            pgtype.Text        `json:"last_error"`
-	LastAttemptedAt      pgtype.Timestamptz `json:"last_attempted_at"`
-	CreatedAt            pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
-	ConnectionID         string             `json:"connection_id"`
 }
 
 type ChannelOutboundNotification struct {
 	ID                    pgtype.UUID        `json:"id"`
 	Provider              string             `json:"provider"`
+	ConnectionID          string             `json:"connection_id"`
 	EventKind             string             `json:"event_kind"`
 	TargetUserID          pgtype.UUID        `json:"target_user_id"`
 	TargetExternalUserID  pgtype.Text        `json:"target_external_user_id"`
+	TargetType            string             `json:"target_type"`
+	TargetChatID          string             `json:"target_chat_id"`
+	MentionExternalUserID string             `json:"mention_external_user_id"`
 	Title                 string             `json:"title"`
 	Body                  string             `json:"body"`
 	Status                string             `json:"status"`
@@ -325,18 +311,14 @@ type ChannelOutboundNotification struct {
 	AggregationDueAt      pgtype.Timestamptz `json:"aggregation_due_at"`
 	NextAttemptAt         pgtype.Timestamptz `json:"next_attempt_at"`
 	LastError             pgtype.Text        `json:"last_error"`
-	CreatedAt             pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
-	ConnectionID          string             `json:"connection_id"`
 	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
 	IssueID               pgtype.UUID        `json:"issue_id"`
 	IssueIdentifier       string             `json:"issue_identifier"`
 	IssueTitle            string             `json:"issue_title"`
 	InboxItemID           pgtype.UUID        `json:"inbox_item_id"`
 	Replyable             bool               `json:"replyable"`
-	TargetType            string             `json:"target_type"`
-	TargetChatID          string             `json:"target_chat_id"`
-	MentionExternalUserID string             `json:"mention_external_user_id"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ChannelReplyContext struct {
@@ -355,12 +337,12 @@ type ChannelReplyContext struct {
 type ChannelUserBinding struct {
 	ID             pgtype.UUID        `json:"id"`
 	Provider       string             `json:"provider"`
+	ConnectionID   string             `json:"connection_id"`
 	ExternalUserID string             `json:"external_user_id"`
 	UserID         pgtype.UUID        `json:"user_id"`
 	ExternalName   pgtype.Text        `json:"external_name"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	ConnectionID   string             `json:"connection_id"`
 }
 
 type ChatMessage struct {

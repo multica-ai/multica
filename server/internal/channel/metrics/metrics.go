@@ -20,9 +20,6 @@ type Recorder struct {
 	inboundStepErrors   *prometheus.CounterVec
 	outboundCards       *prometheus.CounterVec
 	outboundFailures    *prometheus.CounterVec
-	outboundRetries     *prometheus.CounterVec
-	outboundDead        *prometheus.CounterVec
-	outboundAggregates  *prometheus.CounterVec
 	outboundOutbox      *prometheus.CounterVec
 	adapterDrops        *prometheus.CounterVec
 	leaderState         *prometheus.GaugeVec
@@ -64,24 +61,6 @@ func NewRecorder() *Recorder {
 			Name:      "outbound_failures_total",
 			Help:      "Total channel outbound failures by stage.",
 		}, []string{"provider", "event_kind", "stage", "retryable"}),
-		outboundRetries: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "multica",
-			Subsystem: "channel",
-			Name:      "outbound_retry_total",
-			Help:      "Total channel outbound retry worker outcomes.",
-		}, []string{"provider", "result"}),
-		outboundDead: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "multica",
-			Subsystem: "channel",
-			Name:      "outbound_dead_total",
-			Help:      "Total channel outbound failures marked dead.",
-		}, []string{"provider", "reason"}),
-		outboundAggregates: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "multica",
-			Subsystem: "channel",
-			Name:      "outbound_aggregated_notifications_total",
-			Help:      "Total notifications handled by outbound aggregation.",
-		}, []string{"provider", "event_kind", "result"}),
 		outboundOutbox: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica",
 			Subsystem: "channel",
@@ -119,9 +98,6 @@ func (r *Recorder) Collectors() []prometheus.Collector {
 		r.inboundStepErrors,
 		r.outboundCards,
 		r.outboundFailures,
-		r.outboundRetries,
-		r.outboundDead,
-		r.outboundAggregates,
 		r.outboundOutbox,
 		r.adapterDrops,
 		r.leaderState,
@@ -164,27 +140,6 @@ func (r *Recorder) RecordOutboundFailure(provider, eventKind, stage string, retr
 		return
 	}
 	r.outboundFailures.WithLabelValues(label(provider), label(eventKind), label(stage), boolLabel(retryable)).Inc()
-}
-
-func (r *Recorder) RecordOutboundRetry(provider, result string) {
-	if r == nil {
-		return
-	}
-	r.outboundRetries.WithLabelValues(label(provider), label(result)).Inc()
-}
-
-func (r *Recorder) RecordOutboundDead(provider, reason string) {
-	if r == nil {
-		return
-	}
-	r.outboundDead.WithLabelValues(label(provider), label(reason)).Inc()
-}
-
-func (r *Recorder) RecordOutboundAggregate(provider, eventKind, result string, count int) {
-	if r == nil || count <= 0 {
-		return
-	}
-	r.outboundAggregates.WithLabelValues(label(provider), label(eventKind), label(result)).Add(float64(count))
 }
 
 func (r *Recorder) RecordOutboundOutbox(provider, result string, count int) {

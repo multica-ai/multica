@@ -109,7 +109,6 @@ func newChannelInboundRuntimeComponents(pool *pgxpool.Pool, opts ...channelPipel
 			DispatchStore:     inbound.NewDBDispatchCompletionStore(pool),
 			ProposalStore:     inbound.NewDBActionProposalStore(pool),
 		}),
-		inbound.NewReplyStep(),
 	)
 	post := inbound.NewPipeline(postSteps...)
 	post.SetObserver(opt.Observer)

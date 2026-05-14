@@ -11,13 +11,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cleanupExpiredBindTokens = `-- name: CleanupExpiredBindTokens :exec
+DELETE FROM channel_bind_token
+WHERE (consumed_at IS NOT NULL AND consumed_at < now() - interval '1 day')
+   OR (consumed_at IS NULL AND expires_at < now() - interval '1 day')
+`
+
+func (q *Queries) CleanupExpiredBindTokens(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, cleanupExpiredBindTokens)
+	return err
+}
+
 const consumeChannelBindToken = `-- name: ConsumeChannelBindToken :one
 UPDATE channel_bind_token SET
     consumed_at = now()
 WHERE token_hash = $1
   AND consumed_at IS NULL
   AND expires_at > now()
-RETURNING token_hash, purpose, provider, external_user_id, external_chat_id, external_chat_type, external_chat_name, expires_at, consumed_at, created_at, connection_id
+RETURNING token_hash, purpose, provider, connection_id, external_user_id, external_chat_id, external_chat_type, external_chat_name, expires_at, consumed_at, created_at
 `
 
 func (q *Queries) ConsumeChannelBindToken(ctx context.Context, tokenHash []byte) (ChannelBindToken, error) {
@@ -27,6 +38,7 @@ func (q *Queries) ConsumeChannelBindToken(ctx context.Context, tokenHash []byte)
 		&i.TokenHash,
 		&i.Purpose,
 		&i.Provider,
+		&i.ConnectionID,
 		&i.ExternalUserID,
 		&i.ExternalChatID,
 		&i.ExternalChatType,
@@ -34,7 +46,6 @@ func (q *Queries) ConsumeChannelBindToken(ctx context.Context, tokenHash []byte)
 		&i.ExpiresAt,
 		&i.ConsumedAt,
 		&i.CreatedAt,
-		&i.ConnectionID,
 	)
 	return i, err
 }
@@ -46,7 +57,7 @@ INSERT INTO channel_bind_token (
     expires_at
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING token_hash, purpose, provider, external_user_id, external_chat_id, external_chat_type, external_chat_name, expires_at, consumed_at, created_at, connection_id
+RETURNING token_hash, purpose, provider, connection_id, external_user_id, external_chat_id, external_chat_type, external_chat_name, expires_at, consumed_at, created_at
 `
 
 type CreateChannelBindTokenParams struct {
@@ -78,6 +89,7 @@ func (q *Queries) CreateChannelBindToken(ctx context.Context, arg CreateChannelB
 		&i.TokenHash,
 		&i.Purpose,
 		&i.Provider,
+		&i.ConnectionID,
 		&i.ExternalUserID,
 		&i.ExternalChatID,
 		&i.ExternalChatType,
@@ -85,23 +97,12 @@ func (q *Queries) CreateChannelBindToken(ctx context.Context, arg CreateChannelB
 		&i.ExpiresAt,
 		&i.ConsumedAt,
 		&i.CreatedAt,
-		&i.ConnectionID,
 	)
 	return i, err
 }
 
-const deleteExpiredChannelBindTokens = `-- name: DeleteExpiredChannelBindTokens :exec
-DELETE FROM channel_bind_token
-WHERE expires_at < now() - interval '1 day'
-`
-
-func (q *Queries) DeleteExpiredChannelBindTokens(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, deleteExpiredChannelBindTokens)
-	return err
-}
-
 const getChannelBindToken = `-- name: GetChannelBindToken :one
-SELECT token_hash, purpose, provider, external_user_id, external_chat_id, external_chat_type, external_chat_name, expires_at, consumed_at, created_at, connection_id FROM channel_bind_token
+SELECT token_hash, purpose, provider, connection_id, external_user_id, external_chat_id, external_chat_type, external_chat_name, expires_at, consumed_at, created_at FROM channel_bind_token
 WHERE token_hash = $1
 `
 
@@ -112,6 +113,7 @@ func (q *Queries) GetChannelBindToken(ctx context.Context, tokenHash []byte) (Ch
 		&i.TokenHash,
 		&i.Purpose,
 		&i.Provider,
+		&i.ConnectionID,
 		&i.ExternalUserID,
 		&i.ExternalChatID,
 		&i.ExternalChatType,
@@ -119,7 +121,6 @@ func (q *Queries) GetChannelBindToken(ctx context.Context, tokenHash []byte) (Ch
 		&i.ExpiresAt,
 		&i.ConsumedAt,
 		&i.CreatedAt,
-		&i.ConnectionID,
 	)
 	return i, err
 }

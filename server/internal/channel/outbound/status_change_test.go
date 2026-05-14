@@ -2,14 +2,15 @@ package outbound
 
 // TC-status-1~3 (PRD M3a): status change notifications for in_review, done,
 // blocked. When an issue's status transitions to one of these three values,
-// the outbound subscriber must send a card to the issue's bound subscribers
-// (excluding the actor who made the change). If the user's preference for
-// the specific status kind is muted, the card must be dropped.
+// the outbound subscriber must enqueue a card notification for the issue's
+// bound subscribers (excluding the actor who made the change). If the user's
+// preference for the specific status kind is muted, the notification is
+// dropped.
 //
 // The subscriber listens on EventIssueUpdated (already published by the
 // handler layer with status_changed=true/false). When status_changed is true
-// and the new status is in {in_review, done, blocked}, we dispatch a card
-// with a status-specific template.
+// and the new status is in {in_review, done, blocked}, we enqueue a durable
+// outbox notification with a status-specific template.
 
 import (
 	"testing"
@@ -35,8 +36,10 @@ func TestSubscriber_StatusChange_InReview_SendsCard(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -62,18 +65,17 @@ func TestSubscriber_StatusChange_InReview_SendsCard(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 card for in_review, got %d", len(msgs))
+	requests := outbox.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("expected 1 outbox request for in_review, got %d", len(requests))
 	}
-	if msgs[0].ChatID != "group-chat-1" {
-		t.Errorf("ChatID = %q, want group-chat-1", msgs[0].ChatID)
+	if requests[0].TargetChatID != "group-chat-1" {
+		t.Errorf("TargetChatID = %q, want group-chat-1", requests[0].TargetChatID)
 	}
-	if len(msgs[0].Mentions) != 1 || msgs[0].Mentions[0].ID != "ext-user-1" {
-		t.Errorf("Mentions = %#v, want ext-user-1", msgs[0].Mentions)
+	if requests[0].MentionExternalUserID != "ext-user-1" {
+		t.Errorf("MentionExternalUserID = %q, want ext-user-1", requests[0].MentionExternalUserID)
 	}
-	body := msgs[0].Body
-	if body == "" {
+	if requests[0].Body == "" {
 		t.Error("Body is empty; expected a status-change card template")
 	}
 }
@@ -94,8 +96,10 @@ func TestSubscriber_StatusChange_Done_SendsCard(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -121,9 +125,8 @@ func TestSubscriber_StatusChange_Done_SendsCard(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 card for done, got %d", len(msgs))
+	if got := len(outbox.Requests()); got != 1 {
+		t.Fatalf("expected 1 outbox request for done, got %d", got)
 	}
 }
 
@@ -143,8 +146,10 @@ func TestSubscriber_StatusChange_Blocked_SendsCard(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -170,9 +175,8 @@ func TestSubscriber_StatusChange_Blocked_SendsCard(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 card for blocked, got %d", len(msgs))
+	if got := len(outbox.Requests()); got != 1 {
+		t.Fatalf("expected 1 outbox request for blocked, got %d", got)
 	}
 }
 
@@ -198,8 +202,10 @@ func TestSubscriber_StatusChange_PrefMuted_DropsEvent(t *testing.T) {
 			},
 		},
 	}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -225,9 +231,8 @@ func TestSubscriber_StatusChange_PrefMuted_DropsEvent(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 0 {
-		t.Errorf("expected 0 messages when status pref muted, got %d", len(msgs))
+	if got := len(outbox.Requests()); got != 0 {
+		t.Errorf("expected 0 outbox requests when status pref muted, got %d", got)
 	}
 }
 
@@ -247,8 +252,10 @@ func TestSubscriber_StatusChange_NotChanged_DropsEvent(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -274,9 +281,8 @@ func TestSubscriber_StatusChange_NotChanged_DropsEvent(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 0 {
-		t.Errorf("expected 0 messages when status not changed, got %d", len(msgs))
+	if got := len(outbox.Requests()); got != 0 {
+		t.Errorf("expected 0 outbox requests when status not changed, got %d", got)
 	}
 }
 
@@ -296,8 +302,10 @@ func TestSubscriber_StatusChange_UnsupportedStatus_DropsEvent(t *testing.T) {
 		},
 	}
 	prefStore := &mockPrefStore{prefs: map[string]map[string]string{}}
+	outbox := &mockOutbox{}
 
 	sub := NewSubscriber(bus, ch, bindingStore, prefStore, "00000000-0000-0000-0000-000000000100")
+	sub.SetNotificationEnqueuer(outbox)
 	sub.Start()
 
 	bus.Publish(events.Event{
@@ -323,8 +331,7 @@ func TestSubscriber_StatusChange_UnsupportedStatus_DropsEvent(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	msgs := ch.Messages()
-	if len(msgs) != 0 {
-		t.Errorf("expected 0 messages for unsupported status 'todo', got %d", len(msgs))
+	if got := len(outbox.Requests()); got != 0 {
+		t.Errorf("expected 0 outbox requests for unsupported status 'todo', got %d", got)
 	}
 }
