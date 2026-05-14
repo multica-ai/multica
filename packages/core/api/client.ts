@@ -2178,6 +2178,24 @@ export class ApiClient {
     );
   }
 
+  // CEREBRO-PATCH(api-client-terminal): cerebro interactive-terminal endpoints.
+  async getRuntimePresentationMode(runtimeId: string): Promise<{ runtime_id: string; presentation_mode: "headless" | "interactive" }> {
+    return this.fetch(`/api/cerebro/terminal/runtimes/${runtimeId}/presentation-mode`);
+  }
+  async setRuntimePresentationMode(runtimeId: string, mode: "headless" | "interactive"): Promise<{ runtime_id: string; presentation_mode: "headless" | "interactive" }> {
+    return this.fetch(`/api/cerebro/terminal/runtimes/${runtimeId}/presentation-mode`, { method: "PUT", body: JSON.stringify({ presentation_mode: mode }) });
+  }
+  async createTerminalSession(runtimeId: string, command?: string[]): Promise<{ id: string; runtime_id: string; command: string[]; created_at: string; attach_path: string }> {
+    return this.fetch(`/api/cerebro/terminal/sessions`, { method: "POST", body: JSON.stringify({ runtime_id: runtimeId, command }) });
+  }
+  async deleteTerminalSession(sessionId: string): Promise<void> {
+    await this.fetch(`/api/cerebro/terminal/sessions/${sessionId}`, { method: "DELETE" });
+  }
+  terminalAttachUrl(attachPath: string): string {
+    const base = this.baseUrl.replace(/^http/, "ws");
+    return `${base}${attachPath}`;
+  }
+
   async updateRuntimeSandbox(
     runtimeId: string,
     sandboxEnabled: boolean | null,

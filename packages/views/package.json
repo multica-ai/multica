@@ -94,6 +94,7 @@
     "@multica/cerebro-skill-ownership": "workspace:*",
     "@multica/cerebro-status-models": "workspace:*",
     "@multica/cerebro-sprints": "workspace:*",
+    "@multica/cerebro-terminal": "workspace:*",
     "@multica/cerebro-focus-list": "workspace:*",
     "@multica/cerebro-ui": "workspace:*",
     "@tiptap/core": "^3.22.1",
