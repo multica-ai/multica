@@ -155,6 +155,14 @@ func resolveManagedInstallPath() (string, error) {
 	return filepath.Join(home, ".multica", "bin", binaryName), nil
 }
 
+func resolveManagedInstallDir() (string, error) {
+	exePath, err := resolveManagedInstallPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(exePath), nil
+}
+
 func ResolveInstalledBinaryPath() (string, error) {
 	managedPath, err := resolveManagedInstallPath()
 	if err != nil {
@@ -321,55 +329,85 @@ func UpdateViaDownload(targetVersion string) (string, error) {
 		return "", err
 	}
 
-	binaryName := "multica"
-	if runtime.GOOS == "windows" {
-		binaryName = "multica.exe"
-	}
-
-	var binaryData []byte
-	if runtime.GOOS == "windows" {
-		binaryData, err = extractBinaryFromZip(bytes.NewReader(archiveData), binaryName)
-	} else {
-		binaryData, err = extractBinaryFromTarGz(bytes.NewReader(archiveData), binaryName)
-	}
-	if err != nil {
-		return "", fmt.Errorf("extract binary: %w", err)
-	}
-
-	exePath, err := resolveManagedInstallPath()
+	binaryName := managedBinaryName()
+	installDir, err := resolveManagedInstallDir()
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(filepath.Dir(exePath), 0o755); err != nil {
+	if err := os.MkdirAll(installDir, 0o755); err != nil {
 		return "", fmt.Errorf("create install dir: %w", err)
 	}
 
-	tmpFile, err := os.CreateTemp(filepath.Dir(exePath), "multica-update-*")
+	stageRoot, err := os.MkdirTemp(installDir, "multica-update-*")
 	if err != nil {
-		return "", fmt.Errorf("create temp file: %w", err)
+		return "", fmt.Errorf("create staging dir: %w", err)
 	}
-	tmpPath := tmpFile.Name()
-
-	if _, err := tmpFile.Write(binaryData); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
-		return "", fmt.Errorf("write temp file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpPath)
-		return "", fmt.Errorf("close temp file: %w", err)
-	}
-	if err := os.Chmod(tmpPath, 0o755); err != nil {
-		os.Remove(tmpPath)
-		return "", fmt.Errorf("chmod temp file: %w", err)
+	defer os.RemoveAll(stageRoot)
+	stageDir := filepath.Join(stageRoot, "archive")
+	if err := os.MkdirAll(stageDir, 0o755); err != nil {
+		return "", fmt.Errorf("create archive dir: %w", err)
 	}
 
-	if err := replaceBinary(tmpPath, exePath); err != nil {
-		os.Remove(tmpPath)
-		return "", fmt.Errorf("replace binary: %w", err)
+	if runtime.GOOS == "windows" {
+		err = extractZipToDir(bytes.NewReader(archiveData), int64(len(archiveData)), stageDir)
+	} else {
+		err = extractTarGzToDir(bytes.NewReader(archiveData), stageDir)
+	}
+	if err != nil {
+		return "", fmt.Errorf("extract archive: %w", err)
+	}
+	if err := installManagedArchive(stageDir, installDir, binaryName); err != nil {
+		return "", fmt.Errorf("install archive: %w", err)
 	}
 
-	return fmt.Sprintf("Downloaded %s and installed %s", targetTag, exePath), nil
+	return fmt.Sprintf("Downloaded %s and installed %s", targetTag, filepath.Join(installDir, binaryName)), nil
+}
+
+func managedBinaryName() string {
+	if runtime.GOOS == "windows" {
+		return "multica.exe"
+	}
+	return "multica"
+}
+
+func installManagedArchive(stageDir, installDir, binaryName string) error {
+	srcBinary := filepath.Join(stageDir, binaryName)
+	if _, err := os.Stat(srcBinary); err != nil {
+		return fmt.Errorf("binary %q not found in extracted archive", binaryName)
+	}
+
+	srcPkg := filepath.Join(stageDir, "package.json")
+	if _, err := os.Stat(srcPkg); err == nil {
+		if err := replaceFile(srcPkg, filepath.Join(installDir, "package.json")); err != nil {
+			return fmt.Errorf("replace package.json: %w", err)
+		}
+	}
+
+	srcModules := filepath.Join(stageDir, "node_modules")
+	if info, err := os.Stat(srcModules); err == nil && info.IsDir() {
+		dstModules := filepath.Join(installDir, "node_modules")
+		if err := os.RemoveAll(dstModules); err != nil {
+			return fmt.Errorf("remove old node_modules: %w", err)
+		}
+		if err := os.Rename(srcModules, dstModules); err != nil {
+			return fmt.Errorf("install node_modules: %w", err)
+		}
+	}
+
+	if err := os.Chmod(srcBinary, 0o755); err != nil && runtime.GOOS != "windows" {
+		return fmt.Errorf("chmod binary: %w", err)
+	}
+	if err := replaceBinary(srcBinary, filepath.Join(installDir, binaryName)); err != nil {
+		return fmt.Errorf("replace binary: %w", err)
+	}
+	return nil
+}
+
+func replaceFile(src, dst string) error {
+	if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.Rename(src, dst)
 }
 
 func ShouldUpdate(currentVersion string, latest *UpdateManifest) (bool, error) {
@@ -410,6 +448,50 @@ func extractBinaryFromTarGz(r io.Reader, name string) ([]byte, error) {
 	}
 }
 
+func extractTarGzToDir(r io.Reader, dst string) error {
+	gz, err := gzip.NewReader(r)
+	if err != nil {
+		return fmt.Errorf("gzip reader: %w", err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read tar: %w", err)
+		}
+		target := filepath.Join(dst, filepath.Clean(hdr.Name))
+		if !strings.HasPrefix(target, dst+string(os.PathSeparator)) && target != dst {
+			return fmt.Errorf("archive entry escapes destination: %q", hdr.Name)
+		}
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return fmt.Errorf("mkdir %q: %w", target, err)
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return fmt.Errorf("mkdir parent for %q: %w", target, err)
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0o777)
+			if err != nil {
+				return fmt.Errorf("open %q: %w", target, err)
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				f.Close()
+				return fmt.Errorf("write %q: %w", target, err)
+			}
+			if err := f.Close(); err != nil {
+				return fmt.Errorf("close %q: %w", target, err)
+			}
+		}
+	}
+}
+
 func extractBinaryFromZip(r io.Reader, name string) ([]byte, error) {
 	buf, err := io.ReadAll(r)
 	if err != nil {
@@ -437,4 +519,48 @@ func extractBinaryFromZip(r io.Reader, name string) ([]byte, error) {
 		}
 	}
 	return nil, fmt.Errorf("binary %q not found in archive", name)
+}
+
+func extractZipToDir(r io.ReaderAt, size int64, dst string) error {
+	zr, err := zip.NewReader(r, size)
+	if err != nil {
+		return fmt.Errorf("zip reader: %w", err)
+	}
+	for _, f := range zr.File {
+		target := filepath.Join(dst, filepath.Clean(f.Name))
+		if !strings.HasPrefix(target, dst+string(os.PathSeparator)) && target != dst {
+			return fmt.Errorf("archive entry escapes destination: %q", f.Name)
+		}
+		if f.FileInfo().IsDir() {
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return fmt.Errorf("mkdir %q: %w", target, err)
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return fmt.Errorf("mkdir parent for %q: %w", target, err)
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return fmt.Errorf("open zip entry %q: %w", f.Name, err)
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, f.Mode())
+		if err != nil {
+			rc.Close()
+			return fmt.Errorf("open %q: %w", target, err)
+		}
+		if _, err := io.Copy(out, rc); err != nil {
+			out.Close()
+			rc.Close()
+			return fmt.Errorf("write %q: %w", target, err)
+		}
+		if err := out.Close(); err != nil {
+			rc.Close()
+			return fmt.Errorf("close %q: %w", target, err)
+		}
+		if err := rc.Close(); err != nil {
+			return fmt.Errorf("close zip entry %q: %w", f.Name, err)
+		}
+	}
+	return nil
 }

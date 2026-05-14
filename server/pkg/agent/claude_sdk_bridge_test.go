@@ -57,3 +57,50 @@ func TestFindClaudeSDKRootRequiresMulticaInstallNotTaskRepo(t *testing.T) {
 		t.Fatalf("findClaudeSDKRoot() = %q, want %q", got, installRoot)
 	}
 }
+
+func TestFindClaudeSDKRootIgnoresDeclaredDependencyWithoutInstall(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"devDependencies":{"@anthropic-ai/claude-agent-sdk":"^0.2.132"}}`), 0o600); err != nil {
+		t.Fatalf("write package.json: %v", err)
+	}
+	if got := findClaudeSDKRoot(root); got != "" {
+		t.Fatalf("declared dependency without installed sdk should not resolve as sdk root, got %q", got)
+	}
+}
+
+func TestFindClaudeSDKRootResolvesRelativePathToAbsoluteRoot(t *testing.T) {
+	t.Parallel()
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "node_modules", "@anthropic-ai", "claude-agent-sdk"), 0o755); err != nil {
+		t.Fatalf("mkdir sdk root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "node_modules", "@anthropic-ai", "claude-agent-sdk", "package.json"), []byte(`{"name":"@anthropic-ai/claude-agent-sdk"}`), 0o600); err != nil {
+		t.Fatalf("write sdk package: %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir root: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(wd)
+	})
+
+	got := findClaudeSDKRoot(".")
+	gotEval, err := filepath.EvalSymlinks(got)
+	if err != nil {
+		t.Fatalf("eval got: %v", err)
+	}
+	rootEval, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("eval root: %v", err)
+	}
+	if gotEval != rootEval {
+		t.Fatalf("findClaudeSDKRoot(.) = %q (eval %q), want %q (eval %q)", got, gotEval, root, rootEval)
+	}
+}

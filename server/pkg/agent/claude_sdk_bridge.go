@@ -621,12 +621,16 @@ func resolveClaudeSDKRequireRoot(cwd string) string {
 			return root
 		}
 	}
+	if cwd != "" {
+		if root := findClaudeSDKRoot(cwd); root != "" {
+			return root
+		}
+	}
 	if wd, err := os.Getwd(); err == nil {
 		if root := findClaudeSDKRoot(wd); root != "" {
 			return root
 		}
 	}
-	_ = cwd
 	return ""
 }
 
@@ -639,9 +643,15 @@ func findClaudeSDKRootFromCaller() string {
 }
 
 func findClaudeSDKRoot(start string) string {
-	dir := start
+	dir := strings.TrimSpace(start)
+	if dir == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
 	for i := 0; i < 12; i++ {
-		if hasClaudeSDKAvailable(dir) {
+		if claudeSDKInstalledAtRoot(dir) {
 			return dir
 		}
 		parent := filepath.Dir(dir)
@@ -658,12 +668,11 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-func hasClaudeSDKAvailable(root string) bool {
+func claudeSDKInstalledAtRoot(root string) bool {
 	if root == "" {
 		return false
 	}
-	return hasClaudeSDKDependency(root) ||
-		fileExists(filepath.Join(root, "node_modules", "@anthropic-ai", "claude-agent-sdk", "package.json")) ||
+	return fileExists(filepath.Join(root, "node_modules", "@anthropic-ai", "claude-agent-sdk", "package.json")) ||
 		fileExists(filepath.Join(root, "node_modules", "@anthropic-ai", "claude-code", "package.json"))
 }
 

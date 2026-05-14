@@ -349,7 +349,24 @@ function Install-CliBinary {
         }
     }
 
+    $runtimeNodeModules = Join-Path $CliBinDir "node_modules"
+    $runtimePackageJson = Join-Path $CliBinDir "package.json"
+    $nodeModulesSrc = Join-Path $tmpDir "node_modules"
+    $packageJsonSrc = Join-Path $tmpDir "package.json"
+
     try {
+        if (Test-Path $runtimeNodeModules) {
+            Remove-Item $runtimeNodeModules -Recurse -Force
+        }
+        if (Test-Path $runtimePackageJson) {
+            Remove-Item $runtimePackageJson -Force
+        }
+        if (Test-Path $nodeModulesSrc) {
+            Move-Item $nodeModulesSrc $runtimeNodeModules -Force
+        }
+        if (Test-Path $packageJsonSrc) {
+            Move-Item $packageJsonSrc $runtimePackageJson -Force
+        }
         Move-Item $exeSrc $CliBinPath -Force
         if (Test-Path $backupPath) {
             Remove-Item $backupPath -Force

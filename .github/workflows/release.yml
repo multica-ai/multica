@@ -75,6 +75,21 @@ jobs:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare CLI runtime assets
+        run: bash scripts/prepare-cli-runtime-assets.sh
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:

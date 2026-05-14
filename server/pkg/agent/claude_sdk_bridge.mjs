@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
 import readline from "node:readline";
@@ -23,7 +24,9 @@ function decodeConfig() {
 }
 
 async function loadSDK(requireRoot) {
-  const requireFromRoot = createRequire(requireRoot.endsWith("/package.json") ? requireRoot : `${requireRoot}/package.json`);
+  const root = path.resolve(requireRoot);
+  const packageJsonPath = root.endsWith("/package.json") ? root : path.join(root, "package.json");
+  const requireFromRoot = createRequire(packageJsonPath);
   const candidates = [
     "@anthropic-ai/claude-agent-sdk",
     "@anthropic-ai/claude-code",
