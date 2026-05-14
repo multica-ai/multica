@@ -89,6 +89,27 @@ function isNavActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
+function openFocusedPage(path: string): void {
+  if (typeof window === "undefined") return;
+  const desktopAPI = (
+    window as unknown as {
+      desktopAPI?: { openExternal?: (url: string) => Promise<void> | void };
+    }
+  ).desktopAPI;
+  if (desktopAPI?.openExternal) {
+    void desktopAPI.openExternal(path);
+    return;
+  }
+  const opened = window.open(path, "_blank");
+  if (!opened) return;
+  opened.focus();
+  try {
+    opened.opener = null;
+  } catch {
+    // Some browsers disallow mutating opener after navigation starts.
+  }
+}
+
 // Stable empty arrays for query defaults. Using an inline `= []` default on
 // `useQuery` creates a new array reference on every render when `data` is
 // undefined (e.g. query disabled or loading) — which in turn breaks any
@@ -341,7 +362,7 @@ interface AppSidebarProps {
 
 export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }: AppSidebarProps = {}) {
   const { t } = useT("layout");
-  const { pathname, push } = useNavigation();
+  const { pathname, push, getShareableUrl } = useNavigation();
   const user = useAuthStore((s) => s.user);
   const userId = useAuthStore((s) => s.user?.id);
   const logout = useLogout();
@@ -370,6 +391,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
+  const handleUsageClick = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      openFocusedPage(getShareableUrl?.(href) ?? href);
+    },
+    [getShareableUrl],
+  );
 
   // Local presentational copy of pinnedItems for drop-animation stability.
   // Follows TQ at rest; frozen during a drag gesture so a mid-drag cache
@@ -680,11 +709,22 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 {workspaceNav.map((item) => {
                   const href = p[item.key]();
                   const isActive = isNavActive(pathname, href);
+                  const render =
+                    item.key === "usage" ? (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(event) => handleUsageClick(event, href)}
+                      />
+                    ) : (
+                      <AppLink href={href} />
+                    );
                   return (
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
                         isActive={isActive}
-                        render={<AppLink href={href} />}
+                        render={render}
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />

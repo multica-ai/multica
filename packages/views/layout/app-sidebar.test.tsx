@@ -1,4 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { cloneElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
@@ -43,7 +45,13 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   SidebarGroupLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SidebarMenuButton: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
+  SidebarMenuButton: ({
+    children,
+    render,
+  }: {
+    children: React.ReactNode;
+    render?: React.ReactElement<{ children?: React.ReactNode }>;
+  }) => (render ? cloneElement(render, undefined, children) : <button type="button">{children}</button>),
   SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarRail: () => null,
 }));
@@ -70,7 +78,7 @@ vi.mock("./help-launcher", () => ({ HelpLauncher: () => null }));
 vi.mock("../auth", () => ({ useLogout: () => vi.fn() }));
 vi.mock("../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
 vi.mock("../navigation", () => ({
-  AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
+  AppLink: ({ children, href, ...props }: { children: React.ReactNode; href: string }) => <a href={href} {...props}>{children}</a>,
   useNavigation: () => ({ pathname: "/acme/issues", push: vi.fn() }),
 }));
 vi.mock("../projects/components/project-icon", () => ({ ProjectIcon: () => <span /> }));
@@ -147,5 +155,20 @@ describe("PinRow", () => {
     detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
     render(<AppSidebar />);
     expect(await screen.findByText("MUL-123 Keep this pin")).toBeInTheDocument();
+  });
+
+  it("opens the usage dashboard in a focused new page", async () => {
+    const focus = vi.fn();
+    const openedWindow = { focus, opener: null } as unknown as Window;
+    const open = vi.spyOn(window, "open").mockReturnValue(openedWindow);
+
+    const { container } = render(<AppSidebar />);
+    const usageLink = container.querySelector<HTMLAnchorElement>('a[href="/acme/usage"]');
+
+    expect(usageLink).toBeInTheDocument();
+    await userEvent.click(usageLink!);
+
+    expect(open).toHaveBeenCalledWith("/acme/usage", "_blank");
+    expect(focus).toHaveBeenCalledTimes(1);
   });
 });
