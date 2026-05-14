@@ -312,6 +312,57 @@ func TestCreateLocalCLIMessage_CommandUserInputStoresTranscriptOnly(t *testing.T
 	}
 }
 
+func TestCreateLocalCLIMessage_SourceKeyDedupesTranscriptAndComment(t *testing.T) {
+	ctx := context.Background()
+	issue := createIssueForLocalRunTest(t, "in_progress")
+	run := createLocalRunForTest(t, issue.ID, map[string]any{
+		"cli_name":      "codex",
+		"comments_mode": "thread",
+	})
+	runID := run["id"].(string)
+	topCommentID := run["top_comment_id"].(string)
+	body := map[string]any{
+		"type":       "final",
+		"content":    "done once",
+		"source":     "codex",
+		"source_key": "session.jsonl:42:final",
+	}
+
+	for i := 0; i < 2; i++ {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/local-runs/"+runID+"/messages", body)
+		req = withLocalRunWorkspace(req)
+		req = withURLParam(req, "runId", runID)
+		testHandler.CreateLocalCLIMessage(w, req)
+		if i == 0 && w.Code != http.StatusCreated {
+			t.Fatalf("first CreateLocalCLIMessage: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		if i == 1 && w.Code != http.StatusOK {
+			t.Fatalf("duplicate CreateLocalCLIMessage: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	var messageCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM local_cli_message WHERE run_id = $1
+	`, runID).Scan(&messageCount); err != nil {
+		t.Fatalf("count local messages: %v", err)
+	}
+	if messageCount != 1 {
+		t.Fatalf("local messages = %d, want 1", messageCount)
+	}
+
+	var replyCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM comment WHERE issue_id = $1 AND parent_id = $2 AND content = 'done once'
+	`, issue.ID, topCommentID).Scan(&replyCount); err != nil {
+		t.Fatalf("count replies: %v", err)
+	}
+	if replyCount != 1 {
+		t.Fatalf("reply comments = %d, want 1", replyCount)
+	}
+}
+
 func TestCreateLocalCLIMessage_CommentsOffDoesNotCreateReply(t *testing.T) {
 	issue := createIssueForLocalRunTest(t, "in_progress")
 	run := createLocalRunForTest(t, issue.ID, map[string]any{

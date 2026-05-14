@@ -15,10 +15,25 @@ type providerTranscriptExtractor interface {
 	ExtractTurns() ([]providerTranscriptTurn, bool)
 }
 
+type providerTranscriptEventExtractor interface {
+	ExtractEvents() ([]providerTranscriptEvent, bool)
+}
+
 type providerTranscriptTurn struct {
 	Key       string
 	UserInput string
 	Final     string
+}
+
+type providerTranscriptEvent struct {
+	Key     string
+	Source  string
+	Type    string
+	Tool    string
+	Content string
+	Input   map[string]any
+	Output  string
+	Comment bool
 }
 
 func newProviderTranscriptExtractor(cliName, cwd string, runStart time.Time, bootstrapPrompt string) providerTranscriptExtractor {
@@ -69,6 +84,14 @@ func (e *codexTranscriptExtractor) ExtractTurns() ([]providerTranscriptTurn, boo
 		return nil, false
 	}
 	return extractCodexTurnsFromJSONL(path), true
+}
+
+func (e *codexTranscriptExtractor) ExtractEvents() ([]providerTranscriptEvent, bool) {
+	path, ok := e.latestSessionFile(time.Time{})
+	if !ok {
+		return nil, false
+	}
+	return extractCodexEventsFromJSONL(path), true
 }
 
 func (e *codexTranscriptExtractor) latestSessionFile(turnStart time.Time) (string, bool) {
@@ -329,6 +352,128 @@ func extractCodexTurnsFromJSONL(path string) []providerTranscriptTurn {
 	}
 	flush()
 	return turns
+}
+
+func extractCodexEventsFromJSONL(path string) []providerTranscriptEvent {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var events []providerTranscriptEvent
+	commentableTurn := false
+	lastFinal := ""
+	lineNo := 0
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		lineNo++
+		payload, ok := codexEventPayload(scanner.Bytes())
+		if !ok {
+			continue
+		}
+		key := fmt.Sprintf("%s:%d", path, lineNo)
+		switch stringValue(payload["type"]) {
+		case "user_message":
+			text := strings.TrimSpace(codexPayloadText(payload))
+			if text == "" {
+				continue
+			}
+			commentableTurn = !isSlashInput(text)
+			lastFinal = ""
+			events = append(events, providerTranscriptEvent{
+				Key:     key + ":user",
+				Source:  "codex",
+				Type:    "user_input",
+				Content: text,
+				Comment: commentableTurn,
+			})
+		case "agent_message":
+			text := strings.TrimSpace(codexPayloadText(payload))
+			if text == "" {
+				continue
+			}
+			if stringValue(payload["phase"]) == "final_answer" {
+				events = append(events, providerTranscriptEvent{
+					Key:     key + ":final",
+					Source:  "codex",
+					Type:    "final",
+					Content: text,
+					Comment: commentableTurn,
+				})
+				lastFinal = text
+			} else {
+				events = append(events, providerTranscriptEvent{
+					Key:     key + ":text",
+					Source:  "codex",
+					Type:    "text",
+					Content: text,
+				})
+			}
+		case "function_call":
+			events = append(events, providerTranscriptEvent{
+				Key:    key + ":tool_use",
+				Source: "codex",
+				Type:   "tool_use",
+				Tool:   firstString(payload, "name", "tool", "tool_name"),
+				Input:  codexFunctionCallInput(payload),
+			})
+		case "function_call_output":
+			output := strings.TrimSpace(codexPayloadText(payload))
+			if output == "" {
+				output = stringValue(payload["output"])
+			}
+			events = append(events, providerTranscriptEvent{
+				Key:    key + ":tool_result",
+				Source: "codex",
+				Type:   "tool_result",
+				Tool:   firstString(payload, "name", "tool", "tool_name"),
+				Output: output,
+			})
+		case "task_complete":
+			text := strings.TrimSpace(codexTaskCompleteLastAgentMessage(payload))
+			if text != "" && text != lastFinal {
+				events = append(events, providerTranscriptEvent{
+					Key:     key + ":final",
+					Source:  "codex",
+					Type:    "final",
+					Content: text,
+					Comment: commentableTurn,
+				})
+			}
+		case "error":
+			text := strings.TrimSpace(codexPayloadText(payload))
+			if text != "" {
+				events = append(events, providerTranscriptEvent{
+					Key:     key + ":error",
+					Source:  "codex",
+					Type:    "error",
+					Content: text,
+				})
+			}
+		}
+	}
+	return events
+}
+
+func codexFunctionCallInput(payload map[string]any) map[string]any {
+	input := make(map[string]any)
+	if callID := stringValue(payload["call_id"]); callID != "" {
+		input["call_id"] = callID
+	}
+	if args := stringValue(payload["arguments"]); args != "" {
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(args), &parsed); err == nil {
+			input["arguments"] = parsed
+		} else {
+			input["arguments"] = args
+		}
+	}
+	if len(input) == 0 {
+		return nil
+	}
+	return input
 }
 
 type codexAnswerCandidates struct {

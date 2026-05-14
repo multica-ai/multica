@@ -36,7 +36,8 @@ export const issueKeys = {
   tasksAll: () => ["issues", "tasks"] as const,
   attachments: (issueId: string) => ["issues", "attachments", issueId] as const,
   taskRuns: (issueId: string) => ["issues", "task-runs", issueId] as const,
-  taskMessages: (taskId: string) => ["issues", "task-messages", taskId] as const,
+  /** Per-task execution messages. Shared with chat and realtime WS writes. */
+  taskMessages: (taskId: string) => ["task-messages", taskId] as const,
 };
 
 export type MyIssuesFilter = Pick<

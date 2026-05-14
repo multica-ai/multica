@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -50,11 +51,13 @@ type updateLocalCLIRunRequest struct {
 }
 
 type createLocalCLIMessageRequest struct {
-	Type    string         `json:"type"`
-	Tool    string         `json:"tool"`
-	Content string         `json:"content"`
-	Input   map[string]any `json:"input"`
-	Output  string         `json:"output"`
+	Type      string         `json:"type"`
+	Tool      string         `json:"tool"`
+	Content   string         `json:"content"`
+	Input     map[string]any `json:"input"`
+	Output    string         `json:"output"`
+	Source    string         `json:"source"`
+	SourceKey string         `json:"source_key"`
 }
 
 type localCLICommentDisplayRow struct {
@@ -248,6 +251,54 @@ func (h *Handler) CreateLocalCLIMessage(w http.ResponseWriter, r *http.Request) 
 	req.Content = redact.Text(req.Content)
 	req.Output = redact.Text(req.Output)
 	req.Input = redact.InputMap(req.Input)
+	req.Source = strings.TrimSpace(req.Source)
+	req.SourceKey = strings.TrimSpace(req.SourceKey)
+
+	if req.Source != "" && req.SourceKey != "" {
+		msg, found, err := h.loadLocalCLIMessageBySource(r.Context(), run, req.Source, req.SourceKey)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check local run message")
+			return
+		}
+		if found {
+			writeJSON(w, http.StatusOK, msg)
+			return
+		}
+	}
+
+	input, _ := json.Marshal(req.Input)
+	if req.Input == nil {
+		input = nil
+	}
+
+	row := h.DB.QueryRow(r.Context(), `
+		INSERT INTO local_cli_message (run_id, seq, type, tool, content, input, output, source, source_key)
+		VALUES (
+			$1,
+			COALESCE((SELECT MAX(seq) + 1 FROM local_cli_message WHERE run_id = $1), 1),
+			$2, NULLIF($3, ''), NULLIF($4, ''), $5::jsonb, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, '')
+		)
+		ON CONFLICT (run_id, source, source_key)
+			WHERE source IS NOT NULL AND source_key IS NOT NULL
+			DO NOTHING
+		RETURNING id, run_id, seq, type, tool, content, input, output, created_at, source, source_key
+	`, run.ID, req.Type, req.Tool, req.Content, input, req.Output, req.Source, req.SourceKey)
+	msg, err := scanLocalCLIMessage(row, uuidToString(run.IssueID))
+	if err != nil {
+		if req.Source != "" && req.SourceKey != "" && err == pgx.ErrNoRows {
+			existing, found, loadErr := h.loadLocalCLIMessageBySource(r.Context(), run, req.Source, req.SourceKey)
+			if loadErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to load local run message")
+				return
+			}
+			if found {
+				writeJSON(w, http.StatusOK, existing)
+				return
+			}
+		}
+		writeError(w, http.StatusInternalServerError, "failed to create local run message")
+		return
+	}
 
 	var commentID pgtype.UUID
 	createsReply := (req.Type == "final" || (req.Type == "user_input" && !localCLIMessageIsCommand(req))) &&
@@ -279,29 +330,33 @@ func (h *Handler) CreateLocalCLIMessage(w http.ResponseWriter, r *http.Request) 
 			"comment":    resp,
 			"app_origin": requestAppOrigin(r),
 		})
-	}
-	input, _ := json.Marshal(req.Input)
-	if req.Input == nil {
-		input = nil
-	}
-
-	row := h.DB.QueryRow(r.Context(), `
-		INSERT INTO local_cli_message (run_id, comment_id, seq, type, tool, content, input, output)
-		VALUES (
-			$1,
-			$2,
-			COALESCE((SELECT MAX(seq) + 1 FROM local_cli_message WHERE run_id = $1), 1),
-			$3, NULLIF($4, ''), NULLIF($5, ''), $6::jsonb, NULLIF($7, '')
-		)
-		RETURNING id, run_id, seq, type, tool, content, input, output, created_at
-	`, run.ID, uuidOrNil(commentID), req.Type, req.Tool, req.Content, input, req.Output)
-	msg, err := scanLocalCLIMessage(row, uuidToString(run.IssueID))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create local run message")
-		return
+		if _, err := h.DB.Exec(r.Context(), `
+			UPDATE local_cli_message
+			SET comment_id = $2
+			WHERE run_id = $1 AND seq = $3
+		`, run.ID, uuidOrNil(commentID), msg.Seq); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to attach local run comment")
+			return
+		}
 	}
 	h.publishTask(protocol.EventTaskMessage, uuidToString(run.WorkspaceID), "member", uuidToString(run.OwnerID), uuidToString(run.ID), msg)
 	writeJSON(w, http.StatusCreated, msg)
+}
+
+func (h *Handler) loadLocalCLIMessageBySource(ctx context.Context, run localCLIRun, source, sourceKey string) (protocol.TaskMessagePayload, bool, error) {
+	row := h.DB.QueryRow(ctx, `
+		SELECT id, run_id, seq, type, tool, content, input, output, created_at, source, source_key
+		FROM local_cli_message
+		WHERE run_id = $1 AND source = $2 AND source_key = $3
+	`, run.ID, source, sourceKey)
+	msg, err := scanLocalCLIMessage(row, uuidToString(run.IssueID))
+	if err == nil {
+		return msg, true, nil
+	}
+	if err == pgx.ErrNoRows {
+		return protocol.TaskMessagePayload{}, false, nil
+	}
+	return protocol.TaskMessagePayload{}, false, err
 }
 
 func localCLIMessageIsCommand(req createLocalCLIMessageRequest) bool {
@@ -414,7 +469,7 @@ func (h *Handler) listLocalCLIRunsByIssue(r *http.Request, issue db.Issue) ([]lo
 
 func (h *Handler) writeLocalCLIMessages(w http.ResponseWriter, r *http.Request, run localCLIRun) {
 	query := `
-		SELECT id, run_id, seq, type, tool, content, input, output, created_at
+		SELECT id, run_id, seq, type, tool, content, input, output, created_at, source, source_key
 		FROM local_cli_message
 		WHERE run_id = $1
 		ORDER BY seq ASC
@@ -422,7 +477,7 @@ func (h *Handler) writeLocalCLIMessages(w http.ResponseWriter, r *http.Request, 
 	args := []any{run.ID}
 	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
 		query = `
-			SELECT id, run_id, seq, type, tool, content, input, output, created_at
+			SELECT id, run_id, seq, type, tool, content, input, output, created_at, source, source_key
 			FROM local_cli_message
 			WHERE run_id = $1 AND seq > $2
 			ORDER BY seq ASC
@@ -483,8 +538,10 @@ func scanLocalCLIMessage(row localCLIMessageScanner, issueID string) (protocol.T
 		inputBytes []byte
 		output     pgtype.Text
 		createdAt  pgtype.Timestamptz
+		source     pgtype.Text
+		sourceKey  pgtype.Text
 	)
-	err := row.Scan(&id, &runID, &seq, &msgType, &tool, &content, &inputBytes, &output, &createdAt)
+	err := row.Scan(&id, &runID, &seq, &msgType, &tool, &content, &inputBytes, &output, &createdAt, &source, &sourceKey)
 	if err != nil {
 		return protocol.TaskMessagePayload{}, err
 	}

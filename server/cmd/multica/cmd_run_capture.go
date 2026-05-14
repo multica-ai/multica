@@ -189,19 +189,21 @@ func (e *terminalInputEditor) ctrlW() {
 }
 
 type terminalTurnCapture struct {
-	mu              sync.Mutex
-	stopOnce        sync.Once
-	reporter        *localRunReporter
-	screen          *terminalScreen
-	provider        providerTranscriptExtractor
-	done            chan struct{}
-	syncedUsers     map[string]bool
-	syncedFinals    map[string]bool
-	active          bool
-	source          assistantCaptureSource
-	suppress        bool
-	bootstrap       bool
-	bootstrapPrompt string
+	mu                  sync.Mutex
+	stopOnce            sync.Once
+	reporter            *localRunReporter
+	screen              *terminalScreen
+	provider            providerTranscriptExtractor
+	done                chan struct{}
+	syncedUsers         map[string]bool
+	syncedFinals        map[string]bool
+	syncedEvents        map[string]bool
+	active              bool
+	source              assistantCaptureSource
+	suppress            bool
+	bootstrap           bool
+	bootstrapPrompt     string
+	providerCommentable bool
 }
 
 type assistantCaptureSource int
@@ -230,6 +232,24 @@ func (c *terminalTurnCapture) Write(p []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.screen.Write(p)
+}
+
+func (c *terminalTurnCapture) HasProviderTranscript() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	provider := c.provider
+	c.mu.Unlock()
+	if provider == nil {
+		return false
+	}
+	if extractor, ok := provider.(providerTranscriptEventExtractor); ok {
+		_, ok := extractor.ExtractEvents()
+		return ok
+	}
+	_, ok := provider.ExtractTurns()
+	return ok
 }
 
 func (c *terminalTurnCapture) MarkStructuredAssistant() {
@@ -367,6 +387,16 @@ func (c *terminalTurnCapture) syncProviderTurns() {
 	if c == nil || c.provider == nil {
 		return
 	}
+	if extractor, ok := c.provider.(providerTranscriptEventExtractor); ok {
+		events, ok := extractor.ExtractEvents()
+		if !ok {
+			return
+		}
+		for _, event := range events {
+			c.syncProviderEvent(event)
+		}
+		return
+	}
 	turns, ok := c.provider.ExtractTurns()
 	if !ok {
 		return
@@ -383,6 +413,63 @@ func (c *terminalTurnCapture) syncProviderTurns() {
 		}
 		c.syncProviderFinal(turn.Key, final)
 	}
+}
+
+func (c *terminalTurnCapture) syncProviderEvent(event providerTranscriptEvent) {
+	if event.Key == "" || strings.TrimSpace(event.Type) == "" {
+		return
+	}
+	msg := localCLIMessage{
+		Type:      event.Type,
+		Tool:      event.Tool,
+		Content:   strings.TrimSpace(event.Content),
+		Input:     event.Input,
+		Output:    strings.TrimSpace(event.Output),
+		Source:    event.Source,
+		SourceKey: event.Key,
+	}
+	if msg.Source == "" {
+		msg.Source = "provider"
+	}
+	if msg.Type == "user_input" {
+		if msg.Content == "" || c.isBootstrapProviderUserInput(msg.Content) || isSlashInput(msg.Content) {
+			c.setProviderCommentable(false)
+			return
+		}
+		c.setProviderCommentable(true)
+	}
+	if msg.Type == "final" {
+		if msg.Content == "" || isStatusOnly(msg.Content) || !event.Comment || !c.isProviderCommentable() {
+			return
+		}
+	}
+	if msg.Type != "user_input" && msg.Type != "final" && msg.Content == "" && msg.Output == "" && msg.Tool == "" {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ensureProviderSyncMapsLocked()
+	if c.syncedEvents[event.Key] {
+		return
+	}
+	msg.Content = redact.Text(msg.Content)
+	msg.Output = redact.Text(msg.Output)
+	msg.Input = redactInputMap(msg.Input)
+	c.reporter.Post(msg)
+	c.syncedEvents[event.Key] = true
+}
+
+func (c *terminalTurnCapture) setProviderCommentable(commentable bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.providerCommentable = commentable
+}
+
+func (c *terminalTurnCapture) isProviderCommentable() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.providerCommentable
 }
 
 func (c *terminalTurnCapture) syncProviderUser(key, content string) {
@@ -419,6 +506,9 @@ func (c *terminalTurnCapture) ensureProviderSyncMapsLocked() {
 	}
 	if c.syncedFinals == nil {
 		c.syncedFinals = make(map[string]bool)
+	}
+	if c.syncedEvents == nil {
+		c.syncedEvents = make(map[string]bool)
 	}
 }
 
@@ -794,8 +884,8 @@ func isStatusOnly(s string) bool {
 	if s == "" {
 		return true
 	}
-	lower := strings.ToLower(s)
-	statusPrefixes := []string{"thinking", "working", "loading", "running", "processing", "waiting"}
+	lower := strings.ToLower(strings.TrimSpace(strings.TrimLeft(s, "✓✔•└─>› ")))
+	statusPrefixes := []string{"think", "thinking", "work", "working", "loading", "running", "processing", "waiting"}
 	for _, prefix := range statusPrefixes {
 		if strings.HasPrefix(lower, prefix) && len([]rune(s)) <= 40 {
 			return true

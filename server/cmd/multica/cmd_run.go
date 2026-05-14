@@ -42,11 +42,13 @@ type localRunResponse struct {
 }
 
 type localCLIMessage struct {
-	Type    string         `json:"type"`
-	Tool    string         `json:"tool,omitempty"`
-	Content string         `json:"content,omitempty"`
-	Input   map[string]any `json:"input,omitempty"`
-	Output  string         `json:"output,omitempty"`
+	Type      string         `json:"type"`
+	Tool      string         `json:"tool,omitempty"`
+	Content   string         `json:"content,omitempty"`
+	Input     map[string]any `json:"input,omitempty"`
+	Output    string         `json:"output,omitempty"`
+	Source    string         `json:"source,omitempty"`
+	SourceKey string         `json:"source_key,omitempty"`
 }
 
 const invalidLocalRunMulticaToken = "multica-local-run-token-disabled"
@@ -386,6 +388,9 @@ func (s *transcriptStream) flushRawBytes(raw []byte) {
 	s.rawVisible = visible
 	content := strings.TrimSpace(delta)
 	if content == "" || isStatusOnly(content) {
+		return
+	}
+	if s.capture != nil && s.capture.HasProviderTranscript() {
 		return
 	}
 	content = redact.Text(content)

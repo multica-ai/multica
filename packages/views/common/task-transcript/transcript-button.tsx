@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Loader2, ScrollText } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -8,7 +9,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import { api } from "@multica/core/api";
+import { taskMessagesOptions } from "@multica/core/issues/queries";
 import type { AgentTask } from "@multica/core/types/agent";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 import { buildTimeline, type TimelineItem } from "./build-timeline";
@@ -19,8 +20,8 @@ interface TranscriptButtonProps {
   /**
    * Pre-loaded timeline. When provided the button skips the fetch and opens
    * the dialog immediately — used by the live card where `items` already
-   * accumulate via WS. Omit for terminal tasks; the button will fetch via
-   * `api.listTaskMessages` on the first click and cache the result.
+   * accumulate via WS. Omit for lazy mode; the button will read from the
+   * shared task-messages query cache so WS updates keep the dialog live.
    */
   items?: TimelineItem[];
   isLive?: boolean;
@@ -44,35 +45,36 @@ export function TranscriptButton({
 }: TranscriptButtonProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [loadedItems, setLoadedItems] = useState<TimelineItem[] | null>(null);
+  const usesProvidedItems = providedItems !== undefined;
+  const { data: messages = [], refetch } = useQuery({
+    ...taskMessagesOptions(task.id),
+    enabled: open && !usesProvidedItems,
+    refetchInterval: open && isLive && !usesProvidedItems ? 2000 : false,
+  });
 
-  // Live mode: parent owns the timeline, we just render it.
-  // Lazy mode: we fetch once and cache.
-  const items = providedItems ?? loadedItems ?? [];
+  // Provided mode: parent owns the timeline. Lazy mode: subscribe to the
+  // canonical task-messages cache, which WS updates append to in real time.
+  const items = providedItems ?? buildTimeline(messages);
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      if (providedItems !== undefined || loadedItems !== null) {
+      if (usesProvidedItems) {
         setOpen(true);
         return;
       }
       setLoading(true);
-      api
-        .listTaskMessages(task.id)
-        .then((msgs) => {
-          setLoadedItems(buildTimeline(msgs));
-          setOpen(true);
-        })
+      refetch()
         .catch((err) => {
           console.error(err);
-          setLoadedItems([]);
-          setOpen(true);
         })
-        .finally(() => setLoading(false));
+        .finally(() => {
+          setOpen(true);
+          setLoading(false);
+        });
     },
-    [providedItems, loadedItems, task.id],
+    [refetch, usesProvidedItems],
   );
 
   return (

@@ -868,6 +868,37 @@ func TestCodexTranscriptExtractsSessionTurns(t *testing.T) {
 	}
 }
 
+func TestCodexTranscriptExtractsStructuredEvents(t *testing.T) {
+	path := writeJSONLForTest(t, []string{
+		`{"type":"event_msg","payload":{"type":"user_message","message":"fix it"}}`,
+		`{"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"call-1","arguments":"{\"cmd\":\"go test ./...\"}"}}`,
+		`{"type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"ok"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"commentary","message":"checking"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"done"}}`,
+		`{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":"done"}}`,
+	})
+
+	events := extractCodexEventsFromJSONL(path)
+	if len(events) != 5 {
+		t.Fatalf("events = %+v, want 5 without duplicate task_complete final", events)
+	}
+	if events[0].Type != "user_input" || events[0].Content != "fix it" || !events[0].Comment {
+		t.Fatalf("user event = %+v, want commentable user input", events[0])
+	}
+	if events[1].Type != "tool_use" || events[1].Tool != "exec_command" {
+		t.Fatalf("tool event = %+v, want exec_command tool_use", events[1])
+	}
+	if args, ok := events[1].Input["arguments"].(map[string]any); !ok || args["cmd"] != "go test ./..." {
+		t.Fatalf("tool input = %+v, want parsed command arguments", events[1].Input)
+	}
+	if events[2].Type != "tool_result" || events[2].Output != "ok" {
+		t.Fatalf("tool result = %+v, want output", events[2])
+	}
+	if events[4].Type != "final" || events[4].Content != "done" || !events[4].Comment {
+		t.Fatalf("final event = %+v, want commentable final", events[4])
+	}
+}
+
 func TestCodexTranscriptExtractorBindsToBootstrapSession(t *testing.T) {
 	isolateCodexSessions(t)
 	root := filepath.Join(os.Getenv("CODEX_HOME"), "sessions", "2026", "05", "14")
@@ -1025,6 +1056,58 @@ func TestProviderTranscriptPollSyncsFinalWithoutNextInput(t *testing.T) {
 	finals := finalMessages(poster.messages())
 	if len(finals) != 1 || finals[0].Content != "provider answer" {
 		t.Fatalf("finals = %+v, want one provider answer", finals)
+	}
+}
+
+func TestProviderEventTranscriptSkipsBootstrapFinal(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, eventProviderTranscript{events: []providerTranscriptEvent{
+		{Key: "event:1", Source: "codex", Type: "user_input", Content: "issue context prompt", Comment: true},
+		{Key: "event:2", Source: "codex", Type: "final", Content: "bootstrap answer", Comment: true},
+	}}, 0)
+
+	capture.StartInitialPrompt("issue context prompt")
+	capture.Finalize()
+	reporter.Close()
+
+	if inputs := userInputMessages(poster.messages()); len(inputs) != 0 {
+		t.Fatalf("inputs = %+v, want no bootstrap user input", inputs)
+	}
+	if finals := finalMessages(poster.messages()); len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no bootstrap final", finals)
+	}
+}
+
+func TestProviderEventTranscriptSyncsToolAndFinalEvents(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, eventProviderTranscript{events: []providerTranscriptEvent{
+		{Key: "event:1", Source: "codex", Type: "user_input", Content: "real question", Comment: true},
+		{Key: "event:2", Source: "codex", Type: "tool_use", Tool: "exec_command", Input: map[string]any{"cmd": "go test"}},
+		{Key: "event:3", Source: "codex", Type: "final", Content: "done", Comment: true},
+	}}, 0)
+
+	capture.Finalize()
+	reporter.Close()
+
+	messages := poster.messages()
+	inputs := userInputMessages(messages)
+	finals := finalMessages(messages)
+	if len(inputs) != 1 || inputs[0].Content != "real question" || inputs[0].Source != "codex" || inputs[0].SourceKey != "event:1" {
+		t.Fatalf("inputs = %+v, want sourced provider user input", inputs)
+	}
+	if len(finals) != 1 || finals[0].Content != "done" || finals[0].SourceKey != "event:3" {
+		t.Fatalf("finals = %+v, want sourced provider final", finals)
+	}
+	var tools []localCLIMessage
+	for _, msg := range messages {
+		if msg.Type == "tool_use" {
+			tools = append(tools, msg)
+		}
+	}
+	if len(tools) != 1 || tools[0].Tool != "exec_command" || tools[0].Input["cmd"] != "go test" {
+		t.Fatalf("tools = %+v, want tool event", tools)
 	}
 }
 
@@ -1501,6 +1584,18 @@ func (p promptProviderTranscript) ExtractTurns() ([]providerTranscriptTurn, bool
 
 type staticProviderTranscript struct {
 	turns []providerTranscriptTurn
+}
+
+type eventProviderTranscript struct {
+	events []providerTranscriptEvent
+}
+
+func (p eventProviderTranscript) ExtractEvents() ([]providerTranscriptEvent, bool) {
+	return p.events, len(p.events) > 0
+}
+
+func (p eventProviderTranscript) ExtractTurns() ([]providerTranscriptTurn, bool) {
+	return nil, false
 }
 
 func (p staticProviderTranscript) ExtractTurns() ([]providerTranscriptTurn, bool) {
