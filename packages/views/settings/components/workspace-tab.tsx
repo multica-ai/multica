@@ -2,8 +2,8 @@
 
 // CEREBRO-PATCH(workspace-tab-cerebro): cerebro modification of upstream file
 
-import { useEffect, useState } from "react";
-import { Cloud, KeyRound, LogOut, Save } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { Cloud, KeyRound, LogOut, Save, Wrench, CheckCircle2, FlaskConical } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
@@ -50,12 +50,26 @@ interface FirtalGatewaySettings {
   model?: string;
 }
 
+// CEREBRO-PATCH(workspace-tool-credentials): JEH-1290 W8 — tool credential storage in workspace.settings
+interface ToolCredentialSettings {
+  google_service_account_configured?: boolean;
+}
+
 function getFirtalGatewaySettings(workspace: Workspace | null): FirtalGatewaySettings {
   const settings = workspace?.settings?.firtal_gateway;
   if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
     return {};
   }
   return settings as FirtalGatewaySettings;
+}
+
+// CEREBRO-PATCH(workspace-tool-credentials): JEH-1290 W8
+function getToolCredentialSettings(workspace: Workspace | null): ToolCredentialSettings {
+  const settings = workspace?.settings?.tool_credentials;
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+    return {};
+  }
+  return settings as ToolCredentialSettings;
 }
 
 export function WorkspaceTab() {
@@ -124,6 +138,12 @@ export function WorkspaceTab() {
   const [gatewayApiKey, setGatewayApiKey] = useState("");
   const [gatewayModel, setGatewayModel] = useState(initialGatewaySettings.model ?? "");
   const [savingGateway, setSavingGateway] = useState(false);
+  // CEREBRO-PATCH(workspace-tool-credentials): JEH-1290 W8 — state for tool credentials section
+  const [googleServiceAccountJson, setGoogleServiceAccountJson] = useState("");
+  const [savingToolCredentials, setSavingToolCredentials] = useState(false);
+  const [verifyingToolCredentials, setVerifyingToolCredentials] = useState(false);
+  const toolCredentialSettings = getToolCredentialSettings(workspace);
+  const googleServiceAccountConfigured = toolCredentialSettings.google_service_account_configured === true;
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
@@ -159,6 +179,7 @@ export function WorkspaceTab() {
     setGatewayUrl(gatewaySettings.gateway_url ?? "");
     setGatewayApiKey("");
     setGatewayModel(gatewaySettings.model ?? "");
+    setGoogleServiceAccountJson(""); // CEREBRO-PATCH(workspace-tool-credentials)
   }, [workspace]);
 
   const handleSave = async () => {
@@ -211,6 +232,54 @@ export function WorkspaceTab() {
       setSavingGateway(false);
     }
   };
+
+  // CEREBRO-PATCH(workspace-tool-credentials): JEH-1290 W8 — save tool credentials handler
+  const handleSaveToolCredentials = useCallback(async () => {
+    if (!workspace) return;
+    setSavingToolCredentials(true);
+    try {
+      const nextCredentials: Record<string, unknown> = {};
+      if (googleServiceAccountJson.trim()) {
+        nextCredentials.google_service_account = googleServiceAccountJson.trim();
+      }
+      const updated = await api.updateWorkspace(workspace.id, {
+        settings: {
+          ...workspace.settings,
+          tool_credentials: nextCredentials,
+        },
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+      setGoogleServiceAccountJson("");
+      toast.success(t(($) => $.workspace.tool_credentials_toast_saved));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.workspace.tool_credentials_toast_failed));
+    } finally {
+      setSavingToolCredentials(false);
+    }
+  }, [workspace, googleServiceAccountJson, qc, t]);
+
+  // CEREBRO-PATCH(workspace-tool-credentials): JEH-1318 — verify Google SA JSON format before save
+  const handleVerifyToolCredentials = useCallback(() => {
+    const json = googleServiceAccountJson.trim();
+    if (!json) return;
+    setVerifyingToolCredentials(true);
+    try {
+      const parsed = JSON.parse(json) as Record<string, unknown>;
+      const required = ["type", "project_id", "private_key", "client_email"] as const;
+      const missing = required.filter((k) => !parsed[k]);
+      if (missing.length > 0) {
+        toast.error(t(($) => $.workspace.tool_credentials_verify_failed, { fields: missing.join(", ") }));
+      } else {
+        toast.success(t(($) => $.workspace.tool_credentials_verify_ok));
+      }
+    } catch {
+      toast.error(t(($) => $.workspace.tool_credentials_verify_failed, { fields: "invalid JSON" }));
+    } finally {
+      setVerifyingToolCredentials(false);
+    }
+  }, [googleServiceAccountJson, t]);
 
   const handleLeaveWorkspace = () => {
     if (!workspace) return;
@@ -408,6 +477,96 @@ export function WorkspaceTab() {
             {!isOwner && (
               <p className="text-xs text-muted-foreground">
                 {t(($) => $.workspace.gateway_owner_hint)}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* CEREBRO-PATCH(workspace-tool-credentials): JEH-1290 W8 — tool credentials section */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Wrench className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold">{t(($) => $.workspace.tool_credentials_section)}</h2>
+        </div>
+
+        <Card>
+          <CardContent className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              {t(($) => $.workspace.tool_credentials_hint)}
+            </p>
+
+            {/* FDR Gateway Key — already configured in the Gateway section above; shown here as status only */}
+            <div className="flex items-center justify-between rounded-md border px-3 py-2.5">
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium">{t(($) => $.workspace.tool_credentials_bq_label)}</p>
+                <p className="text-xs text-muted-foreground">{t(($) => $.workspace.tool_credentials_bq_hint)}</p>
+              </div>
+              {gatewayApiKeyConfigured ? (
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                  <code className="font-mono text-xs text-muted-foreground">••••••••</code>
+                </div>
+              ) : (
+                <span className="text-xs text-muted-foreground">
+                  {t(($) => $.workspace.tool_credentials_not_configured)}
+                </span>
+              )}
+            </div>
+
+            {/* Google Service Account JSON — for Sheets tool */}
+            <div>
+              <Label className="flex items-center gap-1 text-xs text-muted-foreground">
+                <KeyRound className="h-3 w-3" />
+                {t(($) => $.workspace.tool_credentials_sheets_label)}
+              </Label>
+              <textarea
+                value={googleServiceAccountJson}
+                onChange={(e) => setGoogleServiceAccountJson(e.target.value)}
+                disabled={!isOwner || savingToolCredentials}
+                className="mt-1 min-h-[80px] w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                placeholder={
+                  googleServiceAccountConfigured
+                    ? t(($) => $.workspace.tool_credentials_sheets_placeholder_configured)
+                    : '{"type":"service_account","project_id":"...","private_key":"..."}'
+                }
+                autoComplete="off"
+                spellCheck={false}
+              />
+              {googleServiceAccountConfigured && !googleServiceAccountJson.trim() && (
+                <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                  <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                  <code className="font-mono">••••••••</code>
+                  <span className="text-muted-foreground/60">— {t(($) => $.workspace.tool_credentials_sheets_configured)}</span>
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              {/* CEREBRO-PATCH(workspace-tool-credentials): JEH-1318 — verify button */}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleVerifyToolCredentials}
+                disabled={!isOwner || verifyingToolCredentials || !googleServiceAccountJson.trim()}
+              >
+                <FlaskConical className="h-3 w-3" />
+                {t(($) => $.workspace.tool_credentials_verify)}
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveToolCredentials}
+                disabled={!isOwner || savingToolCredentials || !googleServiceAccountJson.trim()}
+              >
+                <Save className="h-3 w-3" />
+                {savingToolCredentials
+                  ? t(($) => $.workspace.tool_credentials_saving)
+                  : t(($) => $.workspace.tool_credentials_save)}
+              </Button>
+            </div>
+            {!isOwner && (
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.workspace.tool_credentials_owner_hint)}
               </p>
             )}
           </CardContent>

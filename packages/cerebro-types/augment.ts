@@ -28,4 +28,13 @@ declare module "@multica/core/types/agent" {
   }
 }
 
+// JEH-1284/1290: Agent tool grants — W3 registry + W8 UI.
+// AgentTool is a cerebro-only concept (agent_tool_grant table).
+export interface AgentTool {
+  name: string;
+  description: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+}
+
 export {};

@@ -190,6 +190,8 @@
     "skills": "Skills",
     "environment": "Environment",
     "custom_args": "Custom Args",
+    "tools": "Tools",
+    "_comment_tools": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab label",
     "discard_dialog_title": "Discard unsaved changes?",
     "discard_dialog_description": "You have unsaved changes in this tab. Leaving now will discard them.",
     "discard_keep": "Keep editing",
@@ -266,6 +268,16 @@
       "add_dialog_no_match": "No skills match your search.",
       "add_dialog_cancel": "Cancel",
       "add_failed_toast": "Failed to add skill"
+    },
+    "tools": {
+      "_comment": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab body strings",
+      "intro": "Toggle which tools this agent can use. Tool credentials are configured in workspace settings.",
+      "empty_title": "No tools registered",
+      "empty_hint": "Tools become available once the W3 tool registry is deployed.",
+      "load_failed": "Could not load tools for this agent.",
+      "toggle_failed_toast": "Failed to update tool",
+      "config_saved_toast": "Tool config saved",
+      "config_save_failed_toast": "Failed to save tool config"
     },
     "activity": {
       "section_now": "Now",
