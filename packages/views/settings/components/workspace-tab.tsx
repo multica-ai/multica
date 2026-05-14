@@ -3,7 +3,7 @@
 // CEREBRO-PATCH(workspace-tab-cerebro): cerebro modification of upstream file
 
 import { useEffect, useState, useCallback } from "react";
-import { Cloud, KeyRound, LogOut, Save, Wrench, CheckCircle2 } from "lucide-react";
+import { Cloud, KeyRound, LogOut, Save, Wrench, CheckCircle2, FlaskConical } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
@@ -141,6 +141,7 @@ export function WorkspaceTab() {
   // CEREBRO-PATCH(workspace-tool-credentials): JEH-1290 W8 — state for tool credentials section
   const [googleServiceAccountJson, setGoogleServiceAccountJson] = useState("");
   const [savingToolCredentials, setSavingToolCredentials] = useState(false);
+  const [verifyingToolCredentials, setVerifyingToolCredentials] = useState(false);
   const toolCredentialSettings = getToolCredentialSettings(workspace);
   const googleServiceAccountConfigured = toolCredentialSettings.google_service_account_configured === true;
   const [actionId, setActionId] = useState<string | null>(null);
@@ -258,6 +259,27 @@ export function WorkspaceTab() {
       setSavingToolCredentials(false);
     }
   }, [workspace, googleServiceAccountJson, qc, t]);
+
+  // CEREBRO-PATCH(workspace-tool-credentials): JEH-1318 — verify Google SA JSON format before save
+  const handleVerifyToolCredentials = useCallback(() => {
+    const json = googleServiceAccountJson.trim();
+    if (!json) return;
+    setVerifyingToolCredentials(true);
+    try {
+      const parsed = JSON.parse(json) as Record<string, unknown>;
+      const required = ["type", "project_id", "private_key", "client_email"] as const;
+      const missing = required.filter((k) => !parsed[k]);
+      if (missing.length > 0) {
+        toast.error(t(($) => $.workspace.tool_credentials_verify_failed, { fields: missing.join(", ") }));
+      } else {
+        toast.success(t(($) => $.workspace.tool_credentials_verify_ok));
+      }
+    } catch {
+      toast.error(t(($) => $.workspace.tool_credentials_verify_failed, { fields: "invalid JSON" }));
+    } finally {
+      setVerifyingToolCredentials(false);
+    }
+  }, [googleServiceAccountJson, t]);
 
   const handleLeaveWorkspace = () => {
     if (!workspace) return;
@@ -481,9 +503,9 @@ export function WorkspaceTab() {
                 <p className="text-xs text-muted-foreground">{t(($) => $.workspace.tool_credentials_bq_hint)}</p>
               </div>
               {gatewayApiKeyConfigured ? (
-                <div className="flex items-center gap-1.5 text-xs text-emerald-600">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  {t(($) => $.workspace.tool_credentials_configured)}
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                  <code className="font-mono text-xs text-muted-foreground">••••••••</code>
                 </div>
               ) : (
                 <span className="text-xs text-muted-foreground">
@@ -511,15 +533,26 @@ export function WorkspaceTab() {
                 autoComplete="off"
                 spellCheck={false}
               />
-              {googleServiceAccountConfigured && (
+              {googleServiceAccountConfigured && !googleServiceAccountJson.trim() && (
                 <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
                   <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                  {t(($) => $.workspace.tool_credentials_sheets_configured)}
+                  <code className="font-mono">••••••••</code>
+                  <span className="text-muted-foreground/60">— {t(($) => $.workspace.tool_credentials_sheets_configured)}</span>
                 </p>
               )}
             </div>
 
             <div className="flex items-center justify-end gap-2">
+              {/* CEREBRO-PATCH(workspace-tool-credentials): JEH-1318 — verify button */}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleVerifyToolCredentials}
+                disabled={!isOwner || verifyingToolCredentials || !googleServiceAccountJson.trim()}
+              >
+                <FlaskConical className="h-3 w-3" />
+                {t(($) => $.workspace.tool_credentials_verify)}
+              </Button>
               <Button
                 size="sm"
                 onClick={handleSaveToolCredentials}
