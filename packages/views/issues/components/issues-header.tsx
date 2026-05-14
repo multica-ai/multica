@@ -65,6 +65,7 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { Issue } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 // ---------------------------------------------------------------------------
 // HoverCheck — shadcn official pattern (PR #6862)
@@ -187,13 +188,13 @@ function ActorSubContent({
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const query = search.trim().toLowerCase();
   const filteredMembers = members.filter((m) =>
-    m.name.toLowerCase().includes(query),
+    m.name.toLowerCase().includes(query) || matchesPinyin(m.name, query),
   );
   const filteredAgents = agents.filter((a) =>
-    !a.archived_at && a.name.toLowerCase().includes(query),
+    !a.archived_at && (a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)),
   );
   const filteredSquads = squads.filter((s) =>
-    !s.archived_at && s.name.toLowerCase().includes(query),
+    !s.archived_at && (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)),
   );
 
   const isSelected = (type: "member" | "agent" | "squad", id: string) =>

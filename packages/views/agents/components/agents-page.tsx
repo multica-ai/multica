@@ -46,6 +46,7 @@ import { availabilityConfig, availabilityOrder } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { type AgentRow, createAgentColumns } from "./agent-columns";
 import { useT } from "../../i18n";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 // Filter axes:
 //
@@ -196,6 +197,7 @@ export function AgentsPage() {
       if (q) {
         if (
           !a.name.toLowerCase().includes(q) &&
+          !matchesPinyin(a.name, q) &&
           !(a.description ?? "").toLowerCase().includes(q)
         ) {
           return false;

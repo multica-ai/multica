@@ -12,6 +12,7 @@ import {
   PickerEmpty,
 } from "../../../issues/components/pickers/property-picker";
 import { useT } from "../../../i18n";
+import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
 
 export function AgentPicker({
   agentId,
@@ -36,7 +37,7 @@ export function AgentPicker({
 
   const query = filter.trim().toLowerCase();
   const filteredAgents = query
-    ? active.filter((a) => a.name.toLowerCase().includes(query))
+    ? active.filter((a) => a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query))
     : active;
 
   return (
