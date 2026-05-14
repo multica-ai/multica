@@ -1,6 +1,8 @@
 package webhooks
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -297,6 +299,107 @@ func TestServe_StampsReceivedAt(t *testing.T) {
 	}
 	if captured.Source != "github" {
 		t.Fatalf("router did not stamp Source: got %q, want %q", captured.Source, "github")
+	}
+}
+
+// fakeStore satisfies EventStore for tests of the persistence path.
+type fakeStore struct {
+	called   int
+	lastEvt  PersistableEvent
+	returnErr error
+}
+
+func (f *fakeStore) Insert(_ context.Context, e PersistableEvent) error {
+	f.called++
+	f.lastEvt = e
+	return f.returnErr
+}
+
+func TestServe_PersistanceSuccess_Returns200(t *testing.T) {
+	store := &fakeStore{}
+	src := &mockSource{
+		name: "github",
+		normalize: func(*http.Request) (*TriggerEvent, error) {
+			return &TriggerEvent{
+				EventID:   uuid.New(),
+				EventType: EventTypePRMerged,
+				PRURL:     "https://github.com/owner/repo/pull/77",
+				PRNumber:  77,
+				PRTitle:   "[PUL-1] x",
+				HeadSHA:   "store-sha",
+				Branch:    "agent-1/pul-1",
+			}, nil
+		},
+	}
+	mux := chi.NewRouter()
+	r := NewRouter(nil).WithStore(store)
+	r.Register(src)
+	r.Mount(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", strings.NewReader("{}"))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if store.called != 1 {
+		t.Fatalf("store.Insert called %d times, want 1", store.called)
+	}
+	if store.lastEvt.PRNumber != 77 || store.lastEvt.HeadSHA != "store-sha" {
+		t.Fatalf("lastEvt mismatch: %+v", store.lastEvt)
+	}
+}
+
+func TestServe_PersistanceDuplicate_Returns200(t *testing.T) {
+	store := &fakeStore{returnErr: ErrAlreadyExists}
+	src := &mockSource{
+		name: "github",
+		normalize: func(*http.Request) (*TriggerEvent, error) {
+			return &TriggerEvent{
+				EventID:   uuid.New(),
+				EventType: EventTypePRMerged,
+				PRURL:     "u", PRNumber: 1, PRTitle: "t", HeadSHA: "s", Branch: "b",
+			}, nil
+		},
+	}
+	mux := chi.NewRouter()
+	r := NewRouter(nil).WithStore(store)
+	r.Register(src)
+	r.Mount(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", strings.NewReader("{}"))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (idempotent re-delivery)", rec.Code)
+	}
+}
+
+func TestServe_PersistanceFailure_Returns500(t *testing.T) {
+	store := &fakeStore{returnErr: errors.New("db down")}
+	src := &mockSource{
+		name: "github",
+		normalize: func(*http.Request) (*TriggerEvent, error) {
+			return &TriggerEvent{
+				EventID:   uuid.New(),
+				EventType: EventTypePRMerged,
+				PRURL:     "u", PRNumber: 1, PRTitle: "t", HeadSHA: "s", Branch: "b",
+			}, nil
+		},
+	}
+	mux := chi.NewRouter()
+	r := NewRouter(nil).WithStore(store)
+	r.Register(src)
+	r.Mount(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", strings.NewReader("{}"))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (db down)", rec.Code)
 	}
 }
 

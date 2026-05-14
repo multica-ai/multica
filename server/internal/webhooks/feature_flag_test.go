@@ -15,7 +15,7 @@ func TestMountFromEnv_DisabledByDefault(t *testing.T) {
 	t.Setenv(FeatureFlagEnvVar, "")
 
 	mux := chi.NewRouter()
-	router := MountFromEnv(mux, nil)
+	router := MountFromEnv(mux, MountOptions{}, nil)
 	if router != nil {
 		t.Fatalf("MountFromEnv with flag unset returned non-nil router")
 	}
@@ -33,7 +33,7 @@ func TestMountFromEnv_EnabledRegistersStubs(t *testing.T) {
 	t.Setenv(FeatureFlagEnvVar, "true")
 
 	mux := chi.NewRouter()
-	router := MountFromEnv(mux, nil)
+	router := MountFromEnv(mux, MountOptions{}, nil)
 	if router == nil {
 		t.Fatalf("MountFromEnv with flag=true returned nil router")
 	}
