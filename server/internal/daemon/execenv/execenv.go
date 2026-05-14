@@ -68,6 +68,17 @@ type TaskContextForEnv struct {
 	AutopilotSource         string
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
+
+	// CascadeMarkdown is the rendered "Cascade Execution" block that the
+	// template injects into the agent's CLAUDE.md / AGENTS.md when the
+	// task is part of an active cascade (issue.cascade_started_at IS NOT
+	// NULL). Empty means "no cascade in flight" and the template falls
+	// back to the legacy per-PR approval workflow. Populated by the PR4
+	// worker via cascade.RenderCascadeBlock; PR5 ships the template hook
+	// and the renderer, PR4 wires the actual data flow so existing
+	// in-flight tasks (cascade_started_at NULL) see no behavior change
+	// (C3 conditional injection).
+	CascadeMarkdown string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

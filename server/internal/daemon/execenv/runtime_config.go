@@ -335,6 +335,22 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("If you need to perform an operation that is not covered by any existing `multica` command, ")
 	b.WriteString("do NOT attempt to work around it. Instead, post a comment mentioning the workspace owner to request the missing functionality.\n\n")
 
+	// Cascade execution block (PUL-102 PR5). Injected only when the
+	// task is part of an active cascade — i.e. issue.cascade_started_at
+	// IS NOT NULL on the server side and PR4's task-prep populated
+	// CascadeMarkdown. Existing in-flight tasks without a cascade
+	// (CascadeMarkdown == "") see the original template unchanged
+	// (C3 conditional injection). Lives between Output and Mentions
+	// blocks so the agent reads "what to do in a cascade" right after
+	// "how to talk to multica" and before the noisier per-comment
+	// guidance.
+	if ctx.CascadeMarkdown != "" {
+		b.WriteString(ctx.CascadeMarkdown)
+		if !strings.HasSuffix(ctx.CascadeMarkdown, "\n\n") {
+			b.WriteString("\n\n")
+		}
+	}
+
 	b.WriteString("## Output\n\n")
 	switch {
 	case ctx.AutopilotRunID != "":

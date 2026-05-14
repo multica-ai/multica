@@ -2086,3 +2086,71 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		}
 	})
 }
+
+// PUL-102 PR5: the Cascade Execution block must be injected into the
+// agent's CLAUDE.md whenever CascadeMarkdown is non-empty (C3
+// conditional injection — existing in-flight tasks with no cascade
+// see the original template unchanged).
+func TestInjectRuntimeConfigCascadeBlock(t *testing.T) {
+	t.Parallel()
+
+	read := func(t *testing.T, ctx TaskContextForEnv) string {
+		t.Helper()
+		dir := t.TempDir()
+		if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+			t.Fatalf("InjectRuntimeConfig: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+		if err != nil {
+			t.Fatalf("read CLAUDE.md: %v", err)
+		}
+		return string(data)
+	}
+
+	t.Run("empty-cascade-markdown-omits-block", func(t *testing.T) {
+		t.Parallel()
+		s := read(t, TaskContextForEnv{IssueID: "no-cascade"})
+		if strings.Contains(s, "## Cascade Execution") {
+			t.Fatalf("expected no Cascade Execution block when CascadeMarkdown is empty:\n%s", s)
+		}
+	})
+
+	t.Run("populated-cascade-markdown-injects-block", func(t *testing.T) {
+		t.Parallel()
+		cascade := "## Cascade Execution (PUL-102)\n\nbody text\n"
+		s := read(t, TaskContextForEnv{
+			IssueID:         "with-cascade",
+			CascadeMarkdown: cascade,
+		})
+		if !strings.Contains(s, "## Cascade Execution (PUL-102)") {
+			t.Errorf("expected Cascade Execution header in CLAUDE.md")
+		}
+		if !strings.Contains(s, "body text") {
+			t.Errorf("expected Cascade Execution body in CLAUDE.md")
+		}
+		// Must land BEFORE the Output section so the agent reads
+		// "what to do in a cascade" before "how to format final
+		// comments".
+		cascadeIdx := strings.Index(s, "## Cascade Execution")
+		outputIdx := strings.Index(s, "## Output")
+		if cascadeIdx == -1 || outputIdx == -1 {
+			t.Fatalf("missing one of the section markers")
+		}
+		if cascadeIdx >= outputIdx {
+			t.Errorf("Cascade Execution must precede Output section, got cascade@%d, output@%d", cascadeIdx, outputIdx)
+		}
+	})
+
+	t.Run("cascade-block-trailing-newlines-respected", func(t *testing.T) {
+		t.Parallel()
+		// Caller may pass a block that already ends with \n\n;
+		// template must not double-pad.
+		s := read(t, TaskContextForEnv{
+			IssueID:         "trailing",
+			CascadeMarkdown: "## Cascade Execution (X)\n\nbody\n\n",
+		})
+		if strings.Contains(s, "body\n\n\n\n## Output") {
+			t.Errorf("expected single double-newline before Output, got four newlines:\n%s", s)
+		}
+	})
+}
