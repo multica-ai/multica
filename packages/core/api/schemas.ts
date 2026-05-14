@@ -136,14 +136,23 @@ export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
 }).loose();
 
-// CEREBRO-PATCH(agent-tools-schema): JEH-1353 — tool grant list response shape.
+// CEREBRO-PATCH(agent-tools-schema): JEH-1353/1359 — tool grant list response shape.
 // name/description come from the server-side tool registry; enabled from the
 // agent_tool_grant row (or false when no row exists yet).
-const AgentToolSchema = z.object({
-  name: z.string(),
+const AgentToolSchema = z.preprocess((value) => {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const row = value as Record<string, unknown>;
+    if (typeof row.name !== "string" && typeof row.tool_name === "string") {
+      const { tool_name: toolName, ...rest } = row;
+      return { ...rest, name: toolName };
+    }
+  }
+  return value;
+}, z.object({
+  name: z.string().min(1),
   description: z.string().default(""),
   enabled: z.boolean().default(false),
   config: z.record(z.string(), z.unknown()).optional().default({}),
-}).loose();
+}).loose());
 
 export const AgentToolsListSchema = z.array(AgentToolSchema).default([]);

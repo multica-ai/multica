@@ -1743,17 +1743,24 @@ export class ApiClient {
     });
   }
 
-  // CEREBRO-PATCH(agent-tools-api): JEH-1284/1290/1353 — tool grant list +
+  // CEREBRO-PATCH(agent-tools-api): JEH-1284/1290/1353/1359 — tool grant list +
   // toggle via W3 admin API. Schema-validated per API Response Compatibility.
-  async getAgentTools(agentId: string): Promise<import("@multica/cerebro-types").AgentTool[]> {
-    const raw = await this.fetch(`/api/agents/${agentId}/tools`);
+  async getAgentTools(agentId: string, params?: { workspace_id?: string }): Promise<import("@multica/cerebro-types").AgentTool[]> {
+    const search = new URLSearchParams();
+    if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
+    const query = search.toString();
+    const path = `/api/agents/${agentId}/tools${query ? `?${query}` : ""}`;
+    const raw = await this.fetch(path);
     return parseWithFallback(raw, AgentToolsListSchema, [], {
-      endpoint: `/api/agents/${agentId}/tools`,
+      endpoint: path,
     }) as import("@multica/cerebro-types").AgentTool[];
   }
 
-  async updateAgentTool(agentId: string, toolName: string, data: { enabled: boolean; config?: Record<string, unknown> }): Promise<void> {
-    await this.fetch(`/api/agents/${agentId}/tools/${encodeURIComponent(toolName)}`, {
+  async updateAgentTool(agentId: string, toolName: string, data: { enabled: boolean; config?: Record<string, unknown> }, params?: { workspace_id?: string }): Promise<void> {
+    const search = new URLSearchParams();
+    if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
+    const query = search.toString();
+    await this.fetch(`/api/agents/${agentId}/tools/${encodeURIComponent(toolName)}${query ? `?${query}` : ""}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });

@@ -109,6 +109,32 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  // CEREBRO-PATCH(agent-tools-schema-test): JEH-1359 — workspace-scoped tools and legacy row normalization.
+  describe("getAgentTools", () => {
+    it("passes workspace_id and normalizes older tool_name rows", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify([
+          { tool_name: "list_issues", enabled: true },
+        ]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const tools = await client.getAgentTools("agent-1", { workspace_id: "ws-1" });
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.example.test/api/agents/agent-1/tools?workspace_id=ws-1",
+        expect.any(Object),
+      );
+      expect(tools).toEqual([
+        { name: "list_issues", description: "", enabled: true, config: {} },
+      ]);
+    });
+  });
+
   describe("listChildIssues", () => {
     it("returns { issues: [] } when the issues field is missing", async () => {
       stubFetchJson({});
