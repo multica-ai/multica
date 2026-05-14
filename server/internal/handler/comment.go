@@ -463,6 +463,10 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 			if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 				continue
 			}
+			// Private-agent gate: prevent triggering a private leader via squad mention.
+			if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
+				continue
+			}
 			// Dedup: skip if leader already has a pending task for this issue.
 			hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
 				IssueID: issue.ID,
