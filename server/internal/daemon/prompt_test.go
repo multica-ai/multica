@@ -209,3 +209,68 @@ func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
 		t.Errorf("buildQuickCreatePrompt without project must NOT mention --project, got:\n%s", plain)
 	}
 }
+
+// TestBuildPromptSquadLeaderNoActionForMemberTrigger verifies that the
+// squad leader no_action prohibition is injected in the per-turn prompt
+// regardless of whether the triggering comment was posted by an agent or
+// a member. This was the root cause of the "LGTM is a pure acknowledgment
+// — no reply needed. Exiting silently." noise comment: the prohibition
+// only fired for agent-triggered comments, so member-triggered ones
+// (like "LGTM") bypassed it.
+func TestBuildPromptSquadLeaderNoActionForMemberTrigger(t *testing.T) {
+	task := Task{
+		IssueID:               "issue-123",
+		TriggerCommentID:      "comment-456",
+		TriggerCommentContent: "LGTM",
+		TriggerAuthorType:     "member",
+		TriggerAuthorName:     "Bohan",
+		Agent: &AgentData{
+			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
+		},
+	}
+	out := BuildPrompt(task, "claude")
+	if !strings.Contains(out, "Squad leader no_action rule") {
+		t.Errorf("buildCommentPrompt must inject squad leader no_action rule for member-triggered comments, got:\n%s", out)
+	}
+	if !strings.Contains(out, "DO NOT post any comment") {
+		t.Errorf("buildCommentPrompt must contain DO NOT post prohibition for member-triggered squad leader, got:\n%s", out)
+	}
+}
+
+// TestBuildPromptSquadLeaderNoActionForAgentTrigger verifies the rule also
+// fires for agent-triggered comments (the original path that already worked).
+func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
+	task := Task{
+		IssueID:               "issue-123",
+		TriggerCommentID:      "comment-456",
+		TriggerCommentContent: "Deploy complete.",
+		TriggerAuthorType:     "agent",
+		TriggerAuthorName:     "deploy-boy",
+		Agent: &AgentData{
+			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
+		},
+	}
+	out := BuildPrompt(task, "claude")
+	if !strings.Contains(out, "Squad leader no_action rule") {
+		t.Errorf("buildCommentPrompt must inject squad leader no_action rule for agent-triggered comments, got:\n%s", out)
+	}
+}
+
+// TestBuildPromptNonSquadLeaderNoRule verifies that non-squad-leader agents
+// do NOT get the squad leader no_action rule injected.
+func TestBuildPromptNonSquadLeaderNoRule(t *testing.T) {
+	task := Task{
+		IssueID:               "issue-123",
+		TriggerCommentID:      "comment-456",
+		TriggerCommentContent: "LGTM",
+		TriggerAuthorType:     "member",
+		TriggerAuthorName:     "Bohan",
+		Agent: &AgentData{
+			Instructions: "Some instructions without the squad marker",
+		},
+	}
+	out := BuildPrompt(task, "claude")
+	if strings.Contains(out, "Squad leader no_action rule") {
+		t.Errorf("buildCommentPrompt must NOT inject squad leader no_action rule for non-squad-leader agents, got:\n%s", out)
+	}
+}
