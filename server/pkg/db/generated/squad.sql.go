@@ -380,7 +380,7 @@ func (q *Queries) ListSquadsByMember(ctx context.Context, arg ListSquadsByMember
 	return items, nil
 }
 
-const removeSquadMember = `-- name: RemoveSquadMember :exec
+const removeSquadMember = `-- name: RemoveSquadMember :execrows
 DELETE FROM squad_member
 WHERE squad_id = $1 AND member_type = $2 AND member_id = $3
 `
@@ -391,9 +391,12 @@ type RemoveSquadMemberParams struct {
 	MemberID   pgtype.UUID `json:"member_id"`
 }
 
-func (q *Queries) RemoveSquadMember(ctx context.Context, arg RemoveSquadMemberParams) error {
-	_, err := q.db.Exec(ctx, removeSquadMember, arg.SquadID, arg.MemberType, arg.MemberID)
-	return err
+func (q *Queries) RemoveSquadMember(ctx context.Context, arg RemoveSquadMemberParams) (int64, error) {
+	result, err := q.db.Exec(ctx, removeSquadMember, arg.SquadID, arg.MemberType, arg.MemberID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const transferSquadAssignees = `-- name: TransferSquadAssignees :exec

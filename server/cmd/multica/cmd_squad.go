@@ -96,6 +96,147 @@ func runSquadGet(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// ── Create ──────────────────────────────────────────────────────────────────
+
+var squadCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a new squad",
+	Args:  cobra.NoArgs,
+	RunE:  runSquadCreate,
+}
+
+func runSquadCreate(cmd *cobra.Command, _ []string) error {
+	name, _ := cmd.Flags().GetString("name")
+	if name == "" {
+		return fmt.Errorf("--name is required")
+	}
+	leader, _ := cmd.Flags().GetString("leader")
+	if leader == "" {
+		return fmt.Errorf("--leader is required (agent name or ID)")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	leaderID, err := resolveAgent(ctx, client, leader)
+	if err != nil {
+		return fmt.Errorf("resolve leader: %w", err)
+	}
+
+	body := map[string]any{
+		"name":      name,
+		"leader_id": leaderID,
+	}
+	if v, _ := cmd.Flags().GetString("description"); v != "" {
+		body["description"] = v
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/squads", body, &result); err != nil {
+		return fmt.Errorf("create squad: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	fmt.Printf("Squad created: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
+	return nil
+}
+
+// ── Update ──────────────────────────────────────────────────────────────────
+
+var squadUpdateCmd = &cobra.Command{
+	Use:   "update <squad-id>",
+	Short: "Update a squad",
+	Args:  exactArgs(1),
+	RunE:  runSquadUpdate,
+}
+
+func runSquadUpdate(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	body := map[string]any{}
+	if cmd.Flags().Changed("name") {
+		v, _ := cmd.Flags().GetString("name")
+		body["name"] = v
+	}
+	if cmd.Flags().Changed("description") {
+		v, _ := cmd.Flags().GetString("description")
+		body["description"] = v
+	}
+	if cmd.Flags().Changed("instructions") {
+		v, _ := cmd.Flags().GetString("instructions")
+		body["instructions"] = v
+	}
+	if cmd.Flags().Changed("leader") {
+		v, _ := cmd.Flags().GetString("leader")
+		leaderID, err := resolveAgent(ctx, client, v)
+		if err != nil {
+			return fmt.Errorf("resolve leader: %w", err)
+		}
+		body["leader_id"] = leaderID
+	}
+	if cmd.Flags().Changed("avatar-url") {
+		v, _ := cmd.Flags().GetString("avatar-url")
+		body["avatar_url"] = v
+	}
+
+	if len(body) == 0 {
+		return fmt.Errorf("no fields to update; use flags like --name, --description, --instructions, --leader")
+	}
+
+	var result map[string]any
+	if err := client.PutJSON(ctx, "/api/squads/"+args[0], body, &result); err != nil {
+		return fmt.Errorf("update squad: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	fmt.Printf("Squad updated: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
+	return nil
+}
+
+// ── Delete ──────────────────────────────────────────────────────────────────
+
+var squadDeleteCmd = &cobra.Command{
+	Use:   "delete <squad-id>",
+	Short: "Delete (archive) a squad",
+	Args:  exactArgs(1),
+	RunE:  runSquadDelete,
+}
+
+func runSquadDelete(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := client.DeleteJSON(ctx, "/api/squads/"+args[0]); err != nil {
+		return fmt.Errorf("delete squad: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, map[string]any{"id": args[0], "deleted": true})
+	}
+	fmt.Fprintf(os.Stderr, "Squad %s deleted.\n", args[0])
+	return nil
+}
+
 // ── Members ─────────────────────────────────────────────────────────────────
 
 var squadMemberCmd = &cobra.Command{
@@ -140,6 +281,97 @@ func runSquadMemberList(cmd *cobra.Command, args []string) error {
 			strVal(m, "member_id"), strVal(m, "member_type"), strVal(m, "role"))
 	}
 	return w.Flush()
+}
+
+// ── Member Add ──────────────────────────────────────────────────────────────
+
+var squadMemberAddCmd = &cobra.Command{
+	Use:   "add <squad-id>",
+	Short: "Add a member to a squad",
+	Args:  exactArgs(1),
+	RunE:  runSquadMemberAdd,
+}
+
+func runSquadMemberAdd(cmd *cobra.Command, args []string) error {
+	memberID, _ := cmd.Flags().GetString("member-id")
+	memberType, _ := cmd.Flags().GetString("type")
+	role, _ := cmd.Flags().GetString("role")
+
+	if memberID == "" {
+		return fmt.Errorf("--member-id is required")
+	}
+	if memberType != "agent" && memberType != "member" {
+		return fmt.Errorf("--type must be 'agent' or 'member'")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	body := map[string]any{
+		"member_type": memberType,
+		"member_id":   memberID,
+		"role":        role,
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/squads/"+args[0]+"/members", body, &result); err != nil {
+		return fmt.Errorf("add member: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	fmt.Printf("Member %s added to squad.\n", memberID)
+	return nil
+}
+
+// ── Member Remove ───────────────────────────────────────────────────────────
+
+var squadMemberRemoveCmd = &cobra.Command{
+	Use:   "remove <squad-id>",
+	Short: "Remove a member from a squad",
+	Args:  exactArgs(1),
+	RunE:  runSquadMemberRemove,
+}
+
+func runSquadMemberRemove(cmd *cobra.Command, args []string) error {
+	memberID, _ := cmd.Flags().GetString("member-id")
+	memberType, _ := cmd.Flags().GetString("type")
+
+	if memberID == "" {
+		return fmt.Errorf("--member-id is required")
+	}
+	if memberType != "agent" && memberType != "member" {
+		return fmt.Errorf("--type must be 'agent' or 'member'")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	body := map[string]any{
+		"member_type": memberType,
+		"member_id":   memberID,
+	}
+
+	if err := client.DeleteJSONWithBody(ctx, "/api/squads/"+args[0]+"/members", body); err != nil {
+		return fmt.Errorf("remove member: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, map[string]any{"squad_id": args[0], "member_id": memberID, "removed": true})
+	}
+	fmt.Fprintf(os.Stderr, "Member %s removed from squad.\n", memberID)
+	return nil
 }
 
 // ── Activity ────────────────────────────────────────────────────────────────
@@ -204,16 +436,56 @@ func runSquadActivity(cmd *cobra.Command, args []string) error {
 // ── Init ────────────────────────────────────────────────────────────────────
 
 func init() {
+	// list
 	squadListCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// get
 	squadGetCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// create
+	squadCreateCmd.Flags().String("name", "", "Squad name (required)")
+	squadCreateCmd.Flags().String("description", "", "Squad description")
+	squadCreateCmd.Flags().String("leader", "", "Leader agent (name or ID) — required")
+	squadCreateCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// update
+	squadUpdateCmd.Flags().String("name", "", "New name")
+	squadUpdateCmd.Flags().String("description", "", "New description")
+	squadUpdateCmd.Flags().String("instructions", "", "New instructions")
+	squadUpdateCmd.Flags().String("leader", "", "New leader agent (name or ID)")
+	squadUpdateCmd.Flags().String("avatar-url", "", "New avatar URL")
+	squadUpdateCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// delete
+	squadDeleteCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// member list
 	squadMemberListCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// member add
+	squadMemberAddCmd.Flags().String("member-id", "", "Member or agent ID (required)")
+	squadMemberAddCmd.Flags().String("type", "agent", "Member type: agent or member")
+	squadMemberAddCmd.Flags().String("role", "member", "Role in the squad")
+	squadMemberAddCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// member remove
+	squadMemberRemoveCmd.Flags().String("member-id", "", "Member or agent ID (required)")
+	squadMemberRemoveCmd.Flags().String("type", "agent", "Member type: agent or member")
+	squadMemberRemoveCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// activity
 	squadActivityCmd.Flags().String("reason", "", "Short explanation of the decision")
 	squadActivityCmd.Flags().String("output", "table", "Output format: table or json")
 
 	squadMemberCmd.AddCommand(squadMemberListCmd)
+	squadMemberCmd.AddCommand(squadMemberAddCmd)
+	squadMemberCmd.AddCommand(squadMemberRemoveCmd)
 
 	squadCmd.AddCommand(squadListCmd)
 	squadCmd.AddCommand(squadGetCmd)
+	squadCmd.AddCommand(squadCreateCmd)
+	squadCmd.AddCommand(squadUpdateCmd)
+	squadCmd.AddCommand(squadDeleteCmd)
 	squadCmd.AddCommand(squadMemberCmd)
 	squadCmd.AddCommand(squadActivityCmd)
 }
