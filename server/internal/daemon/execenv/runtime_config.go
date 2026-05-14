@@ -285,7 +285,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the full comment history (returns all comments, capped server-side at 2000) — this is mandatory, not optional. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions.\n", ctx.IssueID)
 		fmt.Fprintf(&b, "3. Run `multica issue status %s in_progress`\n", ctx.IssueID)
 		b.WriteString("4. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)\n")
-		fmt.Fprintf(&b, "5. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
+		if ctx.IsSquadLeader {
+			fmt.Fprintf(&b, "5. **Post your final results as a comment** (unless your outcome is `no_action` — in that case, calling `multica squad activity %s no_action --reason \"...\"` alone is sufficient and you may exit silently): `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID, ctx.IssueID)
+		} else {
+			fmt.Fprintf(&b, "5. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
+		}
 		fmt.Fprintf(&b, "6. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
 		fmt.Fprintf(&b, "7. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
 	}
@@ -352,7 +356,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- Print exactly one final line: `Created MUL-<n>: <title>` after a successful `multica issue create`.\n")
 		b.WriteString("- On CLI failure, exit with the CLI error as the only output. The platform translates that into a `quick_create_failed` inbox item carrying the original prompt for the user.\n")
 	default:
-		b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
+		if ctx.IsSquadLeader {
+			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`** — unless your outcome is `no_action`. When you evaluate a trigger and decide no action is needed, calling `multica squad activity <issue-id> no_action --reason \"...\"` alone is sufficient; you may exit silently without posting a comment. For all other outcomes (`action`, `failed`), a comment is still mandatory.\n\n")
+		} else {
+			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
+		}
 		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
 		b.WriteString("Good: \"Fixed the login redirect. PR: https://...\"\n")
 		b.WriteString("Bad: \"1. Read the issue 2. Found the bug in auth.go 3. Created branch 4. ...\"\n")
