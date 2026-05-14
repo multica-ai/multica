@@ -1,6 +1,6 @@
 package main
 
-// CEREBRO-PATCH(mcp-cli-cmd-mcp-tools-grants-test): tests for the Persona grant MCP tools (JEH-1181).
+// CEREBRO-PATCH(mcp-cli-cmd-mcp-tools-grants-test): tests for the Persona grant MCP tools (JEH-1181) — backend swapped via factory, mock still used here.
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/persona"
+	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/mcp"
 )
 
@@ -17,9 +18,9 @@ func setupGrantsTestServer(t *testing.T) (*mcp.Server, *persona.MockBackend) {
 	srv := mcp.NewServer("test", "0")
 	mock := persona.NewMockBackend("ws-test")
 	prev := grantsBackendFactory
-	grantsBackendFactory = func(_ string) persona.Backend { return mock }
+	grantsBackendFactory = func(_ *cli.APIClient, _ string) persona.Backend { return mock }
 	t.Cleanup(func() { grantsBackendFactory = prev })
-	registerGrantTools(srv, "ws-test", "user-sara", "member")
+	registerGrantTools(srv, nil, "ws-test", "user-sara", "member")
 	return srv, mock
 }
 

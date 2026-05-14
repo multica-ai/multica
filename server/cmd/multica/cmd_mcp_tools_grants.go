@@ -17,13 +17,12 @@ import (
 	"github.com/multica-ai/multica/server/internal/mcp"
 )
 
-// grantsBackendFactory builds the backend used by the grant tools. JEH-1181
-// ships ahead of JEH-1179, so today this always returns the in-memory mock.
-// When JEH-1179 lands, swap the body for an HTTP-backed implementation that
-// talks to /api/workspaces/{id}/grants. The MCP tool signatures stay
-// identical.
-var grantsBackendFactory = func(workspaceID string) persona.Backend {
-	return persona.NewMockBackend(workspaceID)
+// grantsBackendFactory builds the backend used by the grant tools.
+// CEREBRO-PATCH(mcp-cli-cmd-mcp-tools-grants): JEH-1179 is on main — uses
+// the HTTP backend against /api/workspaces/{id}/grants. Kept as a var so
+// tests can swap it out.
+var grantsBackendFactory = func(client *cli.APIClient, workspaceID string) persona.Backend {
+	return persona.NewHTTPBackend(client, workspaceID)
 }
 
 // mcpProcessSessionID identifies this `multica mcp serve` process in audit
@@ -37,8 +36,8 @@ var mcpProcessSessionID = uuid.NewString()
 // extra /api/me roundtrip per call. The caller is expected to pass empty
 // strings if it could not resolve the identity — in that case the tools
 // still work but audit entries are anonymous.
-func registerGrantTools(srv *mcp.Server, workspaceID, actor, actorType string) {
-	backend := grantsBackendFactory(workspaceID)
+func registerGrantTools(srv *mcp.Server, client *cli.APIClient, workspaceID, actor, actorType string) {
+	backend := grantsBackendFactory(client, workspaceID)
 	ac := func() persona.AuditContext {
 		return persona.AuditContext{
 			Actor:     actor,
