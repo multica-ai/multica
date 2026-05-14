@@ -82,13 +82,15 @@ type Daemon struct {
 	wsHBMu      sync.RWMutex         // guards wsHBLastAck
 	wsHBLastAck map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 
-	// runtimeGoneMu guards runtimeGoneInflight and reregisterNextAttempt. The
-	// state lets heartbeat / poller / WS-ack handlers converge on a single
-	// recovery path when they each detect that a runtime row was deleted
-	// server-side without three of them stampeding registerRuntimesForWorkspace.
-	runtimeGoneMu         sync.Mutex
-	runtimeGoneInflight   map[string]struct{}  // runtime_id -> currently recovering
-	reregisterNextAttempt map[string]time.Time // workspace_id -> earliest time the next re-register attempt may run
+	// runtimeGoneMu guards runtimeGoneInflight, reregisterNextAttempt, and
+	// reregisterLastCompletedAt. The state lets heartbeat / poller / WS-ack
+	// handlers converge on a single recovery path when they each detect that a
+	// runtime row was deleted server-side without three of them stampeding
+	// registerRuntimesForWorkspace.
+	runtimeGoneMu             sync.Mutex
+	runtimeGoneInflight       map[string]struct{}  // runtime_id -> currently recovering
+	reregisterNextAttempt     map[string]time.Time // workspace_id -> earliest time the next re-register attempt may run
+	reregisterLastCompletedAt map[string]time.Time // workspace_id -> wall-clock at which the last re-register call returned (success or failure)
 
 	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
 	rootCtx       context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
@@ -115,18 +117,19 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
 	return &Daemon{
-		cfg:                   cfg,
-		client:                client,
-		repoCache:             repocache.New(cacheRoot, logger),
-		logger:                logger,
-		workspaces:            make(map[string]*workspaceState),
-		runtimeIndex:          make(map[string]Runtime),
-		runtimeSet:            newRuntimeSetWatcher(),
-		agentVersions:         make(map[string]string),
-		wsHBLastAck:           make(map[string]time.Time),
-		activeEnvRoots:        make(map[string]int),
-		runtimeGoneInflight:   make(map[string]struct{}),
-		reregisterNextAttempt: make(map[string]time.Time),
+		cfg:                       cfg,
+		client:                    client,
+		repoCache:                 repocache.New(cacheRoot, logger),
+		logger:                    logger,
+		workspaces:                make(map[string]*workspaceState),
+		runtimeIndex:              make(map[string]Runtime),
+		runtimeSet:                newRuntimeSetWatcher(),
+		agentVersions:             make(map[string]string),
+		wsHBLastAck:               make(map[string]time.Time),
+		activeEnvRoots:            make(map[string]int),
+		runtimeGoneInflight:       make(map[string]struct{}),
+		reregisterNextAttempt:     make(map[string]time.Time),
+		reregisterLastCompletedAt: make(map[string]time.Time),
 	}
 }
 
@@ -170,12 +173,17 @@ const reregisterFailureBackoff = 60 * time.Second
 // each other, so this function:
 //
 //   - keys an in-flight set on runtimeID to drop concurrent calls for the same
-//     ID after the first one is already cleaning up; and
+//     ID after the first one is already cleaning up;
 //   - keys a per-workspace next-attempt timestamp on workspaceID so that
 //     concurrent recoveries triggered by the SAME initial event coalesce to a
 //     single registerRuntimesForWorkspace call. The slot is cleared on success
 //     so a later distinct runtime deletion in the same workspace can trigger
-//     its own recovery without waiting for the coalesce window to expire.
+//     its own recovery without waiting for the coalesce window to expire; and
+//   - keys a per-workspace last-completed timestamp so that a straggler whose
+//     removeStaleRuntime took long enough that a sibling fully ran AND cleared
+//     the slot can still recognize itself as same-wave and bail. Without this,
+//     the success-case slot clear opens a race where the late caller re-claims
+//     an empty slot and double-registers.
 //
 // On failure of the underlying re-register, the next-attempt timestamp is
 // extended by reregisterFailureBackoff so we don't replace a server-side log
@@ -190,6 +198,11 @@ func (d *Daemon) handleRuntimeGone(runtimeID string) {
 	if runtimeID == "" {
 		return
 	}
+
+	// entryAt anchors the same-wave-straggler check at the bottom of the
+	// function. Captured at the very top so removeStaleRuntime mutex
+	// contention can't push it past a sibling's register completion.
+	entryAt := time.Now()
 
 	// Stampede control per runtime ID.
 	d.runtimeGoneMu.Lock()
@@ -216,40 +229,70 @@ func (d *Daemon) handleRuntimeGone(runtimeID string) {
 		"runtime_id", runtimeID, "workspace_id", workspaceID)
 	d.notifyRuntimeSetChanged()
 
-	// Per-workspace coalescing: claim the slot atomically. The first caller
-	// past this check is the only one that will run
-	// registerRuntimesForWorkspace while the coalesce window is open. We
-	// clear the slot on success so a separate later deletion in the same
-	// workspace is NOT suppressed; the inflight set above is what keeps two
-	// callers from racing the same recovery.
-	now := time.Now()
-	d.runtimeGoneMu.Lock()
-	if next, ok := d.reregisterNextAttempt[workspaceID]; ok && now.Before(next) {
-		d.runtimeGoneMu.Unlock()
+	if !d.tryClaimRegisterSlot(workspaceID, entryAt, time.Now()) {
 		d.logger.Debug("skip re-register: coalescing with recent attempt",
 			"workspace_id", workspaceID)
 		return
 	}
-	d.reregisterNextAttempt[workspaceID] = now.Add(reregisterCoalesceWindow)
-	d.runtimeGoneMu.Unlock()
 
-	if err := d.reregisterWorkspaceAfterRuntimeGone(d.recoveryContext(), workspaceID); err != nil {
-		d.runtimeGoneMu.Lock()
-		d.reregisterNextAttempt[workspaceID] = time.Now().Add(reregisterFailureBackoff)
-		d.runtimeGoneMu.Unlock()
+	err := d.reregisterWorkspaceAfterRuntimeGone(d.recoveryContext(), workspaceID)
+	d.recordRegisterCompletion(workspaceID, time.Now(), err)
+	if err != nil {
 		// Logged at Warn (not Error) because workspaceSyncLoop retries
 		// independently every DefaultWorkspaceSyncInterval, so a transient
 		// failure here is not a stuck state — just an extra wait.
 		d.logger.Warn("re-register after runtime gone failed",
 			"workspace_id", workspaceID, "error", err)
+	}
+}
+
+// tryClaimRegisterSlot atomically decides whether the calling goroutine should
+// run registerRuntimesForWorkspace. Returns true and claims the in-flight slot
+// when the caller may proceed; returns false (without mutating state) when the
+// call must be coalesced with a peer.
+//
+// Two gates are checked under runtimeGoneMu:
+//
+//  1. reregisterNextAttempt: a future timestamp means a peer holds the slot or
+//     a previous attempt failed and we are inside the failure backoff window.
+//  2. reregisterLastCompletedAt: a timestamp at or after our entryAt means a
+//     peer's register completed AFTER we entered handleRuntimeGone. We are a
+//     same-wave straggler whose state is already covered by that peer's call.
+//
+// entryAt is the wall-clock captured at the top of handleRuntimeGone. now is
+// passed in (rather than read inside) so tests can drive the gate
+// deterministically without sleeping.
+func (d *Daemon) tryClaimRegisterSlot(workspaceID string, entryAt, now time.Time) bool {
+	d.runtimeGoneMu.Lock()
+	defer d.runtimeGoneMu.Unlock()
+	if next, ok := d.reregisterNextAttempt[workspaceID]; ok && now.Before(next) {
+		return false
+	}
+	if last, ok := d.reregisterLastCompletedAt[workspaceID]; ok && !last.Before(entryAt) {
+		return false
+	}
+	d.reregisterNextAttempt[workspaceID] = now.Add(reregisterCoalesceWindow)
+	return true
+}
+
+// recordRegisterCompletion stamps the per-workspace completion timestamp and
+// either applies the failure backoff or clears the in-flight slot, depending on
+// whether the underlying register call succeeded. Always records
+// lastCompletedAt so a same-wave straggler that races past the slot clear is
+// still caught.
+func (d *Daemon) recordRegisterCompletion(workspaceID string, completedAt time.Time, err error) {
+	d.runtimeGoneMu.Lock()
+	defer d.runtimeGoneMu.Unlock()
+	d.reregisterLastCompletedAt[workspaceID] = completedAt
+	if err != nil {
+		d.reregisterNextAttempt[workspaceID] = completedAt.Add(reregisterFailureBackoff)
 		return
 	}
 	// Success: clear the coalesce slot so a future distinct runtime deletion
 	// in this workspace can trigger its own recovery immediately. The
-	// inflight set on runtimeID still prevents same-event stampedes.
-	d.runtimeGoneMu.Lock()
+	// lastCompletedAt check still suppresses same-wave stragglers — their
+	// entryAt predates completedAt, so they bail there instead.
 	delete(d.reregisterNextAttempt, workspaceID)
-	d.runtimeGoneMu.Unlock()
 }
 
 // recoveryContext returns the daemon root context for long-running recovery
