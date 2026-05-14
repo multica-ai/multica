@@ -2666,13 +2666,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if comment == "" {
 			comment = fmt.Sprintf("%s timed out after %s", provider, d.cfg.AgentTimeout)
 		}
+		failureReason := "timeout"
+		if reason, ok := classifyResumeUnsafeTimeout(provider, comment); ok {
+			taskLog.Warn("agent timed out with resume-unsafe session, classifying as blocked",
+				"failure_reason", reason,
+			)
+			failureReason = reason
+		}
 		return TaskResult{
 			Status:        "blocked",
 			Comment:       comment,
 			SessionID:     result.SessionID,
 			WorkDir:       env.WorkDir,
 			EnvRoot:       env.RootDir,
-			FailureReason: "timeout",
+			FailureReason: failureReason,
 			Usage:         usageEntries,
 		}, nil
 	case "idle_watchdog":
