@@ -65,13 +65,17 @@ const {
   mockClipboardWrite: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock("@multica/core/api", () => ({
-  api: {
-    getBaseUrl: () => "http://127.0.0.1:8080",
-    searchIssues: mockSearchIssues,
-    searchProjects: mockSearchProjects,
-  },
-}));
+vi.mock("@multica/core/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/api")>();
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      searchIssues: mockSearchIssues,
+      searchProjects: mockSearchProjects,
+    },
+  };
+});
 
 vi.mock("@multica/core/issues/stores", () => {
   const EMPTY: Array<{ id: string; visitedAt: number }> = [];
