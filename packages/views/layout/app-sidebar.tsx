@@ -905,9 +905,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                                   </SidebarMenuButton>
                                 </div>
                                 {hasChildren && isExpanded && (
-                                  // CEREBRO-PATCH(nested-projects-guide-line): single continuous spine on children-ul, anchored at parent's chevron column (level*12 + 8 = button px-2 inset).
+                                  // CEREBRO-PATCH(nested-projects-guide-line): single continuous spine on children-ul, anchored at parent's chevron column. Formula: level*(marginLeft+paddingLeft)+button-px-2 = level*20+8.
                                   <ul className="relative flex w-full min-w-0 flex-col gap-0">
-                                    <span aria-hidden="true" className="pointer-events-none absolute -top-3.5 bottom-0 w-px" style={{ left: level * 12 + 8, background: "color-mix(in oklch, var(--sidebar-foreground) 20%, transparent)" }} />
+                                    <span aria-hidden="true" className="pointer-events-none absolute -top-3.5 bottom-0 w-px" style={{ left: level * 20 + 8, background: "color-mix(in oklch, var(--sidebar-foreground) 20%, transparent)" }} />
                                     {children.map((child) => renderProject(child, level + 1))}
                                   </ul>
                                 )}
