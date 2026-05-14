@@ -1515,17 +1515,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               )
             )}
 
-            {/* Bottom comment input — no avatar, full width */}
-            <div className="mt-4">
-              {/* key={id}: web's /issues/[id] route doesn't remount on
-                  issueId change, so without an explicit key the editor
-                  keeps the previous issue's in-memory content and the
-                  next keystroke would flush it into the new issue's
-                  draft key. */}
-              <CommentInput key={id} issueId={id} onSubmit={submitComment} />
-            </div>
           </div>
         </div>
+        </div>
+
+        {/* Sticky comment input — pinned to the bottom of the detail panel,
+            outside the scrollable timeline so it's always visible. */}
+        <div className="shrink-0 border-t bg-background px-8 py-3">
+          <div className="mx-auto w-full max-w-4xl">
+            {/* key={id}: web's /issues/[id] route doesn't remount on
+                issueId change, so without an explicit key the editor
+                keeps the previous issue's in-memory content and the
+                next keystroke would flush it into the new issue's
+                draft key. */}
+            <CommentInput key={id} issueId={id} onSubmit={submitComment} />
+          </div>
         </div>
       </div>
   );
