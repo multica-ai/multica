@@ -127,7 +127,7 @@ function StatusAccordionItem({
   return (
     <Accordion.Item value={status}>
       <Accordion.Header className="group/header flex h-10 items-center rounded-lg bg-muted/40 transition-colors hover:bg-accent/30">
-        <div className="pl-3 flex items-center">
+        <div className="ps-3 flex items-center">
           <input
             type="checkbox"
             checked={allSelected}
@@ -144,11 +144,11 @@ function StatusAccordionItem({
             className="cursor-pointer accent-primary"
           />
         </div>
-        <Accordion.Trigger className="group/trigger flex flex-1 items-center gap-2 px-2 h-full text-left outline-none">
+        <Accordion.Trigger className="group/trigger flex flex-1 items-center gap-2 px-2 h-full text-start outline-none">
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90" />
           <StatusHeading status={status} count={total} />
         </Accordion.Trigger>
-        <div className="pr-2">
+        <div className="pe-2">
           <Tooltip>
             <TooltipTrigger
               render={

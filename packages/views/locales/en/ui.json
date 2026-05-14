@@ -4,5 +4,6 @@
   "pagination_previous": "Go to previous page",
   "pagination_next": "Go to next page",
   "copy_code": "Copy code",
-  "plain_text": "plain text"
+  "plain_text": "plain text",
+  "loading": "Loading"
 }

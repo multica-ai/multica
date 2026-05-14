@@ -1,0 +1,156 @@
+{
+  "common": {
+    "back": "חזרה",
+    "close": "סגור",
+    "cancel": "ביטול",
+    "expand_tooltip": "הרחב",
+    "collapse_tooltip": "כווץ"
+  },
+  "create_workspace": {
+    "title": "צור סביבת עבודה חדשה",
+    "description": "סביבות עבודה הן סביבות משותפות שבהן צוותים יכולים לעבוד על פרויקטים ו-issues."
+  },
+  "delete_issue": {
+    "title": "מחק issue",
+    "description": "פעולה זו תמחק לצמיתות את ה-issue הזה ואת כל תגובותיו. לא ניתן לבטל פעולה זו.",
+    "hint": "כל חבר בסביבת העבודה יכול למחוק issues.",
+    "cancel": "ביטול",
+    "confirm": "מחיקה",
+    "deleting": "מוחק...",
+    "toast_deleted": "ה-issue נמחק",
+    "toast_delete_failed": "מחיקת ה-issue נכשלה"
+  },
+  "feedback": {
+    "title": "משוב",
+    "placeholder": "ספר לנו על החוויה שלך, באגים שמצאת, או פיצ׳רים שתרצה לראות…",
+    "toast_uploading": "אנא המתן עד שההעלאות יסתיימו…",
+    "toast_too_long": "ההודעה ארוכה מדי",
+    "toast_sent": "תודה על המשוב!",
+    "toast_failed": "שליחת המשוב נכשלה",
+    "send": "שלח משוב",
+    "sending": "שולח…",
+    "github_hint_prefix": "רוצה טיפול מהיר יותר ודיון פתוח? עבור אל ",
+    "github_hint_link": "GitHub"
+  },
+  "issue_picker": {
+    "search_placeholder": "חפש issues...",
+    "searching": "מחפש...",
+    "no_results": "לא נמצאו issues.",
+    "prompt_to_search": "הקלד כדי לחפש issues"
+  },
+  "set_parent": {
+    "title": "הגדר issue אב",
+    "description": "חפש issue להגדרה כאב של ה-issue הזה",
+    "toast_failed": "עדכון ה-issue נכשל",
+    "toast_success": "{{identifier}} הוגדר כ-issue אב"
+  },
+  "add_child": {
+    "title": "הוסף תת-issue",
+    "description": "חפש issue להוספה כתת-issue",
+    "toast_failed": "הוספת תת-issue נכשלה",
+    "toast_success": "{{identifier}} נוסף כתת-issue"
+  },
+  "backlog_hint": {
+    "toast_status_failed": "עדכון הסטטוס נכשל"
+  },
+  "create_squad": {
+    "title": "צור צוות",
+    "description": "צור צוות שיתופי עם סוכן מוביל שמתאם את הצוות.",
+    "name_label": "שם",
+    "name_placeholder": "לדוגמה: צוות פרונט",
+    "description_label": "תיאור",
+    "description_placeholder": "תאר על מה הצוות הזה אחראי...",
+    "leader_label": "סוכן מוביל",
+    "leader_hint": "המוביל מקבל את כל המשימות שמוקצות לצוות זה ומתאם את הצוות.",
+    "no_agents": "אין סוכנים פעילים זמינים. צור סוכן תחילה.",
+    "cancel": "ביטול",
+    "submit": "צור צוות",
+    "submitting": "יוצר...",
+    "toast_created": "הצוות נוצר",
+    "toast_failed": "יצירת הצוות נכשלה"
+  },
+  "create_project": {
+    "title": "פרויקט חדש",
+    "title_breadcrumb": "פרויקט חדש",
+    "icon_tooltip": "בחר אייקון",
+    "title_placeholder": "כותרת הפרויקט",
+    "description_placeholder": "הוסף תיאור...",
+    "lead": "אחראי",
+    "no_lead": "ללא אחראי",
+    "lead_placeholder": "הקצה אחראי...",
+    "members_group": "חברים",
+    "agents_group": "סוכנים",
+    "no_results": "אין תוצאות",
+    "submit": "צור פרויקט",
+    "submitting": "יוצר...",
+    "toast_created": "הפרויקט נוצר",
+    "toast_failed": "יצירת הפרויקט נכשלה",
+    "repos_pill": "ריפוז",
+    "repos_pill_count_one": "ריפו {{count}}",
+    "repos_pill_count_other": "{{count}} ריפוז",
+    "repos_heading": "צרף ריפוז של GitHub לפרויקט הזה",
+    "repos_empty": "אין עדיין ריפוז ברמת סביבת העבודה. הדבק כתובת URL למטה כדי לצרף אד-הוק.",
+    "repos_url_placeholder": "https://github.com/owner/repo",
+    "repos_add": "הוסף",
+    "repos_selected": "נבחר"
+  },
+  "create_issue": {
+    "sr_manual": "issue חדש",
+    "sr_agent": "יצירה מהירה של issue",
+    "manual_breadcrumb": "צור ידנית",
+    "agent_breadcrumb": "צור עם סוכן",
+    "title_placeholder": "כותרת ה-issue",
+    "description_placeholder": "הוסף תיאור...",
+    "more_options_aria": "אפשרויות נוספות",
+    "submit": "צור issue",
+    "submitting": "יוצר...",
+    "toast_created": "ה-issue נוצר",
+    "view_issue": "הצג issue",
+    "toast_failed": "יצירת ה-issue נכשלה",
+    "toast_link_subissues_all_failed": "קישור תת-issues נכשל",
+    "toast_link_subissues_partial": "{{failed}} מתוך {{total}} תת-issues לא קושרו",
+    "switch_to_agent": "עבור לסוכן",
+    "switch_to_agent_tooltip": "עבור ליצירה עם סוכן — תאר בשורה אחת ותן לסוכן להגיש",
+    "switch_to_manual": "עבור ליצירה ידנית",
+    "switch_to_manual_tooltip": "עבור ליצירה ידנית — מלא את השדות בעצמך",
+    "create_another": "צור עוד אחד",
+    "remove_parent_aria": "הסר אב",
+    "remove_subissue_aria": "הסר תת-issue {{identifier}}",
+    "subissue_of": "תת-issue של {{identifier}}",
+    "subissue_chip": "תת-issue: {{identifier}}",
+    "parent_with_id": "אב: {{identifier}}",
+    "set_parent": "הגדר issue אב...",
+    "add_subissue": "הוסף תת-issue...",
+    "remove_parent": "הסר אב",
+    "set_parent_picker": {
+      "title": "הגדר issue אב",
+      "description": "חפש issue להגדרה כאב של ה-issue החדש"
+    },
+    "add_subissue_picker": {
+      "title": "הוסף תת-issue",
+      "description": "חפש issue להוספה כתת-issue של ה-issue החדש"
+    },
+    "agent": {
+      "created_by": "נוצר על ידי",
+      "select_agent_aria": "בחר סוכן",
+      "pick_an_agent": "בחר סוכן…",
+      "no_agents": "אין סוכנים או צוותים זמינים.",
+      "search_placeholder": "חפש סוכנים וצוותים…",
+      "agents_group": "סוכנים",
+      "squads_group": "צוותים",
+      "version_missing": "ה-daemon של הסוכן הזה אינו מדווח גרסת CLI. יצירה עם סוכן דורשת multica CLI ≥ {{min}}. שדרג את ה-daemon וחבר מחדש, או עבור ליצירה ידנית.",
+      "version_below": "ה-CLI של ה-daemon של הסוכן הזה הוא {{current}} — יצירה עם סוכן דורשת ≥ {{min}}. שדרג את ה-daemon, או עבור ליצירה ידנית.",
+      "prompt_placeholder": "אמור לסוכן מה לעשות, לדוגמה \"תן ל-Bohan לתקן את האיטיות בטעינת ה-inbox בפרויקט Web\"",
+      "submit": "צור",
+      "sending": "שולח…",
+      "uploading": "מעלה…",
+      "sent_label": "נשלח",
+      "sent_count": "{{count}} נשלחו",
+      "version_blocked_tooltip": "ה-CLI של ה-daemon חייב להיות ≥ {{min}}",
+      "toast_sent": "נשלח לסוכן — תקבל התראה ל-inbox כשהוא יסיים",
+      "error_agent_unavailable_fallback": "הסוכן אינו זמין. בחר סוכן אחר.",
+      "error_daemon_version": "ה-CLI של ה-daemon של הסוכן ({{current}}) נמוך מהנדרש {{min}}. שדרג את ה-daemon כדי להשתמש ביצירה עם סוכן.",
+      "error_unknown": "השליחה נכשלה. נסה שוב."
+    }
+  }
+}

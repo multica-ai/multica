@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Multica</title>
+    <script>
+      // Bootstrap dir + lang from the persisted locale before any stylesheet
+      // evaluates, so RTL users don't see a first-paint LTR flash. The full
+      // locale resolution happens in App.tsx — this only mirrors what the
+      // desktop locale adapter persisted on the last session.
+      try {
+        var l = localStorage.getItem("multica-locale");
+        if (l === "he") {
+          document.documentElement.dir = "rtl";
+          document.documentElement.lang = "he";
+        }
+      } catch (e) { /* ignore */ }
+    </script>
   </head>
   <body class="h-full overflow-hidden antialiased font-sans">
     <div id="root" class="h-full"></div>

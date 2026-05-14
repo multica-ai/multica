@@ -21,11 +21,19 @@ describe("matchLocale", () => {
   it("matches a clean supported tag", () => {
     expect(matchLocale(["zh-Hans"])).toBe("zh-Hans");
     expect(matchLocale(["en"])).toBe("en");
+    expect(matchLocale(["he"])).toBe("he");
   });
 
   it("collapses region-tagged BCP-47 to the supported base", () => {
     expect(matchLocale(["en-US"])).toBe("en");
     expect(matchLocale(["zh-Hans-CN"])).toBe("zh-Hans");
+    expect(matchLocale(["he-IL"])).toBe("he");
+  });
+
+  it("picks Hebrew when it appears before English in the candidate list", () => {
+    // Mirrors how apps/web/proxy.ts splits Accept-Language: he-IL,en;q=0.5
+    // into ["he-IL", "en"] (quality values are stripped before reaching matchLocale).
+    expect(matchLocale(["he-IL", "en"])).toBe("he");
   });
 
   it("falls back to DEFAULT_LOCALE when no candidate matches", () => {

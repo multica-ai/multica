@@ -2,23 +2,24 @@ import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { SUPPORTED_LOCALES, type SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "./index";
 
 // Schema-level guard: every key in the EN bundle must have a counterpart
-// in the zh-Hans bundle and vice-versa. Catches retrofit drift where a
-// new EN key lands without zh, which would silently fall back to the
-// English string in production.
+// in every other locale and vice-versa. Catches retrofit drift where a
+// new EN key lands without its translation, which would silently fall
+// back to the English string in production.
 //
-// i18next plural rule: EN uses `_one` + `_other`; zh only uses `_other`
-// because Chinese has no grammatical number. Normalize both forms to
-// `_other` before comparing so a `{ key_one, key_other }` pair in EN
-// matches a single `{ key_other }` in zh.
+// i18next plural rule: EN uses `_one` + `_other`; zh and he use only
+// `_other` (Chinese has no grammatical number; Hebrew's plural agreement
+// isn't expressed via i18next's `_one`/`_other` split for our keys).
+// Normalize both forms to `_other` before comparing so `{ key_one, key_other }`
+// in EN matches a single `{ key_other }` in the target locale.
 
 // Derive the canonical namespace list from disk so the test fails if a JSON
 // file ships without a matching RESOURCES entry. Without this guard the test
-// would still pass when both EN and zh-Hans skip a namespace (e.g. issues +
-// agents both unregistered), since the iteration happens over RESOURCES.en
-// itself — that's a tautology, not parity.
+// would still pass when EN and a target locale both skip the same namespace
+// — that's a tautology, not parity.
 const LOCALES_DIR = dirname(fileURLToPath(import.meta.url));
 
 function jsonNamespacesIn(locale: string): string[] {
@@ -48,34 +49,42 @@ function keySet(bundle: Record<string, unknown>): Set<string> {
 }
 
 const en = RESOURCES.en;
-const zh = RESOURCES["zh-Hans"];
+const OTHER_LOCALES: SupportedLocale[] = SUPPORTED_LOCALES.filter(
+  (l) => l !== "en",
+);
 
 describe("locale bundle parity", () => {
-  it("declares the same namespaces in EN and zh-Hans", () => {
-    expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort());
-  });
-
-  it("registers every JSON file in RESOURCES (EN)", () => {
+  it("registers every JSON file in RESOURCES (en)", () => {
     expect(Object.keys(en).sort()).toEqual(jsonNamespacesIn("en"));
   });
 
-  it("registers every JSON file in RESOURCES (zh-Hans)", () => {
-    expect(Object.keys(zh).sort()).toEqual(jsonNamespacesIn("zh-Hans"));
-  });
+  for (const locale of OTHER_LOCALES) {
+    describe(locale, () => {
+      const bundle = RESOURCES[locale];
 
-  for (const ns of Object.keys(en)) {
-    it(`${ns}: zh-Hans covers every EN key`, () => {
-      const enKeys = keySet(en[ns] ?? {});
-      const zhKeys = keySet(zh[ns] ?? {});
-      const missing = [...enKeys].filter((k) => !zhKeys.has(k));
-      expect(missing).toEqual([]);
-    });
+      it(`declares the same namespaces as en`, () => {
+        expect(Object.keys(en).sort()).toEqual(Object.keys(bundle).sort());
+      });
 
-    it(`${ns}: EN covers every zh-Hans key`, () => {
-      const enKeys = keySet(en[ns] ?? {});
-      const zhKeys = keySet(zh[ns] ?? {});
-      const extra = [...zhKeys].filter((k) => !enKeys.has(k));
-      expect(extra).toEqual([]);
+      it(`registers every JSON file in RESOURCES`, () => {
+        expect(Object.keys(bundle).sort()).toEqual(jsonNamespacesIn(locale));
+      });
+
+      for (const ns of Object.keys(en)) {
+        it(`${ns}: covers every en key`, () => {
+          const enKeys = keySet(en[ns] ?? {});
+          const targetKeys = keySet(bundle[ns] ?? {});
+          const missing = [...enKeys].filter((k) => !targetKeys.has(k));
+          expect(missing).toEqual([]);
+        });
+
+        it(`${ns}: en covers every ${locale} key`, () => {
+          const enKeys = keySet(en[ns] ?? {});
+          const targetKeys = keySet(bundle[ns] ?? {});
+          const extra = [...targetKeys].filter((k) => !enKeys.has(k));
+          expect(extra).toEqual([]);
+        });
+      }
     });
   }
 });

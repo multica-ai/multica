@@ -327,7 +327,7 @@ export function InboxPage() {
           size="sm"
           onClick={() => handleArchive(selected.id)}
         >
-          <Archive className="mr-1.5 h-3.5 w-3.5" />
+          <Archive className="me-1.5 h-3.5 w-3.5" />
           {t(($) => $.detail.archive)}
         </Button>
       </div>

@@ -1,0 +1,68 @@
+{
+  "page": {
+    "title": "דואר נכנס",
+    "back": "דואר נכנס"
+  },
+  "menu": {
+    "mark_all_read": "סמן הכל כנקרא",
+    "archive_all": "העבר הכל לארכיון",
+    "archive_all_read": "העבר לארכיון את כל הנקראים",
+    "archive_completed": "העבר לארכיון את שהושלמו"
+  },
+  "list": {
+    "empty": "אין התראות",
+    "mark_done_tooltip": "סמן כהושלם",
+    "archive_tooltip": "ארכיון",
+    "time": {
+      "just_now": "ממש עכשיו",
+      "minutes": "{{count}}ד׳",
+      "hours": "{{count}}ש׳",
+      "days": "{{count}}י׳"
+    }
+  },
+  "detail": {
+    "select_prompt": "בחר התראה כדי לראות פרטים",
+    "empty": "תיבת הדואר הנכנס שלך ריקה",
+    "original_input": "קלט מקורי",
+    "edit_advanced": "ערוך כטופס מתקדם",
+    "archive": "ארכיון"
+  },
+  "types": {
+    "issue_assigned": "הוקצה",
+    "unassigned": "בוטלה הקצאה",
+    "assignee_changed": "האחראי שונה",
+    "status_changed": "הסטטוס שונה",
+    "priority_changed": "העדיפות שונתה",
+    "due_date_changed": "תאריך היעד שונה",
+    "new_comment": "תגובה חדשה",
+    "mentioned": "אוזכרת",
+    "review_requested": "התבקש סקירה",
+    "task_completed": "המשימה הושלמה",
+    "task_failed": "המשימה נכשלה",
+    "agent_blocked": "הסוכן חסום",
+    "agent_completed": "הסוכן סיים",
+    "reaction_added": "הגיב",
+    "quick_create_done": "נוצר עם סוכן",
+    "quick_create_failed": "יצירה עם סוכן נכשלה"
+  },
+  "labels": {
+    "set_status_to": "הגדר סטטוס ל-",
+    "set_priority_to": "הגדר עדיפות ל-",
+    "assigned_to": "הוקצה ל-{{name}}",
+    "removed_assignee": "האחראי הוסר",
+    "set_due_date_to": "הוגדר תאריך יעד ל-{{date}}",
+    "removed_due_date": "תאריך היעד הוסר",
+    "reacted_to_comment": "הגיב {{emoji}} לתגובה שלך",
+    "created_with_agent": "נוצר עם סוכן: {{identifier}}",
+    "failed_with_detail": "נכשל: {{detail}}"
+  },
+  "errors": {
+    "mark_read_failed": "סימון כנקרא נכשל",
+    "archive_failed": "ההעברה לארכיון נכשלה",
+    "mark_done_failed": "סימון כהושלם נכשל",
+    "mark_all_read_failed": "סימון הכל כנקרא נכשל",
+    "archive_all_failed": "ההעברה של הכל לארכיון נכשלה",
+    "archive_all_read_failed": "ההעברה של הנקראים לארכיון נכשלה",
+    "archive_completed_failed": "ההעברה של שהושלמו לארכיון נכשלה"
+  }
+}

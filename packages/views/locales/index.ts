@@ -47,6 +47,30 @@ import zhHansLayout from "./zh-Hans/layout.json";
 import zhHansUsage from "./zh-Hans/usage.json";
 import zhHansUi from "./zh-Hans/ui.json";
 import zhHansSquads from "./zh-Hans/squads.json";
+import heCommon from "./he/common.json";
+import heAuth from "./he/auth.json";
+import heSettings from "./he/settings.json";
+import heIssues from "./he/issues.json";
+import heAgents from "./he/agents.json";
+import heEditor from "./he/editor.json";
+import heOnboarding from "./he/onboarding.json";
+import heInvite from "./he/invite.json";
+import heLabels from "./he/labels.json";
+import heMembers from "./he/members.json";
+import heMyIssues from "./he/my-issues.json";
+import heSearch from "./he/search.json";
+import heInbox from "./he/inbox.json";
+import heWorkspace from "./he/workspace.json";
+import heProjects from "./he/projects.json";
+import heAutopilots from "./he/autopilots.json";
+import heSkills from "./he/skills.json";
+import heChat from "./he/chat.json";
+import heModals from "./he/modals.json";
+import heRuntimes from "./he/runtimes.json";
+import heLayout from "./he/layout.json";
+import heUsage from "./he/usage.json";
+import heUi from "./he/ui.json";
+import heSquads from "./he/squads.json";
 
 // Single source of truth for the resource bundle. Both apps (web layout +
 // desktop App.tsx) import from here so adding a locale or namespace happens
@@ -103,5 +127,31 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     usage: zhHansUsage,
     ui: zhHansUi,
     squads: zhHansSquads,
+  },
+  he: {
+    common: heCommon,
+    auth: heAuth,
+    settings: heSettings,
+    issues: heIssues,
+    agents: heAgents,
+    editor: heEditor,
+    onboarding: heOnboarding,
+    invite: heInvite,
+    labels: heLabels,
+    members: heMembers,
+    "my-issues": heMyIssues,
+    search: heSearch,
+    inbox: heInbox,
+    workspace: heWorkspace,
+    projects: heProjects,
+    autopilots: heAutopilots,
+    skills: heSkills,
+    chat: heChat,
+    modals: heModals,
+    runtimes: heRuntimes,
+    layout: heLayout,
+    usage: heUsage,
+    ui: heUi,
+    squads: heSquads,
   },
 };

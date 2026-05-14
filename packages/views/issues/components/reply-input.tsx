@@ -146,7 +146,7 @@ function ReplyInput({
             attachments={pendingAttachments}
           />
         </div>
-        <div className="absolute bottom-0 right-0 flex items-center gap-1">
+        <div className="absolute bottom-0 end-0 flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger
               render={

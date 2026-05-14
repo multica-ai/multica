@@ -157,7 +157,7 @@ export function IssueActionsMenuItems({
               <StatusIcon status={s} className="h-3.5 w-3.5" />
               {t(($) => $.status[s])}
               {issue.status === s && (
-                <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
+                <span className="ms-auto text-xs text-muted-foreground">{"✓"}</span>
               )}
             </P.Item>
           ))}
@@ -180,7 +180,7 @@ export function IssueActionsMenuItems({
                 {t(($) => $.priority[p])}
               </span>
               {issue.priority === p && (
-                <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
+                <span className="ms-auto text-xs text-muted-foreground">{"✓"}</span>
               )}
             </P.Item>
           ))}

@@ -1,0 +1,51 @@
+{
+  "page": {
+    "title": "צוותים",
+    "new_button": "צוות חדש",
+    "empty_no_squads": "אין עדיין צוותים. צור אחד כדי להתחיל.",
+    "empty_no_match": "אין צוותים שתואמים לסינונים שלך."
+  },
+  "inspector": {
+    "details_section": "פרטים",
+    "archive_button": "ארכיון"
+  },
+  "name_editor": {
+    "cancel": "ביטול"
+  },
+  "add_member_dialog": {
+    "title": "הוסף חבר",
+    "description": "הוסף חבר בסביבת העבודה או סוכן לצוות זה.",
+    "label_member": "חבר",
+    "label_role": "תפקיד",
+    "label_optional": "(אופציונלי)",
+    "placeholder_role_inline": "הוסף תפקיד…",
+    "cancel": "ביטול"
+  },
+  "description_dialog": {
+    "title": "ערוך תיאור",
+    "placeholder_empty": "הוסף תיאור",
+    "cancel": "ביטול"
+  },
+  "discard_changes_dialog": {
+    "title": "לבטל שינויים שלא נשמרו?",
+    "description": "יש לך שינויים שלא נשמרו בלשונית זו. מעבר ללשונית אחרת יבטל אותם.",
+    "keep_editing": "המשך לערוך",
+    "discard_button": "בטל"
+  },
+  "members_tab": {
+    "section_title": "חברים",
+    "section_count_one": "חבר {{count}} בצוות זה",
+    "section_count_other": "{{count}} חברים בצוות זה",
+    "add_member_button": "הוסף חבר",
+    "create_agent_button": "צור סוכן",
+    "leader_chip": "מוביל",
+    "view_agent_tooltip": "פתח פרטי סוכן",
+    "make_leader_tooltip": "הפוך למוביל הצוות",
+    "remove_member_tooltip": "הסר מהצוות"
+  },
+  "instructions_tab": {
+    "description": "הוראות הצוות מוזרקות להנחיה של סוכן המוביל בכל פעם שהוא עובד על issue שהוקצה לצוות זה. השתמש בהן כדי לתת למוביל הנחיות צוותיות כלליות, הסכמי עבודה או הקשר שעל המוביל לעקוב אחריו בכל משימה.",
+    "unsaved_changes": "שינויים שלא נשמרו",
+    "save_button": "שמירה"
+  }
+}

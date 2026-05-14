@@ -187,7 +187,7 @@ export const BoardCardContent = memo(function BoardCardContent({
               </span>
             ))}
           {showDueDate && (
-            <div className="ml-auto">
+            <div className="ms-auto">
               {editable ? (
                 <PickerWrapper>
                   <DueDatePicker

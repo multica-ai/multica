@@ -315,7 +315,7 @@ function CommentRow({
         </Tooltip>
 
         {!isTemp && (
-          <div className="ml-auto flex items-center gap-0.5">
+          <div className="ms-auto flex items-center gap-0.5">
             <QuickEmojiPicker
               onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
               align="end"
@@ -368,7 +368,7 @@ function CommentRow({
       {editing ? (
         <div
           {...dropZoneProps}
-          className="relative mt-1.5 pl-8"
+          className="relative mt-1.5 ps-8"
           onKeyDown={(e) => { if (e.key === "Escape") cancelEdit(); }}
         >
           <div className="text-sm leading-relaxed">
@@ -401,10 +401,10 @@ function CommentRow({
         </div>
       ) : (
         <>
-          <div className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85">
+          <div className="mt-1.5 ps-8 text-sm leading-relaxed text-foreground/85">
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
-          <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
+          <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 ps-8" />
           {!isTemp && (
             <ReactionBar
               reactions={reactions}
@@ -412,7 +412,7 @@ function CommentRow({
               onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
               getActorName={getActorName}
               hideAddButton={!isLongContent}
-              className="mt-1.5 pl-8"
+              className="mt-1.5 ps-8"
             />
           )}
         </>
@@ -539,7 +539,7 @@ function CommentCardImpl({
         <button
           type="button"
           onClick={onCollapseResolved}
-          className="flex w-full items-center justify-between border-b border-border/50 px-4 py-2.5 text-left text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
+          className="flex w-full items-center justify-between border-b border-border/50 px-4 py-2.5 text-start text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
           aria-label={t(($) => $.comment.resolve.collapse)}
         >
           <span className="flex items-center gap-2">
@@ -585,7 +585,7 @@ function CommentCardImpl({
             )}
 
             {open && !isTemp && (
-              <div className="ml-auto flex items-center gap-0.5">
+              <div className="ms-auto flex items-center gap-0.5">
                 <QuickEmojiPicker
                   onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
                   align="end"
@@ -662,7 +662,7 @@ function CommentCardImpl({
             {editing ? (
               <div
                 {...parentDropZoneProps}
-                className="relative pl-10"
+                className="relative ps-10"
                 onKeyDown={(e) => { if (e.key === "Escape") cancelEdit(); }}
               >
                 <div className="text-sm leading-relaxed">
@@ -695,10 +695,10 @@ function CommentCardImpl({
               </div>
             ) : (
               <>
-                <div className="pl-10 text-sm leading-relaxed text-foreground/85">
+                <div className="ps-10 text-sm leading-relaxed text-foreground/85">
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
-                <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
+                <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 ps-10" />
                 {!isTemp && (
                   <ReactionBar
                     reactions={reactions}
@@ -706,7 +706,7 @@ function CommentCardImpl({
                     onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
                     getActorName={getActorName}
                     hideAddButton={!isLongContent}
-                    className="mt-1.5 pl-10"
+                    className="mt-1.5 ps-10"
                   />
                 )}
               </>

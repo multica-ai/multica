@@ -1,0 +1,237 @@
+{
+  "page": {
+    "title": "Skills",
+    "tagline": "הוראות שכל סוכן בסביבת העבודה הזו יכול להשתמש בהן.",
+    "learn_more": "מידע נוסף ←",
+    "new_skill": "skill חדש",
+    "search_placeholder": "חפש skills…",
+    "scopes": {
+      "all": { "label": "הכל", "description": "כל ה-skills בסביבת העבודה הזו" },
+      "used": { "label": "בשימוש", "description": "skills המוקצים לפחות לסוכן אחד" },
+      "unused": { "label": "לא בשימוש", "description": "skills שאינם מוקצים לאף סוכן" },
+      "mine": { "label": "שיצרתי", "description": "skills שאתה יצרת" }
+    },
+    "empty": {
+      "title": "אין עדיין skills",
+      "description": "צור את ה-skill הראשון שלך, ייבא אחד מכתובת URL, או העתק אחד מסביבת ריצה מחוברת — וכל סוכן בסביבת העבודה יוכל להשתמש בו."
+    },
+    "no_matches": {
+      "title": "אין התאמות",
+      "with_query": "אין skills התואמים ל-\"{{query}}\"{{filterSuffix}}.",
+      "with_query_filter_suffix": " בסינון הזה",
+      "filter_only": "אין skills התואמים לסינון הזה.",
+      "try_different": " נסה שאילתה אחרת."
+    },
+    "intro_banner": {
+      "title": "משותף עם סביבת העבודה שלך.",
+      "body": "כל אחד יכול ליצור skill, לייבא אחד מ-URL, או להעתיק אחד מסביבת הריצה המקומית שלו — וכל סוכן יוכל להשתמש בו.",
+      "highlight": "skills מסביבת ריצה מקומית נשארים פרטיים עד שתעתיק אחד לכאן."
+    },
+    "list_error": {
+      "title": "טעינת ה-skills נכשלה",
+      "fallback": "משהו השתבש בעת הבאת רשימת ה-skills.",
+      "retry": "נסה שוב"
+    },
+    "supporting_data_warning": "טעינת חלק מנתוני סביבת העבודה נכשלה. ייחוס יוצרים, שמות סביבות ריצה, או הרשאות עריכה עשויים להופיע באופן חלקי."
+  },
+  "table": {
+    "name": "שם",
+    "used_by": "בשימוש על ידי",
+    "source": "מקור · נוסף על ידי",
+    "updated": "עודכן",
+    "no_description": "אין תיאור",
+    "lock_tooltip": "לקריאה בלבד — רק היוצר או מנהל יכולים לערוך",
+    "unused": "— לא בשימוש",
+    "by_creator": "על ידי {{name}}",
+    "source_manual": "נוצר ידנית",
+    "source_runtime_named": "מ-{{name}}",
+    "source_runtime_provider": "מסביבת ריצה של {{provider}}",
+    "source_runtime_unknown": "מסביבת ריצה",
+    "source_clawhub": "מ-ClawHub",
+    "source_skills_sh": "מ-Skills.sh",
+    "source_github": "מ-GitHub"
+  },
+  "detail": {
+    "all_skills": "כל ה-skills",
+    "read_only": "לקריאה בלבד",
+    "delete_aria": "מחק skill",
+    "delete_tooltip": "מחק skill",
+    "supporting_data_warning": "טעינת חלק מנתוני סביבת העבודה נכשלה. ייחוס יוצרים, שמות סביבות ריצה, או הרשאות עריכה עשויים להופיע באופן חלקי עד הרענון הבא.",
+    "files_label": "קבצים · {{count}}",
+    "add_file_aria": "הוסף קובץ",
+    "add_file_tooltip": "הוסף קובץ",
+    "delete_file": "מחק קובץ",
+    "name_aria": "שם ה-skill",
+    "name_placeholder": "skill-name",
+    "description_label": "תיאור",
+    "description_placeholder": "משפט אחד שמתאר מתי על סוכן להשתמש ב-skill הזה…",
+    "subline": {
+      "origin_runtime_named": "סביבת ריצה מקומית · {{name}}",
+      "origin_runtime_provider": "סביבת ריצה מקומית · {{provider}}",
+      "origin_runtime_unknown": "סביבת ריצה מקומית",
+      "origin_clawhub": "יובא · ClawHub",
+      "origin_skills_sh": "יובא · Skills.sh",
+      "origin_github": "יובא · GitHub",
+      "origin_workspace": "סביבת עבודה",
+      "updated_label": "עודכן {{when}}",
+      "by_creator": "על ידי {{name}}"
+    },
+    "conflict_banner": {
+      "title": "מישהו אחר עדכן את ה-skill הזה",
+      "body": "העריכות שלך נשמרו. השלך כדי למשוך את השינויים שלהם, או שמור כדי לדרוס."
+    },
+    "save_bar": {
+      "unsaved": "שינויים שלא נשמרו — ידרסו את ה-skill הפעיל בעת שמירה",
+      "discard": "השלך",
+      "save": "שמור שינויים",
+      "saving": "שומר…"
+    },
+    "sidebar": {
+      "metadata": "מטא-נתונים",
+      "created": "נוצר",
+      "updated": "עודכן",
+      "created_by": "נוצר על ידי",
+      "files": "קבצים",
+      "id": "מזהה",
+      "origin": "מקור",
+      "used_by_one": "בשימוש על ידי סוכן {{count}}",
+      "used_by_other": "בשימוש על ידי {{count}} סוכנים",
+      "permissions": "הרשאות",
+      "permissions_owner": "אתה יכול לערוך ולמחוק את ה-skill הזה. השינויים נכנסים לתוקף בריצת הסוכן הבאה.",
+      "permissions_locked_creator": "רק היוצר ({{name}}) או מנהל סביבת עבודה יכולים לערוך את ה-skill הזה.",
+      "permissions_locked": "רק היוצר או מנהל סביבת עבודה יכולים לערוך את ה-skill הזה.",
+      "used_by_empty": "עדיין לא הוקצה לאף סוכן. פתח את לשונית ה-Skills של סוכן כדי להקצות."
+    },
+    "origin_card": {
+      "imported_runtime": "יובא מסביבת ריצה מקומית",
+      "imported_clawhub": "יובא מ-ClawHub",
+      "imported_skills_sh": "יובא מ-Skills.sh",
+      "imported_github": "יובא מ-GitHub",
+      "provider": "ספק · {{provider}}"
+    },
+    "not_found": {
+      "title": "ה-skill לא נמצא",
+      "fallback": "ייתכן שה-skill הזה נמחק או שאיבדת גישה אליו.",
+      "back": "חזרה ל-Skills"
+    },
+    "toast_saved": "ה-skill נשמר",
+    "toast_save_failed": "שמירת ה-skill נכשלה",
+    "toast_deleted": "ה-skill נמחק",
+    "toast_delete_failed": "מחיקת ה-skill נכשלה",
+    "delete_dialog": {
+      "title": "למחוק את ה-skill?",
+      "description_with_agents_one": "פעולה זו תמחק לצמיתות את \"{{name}}\" ותסיר אותו מסוכן {{count}} שמשתמש בו כעת.",
+      "description_with_agents_other": "פעולה זו תמחק לצמיתות את \"{{name}}\" ותסיר אותו מ-{{count}} סוכנים שמשתמשים בו כעת.",
+      "description_no_agents": "פעולה זו תמחק לצמיתות את \"{{name}}\" ותסיר אותו מכל הסוכנים.",
+      "warning": "לא ניתן לבטל פעולה זו.",
+      "cancel": "ביטול",
+      "confirm": "מחק לצמיתות",
+      "deleting": "מוחק…"
+    },
+    "add_file": {
+      "placeholder": "templates/review.md",
+      "add": "הוסף",
+      "cancel": "ביטול",
+      "errors": {
+        "empty": "הנתיב לא יכול להיות ריק.",
+        "absolute": "נתיבים מוחלטים אינם מורשים.",
+        "double_dot": "נתיבים לא יכולים להכיל \"..\".",
+        "reserved": "SKILL.md שמור לקובץ הראשי.",
+        "exists": "קובץ בנתיב הזה כבר קיים."
+      }
+    }
+  },
+  "create": {
+    "back": "חזרה",
+    "back_aria": "חזרה לבורר השיטה",
+    "close": "סגור",
+    "close_aria": "סגור",
+    "method": {
+      "chooser": {
+        "title": "skill חדש",
+        "desc": "בחר איך תרצה להוסיף skill לסביבת העבודה הזו."
+      },
+      "manual": {
+        "title": "צור ידנית",
+        "desc": "כתוב SKILL.md חדש מאפס."
+      },
+      "url": {
+        "title": "ייבא מ-URL",
+        "desc": "הבא skill שפורסם לפי URL. קבצים נמשכים בצד השרת."
+      },
+      "runtime": {
+        "title": "העתק מסביבת ריצה",
+        "desc": "סרוק סביבת ריצה מקומית והעלה אחד מה-skills שעל הדיסק לסביבת העבודה."
+      }
+    },
+    "method_card": {
+      "manual_title": "צור ידנית",
+      "manual_desc": "התחל עם SKILL.md ריק וכתוב את ההוראות שלך.",
+      "url_title": "ייבא מ-URL",
+      "url_desc": "משוך skill שפורסם מ-ClawHub או מ-Skills.sh.",
+      "runtime_title": "העתק מסביבת ריצה",
+      "runtime_desc": "העלה skill שכבר מותקן בסביבת הריצה המקומית שלך."
+    },
+    "manual": {
+      "name_label": "שם",
+      "name_placeholder": "למשל review-helper",
+      "name_hint": "חייב להיות ייחודי בתוך סביבת העבודה.",
+      "description_label": "תיאור",
+      "description_placeholder": "משפט אחד על מתי להקצות את ה-skill הזה לסוכן.",
+      "name_conflict_hint": " נסה שם אחר ושלח שוב.",
+      "fallback_error": "יצירת ה-skill נכשלה",
+      "cancel": "ביטול",
+      "submit": "צור skill",
+      "submitting": "יוצר…",
+      "toast_created": "ה-skill נוצר"
+    },
+    "url": {
+      "url_label": "כתובת URL של skill",
+      "supported_sources": "מקורות נתמכים",
+      "import": "ייבוא",
+      "importing": "מייבא…",
+      "importing_clawhub": "מייבא מ-ClawHub…",
+      "importing_skills_sh": "מייבא מ-Skills.sh…",
+      "importing_github": "מייבא מ-GitHub…",
+      "name_conflict_hint": " שם ה-skill המיובא כבר קיים — מחק את הקיים לפני שתנסה שוב.",
+      "fallback_error": "הייבוא נכשל",
+      "cancel": "ביטול",
+      "toast_imported": "ה-skill יובא"
+    }
+  },
+  "runtime_import": {
+    "runtime_label": "סביבת ריצה",
+    "runtime_placeholder": "בחר סביבת ריצה מקומית",
+    "no_local_runtimes_title": "אין סביבות ריצה מקומיות זמינות",
+    "no_local_runtimes_hint": "חבר סביבת ריצה מקומית כדי לעיין ולייבא את ה-skills המקומיים שלה.",
+    "choose_runtime": "בחר סביבת ריצה כדי להמשיך",
+    "must_be_online": "סביבת הריצה חייבת להיות מקוונת כדי לעיין ב-skills מקומיים.",
+    "load_failed": "טעינת ה-skills המקומיים של סביבת הריצה נכשלה",
+    "not_supported": "ספק סביבת הריצה הזה אינו חושף עדיין מלאי skills מקומי.",
+    "no_skills_title": "לא נמצאו skills מקומיים",
+    "no_skills_hint": "לסביבת הריצה הזו אין עדיין skills מקומיים שניתנים לגילוי.",
+    "ignored_files_hint": "קישורים סימבוליים, קבצים לא קריאים, קבצים גדולים מדי, וחבילות גדולות מאוד מתעלמים במהלך הייבוא.",
+    "ready": "מוכן לייבוא",
+    "into_workspace": "לסביבת העבודה הזו.",
+    "select_skill": "בחר skill כדי להמשיך.",
+    "import_button": "ייבא לסביבת העבודה",
+    "importing": "מייבא…",
+    "skill_files_one": "קובץ {{count}}",
+    "skill_files_other": "{{count}} קבצים",
+    "skill_name_label": "שם ה-skill בסביבת העבודה",
+    "skill_description_label": "תיאור",
+    "skill_description_placeholder": "אופציונלי — תאר מתי על סוכן להשתמש ב-skill הזה.",
+    "toast_imported": "ה-skill יובא",
+    "toast_import_failed": "ייבוא ה-skill נכשל"
+  },
+  "file_tree": {
+    "no_files": "אין קבצים"
+  },
+  "file_viewer": {
+    "edit_tooltip": "ערוך",
+    "preview_tooltip": "תצוגה מקדימה",
+    "no_content": "*אין עדיין תוכן*",
+    "markdown_placeholder": "כתוב תוכן markdown...",
+    "raw_placeholder": "תוכן הקובץ..."
+  }
+}

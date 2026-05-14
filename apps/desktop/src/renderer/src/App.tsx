@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
-import { pickLocale } from "@multica/core/i18n";
+import { pickLocale, getDirection } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
@@ -287,6 +287,15 @@ export default function App() {
     [systemLocale],
   );
   const locale = useMemo(() => pickLocale(localeAdapter), [localeAdapter]);
+  // Apply lang + dir synchronously on the document element so RTL styling is
+  // active before any children mount. The inline bootstrap in index.html sets
+  // dir from localStorage to avoid a first-paint flash; this layout effect
+  // keeps the attributes in sync with the resolved locale (e.g. when system
+  // locale is the source and nothing has been persisted yet).
+  useLayoutEffect(() => {
+    document.documentElement.lang = locale;
+    document.documentElement.dir = getDirection(locale);
+  }, [locale]);
   const resources = useMemo(
     () => ({ [locale]: RESOURCES[locale] }),
     [locale],

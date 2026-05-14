@@ -1,0 +1,14 @@
+{
+  "role": {
+    "owner": "בעלים",
+    "admin": "מנהל",
+    "member": "חבר"
+  },
+  "card": {
+    "unavailable": "החבר אינו זמין",
+    "agents_section": "סוכנים ({{count}})",
+    "detail_link": "פרטים ←",
+    "more_agents_one": "ועוד סוכן {{count}}",
+    "more_agents_other": "ועוד {{count}} סוכנים"
+  }
+}

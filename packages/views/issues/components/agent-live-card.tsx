@@ -340,7 +340,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
             <span className="text-muted-foreground shrink-0">{t(($) => $.agent_live.tool_count, { count: toolCount })}</span>
           )}
         </div>
-        <div className="ml-auto flex items-center gap-1 shrink-0">
+        <div className="ms-auto flex items-center gap-1 shrink-0">
           {!isQueued && (
             <TranscriptButton
               task={task}

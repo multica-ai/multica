@@ -14,7 +14,8 @@
     "lint": "turbo lint",
     "clean": "turbo clean && rm -rf node_modules",
     "ui:add": "cd packages/ui && npx shadcn@latest add",
-    "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs"
+    "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs",
+    "seed-locale": "node --experimental-strip-types scripts/seed-locale.ts"
   },
   "packageManager": "pnpm@10.28.2",
   "pnpm": {

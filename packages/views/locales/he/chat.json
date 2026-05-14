@@ -1,0 +1,118 @@
+{
+  "fab": {
+    "running": "Multica עובד...",
+    "unread_one": "צ׳אט {{count}} שלא נקרא",
+    "unread_other": "{{count}} צ׳אטים שלא נקראו",
+    "default": "שאל את Multica"
+  },
+  "input": {
+    "placeholder_no_agent": "צור סוכן כדי להתחיל לשוחח",
+    "placeholder_archived": "סשן זה הועבר לארכיון",
+    "placeholder_named": "אמור ל-{{name}} מה לעשות…",
+    "placeholder_default": "אמור לי מה לעשות…",
+    "send_tooltip": "שלח",
+    "stop_tooltip": "עצור"
+  },
+  "message_list": {
+    "show_details": "הצג פרטים",
+    "replied_in": "ענה תוך {{elapsed}}",
+    "failed_after": "נכשל אחרי {{elapsed}}",
+    "task_failed_fallback": "המשימה נכשלה",
+    "tools_one": "כלי {{count}}",
+    "tools_other": "{{count}} כלים",
+    "tool_result_named": "תוצאת {{tool}}: ",
+    "tool_result_unnamed": "תוצאה: ",
+    "process_steps_one": "שלב {{count}}",
+    "process_steps_other": "{{count}} שלבים",
+    "copy_action": "העתק",
+    "copied_toast": "הועתק",
+    "copy_failed_toast": "ההעתקה נכשלה"
+  },
+  "session_history": {
+    "untitled": "ללא כותרת",
+    "time": {
+      "just_now": "ממש עכשיו",
+      "minutes": "לפני {{count}}ד׳",
+      "hours": "לפני {{count}}ש׳",
+      "days": "לפני {{count}}י׳"
+    },
+    "row_delete_aria": "מחק סשן צ׳אט",
+    "row_rename_aria": "שנה שם סשן צ׳אט",
+    "delete_dialog": {
+      "title": "מחק סשן צ׳אט",
+      "description_with_title": "\"{{title}}\" וההודעות שלו יוסרו לצמיתות. לא ניתן לבטל פעולה זו.",
+      "description_default": "סשן הצ׳אט הזה וההודעות שלו יוסרו לצמיתות. לא ניתן לבטל פעולה זו.",
+      "cancel": "ביטול",
+      "confirm": "מחיקה",
+      "confirming": "מוחק..."
+    }
+  },
+  "window": {
+    "new_chat_tooltip": "צ׳אט חדש",
+    "restore_tooltip": "שחזר",
+    "expand_tooltip": "הרחב",
+    "minimize_tooltip": "מזער",
+    "another_running": "צ׳אט אחר רץ כעת",
+    "another_unread": "לצ׳אט אחר יש תגובות שלא נקראו",
+    "running": "רץ",
+    "unread": "לא נקרא",
+    "no_previous": "אין צ׳אטים קודמים",
+    "untitled": "צ׳אט חדש",
+    "my_agents": "הסוכנים שלי",
+    "others": "אחרים",
+    "no_agents": "אין סוכנים",
+    "active_group": "פעיל",
+    "archived_group_one": "צ׳אט {{count}} בארכיון",
+    "archived_group_other": "{{count}} צ׳אטים בארכיון"
+  },
+  "empty_state": {
+    "first_time_title": "שוחח עם הסוכנים שלך",
+    "first_time_intro": "✨ הם מכירים את סביבת העבודה שלך —",
+    "first_time_pillars": "issues, פרויקטים, skills",
+    "first_time_pillars_suffix": ".",
+    "first_time_actions": "בקש סיכום, תכנן את היום שלך, או העבר משימה מהירה.",
+    "returning_title_named": "שלום, אני {{name}}",
+    "returning_title_default": "ברוך הבא ל-Multica",
+    "returning_subtitle": "נסה לשאול"
+  },
+  "starter_prompts": {
+    "list_open": "הצג את המשימות הפתוחות שלי לפי עדיפות",
+    "summarize_today": "סכם את מה שעשיתי היום",
+    "plan_next": "תכנן על מה לעבוד בהמשך"
+  },
+  "context_anchor": {
+    "tooltip_disabled": "אין מה לשתף עם Multica בעמוד זה",
+    "tooltip_off": "תן ל-Multica לדעת מה אתה צופה",
+    "tooltip_on_issue": "Multica יודע שאתה צופה ב-{{label}} · לחץ כדי לכבות",
+    "tooltip_on_project": "Multica יודע שאתה צופה בפרויקט \"{{label}}\" · לחץ כדי לכבות",
+    "card_tooltip_issue_with_subtitle": "Multica יודע שאתה צופה ב-{{label}} — {{subtitle}}",
+    "card_tooltip_issue": "Multica יודע שאתה צופה ב-{{label}}",
+    "card_tooltip_project": "Multica יודע שאתה צופה בפרויקט \"{{label}}\"",
+    "aria_stop": "הפסק לשתף את העמוד הנוכחי",
+    "aria_start": "שתף את העמוד הנוכחי עם Multica"
+  },
+  "no_agent_banner": "אתה צריך סוכן כדי להתחיל לשוחח.",
+  "offline_banner": {
+    "fallback_name": "הסוכן",
+    "unstable": "החיבור של {{name}} לא יציב — תגובות עשויות להתעכב.",
+    "offline": "{{name}} במצב לא מקוון — ההודעה שלך תימסר כשיחזור."
+  },
+  "status_pill": {
+    "stages": {
+      "offline": "לא מקוון",
+      "reconnecting": "מתחבר מחדש",
+      "queued": "בתור",
+      "starting_up": "מתחיל",
+      "thinking": "חושב",
+      "typing": "מקליד"
+    },
+    "tools": {
+      "running_command": "מריץ פקודה",
+      "reading_files": "קורא קבצים",
+      "searching_code": "מחפש בקוד",
+      "making_edits": "מבצע עריכות",
+      "searching_web": "מחפש ברשת",
+      "fallback": "עובד"
+    }
+  }
+}

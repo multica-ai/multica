@@ -1,0 +1,71 @@
+{
+  "bubble_menu": {
+    "bold": "מודגש",
+    "italic": "נטוי",
+    "strikethrough": "קו חוצה",
+    "code": "קוד",
+    "link": "קישור",
+    "list": "רשימה",
+    "quote": "ציטוט",
+    "url_aria_label": "כתובת URL",
+    "heading_dropdown": {
+      "text": "טקסט",
+      "normal_text": "טקסט רגיל",
+      "heading_1": "כותרת 1",
+      "heading_2": "כותרת 2",
+      "heading_3": "כותרת 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "רשימת תבליטים",
+      "ordered_list": "רשימה ממוספרת"
+    },
+    "sub_issue": {
+      "tooltip": "צור תת-issue מהבחירה",
+      "created": "נוצר {{identifier}}",
+      "create_failed": "יצירת תת-issue נכשלה"
+    }
+  },
+  "image": {
+    "view": "הצג תמונה",
+    "download": "הורדה",
+    "copy_link": "העתק קישור",
+    "delete": "מחיקה",
+    "link_copied": "הקישור הועתק",
+    "copy_link_failed": "העתקת הקישור נכשלה"
+  },
+  "attachment": {
+    "download_failed": "לא הצלחנו להביא קישור הורדה. נסה שוב בעוד רגע.",
+    "preview": "תצוגה מקדימה",
+    "preview_loading": "טוען תצוגה מקדימה…",
+    "preview_failed": "טעינת התצוגה המקדימה נכשלה",
+    "preview_too_large": "הקובץ גדול מדי לתצוגה מקדימה. אנא הורד אותו.",
+    "preview_unsupported": "סוג קובץ זה אינו נתמך בתצוגה מקדימה.",
+    "close": "סגור"
+  },
+  "link_hover": {
+    "copy_link": "העתק קישור",
+    "open_link": "פתח קישור",
+    "link_copied": "הקישור הועתק",
+    "copy_failed": "ההעתקה נכשלה"
+  },
+  "mention": {
+    "group_users": "משתמשים",
+    "group_issues": "Issues",
+    "all_members": "כל החברים",
+    "searching": "מחפש...",
+    "no_results": "אין תוצאות"
+  },
+  "code_block": {
+    "copy_code": "העתק קוד"
+  },
+  "file_card": {
+    "uploading": "מעלה את {{filename}}"
+  },
+  "title_editor": {
+    "title_aria_label": "כותרת"
+  },
+  "mermaid": {
+    "render_error": "לא ניתן להציג את תרשים ה-Mermaid.",
+    "rendering": "מציג תרשים…"
+  }
+}

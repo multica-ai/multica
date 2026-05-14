@@ -115,7 +115,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           attachments={pendingAttachments}
         />
       </div>
-      <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
+      <div className="absolute bottom-1 end-1.5 flex items-center gap-1">
         <Tooltip>
           <TooltipTrigger
             render={

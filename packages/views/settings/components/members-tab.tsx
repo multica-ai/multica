@@ -154,7 +154,7 @@ function MemberRow({
                             </span>
                           </div>
                           {member.role === role && (
-                            <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
+                            <span className="ms-auto text-xs text-muted-foreground">{"✓"}</span>
                           )}
                         </DropdownMenuItem>
                       );

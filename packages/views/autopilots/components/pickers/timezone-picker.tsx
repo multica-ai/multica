@@ -17,9 +17,9 @@ export interface TimezonePickerProps {
   className?: string;
 }
 
-function offsetFor(tz: string): string {
+function offsetFor(tz: string, locale: string): string {
   try {
-    const parts = new Intl.DateTimeFormat("en-US", {
+    const parts = new Intl.DateTimeFormat(locale, {
       timeZone: tz,
       timeZoneName: "shortOffset",
     }).formatToParts(new Date());
@@ -41,21 +41,22 @@ export function TimezonePicker({
   disabled,
   className,
 }: TimezonePickerProps) {
-  const { t } = useT("autopilots");
+  const { t, i18n } = useT("autopilots");
+  const locale = i18n.language;
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
 
   const selectedCity = cityLabel(value);
-  const selectedOffset = useMemo(() => offsetFor(value), [value]);
+  const selectedOffset = useMemo(() => offsetFor(value, locale), [value, locale]);
 
   const query = filter.trim().toLowerCase();
   const filteredOptions = useMemo(() => {
     if (!query) return options;
     return options.filter((tz) => {
-      const haystack = `${tz} ${cityLabel(tz)} ${offsetFor(tz)}`.toLowerCase();
+      const haystack = `${tz} ${cityLabel(tz)} ${offsetFor(tz, locale)}`.toLowerCase();
       return haystack.includes(query);
     });
-  }, [options, query]);
+  }, [options, query, locale]);
 
   return (
     <PropertyPicker
@@ -100,7 +101,7 @@ export function TimezonePicker({
         <PickerEmpty />
       ) : (
         filteredOptions.map((tz) => {
-          const off = offsetFor(tz);
+          const off = offsetFor(tz, locale);
           const isSelected = tz === value;
           return (
             <button

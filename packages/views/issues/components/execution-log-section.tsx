@@ -132,14 +132,14 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
           }`}
         />
         {activeTasks.length > 0 && (
-          <span className="ml-auto inline-flex items-center gap-1 text-info">
+          <span className="ms-auto inline-flex items-center gap-1 text-info">
             <span className="h-1.5 w-1.5 rounded-full bg-info animate-pulse" />
             <span className="font-mono tabular-nums">{activeTasks.length}</span>
           </span>
         )}
       </button>
       {open && (
-        <div className="space-y-0.5 pl-2">
+        <div className="space-y-0.5 ps-2">
           {activeTasks.map((task) => (
             <ActiveRow key={task.id} task={task} issueId={issueId} />
           ))}
@@ -457,7 +457,7 @@ function RowActions({ children }: { children: React.ReactNode }) {
   return (
     <div
       className={[
-        "pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 pl-6 opacity-0 transition-opacity",
+        "pointer-events-none absolute inset-y-0 end-1 flex items-center gap-0.5 ps-6 opacity-0 transition-opacity",
         // The gradient backdrop blends the row's hover background (accent/40)
         // from the right and fades to transparent on the left, so the
         // status text underneath is dimmed gracefully rather than cut.

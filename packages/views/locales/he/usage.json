@@ -1,0 +1,42 @@
+{
+  "title": "שימוש",
+  "subtitle": "צריכת טוקנים ופעילות סוכנים בסביבת עבודה זו.",
+  "filter": {
+    "project_label": "פרויקט",
+    "all_projects": "כל הפרויקטים",
+    "period_label": "תקופה"
+  },
+  "kpi": {
+    "cost_label": "עלות · {{days}}י׳",
+    "tokens_label": "טוקנים · {{days}}י׳",
+    "tokens_hint": "קלט {{input}} · פלט {{output}}",
+    "run_time_label": "זמן ריצה · {{days}}י׳",
+    "run_time_hint": "ב-{{tasks}} משימות",
+    "tasks_label": "משימות · {{days}}י׳",
+    "tasks_hint": "{{failed}} נכשלו"
+  },
+  "daily": {
+    "title_cost": "עלות יומית",
+    "title_tokens": "טוקנים יומיים",
+    "metric_cost": "עלות",
+    "metric_tokens": "טוקנים",
+    "no_data": "אין שימוש בחלון הזמן הזה."
+  },
+  "leaderboard": {
+    "title": "לוח מובילים",
+    "caption": "{{count}} סוכנים",
+    "header_agent": "סוכן",
+    "header_tokens": "טוקנים",
+    "header_cost": "עלות",
+    "header_time": "זמן",
+    "header_tasks": "משימות",
+    "no_data": "אין פעילות סוכנים בחלון הזמן הזה."
+  },
+  "empty": {
+    "title": "אין שימוש עדיין",
+    "body": "ברגע שסוכנים יתחילו להריץ משימות כאן, צריכת הטוקנים וזמן הריצה שלהם יופיעו בתצוגה זו."
+  },
+  "duration": {
+    "less_than_minute": "<1ד׳"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "header": {
+    "back": "חזרה",
+    "log_out": "התנתקות"
+  },
+  "not_found": {
+    "title": "ההזמנה לא נמצאה",
+    "description": "ייתכן שתוקף ההזמנה הזו פג, שהיא בוטלה, או שאינה שייכת לחשבון שלך.",
+    "go_to_dashboard": "עבור ללוח הבקרה"
+  },
+  "accepted": {
+    "title": "הצטרפת ל-{{workspace_name}}!",
+    "redirecting": "מנתב לסביבת העבודה..."
+  },
+  "declined": {
+    "title": "ההזמנה נדחתה",
+    "description": "לא תתווסף לסביבת עבודה זו.",
+    "go_to_dashboard": "עבור ללוח הבקרה"
+  },
+  "main": {
+    "join_title": "הצטרף ל-{{workspace_name}}",
+    "fallback_workspace_name": "סביבת עבודה",
+    "invited_role_admin": "הזמין אותך להצטרף כמנהל.",
+    "invited_role_member": "הזמין אותך להצטרף כחבר.",
+    "already_handled_accepted": "הזמנה זו כבר התקבלה.",
+    "already_handled_declined": "הזמנה זו כבר נדחתה.",
+    "expired": "תוקף ההזמנה הזו פג.",
+    "decline": "דחה",
+    "declining": "דוחה...",
+    "accept": "אשר והצטרף",
+    "joining": "מצטרף..."
+  },
+  "errors": {
+    "accept_failed": "אישור ההזמנה נכשל",
+    "decline_failed": "דחיית ההזמנה נכשלה"
+  },
+  "batch": {
+    "log_out": "התנתקות",
+    "empty_title": "אין הזמנות ממתינות",
+    "empty_hint": "המשך כדי להקים את סביבת העבודה שלך.",
+    "empty_continue": "המשך להגדרה",
+    "title": "הוזמנת",
+    "subtitle": "בחר את סביבות העבודה שאליהן תרצה להצטרף. תמיד תוכל לטפל בשאר מאוחר יותר מהסרגל הצדדי.",
+    "submit_skip": "דלג והקם סביבת עבודה משלי",
+    "submit_join_one": "הצטרף לסביבת עבודה אחת",
+    "submit_join_other": "הצטרף ל-{{count}} סביבות עבודה",
+    "joining": "מצטרף...",
+    "error_generic": "עיבוד ההזמנות נכשל. אנא נסה שוב.",
+    "row_workspace_fallback": "סביבת עבודה",
+    "row_inviter_fallback": "מישהו",
+    "row_invited_admin": "{{inviter}} הזמין אותך כמנהל",
+    "row_invited_member": "{{inviter}} הזמין אותך כחבר"
+  }
+}

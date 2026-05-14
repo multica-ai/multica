@@ -1,0 +1,92 @@
+{
+  "page": {
+    "title": "פרויקטים",
+    "new_project": "פרויקט חדש",
+    "empty": "אין עדיין פרויקטים",
+    "create_first": "צור את הפרויקט הראשון שלך"
+  },
+  "table": {
+    "name": "שם",
+    "priority": "עדיפות",
+    "status": "סטטוס",
+    "progress": "התקדמות",
+    "lead": "אחראי",
+    "created": "נוצר"
+  },
+  "status": {
+    "planned": "מתוכנן",
+    "in_progress": "בעבודה",
+    "paused": "מושהה",
+    "completed": "הושלם",
+    "cancelled": "בוטל"
+  },
+  "priority": {
+    "urgent": "דחוף",
+    "high": "גבוה",
+    "medium": "בינוני",
+    "low": "נמוך",
+    "none": "ללא עדיפות"
+  },
+  "lead": {
+    "no_lead": "ללא אחראי",
+    "assign_placeholder": "הקצה אחראי...",
+    "members_group": "חברים",
+    "agents_group": "סוכנים",
+    "no_results": "אין תוצאות"
+  },
+  "relative_date": {
+    "today": "היום",
+    "one_day_ago": "לפני יום",
+    "days_ago": "לפני {{count}}י׳",
+    "months_ago": "לפני {{count}}ח׳"
+  },
+  "detail": {
+    "not_found": "הפרויקט לא נמצא",
+    "breadcrumb_fallback": "פרויקטים",
+    "title_placeholder": "כותרת הפרויקט",
+    "icon_tooltip": "שנה אייקון",
+    "pin_tooltip": "הצמד לסרגל הצד",
+    "unpin_tooltip": "בטל הצמדה מהסרגל הצד",
+    "sidebar_tooltip": "הצג/הסתר סרגל צד",
+    "copy_link": "העתק קישור",
+    "delete_action": "מחק פרויקט",
+    "section_properties": "מאפיינים",
+    "section_progress": "התקדמות",
+    "section_description": "תיאור",
+    "description_placeholder": "הוסף תיאור...",
+    "empty_issues_title": "אין issues מקושרים",
+    "empty_issues_hint": "צור issue חדש או שייך issues קיימים לפרויקט הזה.",
+    "empty_issues_new_button": "issue חדש",
+    "toast_link_copied": "הקישור הועתק",
+    "toast_project_deleted": "הפרויקט נמחק",
+    "toast_move_issue_failed": "העברת ה-issue נכשלה"
+  },
+  "resources": {
+    "section_header": "משאבים",
+    "empty": "אין משאבים מצורפים.",
+    "add_button": "הוסף משאב",
+    "popover_title": "צרף ריפו GitHub",
+    "attached_badge": "מצורף",
+    "remove_tooltip": "הסר",
+    "url_placeholder": "https://github.com/owner/repo",
+    "url_submit": "הוסף",
+    "toast_attached": "הריפו צורף",
+    "toast_attach_failed": "הצירוף נכשל",
+    "toast_removed": "המשאב הוסר",
+    "toast_remove_failed": "הסרת המשאב נכשלה"
+  },
+  "delete_dialog": {
+    "title": "מחק פרויקט",
+    "description": "פעולה זו תמחק את הפרויקט. issues לא יימחקו אך הקישור אליהם יוסר.",
+    "confirm": "מחיקה",
+    "cancel": "ביטול"
+  },
+  "picker": {
+    "no_project": "ללא פרויקט",
+    "remove": "הסר מהפרויקט",
+    "empty": "אין עדיין פרויקטים"
+  },
+  "chip": {
+    "fallback_label": "פרויקט"
+  }
+}

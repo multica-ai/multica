@@ -211,7 +211,7 @@ export function LabelPicker({
               {t(($) => $.pickers.label.create_action)} <span className="font-medium">&ldquo;{query}&rdquo;</span>
             </span>
             <span
-              className="ml-auto inline-block h-3 w-3 shrink-0 rounded-full"
+              className="ms-auto inline-block h-3 w-3 shrink-0 rounded-full"
               style={{ backgroundColor: pickInlineColor(query) }}
               aria-hidden
             />

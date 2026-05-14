@@ -1,0 +1,44 @@
+{
+  "title": "חיפוש",
+  "description": "חפש דפים, issues ופרויקטים",
+  "placeholder": "הקלד פקודה או חפש...",
+  "groups": {
+    "pages": "דפים",
+    "commands": "פקודות",
+    "switch_workspace": "החלף סביבת עבודה",
+    "projects": "פרויקטים",
+    "issues": "Issues",
+    "recent": "אחרונים"
+  },
+  "pages": {
+    "inbox": "דואר נכנס",
+    "my_issues": "ה-issues שלי",
+    "issues": "Issues",
+    "projects": "פרויקטים",
+    "agents": "סוכנים",
+    "runtimes": "סביבות ריצה",
+    "skills": "Skills",
+    "settings": "הגדרות"
+  },
+  "commands": {
+    "current_theme_aria": "ערכת נושא נוכחית",
+    "new_issue": "issue חדש",
+    "new_project": "פרויקט חדש",
+    "copy_issue_link": "העתק קישור issue",
+    "copy_identifier": "העתק מזהה ({{identifier}})",
+    "switch_to_light": "החלף לערכת נושא בהירה",
+    "switch_to_dark": "החלף לערכת נושא כהה",
+    "use_system_theme": "השתמש בערכת הנושא של המערכת"
+  },
+  "toast": {
+    "link_copied": "הקישור הועתק",
+    "copied_identifier": "{{identifier}} הועתק"
+  },
+  "empty": {
+    "no_results": "לא נמצאו תוצאות.",
+    "type_to_search": "הקלד כדי לחפש issues ופרויקטים"
+  },
+  "trigger": {
+    "label": "חיפוש..."
+  }
+}

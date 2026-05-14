@@ -68,10 +68,10 @@ export function getLocalTimezone(): string {
   }
 }
 
-function getTimezoneOffset(tz: string): string {
+function getTimezoneOffset(tz: string, locale: string): string {
   if (tz === "UTC") return "UTC";
   try {
-    const parts = new Intl.DateTimeFormat("en-US", {
+    const parts = new Intl.DateTimeFormat(locale, {
       timeZone: tz,
       timeZoneName: "shortOffset",
     }).formatToParts(new Date());
@@ -81,10 +81,10 @@ function getTimezoneOffset(tz: string): string {
   }
 }
 
-function getTimezoneLabel(tz: string): string {
+function getTimezoneLabel(tz: string, locale: string): string {
   if (tz === "UTC") return "UTC";
   const city = tz.split("/").pop()?.replace(/_/g, " ") ?? tz;
-  return `${city} (${getTimezoneOffset(tz)})`;
+  return `${city} (${getTimezoneOffset(tz, locale)})`;
 }
 
 function formatTime12h(time: string): string {
@@ -201,9 +201,9 @@ export function useSummarizeTrigger(): (cfg: TriggerConfig) => string {
 // Hook returning a function that produces the longer "Runs daily at 9:00 AM PDT"
 // description. Same rationale as useSummarizeTrigger.
 export function useDescribeTrigger(): (cfg: TriggerConfig) => string {
-  const { t } = useT("autopilots");
+  const { t, i18n } = useT("autopilots");
   return (cfg) => {
-    const offset = getTimezoneOffset(cfg.timezone);
+    const offset = getTimezoneOffset(cfg.timezone, i18n.language);
     switch (cfg.frequency) {
       case "hourly": {
         const min = parseInt(cfg.time.split(":")[1] ?? "0", 10).toString().padStart(2, "0");
@@ -255,7 +255,7 @@ export function TriggerConfigSection({
   config: TriggerConfig;
   onChange: (config: TriggerConfig) => void;
 }) {
-  const { t } = useT("autopilots");
+  const { t, i18n } = useT("autopilots");
   const describeTrigger = useDescribeTrigger();
   const timezones = useMemo(() => {
     const local = getLocalTimezone();
@@ -345,13 +345,13 @@ export function TriggerConfigSection({
                   >
                     <SelectTrigger className="mt-1 w-full">
                       <SelectValue>
-                        {() => getTimezoneLabel(config.timezone)}
+                        {() => getTimezoneLabel(config.timezone, i18n.language)}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {timezones.map((tz) => (
                         <SelectItem key={tz} value={tz}>
-                          {getTimezoneLabel(tz)}
+                          {getTimezoneLabel(tz, i18n.language)}
                         </SelectItem>
                       ))}
                     </SelectContent>

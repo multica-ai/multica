@@ -87,7 +87,7 @@ export function BacklogAgentHintContent({
             <ArrowRight className="size-4 shrink-0" />
             <span className="font-medium text-foreground">{t(($) => $.backlog_hint.row_todo_label)}</span>
             <span className="text-muted-foreground">{t(($) => $.backlog_hint.row_todo_hint)}</span>
-            <CheckCircle2 className="ml-auto size-4 shrink-0 text-primary" />
+            <CheckCircle2 className="ms-auto size-4 shrink-0 text-primary" />
           </div>
         </div>
       </div>

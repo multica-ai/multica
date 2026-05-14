@@ -72,7 +72,7 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 // ---------------------------------------------------------------------------
 
 const FILTER_ITEM_CLASS =
-  "group/fitem pr-1.5! [&>[data-slot=dropdown-menu-checkbox-item-indicator]]:hidden";
+  "group/fitem pe-1.5! [&>[data-slot=dropdown-menu-checkbox-item-indicator]]:hidden";
 
 function HoverCheck({ checked }: { checked: boolean }) {
   return (
@@ -225,7 +225,7 @@ function ActorSubContent({
               <UserMinus className="size-3.5 text-muted-foreground" />
               {t(($) => $.filters.no_assignee)}
               {(noAssigneeCount ?? 0) > 0 && (
-                <span className="ml-auto text-xs text-muted-foreground">
+                <span className="ms-auto text-xs text-muted-foreground">
                   {noAssigneeCount}
                 </span>
               )}
@@ -251,7 +251,7 @@ function ActorSubContent({
                   <ActorAvatar actorType="member" actorId={m.user_id} size={18} />
                   <span className="truncate">{m.name}</span>
                   {count > 0 && (
-                    <span className="ml-auto text-xs text-muted-foreground">
+                    <span className="ms-auto text-xs text-muted-foreground">
                       {count}
                     </span>
                   )}
@@ -280,7 +280,7 @@ function ActorSubContent({
                   <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
                   <span className="truncate">{a.name}</span>
                   {count > 0 && (
-                    <span className="ml-auto text-xs text-muted-foreground">
+                    <span className="ms-auto text-xs text-muted-foreground">
                       {count}
                     </span>
                   )}
@@ -309,7 +309,7 @@ function ActorSubContent({
                   <ActorAvatar actorType="squad" actorId={s.id} size={18} />
                   <span className="truncate">{s.name}</span>
                   {count > 0 && (
-                    <span className="ml-auto text-xs text-muted-foreground">
+                    <span className="ms-auto text-xs text-muted-foreground">
                       {count}
                     </span>
                   )}
@@ -381,7 +381,7 @@ function ProjectSubContent({
             <FolderMinus className="size-3.5 text-muted-foreground" />
             {t(($) => $.filters.no_project)}
             {noProjectCount > 0 && (
-              <span className="ml-auto text-xs text-muted-foreground">
+              <span className="ms-auto text-xs text-muted-foreground">
                 {noProjectCount}
               </span>
             )}
@@ -402,7 +402,7 @@ function ProjectSubContent({
               <ProjectIcon project={p} size="sm" />
               <span className="truncate">{p.title}</span>
               {count > 0 && (
-                <span className="ml-auto text-xs text-muted-foreground">
+                <span className="ms-auto text-xs text-muted-foreground">
                   {count}
                 </span>
               )}
@@ -467,7 +467,7 @@ function LabelSubContent({
               <HoverCheck checked={checked} />
               <LabelChip label={l} />
               {count > 0 && (
-                <span className="ml-auto text-xs text-muted-foreground">
+                <span className="ms-auto text-xs text-muted-foreground">
                   {count}
                 </span>
               )}
@@ -589,7 +589,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                     <Button variant="outline" size="icon-sm" className="relative text-muted-foreground">
                       <Filter className="size-4" />
                       {hasActiveFilters && (
-                        <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />
+                        <span className="absolute top-0 end-0 size-1.5 rounded-full bg-brand" />
                       )}
                     </Button>
                   }
@@ -625,7 +625,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                       <StatusIcon status={s} className="h-3.5 w-3.5" />
                       {t(($) => $.status[s])}
                       {count > 0 && (
-                        <span className="ml-auto text-xs text-muted-foreground">
+                        <span className="ms-auto text-xs text-muted-foreground">
                           {t(($) => $.filters.issue_count, { count })}
                         </span>
                       )}
@@ -661,7 +661,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                       <PriorityIcon priority={p} />
                       {t(($) => $.priority[p])}
                       {count > 0 && (
-                        <span className="ml-auto text-xs text-muted-foreground">
+                        <span className="ms-auto text-xs text-muted-foreground">
                           {t(($) => $.filters.issue_count, { count })}
                         </span>
                       )}

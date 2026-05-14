@@ -9,7 +9,7 @@ function MobileSidebarTrigger() {
   } catch {
     return null;
   }
-  return <SidebarTrigger className="mr-2 md:hidden" />;
+  return <SidebarTrigger className="me-2 md:hidden" />;
 }
 
 interface PageHeaderProps {

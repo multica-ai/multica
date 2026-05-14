@@ -47,7 +47,7 @@ export function ResolvedThreadBar({ entry, replies, onExpand }: ResolvedThreadBa
       <button
         type="button"
         onClick={onExpand}
-        className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-muted/50 transition-colors"
+        className="flex w-full items-center justify-between px-4 py-3 text-start hover:bg-muted/50 transition-colors"
       >
         <span className="flex items-center gap-2.5 text-sm text-muted-foreground">
           <CheckCircle2 className="h-4 w-4 shrink-0" />

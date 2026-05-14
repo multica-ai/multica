@@ -30,6 +30,12 @@ describe("createBrowserCookieLocaleAdapter", () => {
     expect(adapter.getUserChoice()).toBe("zh-Hans");
   });
 
+  it("getUserChoice round-trips a persisted Hebrew value", () => {
+    const adapter = createBrowserCookieLocaleAdapter();
+    adapter.persist("he");
+    expect(adapter.getUserChoice()).toBe("he");
+  });
+
   it("getUserChoice decodes URI-encoded cookie values", () => {
     document.cookie = `${LOCALE_COOKIE}=${encodeURIComponent("zh-Hans")}; path=/`;
     expect(createBrowserCookieLocaleAdapter().getUserChoice()).toBe("zh-Hans");

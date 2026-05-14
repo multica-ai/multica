@@ -1,0 +1,38 @@
+{
+  "page": {
+    "breadcrumb": "ה-issues שלי",
+    "workspace_fallback": "סביבת עבודה",
+    "empty_title": "אין issues שהוקצו לך",
+    "empty_description": "issues שאתה יוצר או שהוקצו לך יופיעו כאן."
+  },
+  "header": {
+    "scope": {
+      "assigned_label": "הוקצה",
+      "assigned_description": "issues שהוקצו לי",
+      "created_label": "נוצר",
+      "created_description": "issues שיצרתי",
+      "agents_label": "הסוכנים שלי",
+      "agents_description": "issues שהוקצו לסוכנים שלי"
+    },
+    "filter_button": "סינון",
+    "filter_status": "סטטוס",
+    "filter_priority": "עדיפות",
+    "issue_count_one": "issue {{count}}",
+    "issue_count_other": "{{count}} issues",
+    "reset_filters": "אפס את כל הסינונים",
+    "display_settings": "הגדרות תצוגה",
+    "ordering": "סידור",
+    "ascending": "סדר עולה",
+    "descending": "סדר יורד",
+    "card_properties": "מאפייני כרטיס",
+    "view_board": "תצוגת לוח",
+    "view_list": "תצוגת רשימה",
+    "view_label": "תצוגה",
+    "view_board_short": "לוח",
+    "view_list_short": "רשימה",
+    "sort_manual": "ידני"
+  },
+  "errors": {
+    "move_failed": "העברת ה-issue נכשלה"
+  }
+}

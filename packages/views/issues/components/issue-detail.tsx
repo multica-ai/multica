@@ -929,7 +929,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <p>{t(($) => $.detail.not_found)}</p>
         {!onDelete && (
           <Button variant="outline" size="sm" onClick={() => router.push(paths.issues())}>
-            <ChevronLeft className="mr-1 h-3.5 w-3.5" />
+            <ChevronLeft className="me-1 h-3.5 w-3.5 rtl:rotate-180" />
             {t(($) => $.detail.back_to_issues)}
           </Button>
         )}
@@ -948,7 +948,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {t(($) => $.detail.section_properties)}
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
         </button>
-        {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+        {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 ps-2">
           <PropRow label={t(($) => $.detail.prop_status)}>
             <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
           </PropRow>
@@ -980,7 +980,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             {t(($) => $.detail.section_parent_issue)}
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${parentIssueOpen ? "rotate-90" : ""}`} />
           </button>
-          {parentIssueOpen && <div className="pl-2">
+          {parentIssueOpen && <div className="ps-2">
             <AppLink
               href={paths.issueDetail(parentIssue.id)}
               className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
@@ -1002,7 +1002,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {t(($) => $.detail.section_pull_requests)}
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${pullRequestsOpen ? "rotate-90" : ""}`} />
         </button>
-        {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
+        {pullRequestsOpen && <div className="ps-2"><PullRequestList issueId={id} /></div>}
       </div>
 
       {/* Details */}
@@ -1014,7 +1014,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {t(($) => $.detail.section_details)}
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
         </button>
-        {detailsOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+        {detailsOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 ps-2">
           <PropRow label={t(($) => $.detail.prop_created_by)}>
             <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={18} enableHoverCard />
             <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
@@ -1043,7 +1043,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             {t(($) => $.detail.section_token_usage)}
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${tokenUsageOpen ? "rotate-90" : ""}`} />
           </button>
-          {tokenUsageOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+          {tokenUsageOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 ps-2">
             <PropRow label={t(($) => $.detail.prop_input)}>
               <span className="text-muted-foreground">{formatTokenCount(usage.total_input_tokens)}</span>
             </PropRow>
@@ -1127,7 +1127,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
           return (
             <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
-              <div className="mr-2 flex w-4 shrink-0 justify-center">
+              <div className="me-2 flex w-4 shrink-0 justify-center">
                 {leadIcon}
               </div>
               <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -1143,7 +1143,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <Tooltip>
                   <TooltipTrigger
                     render={
-                      <span className="ml-auto shrink-0 cursor-default">
+                      <span className="ms-auto shrink-0 cursor-default">
                         {timeAgo(entry.created_at)}
                       </span>
                     }
@@ -1303,7 +1303,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               {parentChildIssues.length > 0 && (() => {
                 const done = parentChildIssues.filter((c) => c.status === "done").length;
                 return (
-                  <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
+                  <span className="ms-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
                     <ProgressRing done={done} total={parentChildIssues.length} size={11} />
                     <span className="tabular-nums text-[10.5px] font-medium">
                       {done}/{parentChildIssues.length}
@@ -1397,7 +1397,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     onChange={handleToggleSelectAllChildren}
                     aria-label="Select all sub-issues"
                     className={cn(
-                      "ml-1 cursor-pointer accent-primary transition-opacity",
+                      "ms-1 cursor-pointer accent-primary transition-opacity",
                       someChildrenSelected
                         ? "opacity-100"
                         : "opacity-0 group-hover/sub-issues:opacity-100 focus-visible:opacity-100",
@@ -1408,7 +1408,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       render={
                         <button
                           type="button"
-                          className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                          className="ms-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                           onClick={() => actions.openCreateSubIssue()}
                           aria-label={t(($) => $.detail.add_sub_issue_aria)}
                         >

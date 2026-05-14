@@ -1,0 +1,402 @@
+{
+  "page": {
+    "title": "סוכנים",
+    "tagline": "שותפי AI שלוקחים issues, מגיבים, ומעדכנים סטטוס.",
+    "learn_more": "מידע נוסף ←",
+    "new_agent": "סוכן חדש",
+    "search_placeholder": "חפש סוכנים…",
+    "show_archived": "הצג בארכיון ({{count}}) ←",
+    "of_total": "{{visible}} מתוך {{total}}",
+    "list_load_failed": "טעינת הסוכנים נכשלה",
+    "list_load_failed_default": "משהו השתבש בעת הבאת רשימת הסוכנים.",
+    "try_again": "נסה שוב"
+  },
+  "scope": {
+    "mine": "שלי",
+    "all": "הכל"
+  },
+  "sort": {
+    "label_recent": "פעילות אחרונה",
+    "label_name": "שם",
+    "label_runs": "הכי הרבה ריצות",
+    "label_created": "נוצרו לאחרונה"
+  },
+  "availability": {
+    "all": "הכל",
+    "online": "מקוון",
+    "unstable": "לא יציב",
+    "offline": "לא מקוון"
+  },
+  "workload": {
+    "working": "עובד",
+    "queued": "בתור",
+    "idle": "פנוי"
+  },
+  "archived": {
+    "active_link": "סוכנים פעילים",
+    "title": "סוכנים בארכיון"
+  },
+  "empty": {
+    "title": "אין עדיין סוכנים",
+    "description": "צור סוכן והקצה לו issues, כמו לכל עמית בצוות. סוכנים מקומיים רצים על המכונה שלך; סוכני ענן רצים על סביבת הריצה של Multica."
+  },
+  "no_matches": {
+    "title": "אין התאמות",
+    "search_archived": "אין סוכנים בארכיון התואמים ל-\"{{query}}\".",
+    "no_archived": "אין עדיין סוכנים בארכיון.",
+    "search_active": "אין סוכנים התואמים ל-\"{{query}}\".",
+    "search_active_filtered": "אין סוכנים התואמים ל-\"{{query}}\" בסינון הזה.",
+    "no_filter_match": "אין סוכנים התואמים לסינון הזה."
+  },
+  "columns": {
+    "agent": "סוכן",
+    "status": "סטטוס",
+    "workload": "עומס",
+    "runtime": "סביבת ריצה",
+    "activity_7d": "פעילות (7י׳)",
+    "runs": "ריצות"
+  },
+  "row": {
+    "you": "אתה",
+    "archived": "בארכיון",
+    "no_description": "אין תיאור",
+    "fallback_runtime_cloud": "ענן",
+    "fallback_runtime_local": "מקומי",
+    "actions_aria": "פעולות שורה"
+  },
+  "activity_tooltip": {
+    "created_today": "נוצר היום",
+    "created_days_ago_one": "נוצר לפני יום {{count}}",
+    "created_days_ago_other": "נוצר לפני {{count}} ימים",
+    "last_7_days": "7 הימים האחרונים",
+    "no_activity": "אין פעילות",
+    "runs_one": "ריצה {{count}}",
+    "runs_other": "{{count}} ריצות",
+    "failed_suffix": " · {{count}} נכשלו ({{percent}}%)"
+  },
+  "row_actions": {
+    "cancel_all_tasks": "בטל את כל המשימות",
+    "duplicate": "שכפל",
+    "restore": "שחזר",
+    "archive": "ארכיון",
+    "agent_archived_toast": "הסוכן הועבר לארכיון",
+    "archive_failed_toast": "העברת הסוכן לארכיון נכשלה",
+    "agent_restored_toast": "הסוכן שוחזר",
+    "restore_failed_toast": "שחזור הסוכן נכשל",
+    "no_tasks_to_cancel_toast": "אין משימות פעילות לביטול",
+    "cancelled_tasks_toast_one": "בוטלה משימה {{count}}",
+    "cancelled_tasks_toast_other": "בוטלו {{count}} משימות",
+    "cancel_failed_toast": "ביטול המשימות נכשל",
+    "cancel_dialog_title": "לבטל את כל המשימות עבור \"{{name}}\"?",
+    "cancel_dialog_no_tasks": "אין משימות פעילות לביטול.",
+    "cancel_dialog_running_one": "{{count}} פועלת",
+    "cancel_dialog_queued_one": "{{count}} בתור",
+    "cancel_dialog_impact_one": "פעולה זו תבטל משימה {{summary}}.",
+    "cancel_dialog_impact_other": "פעולה זו תבטל {{summary}} משימות.",
+    "cancel_dialog_running_note": " למשימות פועלות עשוי לקחת עד 5 שניות עד לעצירה מלאה.",
+    "cancel_dialog_irreversible": " משימות שבוטלו לא ניתנות לחידוש.",
+    "cancel_dialog_keep": "השאר אותן",
+    "cancel_dialog_confirm": "בטל את כל המשימות",
+    "archive_dialog_title": "להעביר את \"{{name}}\" לארכיון?",
+    "archive_dialog_description": "הסוכן לא יהיה ניתן להקצאה או לאזכור, וכל המשימות הפעילות יבוטלו. כל ההיסטוריה נשמרת ותוכל לשחזר אותו מאוחר יותר.",
+    "archive_dialog_cancel": "ביטול",
+    "archive_dialog_confirm": "ארכיון"
+  },
+  "detail": {
+    "back_to_agents": "סוכנים",
+    "back_to_agents_full": "חזרה לסוכנים",
+    "not_found_title": "הסוכן לא נמצא",
+    "not_found_default": "ייתכן שהסוכן הזה הועבר לארכיון או נמחק.",
+    "no_access_title": "אין לך גישה לסוכן הזה",
+    "no_access_hint": "רק בעל הסוכן או מנהל סביבת עבודה יכולים לצפות בסוכן הפרטי הזה.",
+    "try_again": "נסה שוב",
+    "archived_banner": "הסוכן הזה בארכיון. לא ניתן להקצות לו או לאזכר אותו.",
+    "restore": "שחזר",
+    "archive_dialog_title": "להעביר את הסוכן לארכיון?",
+    "archive_dialog_description": "\"{{name}}\" יועבר לארכיון. הוא לא יהיה ניתן להקצאה או לאזכור, אך כל ההיסטוריה נשמרת. תוכל לשחזר אותו מאוחר יותר.",
+    "archive_dialog_cancel": "ביטול",
+    "archive_dialog_confirm": "ארכיון",
+    "more_archive": "העבר סוכן לארכיון",
+    "agent_updated_toast": "הסוכן עודכן",
+    "update_failed_toast": "עדכון הסוכן נכשל",
+    "agent_archived_toast": "הסוכן הועבר לארכיון",
+    "archive_failed_toast": "העברת הסוכן לארכיון נכשלה",
+    "agent_restored_toast": "הסוכן שוחזר",
+    "restore_failed_toast": "שחזור הסוכן נכשל"
+  },
+  "inspector": {
+    "section_properties": "מאפיינים",
+    "section_details": "פרטים",
+    "section_skills": "Skills",
+    "prop_runtime": "סביבת ריצה",
+    "prop_model": "מודל",
+    "prop_visibility": "נראות",
+    "prop_concurrency": "מקביליות",
+    "prop_owner": "בעלים",
+    "prop_created": "נוצר",
+    "prop_updated": "עודכן",
+    "no_description_placeholder": "אין תיאור",
+    "change_avatar_aria": "שנה תמונת פרופיל",
+    "avatar_updated_toast": "תמונת הפרופיל עודכנה",
+    "avatar_upload_failed_toast": "העלאת תמונת הפרופיל נכשלה",
+    "rename_title": "שנה שם לסוכן",
+    "rename_placeholder": "שם הסוכן",
+    "rename_required": "שם נדרש",
+    "edit_description_title": "ערוך תיאור",
+    "description_placeholder": "מה הסוכן הזה עושה?",
+    "save": "שמירה",
+    "cancel": "ביטול"
+  },
+  "skill_attach": {
+    "trigger_aria": "צרף skill מסביבת העבודה",
+    "trigger_label": "צרף"
+  },
+  "pickers": {
+    "concurrency_tooltip": "מקביליות · {{value}} משימות מקבילות מקסימום",
+    "concurrency_range": "משימות מקבילות מקסימום ({{min}}–{{max}})",
+    "runtime_none": "אין סביבת ריצה",
+    "runtime_tooltip": "סביבת ריצה · {{name}} · {{status}}",
+    "runtime_tooltip_none": "סביבת ריצה · לא נבחרה",
+    "runtime_online": "מקוון",
+    "runtime_offline": "לא מקוון",
+    "runtime_owned_by": "בבעלות {{name}}",
+    "runtime_empty": "אין סביבות ריצה",
+    "model_default": "ברירת מחדל",
+    "model_tooltip": "מודל · {{value}}",
+    "model_managed_by_runtime": "מנוהל על ידי סביבת הריצה",
+    "model_search_placeholder": "חפש או הקלד מזהה מודל",
+    "model_discovering": "מגלה מודלים…",
+    "model_default_badge": "ברירת מחדל",
+    "model_empty": "אין מודלים זמינים",
+    "model_empty_with_dot": "אין מודלים זמינים.",
+    "model_custom_tooltip": "השתמש ב-\"{{value}}\" כמזהה מודל מותאם",
+    "model_custom_use": "השתמש ב-\"{{value}}\"",
+    "model_clear": "נקה (השתמש בברירת המחדל של הספק)",
+    "model_clear_title": "נקה וחזור לברירת המחדל של ספק סביבת הריצה"
+  },
+  "model_dropdown": {
+    "label": "מודל",
+    "select_runtime_first": "בחר סביבת ריצה תחילה",
+    "default_provider": "ברירת מחדל (ספק)",
+    "runtime_offline_manual": "סביבת ריצה לא מקוונת — הזן ידנית",
+    "managed_by_runtime_title": "בחירת המודל מנוהלת על ידי סביבת הריצה הזו.",
+    "managed_by_runtime_hint": "הגדר את המודל ב-host של סביבת הריצה (לדוגמה Hermes קורא אותו מקובץ הקונפיג שלו).",
+    "discovery_failed": "הגילוי נכשל",
+    "clear_full": "נקה את הבחירה (השתמש בברירת המחדל של הספק)"
+  },
+  "tabs": {
+    "activity": "פעילות",
+    "instructions": "הוראות",
+    "skills": "Skills",
+    "environment": "סביבה",
+    "custom_args": "ארגומנטים מותאמים",
+    "discard_dialog_title": "להשליך שינויים שלא נשמרו?",
+    "discard_dialog_description": "יש לך שינויים שלא נשמרו בלשונית זו. עזיבה עכשיו תשליך אותם.",
+    "discard_keep": "המשך לערוך",
+    "discard_confirm": "השלך שינויים"
+  },
+  "create_dialog": {
+    "title_create": "צור סוכן",
+    "title_duplicate": "שכפל סוכן",
+    "description_create": "צור סוכן AI חדש עבור סביבת העבודה שלך.",
+    "description_duplicate": "צור סוכן חדש על בסיס \"{{name}}\". הוראות, env, ו-skills מועתקים עבורך.",
+    "name_label": "שם",
+    "name_placeholder": "למשל Deep Research Agent",
+    "description_label": "תיאור",
+    "description_placeholder": "מה הסוכן הזה עושה?",
+    "visibility_label": "נראות",
+    "runtime_label": "סביבת ריצה",
+    "runtime_filter_mine": "שלי",
+    "runtime_filter_all": "הכל",
+    "runtime_loading": "טוען סביבות ריצה...",
+    "runtime_none": "אין סביבת ריצה זמינה",
+    "runtime_cloud_badge": "ענן",
+    "runtime_private_badge": "פרטי",
+    "runtime_private_locked_tooltip": "סביבת ריצה פרטית — רק הבעלים שלה או מנהל סביבת עבודה יכולים ליצור עליה סוכנים. בקש מהבעלים להחליף אותה לציבורית כדי לשתף.",
+    "duplicate_copy_suffix": " (העתק)",
+    "create": "צור",
+    "creating": "יוצר...",
+    "cancel": "ביטול",
+    "create_failed_toast": "יצירת הסוכן נכשלה",
+    "skill_attach_failed_toast": "הסוכן נוצר, אך צירוף ה-skills נכשל: {{error}}",
+    "squad_join_failed_toast": "הסוכן \"{{name}}\" נוצר אך לא הצליח להצטרף לצוות: {{error}}. תוכל להוסיף אותו ידנית מתוך חברים.",
+    "instructions": {
+      "label": "הוראות",
+      "placeholder_blank": "לחץ כדי לכתוב הוראות…",
+      "placeholder_duplicate": "לחץ כדי להציג או לערוך את ההוראות המשוכפלות",
+      "collapse": "כווץ",
+      "editor_placeholder": "כתוב מה הסוכן הזה צריך לעשות, על מה להתמקד, ממה להימנע…"
+    },
+    "skills_section": {
+      "label": "Skills",
+      "placeholder": "הוסף skills מסביבת העבודה",
+      "selected_one": "{{count}} נבחר — לחץ לעריכה",
+      "selected_other": "{{count}} נבחרו — לחץ לעריכה",
+      "collapse": "כווץ",
+      "list_empty_multi": "אין עדיין skills בסביבת העבודה. צור או ייבא אחד תחילה.",
+      "list_loading": "טוען…",
+      "list_empty_default": "אין skills זמינים.",
+      "list_no_match": "אין skills תואמים.",
+      "search_placeholder": "חפש skills…"
+    },
+    "avatar": {
+      "change_aria": "שנה תמונת פרופיל",
+      "upload_aria": "העלה תמונת פרופיל",
+      "remove_aria": "הסר תמונת פרופיל",
+      "select_image_toast": "אנא בחר קובץ תמונה.",
+      "upload_failed_toast": "העלאת תמונת הפרופיל נכשלה"
+    }
+  },
+  "tab_body": {
+    "common": {
+      "save": "שמירה",
+      "add": "הוסף",
+      "unsaved_changes": "שינויים שלא נשמרו"
+    },
+    "instructions": {
+      "intro": "הגדר את הזהות וסגנון העבודה של הסוכן הזה. מוזרק להקשר של הסוכן בכל משימה. Markdown נתמך.",
+      "placeholder": "Define this agent's role, expertise, and working style.\n\n# Example\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/"
+    },
+    "env": {
+      "intro_readonly": "מוזרקים לתהליך הסוכן בעת ההפעלה. הערכים מוסתרים — רק בעל הסוכן או מנהל סביבת עבודה יכולים לצפות ולערוך אותם.",
+      "empty_readonly": "אין משתני סביבה מוגדרים.",
+      "intro_prefix": "מוזרקים לתהליך הסוכן בעת ההפעלה (לדוגמה ",
+      "intro_separator": ", ",
+      "intro_suffix": ").",
+      "key_placeholder": "KEY",
+      "value_placeholder": "value",
+      "show_value_aria": "הצג ערך",
+      "hide_value_aria": "הסתר ערך",
+      "remove_aria": "הסר משתנה",
+      "duplicate_keys_toast": "מפתחות משתני סביבה כפולים",
+      "saved_toast": "משתני הסביבה נשמרו",
+      "save_failed_toast": "שמירת משתני הסביבה נכשלה"
+    },
+    "custom_args": {
+      "intro": "ארגומנטים נוספים של CLI שמוצמדים לפקודת הסוכן בהפעלה. דגלים מרובי-טוקנים יכולים לחלוק שורה אחת — הם יפוצלו על רווח לפני שיועברו ל-CLI.",
+      "launch_mode_prefix": "מצב הפעלה: ",
+      "launch_mode_args_placeholder": "<הארגומנטים שלך>",
+      "input_placeholder": "--flag value",
+      "remove_aria": "הסר ארגומנט",
+      "saved_toast": "ארגומנטים מותאמים נשמרו",
+      "save_failed_toast": "שמירת ארגומנטים מותאמים נכשלה"
+    },
+    "skills": {
+      "intro": "Skills מסביבת העבודה שמוקצים לסוכן הזה. Skills מקומיים של סביבת ריצה תמיד זמינים אוטומטית.",
+      "add_action": "הוסף skill",
+      "import_hint": "הייבוא יוצר עותק בסביבת העבודה שהצוות שלך יכול לערוך ולעשות בו שימוש חוזר.",
+      "empty_title": "אין skills מוקצים",
+      "empty_hint": "הוסף skills מסביבת העבודה כדי לשתף ידע צוותי עם הסוכן הזה.",
+      "remove_failed_toast": "הסרת ה-skill נכשלה",
+      "add_dialog_title": "הוסף skill",
+      "add_dialog_description": "בחר skill מסביבת העבודה להקצאה לסוכן הזה.",
+      "add_dialog_search_placeholder": "חפש skills",
+      "add_dialog_empty": "כל ה-skills מסביבת העבודה כבר מוקצים.",
+      "add_dialog_no_match": "אין skills תואמים לחיפוש שלך.",
+      "add_dialog_empty_partial": "אין עוד skills להוסיף — הסוכן הזה כבר מקבל את כולם.",
+      "add_dialog_saving": "מוסיף…",
+      "add_dialog_confirm_default": "הוסף",
+      "add_dialog_confirm_one": "הוסף skill {{count}}",
+      "add_dialog_confirm_other": "הוסף {{count}} skills",
+      "add_dialog_cancel": "ביטול",
+      "add_failed_toast": "הוספת ה-skill נכשלה"
+    },
+    "activity": {
+      "section_now": "עכשיו",
+      "section_last_30d": "30 הימים האחרונים",
+      "section_recent": "עבודה אחרונה",
+      "subtitle_no_active": "אין עבודה פעילה",
+      "subtitle_active_one": "{{count}} משימה פעילה",
+      "subtitle_active_other": "{{count}} משימות פעילות",
+      "subtitle_performance": "ביצועים",
+      "subtitle_no_recent": "עדיין לא הסתיים דבר",
+      "subtitle_recent_progress": "{{shown}} מתוך {{total}}",
+      "subtitle_recent_latest": "{{count}} אחרונות",
+      "empty_now": "הסוכן הזה לא מריץ שום דבר כעת.",
+      "empty_30d": "אין השלמות ב-30 הימים האחרונים.",
+      "empty_recent": "הסוכן הזה לא סיים עדיין שום דבר.",
+      "show_more": "הצג עוד ←",
+      "runs_one": "ריצה",
+      "runs_other": "ריצות",
+      "success_pct": "{{percent}}% הצלחה",
+      "avg_duration": "ממוצע {{value}}",
+      "failed_count": "{{count}} נכשלו",
+      "source_issue": "Issue",
+      "source_chat": "צ׳אט",
+      "source_autopilot": "אוטופיילוט",
+      "source_untracked": "לא במעקב",
+      "source_quick_create": "יצירה מהירה",
+      "source_creating_issue": "יוצר issue",
+      "source_chat_session": "סשן צ׳אט",
+      "source_autopilot_run": "ריצת אוטופיילוט",
+      "issue_short_fallback": "Issue {{prefix}}…",
+      "triggered_by": "הופעל על ידי",
+      "open_issue_aria": "פתח issue",
+      "open_issue_tooltip": "פתח issue",
+      "transcript_tooltip": "הצג תמליל",
+      "cancel_task_aria": "בטל משימה",
+      "cancel_task_tooltip": "בטל משימה",
+      "cancelling_tooltip": "מבטל…",
+      "cancel_failed_toast": "ביטול המשימה נכשל",
+      "started_prefix": "התחיל {{when}}",
+      "dispatched_prefix": "נשלח {{when}}",
+      "queued_prefix": "בתור {{when}}"
+    }
+  },
+  "char_counter": {
+    "over_limit": " · {{count}} מעל המגבלה"
+  },
+  "presence": {
+    "queue_badge": "+{{count}} בתור"
+  },
+  "visibility": {
+    "private": {
+      "label": "אישי",
+      "tooltip": "אישי · רק אתה ומנהלי סביבת עבודה יכולים להשתמש בסוכן הזה"
+    },
+    "workspace": {
+      "label": "סביבת עבודה",
+      "tooltip": "סביבת עבודה · כל מי שבסביבת העבודה הזו יכול להשתמש בסוכן הזה"
+    }
+  },
+  "profile_card": {
+    "unavailable": "הסוכן אינו זמין",
+    "detail_link": "פרטים ←",
+    "runtime_label": "סביבת ריצה",
+    "skills_label": "Skills",
+    "owner_label": "בעלים",
+    "unknown_runtime": "סביבת ריצה לא ידועה"
+  },
+  "live_peek": {
+    "current_issue_label": "כעת על",
+    "no_current_issue": "אין משימה",
+    "last_activity_label": "נראה לאחרונה",
+    "no_recent_activity": "אין פעילות אחרונה",
+    "failed_indicator": "נכשל"
+  },
+  "transcript": {
+    "dialog_title": "תמליל ביצוע סוכן",
+    "status_running": "פועל",
+    "status_completed": "הושלם",
+    "status_failed": "נכשל",
+    "filter": "סינון",
+    "clear_filters": "נקה סינונים",
+    "tool_calls_one": "קריאת כלי {{count}}",
+    "tool_calls_other": "{{count}} קריאות כלי",
+    "events_one": "{{count}} אירועים",
+    "events_other": "{{count}} אירועים",
+    "events_filtered": "{{shown}} מתוך {{total}} אירועים",
+    "copy_all": "העתק הכל",
+    "copy_filtered": "העתק מסונן",
+    "copied": "הועתק",
+    "waiting_events": "ממתין לאירועים...",
+    "no_data": "לא נרשמו נתוני ביצוע."
+  },
+  "task_failure": {
+    "agent_error": "שגיאת ביצוע סוכן",
+    "timeout": "המשימה הסתיימה בפסק זמן",
+    "runtime_offline": "ה-Daemon לא מקוון",
+    "runtime_recovery": "ה-Daemon הופעל מחדש",
+    "manual": "בוטל על ידי המשתמש"
+  }
+}

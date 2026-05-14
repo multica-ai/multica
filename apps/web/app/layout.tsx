@@ -8,21 +8,25 @@ import { WebProviders } from "@/components/web-providers";
 import {
   DEFAULT_LOCALE,
   SUPPORTED_LOCALES,
+  getDirection,
   type SupportedLocale,
 } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
 import "./globals.css";
 
-// Font stack: Inter for Latin UI text + system Chinese fonts for zh content.
+// Font stack: Inter for Latin UI text + system Chinese fonts for zh content
+// + Hebrew system fonts for he content. Inter ships Latin glyphs only, so any
+// non-Latin character falls through the fallback array per-character: Chinese
+// → PingFang SC (macOS) / Microsoft YaHei (Windows) / Noto Sans CJK SC (Linux);
+// Hebrew → Arial Hebrew (macOS) / David (Windows) / Noto Sans Hebrew (Linux).
 // Desktop app uses the same stack via apps/desktop/src/renderer/src/globals.css —
-// keep the CJK fallback tail in sync across both files. The Inter primary family
-// differs by design: next/font produces `__Inter_xxx` (with a synthetic size-adjusted
-// fallback face to prevent FOUT layout shift); desktop uses fontsource's "Inter Variable".
-// Both resolve to Inter glyphs, so rendering is identical in practice.
-// Currently covers English + Simplified Chinese. When ja/ko i18n lands, extend
-// the tail with Hiragino Kaku Gothic ProN / Yu Gothic / Apple SD Gothic Neo / Malgun Gothic.
-// Per-character fallback: Latin chars render with Inter, Chinese chars with
-// PingFang SC (macOS) / Microsoft YaHei (Windows) / Noto Sans CJK SC (Linux).
+// keep the non-Latin fallback tail in sync across both files. The Inter primary
+// family differs by design: next/font produces `__Inter_xxx` (with a synthetic
+// size-adjusted fallback face to prevent FOUT layout shift); desktop uses
+// fontsource's "Inter Variable". Both resolve to Inter glyphs, so rendering is
+// identical in practice.
+// When ja/ko i18n lands, extend the tail with Hiragino Kaku Gothic ProN /
+// Yu Gothic / Apple SD Gothic Neo / Malgun Gothic.
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-sans",
@@ -33,6 +37,9 @@ const inter = Inter({
     "PingFang SC",
     "Microsoft YaHei",
     "Noto Sans CJK SC",
+    "Arial Hebrew",
+    "David",
+    "Noto Sans Hebrew",
     "sans-serif",
   ],
 });
@@ -111,9 +118,11 @@ function isSupportedLocale(value: string | null): value is SupportedLocale {
 // stacks recognize widely. i18next keeps `zh-Hans` as its internal locale
 // (script subtag is what we actually translate against), but the html element
 // expects a region-flavoured tag for accessibility tooling and CJK fallback.
+// Hebrew uses the plain `he` tag — no region subtag is conventional.
 const HTML_LANG: Record<SupportedLocale, string> = {
   en: "en",
   "zh-Hans": "zh-CN",
+  he: "he",
 };
 
 export default async function RootLayout({
@@ -131,6 +140,7 @@ export default async function RootLayout({
   return (
     <html
       lang={HTML_LANG[locale]}
+      dir={getDirection(locale)}
       suppressHydrationWarning
       className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, sourceSerif.variable)}
     >

@@ -23,6 +23,7 @@ declare global {
       pagination_next: string;
       copy_code: string;
       plain_text: string;
+      loading: string;
     };
   }
 }

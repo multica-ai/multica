@@ -152,7 +152,7 @@ const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
   if (!hasDraft) return null;
-  return <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />;
+  return <span className="absolute top-0 end-0 size-1.5 rounded-full bg-brand" />;
 }
 
 /**
@@ -477,7 +477,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <span className="relative">
                         <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
                         {myInvitations.length > 0 && (
-                          <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
+                          <span className="absolute -top-0.5 -end-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
                         )}
                       </span>
                       <span className="flex-1 truncate font-medium">
@@ -602,7 +602,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   <DraftDot />
                 </span>
                 <span>{t(($) => $.sidebar.new_issue)}</span>
-                <kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">{t(($) => $.sidebar.new_issue_shortcut)}</kbd>
+                <kbd className="pointer-events-none ms-auto inline-flex h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">{t(($) => $.sidebar.new_issue_shortcut)}</kbd>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -626,7 +626,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         <item.icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
                         {item.key === "inbox" && unreadCount > 0 && (
-                          <span className="ml-auto text-xs">
+                          <span className="ms-auto text-xs">
                             {unreadCount > 99 ? "99+" : unreadCount}
                           </span>
                         )}
@@ -646,8 +646,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   className="group/trigger cursor-pointer hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
                 >
                   <span>{t(($) => $.sidebar.pinned_label)}</span>
-                  <ChevronRight className="!size-3 ml-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
-                  <span className="ml-auto text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover/pinned:opacity-100">{localPinned.length}</span>
+                  <ChevronRight className="!size-3 ms-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90 rtl:rotate-180 rtl:group-data-[panel-open]/trigger:rotate-90" />
+                  <span className="ms-auto text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover/pinned:opacity-100">{localPinned.length}</span>
                 </SidebarGroupLabel>
                 <CollapsibleContent>
                   <SidebarGroupContent>
@@ -714,7 +714,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         <item.icon />
                         <span>{t(($) => $.nav[item.labelKey])}</span>
                         {item.key === "runtimes" && hasRuntimeUpdates && (
-                          <span className="ml-auto size-1.5 rounded-full bg-destructive" />
+                          <span className="ms-auto size-1.5 rounded-full bg-destructive" />
                         )}
                       </SidebarMenuButton>
                     </SidebarMenuItem>

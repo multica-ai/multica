@@ -1,0 +1,232 @@
+{
+  "page": {
+    "title": "סביבות ריצה",
+    "tagline": "מכונות ועובדי ענן שמריצים סשני CLI עבור הסוכנים שלך.",
+    "learn_more": "מידע נוסף ←",
+    "connect_remote": "חבר מכונה מרוחקת",
+    "search_placeholder": "חפש סביבות ריצה…",
+    "scope_mine": "שלי",
+    "scope_all": "הכל",
+    "live": "בזמן אמת",
+    "live_tooltip": "עדכונים בזמן אמת · זיהוי ניתוק עד 75 שניות",
+    "filter_all": "הכל",
+    "filter_all_description": "כל סביבות הריצה בתצוגה זו",
+    "empty": {
+      "title": "אין עדיין סביבות ריצה",
+      "hint": "Desktop סורק אוטומטית את המכונה המקומית שלך. עבור AWS EC2 או מכונות מרוחקות אחרות, חבר אותן באמצעות אשף ההגדרה."
+    },
+    "no_matches": {
+      "title": "אין התאמות",
+      "with_query": "אין סביבות ריצה התואמות ל-\"{{query}}\"{{filterSuffix}}.",
+      "with_query_filter_suffix": " בסינון הזה",
+      "no_query": "אין סביבות ריצה התואמות לסינון הזה.",
+      "try_widening": " נסה להרחיב את הטווח או לנקות את הסינונים."
+    },
+    "bootstrapping": {
+      "title": "מתחיל סביבת ריצה מקומית…",
+      "hint": "זה לרוב לוקח כמה שניות. ה-daemon שלך נרשם לסביבת העבודה."
+    }
+  },
+  "health": {
+    "online": {
+      "label": "מקוון",
+      "description": "התקבל heartbeat ב-45 השניות האחרונות. מוכן לקבל משימות."
+    },
+    "recently_lost": {
+      "label": "אבד לאחרונה",
+      "description": "איבד קשר לפני פחות מ-5 דקות — לרוב הפרעה זמנית ברשת."
+    },
+    "offline": {
+      "label": "לא מקוון",
+      "description": "אין heartbeat כבר 5+ דקות. הפעל את ה-daemon מחדש או בדוק את ה-host."
+    },
+    "about_to_gc": {
+      "label": "מועמד למחיקה",
+      "description": "לא מקוון 6+ ימים. יימחק אוטומטית לאחר 7 ימים אם לא יתחבר מחדש."
+    }
+  },
+  "detail": {
+    "all_runtimes": "כל סביבות הריצה",
+    "read_only": "לקריאה בלבד",
+    "delete_aria": "מחק סביבת ריצה",
+    "delete_tooltip": "מחק סביבת ריצה",
+    "delete_button": "מחק סביבת ריצה",
+    "last_seen": "נראה לאחרונה {{when}}",
+    "fact_owner": "בעלים",
+    "fact_device": "מכשיר",
+    "fact_runtime": "סביבת ריצה",
+    "technical_details": "פרטים טכניים",
+    "fact_daemon_cli": "Daemon CLI",
+    "fact_daemon_id": "מזהה Daemon",
+    "serving_title": "משרת",
+    "serving_count_one": "סוכן {{count}}",
+    "serving_count_other": "{{count}} סוכנים",
+    "no_agents": "אף סוכן אינו מקושר לסביבת הריצה הזו עדיין.",
+    "diagnostics_title": "אבחון",
+    "diagnostics_cli": "CLI",
+    "diagnostics_visibility": "נראות",
+    "diagnostics_timezone": "אזור זמן",
+    "visibility_label": {
+      "private": "פרטי",
+      "public": "ציבורי"
+    },
+    "visibility_hint": {
+      "private": "רק אתה ומנהלי סביבת העבודה יכולים ליצור סוכנים בסביבת הריצה הזו.",
+      "public": "כל חבר בסביבת העבודה יכול ליצור סוכנים בסביבת הריצה הזו."
+    },
+    "visibility_toast_updated": "הנראות הוגדרה ל-{{visibility}}",
+    "visibility_toast_failed": "עדכון הנראות נכשל",
+    "timezone_browser_suffix": " (דפדפן)",
+    "timezone_hint": "תרשימי שימוש בטוקנים בסביבת ריצה זו מקובצים לפי אזור הזמן הזה.",
+    "timezone_toast_updated": "אזור הזמן עודכן ל-{{tz}}",
+    "timezone_toast_failed": "עדכון אזור הזמן נכשל",
+    "delete_dialog": {
+      "title": "מחק סביבת ריצה",
+      "description": "האם אתה בטוח שברצונך למחוק את \"{{name}}\"? לא ניתן לבטל פעולה זו.",
+      "cancel": "ביטול",
+      "confirm": "מחיקה",
+      "deleting": "מוחק..."
+    },
+    "toast_deleted": "סביבת הריצה נמחקה",
+    "toast_delete_failed": "מחיקת סביבת הריצה נכשלה",
+    "running_chip_one": "· {{count}} פועל",
+    "running_chip_other": "· {{count}} פועלים",
+    "queued_chip_one": "· {{count}} בתור",
+    "queued_chip_other": "· {{count}} בתור"
+  },
+  "detail_page": {
+    "not_found_title": "סביבת הריצה לא נמצאה",
+    "not_found_hint": "ייתכן שהיא נמחקה או שאין לך גישה אליה."
+  },
+  "running_one": "{{count}} פועל",
+  "running_other": "{{count}} פועלים",
+  "queued_one": "{{count}} בתור",
+  "queued_other": "{{count}} בתור",
+  "connect": {
+    "title": "חבר מכונה מרוחקת",
+    "description": "הרץ את הפקודות האלו במכונה המרוחקת שלך (לדוגמה AWS EC2) כדי להתקין את Multica CLI ולרשום אותו כסביבת ריצה.",
+    "step1": "1. התקן את ה-CLI",
+    "step2": "2. הגדר",
+    "step3": "3. התחבר עם טוקן גישה אישי",
+    "step3_hint_prefix": "צור טוקן ב-",
+    "step3_hint_destination": "הגדרות ← טוקנים",
+    "step3_hint_suffix": ".",
+    "step4": "4. הפעל את ה-daemon",
+    "security_label": "אבטחה: ",
+    "security_body": "השתמש ב-IAM role של EC2 או הרשאות מינימליות. לעולם אל תכניס מפתחות root לתוך ",
+    "security_body_suffix": " של הסוכן. ה-daemon משתמש בחיבורים יוצאים בלבד — אין צורך בפורטים נכנסים.",
+    "troubleshooting": "פתרון בעיות",
+    "trouble_check_status": "בדוק סטטוס: ",
+    "trouble_view_logs": "הצג לוגים: ",
+    "trouble_verify_provider": "אמת ספק: ",
+    "trouble_remote_note_prefix": "Desktop סורק אוטומטית רק את המכונה המקומית שלך. מכונות מרוחקות חייבות להריץ ",
+    "trouble_remote_note_suffix": " בנפרד.",
+    "cancel": "ביטול",
+    "started_daemon": "הפעלתי את ה-daemon",
+    "waiting_title": "ממתין לסביבת ריצה…",
+    "waiting_description": "מאזין ל-daemon המרוחק שלך כדי שיירשם. העמוד מתעדכן אוטומטית — אין צורך לרענן.",
+    "waiting_hint_prefix": "הרץ ",
+    "waiting_hint_suffix": " במכונה המרוחקת כדי לוודא שהוא פועל.",
+    "back": "חזרה",
+    "success_title": "סביבת הריצה חוברה!",
+    "success_description": "המכונה המרוחקת שלך נרשמה כסביבת ריצה. כעת תוכל ליצור סוכן שישלח אליה משימות.",
+    "view_runtime": "הצג סביבת ריצה",
+    "create_agent": "צור סוכן"
+  },
+  "update": {
+    "cli_version_label": "גרסת CLI:",
+    "version_unknown": "לא ידוע",
+    "managed_by_desktop": "מנוהל על ידי Desktop",
+    "managed_by_desktop_title": "קובץ ה-CLI מנוהל על ידי Multica Desktop — שדרג את Desktop כדי לעדכן את ה-CLI.",
+    "latest": "האחרון",
+    "available": "זמין",
+    "action": "עדכון",
+    "retry": "נסה שוב",
+    "unknown_error": "שגיאה לא ידועה",
+    "initiate_failed": "הפעלת העדכון נכשלה",
+    "status": {
+      "pending": "ממתין ל-daemon...",
+      "running": "מעדכן...",
+      "completed": "העדכון הושלם. ה-daemon מופעל מחדש...",
+      "failed": "העדכון נכשל",
+      "timeout": "פסק זמן"
+    }
+  },
+  "charts": {
+    "heatmap_less": "פחות",
+    "heatmap_more": "יותר"
+  },
+  "list": {
+    "col_runtime": "סביבת ריצה",
+    "col_health": "תקינות",
+    "col_owner": "בעלים",
+    "col_agents": "סוכנים",
+    "col_workload": "עומס",
+    "col_cost": "עלות · 7י׳",
+    "col_cli": "CLI",
+    "cost_delta_flat": "ללא שינוי",
+    "cli_managed_badge": "Desktop",
+    "cli_update_available_aria": "עדכון זמין",
+    "cli_update_available_tooltip": "עדכון זמין: {{version}}",
+    "row_actions_aria": "פעולות שורה",
+    "delete_action": "מחיקה",
+    "delete_permission_hint": "רק בעל סביבת הריצה ומנהלי סביבת העבודה יכולים למחוק את סביבת הריצה הזו",
+    "delete_admin_hint": "רק בעל סביבת הריצה ומנהלי סביבת העבודה יכולים למחוק סביבת ריצה."
+  },
+  "usage": {
+    "period_label": "תקופה",
+    "kpi_cost_label": "עלות · {{days}}י׳",
+    "kpi_cost_delta": "{{sign}}{{pct}}% מול הקודמת",
+    "kpi_cache_label": "חיסכון מ-Cache · {{days}}י׳",
+    "kpi_cache_hint": "{{pct}}% פגיעות · {{reads}} קריאות",
+    "kpi_tokens_label": "טוקנים · {{days}}י׳",
+    "kpi_tokens_hint": "קלט {{input}} · פלט {{output}}",
+    "when_title": "מתי סביבת הריצה הזו צרכה",
+    "when_tab_daily": "יומי",
+    "when_tab_hourly": "שעתי",
+    "when_tab_heatmap": "מפת חום",
+    "daily_metric_cost": "עלות",
+    "daily_metric_tokens": "טוקנים",
+    "heatmap_caption": "26 השבועות האחרונים · עוצמת $ יומית (בורר התקופה אינו פעיל כאן)",
+    "legend_input": "קלט",
+    "legend_output": "פלט",
+    "legend_cache_read": "קריאה מ-Cache",
+    "legend_cache_write": "כתיבה ל-Cache",
+    "empty_no_usage": "אין שימוש בתקופה הזו.",
+    "empty_pricing_missing": "נרשמו טוקנים אך חסר תמחור עבור:",
+    "empty_pricing_hint": "הגדר תעריף מותאם כדי לכלול אותם בסך העלויות.",
+    "empty_zero_cost": "נרשמו טוקנים אך חישוב העלות החזיר $0.",
+    "unmapped_notice_one": "{{count}} מודל אינו מתומחר — הטוקנים שלו לא נכללים בסך העלויות.",
+    "unmapped_notice_other": "{{count}} מודלים אינם מתומחרים — הטוקנים שלהם לא נכללים בסך העלויות.",
+    "custom_pricing": {
+      "open_button": "הגדר תמחור מותאם",
+      "title": "תמחור מודלים מותאם",
+      "description": "הזן תעריפים למיליון טוקנים כדי לתמחר מודלים שאין לנו תעריף עבורם. נשמר מקומית במכשיר הזה.",
+      "empty": "אין מודלים שדורשים תמחור מותאם כעת.",
+      "field_input": "קלט",
+      "field_output": "פלט",
+      "field_cache_read": "קריאה מ-Cache",
+      "field_cache_write": "כתיבה ל-Cache",
+      "unit_hint": "כל התעריפים ב-USD למיליון טוקנים. השאר את כל השדות ריקים כדי להסיר עקיפה.",
+      "remove_aria": "הסר תמחור מותאם",
+      "cancel": "ביטול",
+      "save": "שמירה"
+    },
+    "cost_by_title_agent": "עלות לפי סוכן",
+    "cost_by_title_model": "עלות לפי מודל",
+    "cost_by_tab_agent": "לפי סוכן",
+    "cost_by_tab_model": "לפי מודל",
+    "cost_by_caption_agent_one": "סוכן {{count}} בסביבת ריצה זו",
+    "cost_by_caption_agent_other": "{{count}} סוכנים בסביבת ריצה זו",
+    "cost_by_caption_model_one": "מודל {{count}} בשימוש",
+    "cost_by_caption_model_other": "{{count}} מודלים בשימוש",
+    "daily_breakdown_toggle": "טבלת פירוט יומי",
+    "table_date": "תאריך",
+    "table_model": "מודל",
+    "table_input": "קלט",
+    "table_output": "פלט",
+    "table_cache_r": "קריאת Cache",
+    "table_cache_w": "כתיבת Cache",
+    "no_data": "אין עדיין נתוני שימוש"
+  }
+}

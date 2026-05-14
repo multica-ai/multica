@@ -1,0 +1,232 @@
+{
+  "page": {
+    "title": "אוטופיילוט",
+    "new_autopilot": "אוטופיילוט חדש",
+    "start_blank": "התחל מאפס",
+    "table": {
+      "name": "שם",
+      "agent": "סוכן",
+      "mode": "מצב",
+      "status": "סטטוס",
+      "last_run": "ריצה אחרונה"
+    },
+    "last_run_empty": "--",
+    "empty": {
+      "title": "אין עדיין אוטופיילוטים",
+      "hint": "תזמן משימות חוזרות עבור סוכני ה-AI שלך. בחר תבנית או התחל מאפס."
+    }
+  },
+  "status": {
+    "active": "פעיל",
+    "paused": "מושהה",
+    "archived": "בארכיון"
+  },
+  "execution_mode": {
+    "create_issue": "צור issue",
+    "run_only": "ריצה בלבד"
+  },
+  "relative_date": {
+    "today": "היום",
+    "one_day_ago": "לפני יום",
+    "days_ago": "לפני {{count}}י׳",
+    "months_ago": "לפני {{count}}ח׳"
+  },
+  "templates": {
+    "daily_news": {
+      "title": "תקציר חדשות יומי",
+      "summary": "חפש וסכם את חדשות היום עבור הצוות"
+    },
+    "pr_review": {
+      "title": "תזכורת לסקירת PR",
+      "summary": "סמן Pull Requests תקועים שדורשים סקירה"
+    },
+    "bug_triage": {
+      "title": "מיון באגים",
+      "summary": "הערך ותעדף דיווחי באגים חדשים"
+    },
+    "weekly_progress": {
+      "title": "דוח התקדמות שבועי",
+      "summary": "ערוך סיכום שבועי של התקדמות הצוות"
+    },
+    "dependency_audit": {
+      "title": "ביקורת תלויות",
+      "summary": "סרוק לאיתור פגיעויות אבטחה וחבילות לא מעודכנות"
+    },
+    "documentation_check": {
+      "title": "בדיקת תיעוד",
+      "summary": "סקור שינויים אחרונים לאיתור פערים בתיעוד"
+    }
+  },
+  "detail": {
+    "not_found": "האוטופיילוט לא נמצא",
+    "pause_aria": "השהה אוטופיילוט",
+    "activate_aria": "הפעל אוטופיילוט",
+    "edit": "עריכה",
+    "run_now": "הפעל עכשיו",
+    "running": "פועל...",
+    "toast_triggered": "האוטופיילוט הופעל",
+    "toast_trigger_failed": "הפעלת האוטופיילוט נכשלה",
+    "section_properties": "מאפיינים",
+    "section_triggers": "טריגרים",
+    "section_run_history": "היסטוריית ריצות",
+    "section_danger": "אזור מסוכן",
+    "field_agent": "סוכן",
+    "field_output_mode": "מצב פלט",
+    "field_prompt": "הנחיה",
+    "add_trigger": "הוסף טריגר",
+    "no_triggers": "אין טריגרים מוגדרים. הוסף תזמון להפעלה אוטומטית.",
+    "no_runs": "אין עדיין ריצות. לחץ על \"הפעל עכשיו\" כדי להפעיל ידנית.",
+    "delete_button": "מחק אוטופיילוט",
+    "toast_deleted": "האוטופיילוט נמחק",
+    "toast_delete_failed": "מחיקת האוטופיילוט נכשלה",
+    "delete_dialog": {
+      "title": "מחק אוטופיילוט",
+      "description": "פעולה זו תמחק לצמיתות את \"{{title}}\", יחד עם הטריגרים שלו והיסטוריית הריצות. לא ניתן לבטל פעולה זו.",
+      "cancel": "ביטול",
+      "confirm": "מחיקה",
+      "deleting": "מוחק..."
+    }
+  },
+  "run_status": {
+    "issue_created": "issue נוצר",
+    "running": "פועל",
+    "completed": "הושלם",
+    "failed": "נכשל"
+  },
+  "run": {
+    "issue_linked": "issue מקושר",
+    "view_log": "הצג יומן ביצוע"
+  },
+  "trigger_row": {
+    "disabled_badge": "מבוטל",
+    "next_label": "הבא: {{date}}",
+    "toast_deleted": "הטריגר נמחק",
+    "toast_delete_failed": "מחיקת הטריגר נכשלה",
+    "delete_dialog": {
+      "title": "מחק טריגר",
+      "description": "הטריגר הזה יוסר והאוטופיילוט יפסיק לפעול בתזמון הזה. לא ניתן לבטל פעולה זו.",
+      "cancel": "ביטול",
+      "confirm": "מחיקה",
+      "deleting": "מוחק..."
+    }
+  },
+  "add_trigger_dialog": {
+    "title": "הוסף טריגר",
+    "label_field": "תווית (אופציונלי)",
+    "label_placeholder": "לדוגמה: בוקר ימי חול",
+    "submit": "הוסף טריגר",
+    "submitting": "מוסיף...",
+    "toast_added": "הטריגר נוסף",
+    "toast_add_failed": "הוספת הטריגר נכשלה"
+  },
+  "dialog": {
+    "sr_create": "אוטופיילוט חדש",
+    "sr_edit": "ערוך אוטופיילוט",
+    "header_create": "אוטופיילוט חדש",
+    "header_edit": "ערוך אוטופיילוט",
+    "subtitle": "משימת AI חוזרת",
+    "expand": "הרחב",
+    "collapse": "כווץ",
+    "close": "סגור",
+    "title_placeholder": "שם האוטופיילוט",
+    "runbook_label": "הוראות הפעלה",
+    "runbook_hint": "נקראות על ידי הסוכן בכל ריצה",
+    "description_placeholder": "# מטרה\nמה הסוכן צריך להשיג?\n\n# הקשר\nעבור מי זה? אילו אילוצים?\n\n# שלבים\n1. …\n2. …",
+    "auto_run_hint": "לאחר השמירה, יפעל אוטומטית עד להשהיה.",
+    "cancel": "ביטול",
+    "create": "צור אוטופיילוט",
+    "save": "שמירה",
+    "creating": "יוצר...",
+    "saving": "שומר...",
+    "toast_created": "האוטופיילוט נוצר",
+    "toast_create_partial": "האוטופיילוט נוצר, אך שמירת התזמון נכשלה",
+    "toast_create_failed": "יצירת האוטופיילוט נכשלה",
+    "toast_updated": "האוטופיילוט עודכן",
+    "toast_update_partial": "האוטופיילוט עודכן, אך שמירת התזמון נכשלה",
+    "toast_update_failed": "עדכון האוטופיילוט נכשל",
+    "section_agent": "סוכן",
+    "select_agent": "בחר סוכן",
+    "section_output_mode": "מצב פלט",
+    "section_schedule": "תזמון",
+    "schedule_disabled_reason": "לאוטופיילוט הזה יש כמה תזמונים — ערוך אותם בעמוד הפרטים.",
+    "next_run_label": "ריצה הבאה:",
+    "output_modes": {
+      "create_issue": {
+        "label": "צור issue",
+        "description": "כל ריצה יוצרת issue במעקב"
+      },
+      "run_only": {
+        "label": "ריצה בלבד",
+        "description": "ריצה שקטה, ללא יצירת issue"
+      }
+    },
+    "frequency_long": {
+      "hourly": "כל שעה",
+      "daily": "כל יום",
+      "weekdays": "בימי חול",
+      "weekly": "כל שבוע",
+      "custom": "Cron מותאם"
+    },
+    "days": {
+      "sunday": "ראשון",
+      "monday": "שני",
+      "tuesday": "שלישי",
+      "wednesday": "רביעי",
+      "thursday": "חמישי",
+      "friday": "שישי",
+      "saturday": "שבת"
+    }
+  },
+  "trigger_config": {
+    "frequencies": {
+      "hourly": "שעתי",
+      "daily": "יומי",
+      "weekdays": "ימי חול",
+      "weekly": "ימים",
+      "custom": "מותאם"
+    },
+    "days_short": {
+      "sun": "א׳",
+      "mon": "ב׳",
+      "tue": "ג׳",
+      "wed": "ד׳",
+      "thu": "ה׳",
+      "fri": "ו׳",
+      "sat": "ש׳"
+    },
+    "cron_label": "ביטוי Cron",
+    "cron_hint": "Cron סטנדרטי בן 5 שדות (דקה שעה יום-בחודש חודש יום-בשבוע)",
+    "minute_label": "דקה",
+    "time_label": "שעה",
+    "timezone_label": "אזור זמן",
+    "days_label": "ימים",
+    "summary": {
+      "hourly": "שעתי · :{{min}}",
+      "daily": "יומי {{time}}",
+      "weekdays": "ימי חול {{time}}",
+      "weekly": "{{days}} {{time}}",
+      "custom": "Cron מותאם",
+      "no_days": "—"
+    },
+    "describe": {
+      "hourly": "רץ כל שעה ב-:{{min}}",
+      "daily": "רץ מדי יום ב-{{time}} {{offset}}",
+      "weekdays": "רץ בימי חול ב-{{time}} {{offset}}",
+      "weekly": "רץ כל {{days}} ב-{{time}} {{offset}}",
+      "custom": "תזמון מותאם: {{cron}}"
+    },
+    "countdown": {
+      "days_hours": "{{days}}י׳ {{hours}}ש׳",
+      "hours_minutes": "{{hours}}ש׳ {{minutes}}ד׳",
+      "minutes": "{{minutes}}ד׳",
+      "less_than_minute": "<1ד׳"
+    }
+  },
+  "agent_picker": {
+    "filter_placeholder": "סנן סוכנים...",
+    "select_agent": "בחר סוכן"
+  },
+  "timezone_picker": {
+    "search_placeholder": "חפש אזור זמן..."
+  }
+}

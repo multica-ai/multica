@@ -198,9 +198,9 @@ function useFormatCountdown(): (target: Date, now: Date) => string {
   };
 }
 
-function formatNextRunAbsolute(date: Date, timezone: string): string {
+function formatNextRunAbsolute(date: Date, timezone: string, locale: string): string {
   try {
-    return new Intl.DateTimeFormat("en-US", {
+    return new Intl.DateTimeFormat(locale, {
       timeZone: timezone,
       weekday: "short",
       month: "short",
@@ -662,7 +662,7 @@ function ScheduleSection({
   disabled?: boolean;
   disabledReason?: string;
 }) {
-  const { t } = useT("autopilots");
+  const { t, i18n } = useT("autopilots");
   const formatCountdown = useFormatCountdown();
   const now = useNowTicker();
   const next = useMemo(() => computeNextRun(config, now), [config, now]);
@@ -763,7 +763,7 @@ function ScheduleSection({
             <span className="truncate">
               {t(($) => $.dialog.next_run_label)}{" "}
               <span className="text-foreground">
-                {formatNextRunAbsolute(next, config.timezone)}
+                {formatNextRunAbsolute(next, config.timezone, i18n.language)}
               </span>
             </span>
             <span className="ml-auto rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground shrink-0">

@@ -1,0 +1,41 @@
+{
+  "nav": {
+    "inbox": "דואר נכנס",
+    "my_issues": "ה-issues שלי",
+    "issues": "Issues",
+    "projects": "פרויקטים",
+    "autopilots": "אוטופיילוט",
+    "agents": "סוכנים",
+    "squads": "צוותים",
+    "usage": "שימוש",
+    "runtimes": "סביבות ריצה",
+    "skills": "Skills",
+    "settings": "הגדרות"
+  },
+  "help": {
+    "trigger": "עזרה",
+    "docs": "תיעוד",
+    "changelog": "יומן שינויים",
+    "feedback": "משוב"
+  },
+  "workspace_loader": {
+    "loading_workspace": "טוען סביבת עבודה…",
+    "loading_named_prefix": "טוען"
+  },
+  "sidebar": {
+    "unpin_tooltip": "בטל הצמדה",
+    "workspaces_label": "סביבות עבודה",
+    "create_workspace": "צור סביבת עבודה",
+    "pending_invitations_label": "הזמנות ממתינות",
+    "invitation_workspace_fallback": "סביבת עבודה",
+    "invitation_join": "הצטרף",
+    "invitation_decline": "דחה",
+    "log_out": "התנתקות",
+    "new_issue": "issue חדש",
+    "new_issue_shortcut": "C",
+    "pinned_label": "מוצמד",
+    "workspace_group": "סביבת עבודה",
+    "configure_group": "תצורה",
+    "unread_overflow": "99+"
+  }
+}
