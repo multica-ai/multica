@@ -448,9 +448,10 @@ func (h *Handler) GetWorkspaceUsageSummary(w http.ResponseWriter, r *http.Reques
 }
 
 // parseSinceParam parses the "days" query parameter and returns a timestamptz.
-// Wall-clock window relative to UTC. Use parseSinceParamInTZ when the cutoff
-// must align with a per-runtime calendar boundary (so `days=N` returns N
-// full local days under the runtime's tz instead of N×24h sliding window).
+// CEREBRO-PATCH(usage-since-calendar-days): workspace/dashboard usage windows align to full UTC calendar days.
+// Use parseSinceParamInTZ when the cutoff must align with a per-runtime
+// calendar boundary (so `days=N` returns N full local days under the runtime's
+// tz instead of UTC calendar days).
 func parseSinceParam(r *http.Request, defaultDays int) pgtype.Timestamptz {
 	days := defaultDays
 	if d := r.URL.Query().Get("days"); d != "" {
@@ -458,8 +459,10 @@ func parseSinceParam(r *http.Request, defaultDays int) pgtype.Timestamptz {
 			days = parsed
 		}
 	}
-	t := time.Now().AddDate(0, 0, -days)
-	return pgtype.Timestamptz{Time: t, Valid: true}
+	now := time.Now().UTC()
+	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	cutoff := startOfToday.AddDate(0, 0, -days)
+	return pgtype.Timestamptz{Time: cutoff, Valid: true}
 }
 
 // parseSinceParamInTZ is the timezone-aware variant of parseSinceParam.
