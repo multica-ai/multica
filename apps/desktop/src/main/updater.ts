@@ -39,6 +39,18 @@ function checkForUpdatesOnce(): Promise<unknown> {
   if (inFlightCheck) return inFlightCheck;
   const p = autoUpdater
     .checkForUpdates()
+    .then((result) => {
+      // checkForUpdates resolves as soon as metadata is fetched; the actual
+      // download (when autoDownload=true) is exposed on result.downloadPromise.
+      // Without a handler a download failure becomes an unhandled rejection
+      // in the main process — Node may terminate it on future versions.
+      void (result as { downloadPromise?: Promise<unknown> } | null)?.downloadPromise?.catch(
+        (err) => {
+          console.error("Failed to download update:", err);
+        },
+      );
+      return result;
+    })
     .finally(() => {
       if (inFlightCheck === p) inFlightCheck = null;
     });
