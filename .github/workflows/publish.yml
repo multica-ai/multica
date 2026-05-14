@@ -125,20 +125,23 @@ jobs:
     secrets: inherit
 
   extract-tags:
-    needs: [bake-build-backend, bake-build-web]
+    needs: [bake-build-backend, bake-build-web, bake-build-devenv-runtime]
     runs-on: ubuntu-latest
     outputs:
       backend_tag: ${{ steps.extract.outputs.backend_tag }}
       web_tag: ${{ steps.extract.outputs.web_tag }}
+      devenv_runtime_tag: ${{ steps.extract.outputs.devenv_runtime_tag }}
     steps:
       - name: Extract tags from image_name
         id: extract
         env:
           BACKEND_IMAGE: ${{ needs.bake-build-backend.outputs.image_name }}
           WEB_IMAGE: ${{ needs.bake-build-web.outputs.image_name }}
+          DEVENV_RUNTIME_IMAGE: ${{ needs.bake-build-devenv-runtime.outputs.image_name }}
         run: |
           echo "backend_tag=${BACKEND_IMAGE##*:}" >> "$GITHUB_OUTPUT"
           echo "web_tag=${WEB_IMAGE##*:}" >> "$GITHUB_OUTPUT"
+          echo "devenv_runtime_tag=${DEVENV_RUNTIME_IMAGE##*:}" >> "$GITHUB_OUTPUT"
 
   commit-to-gitops-backend:
     needs: [bake-build-backend, bake-build-web, extract-tags]
@@ -160,5 +163,16 @@ jobs:
       image_tag: ${{ needs.extract-tags.outputs.web_tag }}
       app_repo_branch: ${{ github.head_ref || github.ref_name }}
       path_to_kustomization: gitops/environments/tools/kustomization.yaml
+      image_yq_matcher: .images[1].newTag
+
+  commit-to-gitops-devenv-runtime:
+    needs: [bake-build-devenv-runtime, extract-tags, commit-to-gitops-web]
+    uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
+    secrets: inherit
+    with:
+      gitops_repository: g2crowd/configuration
+      image_tag: ${{ needs.extract-tags.outputs.devenv_runtime_tag }}
+      app_repo_branch: ${{ github.head_ref || github.ref_name }}
+      path_to_kustomization: kustomize/DevOps/devenv/environments/development/kustomization.yaml
       image_yq_matcher: .images[1].newTag
 
