@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
@@ -68,7 +67,7 @@ func runLocalCLI(cmd *cobra.Command, args []string) error {
 	if cliName == "" {
 		return fmt.Errorf("unable to infer CLI name")
 	}
-	if !supportsProviderTranscript(cliName) {
+	if !supportsLocalRunAgent(cliName) {
 		return fmt.Errorf("当前 Agent 尚未支持，敬请期待")
 	}
 
@@ -166,6 +165,15 @@ func stringValue(v any) string {
 	return ""
 }
 
+func supportsLocalRunAgent(cliName string) bool {
+	switch strings.ToLower(strings.TrimSpace(cliName)) {
+	case "codex":
+		return true
+	default:
+		return false
+	}
+}
+
 func localRunPrompt(issueID string) string {
 	return fmt.Sprintf(strings.Join([]string{
 		"You are assigned to Multica issue %s.",
@@ -248,7 +256,7 @@ func newLocalRunReporter(client localRunMessagePoster, runID string) *localRunRe
 }
 
 func (r *localRunReporter) Post(msg localCLIMessage) {
-	if r == nil || strings.TrimSpace(msg.Content) == "" && msg.Output == "" && msg.Type != "tool_use" {
+	if r == nil || strings.TrimSpace(msg.Content) == "" && msg.Output == "" && msg.Type != "tool_use" && msg.Type != "tool_result" {
 		return
 	}
 	r.mu.Lock()
@@ -287,145 +295,6 @@ func (r *localRunReporter) loop() {
 	}
 }
 
-type transcriptStream struct {
-	reporter    *localRunReporter
-	capture     *terminalTurnCapture
-	suppressRaw bool
-	raw         []byte
-	rawScreen   *terminalScreen
-	rawVisible  string
-	line        strings.Builder
-	last        time.Time
-}
-
-func newTranscriptStream(reporter *localRunReporter, capture *terminalTurnCapture) *transcriptStream {
-	return &transcriptStream{reporter: reporter, capture: capture, rawScreen: newTerminalScreen(), last: time.Now()}
-}
-
-func newStructuredTranscriptStream(reporter *localRunReporter) *transcriptStream {
-	return &transcriptStream{reporter: reporter, suppressRaw: true, rawScreen: newTerminalScreen(), last: time.Now()}
-}
-
-func (s *transcriptStream) Write(p []byte) (int, error) {
-	if s == nil {
-		return len(p), nil
-	}
-	s.raw = append(s.raw, p...)
-	if s.capture != nil {
-		s.capture.Write(p)
-	}
-	for _, b := range p {
-		if b == '\n' {
-			s.flushLine()
-			continue
-		}
-		s.line.WriteByte(b)
-	}
-	if (len(s.raw) >= 4096 || time.Since(s.last) >= time.Second) && !looksLikePotentialStructuredLine(s.line.String()) {
-		s.FlushRaw()
-	}
-	return len(p), nil
-}
-
-func (s *transcriptStream) Flush() {
-	if s == nil {
-		return
-	}
-	s.flushLine()
-	s.FlushRaw()
-}
-
-func (s *transcriptStream) FlushRaw() {
-	if s == nil || len(s.raw) == 0 {
-		return
-	}
-	s.flushRawBytes(s.raw)
-	s.raw = s.raw[:0]
-	s.last = time.Now()
-}
-
-func (s *transcriptStream) flushLine() {
-	if s == nil || s.line.Len() == 0 {
-		return
-	}
-	rawLine := s.line.String()
-	line := strings.TrimSpace(strings.TrimRight(rawLine, "\r"))
-	s.line.Reset()
-	if msg, ok := parseStructuredMessage(line); ok {
-		s.flushRawBeforeStructuredLine(rawLine)
-		msg.Content = redact.Text(msg.Content)
-		msg.Output = redact.Text(msg.Output)
-		msg.Input = redactInputMap(msg.Input)
-		if msg.Type == "final" && s.capture != nil {
-			if !s.capture.PrepareStructuredFinal() {
-				return
-			}
-		}
-		s.reporter.Post(msg)
-	}
-}
-
-func (s *transcriptStream) flushRawBeforeStructuredLine(rawLine string) {
-	if s == nil || len(s.raw) == 0 {
-		return
-	}
-	lineBytes := len([]byte(rawLine)) + 1
-	if lineBytes > len(s.raw) {
-		s.FlushRaw()
-		return
-	}
-	prior := s.raw[:len(s.raw)-lineBytes]
-	if len(prior) > 0 {
-		s.flushRawBytes(prior)
-	}
-	s.raw = s.raw[:0]
-	s.last = time.Now()
-}
-
-func (s *transcriptStream) flushRawBytes(raw []byte) {
-	if s == nil || len(raw) == 0 {
-		return
-	}
-	if s.rawScreen == nil {
-		s.rawScreen = newTerminalScreen()
-	}
-	s.rawScreen.Write(raw)
-	visible := s.rawScreen.Text()
-	delta := visibleTextDelta(s.rawVisible, visible)
-	s.rawVisible = visible
-	content := strings.TrimSpace(delta)
-	if content == "" || isStatusOnly(content) {
-		return
-	}
-	if s.suppressRaw {
-		return
-	}
-	if s.capture != nil && s.capture.HasProviderTranscript() {
-		return
-	}
-	content = redact.Text(content)
-	if content == "" {
-		return
-	}
-	s.reporter.Post(localCLIMessage{Type: "raw", Content: content})
-}
-
-func visibleTextDelta(prev, next string) string {
-	prev = strings.TrimSpace(prev)
-	next = strings.TrimSpace(next)
-	if next == "" || next == prev {
-		return ""
-	}
-	if prev != "" && strings.HasPrefix(next, prev) {
-		return strings.TrimSpace(strings.TrimPrefix(next, prev))
-	}
-	return next
-}
-
-func looksLikePotentialStructuredLine(line string) bool {
-	return strings.HasPrefix(strings.TrimSpace(line), "{")
-}
-
 func redactInputMap(m map[string]any) map[string]any {
 	if m == nil {
 		return nil
@@ -453,7 +322,6 @@ func executeLocalCLI(args []string, cwd, cliName string, env localCLIEnv, initia
 		return executeCodexRemoteCLI(args, cwd, env, initialPrompt, reporter)
 	}
 
-	startTime := time.Now()
 	childArgs := args[1:]
 	writePromptToPTY := initialPrompt
 	if cliName == "codex" && initialPrompt != "" {
@@ -479,19 +347,14 @@ func executeLocalCLI(args []string, cwd, cliName string, env localCLIEnv, initia
 	stopSignalForward := forwardSignals(child.Process)
 	defer stopSignalForward()
 
-	turnCapture := newTerminalTurnCapture(reporter, newProviderTranscriptExtractor(cliName, cwd, startTime, initialPrompt))
-	turnCapture.StartInitialPrompt(initialPrompt)
-	transcript := newTranscriptStream(reporter, turnCapture)
 	go func() {
 		if writePromptToPTY != "" {
 			_, _ = io.WriteString(ptmx, writePromptToPTY)
 		}
-		_, _ = io.Copy(ptmx, io.TeeReader(os.Stdin, &stdinCapture{reporter: reporter, turns: turnCapture}))
+		_, _ = io.Copy(ptmx, os.Stdin)
 	}()
 
-	_, _ = io.Copy(io.MultiWriter(os.Stdout, transcript), ptmx)
-	transcript.Flush()
-	turnCapture.Finalize()
+	_, _ = io.Copy(os.Stdout, ptmx)
 	err = child.Wait()
 	exitCode := 0
 	if child.ProcessState != nil {
@@ -550,94 +413,6 @@ func watchTerminalResize(ptmx *os.File) func() {
 	return func() {
 		signal.Stop(ch)
 		close(done)
-	}
-}
-
-type structuredAdapter interface {
-	ParseLine(line string) (localCLIMessage, bool)
-}
-
-type jsonLineAdapter struct{}
-
-func (jsonLineAdapter) ParseLine(line string) (localCLIMessage, bool) {
-	return parseJSONLineStructuredMessage(line)
-}
-
-type providerAdapter struct {
-	name string
-	next structuredAdapter
-}
-
-func (a providerAdapter) ParseLine(line string) (localCLIMessage, bool) {
-	return a.next.ParseLine(line)
-}
-
-var defaultStructuredAdapter structuredAdapter = providerAdapter{name: "json-line", next: jsonLineAdapter{}}
-
-func parseStructuredTranscript(raw string) []localCLIMessage {
-	var messages []localCLIMessage
-	for _, line := range strings.Split(raw, "\n") {
-		line = strings.TrimSpace(strings.TrimRight(line, "\r"))
-		if line == "" || !strings.HasPrefix(line, "{") {
-			continue
-		}
-		msg, ok := defaultStructuredAdapter.ParseLine(line)
-		if ok {
-			messages = append(messages, msg)
-		}
-	}
-	return messages
-}
-
-func parseStructuredMessage(line string) (localCLIMessage, bool) {
-	return defaultStructuredAdapter.ParseLine(line)
-}
-
-func parseJSONLineStructuredMessage(line string) (localCLIMessage, bool) {
-	var obj map[string]any
-	if err := json.Unmarshal([]byte(line), &obj); err != nil {
-		return localCLIMessage{}, false
-	}
-	msgType := stringValue(obj["type"])
-	if msgType == "" {
-		msgType = stringValue(obj["kind"])
-	}
-	if msgType == "" {
-		return localCLIMessage{}, false
-	}
-	msgType = normalizeStructuredMessageType(msgType)
-	if msgType == "" {
-		return localCLIMessage{}, false
-	}
-	msg := localCLIMessage{
-		Type:    msgType,
-		Tool:    firstString(obj, "tool", "name", "tool_name"),
-		Content: firstString(obj, "content", "text", "message", "result"),
-		Output:  firstString(obj, "output"),
-	}
-	if input, ok := obj["input"].(map[string]any); ok {
-		msg.Input = input
-	}
-	return msg, true
-}
-
-func normalizeStructuredMessageType(t string) string {
-	switch strings.ToLower(strings.TrimSpace(t)) {
-	case "thinking", "reasoning":
-		return "thinking"
-	case "tool", "tool_use", "tool_call":
-		return "tool_use"
-	case "tool_result", "tool_output":
-		return "tool_result"
-	case "final", "answer", "result":
-		return "final"
-	case "raw", "text", "error", "assistant", "assistant_message", "agent_message":
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(t)), "assistant") || strings.TrimSpace(t) == "agent_message" {
-			return "text"
-		}
-		return strings.ToLower(strings.TrimSpace(t))
-	default:
-		return ""
 	}
 }
 

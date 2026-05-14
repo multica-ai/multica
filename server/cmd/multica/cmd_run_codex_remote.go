@@ -73,13 +73,11 @@ func executeCodexRemoteCLI(args []string, cwd string, env localCLIEnv, initialPr
 	stopSignalForward := forwardSignals(child.Process)
 	defer stopSignalForward()
 
-	transcript := newStructuredTranscriptStream(reporter)
 	go func() {
 		_, _ = io.Copy(ptmx, os.Stdin)
 	}()
 
-	_, _ = io.Copy(io.MultiWriter(os.Stdout, transcript), ptmx)
-	transcript.Flush()
+	_, _ = io.Copy(os.Stdout, ptmx)
 	err = child.Wait()
 	exitCode := 0
 	if child.ProcessState != nil {
@@ -95,6 +93,10 @@ func validateCodexRemoteArgs(args []string) error {
 		}
 		if arg == "app-server" {
 			return fmt.Errorf("multica run manages codex app-server automatically")
+		}
+		switch arg {
+		case "exec", "review":
+			return fmt.Errorf("multica run supports interactive Codex sessions only; use codex %s outside multica run", arg)
 		}
 	}
 	return nil
@@ -201,7 +203,6 @@ func (b *limitedBuffer) String() string {
 
 type codexRemoteProxy struct {
 	upstreamURL string
-	reporter    *localRunReporter
 	listener    net.Listener
 	server      *http.Server
 	mapper      *codexAppServerMapper
@@ -214,7 +215,6 @@ func newCodexRemoteProxy(upstreamURL string, reporter *localRunReporter, bootstr
 	}
 	p := &codexRemoteProxy{
 		upstreamURL: upstreamURL,
-		reporter:    reporter,
 		listener:    ln,
 		mapper:      newCodexAppServerMapper(reporter, bootstrapPrompt),
 	}
@@ -318,14 +318,14 @@ func (p *codexRemoteProxy) copyMessages(src, dst *websocket.Conn, dstWriteMu *sy
 }
 
 type codexAppServerMapper struct {
-	mu              sync.Mutex
-	reporter        *localRunReporter
-	bootstrap       string
-	pending         map[string]codexPendingRequest
-	turnComment     map[string]bool
-	deltas          map[string]string
-	currentThread   string
-	syncedLifecycle map[string]bool
+	mu             sync.Mutex
+	reporter       *localRunReporter
+	bootstrap      string
+	pending        map[string]codexPendingRequest
+	turnComment    map[string]bool
+	deltas         map[string]string
+	activeThreadID string
+	activeTurnID   string
 }
 
 type codexPendingRequest struct {
@@ -335,12 +335,11 @@ type codexPendingRequest struct {
 
 func newCodexAppServerMapper(reporter *localRunReporter, bootstrapPrompt string) *codexAppServerMapper {
 	return &codexAppServerMapper{
-		reporter:        reporter,
-		bootstrap:       bootstrapPrompt,
-		pending:         make(map[string]codexPendingRequest),
-		turnComment:     make(map[string]bool),
-		deltas:          make(map[string]string),
-		syncedLifecycle: make(map[string]bool),
+		reporter:    reporter,
+		bootstrap:   bootstrapPrompt,
+		pending:     make(map[string]codexPendingRequest),
+		turnComment: make(map[string]bool),
+		deltas:      make(map[string]string),
 	}
 }
 
@@ -374,8 +373,12 @@ func (m *codexAppServerMapper) observeServerMessage(msg map[string]any) {
 		m.handleNotification(method, params)
 		return
 	}
+	rpcErr := nestedMap(msg, "error")
 	id := codexRPCID(msg["id"])
 	if id == "" {
+		if rpcErr != nil {
+			m.recordError(firstString(rpcErr, "message", "error"))
+		}
 		return
 	}
 	m.mu.Lock()
@@ -387,12 +390,16 @@ func (m *codexAppServerMapper) observeServerMessage(msg map[string]any) {
 	if !ok {
 		return
 	}
+	if rpcErr != nil {
+		m.recordError(firstString(rpcErr, "message", "error"))
+		return
+	}
 	result, _ := msg["result"].(map[string]any)
 	switch pending.method {
 	case "thread/start":
-		m.handleThreadResult("started", pending.params, result)
+		m.handleThreadResult(result)
 	case "thread/resume":
-		m.handleThreadResult("resumed", pending.params, result)
+		m.handleThreadResult(result)
 	}
 }
 
@@ -400,73 +407,54 @@ func (m *codexAppServerMapper) handleNotification(method string, params map[stri
 	switch method {
 	case "thread/started":
 		if thread := nestedMap(params, "thread"); thread != nil {
-			m.recordThreadLifecycle("started", thread, nil)
+			m.setActiveThread(stringValue(thread["id"]))
 		}
 	case "turn/started":
-		m.recordTurnLifecycle("started", params)
+		m.trackTurn(params)
 	case "turn/completed":
-		m.recordTurnLifecycle("completed", params)
+		m.trackTurn(params)
+		m.recordFailedTurn(params)
+	case "error":
+		m.recordError(firstString(params, "message", "error"))
+		if errObj := nestedMap(params, "error"); errObj != nil {
+			m.recordError(firstString(errObj, "message", "error"))
+		}
 	case "item/agentMessage/delta":
 		m.recordAgentDelta(params)
+	case "item/started":
+		m.recordStartedItem(params)
 	case "item/completed":
 		m.recordCompletedItem(params)
 	}
 }
 
-func (m *codexAppServerMapper) handleThreadResult(action string, reqParams, result map[string]any) {
+func (m *codexAppServerMapper) handleThreadResult(result map[string]any) {
 	thread := nestedMap(result, "thread")
 	if thread == nil {
 		return
 	}
-	m.recordThreadLifecycle(action, thread, reqParams)
+	m.setActiveThread(stringValue(thread["id"]))
 }
 
-func (m *codexAppServerMapper) recordThreadLifecycle(action string, thread, reqParams map[string]any) {
-	threadID := stringValue(thread["id"])
-	if threadID == "" {
-		return
-	}
-	source := stringValue(thread["sessionStartSource"])
-	if source == "" && reqParams != nil {
-		source = stringValue(reqParams["sessionStartSource"])
-	}
-	m.mu.Lock()
-	m.currentThread = threadID
-	m.mu.Unlock()
-	content := "Codex thread " + action
-	if source != "" {
-		content += " (" + source + ")"
-	}
-	m.postLifecycle("thread:"+threadID+":"+action, content, map[string]any{
-		"thread_id":  threadID,
-		"session_id": stringValue(thread["sessionId"]),
-		"path":       stringValue(thread["path"]),
-		"cwd":        stringValue(thread["cwd"]),
-		"source":     source,
-	})
-}
-
-func (m *codexAppServerMapper) recordTurnLifecycle(action string, params map[string]any) {
-	threadID := stringValue(params["threadId"])
+func (m *codexAppServerMapper) trackTurn(params map[string]any) {
+	threadID := m.threadID(params)
 	turn := nestedMap(params, "turn")
 	turnID := stringValue(params["turnId"])
 	if turnID == "" && turn != nil {
 		turnID = stringValue(turn["id"])
 	}
-	if threadID == "" || turnID == "" {
-		return
+	m.mu.Lock()
+	if threadID != "" {
+		m.activeThreadID = threadID
 	}
-	input := map[string]any{"thread_id": threadID, "turn_id": turnID}
-	if turn != nil {
-		input["status"] = stringValue(turn["status"])
-		input["duration_ms"] = turn["durationMs"]
-		input["error"] = turn["error"]
+	if turnID != "" {
+		m.activeTurnID = turnID
 	}
-	m.postLifecycle("thread:"+threadID+":turn:"+turnID+":"+action, "Codex turn "+action, input)
+	m.mu.Unlock()
 }
 
 func (m *codexAppServerMapper) recordAgentDelta(params map[string]any) {
-	itemID := stringValue(params["itemId"])
+	itemID := codexAppServerParamItemID(params)
 	delta := stringValue(params["delta"])
 	if itemID == "" || delta == "" {
 		return
@@ -481,8 +469,8 @@ func (m *codexAppServerMapper) recordCompletedItem(params map[string]any) {
 	if item == nil {
 		return
 	}
-	threadID := stringValue(params["threadId"])
-	turnID := stringValue(params["turnId"])
+	threadID := m.threadID(params)
+	turnID := m.turnID(params)
 	itemID := stringValue(item["id"])
 	itemType := stringValue(item["type"])
 	if threadID == "" || turnID == "" || itemID == "" || itemType == "" {
@@ -493,8 +481,43 @@ func (m *codexAppServerMapper) recordCompletedItem(params map[string]any) {
 		m.recordUserMessage(threadID, turnID, itemID, item)
 	case "agentMessage":
 		m.recordAgentMessage(threadID, turnID, itemID, item)
-	case "commandExecution", "localShellCommand", "toolCall", "functionCall":
-		m.recordToolItem(threadID, turnID, itemID, item)
+	case "commandExecution":
+		m.recordCommandResult(threadID, turnID, itemID, item)
+	case "fileChange":
+		m.recordPatchResult(threadID, turnID, itemID)
+	}
+}
+
+func (m *codexAppServerMapper) recordStartedItem(params map[string]any) {
+	item := nestedMap(params, "item")
+	if item == nil {
+		return
+	}
+	threadID := m.threadID(params)
+	turnID := m.turnID(params)
+	itemID := stringValue(item["id"])
+	itemType := stringValue(item["type"])
+	if threadID == "" || turnID == "" || itemID == "" || itemType == "" {
+		return
+	}
+	switch itemType {
+	case "commandExecution":
+		input := map[string]any{}
+		if command := stringValue(item["command"]); command != "" {
+			input["command"] = command
+		}
+		m.post(localCLIMessage{
+			Type:      "tool_use",
+			Tool:      "exec_command",
+			Input:     input,
+			SourceKey: "thread:" + threadID + ":turn:" + turnID + ":tool:" + itemID + ":start",
+		})
+	case "fileChange":
+		m.post(localCLIMessage{
+			Type:      "tool_use",
+			Tool:      "patch_apply",
+			SourceKey: "thread:" + threadID + ":turn:" + turnID + ":tool:" + itemID + ":start",
+		})
 	}
 }
 
@@ -529,76 +552,103 @@ func (m *codexAppServerMapper) recordAgentMessage(threadID, turnID, itemID strin
 	if content == "" {
 		return
 	}
-	msgType := "text"
-	if stringValue(item["phase"]) == "final_answer" {
-		msgType = "final"
+	phase := stringValue(item["phase"])
+	m.post(localCLIMessage{
+		Type:      "text",
+		Content:   content,
+		SourceKey: "thread:" + threadID + ":turn:" + turnID + ":agent:" + itemID + ":text",
+	})
+
+	if phase == "final_answer" {
 		m.mu.Lock()
 		commentable := m.turnComment[turnID]
 		m.mu.Unlock()
 		if !commentable || isStatusOnly(content) {
 			return
 		}
-	}
-	m.post(localCLIMessage{
-		Type:      msgType,
-		Content:   content,
-		SourceKey: "thread:" + threadID + ":turn:" + turnID + ":agent:" + itemID,
-		Input: map[string]any{
-			"thread_id": threadID,
-			"turn_id":   turnID,
-			"item_id":   itemID,
-			"phase":     stringValue(item["phase"]),
-		},
-	})
-}
-
-func (m *codexAppServerMapper) recordToolItem(threadID, turnID, itemID string, item map[string]any) {
-	tool := firstString(item, "name", "tool", "type")
-	input := map[string]any{
-		"thread_id": threadID,
-		"turn_id":   turnID,
-		"item_id":   itemID,
-	}
-	for _, key := range []string{"command", "cwd", "status", "exitCode"} {
-		if v, ok := item[key]; ok {
-			input[toSnake(key)] = v
-		}
-	}
-	output := strings.TrimSpace(firstString(item, "output", "text", "content"))
-	m.post(localCLIMessage{
-		Type:      "tool_use",
-		Tool:      tool,
-		Input:     input,
-		SourceKey: "thread:" + threadID + ":turn:" + turnID + ":tool:" + itemID + ":complete",
-	})
-	if output != "" {
 		m.post(localCLIMessage{
-			Type:      "tool_result",
-			Tool:      tool,
-			Output:    output,
-			SourceKey: "thread:" + threadID + ":turn:" + turnID + ":tool:" + itemID + ":result",
+			Type:      "final",
+			Content:   content,
+			SourceKey: "thread:" + threadID + ":turn:" + turnID + ":agent:" + itemID + ":final",
 		})
 	}
 }
 
-func (m *codexAppServerMapper) postLifecycle(key, content string, input map[string]any) {
-	m.mu.Lock()
-	if m.syncedLifecycle[key] {
-		m.mu.Unlock()
-		return
-	}
-	m.syncedLifecycle[key] = true
-	m.mu.Unlock()
+func (m *codexAppServerMapper) recordCommandResult(threadID, turnID, itemID string, item map[string]any) {
+	output := strings.TrimSpace(firstString(item, "aggregatedOutput", "output", "text", "content"))
 	m.post(localCLIMessage{
-		Type:      "event",
-		Content:   content,
-		Input:     input,
-		SourceKey: key,
+		Type:      "tool_result",
+		Tool:      "exec_command",
+		Output:    output,
+		SourceKey: "thread:" + threadID + ":turn:" + turnID + ":tool:" + itemID + ":result",
 	})
 }
 
+func (m *codexAppServerMapper) recordPatchResult(threadID, turnID, itemID string) {
+	m.post(localCLIMessage{
+		Type:      "tool_result",
+		Tool:      "patch_apply",
+		SourceKey: "thread:" + threadID + ":turn:" + turnID + ":tool:" + itemID + ":result",
+	})
+}
+
+func (m *codexAppServerMapper) recordFailedTurn(params map[string]any) {
+	turn := nestedMap(params, "turn")
+	if turn == nil || stringValue(turn["status"]) != "failed" {
+		return
+	}
+	errMsg := "codex turn failed"
+	if errObj := nestedMap(turn, "error"); errObj != nil {
+		if msg := firstString(errObj, "message", "error"); msg != "" {
+			errMsg = msg
+		}
+	}
+	m.recordError(errMsg)
+}
+
+func (m *codexAppServerMapper) recordError(content string) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return
+	}
+	m.post(localCLIMessage{Type: "error", Content: content})
+}
+
+func (m *codexAppServerMapper) setActiveThread(threadID string) {
+	if threadID == "" {
+		return
+	}
+	m.mu.Lock()
+	m.activeThreadID = threadID
+	m.activeTurnID = ""
+	m.mu.Unlock()
+}
+
+func (m *codexAppServerMapper) threadID(params map[string]any) string {
+	if threadID := stringValue(params["threadId"]); threadID != "" {
+		return threadID
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.activeThreadID
+}
+
+func (m *codexAppServerMapper) turnID(params map[string]any) string {
+	if turnID := stringValue(params["turnId"]); turnID != "" {
+		return turnID
+	}
+	if turn := nestedMap(params, "turn"); turn != nil {
+		if turnID := stringValue(turn["id"]); turnID != "" {
+			return turnID
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.activeTurnID
+}
+
 func (m *codexAppServerMapper) post(msg localCLIMessage) {
-	if strings.TrimSpace(msg.Content) == "" && strings.TrimSpace(msg.Output) == "" && msg.Type != "tool_use" {
+	if strings.TrimSpace(msg.Content) == "" && strings.TrimSpace(msg.Output) == "" && msg.Type != "tool_use" && msg.Type != "tool_result" {
 		return
 	}
 	msg.Source = codexAppServerSource
@@ -612,8 +662,8 @@ func (m *codexAppServerMapper) isBootstrap(content string) bool {
 	if strings.TrimSpace(m.bootstrap) == "" {
 		return false
 	}
-	candidate := normalizeProviderText(content)
-	bootstrap := normalizeProviderText(m.bootstrap)
+	candidate := normalizeCapturedUserText(content)
+	bootstrap := normalizeCapturedUserText(m.bootstrap)
 	if candidate == "" || bootstrap == "" {
 		return false
 	}
@@ -662,11 +712,12 @@ func codexAppServerItemText(item map[string]any) string {
 	return strings.Join(parts, "\n")
 }
 
-func toSnake(s string) string {
-	switch s {
-	case "exitCode":
-		return "exit_code"
-	default:
-		return s
+func codexAppServerParamItemID(params map[string]any) string {
+	if itemID := stringValue(params["itemId"]); itemID != "" {
+		return itemID
 	}
+	if item := nestedMap(params, "item"); item != nil {
+		return stringValue(item["id"])
+	}
+	return ""
 }
