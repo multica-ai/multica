@@ -634,6 +634,40 @@ func TestTryClaimRegisterSlot_FailureBackoffSuppressesRetries(t *testing.T) {
 	}
 }
 
+func TestTryClaimRegisterSlot_StragglerAfterFailedSiblingRetriesPastBackoff(t *testing.T) {
+	// Regression for the failure-path semantics gap the second review caught:
+	// recordRegisterCompletion must NOT stamp lastCompletedAt on failure,
+	// because a failed register has not covered any workspace state. A
+	// same-wave straggler whose entryAt predates the failure but who only
+	// reaches the gate after the failure backoff has expired must be allowed
+	// to claim — otherwise the workspace stays unregistered until
+	// workspaceSyncLoop notices, and that loop only fires when the workspace's
+	// runtimeIDs fully drain (partial deletions wouldn't trigger it).
+	t.Parallel()
+
+	d := freshDaemon("")
+	t0 := time.Now()
+
+	// A: enters at T0+1ms, claims slot, register FAILS at T0+50ms. The
+	// failure stamps reregisterNextAttempt = failAt + failureBackoff and
+	// (per the fix) does NOT stamp lastCompletedAt.
+	aEntry := t0.Add(1 * time.Millisecond)
+	if !d.tryClaimRegisterSlot("ws-1", aEntry, aEntry) {
+		t.Fatalf("A: expected to claim, got bail")
+	}
+	failAt := t0.Add(50 * time.Millisecond)
+	d.recordRegisterCompletion("ws-1", failAt, errors.New("boom"))
+
+	// B: entered at T0 (BEFORE A's failure) but was stuck on removeStaleRuntime
+	// mutex contention; arrives at the gate at failAt + failureBackoff + 1s.
+	// nextAttempt has expired; lastCompletedAt is unset; B must claim.
+	bEntry := t0
+	bArrive := failAt.Add(reregisterFailureBackoff + time.Second)
+	if !d.tryClaimRegisterSlot("ws-1", bEntry, bArrive) {
+		t.Fatalf("B: straggler whose entryAt predates a failed sibling must reclaim once failure backoff expires")
+	}
+}
+
 func TestTryClaimRegisterSlot_PeerHoldingSlotForcesCoalesce(t *testing.T) {
 	// While a peer holds an unfinished slot, callers must bail regardless of
 	// the lastCompletedAt state.

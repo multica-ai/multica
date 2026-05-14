@@ -90,7 +90,7 @@ type Daemon struct {
 	runtimeGoneMu             sync.Mutex
 	runtimeGoneInflight       map[string]struct{}  // runtime_id -> currently recovering
 	reregisterNextAttempt     map[string]time.Time // workspace_id -> earliest time the next re-register attempt may run
-	reregisterLastCompletedAt map[string]time.Time // workspace_id -> wall-clock at which the last re-register call returned (success or failure)
+	reregisterLastCompletedAt map[string]time.Time // workspace_id -> wall-clock at which the last SUCCESSFUL re-register call returned (failures intentionally not stamped — see recordRegisterCompletion)
 
 	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
 	rootCtx       context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
@@ -256,8 +256,12 @@ func (d *Daemon) handleRuntimeGone(runtimeID string) {
 //  1. reregisterNextAttempt: a future timestamp means a peer holds the slot or
 //     a previous attempt failed and we are inside the failure backoff window.
 //  2. reregisterLastCompletedAt: a timestamp at or after our entryAt means a
-//     peer's register completed AFTER we entered handleRuntimeGone. We are a
-//     same-wave straggler whose state is already covered by that peer's call.
+//     peer's register SUCCEEDED after we entered handleRuntimeGone, so the
+//     workspace state is already covered for our wave and we can bail.
+//     Failures intentionally don't stamp this field (see
+//     recordRegisterCompletion), so a same-wave straggler whose entryAt
+//     predates a failed sibling can still retry once the failure backoff
+//     expires — failures don't cover anything.
 //
 // entryAt is the wall-clock captured at the top of handleRuntimeGone. now is
 // passed in (rather than read inside) so tests can drive the gate
@@ -275,23 +279,24 @@ func (d *Daemon) tryClaimRegisterSlot(workspaceID string, entryAt, now time.Time
 	return true
 }
 
-// recordRegisterCompletion stamps the per-workspace completion timestamp and
-// either applies the failure backoff or clears the in-flight slot, depending on
-// whether the underlying register call succeeded. Always records
-// lastCompletedAt so a same-wave straggler that races past the slot clear is
-// still caught.
+// recordRegisterCompletion records the outcome of a register call. On success
+// it stamps lastCompletedAt (which suppresses same-wave stragglers via
+// tryClaimRegisterSlot) and clears the in-flight slot so a genuinely later
+// runtime deletion can claim immediately. On failure it extends
+// reregisterNextAttempt by the failure backoff and intentionally does NOT
+// stamp lastCompletedAt — a failed register did not cover any workspace
+// state, so a same-wave straggler whose entryAt predates the failure must
+// still be allowed to retry once the backoff expires. workspaceSyncLoop only
+// retries when the workspace's runtimeIDs fully drain, so partial-deletion
+// recovery has to come from the straggler path.
 func (d *Daemon) recordRegisterCompletion(workspaceID string, completedAt time.Time, err error) {
 	d.runtimeGoneMu.Lock()
 	defer d.runtimeGoneMu.Unlock()
-	d.reregisterLastCompletedAt[workspaceID] = completedAt
 	if err != nil {
 		d.reregisterNextAttempt[workspaceID] = completedAt.Add(reregisterFailureBackoff)
 		return
 	}
-	// Success: clear the coalesce slot so a future distinct runtime deletion
-	// in this workspace can trigger its own recovery immediately. The
-	// lastCompletedAt check still suppresses same-wave stragglers — their
-	// entryAt predates completedAt, so they bail there instead.
+	d.reregisterLastCompletedAt[workspaceID] = completedAt
 	delete(d.reregisterNextAttempt, workspaceID)
 }
 
