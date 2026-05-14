@@ -733,6 +733,10 @@
       "gate": "cerebro_agent_access"
     },
     {
+      "id": "PUT /api/agents/{id}/tools/{name}/",
+      "gate": "cerebro_agent_access"
+    },
+    {
       "id": "PUT /api/artifact-folders/{id}",
       "gate": "workspace_member"
     },
