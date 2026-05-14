@@ -14,6 +14,7 @@ import {
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { Button } from "@multica/ui/components/ui/button";
+import { MicButton } from "@multica/cerebro-dictation"; // CEREBRO-PATCH(chat-input-dictation): mount push-to-talk dictation button (JEH-729).
 // CEREBRO-PATCH(chat-input-expand): JEH-887 — expand toggle imports
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 // CEREBRO-PATCH(chat-input-expand): JEH-887 — Maximize2/Minimize2 for the toggle button
@@ -215,6 +216,10 @@ export function ChatInput({
             disabled={!!disabled}
             onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
             onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
+          />
+          <MicButton
+            disabled={!!disabled || !!noAgent}
+            onTranscribed={(text) => editorRef.current?.insertText(text)}
           />
           {rightAdornment}
           {/* CEREBRO-PATCH(chat-input-expand): JEH-887 — expand toggle.

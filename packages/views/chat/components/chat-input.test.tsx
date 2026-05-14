@@ -53,6 +53,11 @@ vi.mock("@multica/core/api", () => ({ api: {} }));
 
 vi.mock("@multica/core/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  noopLogger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: () => true,
 }));
 
 vi.mock("@multica/cerebro-preferences/views", () => ({
@@ -69,7 +74,14 @@ vi.mock("../../editor", () => {
         placeholder?: string;
         autoFocus?: boolean;
       },
-      ref: Ref<{ getMarkdown: () => string; clearContent: () => void; uploadFile: () => void; blur: () => void; focus: () => void }>,
+      ref: Ref<{
+        getMarkdown: () => string;
+        clearContent: () => void;
+        uploadFile: () => void;
+        blur: () => void;
+        focus: () => void;
+        insertText: (text: string) => void;
+      }>,
     ) => {
       lastAutoFocus.value = props.autoFocus;
       useImperativeHandle(ref, () => ({
@@ -80,6 +92,9 @@ vi.mock("../../editor", () => {
         uploadFile: () => {},
         blur: () => {},
         focus: editorFocus,
+        insertText: (text: string) => {
+          editorMarkdown.value += text;
+        },
       }));
       return (
         <div>

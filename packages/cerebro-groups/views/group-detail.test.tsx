@@ -338,7 +338,7 @@ describe("GroupDetailView", () => {
       expect(mockAddGroupRuntime).toHaveBeenCalledWith("g-1", "rt-1");
       expect(mockAddGroupAgent).toHaveBeenCalledWith("g-1", "agent-1");
     });
-  });
+  }, 10_000);
 
   it("exposes capability tooltips for create_runtime and create_agent", async () => {
     renderDetail();

@@ -931,6 +931,12 @@ importers:
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
+      '@multica/ui':
+        specifier: workspace:*
+        version: link:../ui
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.14.0(react@19.2.3)
       react:
         specifier: 'catalog:'
         version: 19.2.3

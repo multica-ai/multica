@@ -11,7 +11,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@multica/cerebro-feature-flags": "workspace:*"
+    "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "lucide-react": "catalog:"
   },
   "peerDependencies": {
     "react": "catalog:"
