@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/mention"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -196,10 +197,23 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 			taskUUID, parseErr := util.ParseUUID(taskIDHeader)
 			if parseErr == nil {
 				task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
-				if err == nil && task.TriggerCommentID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
-					if uuidToString(parentID) != uuidToString(task.TriggerCommentID) {
-						writeError(w, http.StatusConflict,
-							"parent_id must equal this task's trigger comment id ("+uuidToString(task.TriggerCommentID)+")")
+				if err == nil && task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
+					if task.TriggerCommentID.Valid {
+						if uuidToString(parentID) != uuidToString(task.TriggerCommentID) {
+							writeError(w, http.StatusConflict,
+								"parent_id must equal this task's trigger comment id ("+uuidToString(task.TriggerCommentID)+")")
+							return
+						}
+					}
+					noAction, checkErr := service.HasSquadLeaderNoActionEvaluationForTask(r.Context(), h.Queries, task)
+					if checkErr != nil {
+						slog.Warn("checking squad leader no_action evaluation failed", append(logger.RequestAttrs(r),
+							"error", checkErr,
+							"task_id", taskIDHeader,
+							"issue_id", issueID,
+						)...)
+					} else if noAction {
+						writeError(w, http.StatusConflict, "squad leader recorded no_action; comments are not allowed for this task")
 						return
 					}
 				}
