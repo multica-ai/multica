@@ -92,7 +92,7 @@
     "title": "Customer profile",
     "summary_title": "Profile summary",
     "metadata_title": "Account details",
-    "help": "Capture business context, buying needs, risks, and communication preferences for this customer.",
+    "help": "Auto-generated from customer basics and communication history. It refreshes after customer edits or new communications; use refresh to regenerate now.",
     "empty": "No customer profile yet. Add one to make follow-up easier.",
     "add": "Add profile",
     "edit": "Edit profile",
@@ -106,9 +106,7 @@
     "communication_preference": "Communication preference",
     "risk_notes": "Risk notes",
     "cooperation_history": "Cooperation history",
-    "suggest": "Suggest profile",
-    "suggestion_title": "Profile suggestion",
-    "apply_suggestion": "Apply suggestion"
+    "refresh": "Refresh profile"
   },
   "projects": {
     "title": "Projects",

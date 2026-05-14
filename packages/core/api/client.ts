@@ -72,7 +72,6 @@ import type {
   CRMIMAPSetting,
   CRMIMAPTestResponse,
   CRMIMAPPreviewResponse,
-  CRMProfileSuggestion,
   UpsertCRMIMAPSettingRequest,
   ListCRMIMAPSettingsResponse,
   CreateCRMAccountRequest,
@@ -1279,8 +1278,12 @@ export class ApiClient {
     });
   }
 
-  async suggestCRMAccountProfile(accountId: string): Promise<CRMProfileSuggestion> {
+  async refreshCRMAccountProfile(accountId: string): Promise<CRMAccountProfile> {
     return this.fetch(`/api/crm/accounts/${accountId}/profile/suggestions`, { method: "POST" });
+  }
+
+  async suggestCRMAccountProfile(accountId: string): Promise<CRMAccountProfile> {
+    return this.refreshCRMAccountProfile(accountId);
   }
 
   async applyCRMAccountProfileSuggestion(accountId: string, suggestionId: string): Promise<{ ok: boolean }> {

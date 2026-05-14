@@ -1087,6 +1087,7 @@ func (h *Handler) UpdateCRMAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update CRM account")
 		return
 	}
+	_, _ = h.regenerateCRMAccountProfile(r.Context(), workspaceID, accountID)
 	writeJSON(w, http.StatusOK, crmAccountToResponse(row))
 }
 
@@ -1633,6 +1634,74 @@ func (h *Handler) PreviewCRMIMAP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"messages": []any{}, "total": 0, "limit": limit, "sync_enabled": false, "note": "Manual preview only; automatic IMAP sync is disabled."})
 }
 
+func crmTextValue(t pgtype.Text) string {
+	if !t.Valid {
+		return ""
+	}
+	return strings.TrimSpace(t.String)
+}
+
+func (h *Handler) regenerateCRMAccountProfile(ctx context.Context, workspaceID, accountID pgtype.UUID) (CRMAccountProfileResponse, error) {
+	var name, status, rating, priority string
+	var website, countryName, industry, notes pgtype.Text
+	if err := h.DB.QueryRow(ctx, `SELECT name, status, rating, priority, website, country_name, industry, notes FROM crm_account WHERE id=$1 AND workspace_id=$2`, accountID, workspaceID).Scan(&name, &status, &rating, &priority, &website, &countryName, &industry, &notes); err != nil {
+		return CRMAccountProfileResponse{}, err
+	}
+	rows, err := h.DB.Query(ctx, `SELECT channel, direction, COALESCE(subject,''), body FROM crm_communication_note WHERE account_id=$1 AND workspace_id=$2 ORDER BY occurred_at DESC, created_at DESC LIMIT 5`, accountID, workspaceID)
+	if err != nil {
+		return CRMAccountProfileResponse{}, err
+	}
+	defer rows.Close()
+	communications := make([]string, 0, 5)
+	for rows.Next() {
+		var channel, direction, subject, body string
+		if err := rows.Scan(&channel, &direction, &subject, &body); err == nil {
+			line := strings.TrimSpace(strings.Join([]string{channel, direction, subject, body}, " "))
+			if len(line) > 220 {
+				line = line[:220]
+			}
+			communications = append(communications, line)
+		}
+	}
+	country := crmTextValue(countryName)
+	industryValue := crmTextValue(industry)
+	baseParts := []string{name}
+	if industryValue != "" {
+		baseParts = append(baseParts, industryValue)
+	}
+	if country != "" {
+		baseParts = append(baseParts, country)
+	}
+	summary := strings.TrimSpace(strings.Join(baseParts, " · "))
+	if summary == "" {
+		summary = "CRM customer profile"
+	}
+	if len(communications) > 0 {
+		summary += "。最近往来：" + communications[0]
+	}
+	profile := map[string]any{
+		"business_model":           strings.TrimSpace(strings.Join([]string{industryValue, crmTextValue(website)}, " ")),
+		"main_products":            "根据客户基础信息和往来记录持续更新；请在后续沟通中补充具体产品。",
+		"procurement_needs":        "结合最近往来跟进需求、数量、交期、目标价格和决策人。",
+		"pain_points":              strings.Join(communications, "\n"),
+		"decision_process":         "根据联系人、项目和历史往来持续归纳；优先确认决策链路和采购周期。",
+		"communication_preference": "参考最近往来渠道和回复习惯安排跟进。",
+		"risk_notes":               strings.TrimSpace(strings.Join([]string{crmTextValue(notes), "自动画像由客户信息和历史往来生成；新增往来或修改客户信息会自动刷新。"}, "\n")),
+		"cooperation_history":      strings.Join(communications, "\n"),
+		"rating_hint":              rating,
+		"priority_hint":            priority,
+		"status_hint":              status,
+		"auto_generated":           true,
+	}
+	profileJSON, _ := json.Marshal(profile)
+	var rawProfile []byte
+	var updatedAt pgtype.Timestamptz
+	if err := h.DB.QueryRow(ctx, `INSERT INTO crm_account_profile (workspace_id, account_id, summary, profile_json, updated_at) VALUES ($1,$2,$3,$4,now()) ON CONFLICT (account_id) DO UPDATE SET summary=EXCLUDED.summary, profile_json=EXCLUDED.profile_json, updated_at=now() RETURNING profile_json, updated_at`, workspaceID, accountID, summary, profileJSON).Scan(&rawProfile, &updatedAt); err != nil {
+		return CRMAccountProfileResponse{}, err
+	}
+	return CRMAccountProfileResponse{WorkspaceID: uuidToString(workspaceID), AccountID: uuidToString(accountID), Summary: &summary, ProfileJSON: rawProfile, UpdatedAt: timestampToString(updatedAt)}, nil
+}
+
 func (h *Handler) SuggestCRMAccountProfile(w http.ResponseWriter, r *http.Request) {
 	workspaceID, ok := h.crmWorkspaceUUID(w, r)
 	if !ok {
@@ -1642,22 +1711,16 @@ func (h *Handler) SuggestCRMAccountProfile(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	var name string
-	if err := h.DB.QueryRow(r.Context(), `SELECT name FROM crm_account WHERE id=$1 AND workspace_id=$2`, accountID, workspaceID).Scan(&name); err != nil {
-		writeError(w, http.StatusNotFound, "CRM account not found")
+	profile, err := h.regenerateCRMAccountProfile(r.Context(), workspaceID, accountID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "CRM account not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to generate CRM profile")
 		return
 	}
-	var noteCount int32
-	_ = h.DB.QueryRow(r.Context(), `SELECT COUNT(*)::int FROM crm_communication_note WHERE account_id=$1 AND workspace_id=$2`, accountID, workspaceID).Scan(&noteCount)
-	profile := json.RawMessage(`{"communication_preference":"Review recent communications before next follow-up","procurement_needs":"Confirm demand, timeline, and target products manually","risk_notes":"AI suggestion requires manual review"}`)
-	summary := "Suggested profile for " + name + " based on CRM communications. Review before applying."
-	var id pgtype.UUID
-	var created pgtype.Timestamptz
-	if err := h.DB.QueryRow(r.Context(), `INSERT INTO crm_profile_suggestion (workspace_id, account_id, summary, profile_json, source_count) VALUES ($1,$2,$3,$4,$5) RETURNING id, created_at`, workspaceID, accountID, summary, profile, noteCount).Scan(&id, &created); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create CRM profile suggestion")
-		return
-	}
-	writeJSON(w, http.StatusCreated, CRMProfileSuggestionResponse{ID: uuidToString(id), WorkspaceID: uuidToString(workspaceID), AccountID: uuidToString(accountID), Summary: &summary, ProfileJSON: profile, SourceCount: noteCount, Status: "draft", CreatedAt: timestampToString(created)})
+	writeJSON(w, http.StatusOK, profile)
 }
 
 func (h *Handler) ApplyCRMAccountProfileSuggestion(w http.ResponseWriter, r *http.Request) {
@@ -2002,6 +2065,7 @@ func (h *Handler) CreateCRMCommunicationNote(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed to create CRM communication note")
 		return
 	}
+	_, _ = h.regenerateCRMAccountProfile(r.Context(), workspaceID, accountID)
 	writeJSON(w, http.StatusCreated, CRMCommunicationNoteResponse{
 		ID: uuidToString(id), WorkspaceID: uuidToString(outWorkspaceID), AccountID: uuidToPtr(outAccountID), ContactID: uuidToPtr(outContactID),
 		Channel: outChannel, Direction: outDirection, OccurredAt: timestampToString(outOccurredAt), Subject: textToPtr(outSubject), Body: outBody,
