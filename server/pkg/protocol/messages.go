@@ -137,6 +137,8 @@ type DaemonHeartbeatAccount struct {
 type DaemonHeartbeatAckPayload struct {
 	RuntimeID               string                                  `json:"runtime_id"`
 	Status                  string                                  `json:"status"`
+	// CEREBRO-PATCH(heartbeat-account-id-ack): JEH-881 registered cerebro account_id for this runtime.
+	CerebroAccountID        string                                  `json:"cerebro_account_id,omitempty"`
 	PendingUpdate           *DaemonHeartbeatPendingUpdate           `json:"pending_update,omitempty"`
 	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`
 	PendingLocalSkills      *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`

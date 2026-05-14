@@ -923,7 +923,8 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	// runtime's detected login identity on the heartbeat; recordHeartbeatAccount
 	// upserts cerebro_account + links agent_runtime.current_account_id. Best-
 	// effort; failures are logged but never block the heartbeat ack.
-	h.recordHeartbeatAccount(r.Context(), rt, req.Account)
+	// CEREBRO-PATCH(heartbeat-account-id-ack): JEH-881 capture account_id for ack.
+	cerebroAccountID := h.recordHeartbeatAccount(r.Context(), rt, req.Account)
 	// W4.2: detect CLI-version drift. When the daemon's reported CLI version
 	// differs from the row, the runtime's tool surface may have changed and
 	// persona's scanner-discovery view is now stale. Persist any capabilities
@@ -954,6 +955,10 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	// in the WS path and would be redundant noise on the HTTP path where the
 	// caller already knows which runtime it asked about.
 	resp := map[string]any{"status": ack.Status}
+	// CEREBRO-PATCH(heartbeat-account-id-ack): JEH-881 return account_id so daemon can cache it.
+	if cerebroAccountID != "" {
+		resp["cerebro_account_id"] = cerebroAccountID
+	}
 	if ack.PendingUpdate != nil {
 		resp["pending_update"] = ack.PendingUpdate
 	}
@@ -1006,7 +1011,10 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	// CEREBRO-PATCH(heartbeat-account-ws): JEH-997 mirror the HTTP-side
 	// account hook on the WS path so daemons that stay on WS still get
 	// their login identity registered.
-	h.recordHeartbeatAccount(ctx, rt, payload.Account)
+	// CEREBRO-PATCH(heartbeat-account-id-ack): JEH-881 forward registered account_id in WS ack.
+	if cerebroAccountID := h.recordHeartbeatAccount(ctx, rt, payload.Account); ack != nil && cerebroAccountID != "" {
+		ack.CerebroAccountID = cerebroAccountID
+	}
 	return ack, err
 }
 

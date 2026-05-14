@@ -241,6 +241,8 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, erro
 type HeartbeatResponse struct {
 	RuntimeID               string                   `json:"runtime_id"`
 	Status                  string                   `json:"status"`
+	// CEREBRO-PATCH(heartbeat-account-id-ack): JEH-881 registered cerebro account_id.
+	CerebroAccountID        string                   `json:"cerebro_account_id,omitempty"`
 	PendingPing             *PendingPing             `json:"pending_ping,omitempty"`
 	PendingUpdate           *PendingUpdate           `json:"pending_update,omitempty"`
 	PendingModelList        *PendingModelList        `json:"pending_model_list,omitempty"`

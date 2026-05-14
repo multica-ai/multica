@@ -272,6 +272,10 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 				continue
 			}
 			d.recordWSHeartbeatAck(ack.RuntimeID)
+			// CEREBRO-PATCH(daemon-ws-account-id-cache): JEH-881 cache account_id from WS ack.
+			if d.accountIdentities != nil {
+				d.accountIdentities.setAccountID(ack.RuntimeID, ack.CerebroAccountID)
+			}
 			d.handleHeartbeatActions(context.Background(), ack.RuntimeID, &ack)
 		}
 	}
