@@ -253,6 +253,18 @@ describe("SearchCommand", () => {
     expect(useSearchStore.getState().open).toBe(false);
   });
 
+  it("opens the full search page when pressing Enter in the input", async () => {
+    const user = userEvent.setup();
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "mobile search{Enter}");
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/search?q=mobile%20search");
+    expect(mockOpenModal).not.toHaveBeenCalled();
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
   it("renders recent issues from query cache joined with store visit records", () => {
     mockRecentItems.current = [
       { id: "issue-1", visitedAt: 1000 },

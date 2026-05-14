@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   Check,
   Clock,
@@ -321,7 +322,7 @@ export function SearchCommand() {
 
   // Global Cmd+K / Ctrl+K shortcut
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         useSearchStore.getState().toggle();
@@ -334,7 +335,7 @@ export function SearchCommand() {
   // Close on single ESC — capture phase fires before base-ui Dialog's handlers
   useEffect(() => {
     if (!open) return;
-    const handleEsc = (e: KeyboardEvent) => {
+    const handleEsc = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
@@ -450,6 +451,17 @@ export function SearchCommand() {
     push(q ? `${p.search()}?q=${encodeURIComponent(q)}` : p.search());
   }, [p, push, query, setOpen]);
 
+  // CEREBRO-PATCH(search-page-enter-1326): JEH-1326 — Enter in the palette search input opens the full search page.
+  const handleInputKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLInputElement>) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      event.stopPropagation();
+      handleOpenSearchPage();
+    },
+    [handleOpenSearchPage],
+  );
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
@@ -474,6 +486,7 @@ export function SearchCommand() {
               placeholder={t(($) => $.placeholder)}
               value={query}
               onValueChange={handleValueChange}
+              onKeyDown={handleInputKeyDown}
               className="flex-1 bg-transparent text-base md:text-sm outline-none placeholder:text-muted-foreground"
             />
             <kbd className="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline">

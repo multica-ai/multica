@@ -43,6 +43,9 @@ type SearchScope = "all" | "issues" | "projects" | "tasks" | "chats";
 type ClosedFilter = "open" | "all";
 type TaskStatusFilter = "all" | TaskStatus;
 type TaskTypeFilter = "all" | TaskType;
+// CEREBRO-PATCH(search-page-date-filters-1326): JEH-1326 — full-page search date filtering controls.
+type DateField = "created" | "activity";
+type DateRange = "all" | "24h" | "7d" | "30d";
 
 interface SearchData {
   issues: SearchIssueResult[];
@@ -55,6 +58,28 @@ const EMPTY_TASKS: CerebroTask[] = [];
 
 function normalize(text: string | null | undefined) {
   return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
+function rangeStart(range: DateRange, now = Date.now()) {
+  if (range === "all") return null;
+  const days = range === "24h" ? 1 : range === "7d" ? 7 : 30;
+  return new Date(now - days * 24 * 60 * 60 * 1000);
+}
+
+function activityAt(row: { updated_at?: string; completed_at?: string; started_at?: string; dispatched_at?: string; created_at?: string }) {
+  return row.updated_at ?? row.completed_at ?? row.started_at ?? row.dispatched_at ?? row.created_at ?? null;
+}
+
+function matchesDateRange(
+  row: { created_at?: string; updated_at?: string; completed_at?: string; started_at?: string; dispatched_at?: string },
+  field: DateField,
+  range: DateRange,
+) {
+  const start = rangeStart(range);
+  if (!start) return true;
+  const raw = field === "created" ? row.created_at : activityAt(row);
+  if (!raw) return false;
+  return new Date(raw).getTime() >= start.getTime();
 }
 
 function useUrlBackedQuery() {
@@ -89,9 +114,11 @@ export function SearchPage() {
   const navigation = useNavigation();
   const [query, setQuery] = useUrlBackedQuery();
   const [scope, setScope] = useState<SearchScope>("all");
-  const [closedFilter, setClosedFilter] = useState<ClosedFilter>("open");
+  const [closedFilter, setClosedFilter] = useState<ClosedFilter>("all");
   const [taskStatus, setTaskStatus] = useState<TaskStatusFilter>("all");
   const [taskType, setTaskType] = useState<TaskTypeFilter>("all");
+  const [dateField, setDateField] = useState<DateField>("activity");
+  const [dateRange, setDateRange] = useState<DateRange>("all");
 
   const trimmedQuery = query.trim();
   const includeClosed = closedFilter === "all";
@@ -135,16 +162,27 @@ export function SearchPage() {
     staleTime: 30 * 1000,
   });
 
-  const searchData = globalSearch.data ?? EMPTY_SEARCH_DATA;
-  const taskRows = tasks.data?.tasks ?? EMPTY_TASKS;
+  const searchData = useMemo(() => {
+    const data = globalSearch.data ?? EMPTY_SEARCH_DATA;
+    if (dateRange === "all") return data;
+    return {
+      issues: data.issues.filter((issue) => matchesDateRange(issue, dateField, dateRange)),
+      projects: data.projects.filter((project) => matchesDateRange(project, dateField, dateRange)),
+    };
+  }, [dateField, dateRange, globalSearch.data]);
+  const taskRows = useMemo(
+    () => (tasks.data?.tasks ?? EMPTY_TASKS).filter((task) => matchesDateRange(task, dateField, dateRange)),
+    [dateField, dateRange, tasks.data?.tasks],
+  );
   const chatRows = useMemo(() => {
     const rows = chats.data ?? EMPTY_CHATS;
-    if (!trimmedQuery) return rows.slice(0, 25);
+    const dated = rows.filter((chat) => matchesDateRange(chat, dateField, dateRange));
+    if (!trimmedQuery) return dated.slice(0, 25);
     const q = trimmedQuery.toLowerCase();
-    return rows
+    return dated
       .filter((chat) => chat.title.toLowerCase().includes(q))
       .slice(0, 25);
-  }, [chats.data, trimmedQuery]);
+  }, [chats.data, dateField, dateRange, trimmedQuery]);
 
   const counts = {
     issues: searchData.issues.length,
@@ -180,7 +218,7 @@ export function SearchPage() {
       </PageHeader>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-3 sm:p-6">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 sm:p-6">
           <div className="border-b bg-background pb-4">
             <div className="flex flex-col gap-3">
               <div className="relative">
@@ -195,9 +233,9 @@ export function SearchPage() {
                 />
               </div>
 
-              <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                 <Tabs value={scope} onValueChange={(value) => setScope(value as SearchScope)}>
-                  <TabsList className="w-full overflow-x-auto sm:w-fit">
+                  <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-lg p-1 sm:w-fit sm:flex-nowrap">
                     <ScopeTab value="all" label="All" count={total} />
                     <ScopeTab value="issues" label="Issues" count={counts.issues} />
                     <ScopeTab value="projects" label="Projects" count={counts.projects} />
@@ -206,14 +244,14 @@ export function SearchPage() {
                   </TabsList>
                 </Tabs>
 
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:flex xl:flex-wrap xl:justify-end">
                   <FilterSelect
                     icon={<SlidersHorizontal className="size-3.5" />}
                     value={closedFilter}
                     onValueChange={(value) => setClosedFilter(value as ClosedFilter)}
                     items={[
+                      ["all", "All statuses"],
                       ["open", "Open only"],
-                      ["all", "Include closed"],
                     ]}
                   />
                   <FilterSelect
@@ -236,6 +274,24 @@ export function SearchPage() {
                       ["all", "Any task type"],
                       ["issue", "Issue tasks"],
                       ["chat", "Chat tasks"],
+                    ]}
+                  />
+                  <FilterSelect
+                    value={dateField}
+                    onValueChange={(value) => setDateField(value as DateField)}
+                    items={[
+                      ["activity", "Last activity"],
+                      ["created", "Created at"],
+                    ]}
+                  />
+                  <FilterSelect
+                    value={dateRange}
+                    onValueChange={(value) => setDateRange(value as DateRange)}
+                    items={[
+                      ["all", "All time"],
+                      ["24h", "Last 24 hours"],
+                      ["7d", "Last 7 days"],
+                      ["30d", "Last 30 days"],
                     ]}
                   />
                 </div>
@@ -372,8 +428,8 @@ export function SearchPage() {
 
 function ScopeTab({ value, label, count }: { value: SearchScope; label: string; count: number }) {
   return (
-    <TabsTrigger value={value} className="min-w-fit">
-      {label}
+    <TabsTrigger value={value} className="basis-[calc(50%-0.125rem)] justify-between px-2 sm:basis-auto">
+      <span>{label}</span>
       <span className="rounded bg-muted-foreground/10 px-1.5 text-[10px] text-muted-foreground">
         {count}
       </span>
@@ -394,7 +450,7 @@ function FilterSelect({
 }) {
   return (
     <Select value={value} onValueChange={(next) => next && onValueChange(next)}>
-      <SelectTrigger className="h-8 w-auto min-w-36 gap-2">
+      <SelectTrigger className="h-8 w-full min-w-0 gap-2 xl:w-auto xl:min-w-36">
         {icon}
         <SelectValue />
       </SelectTrigger>
