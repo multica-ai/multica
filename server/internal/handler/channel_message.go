@@ -286,7 +286,12 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	params := channel.ListMessagesParams{ChannelID: channelUUID}
 	if v := q.Get("before"); v != "" {
-		t, err := time.Parse(time.RFC3339, v)
+		// Try RFC3339Nano first (sub-second cursors), fall back to RFC3339
+		// for any clients that serialised a second-precision cursor.
+		t, err := time.Parse(time.RFC3339Nano, v)
+		if err != nil {
+			t, err = time.Parse(time.RFC3339, v)
+		}
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid before parameter; expected RFC3339")
 			return
@@ -339,8 +344,13 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 		out[i] = resp
 	}
 	var nextCursor string
-	if hasMore && len(out) > 0 {
-		nextCursor = out[len(out)-1].CreatedAt
+	if hasMore && len(msgs) > 0 {
+		// Use the raw DB timestamp at nanosecond precision so the cursor
+		// survives a round-trip through the SQL `created_at <` comparison.
+		// out[last].CreatedAt is already formatted with second precision
+		// (time.RFC3339), which truncates sub-second timestamps and causes
+		// the next page to miss messages created in the same second.
+		nextCursor = msgs[len(msgs)-1].CreatedAt.Time.UTC().Format(time.RFC3339Nano)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"messages":    out,
