@@ -15,12 +15,11 @@
 #   1. git fetch origin/main, exit 0 if no new commits.
 #   2. git reset --hard origin/main (no local commits expected).
 #   3. pnpm install + Go build + migrate + Next build.
-#   4. Restart backend and frontend unconditionally.
-#      Restart daemon only when server/ changed (JEH-1227): the daemon
-#      binary is rebuilt from server/ — if that directory didn't change the
-#      old binary is still valid and a restart would needlessly interrupt
-#      any in-progress agent work. If server/ DID change, the restart is
-#      mandatory (same reasoning as JEH-438 / JEH-379).
+#   4. Restart backend + frontend unconditionally (JEH-438).
+#      Daemon is restarted ONLY if daemon source changed (server/cmd/multica/,
+#      server/internal/daemon/, server/internal/daemonws/). A hard kill
+#      (kickstart -k) interrupts any agent task in flight — skipping the
+#      restart on routine frontend/backend deploys preserves running tasks.
 
 set -euo pipefail
 
@@ -69,21 +68,26 @@ make migrate-up || echo "WARN: migrate-up failed (may be no-op)"
 echo "Building Next.js frontend…"
 pnpm --filter @multica/web build
 
-# Restart backend and frontend unconditionally — they always need the
-# new binary / Next.js output.
+# Restart backend + frontend unconditionally. JEH-438: make build overwrites
+# the binary on disk but the running launchd job keeps the old one until
+# kickstart. Backend and frontend are stateless so hard-killing them is safe.
 echo "Restarting backend and frontend…"
 launchctl kickstart -k gui/$(id -u)/com.multica.backend
 launchctl kickstart -k gui/$(id -u)/com.multica.frontend
 
-# Restart daemon only when Go code changed (JEH-1227). `make build`
-# rewrites the binary, but if nothing in server/ changed the running
-# daemon is still valid — restarting it would kill any in-progress agent
-# task for no gain. If server/ DID change we must restart (JEH-438).
-if git diff "$OLD_SHA" "$NEW_SHA" --name-only | grep -q '^server/'; then
-  echo "server/ changed — restarting daemon…"
+# Daemon: restart only when daemon source changed. The daemon runs long-lived
+# agent tasks — kickstart -k sends SIGKILL and interrupts any task in flight.
+# Skipping the restart on deploys that only touch frontend or non-daemon
+# backend code lets running agent tasks finish uninterrupted.
+#
+# To force a daemon restart manually after a deploy:
+#   launchctl kickstart -k gui/$(id -u)/com.multica.daemon
+if git diff --name-only "$OLD_SHA" "$NEW_SHA" \
+    | grep -qE '^server/cmd/multica/|^server/internal/daemon/|^server/internal/daemonws/'; then
+  echo "Daemon source changed — restarting daemon (running agent tasks will be interrupted)."
   launchctl kickstart -k gui/$(id -u)/com.multica.daemon
 else
-  echo "No server/ changes — skipping daemon restart (agent work preserved)."
+  echo "Daemon source unchanged — skipping daemon restart to preserve running agent tasks."
 fi
 
 echo "=== deploy finished: $(date -Iseconds) ==="
