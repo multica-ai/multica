@@ -26,8 +26,24 @@ type Handler struct {
 // (Service surfaces ErrCipherMissing if it isn't wired) so tests can stand
 // up the package without a real key; production callers should always
 // supply NewCipherFromEnv() and fail startup if it returned nil.
+//
+// JEH-1197: the returned handler ships with DenyAllChecker as the policy.
+// Production callers chain .WithPolicy(...) to wire the owner+persona
+// composite before mounting routes.
 func New(cerebro *cerebrodb.Queries, cipher *Cipher, bus *events.Bus) *Handler {
 	return &Handler{Service: NewService(cerebro, cipher, bus)}
+}
+
+// WithPolicy returns the handler with its Service rebound to use the
+// supplied policy checker. Chained from the router so the wiring stays
+// a single CEREBRO-PATCH line in cmd/server/router.go.
+func (h *Handler) WithPolicy(p PolicyChecker) *Handler {
+	if h == nil {
+		return nil
+	}
+	clone := *h
+	clone.Service = h.Service.WithPolicy(p)
+	return &clone
 }
 
 // Mount registers every credential-registry route under the workspace-scoped
@@ -81,8 +97,18 @@ type bindingRequest struct {
 }
 
 // List handles GET /api/workspaces/{id}/credentials.
+//
+// JEH-1197: read_redacted policy is enforced per-credential. Rows the
+// actor cannot read are filtered out — no error, just an empty list
+// when the workspace has nothing the caller is allowed to see. We do
+// NOT write an allow audit row for each list-row (volume), but a deny
+// row IS written by AuthorizeRead so a probing actor leaves a trail.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	wsID, ok := workspaceIDFromRequest(w, r)
+	if !ok {
+		return
+	}
+	actorType, actorID, ok := actorFromRequest(w, r)
 	if !ok {
 		return
 	}
@@ -92,9 +118,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list credentials")
 		return
 	}
-	out := make([]CredentialResponse, len(rows))
-	for i, row := range rows {
-		out[i] = credentialResponseFromModel(row)
+	out := make([]CredentialResponse, 0, len(rows))
+	for _, row := range rows {
+		if err := h.Service.AuthorizeRead(r.Context(), row.WorkspaceID, row.ID, Type(row.Type), actorType, actorID); err != nil {
+			if errors.Is(err, ErrPolicyDenied) {
+				continue
+			}
+			h.writeServiceError(w, r, err)
+			return
+		}
+		out = append(out, credentialResponseFromModel(row))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"credentials": out})
 }
@@ -105,8 +138,16 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	actorType, actorID, ok := actorFromRequest(w, r)
+	if !ok {
+		return
+	}
 	row, err := h.Service.Get(r.Context(), wsID, credID)
 	if err != nil {
+		h.writeServiceError(w, r, err)
+		return
+	}
+	if err := h.Service.AuthorizeRead(r.Context(), row.WorkspaceID, row.ID, Type(row.Type), actorType, actorID); err != nil {
 		h.writeServiceError(w, r, err)
 		return
 	}
@@ -269,6 +310,19 @@ func (h *Handler) ListBindings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	actorType, actorID, ok := actorFromRequest(w, r)
+	if !ok {
+		return
+	}
+	cred, err := h.Service.Get(r.Context(), wsID, credID)
+	if err != nil {
+		h.writeServiceError(w, r, err)
+		return
+	}
+	if err := h.Service.AuthorizeRead(r.Context(), cred.WorkspaceID, cred.ID, Type(cred.Type), actorType, actorID); err != nil {
+		h.writeServiceError(w, r, err)
+		return
+	}
 	rows, err := h.Service.ListBindings(r.Context(), wsID, credID)
 	if err != nil {
 		h.writeServiceError(w, r, err)
@@ -332,9 +386,27 @@ func (h *Handler) DeleteBinding(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListAudit handles GET /api/workspaces/{id}/credentials/{credId}/audit.
+//
+// JEH-1197: gated by read_redacted because the audit trail names every
+// member/agent that has touched the credential. The same actor that may
+// see the redacted credential is the one allowed to see its audit
+// trail.
 func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
 	wsID, credID, ok := h.credentialIDs(w, r)
 	if !ok {
+		return
+	}
+	actorType, actorID, ok := actorFromRequest(w, r)
+	if !ok {
+		return
+	}
+	cred, err := h.Service.Get(r.Context(), wsID, credID)
+	if err != nil {
+		h.writeServiceError(w, r, err)
+		return
+	}
+	if err := h.Service.AuthorizeRead(r.Context(), cred.WorkspaceID, cred.ID, Type(cred.Type), actorType, actorID); err != nil {
+		h.writeServiceError(w, r, err)
 		return
 	}
 	limit := int32(100)
@@ -363,6 +435,8 @@ type auditResponse struct {
 	ActorType    string          `json:"actor_type"`
 	ActorID      string          `json:"actor_id"`
 	Metadata     json.RawMessage `json:"metadata"`
+	Result       string          `json:"result"`
+	Reason       string          `json:"reason"`
 	CreatedAt    string          `json:"created_at"`
 }
 
@@ -379,6 +453,8 @@ func auditResponseFromModel(a cerebrodb.CerebroCredentialAudit) auditResponse {
 		ActorType:    a.ActorType,
 		ActorID:      util.UUIDToString(a.ActorID),
 		Metadata:     meta,
+		Result:       a.Result,
+		Reason:       a.Reason,
 		CreatedAt:    util.TimestampToString(a.CreatedAt),
 	}
 }
@@ -420,6 +496,16 @@ func (h *Handler) writeServiceError(w http.ResponseWriter, r *http.Request, err 
 		writeError(w, http.StatusServiceUnavailable, "credentials encryption is not configured")
 	case errors.Is(err, ErrInvalidCiphertext):
 		writeError(w, http.StatusInternalServerError, "credential ciphertext is invalid")
+	case errors.Is(err, ErrPolicyDenied):
+		// JEH-1197: 403 carries the policy reason so a UI can surface
+		// why a member or agent is blocked. The audit row already has
+		// the same reason recorded server-side.
+		reason := "policy denied this action"
+		var pe *PolicyDeniedError
+		if errors.As(err, &pe) && pe != nil {
+			reason = pe.Error()
+		}
+		writeError(w, http.StatusForbidden, reason)
 	default:
 		slog.Error("credentials request failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "credentials request failed")

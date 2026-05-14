@@ -66,13 +66,19 @@ DELETE FROM cerebro_credential_binding WHERE id = $1;
 
 -- name: RecordCerebroCredentialAudit :one
 INSERT INTO cerebro_credential_audit (
-    workspace_id, credential_id, action, actor_type, actor_id, metadata
+    workspace_id, credential_id, action, actor_type, actor_id, metadata, result, reason
 )
-VALUES ($1, $2, $3, $4, $5, $6)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: ListCerebroCredentialAudit :many
 SELECT * FROM cerebro_credential_audit
 WHERE credential_id = $1
+ORDER BY created_at DESC, id DESC
+LIMIT $2;
+
+-- name: ListCerebroCredentialAuditByWorkspace :many
+SELECT * FROM cerebro_credential_audit
+WHERE workspace_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT $2;

@@ -64,6 +64,17 @@ const (
 	ActionRotate Action = "rotate"
 	ActionBind   Action = "bind"
 	ActionUnbind Action = "unbind"
+	// ActionRead is recorded only on a policy-denied read attempt.
+	// Allowed reads are NOT written to keep the audit volume bounded.
+	ActionRead Action = "read"
+)
+
+// Result is the cerebro_credential_audit.result column added by
+// migration 9025. Every row carries a result; the column defaults to
+// 'allow' so the existing reveal/rotate/etc rows backfill cleanly.
+const (
+	AuditResultAllow = "allow"
+	AuditResultDeny  = "deny"
 )
 
 // CredentialResponse is the redacted JSON shape returned by list/get. It

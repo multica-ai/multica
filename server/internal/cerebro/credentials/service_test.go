@@ -116,7 +116,11 @@ func newServiceTest(t *testing.T) (*Service, *eventRecorder) {
 	}
 	bus := events.New()
 	rec := newEventRecorder(bus)
-	svc := NewService(cerebrodb.New(credentialsTestPool), cipher, bus)
+	// JEH-1197: existing tests focus on encryption/audit/bindings — they
+	// pre-date policy enforcement and don't insert a member row, so we
+	// give them AllowAllChecker. Policy-specific behaviour is covered in
+	// policy_test.go (TestService_PolicyEnforces*).
+	svc := NewService(cerebrodb.New(credentialsTestPool), cipher, bus).WithPolicy(AllowAllChecker)
 
 	t.Cleanup(func() {
 		ctx := context.Background()

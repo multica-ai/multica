@@ -281,6 +281,8 @@ type CerebroCredentialAudit struct {
 	ActorID      pgtype.UUID        `json:"actor_id"`
 	Metadata     []byte             `json:"metadata"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	Result       string             `json:"result"`
+	Reason       string             `json:"reason"`
 }
 
 type CerebroCredentialBinding struct {

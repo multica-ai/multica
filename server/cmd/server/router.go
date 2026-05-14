@@ -207,8 +207,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.GroupPermissions = cerebrogrouppermissions.NewHandlerSeam(cerebroGroupPermissionsHandler.Service)
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 workspace accounts handler
 	cerebroAccountHandler := cerebroaccount.New(cerebroQueries, bus)
-	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196 credential registry handler — cipher loaded from MULTICA_CREDENTIALS_KEY; nil cipher → 503 at request time.
-	cerebroCredentialsHandler := cerebrocredentials.New(cerebroQueries, cerebrocredentials.MustNewCipherFromEnv(), bus)
+	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196/1197 credential registry handler — cipher loaded from MULTICA_CREDENTIALS_KEY, governance policy wired via newCredentialsPolicy (owner-only when persona env is unset).
+	cerebroCredentialsHandler := cerebrocredentials.New(cerebroQueries, cerebrocredentials.MustNewCipherFromEnv(), bus).WithPolicy(newCredentialsPolicy(queries))
 	// CEREBRO-PATCH(references-routes): JEH-837 issue references handler instance.
 	cerebroReferencesHandler := cerebroreferences.New(cerebroQueries, queries, bus)
 	// CEREBRO-PATCH(router-runtime-pause): mount cerebro pause/unpause service so

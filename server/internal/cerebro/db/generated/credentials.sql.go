@@ -170,7 +170,7 @@ func (q *Queries) GetCerebroCredentialBinding(ctx context.Context, id pgtype.UUI
 }
 
 const listCerebroCredentialAudit = `-- name: ListCerebroCredentialAudit :many
-SELECT id, workspace_id, credential_id, action, actor_type, actor_id, metadata, created_at FROM cerebro_credential_audit
+SELECT id, workspace_id, credential_id, action, actor_type, actor_id, metadata, created_at, result, reason FROM cerebro_credential_audit
 WHERE credential_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT $2
@@ -199,6 +199,51 @@ func (q *Queries) ListCerebroCredentialAudit(ctx context.Context, arg ListCerebr
 			&i.ActorID,
 			&i.Metadata,
 			&i.CreatedAt,
+			&i.Result,
+			&i.Reason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCerebroCredentialAuditByWorkspace = `-- name: ListCerebroCredentialAuditByWorkspace :many
+SELECT id, workspace_id, credential_id, action, actor_type, actor_id, metadata, created_at, result, reason FROM cerebro_credential_audit
+WHERE workspace_id = $1
+ORDER BY created_at DESC, id DESC
+LIMIT $2
+`
+
+type ListCerebroCredentialAuditByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Limit       int32       `json:"limit"`
+}
+
+func (q *Queries) ListCerebroCredentialAuditByWorkspace(ctx context.Context, arg ListCerebroCredentialAuditByWorkspaceParams) ([]CerebroCredentialAudit, error) {
+	rows, err := q.db.Query(ctx, listCerebroCredentialAuditByWorkspace, arg.WorkspaceID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CerebroCredentialAudit{}
+	for rows.Next() {
+		var i CerebroCredentialAudit
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.CredentialID,
+			&i.Action,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.Result,
+			&i.Reason,
 		); err != nil {
 			return nil, err
 		}
@@ -335,10 +380,10 @@ func (q *Queries) ListCerebroCredentialsForResource(ctx context.Context, arg Lis
 
 const recordCerebroCredentialAudit = `-- name: RecordCerebroCredentialAudit :one
 INSERT INTO cerebro_credential_audit (
-    workspace_id, credential_id, action, actor_type, actor_id, metadata
+    workspace_id, credential_id, action, actor_type, actor_id, metadata, result, reason
 )
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, workspace_id, credential_id, action, actor_type, actor_id, metadata, created_at
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, workspace_id, credential_id, action, actor_type, actor_id, metadata, created_at, result, reason
 `
 
 type RecordCerebroCredentialAuditParams struct {
@@ -348,6 +393,8 @@ type RecordCerebroCredentialAuditParams struct {
 	ActorType    string      `json:"actor_type"`
 	ActorID      pgtype.UUID `json:"actor_id"`
 	Metadata     []byte      `json:"metadata"`
+	Result       string      `json:"result"`
+	Reason       string      `json:"reason"`
 }
 
 func (q *Queries) RecordCerebroCredentialAudit(ctx context.Context, arg RecordCerebroCredentialAuditParams) (CerebroCredentialAudit, error) {
@@ -358,6 +405,8 @@ func (q *Queries) RecordCerebroCredentialAudit(ctx context.Context, arg RecordCe
 		arg.ActorType,
 		arg.ActorID,
 		arg.Metadata,
+		arg.Result,
+		arg.Reason,
 	)
 	var i CerebroCredentialAudit
 	err := row.Scan(
@@ -369,6 +418,8 @@ func (q *Queries) RecordCerebroCredentialAudit(ctx context.Context, arg RecordCe
 		&i.ActorID,
 		&i.Metadata,
 		&i.CreatedAt,
+		&i.Result,
+		&i.Reason,
 	)
 	return i, err
 }
