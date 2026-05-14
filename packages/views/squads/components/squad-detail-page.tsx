@@ -968,7 +968,7 @@ function SquadOverviewPane({
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         {activeTab === "members" && (
-          <div className="mx-auto flex h-full max-w-2xl flex-col p-4 md:p-6">
+          <div className="flex h-full flex-col p-4 md:p-6">
             <SquadMembersTab
               members={members}
               isLeader={isLeader}
@@ -983,7 +983,7 @@ function SquadOverviewPane({
           </div>
         )}
         {activeTab === "instructions" && (
-          <div className="mx-auto flex h-full max-w-2xl flex-col p-4 md:p-6">
+          <div className="flex h-full flex-col p-4 md:p-6">
             <SquadInstructionsTab
               squad={squad}
               onSave={onSaveInstructions}
