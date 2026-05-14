@@ -78,6 +78,7 @@ type AgentRuntime struct {
 	UnpauseAt        pgtype.Timestamptz `json:"unpause_at"`
 	PauseReason      pgtype.Text        `json:"pause_reason"`
 	CurrentAccountID pgtype.UUID        `json:"current_account_id"`
+	PresentationMode string             `json:"presentation_mode"`
 	PersonaSandbox   pgtype.Text        `json:"persona_sandbox"`
 	Capabilities     []byte             `json:"capabilities"`
 	CliVersion       pgtype.Text        `json:"cli_version"`

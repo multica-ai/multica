@@ -227,15 +227,17 @@ func (h *Handler) AttachWS(w http.ResponseWriter, r *http.Request) {
 	upgrader := websocket.Upgrader{CheckOrigin: h.CheckOrigin}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		slog.Debug("terminal: ws upgrade failed", "error", err)
+		slog.Warn("terminal: ws upgrade failed", "error", err, "session", sessionID)
 		return
 	}
 	defer conn.Close()
+	slog.Info("terminal: ws attached", "session", sessionID, "user", userID)
 
 	sub, write, detach := s.Attach()
 	defer detach()
 
 	servePump(r.Context(), conn, s, sub, write)
+	slog.Info("terminal: ws detached", "session", sessionID)
 }
 
 // servePump is the per-connection bidirectional pump.

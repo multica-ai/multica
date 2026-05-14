@@ -27,6 +27,9 @@ const (
 	stdoutChunkBytes = 4096
 	subscriberBuffer = 64
 	maxSessionAge    = 8 * time.Hour
+	// historyBytesMax bounds the replay buffer so a long-running session
+	// doesn't grow unbounded. New attachers see the last N bytes of stdout.
+	historyBytesMax = 64 * 1024
 )
 
 // Session is a single PTY-style stream backed by a child process.
@@ -44,6 +47,7 @@ type Session struct {
 
 	mu          sync.Mutex
 	subscribers map[*Subscriber]struct{}
+	history     []byte // ring of recent stdout bytes; replayed on Attach
 	closed      atomic.Bool
 	exitErr     error
 	done        chan struct{}
@@ -183,12 +187,27 @@ func (b *Broker) Close(id string) error {
 
 // Attach registers a Subscriber for stdout chunks. It returns the
 // subscriber, a function to write stdin, and an unsubscribe func that the
-// caller MUST invoke when done.
+// caller MUST invoke when done. The subscriber receives the recent stdout
+// history (last historyBytesMax bytes) as the first chunk so a fresh
+// attach renders the current screen state correctly.
 func (s *Session) Attach() (sub *Subscriber, write func([]byte) error, detach func()) {
 	sub = newSubscriber()
 	s.mu.Lock()
 	s.subscribers[sub] = struct{}{}
+	var replay []byte
+	if len(s.history) > 0 {
+		replay = make([]byte, len(s.history))
+		copy(replay, s.history)
+	}
 	s.mu.Unlock()
+	if replay != nil {
+		// Non-blocking send — buffer is size 64 and this is the first
+		// write, so it always fits unless the caller pre-loaded it.
+		select {
+		case sub.C <- replay:
+		default:
+		}
+	}
 
 	write = func(p []byte) error {
 		if s.closed.Load() {
@@ -231,9 +250,17 @@ func (s *Session) readLoop() {
 	s.terminate(waitErr)
 }
 
-// fanout broadcasts to every subscriber, evicting any whose buffer is full.
+// fanout broadcasts to every subscriber, evicting any whose buffer is
+// full. Also appends to the bounded history buffer so a fresh Attach can
+// replay recent output.
 func (s *Session) fanout(chunk []byte) {
 	s.mu.Lock()
+	// Append to history, trimming from the head if we exceed the cap.
+	s.history = append(s.history, chunk...)
+	if len(s.history) > historyBytesMax {
+		drop := len(s.history) - historyBytesMax
+		s.history = s.history[drop:]
+	}
 	slow := make([]*Subscriber, 0)
 	for sub := range s.subscribers {
 		select {
