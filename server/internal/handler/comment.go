@@ -440,6 +440,42 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		mentions = util.ParseMentions(parentComment.Content)
 	}
 	for _, m := range mentions {
+		if m.Type == "squad" {
+			// @squad mention → trigger the squad's leader agent.
+			squadUUID := parseUUID(m.ID)
+			squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+				ID:          squadUUID,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil {
+				continue
+			}
+			leaderID := squad.LeaderID
+			// Prevent self-trigger: skip if the comment author is the leader.
+			if authorType == "agent" && authorID == uuidToString(leaderID) {
+				continue
+			}
+			// Verify leader agent is ready (has runtime, not archived).
+			agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+				ID:          leaderID,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+				continue
+			}
+			// Dedup: skip if leader already has a pending task for this issue.
+			hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+				IssueID: issue.ID,
+				AgentID: leaderID,
+			})
+			if err != nil || hasPending {
+				continue
+			}
+			if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, leaderID, comment.ID); err != nil {
+				slog.Warn("enqueue squad leader mention task failed", "issue_id", uuidToString(issue.ID), "squad_id", m.ID, "error", err)
+			}
+			continue
+		}
 		if m.Type != "agent" {
 			continue
 		}
