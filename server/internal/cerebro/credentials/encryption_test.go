@@ -43,7 +43,11 @@ func TestCipher_EncryptDecryptRoundTrip(t *testing.T) {
 			t.Fatalf("Encrypt(%q): %v", pt, err)
 		}
 		// Critical: the ciphertext must not contain the plaintext.
-		if pt != "" && bytes.Contains(blob, []byte(pt)) {
+		// Guarded to len(pt) >= 2 because a single random byte will appear in
+		// the ~29-byte nonce+ciphertext blob ~11% of the time by chance,
+		// producing a flaky false positive. For 2+ bytes the false-positive
+		// rate is < 0.05%.
+		if len(pt) >= 2 && bytes.Contains(blob, []byte(pt)) {
 			t.Fatalf("Encrypt(%q) leaked plaintext into ciphertext", pt)
 		}
 		got, err := c.Decrypt(blob)
