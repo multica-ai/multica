@@ -168,6 +168,14 @@
       "confirm_description": "Closing #{{number}} \"{{title}}\" leaves a courtesy comment for the author. They can reopen on GitHub.",
       "confirm_action": "Close as stale"
     },
+    "close_pr": {
+      "label": "Close PR",
+      "toast_success": "Pull request closed",
+      "toast_in_progress": "Closing pull request…",
+      "confirm_title": "Close this pull request?",
+      "confirm_description": "Closing #{{number}} \"{{title}}\" is irreversible here — you'll need to reopen it on GitHub if you change your mind.",
+      "confirm_action": "Close PR"
+    },
     "talk_to_agent": {
       "label": "Talk to {{agent}}",
       "label_fallback": "Talk to agent",

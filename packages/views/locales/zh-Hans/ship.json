@@ -167,6 +167,14 @@
       "confirm_description": "关闭 #{{number}}「{{title}}」会留下提示评论，作者可在 GitHub 上重新打开。",
       "confirm_action": "标记为已过期"
     },
+    "close_pr": {
+      "label": "关闭 PR",
+      "toast_success": "PR 已关闭",
+      "toast_in_progress": "关闭 PR 中…",
+      "confirm_title": "确定关闭此 PR 吗？",
+      "confirm_description": "关闭 #{{number}}「{{title}}」后无法在此处撤销，如需恢复请前往 GitHub 重新打开。",
+      "confirm_action": "关闭 PR"
+    },
     "talk_to_agent": {
       "label": "与 {{agent}} 对话",
       "label_fallback": "与代理对话",

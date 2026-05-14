@@ -9,6 +9,7 @@ import {
   MessagesSquare,
   ListPlus,
   Eye,
+  XCircle,
   type LucideIcon,
 } from "lucide-react";
 import type { PullRequest } from "@multica/core/types";
@@ -138,6 +139,15 @@ const NUDGE_AUTHOR_CHIP: PrChip = {
   labelKey: "nudge_author",
   icon: Bell,
   variant: "secondary",
+};
+
+const CLOSE_PR_CHIP: PrChip = {
+  id: "close_pr",
+  action: "close_pr",
+  labelKey: "close_pr",
+  icon: XCircle,
+  variant: "destructive",
+  destructive: true,
 };
 
 /** Phase 4 — "Talk to {agent}" chip. Surfaces only when the PR has an
@@ -272,6 +282,11 @@ export function derivePrChips(
         chips.push(NUDGE_AUTHOR_CHIP);
       }
     }
+
+    // Close PR — available on all open PRs as an escape hatch for removing
+    // a PR from the pipeline without going to GitHub. Placed last so it
+    // lands in the overflow menu behind higher-priority actions.
+    chips.push(CLOSE_PR_CHIP);
   }
 
   if (isMerged) {
@@ -327,6 +342,7 @@ export const __testing__ = {
   MERGE_CHIP,
   SUMMARIZE_FEEDBACK_CHIP,
   NUDGE_AUTHOR_CHIP,
+  CLOSE_PR_CHIP,
   TALK_TO_AGENT_CHIP,
   PULL_INTO_ISSUE_CHIP,
   REVIEW_CHIP,

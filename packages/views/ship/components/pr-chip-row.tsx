@@ -19,6 +19,7 @@
 
 import { useMemo, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
+import { toast } from "sonner";
 import {
   useMergePullRequest,
   useRebasePullRequestOnMain,
@@ -26,8 +27,19 @@ import {
   useSummarizeReviewFeedback,
   useNudgePullRequestAuthor,
   useRunSmokeTests,
+  useClosePullRequest,
 } from "@multica/core/ship";
 import { ReviewDialog } from "./review-dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,7 +51,14 @@ import type { ActionResult, PullRequest } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { derivePrChips, type PrChip } from "../hooks/use-pr-chips";
 import { ChipButton } from "./chip-button";
-import { chipLabel } from "./chip-strings";
+import {
+  chipConfirmAction,
+  chipConfirmDescription,
+  chipConfirmTitle,
+  chipInProgressToast,
+  chipLabel,
+  chipSuccessToast,
+} from "./chip-strings";
 
 interface PrChipRowProps {
   pr: PullRequest;
@@ -67,6 +86,7 @@ function useChipMutations(prId: string) {
   const summarize = useSummarizeReviewFeedback(prId);
   const nudge = useNudgePullRequestAuthor(prId);
   const smoke = useRunSmokeTests(prId);
+  const close = useClosePullRequest(prId);
 
   type FireFn = (body?: Record<string, unknown>) => Promise<ActionResult>;
 
@@ -103,9 +123,13 @@ function useChipMutations(prId: string) {
           ),
         isPending: smoke.isPending,
       },
+      close_pr: {
+        fire: () => close.mutateAsync(),
+        isPending: close.isPending,
+      },
     };
     return map;
-  }, [merge, rebase, diagnose, summarize, nudge, smoke]);
+  }, [merge, rebase, diagnose, summarize, nudge, smoke, close]);
 }
 
 export function PrChipRow({ pr, stagingEnv, maxVisible = 2 }: PrChipRowProps) {
@@ -116,6 +140,8 @@ export function PrChipRow({ pr, stagingEnv, maxVisible = 2 }: PrChipRowProps) {
   // Keeping it here means dialogs survive WS-driven re-renders while
   // a member is mid-typing.
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
+  const [confirmOverflowChip, setConfirmOverflowChip] =
+    useState<PrChip | null>(null);
   const chips = useMemo(
     () => derivePrChips(pr, { stagingEnv: stagingEnv ?? null }),
     [pr, stagingEnv],
@@ -134,6 +160,31 @@ export function PrChipRow({ pr, stagingEnv, maxVisible = 2 }: PrChipRowProps) {
   const anyPending = visible.some(
     (c) => !c.custom && mutations[c.action]?.isPending,
   );
+
+  const fireChip = async (chip: PrChip) => {
+    const m = mutations[chip.action];
+    if (!m) return;
+    try {
+      const result = await m.fire(chip.bodyBuilder?.(pr));
+      if (result.status === "succeeded") {
+        toast.success(chipSuccessToast(t, chip.action));
+      } else if (result.status === "in_progress") {
+        toast.info(chipInProgressToast(t, chip.action), {
+          description: result.agent_task_id
+            ? t(($) => $.chips.task_id_hint, { id: result.agent_task_id })
+            : undefined,
+        });
+      } else {
+        toast.error(result.error || t(($) => $.chips.toast_generic_failure));
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t(($) => $.chips.toast_generic_failure),
+      );
+    }
+  };
 
   const renderChip = (chip: PrChip) => {
     if (chip.custom) {
@@ -230,12 +281,11 @@ export function PrChipRow({ pr, stagingEnv, maxVisible = 2 }: PrChipRowProps) {
                   key={chip.id}
                   disabled={m.isPending}
                   onSelect={() => {
-                    // For overflow chips we skip the confirmation dialog
-                    // even when destructive — the dropdown is itself a
-                    // deliberate two-step (open menu, click item) so a
-                    // third confirmation reads as friction. Destructive
-                    // actions in the inline row still confirm.
-                    void m.fire(chip.bodyBuilder?.(pr));
+                    if (chip.destructive) {
+                      setConfirmOverflowChip(chip);
+                      return;
+                    }
+                    void fireChip(chip);
                   }}
                 >
                   <Icon className="size-3.5" aria-hidden />
@@ -251,6 +301,48 @@ export function PrChipRow({ pr, stagingEnv, maxVisible = 2 }: PrChipRowProps) {
         open={reviewDialogOpen}
         onOpenChange={setReviewDialogOpen}
       />
+      {confirmOverflowChip && (
+        <AlertDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setConfirmOverflowChip(null);
+          }}
+        >
+          <AlertDialogContent onClick={swallow} onKeyDown={swallow}>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {chipConfirmTitle(t, confirmOverflowChip.action)}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {chipConfirmDescription(t, confirmOverflowChip.action, {
+                  number: pr.number,
+                  title: pr.title,
+                })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={swallow}>
+                {t(($) => $.chips.confirm_cancel)}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                variant={
+                  confirmOverflowChip.variant === "destructive"
+                    ? "destructive"
+                    : "default"
+                }
+                onClick={(e) => {
+                  swallow(e);
+                  const chip = confirmOverflowChip;
+                  setConfirmOverflowChip(null);
+                  void fireChip(chip);
+                }}
+              >
+                {chipConfirmAction(t, confirmOverflowChip.action)}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   );
 }

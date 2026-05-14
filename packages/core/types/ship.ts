@@ -277,6 +277,7 @@ export type ShipCardActionName =
   | "nudge_author"
   | "run_smoke_tests"
   | "close_as_stale"
+  | "close_pr"
   | "submit_review";
 
 export type ShipCardActionStatus = "succeeded" | "failed" | "in_progress";

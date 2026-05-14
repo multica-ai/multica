@@ -440,6 +440,48 @@ func TestActions_CloseAsStale(t *testing.T) {
 	}
 }
 
+// TestActions_ClosePR — clean close only; unlike close_as_stale it does not
+// post a courtesy comment before closing.
+func TestActions_ClosePR(t *testing.T) {
+	if !shipPhase3MigrationApplied(t) {
+		t.Skip("phase 3 migration not applied")
+	}
+	enableShipHub(t, true)
+	_, prID := seedPRForActions(t, "https://github.com/multica-ai/multica", 211)
+
+	commented := false
+	closed := false
+	ghClient := &fakeShipGithub{
+		createCommentFn: func(ctx context.Context, owner, repo string, prNumber int, body string) (*gh.Comment, error) {
+			commented = true
+			return &gh.Comment{ID: 1, Body: body}, nil
+		},
+		closePRFn: func(ctx context.Context, owner, repo string, prNumber int) error {
+			closed = true
+			return nil
+		},
+	}
+	svc := &ship.Service{Q: testHandler.Queries, Github: ghClient}
+	res, err := runAction(t, svc, prID, parseUUID(testUserID), ship.ActionClosePR, nil, nil, pgtype.UUID{}, "")
+	if err != nil {
+		t.Fatalf("close_pr: %v", err)
+	}
+	if res.Status != ship.StatusSucceeded {
+		t.Fatalf("status = %q, want %q", res.Status, ship.StatusSucceeded)
+	}
+	if commented {
+		t.Fatal("close_pr should not post a courtesy comment")
+	}
+	if !closed {
+		t.Fatal("close_pr should close the pull request")
+	}
+	var state string
+	testPool.QueryRow(context.Background(), `SELECT state FROM pull_request WHERE id = $1`, prID).Scan(&state)
+	if state != "closed" {
+		t.Fatalf("expected state=closed, got %q", state)
+	}
+}
+
 // TestActions_NudgeAuthor_DefaultMessage — no message in body uses the
 // default polite nudge.
 func TestActions_NudgeAuthor_DefaultMessage(t *testing.T) {

@@ -2553,6 +2553,10 @@ export class ApiClient {
     return this.postPullRequestAction(prId, "close_as_stale", body ?? {});
   }
 
+  async closePullRequest(prId: string): Promise<ActionResult> {
+    return this.postPullRequestAction(prId, "close_pr");
+  }
+
   // Phase 6.5 — submit a PR review (Approve / Request changes / Comment).
   // The endpoint is named "review" rather than "submit_review" to keep
   // the URL ergonomic; the action name in the audit row IS submit_review.

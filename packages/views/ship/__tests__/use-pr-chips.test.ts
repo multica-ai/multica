@@ -191,6 +191,21 @@ describe("derivePrChips priority order", () => {
     expect(chips.some((c) => c.action === "submit_review")).toBe(false);
   });
 
+  it("surfaces 'Close PR' for any open PR", () => {
+    const chips = derivePrChips(makePR({ state: "open", is_draft: true }), {
+      now: NOW,
+    });
+    expect(chips.some((c) => c.action === "close_pr")).toBe(true);
+  });
+
+  it("does NOT surface 'Close PR' for merged PRs", () => {
+    const chips = derivePrChips(
+      makePR({ state: "merged", pr_merged_at: "2026-05-09T10:00:00Z" }),
+      { now: NOW },
+    );
+    expect(chips.some((c) => c.action === "close_pr")).toBe(false);
+  });
+
   it("does NOT surface 'Review' on a closed or merged PR", () => {
     // Closed-not-merged returns no chips at all (existing rule).
     expect(

@@ -40,6 +40,8 @@ export function chipLabel(t: T, action: string): string {
       return t(($) => $.chips.run_smoke_tests.label);
     case "close_as_stale":
       return t(($) => $.chips.close_as_stale.label);
+    case "close_pr":
+      return t(($) => $.chips.close_pr.label);
     case "talk_to_agent":
       // Caller may interpolate the agent name post-hoc; this returns the
       // base fallback label so unknown agent names still produce
@@ -76,6 +78,8 @@ export function chipSuccessToast(t: T, action: string): string {
       return t(($) => $.chips.run_smoke_tests.toast_success);
     case "close_as_stale":
       return t(($) => $.chips.close_as_stale.toast_success);
+    case "close_pr":
+      return t(($) => $.chips.close_pr.toast_success);
     case "talk_to_agent":
       return t(($) => $.chips.talk_to_agent.toast_success);
     case "pull_into_issue":
@@ -107,6 +111,8 @@ export function chipInProgressToast(t: T, action: string): string {
       return t(($) => $.chips.run_smoke_tests.toast_in_progress);
     case "close_as_stale":
       return t(($) => $.chips.close_as_stale.toast_in_progress);
+    case "close_pr":
+      return t(($) => $.chips.close_pr.toast_in_progress);
     case "talk_to_agent":
       return t(($) => $.chips.talk_to_agent.toast_in_progress);
     case "pull_into_issue":
@@ -132,6 +138,8 @@ export function chipConfirmTitle(t: T, action: string): string {
       return t(($) => $.chips.run_smoke_tests.confirm_title);
     case "close_as_stale":
       return t(($) => $.chips.close_as_stale.confirm_title);
+    case "close_pr":
+      return t(($) => $.chips.close_pr.confirm_title);
     default:
       return "";
   }
@@ -151,6 +159,8 @@ export function chipConfirmDescription(
       return t(($) => $.chips.run_smoke_tests.confirm_description, vars);
     case "close_as_stale":
       return t(($) => $.chips.close_as_stale.confirm_description, vars);
+    case "close_pr":
+      return t(($) => $.chips.close_pr.confirm_description, vars);
     default:
       return "";
   }
@@ -166,6 +176,8 @@ export function chipConfirmAction(t: T, action: string): string {
       return t(($) => $.chips.run_smoke_tests.confirm_action);
     case "close_as_stale":
       return t(($) => $.chips.close_as_stale.confirm_action);
+    case "close_pr":
+      return t(($) => $.chips.close_pr.confirm_action);
     default:
       return "";
   }
