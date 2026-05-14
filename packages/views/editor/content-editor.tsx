@@ -124,6 +124,7 @@ interface ContentEditorRef {
   getMarkdown: () => string;
   clearContent: () => void;
   focus: () => void;
+  insertText: (text: string) => void; // CEREBRO-PATCH(content-editor-dictation-insert): expose plain text insertion for dictation.
   /** Drop focus from the editor — used by chat after send so the caret
    *  stops competing with the StatusPill / streaming reply for the user's
    *  attention. */
@@ -291,6 +292,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       },
       focus: () => {
         editor?.commands.focus();
+      },
+      insertText: (text: string) => {
+        if (!editor || !text) return;
+        editor.chain().focus().insertContent(text).run();
       },
       blur: () => {
         editor?.commands.blur();

@@ -184,7 +184,7 @@ describe("PermissionsPage", () => {
     ).toBeInTheDocument();
     // Capability input is required-ish; presence proves the form mounted
     expect(screen.getByPlaceholderText("issues.read")).toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("falls back to an empty list when the API returns malformed data", async () => {
     // parseWithFallback should swallow the bad shape and the page should

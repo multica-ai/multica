@@ -306,9 +306,10 @@
       "add_failed_toast": "Failed to add skill"
     },
     "tools": {
-      "_comment": "CEREBRO-PATCH(agent-tools-tab): JEH-1290/1353 W8 — tools tab body strings",
+      "_comment": "CEREBRO-PATCH(agent-tools-tab-local-empty): JEH-1290/1353/1360 W8 — tools tab body strings",
       "intro": "Toggle which tools this agent can use. Tool credentials are configured in workspace settings.",
       "local_agent_note": "This agent runs locally via the daemon. Enabling gateway tools here has no effect — the daemon uses its own MCP config. These toggles only apply to cloud-runtime agents.",
+      "local_empty_title": "Gateway tools are cloud-only",
       "empty_title": "No tools available",
       "empty_hint": "No tools are registered in the gateway runtime. Check that the gateway service is running.",
       "load_failed": "Could not load tools for this agent.",

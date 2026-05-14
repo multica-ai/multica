@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/cerebro/firtalgateway"
 )
 
 // ---------------------------------------------------------------------------
@@ -275,6 +276,14 @@ func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	if rt.Status != "online" {
 		writeError(w, http.StatusServiceUnavailable, "runtime is offline")
+		return
+	}
+
+	// CEREBRO-PATCH(firtal-gateway-model-discovery): server-owned cloud runtimes do not have a daemon heartbeat to claim model-list requests.
+	if rt.Provider == firtalgateway.Provider && rt.RuntimeMode == "cloud" {
+		workspace, workspaceErr := h.Queries.GetWorkspace(r.Context(), rt.WorkspaceID)
+		req := firtalgateway.ResolveModelList(r.Context(), randomID(), uuidToString(rt.ID), workspace.Settings, workspaceErr)
+		writeJSON(w, http.StatusOK, req)
 		return
 	}
 

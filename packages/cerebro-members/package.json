@@ -1,19 +1,26 @@
 {
-  "name": "@multica/cerebro-dictation",
+  "name": "@multica/cerebro-members",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": {
-    ".": "./index.ts"
-  },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./views": "./views/index.ts"
   },
   "dependencies": {
     "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/cerebro-groups": "workspace:*",
+    "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
-    "lucide-react": "catalog:"
+    "@multica/views": "workspace:*",
+    "@tanstack/react-query": "catalog:",
+    "lucide-react": "catalog:",
+    "sonner": "^2.0.7",
+    "zod": "catalog:"
   },
   "peerDependencies": {
     "react": "catalog:"
@@ -22,6 +29,7 @@
     "@multica/tsconfig": "workspace:*",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "catalog:",
     "@types/react": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "jsdom": "catalog:",

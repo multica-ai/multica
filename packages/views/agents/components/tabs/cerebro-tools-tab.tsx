@@ -220,18 +220,28 @@ export function CerebroToolsTab({ agent }: { agent: Agent }) {
   }
 
   if (tools.length === 0) {
+    // CEREBRO-PATCH(agent-tools-tab-local-empty): local agents never use gateway tools.
+    const isLocalAgent = agent.runtime_mode === "local";
     return (
       <div className="space-y-4">
         <p className="text-xs text-muted-foreground">
           {t(($) => $.tab_body.tools.intro)}
         </p>
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
-          <Wrench className="h-8 w-8 text-muted-foreground/40" />
+          {isLocalAgent ? (
+            <Info className="h-8 w-8 text-muted-foreground/40" />
+          ) : (
+            <Wrench className="h-8 w-8 text-muted-foreground/40" />
+          )}
           <p className="mt-3 text-sm text-muted-foreground">
-            {t(($) => $.tab_body.tools.empty_title)}
+            {isLocalAgent
+              ? t(($) => $.tab_body.tools.local_empty_title)
+              : t(($) => $.tab_body.tools.empty_title)}
           </p>
           <p className="mt-1 max-w-xs text-center text-xs text-muted-foreground">
-            {t(($) => $.tab_body.tools.empty_hint)}
+            {isLocalAgent
+              ? t(($) => $.tab_body.tools.local_agent_note)
+              : t(($) => $.tab_body.tools.empty_hint)}
           </p>
         </div>
       </div>

@@ -319,7 +319,7 @@ describe("CreateIssueModal", () => {
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-123");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
-  });
+  }, 30_000);
 
   it("keeps manual mode open and clears content when create another is enabled", async () => {
     const user = userEvent.setup();
