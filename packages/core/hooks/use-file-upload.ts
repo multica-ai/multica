@@ -5,11 +5,11 @@ import type { ApiClient } from "../api/client";
 import type { Attachment } from "../types";
 import { MAX_FILE_SIZE } from "../constants/upload";
 
-export interface UploadResult {
-  id: string;
-  filename: string;
-  link: string;
-}
+// Carries the full Attachment so editors that need preview metadata
+// (`content_type`, `download_url`) get it directly; `link` is kept as an
+// alias for `url` because many callers persist it into Markdown / avatar
+// fields by that name.
+export type UploadResult = Attachment & { link: string };
 
 export interface UploadContext {
   issueId?: string;
@@ -36,7 +36,7 @@ export function useFileUpload(
           commentId: ctx?.commentId,
           chatSessionId: ctx?.chatSessionId,
         });
-        return { id: att.id, filename: att.filename, link: att.url };
+        return { ...att, link: att.url };
       } finally {
         setUploading(false);
       }

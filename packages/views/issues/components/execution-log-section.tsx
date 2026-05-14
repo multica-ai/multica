@@ -323,11 +323,13 @@ function activeTimeText(task: AgentTask): string {
 
 // ─── Active row ────────────────────────────────────────────────────────────
 
+import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
+
 function useTriggerText(task: AgentTask): string {
   const { t } = useT("issues");
   const isRetry = !!task.parent_task_id;
 
-  // Retry: label prefix + summary
+  if (task.trigger_summary) return retryPrefix + stripMentionMarkdown(task.trigger_summary);
   if (isRetry) {
     const retryLabel = task.attempt && task.attempt > 1
       ? t(($) => $.execution_log.trigger_retry_attempt, { attempt: task.attempt })

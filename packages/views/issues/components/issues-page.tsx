@@ -53,7 +53,7 @@ export function IssuesPage() {
     if (scope === "members")
       return allIssues.filter((i) => i.assignee_type === "member");
     if (scope === "agents")
-      return allIssues.filter((i) => i.assignee_type === "agent");
+      return allIssues.filter((i) => i.assignee_type === "agent" || i.assignee_type === "squad");
     return allIssues;
   }, [allIssues, scope]);
 
