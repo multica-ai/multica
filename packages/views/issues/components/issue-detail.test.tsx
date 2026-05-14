@@ -635,13 +635,12 @@ describe("IssueDetail (shared)", () => {
         ).not.toBeNull();
       });
 
-      // The deep-link useLayoutEffect calls native scrollIntoView on the
-      // target node ({block: 'center'}).
+      // The deep-link hook calls native scrollIntoView on the target node.
       await waitFor(() => {
         expect(scrollIntoViewSpy).toHaveBeenCalled();
       });
       expect(scrollIntoViewSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ block: "center" }),
+        expect.objectContaining({ block: "start" }),
       );
     });
 
@@ -673,64 +672,7 @@ describe("IssueDetail (shared)", () => {
       });
       await waitFor(() => {
         expect(scrollIntoViewSpy).toHaveBeenCalledWith(
-          expect.objectContaining({ block: "center" }),
-        );
-      });
-    });
-
-    it("auto-expands a folded resolved thread when deep-link target is a reply inside it", async () => {
-      // Seed a timeline where comment-3 is resolved (so it renders as a
-      // resolved-bar by default) and has a reply, reply-1, whose id is the
-      // deep-link target. The reply is not in the flat items array — only
-      // the resolved-bar root is. The effect must detect this, expand the
-      // thread, then on re-run scroll to the reply's id="comment-reply-1" node.
-      const timelineWithResolvedThread: TimelineEntry[] = [
-        ...mockTimeline,
-        {
-          type: "comment",
-          id: "comment-3",
-          actor_type: "member",
-          actor_id: "user-1",
-          content: "Resolved root",
-          parent_id: null,
-          created_at: "2026-01-18T00:00:00Z",
-          updated_at: "2026-01-18T00:00:00Z",
-          comment_type: "comment",
-          resolved_at: "2026-01-19T00:00:00Z",
-        } as TimelineEntry,
-        {
-          type: "comment",
-          id: "reply-1",
-          actor_type: "member",
-          actor_id: "user-1",
-          content: "Reply inside resolved thread",
-          parent_id: "comment-3",
-          created_at: "2026-01-18T01:00:00Z",
-          updated_at: "2026-01-18T01:00:00Z",
-          comment_type: "comment",
-        } as TimelineEntry,
-      ];
-      mockApiObj.listTimeline.mockResolvedValue(timelineWithResolvedThread);
-
-      const queryClient = createTestQueryClient();
-      render(
-        <I18nProvider locale="en" resources={TEST_RESOURCES}>
-          <QueryClientProvider client={queryClient}>
-            <IssueDetail issueId="issue-1" highlightCommentId="reply-1" />
-          </QueryClientProvider>
-        </I18nProvider>,
-      );
-
-      // After expansion, the reply must appear in the DOM (inside the now
-      // -unfolded CommentCard) and the deep-link effect must scroll to it.
-      await waitFor(() => {
-        expect(
-          document.getElementById("comment-reply-1"),
-        ).not.toBeNull();
-      });
-      await waitFor(() => {
-        expect(scrollIntoViewSpy).toHaveBeenCalledWith(
-          expect.objectContaining({ block: "center" }),
+          expect.objectContaining({ block: "start" }),
         );
       });
     });

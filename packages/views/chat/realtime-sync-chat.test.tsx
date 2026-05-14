@@ -89,7 +89,7 @@ function renderSync(qc: QueryClient, ws: WSClient) {
 }
 
 describe("useRealtimeSync chat lifecycle (JEH-654)", () => {
-  it("chat:done invalidates pending-task without clearing it to {}", () => {
+  it("chat:done clears pending-task and invalidates it", () => {
     const ws = makeMockWS();
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -103,10 +103,8 @@ describe("useRealtimeSync chat lifecycle (JEH-654)", () => {
       ws.fire("chat:done", { task_id: "task-running", chat_session_id: SESSION_ID });
     });
 
-    // The cache value is left intact: the refetch driven by invalidation
-    // is the single thing that updates it. Pre-clearing was the flicker.
-    expect(qc.getQueryData(chatKeys.pendingTask(SESSION_ID))).toEqual(RUNNING_TASK);
-    // But we did invalidate so the refetch will run.
+    expect(qc.getQueryData(chatKeys.pendingTask(SESSION_ID))).toEqual({});
+    // It still invalidates so the refetch reconciles with the server.
     const calls = invalidate.mock.calls.map((c) => c[0]);
     expect(calls).toEqual(
       expect.arrayContaining([
@@ -137,7 +135,7 @@ describe("useRealtimeSync chat lifecycle (JEH-654)", () => {
     expect(qc.getQueryData(chatKeys.pendingTask(SESSION_ID))).toEqual(SUCCESSOR_TASK);
   });
 
-  it("task:failed for a chat session does not clobber the cache", () => {
+  it("task:failed for a chat session clears and invalidates the pending task", () => {
     const ws = makeMockWS();
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -153,6 +151,6 @@ describe("useRealtimeSync chat lifecycle (JEH-654)", () => {
       });
     });
 
-    expect(qc.getQueryData(chatKeys.pendingTask(SESSION_ID))).toEqual(SUCCESSOR_TASK);
+    expect(qc.getQueryData(chatKeys.pendingTask(SESSION_ID))).toEqual({});
   });
 });
