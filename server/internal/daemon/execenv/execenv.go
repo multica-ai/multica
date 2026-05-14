@@ -105,6 +105,7 @@ type TaskContextForEnv struct {
 	// first. renderChannelMentionContext embeds these so the agent has a
 	// transcript without needing to fetch.
 	ChannelHistory []ChannelHistoryEntry
+	IsSquadLeader  bool // true when the agent is acting as a squad leader (may exit silently on no_action)
 }
 
 // ChannelHistoryEntry is the daemon-side rendering shape for one message.
