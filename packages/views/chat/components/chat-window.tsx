@@ -452,6 +452,7 @@ export function ChatWindow() {
   return (
     <motion.div
       ref={windowRef}
+      aria-hidden={!isVisible}
       className={containerClass}
       style={containerStyle}
       layout="position"
