@@ -328,13 +328,17 @@ import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
 function useTriggerText(task: AgentTask): string {
   const { t } = useT("issues");
   const isRetry = !!task.parent_task_id;
+  const retryPrefix = isRetry
+    ? task.attempt && task.attempt > 1
+      ? t(($) => $.execution_log.trigger_retry_attempt_prefix, { attempt: task.attempt })
+      : t(($) => $.execution_log.trigger_retry_prefix)
+    : "";
 
   if (task.trigger_summary) return retryPrefix + stripMentionMarkdown(task.trigger_summary);
   if (isRetry) {
-    const retryLabel = task.attempt && task.attempt > 1
+    return task.attempt && task.attempt > 1
       ? t(($) => $.execution_log.trigger_retry_attempt, { attempt: task.attempt })
       : t(($) => $.execution_log.trigger_retry);
-    return task.trigger_summary ? `${retryLabel} · ${task.trigger_summary}` : retryLabel;
   }
 
   // Semantic label + cleaned context summary

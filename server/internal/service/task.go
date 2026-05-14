@@ -1066,9 +1066,6 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 					// decoded into real newlines before the comment hits the DB. See
 					// util.UnescapeBackslashEscapes for the exact contract.
 					body := util.UnescapeBackslashEscapes(payload.Output)
-<<<<<<< HEAD
-					s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", parentID)
-=======
 					if task.TriggerCommentID.Valid && isTrivialDoneOutput(body) {
 						slog.Warn("suppressing trivial comment-trigger fallback output",
 							"task_id", util.UUIDToString(task.ID),
@@ -1076,9 +1073,8 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 							"agent_id", util.UUIDToString(task.AgentID),
 						)
 					} else {
-						s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID)
+						s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", parentID)
 					}
->>>>>>> v0.3.0
 				}
 			}
 		}
@@ -1409,11 +1405,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 
-<<<<<<< HEAD
-	task, err := s.enqueueIssueTask(ctx, issue, TriggerActor{}, triggerCommentID, nil, true)
-=======
 	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID)
->>>>>>> v0.3.0
 	if err != nil {
 		return nil, err
 	}

@@ -15,7 +15,6 @@ import {
   invalidateIssueDetailQueries,
   patchIssueDetailQueries,
   patchIssueInBuckets,
-  removeIssueFromBuckets,
   restoreIssueDetailCacheSnapshot,
   setBucket,
 } from "./cache-helpers";

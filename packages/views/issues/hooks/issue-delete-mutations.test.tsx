@@ -37,6 +37,7 @@ const workspace: Workspace = {
   slug: SLUG,
   description: null,
   context: null,
+  wiki_content: null,
   settings: {},
   repos: [],
   issue_prefix: "TST",

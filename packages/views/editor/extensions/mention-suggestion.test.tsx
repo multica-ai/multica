@@ -334,13 +334,6 @@ describe("createMentionSuggestion", () => {
           frequency: 2,
           last_mentioned_at: "2026-04-29T05:00:00Z",
         },
-  it("includes all non-archived squads in the mention list", () => {
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      squads: [
-        { id: "s1", name: "Jiayuan's Coding Team", archived_at: null },
-        { id: "s2", name: "独立团", archived_at: null },
-        { id: "s3", name: "Archived Squad", archived_at: "2026-01-01T00:00:00Z" },
       ],
     });
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
@@ -353,6 +346,20 @@ describe("createMentionSuggestion", () => {
     // Bob (u2) has highest frequency, should be first.
     expect(users[0]?.type).toBe("member");
     expect(users[0]?.id).toBe("u2");
+  });
+
+  it("includes all non-archived squads in the mention list", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      squads: [
+        { id: "s1", name: "Jiayuan's Coding Team", archived_at: null },
+        { id: "s2", name: "独立团", archived_at: null },
+        { id: "s3", name: "Archived Squad", archived_at: "2026-01-01T00:00:00Z" },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
     const result = config.items!({ query: "", editor: {} as never });
 
     const items = result as MentionItem[];

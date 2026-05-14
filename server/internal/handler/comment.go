@@ -656,7 +656,7 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 				continue
 			}
 			// Private-agent gate: prevent triggering a private leader via squad mention.
-			if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
+			if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, uuidToString(issue.WorkspaceID)) {
 				continue
 			}
 			// Dedup: skip if leader already has a pending task for this issue.

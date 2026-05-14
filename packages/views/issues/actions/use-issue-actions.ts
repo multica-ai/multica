@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
@@ -8,6 +8,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import { useNavigation } from "../../navigation";
@@ -50,6 +51,13 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     pinnedItems.some(
       (p) => p.item_type === "issue" && p.item_id === issue.id,
     );
+
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+
+  const currentMemberRole = useMemo(
+    () => members.find((m) => m.user_id === userId)?.role,
+    [members, userId],
+  );
 
   const isCreator =
     !!user && !!issue && issue.creator_type === "member" && issue.creator_id === user.id;

@@ -4,7 +4,6 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
-import type { IssueAssigneeType } from "@multica/core/types";
 import enCommon from "../locales/en/common.json";
 import enModals from "../locales/en/modals.json";
 

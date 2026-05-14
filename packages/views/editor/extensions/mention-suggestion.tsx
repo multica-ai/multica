@@ -18,7 +18,7 @@ import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import { isImeComposing } from "@multica/core/utils";
-import { isAgentSelectable } from "@multica/core/permissions";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
 import type {
   Issue,
   ListIssuesCache,
@@ -398,6 +398,8 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
     // store. Used to gate personal agents in the @mention list so no user
     // (including admins) can @mention agents owned by other users.
     const userId = useAuthStore.getState().user?.id ?? null;
+    const myRole =
+      members.find((m) => m.user_id === userId)?.role ?? null;
 
     const q = query.toLowerCase();
 

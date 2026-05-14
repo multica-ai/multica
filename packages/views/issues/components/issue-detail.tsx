@@ -1349,6 +1349,7 @@ export function IssueDetail({
                   actions={actions}
                   primitives={dropdownPrimitives}
                   onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
+                  onOpenAssignee={() => {}}
                 />
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => setClearHistoryDialogOpen(true)}>

@@ -12,7 +12,6 @@ import type { Attachment } from "@multica/core/types";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
-import { toast } from "sonner";
 
 // ---------------------------------------------------------------------------
 // Types

@@ -7,8 +7,6 @@ import {
   getIssueFromDetailCache,
   patchIssueDetailQueries,
   patchIssueInBuckets,
-  removeIssueFromBuckets,
-  removeIssueDetailQueries,
 } from "./cache-helpers";
 import { cleanupDeletedIssueCaches } from "./delete-cache";
 import type { Issue, IssueLabelsResponse, Label } from "../types";
