@@ -907,7 +907,7 @@ function SessionDropdown({
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger className="flex items-center gap-1.5 min-w-0 rounded-md px-1.5 py-1 transition-colors hover:bg-accent aria-expanded:bg-accent">
+        <DropdownMenuTrigger className="flex max-w-96 min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 transition-colors hover:bg-accent aria-expanded:bg-accent">
           {triggerAgent && (
             <ActorAvatar
               actorType="agent"
@@ -917,7 +917,7 @@ function SessionDropdown({
               showStatusDot
             />
           )}
-          <span className="truncate text-sm font-medium">{title}</span>
+          <span className="min-w-0 truncate text-sm font-medium">{title}</span>
           {otherSessionRunning ? (
             <span
               aria-label={t(($) => $.window.another_running)}
@@ -933,7 +933,10 @@ function SessionDropdown({
           ) : null}
           <ChevronDown className="size-3 text-muted-foreground shrink-0" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="max-h-96 w-auto min-w-64 max-w-80 overflow-y-auto">
+        <DropdownMenuContent
+          align="start"
+          className="max-h-96 w-auto min-w-[max(16rem,var(--anchor-width,16rem))] max-w-96 overflow-y-auto"
+        >
           {sessions.length === 0 ? (
             <div className="px-2 py-1.5 text-xs text-muted-foreground">
               {t(($) => $.window.no_previous)}
