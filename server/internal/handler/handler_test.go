@@ -718,7 +718,7 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 	if conflict.Issue.ID != issueID || conflict.Issue.Status != "in_progress" {
 		t.Fatalf("conflict issue = %#v, want original %s in_progress", conflict.Issue, issueID)
 	}
-	if !strings.Contains(conflict.Error, original.Identifier+" "+title) || !strings.Contains(conflict.Error, "Use --allow-duplicate") {
+	if !strings.Contains(conflict.Error, original.Identifier+" "+title) || !strings.Contains(conflict.Error, "allow_duplicate=true") || !strings.Contains(conflict.Error, "--allow-duplicate") {
 		t.Fatalf("unexpected duplicate message: %q", conflict.Error)
 	}
 

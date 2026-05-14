@@ -16,7 +16,7 @@ func NormalizeTitle(title string) string {
 }
 
 func DuplicateMessage(identifier, title, status string) string {
-	return "Active duplicate issue exists: " + identifier + " " + title + " (status: " + status + "). Use --allow-duplicate to create another."
+	return "Active duplicate issue exists: " + identifier + " " + title + " (status: " + status + "). Set allow_duplicate=true or use --allow-duplicate to create another."
 }
 
 type ActiveDuplicateError struct {

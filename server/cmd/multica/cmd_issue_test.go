@@ -238,7 +238,7 @@ func TestRunIssueCreateSendsAllowDuplicate(t *testing.T) {
 }
 
 func TestRunIssueCreateShowsDuplicateMessage(t *testing.T) {
-	want := "Active duplicate issue exists: YUA-36 SH-PM-SYNTH-01 Synthesize recommendation-to-shortlist planning outputs (status: in_progress). Use --allow-duplicate to create another."
+	want := "Active duplicate issue exists: YUA-36 SH-PM-SYNTH-01 Synthesize recommendation-to-shortlist planning outputs (status: in_progress). Set allow_duplicate=true or use --allow-duplicate to create another."
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/issues" {
 			http.NotFound(w, r)

@@ -77,7 +77,7 @@ WHERE workspace_id = $1
   AND status NOT IN ('done', 'cancelled')
   AND project_id IS NOT DISTINCT FROM $2::uuid
   AND parent_issue_id IS NOT DISTINCT FROM $3::uuid
-  AND lower(regexp_replace(btrim(title), '[[:space:]]+', ' ', 'g')) = $4
+  AND lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) = $4
 ORDER BY created_at ASC
 LIMIT 1;
 
