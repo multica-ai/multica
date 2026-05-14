@@ -1668,6 +1668,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 							} else {
 								resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
 							}
+							// Surface the squad identity to the daemon so the
+							// quick-create prompt defaults the new issue's
+							// assignee to the squad, not the leader agent.
+							resp.SquadID = uuidToString(squad.ID)
+							resp.SquadName = squad.Name
 							slog.Debug("injected squad leader briefing for quick-create",
 								"squad_id", uuidToString(squad.ID),
 								"squad_name", squad.Name,

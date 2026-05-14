@@ -86,7 +86,10 @@ func buildQuickCreatePrompt(task Task) string {
 		agentID = task.Agent.ID
 		agentName = task.Agent.Name
 	}
-	// Three regimes for the "user didn't name an assignee" default:
+	// Four regimes for the "user didn't name an assignee" default:
+	//
+	//  - Squad-picked quick-create: route to the squad UUID, not the leader
+	//    agent, so the squad's delegation flow stays visible.
 	//
 	//  - Workspace has peer agents: orchestrator-style pickers (Hermes,
 	//    routing patterns, etc.) need to be allowed to delegate by name
@@ -103,13 +106,20 @@ func buildQuickCreatePrompt(task Task) string {
 	//
 	//  - Single-agent workspace, name only: legacy fallback.
 	hasPeers := len(task.PeerAgents) > 0
-	if agentName != "" && hasPeers {
+	switch {
+	case task.SquadID != "":
+		if task.SquadName != "" {
+			fmt.Fprintf(&b, "    - When the user did NOT name an assignee, default to the picker SQUAD %q: pass `--assignee-id %q` (the squad's UUID). The user opened quick-create with the squad selected; you (the leader agent) are running on the squad's behalf, so the squad — not you — is the expected owner. Never leave the issue unassigned, and do not assign it to your own agent UUID.\n\n", task.SquadName, task.SquadID)
+		} else {
+			fmt.Fprintf(&b, "    - When the user did NOT name an assignee, default to the picker SQUAD: pass `--assignee-id %q` (the squad's UUID). The user opened quick-create with the squad selected; you (the leader agent) are running on the squad's behalf, so the squad — not you — is the expected owner. Never leave the issue unassigned, and do not assign it to your own agent UUID.\n\n", task.SquadID)
+		}
+	case agentName != "" && hasPeers:
 		fmt.Fprintf(&b, "    - When the user did NOT name an assignee, decide based on the work AND your role described in the Agent Identity section. If your persona delegates this kind of task to a peer (peers are listed in the \"Peer Agents in this Workspace\" section above, with each peer's role one-liner), pass `--assignee \"<peer name>\"`. Otherwise keep it yourself: pass `--assignee %q`. Never leave the issue unassigned. Pick exactly one assignee.\n\n", agentName)
-	} else if agentID != "" {
+	case agentID != "":
 		fmt.Fprintf(&b, "    - When the user did NOT name an assignee, default to YOURSELF: pass `--assignee-id %q` (your agent UUID). The picker agent is the expected owner because the user opened quick-create with you selected — never leave the issue unassigned. Use the UUID flag, not `--assignee <name>`, so the assignment is unambiguous even when other agents share part of your name.\n\n", agentID)
-	} else if agentName != "" {
+	case agentName != "":
 		fmt.Fprintf(&b, "    - When the user did NOT name an assignee, default to YOURSELF: pass `--assignee %q`. The picker agent is the expected owner because the user opened quick-create with you selected — never leave the issue unassigned.\n\n", agentName)
-	} else {
+	default:
 		b.WriteString("    - When the user did NOT name an assignee, default to YOURSELF (the picker agent): pass `--assignee-id <your agent UUID>` (preferred) or `--assignee <your agent name>`. Never leave the issue unassigned.\n\n")
 	}
 
