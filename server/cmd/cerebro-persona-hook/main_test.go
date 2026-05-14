@@ -41,7 +41,14 @@ func TestResourceIDFromInput(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		{"Bash → command", "Bash", map[string]any{"command": "git status"}, "git status"},
+		// JEH-1182: Bash maps to the extracted binary, not the raw
+		// command, so grant pattern="curl" matches reliably even when
+		// the command contains URL slashes.
+		{"Bash → binary, not command", "Bash", map[string]any{"command": "git status"}, "git"},
+		{"Bash with URL → binary only", "Bash", map[string]any{"command": "curl https://example.com"}, "curl"},
+		{"Bash with abs path → basename", "Bash", map[string]any{"command": "/usr/bin/kubectl get pods"}, "kubectl"},
+		{"Bash with sh -c wrapper → inner binary", "Bash", map[string]any{"command": `sh -c "curl https://x"`}, "curl"},
+		{"Bash unparseable → falls back to raw command", "Bash", map[string]any{"command": "FOO=bar"}, "FOO=bar"},
 		{"Bash missing → empty", "Bash", map[string]any{"description": "hi"}, ""},
 		{"Edit → file_path", "Edit", map[string]any{"file_path": "/safe/foo.go"}, "/safe/foo.go"},
 		{"Write → file_path", "Write", map[string]any{"file_path": "/tmp/x"}, "/tmp/x"},
@@ -60,6 +67,108 @@ func TestResourceIDFromInput(t *testing.T) {
 			got := resourceIDFromInput(tc.tool, tc.args)
 			if got != tc.want {
 				t.Errorf("resourceIDFromInput(%q, %v) = %q, want %q", tc.tool, tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+// CEREBRO-PATCH(main-test-shell-binary): JEH-1182 — shell_binary parser tests.
+//
+// TestShellBinaryFromCommand locks in the parsing rules that drive the
+// sandbox-policy attr. The acceptance criteria on JEH-1182 ("marketing
+// agent cannot call curl; dev agent can") collapse to: persona must
+// receive a clean binary name, and the parser must not let a wrapper
+// like `sh -c "curl ..."` slip through.
+func TestShellBinaryFromCommand(t *testing.T) {
+	cases := []struct {
+		name string
+		cmd  string
+		want string
+	}{
+		{"plain binary", "curl https://example.com", "curl"},
+		{"absolute path stripped", "/usr/bin/curl -fsSL https://x", "curl"},
+		{"relative path stripped", "./scripts/deploy.sh", "deploy.sh"},
+		{"leading env vars skipped", "FOO=bar BAZ=qux curl https://x", "curl"},
+		{"only env vars → empty", "FOO=bar", ""},
+		{"empty string", "", ""},
+		{"whitespace only", "   \t\n  ", ""},
+		{"sh -c unwraps to inner binary", `sh -c "curl https://x"`, "curl"},
+		{"bash -c unwraps", `bash -c 'gh pr create'`, "gh"},
+		{"sh without -c stays as sh", "sh script.sh", "sh"},
+		{"single-quoted command", `curl 'https://x with spaces'`, "curl"},
+		{"double-quoted command", `curl "https://x"`, "curl"},
+		{"bash -c with env-vars inside", `bash -c "FOO=bar curl https://x"`, "curl"},
+		{"plain shell builtin", "echo hello", "echo"},
+		{"hyphenated binary", "git-lfs pull", "git-lfs"},
+		{"binary with trailing slash path", "/usr/local/bin/kubectl get pods", "kubectl"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := shellBinaryFromCommand(tc.cmd)
+			if got != tc.want {
+				t.Errorf("shellBinaryFromCommand(%q) = %q, want %q", tc.cmd, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSplitShellWords covers the cases that matter for binary
+// extraction: matched quotes group a token, mismatched / unbalanced
+// quotes don't crash. Backslash escapes are intentionally not modelled.
+func TestSplitShellWords(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"plain", "a b c", []string{"a", "b", "c"}},
+		{"double quotes group", `a "b c" d`, []string{"a", "b c", "d"}},
+		{"single quotes group", `a 'b c' d`, []string{"a", "b c", "d"}},
+		{"empty input", "", nil},
+		{"multiple whitespace collapsed", "a\t b  c", []string{"a", "b", "c"}},
+		{"trailing whitespace", "a b ", []string{"a", "b"}},
+		{"unterminated quote keeps reading", `a "b c`, []string{"a", "b c"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := splitShellWords(tc.in)
+			if len(got) != len(tc.want) {
+				t.Fatalf("splitShellWords(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+			for i, s := range got {
+				if s != tc.want[i] {
+					t.Errorf("splitShellWords(%q)[%d] = %q, want %q", tc.in, i, s, tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestIsEnvAssignment locks the NAME=VALUE pattern: NAME must match
+// [A-Za-z_][A-Za-z0-9_]*. A leading digit, hyphen, or empty NAME means
+// "not an env assignment" and the parser should treat the token as a
+// regular argument.
+func TestIsEnvAssignment(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"FOO=bar", true},
+		{"foo=", true},
+		{"_HIDDEN=1", true},
+		{"FOO_BAR=baz", true},
+		{"FOO9=baz", true},
+		{"9FOO=bar", false},
+		{"foo-bar=x", false},
+		{"=bar", false},
+		{"bar", false},
+		{"", false},
+		{"--flag=value", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			if got := isEnvAssignment(tc.in); got != tc.want {
+				t.Errorf("isEnvAssignment(%q) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
 	}

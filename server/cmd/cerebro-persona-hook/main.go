@@ -96,7 +96,23 @@ func resourceIDFromInput(tool string, args map[string]any) string {
 	}
 	switch {
 	case tool == "Bash":
-		return pick("command")
+		// CEREBRO-PATCH(main-bash-resourceid): JEH-1182 — for Bash we
+		// pass the extracted binary as resourceID instead of the raw
+		// command. Persona's grant matcher uses path.Match, where `*`
+		// does not cross `/` — so pattern "curl*" never matches a
+		// command containing a URL like "curl https://example.com".
+		// Sending the bare binary lets sandbox-policy grants be written
+		// as one entry per binary (pattern="curl", pattern="kubectl")
+		// without juggling glob escapes. The full command stays
+		// available to policies via attrs.args.command and
+		// attrs.shell_binary; only the matched resource_id changes.
+		if cmd := pick("command"); cmd != "" {
+			if bin := shellBinaryFromCommand(cmd); bin != "" {
+				return bin
+			}
+			return cmd
+		}
+		return ""
 	case tool == "Edit", tool == "Write", tool == "Read":
 		return pick("file_path", "path")
 	case tool == "NotebookEdit":
@@ -118,6 +134,132 @@ func resourceIDFromInput(tool string, args map[string]any) string {
 		return ""
 	}
 	return ""
+}
+
+// CEREBRO-PATCH(main-shell-binary): JEH-1182 — shell_binary attr for sandbox-policy.
+//
+// shellBinaryFromCommand returns the binary that a Bash command would
+// execute, or "" when we can't confidently determine it. The result is
+// sent to persona as attrs.shell_binary so sandbox-policy grants on
+// claude.tool.bash can match the allowlist/denylist independent of the
+// full command string.
+//
+// Parsing rules (kept deliberately simple — this is policy gating, not
+// a full shell parser):
+//   - Skip leading env-var assignments (FOO=bar baz → baz)
+//   - Strip path prefix from the head (/usr/bin/curl → curl, ./foo → foo)
+//   - Unwrap one level of `sh -c <inner>` / `bash -c <inner>` wrapper
+//     so the policy sees the real binary, not the shell launcher
+//   - Return "" for empty input — caller decides the default action
+//
+// Out of scope (policy should treat the wrapper binary as the head):
+//   - Pipelines (`a | b`), command-chaining (`a && b`, `a; b`)
+//   - Subshells / command substitution (`$(curl ...)`)
+//   - Multi-statement `sh -c "cd /tmp && curl ..."`
+//
+// A policy author who wants to block these constructs entirely can
+// deny the shell binaries (sh, bash, dash, zsh) outright; the head
+// binary is exposed precisely so the simpler rule works.
+func shellBinaryFromCommand(cmd string) string {
+	tokens := splitShellWords(strings.TrimSpace(cmd))
+	i := 0
+	for i < len(tokens) && isEnvAssignment(tokens[i]) {
+		i++
+	}
+	if i >= len(tokens) {
+		return ""
+	}
+	head := baseName(tokens[i])
+	// Unwrap a single level of `sh -c <inner>`. We recurse once; the
+	// recursion already strips a second wrapper, but pathological
+	// quadruple-wrapping is out of scope.
+	if isShellLauncher(head) && i+2 < len(tokens) && tokens[i+1] == "-c" {
+		return shellBinaryFromCommand(tokens[i+2])
+	}
+	return head
+}
+
+// splitShellWords splits a shell command into whitespace-separated
+// tokens, treating matched single- or double-quoted runs as a single
+// token (stripping the quote characters). This is not a full shell
+// parser — backslash escapes, here-documents, and command substitution
+// are not handled — but it is enough to identify the head binary of
+// most operator-written Bash commands.
+func splitShellWords(s string) []string {
+	var out []string
+	var cur strings.Builder
+	var quote rune
+	flush := func() {
+		if cur.Len() > 0 {
+			out = append(out, cur.String())
+			cur.Reset()
+		}
+	}
+	for _, r := range s {
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+				continue
+			}
+			cur.WriteRune(r)
+			continue
+		}
+		switch r {
+		case '\'', '"':
+			quote = r
+		case ' ', '\t', '\n':
+			flush()
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	flush()
+	return out
+}
+
+// isEnvAssignment reports whether s looks like a leading NAME=VALUE
+// shell env-var assignment (which precedes the actual command, e.g.
+// `FOO=bar curl ...`). NAME must match [A-Za-z_][A-Za-z0-9_]*; the
+// VALUE half may be anything including empty.
+func isEnvAssignment(s string) bool {
+	eq := strings.IndexByte(s, '=')
+	if eq <= 0 {
+		return false
+	}
+	name := s[:eq]
+	for i, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '_':
+			// ok
+		case i > 0 && r >= '0' && r <= '9':
+			// ok
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// baseName returns the trailing path component of p (POSIX-style).
+// Used to normalise "/usr/bin/curl" and "./curl" both to "curl" before
+// matching against the policy allowlist.
+func baseName(p string) string {
+	if i := strings.LastIndexByte(p, '/'); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}
+
+// isShellLauncher reports whether name is one of the common POSIX-shell
+// binaries that policy authors expect us to unwrap (so `sh -c "curl ..."`
+// gates on "curl", not on "sh"). zsh/dash are included because daemons
+// occasionally invoke them as login shells on macOS / Alpine.
+func isShellLauncher(name string) bool {
+	switch name {
+	case "sh", "bash", "dash", "zsh":
+		return true
+	}
+	return false
 }
 
 // mcpResourceKind reverses Claude's mcp__<server>__<tool> naming into a
@@ -247,6 +389,17 @@ func run() error {
 		"tool":    tool,
 		"args":    input.InputArgs(),
 		"workdir": input.Dir(),
+	}
+	// CEREBRO-PATCH(main-shell-binary-attr): JEH-1182 — sandbox-policy grants
+	// on claude.tool.bash match on the binary name (curl, gh, kubectl, …),
+	// not the full command. Extracting once here keeps the policy author
+	// free of regex; persona sees attrs.shell_binary as a clean string.
+	if tool == "Bash" {
+		if cmd, ok := input.InputArgs()["command"].(string); ok && cmd != "" {
+			if bin := shellBinaryFromCommand(cmd); bin != "" {
+				attrs["shell_binary"] = bin
+			}
+		}
 	}
 	// JEH-1080: forward the spawning user + group memberships the daemon
 	// resolved at claim time as facts. Persona's resolver matches group
