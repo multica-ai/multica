@@ -360,6 +360,14 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `mcp-types` | server/internal/mcp/types.go | 93 | MCP server additions |
 | `member-detail-handler` | server/internal/handler/member_detail.go | 156 | Member-detail handler (cerebro feature) |
 | `members-tab-cerebro` | packages/views/settings/components/members-tab.tsx | 10 | Settings page cerebro additions |
+| `member-row-cerebro-extras` | packages/views/settings/components/members-tab.tsx | 4 | JEH-1067 (Bundle B / PR-B) — MemberRow accepts an `extras?: React.ReactNode` slot used to inject the cerebro Groups column chips between the AppLink and the action menu. Two markers: one on the destructure, one on the prop type. |
+| `member-row-cerebro-extras-render` | packages/views/settings/components/members-tab.tsx | 2 | JEH-1067 — renders `{extras}` inside the MemberRow JSX. |
+| `members-tab-cerebro-extras-type` | packages/views/settings/components/members-tab.tsx | 5 | JEH-1067 — exported `MembersTabCerebroExtrasProp` interface bundling the three cerebro slot fields (`toolbar`, `filterMember`, `renderRowExtras`) into a single prop. |
+| `members-tab-cerebro-extras-prop` | packages/views/settings/components/members-tab.tsx | 4 | JEH-1067 — adds the `cerebroExtras?: MembersTabCerebroExtrasProp` prop to `MembersTab`. |
+| `members-tab-cerebro-toolbar` | packages/views/settings/components/members-tab.tsx | 2 | JEH-1067 — renders `cerebroExtras?.toolbar` above the member list. |
+| `members-tab-cerebro-filter` | packages/views/settings/components/members-tab.tsx | 1 | JEH-1067 — applies `cerebroExtras?.filterMember` to the rendered member list. |
+| `members-tab-cerebro-row-extras-call` | packages/views/settings/components/members-tab.tsx | 2 | JEH-1067 — forwards `cerebroExtras?.renderRowExtras?.(m)` to MemberRow's `extras` prop. |
+| `settings-page-cerebro-members-extras` | packages/views/settings/components/settings-page.tsx | 5 | JEH-1067 — imports `useMembersTabCerebroExtras` from `@multica/cerebro-members/views`, calls it, and passes the result to `MembersTab` as `cerebroExtras`. |
 | `middleware-auth` | server/internal/middleware/auth.go | 43 | Middleware augmentation |
 | `middleware-scope` | server/internal/middleware/scope.go | 155 | Middleware augmentation |
 | `middleware-scope-test` | server/internal/middleware/scope_test.go | 92 | Middleware augmentation |

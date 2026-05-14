@@ -180,6 +180,9 @@ importers:
       '@multica/cerebro-inbox':
         specifier: workspace:*
         version: link:../../packages/cerebro-inbox
+      '@multica/cerebro-members':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-members
       '@multica/cerebro-notifications':
         specifier: workspace:*
         version: link:../../packages/cerebro-notifications
@@ -337,6 +340,9 @@ importers:
       '@multica/cerebro-inbox':
         specifier: workspace:*
         version: link:../../packages/cerebro-inbox
+      '@multica/cerebro-members':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-members
       '@multica/cerebro-notifications':
         specifier: workspace:*
         version: link:../../packages/cerebro-notifications
@@ -1676,6 +1682,9 @@ importers:
 
   packages/cerebro-users:
     dependencies:
+      '@multica/cerebro-members':
+        specifier: workspace:*
+        version: link:../cerebro-members
       '@multica/core':
         specifier: workspace:*
         version: link:../core

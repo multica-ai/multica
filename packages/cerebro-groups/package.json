@@ -9,7 +9,8 @@
   },
   "exports": {
     ".": "./index.ts",
-    "./views": "./views/index.ts"
+    "./views": "./views/index.ts",
+    "./mutations": "./mutations.ts"
   },
   "dependencies": {
     "@multica/cerebro-feature-flags": "workspace:*",

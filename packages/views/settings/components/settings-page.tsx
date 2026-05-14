@@ -42,6 +42,7 @@ import {
   CerebroMobileTabNav,
   type CerebroMobileTabNavGroup,
 } from "./cerebro-mobile-tab-nav";
+import type { MembersTabCerebroExtrasProp } from "./members-tab";
 
 const ACCOUNT_TAB_KEYS = ["profile", "preferences", "notifications", "tokens"] as const;
 const ACCOUNT_TAB_ICONS = {
@@ -84,6 +85,8 @@ export interface ExtraSettingsTab {
 interface SettingsPageProps {
   /** Additional tabs injected by platform (e.g. desktop daemon settings) */
   extraAccountTabs?: ExtraSettingsTab[];
+  // CEREBRO-PATCH(settings-page-cerebro-members-extras): JEH-1067 platform-injected Groups column + filter for MembersTab
+  membersTabCerebroExtras?: MembersTabCerebroExtrasProp;
   /**
    * Content rendered inside the Documentation tab. The platform layer is
    * responsible for loading MDX/source data; SettingsPage only frames it.
@@ -94,6 +97,7 @@ interface SettingsPageProps {
 
 export function SettingsPage({
   extraAccountTabs,
+  membersTabCerebroExtras,
   documentationContent,
 }: SettingsPageProps = {}) {
   const { t } = useT("settings");
@@ -103,7 +107,6 @@ export function SettingsPage({
   const navigation = useNavigation();
   // CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 feature-flagged Groups tab
   const groupsEnabled = useFeatureFlag("cerebro_groups_enabled");
-
   // Whitelist of valid tab values; unknown ?tab=… values silently fall back to
   // the default. Whitelisting also blocks junk like ?tab=<script> from
   // surfacing in the DOM via Radix Tabs internals.
@@ -299,7 +302,8 @@ export function SettingsPage({
             <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
             <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
             <TabsContent value="labs"><LabsTab /></TabsContent>
-            <TabsContent value="members"><MembersTab /></TabsContent>
+            {/* CEREBRO-PATCH(settings-page-cerebro-members-extras): JEH-1067 inject Groups column + filter */}
+            <TabsContent value="members"><MembersTab cerebroExtras={membersTabCerebroExtras} /></TabsContent>
             {/* CEREBRO-PATCH(settings-page-groups-tab): JEH-1006/JEH-1067 workspace groups list + detail navigation */}
             {groupsEnabled && (
               <TabsContent value={GROUPS_TAB_VALUE}><GroupsTab onSelectGroup={(id) => navigation.push(`/${workspaceSlug}/groups/${id}`)} /></TabsContent>
