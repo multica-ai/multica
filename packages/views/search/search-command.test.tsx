@@ -90,6 +90,7 @@ vi.mock("@multica/core/paths", () => ({
     myIssues: () => "/ws-test/my-issues",
     issues: () => "/ws-test/issues",
     projects: () => "/ws-test/projects",
+    search: () => "/ws-test/search",
     agents: () => "/ws-test/agents",
     runtimes: () => "/ws-test/runtimes",
     skills: () => "/ws-test/skills",
@@ -236,6 +237,19 @@ describe("SearchCommand", () => {
     await user.click(settingsItem);
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/settings");
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("opens the full search page with the current query", async () => {
+    const user = userEvent.setup();
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "billing bug");
+
+    await user.click(screen.getByText("Open page"));
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/search?q=billing%20bug");
     expect(useSearchStore.getState().open).toBe(false);
   });
 

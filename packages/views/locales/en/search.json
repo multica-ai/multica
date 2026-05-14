@@ -2,6 +2,7 @@
   "title": "Search",
   "description": "Search pages, issues, and projects",
   "placeholder": "Type a command or search...",
+  "open_page": "Open page",
   "groups": {
     "pages": "Pages",
     "commands": "Commands",

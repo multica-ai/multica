@@ -2,6 +2,7 @@
   "title": "搜索",
   "description": "搜索页面、issue 和项目",
   "placeholder": "输入命令或关键词搜索...",
+  "open_page": "打开页面",
   "groups": {
     "pages": "页面",
     "commands": "命令",

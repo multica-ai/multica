@@ -17,6 +17,7 @@ import {
   Bot,
   Monitor,
   Moon,
+  SquareArrowOutUpRight,
   Sun,
   BookOpenText,
   Settings,
@@ -47,6 +48,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@multica/ui/components/ui/dialog";
+import { Button } from "@multica/ui/components/ui/button";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
@@ -441,6 +443,12 @@ export function SearchCommand() {
     [push, setOpen],
   );
 
+  const handleOpenSearchPage = useCallback(() => {
+    const q = query.trim();
+    setOpen(false);
+    push(q ? `${p.search()}?q=${encodeURIComponent(q)}` : p.search());
+  }, [p, push, query, setOpen]);
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
@@ -470,6 +478,16 @@ export function SearchCommand() {
             <kbd className="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline">
               ESC
             </kbd>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleOpenSearchPage}
+              className="shrink-0"
+            >
+              <SquareArrowOutUpRight className="size-3.5" />
+              <span className="hidden sm:inline">{t(($) => $.open_page)}</span>
+            </Button>
           </div>
 
           {/* Results list */}
