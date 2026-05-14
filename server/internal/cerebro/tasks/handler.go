@@ -51,22 +51,29 @@ func validStatus(s string) bool {
 }
 
 type taskResponse struct {
-	TaskID          string `json:"task_id"`
-	AgentID         string `json:"agent_id"`
-	AgentName       string `json:"agent_name"`
-	AgentAvatarURL  string `json:"agent_avatar_url,omitempty"`
-	TaskTitle       string `json:"task_title,omitempty"`
-	IssueID         string `json:"issue_id,omitempty"`
-	IssueTitle      string `json:"issue_title,omitempty"`
-	IssueNumber     int32  `json:"issue_number,omitempty"`
-	ChatSessionID   string `json:"chat_session_id,omitempty"`
-	Status          string `json:"status"`
-	DispatchedAt    string `json:"dispatched_at,omitempty"`
-	StartedAt       string `json:"started_at,omitempty"`
-	CompletedAt     string `json:"completed_at,omitempty"`
-	CreatedAt       string `json:"created_at"`
-	CostCents       int64  `json:"cost_cents"`
-	TriggeredByName string `json:"triggered_by_name,omitempty"`
+	TaskID                  string `json:"task_id"`
+	AgentID                 string `json:"agent_id"`
+	AgentName               string `json:"agent_name"`
+	AgentAvatarURL          string `json:"agent_avatar_url,omitempty"`
+	TaskTitle               string `json:"task_title,omitempty"`
+	IssueID                 string `json:"issue_id,omitempty"`
+	IssueTitle              string `json:"issue_title,omitempty"`
+	IssueNumber             int32  `json:"issue_number,omitempty"`
+	ChatSessionID           string `json:"chat_session_id,omitempty"`
+	Status                  string `json:"status"`
+	DispatchedAt            string `json:"dispatched_at,omitempty"`
+	StartedAt               string `json:"started_at,omitempty"`
+	CompletedAt             string `json:"completed_at,omitempty"`
+	CreatedAt               string `json:"created_at"`
+	ParentIssueID           string `json:"parent_issue_id,omitempty"`
+	ParentIssueTitle        string `json:"parent_issue_title,omitempty"`
+	ParentIssueNumber       int32  `json:"parent_issue_number,omitempty"`
+	ParentIssueAssigneeName string `json:"parent_issue_assignee_name,omitempty"`
+	ProjectID               string `json:"project_id,omitempty"`
+	ProjectTitle            string `json:"project_title,omitempty"`
+	ProjectLeadName         string `json:"project_lead_name,omitempty"`
+	CostCents               int64  `json:"cost_cents"`
+	TriggeredByName         string `json:"triggered_by_name,omitempty"`
 }
 
 type listResponse struct {
@@ -262,6 +269,27 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		if row.CompletedAt.Valid {
 			t.CompletedAt = row.CompletedAt.Time.UTC().Format(time.RFC3339)
+		}
+		if row.ParentIssueID.Valid {
+			t.ParentIssueID = util.UUIDToString(row.ParentIssueID)
+		}
+		if row.ParentIssueTitle.Valid {
+			t.ParentIssueTitle = row.ParentIssueTitle.String
+		}
+		if row.ParentIssueNumber.Valid {
+			t.ParentIssueNumber = row.ParentIssueNumber.Int32
+		}
+		if row.ParentIssueAssigneeName != "" {
+			t.ParentIssueAssigneeName = row.ParentIssueAssigneeName
+		}
+		if row.ProjectID.Valid {
+			t.ProjectID = util.UUIDToString(row.ProjectID)
+		}
+		if row.ProjectTitle.Valid {
+			t.ProjectTitle = row.ProjectTitle.String
+		}
+		if row.ProjectLeadName != "" {
+			t.ProjectLeadName = row.ProjectLeadName
 		}
 		if row.TriggeredByName.Valid {
 			t.TriggeredByName = row.TriggeredByName.String

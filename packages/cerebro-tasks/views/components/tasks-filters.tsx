@@ -11,6 +11,7 @@ import { useCerebroTasksStore } from "../../core/store";
 import {
   COLUMN_DEFS,
   type ColumnId,
+  type GroupBy,
   type TaskStatus,
   type TaskTimeRange,
   type TaskType,
@@ -40,6 +41,13 @@ const RANGES: { value: TaskTimeRange; label: string }[] = [
   { value: "custom", label: "Custom" },
 ];
 
+const GROUP_BY_OPTIONS: { value: GroupBy; label: string }[] = [
+  { value: "none", label: "Ingen" },
+  { value: "issue", label: "Issue" },
+  { value: "project", label: "Projekt" },
+  { value: "parent_issue", label: "Parent issue" },
+];
+
 interface TasksFiltersProps {
   wsId: string;
 }
@@ -54,6 +62,7 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
   const customFrom = useCerebroTasksStore((s) => s.customFrom);
   const customTo = useCerebroTasksStore((s) => s.customTo);
   const search = useCerebroTasksStore((s) => s.search);
+  const groupBy = useCerebroTasksStore((s) => s.groupBy);
   const visibleColumns = useCerebroTasksStore((s) => s.visibleColumns);
   const setAgentId = useCerebroTasksStore((s) => s.setAgentId);
   const setIssueId = useCerebroTasksStore((s) => s.setIssueId);
@@ -64,6 +73,7 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
   const setCustomFrom = useCerebroTasksStore((s) => s.setCustomFrom);
   const setCustomTo = useCerebroTasksStore((s) => s.setCustomTo);
   const setSearch = useCerebroTasksStore((s) => s.setSearch);
+  const setGroupBy = useCerebroTasksStore((s) => s.setGroupBy);
   const setColumnVisible = useCerebroTasksStore((s) => s.setColumnVisible);
   const reset = useCerebroTasksStore((s) => s.reset);
 
@@ -81,7 +91,8 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
     !!status ||
     !!type ||
     range !== "24h" ||
-    !!search;
+    !!search ||
+    groupBy !== "none";
 
   return (
     <div className="flex flex-col gap-2">
@@ -205,6 +216,15 @@ export function TasksFilters({ wsId }: TasksFiltersProps) {
               />
             </div>
           )}
+        </FilterGroup>
+
+        <FilterGroup label="Gruppér på">
+          <PillRow
+            ariaLabel="Group by"
+            options={GROUP_BY_OPTIONS}
+            value={groupBy}
+            onChange={(v) => setGroupBy(v as GroupBy)}
+          />
         </FilterGroup>
       </div>
     </div>

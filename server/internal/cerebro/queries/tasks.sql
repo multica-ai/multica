@@ -10,6 +10,13 @@ SELECT atq.id::uuid AS task_id, atq.agent_id, atq.issue_id, atq.status,
        atq.chat_session_id, atq.title AS task_title,
        a.name AS agent_name, a.avatar_url AS agent_avatar_url,
        i.title AS issue_title, i.number AS issue_number,
+       i.parent_issue_id AS parent_issue_id,
+       pi.title AS parent_issue_title,
+       pi.number AS parent_issue_number,
+       COALESCE(pai_agent.name, pai_user.name, '') AS parent_issue_assignee_name,
+       i.project_id AS project_id,
+       pr.title AS project_title,
+       COALESCE(pl_agent.name, pl_user.name, '') AS project_lead_name,
        task_cost.input_tokens AS usage_input_tokens,
        task_cost.output_tokens AS usage_output_tokens,
        task_cost.cache_read_tokens AS usage_cache_read_tokens,
@@ -19,6 +26,12 @@ SELECT atq.id::uuid AS task_id, atq.agent_id, atq.issue_id, atq.status,
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
+LEFT JOIN issue pi ON pi.id = i.parent_issue_id
+LEFT JOIN agent pai_agent ON pai_agent.id = pi.assignee_id AND pi.assignee_type = 'agent'
+LEFT JOIN "user" pai_user ON pai_user.id = pi.assignee_id AND pi.assignee_type = 'member'
+LEFT JOIN project pr ON pr.id = i.project_id
+LEFT JOIN agent pl_agent ON pl_agent.id = pr.lead_id AND pr.lead_type = 'agent'
+LEFT JOIN "user" pl_user ON pl_user.id = pr.lead_id AND pr.lead_type = 'member'
 LEFT JOIN LATERAL (
     SELECT
         COALESCE(SUM(tu.input_tokens), 0)::bigint  AS input_tokens,

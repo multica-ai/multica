@@ -32,6 +32,7 @@ export function TasksPage() {
   const limit = useCerebroTasksStore((s) => s.limit);
   const offset = useCerebroTasksStore((s) => s.offset);
   const search = useCerebroTasksStore((s) => s.search);
+  const groupBy = useCerebroTasksStore((s) => s.groupBy);
   const visibleColumns = useCerebroTasksStore((s) => s.visibleColumns);
 
   const wsId = workspace?.id ?? "";
@@ -46,6 +47,7 @@ export function TasksPage() {
       customFrom,
       customTo,
       search,
+      groupBy,
       limit,
       offset,
     }),
@@ -86,6 +88,7 @@ export function TasksPage() {
             errorMessage={list.error instanceof Error ? list.error.message : undefined}
             workspaceSlug={workspace.slug}
             visibleColumns={visibleColumns}
+            groupBy={groupBy}
           />
 
           {!list.isError && (

@@ -10,11 +10,15 @@ export type TaskType = "issue" | "chat";
 
 export type TaskTimeRange = "all" | "24h" | "7d" | "30d" | "custom";
 
+export type GroupBy = "none" | "issue" | "project" | "parent_issue";
+
 export type ColumnId =
   | "agent"
   | "task"
   | "issue_name"
   | "issue_id"
+  | "parent_issue"
+  | "project"
   | "status"
   | "started"
   | "duration"
@@ -31,6 +35,8 @@ export const COLUMN_DEFS: ColumnDef[] = [
   { id: "task", label: "Task" },
   { id: "issue_name", label: "Issue navn" },
   { id: "issue_id", label: "Issue ID" },
+  { id: "parent_issue", label: "Parent issue" },
+  { id: "project", label: "Projekt" },
   { id: "status", label: "Status" },
   { id: "started", label: "Started" },
   { id: "duration", label: "Varighed" },
@@ -43,6 +49,8 @@ export const DEFAULT_VISIBLE_COLUMNS: Record<ColumnId, boolean> = {
   task: true,
   issue_name: true,
   issue_id: true,
+  parent_issue: true,
+  project: true,
   status: true,
   started: true,
   duration: true,
@@ -67,6 +75,13 @@ export interface CerebroTask {
   created_at: string;
   cost_cents?: number;
   triggered_by_name?: string;
+  parent_issue_id?: string;
+  parent_issue_title?: string;
+  parent_issue_number?: number;
+  parent_issue_assignee_name?: string;
+  project_id?: string;
+  project_title?: string;
+  project_lead_name?: string;
 }
 
 export interface TasksListResponse {
@@ -86,6 +101,7 @@ export interface TasksFilter {
   customFrom: string | null;
   customTo: string | null;
   search: string;
+  groupBy: GroupBy;
   limit: number;
   offset: number;
 }
@@ -100,6 +116,7 @@ export const DEFAULT_TASKS_FILTER: TasksFilter = {
   customFrom: null,
   customTo: null,
   search: "",
+  groupBy: "none",
   limit: 50,
   offset: 0,
 };

@@ -5,6 +5,7 @@ import {
   DEFAULT_TASKS_FILTER,
   DEFAULT_VISIBLE_COLUMNS,
   type ColumnId,
+  type GroupBy,
   type TaskStatus,
   type TaskTimeRange,
   type TaskType,
@@ -26,6 +27,7 @@ interface TasksPageState extends TasksFilter {
   setCustomFrom: (from: string | null) => void;
   setCustomTo: (to: string | null) => void;
   setSearch: (search: string) => void;
+  setGroupBy: (groupBy: GroupBy) => void;
   setLimit: (limit: number) => void;
   setColumnVisible: (column: ColumnId, visible: boolean) => void;
   nextPage: () => void;
@@ -46,6 +48,7 @@ export const useCerebroTasksStore = create<TasksPageState>((set) => ({
   setCustomFrom: (customFrom) => set({ customFrom, offset: 0 }),
   setCustomTo: (customTo) => set({ customTo, offset: 0 }),
   setSearch: (search) => set({ search, offset: 0 }),
+  setGroupBy: (groupBy) => set({ groupBy, offset: 0 }),
   setLimit: (limit) => set({ limit, offset: 0 }),
   setColumnVisible: (column, visible) =>
     set((s) => ({ visibleColumns: { ...s.visibleColumns, [column]: visible } })),
