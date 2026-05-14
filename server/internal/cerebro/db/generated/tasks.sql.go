@@ -72,6 +72,13 @@ SELECT atq.id::uuid AS task_id, atq.agent_id, atq.issue_id, atq.status,
        atq.chat_session_id, atq.title AS task_title,
        a.name AS agent_name, a.avatar_url AS agent_avatar_url,
        i.title AS issue_title, i.number AS issue_number,
+       i.parent_issue_id AS parent_issue_id,
+       pi.title AS parent_issue_title,
+       pi.number AS parent_issue_number,
+       COALESCE(pai_agent.name, pai_user.name, '') AS parent_issue_assignee_name,
+       i.project_id AS project_id,
+       pr.title AS project_title,
+       COALESCE(pl_agent.name, pl_user.name, '') AS project_lead_name,
        task_cost.input_tokens AS usage_input_tokens,
        task_cost.output_tokens AS usage_output_tokens,
        task_cost.cache_read_tokens AS usage_cache_read_tokens,
@@ -81,6 +88,12 @@ SELECT atq.id::uuid AS task_id, atq.agent_id, atq.issue_id, atq.status,
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
+LEFT JOIN issue pi ON pi.id = i.parent_issue_id
+LEFT JOIN agent pai_agent ON pai_agent.id = pi.assignee_id AND pi.assignee_type = 'agent'
+LEFT JOIN "user" pai_user ON pai_user.id = pi.assignee_id AND pi.assignee_type = 'member'
+LEFT JOIN project pr ON pr.id = i.project_id
+LEFT JOIN agent pl_agent ON pl_agent.id = pr.lead_id AND pr.lead_type = 'agent'
+LEFT JOIN "user" pl_user ON pl_user.id = pr.lead_id AND pr.lead_type = 'member'
 LEFT JOIN LATERAL (
     SELECT
         COALESCE(SUM(tu.input_tokens), 0)::bigint  AS input_tokens,
@@ -132,26 +145,33 @@ type ListCerebroTasksParams struct {
 }
 
 type ListCerebroTasksRow struct {
-	TaskID                pgtype.UUID        `json:"task_id"`
-	AgentID               pgtype.UUID        `json:"agent_id"`
-	IssueID               pgtype.UUID        `json:"issue_id"`
-	Status                string             `json:"status"`
-	DispatchedAt          pgtype.Timestamptz `json:"dispatched_at"`
-	StartedAt             pgtype.Timestamptz `json:"started_at"`
-	CompletedAt           pgtype.Timestamptz `json:"completed_at"`
-	CreatedAt             pgtype.Timestamptz `json:"created_at"`
-	ChatSessionID         pgtype.UUID        `json:"chat_session_id"`
-	TaskTitle             pgtype.Text        `json:"task_title"`
-	AgentName             string             `json:"agent_name"`
-	AgentAvatarUrl        pgtype.Text        `json:"agent_avatar_url"`
-	IssueTitle            pgtype.Text        `json:"issue_title"`
-	IssueNumber           pgtype.Int4        `json:"issue_number"`
-	UsageInputTokens      int64              `json:"usage_input_tokens"`
-	UsageOutputTokens     int64              `json:"usage_output_tokens"`
-	UsageCacheReadTokens  int64              `json:"usage_cache_read_tokens"`
-	UsageCacheWriteTokens int64              `json:"usage_cache_write_tokens"`
-	UsageModel            interface{}        `json:"usage_model"`
-	TriggeredByName       pgtype.Text        `json:"triggered_by_name"`
+	TaskID                  pgtype.UUID        `json:"task_id"`
+	AgentID                 pgtype.UUID        `json:"agent_id"`
+	IssueID                 pgtype.UUID        `json:"issue_id"`
+	Status                  string             `json:"status"`
+	DispatchedAt            pgtype.Timestamptz `json:"dispatched_at"`
+	StartedAt               pgtype.Timestamptz `json:"started_at"`
+	CompletedAt             pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	ChatSessionID           pgtype.UUID        `json:"chat_session_id"`
+	TaskTitle               pgtype.Text        `json:"task_title"`
+	AgentName               string             `json:"agent_name"`
+	AgentAvatarUrl          pgtype.Text        `json:"agent_avatar_url"`
+	IssueTitle              pgtype.Text        `json:"issue_title"`
+	IssueNumber             pgtype.Int4        `json:"issue_number"`
+	ParentIssueID           pgtype.UUID        `json:"parent_issue_id"`
+	ParentIssueTitle        pgtype.Text        `json:"parent_issue_title"`
+	ParentIssueNumber       pgtype.Int4        `json:"parent_issue_number"`
+	ParentIssueAssigneeName string             `json:"parent_issue_assignee_name"`
+	ProjectID               pgtype.UUID        `json:"project_id"`
+	ProjectTitle            pgtype.Text        `json:"project_title"`
+	ProjectLeadName         string             `json:"project_lead_name"`
+	UsageInputTokens        int64              `json:"usage_input_tokens"`
+	UsageOutputTokens       int64              `json:"usage_output_tokens"`
+	UsageCacheReadTokens    int64              `json:"usage_cache_read_tokens"`
+	UsageCacheWriteTokens   int64              `json:"usage_cache_write_tokens"`
+	UsageModel              interface{}        `json:"usage_model"`
+	TriggeredByName         pgtype.Text        `json:"triggered_by_name"`
 }
 
 // Cerebro tasks page (JEH-900). Workspace-wide list of agent tasks with
@@ -195,6 +215,13 @@ func (q *Queries) ListCerebroTasks(ctx context.Context, arg ListCerebroTasksPara
 			&i.AgentAvatarUrl,
 			&i.IssueTitle,
 			&i.IssueNumber,
+			&i.ParentIssueID,
+			&i.ParentIssueTitle,
+			&i.ParentIssueNumber,
+			&i.ParentIssueAssigneeName,
+			&i.ProjectID,
+			&i.ProjectTitle,
+			&i.ProjectLeadName,
 			&i.UsageInputTokens,
 			&i.UsageOutputTokens,
 			&i.UsageCacheReadTokens,

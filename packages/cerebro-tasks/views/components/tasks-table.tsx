@@ -3,7 +3,7 @@
 import { useNavigation } from "@multica/views/navigation";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
-import type { ColumnId, CerebroTask } from "../../core/types";
+import type { ColumnId, CerebroTask, GroupBy } from "../../core/types";
 
 interface TasksTableProps {
   tasks: CerebroTask[];
@@ -12,6 +12,7 @@ interface TasksTableProps {
   errorMessage?: string;
   workspaceSlug: string;
   visibleColumns: Record<ColumnId, boolean>;
+  groupBy: GroupBy;
 }
 
 export function TasksTable({
@@ -21,6 +22,7 @@ export function TasksTable({
   errorMessage,
   workspaceSlug,
   visibleColumns,
+  groupBy,
 }: TasksTableProps) {
   if (isError) {
     return (
@@ -51,6 +53,8 @@ export function TasksTable({
     );
   }
 
+  const groups = bucketize(tasks, groupBy);
+
   return (
     <div className="overflow-x-auto rounded-md border">
       <table className="w-full text-xs">
@@ -60,6 +64,8 @@ export function TasksTable({
             {visibleColumns.task && <th className="px-3 py-2 text-left font-medium">Task</th>}
             {visibleColumns.issue_name && <th className="px-3 py-2 text-left font-medium">Issue navn</th>}
             {visibleColumns.issue_id && <th className="px-3 py-2 text-left font-medium">Issue ID</th>}
+            {visibleColumns.parent_issue && <th className="px-3 py-2 text-left font-medium">Parent issue</th>}
+            {visibleColumns.project && <th className="px-3 py-2 text-left font-medium">Projekt</th>}
             {visibleColumns.status && <th className="px-3 py-2 text-left font-medium">Status</th>}
             {visibleColumns.started && <th className="px-3 py-2 text-left font-medium">Started</th>}
             {visibleColumns.duration && <th className="px-3 py-2 text-left font-medium">Varighed</th>}
@@ -68,11 +74,96 @@ export function TasksTable({
           </tr>
         </thead>
         <tbody>
-          {tasks.map((t) => (
-            <Row key={t.task_id} task={t} workspaceSlug={workspaceSlug} visibleColumns={visibleColumns} />
+          {groups.map((group) => (
+            <>
+              {groupBy !== "none" && (
+                <tr key={`group-${group.key}`} className="bg-muted/20">
+                  <td
+                    colSpan={countVisibleColumns(visibleColumns)}
+                    className="px-3 py-1.5"
+                  >
+                    <GroupHeader group={group} groupBy={groupBy} />
+                  </td>
+                </tr>
+              )}
+              {group.tasks.map((t) => (
+                <Row
+                  key={t.task_id}
+                  task={t}
+                  workspaceSlug={workspaceSlug}
+                  visibleColumns={visibleColumns}
+                />
+              ))}
+            </>
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+interface Group {
+  key: string;
+  label: string;
+  assigneeName?: string;
+  tasks: CerebroTask[];
+}
+
+function bucketize(tasks: CerebroTask[], groupBy: GroupBy): Group[] {
+  if (groupBy === "none") {
+    return [{ key: "all", label: "Alle", tasks }];
+  }
+
+  const map = new Map<string, Group>();
+
+  for (const task of tasks) {
+    let key: string;
+    let label: string;
+    let assigneeName: string | undefined;
+
+    if (groupBy === "project") {
+      key = task.project_id ?? "__none__";
+      label = task.project_title ?? "Uden projekt";
+      assigneeName = task.project_lead_name;
+    } else {
+      key = task.parent_issue_id ?? "__none__";
+      label = task.parent_issue_title
+        ? task.parent_issue_number
+          ? `#${task.parent_issue_number} ${task.parent_issue_title}`
+          : task.parent_issue_title
+        : "Uden parent issue";
+      assigneeName = task.parent_issue_assignee_name;
+    }
+
+    if (!map.has(key)) {
+      map.set(key, { key, label, assigneeName, tasks: [] });
+    }
+    map.get(key)!.tasks.push(task);
+  }
+
+  return Array.from(map.values());
+}
+
+function countVisibleColumns(visibleColumns: Record<ColumnId, boolean>): number {
+  return Object.values(visibleColumns).filter(Boolean).length;
+}
+
+function GroupHeader({ group, groupBy }: { group: Group; groupBy: GroupBy }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        {groupBy === "project" ? "Projekt" : "Parent issue"}
+      </span>
+      <span className="font-medium text-foreground">{group.label}</span>
+      {group.assigneeName && (
+        <>
+          <span className="text-muted-foreground">·</span>
+          <span className="text-muted-foreground">{group.assigneeName}</span>
+        </>
+      )}
+      <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+        {group.tasks.length}
+      </span>
     </div>
   );
 }
@@ -142,6 +233,49 @@ function Row({
           ) : (
             "—"
           )}
+        </td>
+      )}
+      {visibleColumns.parent_issue && (
+        <td className="px-3 py-2 text-muted-foreground">
+          <div className="flex flex-col gap-0.5">
+            {task.parent_issue_title ? (
+              <>
+                <span className="truncate">
+                  {task.parent_issue_number ? (
+                    <span className="mr-1 rounded-sm bg-muted px-1 py-0.5 text-[10px] font-medium">
+                      #{task.parent_issue_number}
+                    </span>
+                  ) : null}
+                  {task.parent_issue_title}
+                </span>
+                {task.parent_issue_assignee_name && (
+                  <span className="text-[10px] text-muted-foreground/70">
+                    {task.parent_issue_assignee_name}
+                  </span>
+                )}
+              </>
+            ) : (
+              "—"
+            )}
+          </div>
+        </td>
+      )}
+      {visibleColumns.project && (
+        <td className="px-3 py-2 text-muted-foreground">
+          <div className="flex flex-col gap-0.5">
+            {task.project_title ? (
+              <>
+                <span className="truncate">{task.project_title}</span>
+                {task.project_lead_name && (
+                  <span className="text-[10px] text-muted-foreground/70">
+                    {task.project_lead_name}
+                  </span>
+                )}
+              </>
+            ) : (
+              "—"
+            )}
+          </div>
         </td>
       )}
       {visibleColumns.status && (
