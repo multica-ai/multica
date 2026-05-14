@@ -15,9 +15,11 @@
 #   1. git fetch origin/main, exit 0 if no new commits.
 #   2. git reset --hard origin/main (no local commits expected).
 #   3. pnpm install + Go build + migrate + Next build.
-#   4. Restart all three long-running services (JEH-438): backend, frontend,
-#      AND daemon. Forgetting daemon leaves it on the previous binary —
-#      same class of bug as JEH-379 (backend stale env after deploy).
+#   4. Restart backend + frontend unconditionally (JEH-438).
+#      Daemon is restarted ONLY if daemon source changed (server/cmd/multica/,
+#      server/internal/daemon/, server/internal/daemonws/). A hard kill
+#      (kickstart -k) interrupts any agent task in flight — skipping the
+#      restart on routine frontend/backend deploys preserves running tasks.
 
 set -euo pipefail
 
@@ -66,14 +68,27 @@ make migrate-up || echo "WARN: migrate-up failed (may be no-op)"
 echo "Building Next.js frontend…"
 pnpm --filter @multica/web build
 
-# Restart all three services. The daemon is easy to forget — `make build`
-# rewrites the binary but the running launchd job continues to execute the
-# old one until kickstart. JEH-438 was filed when this caused JEH-418 to
-# look broken in prod until someone manually restarted the daemon.
-echo "Restarting launchd jobs…"
+# Restart backend + frontend unconditionally. JEH-438: make build overwrites
+# the binary on disk but the running launchd job keeps the old one until
+# kickstart. Backend and frontend are stateless so hard-killing them is safe.
+echo "Restarting backend and frontend…"
 launchctl kickstart -k gui/$(id -u)/com.multica.backend
 launchctl kickstart -k gui/$(id -u)/com.multica.frontend
-launchctl kickstart -k gui/$(id -u)/com.multica.daemon
+
+# Daemon: restart only when daemon source changed. The daemon runs long-lived
+# agent tasks — kickstart -k sends SIGKILL and interrupts any task in flight.
+# Skipping the restart on deploys that only touch frontend or non-daemon
+# backend code lets running agent tasks finish uninterrupted.
+#
+# To force a daemon restart manually after a deploy:
+#   launchctl kickstart -k gui/$(id -u)/com.multica.daemon
+if git diff --name-only "$OLD_SHA" "$NEW_SHA" \
+    | grep -qE '^server/cmd/multica/|^server/internal/daemon/|^server/internal/daemonws/'; then
+  echo "Daemon source changed — restarting daemon (running agent tasks will be interrupted)."
+  launchctl kickstart -k gui/$(id -u)/com.multica.daemon
+else
+  echo "Daemon source unchanged — skipping daemon restart to preserve running agent tasks."
+fi
 
 echo "=== deploy finished: $(date -Iseconds) ==="
 echo "Deployed: $OLD_SHA -> $NEW_SHA"
