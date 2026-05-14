@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { renderWithI18n } from "../../test/i18n";
 
 vi.mock("@multica/ui/components/ui/dialog", () => ({
   Dialog: ({ children, open }: { children: ReactNode; open: boolean }) =>
@@ -111,7 +112,7 @@ describe("IntegrationsTab", () => {
       isPending: false,
     });
 
-    render(<IntegrationsTab />);
+    renderWithI18n(<IntegrationsTab />);
     expect(screen.getByText("No integrations yet.")).toBeInTheDocument();
   });
 
@@ -135,7 +136,7 @@ describe("IntegrationsTab", () => {
       isPending: false,
     });
 
-    render(<IntegrationsTab />);
+    renderWithI18n(<IntegrationsTab />);
     expect(screen.getByText("Test Group")).toBeInTheDocument();
     expect(screen.getByText("Primary")).toBeInTheDocument();
   });
@@ -172,7 +173,7 @@ describe("IntegrationsTab", () => {
       isPending: false,
     });
 
-    render(<IntegrationsTab />);
+    renderWithI18n(<IntegrationsTab />);
     expect(screen.getByText("Second Group")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Set as Primary" })).toBeInTheDocument();
   });
@@ -215,7 +216,7 @@ describe("IntegrationsTab", () => {
     (api.setPrimaryChannelBinding as ReturnType<typeof vi.fn>).mockImplementation(setPrimaryMock);
 
     const user = userEvent.setup();
-    render(<IntegrationsTab />);
+    renderWithI18n(<IntegrationsTab />);
 
     const btn = screen.getByRole("button", { name: "Set as Primary" });
     await user.click(btn);
@@ -248,7 +249,7 @@ describe("IntegrationsTab", () => {
     (api.deleteChannelBinding as ReturnType<typeof vi.fn>).mockImplementation(deleteMock);
 
     const user = userEvent.setup();
-    render(<IntegrationsTab />);
+    renderWithI18n(<IntegrationsTab />);
 
     const unbindBtn = screen.getByRole("button", { name: "Unbind" });
     await user.click(unbindBtn);
@@ -289,7 +290,7 @@ describe("IntegrationsTab", () => {
         return { data: [{ id: "agent-1", name: "Agent One", archived_at: null }], isLoading: false };
       }
       if (key[0] === "settings" && key[1] === "integrations" && key[3] === "projects") {
-        return { data: { projects: [{ id: "proj-1", name: "Project One" }] }, isLoading: false };
+        return { data: { projects: [{ id: "proj-1", title: "Project One" }] }, isLoading: false };
       }
       return defaultUseQuery(opts);
     });
@@ -302,7 +303,7 @@ describe("IntegrationsTab", () => {
     }));
 
     const user = userEvent.setup();
-    render(<IntegrationsTab />);
+    renderWithI18n(<IntegrationsTab />);
 
     await user.click(screen.getByRole("button", { name: "Edit" }));
 

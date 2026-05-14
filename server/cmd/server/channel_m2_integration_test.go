@@ -232,7 +232,7 @@ func TestChannelIntegration_TC_int_9_M3a_GroupSetAssignee(t *testing.T) {
 
 	// Resolve assignee display name for the intent.
 	var assigneeName string
-	if err := testPool.QueryRow(ctx, `SELECT display_name FROM "user" WHERE id = $1`, assigneeUserID).Scan(&assigneeName); err != nil {
+	if err := testPool.QueryRow(ctx, `SELECT name FROM "user" WHERE id = $1`, assigneeUserID).Scan(&assigneeName); err != nil {
 		t.Fatalf("read assignee name: %v", err)
 	}
 

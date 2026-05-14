@@ -301,7 +301,11 @@ func (s *directIssueService) CreateIssue(ctx context.Context, req facade.CreateI
 	// production handler uses.
 	var number int32
 	if err := tx.QueryRow(ctx, `
-		UPDATE workspace SET issue_counter = issue_counter + 1
+		UPDATE workspace
+		SET issue_counter = GREATEST(
+			issue_counter,
+			COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0)
+		) + 1
 		WHERE id = $1
 		RETURNING issue_counter
 	`, req.WorkspaceID).Scan(&number); err != nil {
@@ -369,7 +373,7 @@ func (s *directIssueService) SetIssueAssignee(ctx context.Context, id pgtype.UUI
 		JOIN issue i ON i.workspace_id = m.workspace_id
 		LEFT JOIN "user" u ON u.id = m.user_id
 		WHERE i.id = $1
-		  AND (u.display_name = $2 OR m.user_id::text = $2)
+		  AND (u.name = $2 OR m.user_id::text = $2)
 		LIMIT 1
 	`, id, clean).Scan(&assigneeID); err != nil {
 		return fmt.Errorf("用户 %s 不在此 workspace", assigneeIdentifier)
@@ -498,7 +502,7 @@ func mustCreateUser(t *testing.T, displayName string) string {
 	t.Helper()
 	var id string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO "user" (display_name, email)
+		INSERT INTO "user" (name, email)
 		VALUES ($1, $2)
 		RETURNING id
 	`, displayName, displayName+"@test.local").Scan(&id); err != nil {

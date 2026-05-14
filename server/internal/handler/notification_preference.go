@@ -213,10 +213,18 @@ func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	workspaceID := ctxWorkspaceID(r.Context())
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
 
 	pref, err := h.Queries.GetNotificationPreference(r.Context(), db.GetNotificationPreferenceParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		UserID:      parseUUID(userID),
 	})
 	if err != nil {
@@ -252,7 +260,15 @@ func (h *Handler) UpdateNotificationPreferences(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	workspaceID := ctxWorkspaceID(r.Context())
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
 
 	var req updateNotifPrefRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -279,7 +295,7 @@ func (h *Handler) UpdateNotificationPreferences(w http.ResponseWriter, r *http.R
 	// hazard the partial-update API is supposed to avoid.
 	var merged map[string]any
 	existing, err := h.Queries.GetNotificationPreference(r.Context(), db.GetNotificationPreferenceParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		UserID:      parseUUID(userID),
 	})
 	switch {
@@ -309,7 +325,7 @@ func (h *Handler) UpdateNotificationPreferences(w http.ResponseWriter, r *http.R
 	}
 
 	_, err = h.Queries.UpsertNotificationPreference(r.Context(), db.UpsertNotificationPreferenceParams{
-		WorkspaceID: parseUUID(workspaceID),
+		WorkspaceID: wsUUID,
 		UserID:      parseUUID(userID),
 		Preferences: prefsJSON,
 	})
