@@ -1,11 +1,18 @@
 /**
  * Due-date picker. Wraps `@react-native-community/datetimepicker` (native
  * UIDatePicker on iOS, Material spinner on Android). Two affordances:
- *   - "Done" — sends the currently displayed date as ISO date string
+ *   - "Done" — sends the currently displayed date as ISO 8601 / RFC 3339
  *   - "Clear due date" — sends null (only shown when value is set)
  *
- * Date is stored as ISO date-string (YYYY-MM-DD) on the server. The
- * native picker hands us a JS `Date`; we slice the ISO string at the day.
+ * Backend (`server/internal/handler/issue.go` CreateIssue / UpdateIssue)
+ * parses with `time.Parse(time.RFC3339, ...)` — strict. Mirrors web's
+ * `packages/views/issues/components/pickers/due-date-picker.tsx:57` which
+ * sends `d.toISOString()`.
+ *
+ * Note: full ISO means UTC. Users in negative or large positive offsets
+ * may see a one-day shift after round-trip (e.g. local "May 14" stored as
+ * "2026-05-13T16:00:00Z" for UTC+8 if backend truncates day). This
+ * matches web's behavior — diverging here would break parity.
  */
 import { useState, useEffect } from "react";
 import { Modal, Pressable, View } from "react-native";
@@ -25,8 +32,8 @@ function isoToDate(iso: string | null): Date {
   return Number.isNaN(d.getTime()) ? new Date() : d;
 }
 
-function dateToIsoDay(d: Date): string {
-  return d.toISOString().slice(0, 10);
+function dateToIso(d: Date): string {
+  return d.toISOString();
 }
 
 export function DueDatePickerSheet({
@@ -43,7 +50,7 @@ export function DueDatePickerSheet({
   }, [visible, value]);
 
   const submit = () => {
-    onChange(dateToIsoDay(draft));
+    onChange(dateToIso(draft));
     onClose();
   };
   const clear = () => {

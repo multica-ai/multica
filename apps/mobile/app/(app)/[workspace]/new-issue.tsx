@@ -1,12 +1,9 @@
 /**
- * New issue creation modal.
+ * New issue creation modal — manual only.
  *
- * Modes (mirrors web's `useCreateModeStore`):
- *  - Manual: title + description + status/priority/assignee chips.
- *            Fully wired to `apiClient.issues.create` via useCreateIssue().
- *            Description supports inline `@mention` (members + agents).
- *  - Agent:  natural-language prompt + agent picker (placeholder; Phase 3
- *            wires the real picker + apiClient.quickCreateIssue).
+ * title + description + status/priority/assignee/due-date/project chips.
+ * Fully wired to `apiClient.issues.create` via useCreateIssue().
+ * Description supports inline `@mention` (members + agents).
  *
  * Mention pipeline is shared with `comment-composer.tsx` via the
  * `useMentionInput` hook — both surfaces produce the same canonical
@@ -21,25 +18,18 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   TextInput,
   View,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import { Stack, router } from "expo-router";
 import type { IssuePriority, IssueStatus } from "@multica/core/types";
 import { SubmitIssueButton } from "@/components/issue/submit-issue-button";
 import { CreateFormAttributeRow } from "@/components/issue/create-form-attribute-row";
-import {
-  CreateModeToggle,
-  type CreateMode,
-} from "@/components/issue/create-mode-toggle";
 import type { AssigneeValue } from "@/components/issue/pickers/assignee-picker-sheet";
 import { MentionSuggestionBar } from "@/components/issue/mention-suggestion-bar";
 import { MarkdownToolbar } from "@/components/editor/markdown-toolbar";
 import { useFileAttach } from "@/components/editor/use-file-attach";
-import { Text } from "@/components/ui/text";
 import {
   MIN_BODY_INPUT_HEIGHT_PX,
   MOBILE_PLACEHOLDER_COLOR,
@@ -52,68 +42,50 @@ import {
 } from "@/lib/use-mention-input";
 
 export default function NewIssueModal() {
-  const [mode, setMode] = useState<CreateMode>("manual");
-
-  // Manual mode fields
   const [title, setTitle] = useState("");
   const description = useMentionInput();
   const [status, setStatus] = useState<IssueStatus>("todo");
   const [priority, setPriority] = useState<IssuePriority>("none");
   const [assignee, setAssignee] = useState<AssigneeValue>(null);
-
-  // Agent mode fields (Phase 3 wires the picker)
-  const [prompt, setPrompt] = useState("");
-  const [agentId] = useState<string | null>(null);
+  const [dueDate, setDueDate] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
 
   const createIssue = useCreateIssue();
   const isSubmitting = createIssue.isPending;
 
-  const canSubmit =
-    !isSubmitting &&
-    (mode === "manual"
-      ? title.trim().length > 0
-      : prompt.trim().length > 0);
+  const canSubmit = !isSubmitting && title.trim().length > 0;
 
   const onSubmit = useCallback(async () => {
-    if (mode === "manual") {
-      const trimmedTitle = title.trim();
-      if (trimmedTitle.length === 0) return;
-      const finalDescription = description.serialize().trim();
-      try {
-        await createIssue.mutateAsync({
-          title: trimmedTitle,
-          description: finalDescription || undefined,
-          status,
-          priority,
-          ...(assignee
-            ? { assignee_type: assignee.type, assignee_id: assignee.id }
-            : {}),
-        });
-        router.back();
-      } catch (err) {
-        Alert.alert(
-          "Failed to create issue",
-          err instanceof Error ? err.message : "Unknown error",
-        );
-      }
-    } else {
-      // Agent mode — Phase 3 swaps this for apiClient.quickCreateIssue.
-      if (prompt.trim().length === 0) return;
-      console.log("[new-issue] submit (agent)", {
-        prompt: prompt.trim(),
-        agent_id: agentId,
+    const trimmedTitle = title.trim();
+    if (trimmedTitle.length === 0) return;
+    const finalDescription = description.serialize().trim();
+    try {
+      await createIssue.mutateAsync({
+        title: trimmedTitle,
+        description: finalDescription || undefined,
+        status,
+        priority,
+        ...(assignee
+          ? { assignee_type: assignee.type, assignee_id: assignee.id }
+          : {}),
+        ...(dueDate ? { due_date: dueDate } : {}),
+        ...(projectId ? { project_id: projectId } : {}),
       });
       router.back();
+    } catch (err) {
+      Alert.alert(
+        "Failed to create issue",
+        err instanceof Error ? err.message : "Unknown error",
+      );
     }
   }, [
-    mode,
     title,
     description,
     status,
     priority,
     assignee,
-    prompt,
-    agentId,
+    dueDate,
+    projectId,
     createIssue,
   ]);
 
@@ -130,36 +102,29 @@ export default function NewIssueModal() {
     return HeaderRight;
   }, [canSubmit, isSubmitting, onSubmit]);
 
-  const headerTitle = useMemo(() => {
-    function HeaderTitle() {
-      return <CreateModeToggle mode={mode} onChange={setMode} />;
-    }
-    return HeaderTitle;
-  }, [mode]);
-
   return (
     <>
-      <Stack.Screen options={{ headerRight, headerTitle }} />
+      <Stack.Screen options={{ headerRight }} />
       <KeyboardAvoidingView
         className="flex-1 bg-background"
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        {mode === "manual" ? (
-          <ManualPanel
-            title={title}
-            onTitleChange={setTitle}
-            description={description}
-            status={status}
-            onStatusChange={setStatus}
-            priority={priority}
-            onPriorityChange={setPriority}
-            assignee={assignee}
-            onAssigneeChange={setAssignee}
-            submitting={isSubmitting}
-          />
-        ) : (
-          <AgentPanel prompt={prompt} onPromptChange={setPrompt} />
-        )}
+        <ManualPanel
+          title={title}
+          onTitleChange={setTitle}
+          description={description}
+          status={status}
+          onStatusChange={setStatus}
+          priority={priority}
+          onPriorityChange={setPriority}
+          assignee={assignee}
+          onAssigneeChange={setAssignee}
+          dueDate={dueDate}
+          onDueDateChange={setDueDate}
+          projectId={projectId}
+          onProjectIdChange={setProjectId}
+          submitting={isSubmitting}
+        />
       </KeyboardAvoidingView>
     </>
   );
@@ -175,6 +140,10 @@ function ManualPanel({
   onPriorityChange,
   assignee,
   onAssigneeChange,
+  dueDate,
+  onDueDateChange,
+  projectId,
+  onProjectIdChange,
   submitting,
 }: {
   title: string;
@@ -186,6 +155,10 @@ function ManualPanel({
   onPriorityChange: (next: IssuePriority) => void;
   assignee: AssigneeValue;
   onAssigneeChange: (next: AssigneeValue) => void;
+  dueDate: string | null;
+  onDueDateChange: (next: string | null) => void;
+  projectId: string | null;
+  onProjectIdChange: (next: string | null) => void;
   submitting: boolean;
 }) {
   const fileAttach = useFileAttach();
@@ -246,59 +219,11 @@ function ManualPanel({
           onPriorityChange={onPriorityChange}
           assignee={assignee}
           onAssigneeChange={onAssigneeChange}
+          dueDate={dueDate}
+          onDueDateChange={onDueDateChange}
+          projectId={projectId}
+          onProjectIdChange={onProjectIdChange}
         />
-      </View>
-    </>
-  );
-}
-
-function AgentPanel({
-  prompt,
-  onPromptChange,
-}: {
-  prompt: string;
-  onPromptChange: (next: string) => void;
-}) {
-  return (
-    <>
-      <ScrollView
-        className="flex-1"
-        contentContainerClassName="px-4 pt-4 pb-2"
-        keyboardShouldPersistTaps="handled"
-      >
-        <TextInput
-          value={prompt}
-          onChangeText={onPromptChange}
-          placeholder="Describe what you want done…"
-          placeholderTextColor={MOBILE_PLACEHOLDER_COLOR}
-          className="text-base text-foreground py-2 min-h-[160px]"
-          autoFocus
-          multiline
-          textAlignVertical="top"
-        />
-      </ScrollView>
-
-      <View className="border-t border-border bg-background px-4 py-3">
-        {/* Phase 3 will replace this with a real agent picker sheet. */}
-        <Pressable
-          onPress={() => {
-            console.log("[new-issue] agent picker — Phase 3");
-          }}
-          className="flex-row items-center gap-2 px-3 py-2 rounded-full border border-dashed border-muted-foreground/30 self-start active:bg-secondary"
-          hitSlop={4}
-        >
-          <Ionicons
-            name="sparkles-outline"
-            size={14}
-            color={MOBILE_PLACEHOLDER_COLOR}
-          />
-          <Text className="text-xs text-muted-foreground">Agent: Select</Text>
-          <Ionicons
-            name="chevron-down"
-            size={12}
-            color={MOBILE_PLACEHOLDER_COLOR}
-          />
-        </Pressable>
       </View>
     </>
   );

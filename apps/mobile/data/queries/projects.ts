@@ -1,10 +1,6 @@
 /**
- * Workspace project list. Currently used only to look up `project.title` and
- * `project.icon` for the read-only project chip on issue detail.
- *
- * No project picker yet — defer until web ships one (per plan
- * `~/.claude/plans/plan-polymorphic-hickey.md`). When that lands, this same
- * query is what the picker would consume.
+ * Workspace project list. Consumed by the read-only project chip on issue
+ * detail and by `ProjectPickerSheet` in the new-issue / issue-detail flows.
  */
 import { queryOptions } from "@tanstack/react-query";
 import type { Project } from "@multica/core/types";
