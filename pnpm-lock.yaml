@@ -866,6 +866,9 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.2.3
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
     devDependencies:
       '@multica/tsconfig':
         specifier: workspace:*

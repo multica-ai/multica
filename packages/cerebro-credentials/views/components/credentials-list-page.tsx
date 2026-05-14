@@ -14,32 +14,22 @@ import {
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Input } from "@multica/ui/components/ui/input";
 import { useCurrentMember } from "@multica/core/permissions";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import { useWorkspaceId } from "@multica/core/hooks";
 
-import { MOCK_CREDENTIALS } from "../mock-data";
 import { CREDENTIAL_TYPE_LABEL } from "../types";
-import type { Credential } from "../types";
+import { useCredentialsList } from "../queries";
 import { ExpiryBadge } from "./expiry-badge";
 import { CredentialStatusBadge } from "./credential-status-badge";
 import { CredentialDetailPage } from "./credential-detail-page";
 
-// STUB hook — JEH-1196 has shipped the registry REST API at
-// `/api/workspaces/{id}/credentials`; live wiring (TanStack Query +
-// parseWithFallback schema) is tracked as follow-up to JEH-1199. The UI
-// currently still renders deterministic mock data so the policy admin
-// surfaces can be reviewed without an admin first seeding real rows.
-function useCredentials(): { data: Credential[]; isLoading: boolean } {
-  return { data: MOCK_CREDENTIALS, isLoading: false };
-}
-
 export function CredentialsListPage() {
-  const workspace = useCurrentWorkspace();
-  const { role, isLoading: isMemberLoading } = useCurrentMember(workspace?.id ?? "");
-  const { data: credentials } = useCredentials();
+  const wsId = useWorkspaceId();
+  const { role, isLoading: isMemberLoading } = useCurrentMember(wsId);
+  const { data: credentials = [], isLoading, isError } = useCredentialsList(wsId);
   const [filter, setFilter] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  if (!workspace || isMemberLoading) {
+  if (!wsId || isMemberLoading) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         Indlæser…
@@ -83,13 +73,22 @@ export function CredentialsListPage() {
             Credentials
           </h1>
           <p className="text-sm text-muted-foreground">
-            Workspace credentials and governance policies. Showing mock data
-            until live wiring lands; policy edit-paths are gated until
-            JEH-1179 ships the Persona grants admin API.
+            Workspace credentials and governance policies. Read-only —
+            create/rotate/reveal are admin actions performed via the API
+            (JEH-1196) and the CLI.
           </p>
         </div>
-        <Badge variant="outline">{visible.length} credentials</Badge>
+        <Badge variant="outline">
+          {isLoading ? "Loading…" : `${visible.length} credentials`}
+        </Badge>
       </header>
+
+      {isError ? (
+        <p className="text-sm text-destructive">
+          Failed to load credentials. The encryption key may not be configured
+          on this server (MULTICA_CREDENTIALS_KEY).
+        </p>
+      ) : null}
 
       <Input
         type="search"

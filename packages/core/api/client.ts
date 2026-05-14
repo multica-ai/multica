@@ -538,6 +538,30 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(cerebro-credentials-client): JEH-1199 read-only credential
+  // registry methods. Bodies are `unknown` so the cerebro-credentials package
+  // owns the schema via parseWithFallback (the API Response Compatibility
+  // rule in CLAUDE.md). Mutating endpoints (create/reveal/rotate/delete)
+  // are not exposed here yet — the admin UI today only reads.
+  async listCerebroCredentials<T = unknown>(wsId: string): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/credentials`);
+  }
+  async listCerebroCredentialAudit<T = unknown>(
+    wsId: string,
+    credId: string,
+    limit = 100,
+  ): Promise<T> {
+    return this.fetch<T>(
+      `/api/workspaces/${wsId}/credentials/${credId}/audit?limit=${limit}`,
+    );
+  }
+  async listCerebroCredentialBindings<T = unknown>(
+    wsId: string,
+    credId: string,
+  ): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/credentials/${credId}/bindings`);
+  }
+
   // CEREBRO-PATCH(cerebro-groups-client): JEH-1006 workspace groups CRUD + member management.
   // Endpoints are mounted by `cerebro-groups-routes` in server/cmd/server/router.go.
   // Server paths are NOT under /api/cerebro/* — they live on the generic

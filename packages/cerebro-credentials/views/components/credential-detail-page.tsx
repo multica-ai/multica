@@ -14,9 +14,11 @@ import {
   TabsContent,
 } from "@multica/ui/components/ui/tabs";
 
+import { useWorkspaceId } from "@multica/core/hooks";
 import type { Credential } from "../types";
 import { CREDENTIAL_TYPE_LABEL } from "../types";
-import { MOCK_BINDINGS, MOCK_POLICIES, MOCK_AUDIT } from "../mock-data";
+import { MOCK_POLICIES } from "../mock-data";
+import { useCredentialAudit, useCredentialBindings } from "../queries";
 import { PolicyEditor } from "./policy-editor";
 import { AuditLogView } from "./audit-log-view";
 import { CredentialStatusBadge } from "./credential-status-badge";
@@ -29,9 +31,13 @@ export function CredentialDetailPage({
   credential: Credential;
   onClose: () => void;
 }) {
+  const wsId = useWorkspaceId();
+  // Policies are Persona grants (JEH-1197 + JEH-1179); no /policies endpoint
+  // on the credential resource. UI shows whatever the local stub knows about
+  // until the Persona grant admin API lands. Read-only.
   const policies = MOCK_POLICIES.filter((p) => p.credential_id === credential.id);
-  const audit = MOCK_AUDIT.filter((a) => a.credential_id === credential.id);
-  const bindings = MOCK_BINDINGS.filter((b) => b.credential_id === credential.id);
+  const { data: audit = [] } = useCredentialAudit(wsId, credential.id);
+  const { data: bindings = [] } = useCredentialBindings(wsId, credential.id);
 
   return (
     <Dialog open onOpenChange={(open) => (!open ? onClose() : undefined)}>
