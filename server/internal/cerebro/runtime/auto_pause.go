@@ -50,6 +50,18 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 		)
 		return false
 	}
+	// Re-classify the triggering task so the unpause sweeper can resume it.
+	// The daemon sends an empty failure_reason for generic errors, which
+	// defaults to 'agent_error'. That value is excluded from
+	// ListResumableTasksForRuntime's Category-2 resume set. Reclassifying
+	// to 'rate_limit' puts it back in the window. The SQL WHERE guard
+	// makes this idempotent on re-pause.
+	if err := s.Cerebro.ReclassifyAsRateLimit(ctx, task.ID); err != nil {
+		slog.Warn("auto-pause on failure: reclassify task failed",
+			"task_id", util.UUIDToString(task.ID),
+			"error", err,
+		)
+	}
 	slog.Info("auto-paused runtime on task failure",
 		"runtime_id", util.UUIDToString(task.RuntimeID),
 		"task_id", util.UUIDToString(task.ID),

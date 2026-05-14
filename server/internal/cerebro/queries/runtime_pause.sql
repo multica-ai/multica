@@ -103,12 +103,33 @@ WHERE t.runtime_id = $1
       )
 ORDER BY t.completed_at ASC;
 
+-- name: ReclassifyAsRateLimit :exec
+-- Called by MaybeAutoPauseOnFailure after a successful auto-pause to
+-- re-classify the triggering task so the unpause sweeper can resume it.
+-- When a monthly-cap / auth-expired failure arrives via the daemon the
+-- failure_reason is 'agent_error' (daemon default). That value is not in
+-- the Category-2 resume set of ListResumableTasksForRuntime, so the task
+-- would be silently dropped on unpause. Re-classifying it as 'rate_limit'
+-- puts it back in the resume window. The WHERE guard makes this a no-op
+-- when called more than once (idempotent) or on a task that was already
+-- classified correctly.
+UPDATE agent_task_queue
+SET failure_reason = 'rate_limit'
+WHERE id = $1
+  AND failure_reason = 'agent_error';
+
 -- name: CreateResumeFromPauseTask :one
 -- Like CreateRetryTask but resets the attempt counter to 1. Used when
 -- the unpause sweeper resumes work that died during a rate-limit pause —
 -- the pause was caused by an external blocker, not by the task itself, so
 -- giving it a fresh max_attempts budget is correct. Carries forward the
 -- agent's session context so the conversation continues seamlessly.
+--
+-- Uses the agent's current runtime_id (from the agent row) so that if the
+-- daemon restarted and registered a new runtime between the pause and the
+-- unpause, the resume task is routed to the live runtime, not the stale
+-- one the parent was originally dispatched to. Falls back to the parent's
+-- runtime_id when no agent row is found (test/offline path).
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
@@ -116,10 +137,11 @@ INSERT INTO agent_task_queue (
     attempt, max_attempts, parent_task_id
 )
 SELECT
-    p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    p.agent_id, COALESCE(a.runtime_id, p.runtime_id), p.issue_id, p.chat_session_id, p.autopilot_run_id,
     'queued', p.priority, p.trigger_comment_id, p.trigger_summary, p.context,
     p.session_id, p.work_dir,
     1, p.max_attempts, p.id
 FROM agent_task_queue p
+LEFT JOIN agent a ON a.id = p.agent_id
 WHERE p.id = $1
 RETURNING *;
