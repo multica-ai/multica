@@ -246,11 +246,12 @@ func TestCreateIssue_AssignToPrivateAgentForbidsPlainMember(t *testing.T) {
 		}
 	}
 
-	// Workspace owner (testUserID): allowed.
+	// Workspace owner (testUserID): denied (OPE-531: no admin/owner bypass
+	// for private agents — only the agent's owner may assign).
 	w := httptest.NewRecorder()
 	testHandler.CreateIssue(w, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, body(testUserID)))
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue as workspace owner: expected 201, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("CreateIssue as workspace owner: expected 403 (OPE-531), got %d: %s", w.Code, w.Body.String())
 	}
 
 	// Agent owner (plain member who happens to own the agent): allowed.
@@ -487,7 +488,7 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 		t.Fatalf("count tasks before: %v", err)
 	}
 
-	testHandler.enqueueMentionedAgentTasks(ctx, issue, comment, nil, "member", testUserID)
+	testHandler.enqueueMentionedAgentTasks(ctx, issue, comment, nil, "member", testUserID, nil)
 
 	var afterCount int
 	if err := testPool.QueryRow(ctx,

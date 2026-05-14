@@ -405,7 +405,7 @@ func (q *Queries) ListAttachmentsByCommentIDs(ctx context.Context, arg ListAttac
 
 const listAttachmentsByIssue = `-- name: ListAttachmentsByIssue :many
 SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id FROM attachment
-WHERE issue_id = $1 AND workspace_id = $2
+WHERE issue_id = $1 AND workspace_id = $2 AND comment_id IS NULL
 ORDER BY created_at ASC
 `
 

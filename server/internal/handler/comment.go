@@ -632,9 +632,9 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 			continue
 		}
-		// Private-agent gate (member→private requires allowed_principals;
-		// agent→agent always passes).
-		if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, uuidToString(issue.WorkspaceID)) {
+		// OPE-531: strict trigger gate for private agents — only agent owner
+		// or same-owner agents can trigger via mention.
+		if !h.canTriggerPrivateAgent(ctx, agent, authorType, authorID) {
 			continue
 		}
 		// Dedup: skip if this agent already has a pending task for this issue.

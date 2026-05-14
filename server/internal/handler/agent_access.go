@@ -38,6 +38,28 @@ func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, act
 	return roleAllowed(member.Role, "owner", "admin")
 }
 
+// canTriggerPrivateAgent enforces OPE-531 strict policy for mention/assign:
+// only the agent owner (member) or agents sharing the same owner may trigger
+// a private agent. Workspace admins do NOT get bypass.
+func (h *Handler) canTriggerPrivateAgent(ctx context.Context, agent db.Agent, actorType, actorID string) bool {
+	if agent.Visibility != "private" {
+		return true
+	}
+	targetOwner := uuidToString(agent.OwnerID)
+	switch actorType {
+	case "member":
+		return targetOwner == actorID
+	case "agent":
+		triggerAgent, err := h.Queries.GetAgent(ctx, parseUUID(actorID))
+		if err != nil {
+			return false
+		}
+		return uuidToString(triggerAgent.OwnerID) == targetOwner
+	default:
+		return false
+	}
+}
+
 // memberAllowedForPrivateAgent is the pure predicate used by both
 // canAccessPrivateAgent and the ListAgents filter loop. Caller must have
 // already confirmed agent.Visibility == "private".

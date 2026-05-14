@@ -3,13 +3,9 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"bytes"
 	"mime/multipart"
 	"github.com/multica-ai/multica/server/internal/middleware"
