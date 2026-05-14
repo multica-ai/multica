@@ -186,16 +186,24 @@ RETURNING *;
 SELECT * FROM agent_task_queue
 WHERE id = $1;
 
+-- name: LockAgentForClaim :exec
+-- Acquires a transaction-scoped advisory lock keyed on the agent UUID.
+-- Serializes concurrent claim attempts for the same agent so the capacity
+-- check (CountRunningTasks) sees a consistent snapshot. Released
+-- automatically on COMMIT/ROLLBACK. Different agents never contend.
+SELECT pg_advisory_xact_lock(hashtext($1::text));
+
 -- name: ClaimAgentTask :one
--- Claims the next queued task for an agent, enforcing per-(issue, agent) serialization:
--- a task is only claimable when no other task for the same issue AND same agent is
--- already dispatched or running. This allows different agents to work on the same
--- issue in parallel while preventing a single agent from running duplicate tasks.
--- Chat tasks (issue_id IS NULL) use chat_session_id for serialization instead.
--- Quick-create tasks have no issue / chat / autopilot link, so they serialize on
--- "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
--- otherwise a user mashing the create button could fire concurrent quick-creates
--- whose completion lookup would race over "most recent issue by this agent".
+-- Claims the next queued task for an agent, enforcing per-context serialization:
+-- a task is only claimable when no other task for the same context AND same agent
+-- is already dispatched or running. Serialization modes:
+--   1. Issue tasks: same (issue_id, agent_id) pair cannot run concurrently.
+--   2. Chat tasks: same (chat_session_id, agent_id) pair cannot run concurrently.
+--   3. Quick-create tasks (issue_id, chat_session_id, AND autopilot_run_id all NULL):
+--      serialize against any other all-NULL task for the same agent to prevent
+--      concurrent quick-create races.
+-- Tasks with a non-NULL autopilot_run_id but NULL issue_id are NOT serialized by
+-- this query — autopilot orchestration handles sequencing externally.
 UPDATE agent_task_queue
 SET status = 'dispatched', dispatched_at = now()
 WHERE id = (

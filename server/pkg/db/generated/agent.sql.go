@@ -515,6 +515,19 @@ func (q *Queries) ClaimAgentTask(ctx context.Context, agentID pgtype.UUID) (Agen
 	return i, err
 }
 
+const lockAgentForClaim = `-- name: LockAgentForClaim :exec
+SELECT pg_advisory_xact_lock(hashtext($1::text))
+`
+
+// Acquires a transaction-scoped advisory lock keyed on the agent UUID.
+// Serializes concurrent claim attempts for the same agent so the capacity
+// check (CountRunningTasks) sees a consistent snapshot. Released
+// automatically on COMMIT/ROLLBACK. Different agents never contend.
+func (q *Queries) LockAgentForClaim(ctx context.Context, agentID string) error {
+	_, err := q.db.Exec(ctx, lockAgentForClaim, agentID)
+	return err
+}
+
 const clearAgentMcpConfig = `-- name: ClearAgentMcpConfig :one
 UPDATE agent SET mcp_config = NULL, updated_at = now()
 WHERE id = $1

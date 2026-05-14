@@ -730,8 +730,10 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 	return &task, nil
 }
 
-// ClaimTask atomically claims the next queued task for an agent,
-// respecting max_concurrent_tasks.
+// ClaimTask claims the next queued task for an agent, respecting
+// max_concurrent_tasks. Uses a transaction with an advisory lock to
+// serialize per-agent claims, ensuring the capacity check is atomic
+// with the claim itself (no TOCTOU race).
 func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	start := time.Now()
 	var (
@@ -742,58 +744,69 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 		s.maybeLogClaimSlow(agentID, outcome, start, getAgentMs, countRunningMs, claimAgentMs, updateStatusMs, dispatchMs)
 	}()
 
-	t0 := start
-	agent, err := s.Queries.GetAgent(ctx, agentID)
-	getAgentMs = time.Since(t0).Milliseconds()
-	if err != nil {
-		outcome = "error_get_agent"
-		return nil, fmt.Errorf("agent not found: %w", err)
-	}
-
-	t0 = time.Now()
-	running, err := s.Queries.CountRunningTasks(ctx, agentID)
-	countRunningMs = time.Since(t0).Milliseconds()
-	if err != nil {
-		outcome = "error_count_running"
-		return nil, fmt.Errorf("count running tasks: %w", err)
-	}
-	if running >= int64(agent.MaxConcurrentTasks) {
-		slog.Debug("task claim: no capacity", "agent_id", util.UUIDToString(agentID), "running", running, "max", agent.MaxConcurrentTasks)
-		outcome = "no_capacity"
-		return nil, nil // No capacity
-	}
-
-	t0 = time.Now()
-	task, err := s.Queries.ClaimAgentTask(ctx, agentID)
-	claimAgentMs = time.Since(t0).Milliseconds()
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			slog.Debug("task claim: no tasks available", "agent_id", util.UUIDToString(agentID))
-			outcome = "no_tasks"
-			return nil, nil // No tasks available
+	var task *db.AgentTaskQueue
+	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		// Serialize per-agent: concurrent claims for the same agent block
+		// here until the prior claim commits or rolls back.
+		if err := qtx.LockAgentForClaim(ctx, util.UUIDToString(agentID)); err != nil {
+			return fmt.Errorf("advisory lock: %w", err)
 		}
-		outcome = "error_claim"
-		return nil, fmt.Errorf("claim task: %w", err)
+
+		t0 := time.Now()
+		agent, err := qtx.GetAgent(ctx, agentID)
+		getAgentMs = time.Since(t0).Milliseconds()
+		if err != nil {
+			outcome = "error_get_agent"
+			return fmt.Errorf("agent not found: %w", err)
+		}
+
+		t0 = time.Now()
+		running, err := qtx.CountRunningTasks(ctx, agentID)
+		countRunningMs = time.Since(t0).Milliseconds()
+		if err != nil {
+			outcome = "error_count_running"
+			return fmt.Errorf("count running tasks: %w", err)
+		}
+		if running >= int64(agent.MaxConcurrentTasks) {
+			outcome = "no_capacity"
+			return nil
+		}
+
+		t0 = time.Now()
+		claimed, err := qtx.ClaimAgentTask(ctx, agentID)
+		claimAgentMs = time.Since(t0).Milliseconds()
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				outcome = "no_tasks"
+				return nil
+			}
+			outcome = "error_claim"
+			return fmt.Errorf("claim task: %w", err)
+		}
+		task = &claimed
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, nil
 	}
 
 	slog.Info("task claimed", "task_id", util.UUIDToString(task.ID), "agent_id", util.UUIDToString(agentID))
-	s.captureTaskDispatched(ctx, task)
+	s.captureTaskDispatched(ctx, *task)
 
-	// Refresh agent status from active tasks. This avoids a stale unconditional
-	// working write racing after a just-cancelled claim.
-	t0 = time.Now()
+	// Post-claim work outside transaction for shorter lock hold time.
+	t0 := time.Now()
 	s.ReconcileAgentStatus(ctx, agentID)
 	updateStatusMs = time.Since(t0).Milliseconds()
 
-	// Broadcast task:dispatch. ResolveTaskWorkspaceID inside this path can
-	// re-query issue/chat_session/autopilot_run, so it can also be a real
-	// contributor to claim latency.
 	t0 = time.Now()
-	s.broadcastTaskDispatch(ctx, task)
+	s.broadcastTaskDispatch(ctx, *task)
 	dispatchMs = time.Since(t0).Milliseconds()
 
 	outcome = "claimed"
-	return &task, nil
+	return task, nil
 }
 
 // ClaimTaskForRuntime claims the next runnable task for a runtime while
