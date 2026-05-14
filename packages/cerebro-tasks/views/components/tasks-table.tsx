@@ -125,6 +125,13 @@ function bucketize(tasks: CerebroTask[], groupBy: GroupBy): Group[] {
       key = task.project_id ?? "__none__";
       label = task.project_title ?? "Uden projekt";
       assigneeName = task.project_lead_name;
+    } else if (groupBy === "issue") {
+      key = task.issue_id ?? "__none__";
+      label = task.issue_title
+        ? task.issue_number
+          ? `#${task.issue_number} ${task.issue_title}`
+          : task.issue_title
+        : "Uden issue";
     } else {
       key = task.parent_issue_id ?? "__none__";
       label = task.parent_issue_title
@@ -152,7 +159,7 @@ function GroupHeader({ group, groupBy }: { group: Group; groupBy: GroupBy }) {
   return (
     <div className="flex items-center gap-2">
       <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-        {groupBy === "project" ? "Projekt" : "Parent issue"}
+        {groupBy === "project" ? "Projekt" : groupBy === "issue" ? "Issue" : "Parent issue"}
       </span>
       <span className="font-medium text-foreground">{group.label}</span>
       {group.assigneeName && (

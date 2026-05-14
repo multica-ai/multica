@@ -47,6 +47,7 @@ export function TasksPage() {
       customFrom,
       customTo,
       search,
+      groupBy,
       limit,
       offset,
     }),
