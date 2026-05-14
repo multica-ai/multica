@@ -32,6 +32,9 @@ import { InboxPage } from "@multica/views/inbox";
 import { NotificationsPage } from "@multica/cerebro-notifications/views";
 import { SettingsPage } from "@multica/views/settings";
 import { MemberDetailPage } from "@multica/cerebro-users/views";
+import { GroupDetailView } from "@multica/cerebro-groups/views";
+import { useNavigation } from "@multica/views/navigation";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { TasksPage } from "@multica/cerebro-tasks";
 import { PermissionsPage } from "@multica/cerebro-permissions";
 import { SearchPage } from "@multica/views/search";
@@ -195,6 +198,11 @@ export const appRoutes: RouteObject[] = [
             element: <MemberDetailRoute />,
             handle: { title: "Member" },
           },
+          {
+            path: "groups/:id",
+            element: <GroupDetailRoute />,
+            handle: { title: "Group" },
+          },
           { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
           { path: "search", element: <SearchPage />, handle: { title: "Search" } },
           { path: "tasks", element: <TasksPage />, handle: { title: "Tasks" } },
@@ -274,4 +282,24 @@ function AttachmentViewRoute() {
 function MemberDetailRoute() {
   const params = useParams<{ memberId: string }>();
   return <MemberDetailPage memberId={params.memberId ?? ""} />;
+}
+
+// JEH-1067 — Cerebro Groups detail (Bundle B). The shared view lives in
+// @multica/cerebro-groups/views; this wrapper pulls the id from the URL and
+// supplies an onBack callback that returns to Settings → Groups. Desktop's
+// memory router doesn't carry the workspaceSlug as a route param the way the
+// web app's URL does, so the slug is read from the workspace store via
+// useCurrentWorkspace instead.
+function GroupDetailRoute() {
+  const params = useParams<{ id: string }>();
+  const navigation = useNavigation();
+  const workspace = useCurrentWorkspace();
+  return (
+    <GroupDetailView
+      groupId={params.id ?? ""}
+      onBack={() =>
+        navigation.push(`/${workspace?.slug ?? ""}/settings?tab=groups`)
+      }
+    />
+  );
 }

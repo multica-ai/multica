@@ -98,6 +98,8 @@ export function SettingsPage({
 }: SettingsPageProps = {}) {
   const { t } = useT("settings");
   const workspaceName = useCurrentWorkspace()?.name;
+  // CEREBRO-PATCH(settings-page-groups-slug): JEH-1067 slug for groups detail nav
+  const workspaceSlug = useCurrentWorkspace()?.slug ?? "";
   const navigation = useNavigation();
   // CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 feature-flagged Groups tab
   const groupsEnabled = useFeatureFlag("cerebro_groups_enabled");
@@ -298,9 +300,9 @@ export function SettingsPage({
             <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
             <TabsContent value="labs"><LabsTab /></TabsContent>
             <TabsContent value="members"><MembersTab /></TabsContent>
-            {/* CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 workspace groups content */}
+            {/* CEREBRO-PATCH(settings-page-groups-tab): JEH-1006/JEH-1067 workspace groups list + detail navigation */}
             {groupsEnabled && (
-              <TabsContent value={GROUPS_TAB_VALUE}><GroupsTab /></TabsContent>
+              <TabsContent value={GROUPS_TAB_VALUE}><GroupsTab onSelectGroup={(id) => navigation.push(`/${workspaceSlug}/groups/${id}`)} /></TabsContent>
             )}
             {/* CEREBRO-PATCH(settings-page-accounts-content): cerebro Konti tab content (JEH-999) */}
             <TabsContent value={ACCOUNTS_TAB_VALUE}><AccountsSettingsTab /></TabsContent>
