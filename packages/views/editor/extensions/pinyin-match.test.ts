@@ -40,4 +40,10 @@ describe("matchesPinyin", () => {
     expect(matchesPinyin("魏和尚", "whs")).toBe(true);
     expect(matchesPinyin("魏和尚", "weiheshang")).toBe(true);
   });
+
+  it("normalizes ü to v for names like 吕布", () => {
+    expect(matchesPinyin("吕布", "lvbu")).toBe(true);
+    expect(matchesPinyin("吕布", "lb")).toBe(true);
+    expect(matchesPinyin("吕布", "lv")).toBe(true);
+  });
 });

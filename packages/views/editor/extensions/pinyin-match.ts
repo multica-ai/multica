@@ -15,8 +15,8 @@ export function matchesPinyin(name: string, query: string): boolean {
 
   const q = query.toLowerCase();
 
-  // Get full pinyin (no tone, no separator)
-  const full = pinyin(name, { toneType: "none", type: "array" });
+  // Get full pinyin (no tone, no separator, ü→v for standard input)
+  const full = pinyin(name, { toneType: "none", type: "array", v: true });
   const fullStr = full.join("");
 
   // Full pinyin prefix match: "liyunlong" or "liyun"
