@@ -15,9 +15,12 @@
 #   1. git fetch origin/main, exit 0 if no new commits.
 #   2. git reset --hard origin/main (no local commits expected).
 #   3. pnpm install + Go build + migrate + Next build.
-#   4. Restart all three long-running services (JEH-438): backend, frontend,
-#      AND daemon. Forgetting daemon leaves it on the previous binary —
-#      same class of bug as JEH-379 (backend stale env after deploy).
+#   4. Restart backend and frontend unconditionally.
+#      Restart daemon only when server/ changed (JEH-1227): the daemon
+#      binary is rebuilt from server/ — if that directory didn't change the
+#      old binary is still valid and a restart would needlessly interrupt
+#      any in-progress agent work. If server/ DID change, the restart is
+#      mandatory (same reasoning as JEH-438 / JEH-379).
 
 set -euo pipefail
 
@@ -66,14 +69,22 @@ make migrate-up || echo "WARN: migrate-up failed (may be no-op)"
 echo "Building Next.js frontend…"
 pnpm --filter @multica/web build
 
-# Restart all three services. The daemon is easy to forget — `make build`
-# rewrites the binary but the running launchd job continues to execute the
-# old one until kickstart. JEH-438 was filed when this caused JEH-418 to
-# look broken in prod until someone manually restarted the daemon.
-echo "Restarting launchd jobs…"
+# Restart backend and frontend unconditionally — they always need the
+# new binary / Next.js output.
+echo "Restarting backend and frontend…"
 launchctl kickstart -k gui/$(id -u)/com.multica.backend
 launchctl kickstart -k gui/$(id -u)/com.multica.frontend
-launchctl kickstart -k gui/$(id -u)/com.multica.daemon
+
+# Restart daemon only when Go code changed (JEH-1227). `make build`
+# rewrites the binary, but if nothing in server/ changed the running
+# daemon is still valid — restarting it would kill any in-progress agent
+# task for no gain. If server/ DID change we must restart (JEH-438).
+if git diff "$OLD_SHA" "$NEW_SHA" --name-only | grep -q '^server/'; then
+  echo "server/ changed — restarting daemon…"
+  launchctl kickstart -k gui/$(id -u)/com.multica.daemon
+else
+  echo "No server/ changes — skipping daemon restart (agent work preserved)."
+fi
 
 echo "=== deploy finished: $(date -Iseconds) ==="
 echo "Deployed: $OLD_SHA -> $NEW_SHA"
