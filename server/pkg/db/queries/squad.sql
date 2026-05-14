@@ -36,7 +36,7 @@ INSERT INTO squad_member (squad_id, member_type, member_id, role)
 VALUES ($1, $2, $3, $4)
 RETURNING *;
 
--- name: RemoveSquadMember :exec
+-- name: RemoveSquadMember :execrows
 DELETE FROM squad_member
 WHERE squad_id = $1 AND member_type = $2 AND member_id = $3;
 

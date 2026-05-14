@@ -434,12 +434,17 @@ func (h *Handler) RemoveSquadMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.RemoveSquadMember(r.Context(), db.RemoveSquadMemberParams{
+	rows, err := h.Queries.RemoveSquadMember(r.Context(), db.RemoveSquadMemberParams{
 		SquadID:    squad.ID,
 		MemberType: req.MemberType,
 		MemberID:   memberUUID,
-	}); err != nil {
+	})
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to remove squad member")
+		return
+	}
+	if rows == 0 {
+		writeError(w, http.StatusNotFound, "squad member not found")
 		return
 	}
 

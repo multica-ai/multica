@@ -228,6 +228,11 @@ func runSquadDelete(cmd *cobra.Command, args []string) error {
 	if err := client.DeleteJSON(ctx, "/api/squads/"+args[0]); err != nil {
 		return fmt.Errorf("delete squad: %w", err)
 	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, map[string]any{"id": args[0], "deleted": true})
+	}
 	fmt.Fprintf(os.Stderr, "Squad %s deleted.\n", args[0])
 	return nil
 }
@@ -360,6 +365,11 @@ func runSquadMemberRemove(cmd *cobra.Command, args []string) error {
 	if err := client.DeleteJSONWithBody(ctx, "/api/squads/"+args[0]+"/members", body); err != nil {
 		return fmt.Errorf("remove member: %w", err)
 	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, map[string]any{"squad_id": args[0], "member_id": memberID, "removed": true})
+	}
 	fmt.Fprintf(os.Stderr, "Member %s removed from squad.\n", memberID)
 	return nil
 }
@@ -446,7 +456,8 @@ func init() {
 	squadUpdateCmd.Flags().String("avatar-url", "", "New avatar URL")
 	squadUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
-	// delete (no extra flags)
+	// delete
+	squadDeleteCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// member list
 	squadMemberListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -460,6 +471,7 @@ func init() {
 	// member remove
 	squadMemberRemoveCmd.Flags().String("member-id", "", "Member or agent ID (required)")
 	squadMemberRemoveCmd.Flags().String("type", "agent", "Member type: agent or member")
+	squadMemberRemoveCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// activity
 	squadActivityCmd.Flags().String("reason", "", "Short explanation of the decision")
