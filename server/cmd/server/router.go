@@ -333,6 +333,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
+			// PUL-102 cascade dashboard. Lists active cascades for
+			// the requesting workspace; supports cascade_state /
+			// agent filtering and page-based pagination. Auth model
+			// matches the rest of the workspace-scoped API surface
+			// (membership required). The Next.js page that consumes
+			// this endpoint ships in a follow-up — backend lands
+			// first so manual testers can hit /api/cascades via curl.
+			r.Get("/api/cascades", h.ListCascades)
+
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
 				r.Get("/search", h.SearchIssues)
