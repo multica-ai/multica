@@ -129,7 +129,9 @@ function isTrustedReadOnlyPlatformCommand(toolName, input) {
   if (words.length === 2 && words[0] === "which" && words[1] === "multica") return true;
   const executable = words[0] || "";
   const isMultica = executable === "multica" || executable.endsWith("/multica");
-  return isMultica && words[1] === "issue" && words[2] === "get";
+  if (!isMultica || words[1] !== "issue") return false;
+  if (words[2] === "get") return true;
+  return words.length >= 5 && words[2] === "comment" && words[3] === "list";
 }
 
 function normalizeText(value) {

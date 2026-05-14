@@ -104,3 +104,28 @@ func TestFindClaudeSDKRootResolvesRelativePathToAbsoluteRoot(t *testing.T) {
 		t.Fatalf("findClaudeSDKRoot(.) = %q (eval %q), want %q (eval %q)", got, gotEval, root, rootEval)
 	}
 }
+
+func TestNormalizeClaudeSDKPermissionMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "", want: "default"},
+		{in: "default", want: "default"},
+		{in: "plan", want: "plan"},
+		{in: "acceptEdits", want: "acceptEdits"},
+		{in: "unexpected", want: "default"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.in, func(t *testing.T) {
+			t.Parallel()
+			if got := normalizeClaudeSDKPermissionMode(tt.in); got != tt.want {
+				t.Fatalf("normalizeClaudeSDKPermissionMode(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}

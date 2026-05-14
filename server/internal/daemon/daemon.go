@@ -1969,13 +1969,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 			execOpts.TraceCallback = BuildTraceCallback(d.traceStore, task.ID, traceRunID, provider)
 		}
-		if provider == "claude" {
-			execOpts.ClaudePermissionMode = protocol.ResolveClaudePermissionMode(rtCfg)
-			if effectiveRunMode == protocol.TaskRunModePlan {
-				execOpts.ClaudePermissionMode = "plan"
-				execOpts.ClaudeUseSDKBridge = true
+			if provider == "claude" {
+				execOpts.ClaudePermissionMode = protocol.ResolveClaudePermissionMode(rtCfg)
+				if shouldUseClaudeSDKBridge(effectiveRunMode, policy) {
+					if effectiveRunMode == protocol.TaskRunModePlan {
+						execOpts.ClaudePermissionMode = "plan"
+					}
+					execOpts.ClaudeUseSDKBridge = true
+				}
 			}
-		}
 		execOpts.VisibleLanguage = visibleLanguage
 		if policy != protocol.ApprovalPolicyAuto {
 			taskLog.Info("approval policy active", "policy", policy)

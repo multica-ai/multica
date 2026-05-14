@@ -9,14 +9,16 @@ func TestIsTrustedReadOnlyPlatformCommand(t *testing.T) {
 		name    string
 		command string
 		want    bool
-	}{
-		{"which multica", "which multica", true},
-		{"issue get", "multica issue get TES-1 --output json", true},
-		{"absolute issue get", "/Users/admin/project/server/bin/multica issue get 123 --output json", true},
-		{"comment add is write", "multica issue comment add TES-1 --content hi", false},
-		{"shell chain rejected", "multica issue get TES-1 --output json && rm -rf /tmp/x", false},
-		{"substitution rejected", "multica issue get $(cat secret)", false},
-	}
+		}{
+			{"which multica", "which multica", true},
+			{"issue get", "multica issue get TES-1 --output json", true},
+			{"absolute issue get", "/Users/admin/project/server/bin/multica issue get 123 --output json", true},
+			{"comment list", "multica issue comment list TES-1 --output json", true},
+			{"absolute comment list", "/Users/admin/project/server/bin/multica issue comment list 123 --output json", true},
+			{"comment add is write", "multica issue comment add TES-1 --content hi", false},
+			{"shell chain rejected", "multica issue get TES-1 --output json && rm -rf /tmp/x", false},
+			{"substitution rejected", "multica issue get $(cat secret)", false},
+		}
 
 	for _, tt := range tests {
 		tt := tt

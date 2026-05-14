@@ -19,5 +19,11 @@ func isTrustedReadOnlyPlatformCommand(command string) bool {
 	}
 	executable := words[0]
 	isMultica := executable == "multica" || filepath.Base(executable) == "multica"
-	return isMultica && words[1] == "issue" && words[2] == "get"
+	if !isMultica || words[1] != "issue" {
+		return false
+	}
+	if words[2] == "get" {
+		return true
+	}
+	return len(words) >= 5 && words[2] == "comment" && words[3] == "list"
 }

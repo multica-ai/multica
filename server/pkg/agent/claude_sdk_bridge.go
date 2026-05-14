@@ -95,9 +95,7 @@ func (b *claudeBackend) executeWithSDKBridge(ctx context.Context, prompt string,
 		McpConfig:       opts.McpConfig,
 		RequireRoot:     requireRoot,
 	}
-	if cfg.PermissionMode == "" {
-		cfg.PermissionMode = "plan"
-	}
+	cfg.PermissionMode = normalizeClaudeSDKPermissionMode(cfg.PermissionMode)
 	cfgData, err := json.Marshal(cfg)
 	if err != nil {
 		cleanup()
@@ -666,6 +664,16 @@ func findClaudeSDKRoot(start string) string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func normalizeClaudeSDKPermissionMode(mode string) string {
+	mode = strings.TrimSpace(mode)
+	switch mode {
+	case "plan", "acceptEdits":
+		return mode
+	default:
+		return "default"
+	}
 }
 
 func claudeSDKInstalledAtRoot(root string) bool {
