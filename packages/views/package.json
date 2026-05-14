@@ -81,6 +81,7 @@
     "lowlight": "^3.3.0",
     "mermaid": "catalog:",
     "motion": "^12.38.0",
+    "pinyin-pro": "3.26.0",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.7.5",
     "react-virtuoso": "catalog:",

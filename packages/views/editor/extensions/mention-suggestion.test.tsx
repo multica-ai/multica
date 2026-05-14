@@ -285,4 +285,55 @@ describe("createMentionSuggestion", () => {
     const items = result as MentionItem[];
     expect(items.filter((i) => i.type === "squad")).toHaveLength(0);
   });
+
+  it("matches Chinese names by full pinyin", () => {
+    const qc = fakeQc({
+      members: [
+        { user_id: "u1", name: "Alice", role: "member" },
+        { user_id: "u2", name: "李云龙", role: "member" },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "liyunlong", editor: {} as never });
+
+    const items = result as MentionItem[];
+    expect(items.some((i) => i.type === "member" && i.label === "李云龙")).toBe(true);
+    expect(items.some((i) => i.type === "member" && i.label === "Alice")).toBe(false);
+  });
+
+  it("matches Chinese names by pinyin initials", () => {
+    const qc = fakeQc({
+      members: [
+        { user_id: "u1", name: "Alice", role: "member" },
+        { user_id: "u2", name: "李云龙", role: "member" },
+        { user_id: "u3", name: "张大彪", role: "member" },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "lyl", editor: {} as never });
+
+    const items = result as MentionItem[];
+    expect(items.some((i) => i.type === "member" && i.label === "李云龙")).toBe(true);
+    expect(items.some((i) => i.type === "member" && i.label === "张大彪")).toBe(false);
+  });
+
+  it("matches Chinese agent names by pinyin", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        { id: "a1", name: "魏和尚", archived_at: null, visibility: "workspace", owner_id: null },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!({ query: "whs", editor: {} as never });
+
+    const items = result as MentionItem[];
+    expect(items.some((i) => i.type === "agent" && i.label === "魏和尚")).toBe(true);
+  });
 });
