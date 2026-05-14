@@ -1963,6 +1963,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
 	}
 
+	// A2A agents are dispatched via JSON-RPC; skip local env preparation.
+	if entry.Mode == "a2a" {
+		return d.dispatchA2ATask(ctx, task, entry, taskLog)
+	}
+
 	agentName := "agent"
 	var agentID string
 	var skills []SkillData

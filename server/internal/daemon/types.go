@@ -2,10 +2,16 @@ package daemon
 
 import "encoding/json"
 
-// AgentEntry describes a single available agent CLI.
+// AgentEntry describes a single available agent.
+// Mode "cli" (default) uses Path to spawn a local CLI binary.
+// Mode "a2a" uses A2AURL to dispatch tasks via JSON-RPC.
 type AgentEntry struct {
-	Path  string // path to CLI binary
-	Model string // model override (optional)
+	Path    string       // path to CLI binary (cli mode)
+	Model   string       // model override (optional)
+	Mode    string       // "cli" (default) or "a2a"
+	A2AURL  string       // base URL for A2A agent (a2a mode)
+	Card    *A2AAgentCard // fetched Agent Card (a2a mode, may be nil if fetch failed)
+	Token   string       // bearer token for A2A auth (resolved from TokenEnv at startup)
 }
 
 // Runtime represents a registered daemon runtime.
