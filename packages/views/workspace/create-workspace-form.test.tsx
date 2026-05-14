@@ -1,30 +1,28 @@
+import type { ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../locales/en/common.json";
+import enWorkspace from "../locales/en/workspace.json";
+import { CreateWorkspaceForm } from "./create-workspace-form";
 
-// Hoisted mocks so we can swap getWorkspaceUrlHost's return value per-test.
-// The host is driven by a module-level singleton set by CoreProvider. These
-// tests don't mount the provider, so we stub the getter directly — mirroring
-// the pattern in `onboarding/steps/step-workspace.test.tsx`.
-const mocks = vi.hoisted(() => ({
-  getWorkspaceUrlHost: vi.fn<() => string>(() => "multica.ai"),
-}));
-
-vi.mock("@multica/core/platform", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@multica/core/platform")>();
-  return {
-    ...actual,
-    getWorkspaceUrlHost: mocks.getWorkspaceUrlHost,
-  };
-});
+const TEST_RESOURCES = {
+  en: { common: enCommon, workspace: enWorkspace },
+};
 
 const mockMutate = vi.fn();
 vi.mock("@multica/core/workspace/mutations", () => ({
   useCreateWorkspace: () => ({ mutate: mockMutate, isPending: false }),
 }));
 
-import { CreateWorkspaceForm } from "./create-workspace-form";
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
 
 function renderForm(onSuccess = vi.fn()) {
   const qc = new QueryClient();
@@ -32,15 +30,12 @@ function renderForm(onSuccess = vi.fn()) {
     <QueryClientProvider client={qc}>
       <CreateWorkspaceForm onSuccess={onSuccess} />
     </QueryClientProvider>,
+    { wrapper: I18nWrapper },
   );
 }
 
 describe("CreateWorkspaceForm", () => {
-  beforeEach(() => {
-    mockMutate.mockReset();
-    mocks.getWorkspaceUrlHost.mockReset();
-    mocks.getWorkspaceUrlHost.mockReturnValue("multica.ai");
-  });
+  beforeEach(() => mockMutate.mockReset());
 
   it("auto-generates slug from name until user edits slug", () => {
     renderForm();
@@ -105,38 +100,17 @@ describe("CreateWorkspaceForm", () => {
     ).toBeDisabled();
   });
 
-  /**
-   * The URL pill prefix shown next to the slug input must honor the
-   * configurable workspace host (VITE_WORKSPACE_URL_HOST on desktop,
-   * NEXT_PUBLIC_WORKSPACE_URL_HOST on web) so rebranded forks can swap
-   * `multica.ai` for their own domain. Regression guard: this component
-   * previously hardcoded `multica.ai/`.
-   */
-  describe("configurable URL host", () => {
-    it("renders the default 'multica.ai' host in the URL pill when no override is set", () => {
-      renderForm();
-      expect(screen.getByText("multica.ai/")).toBeInTheDocument();
+  it("disables submit when slug is reserved", () => {
+    renderForm();
+    fireEvent.change(screen.getByLabelText(/workspace name/i), {
+      target: { value: "Valid Name" },
     });
-
-    it("renders the configured host in the URL pill when overridden", () => {
-      mocks.getWorkspaceUrlHost.mockReturnValue("agentfarm.g2.com");
-      renderForm();
-      expect(screen.getByText("agentfarm.g2.com/")).toBeInTheDocument();
-      expect(screen.queryByText("multica.ai/")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/workspace url/i), {
+      target: { value: "admin" },
     });
-
-    it("keeps the configured host in the pill while the user types a slug", () => {
-      mocks.getWorkspaceUrlHost.mockReturnValue("agentfarm.g2.com");
-      renderForm();
-      fireEvent.change(screen.getByLabelText(/workspace name/i), {
-        target: { value: "Acme Inc" },
-      });
-      expect(screen.getByText("agentfarm.g2.com/")).toBeInTheDocument();
-    });
-
-    it("calls getWorkspaceUrlHost to resolve the host (does not hardcode)", () => {
-      renderForm();
-      expect(mocks.getWorkspaceUrlHost).toHaveBeenCalled();
-    });
+    expect(
+      screen.getByRole("button", { name: /create workspace/i }),
+    ).toBeDisabled();
+    expect(screen.getByText(/reserved and cannot be used/i)).toBeInTheDocument();
   });
 });

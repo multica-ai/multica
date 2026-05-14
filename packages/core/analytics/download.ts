@@ -12,11 +12,13 @@
  * keep the two in sync when adding a new source or field.
  */
 
-import { captureEvent, setPersonProperties, setPersonPropertiesOnce } from "./index";
+import posthog from "posthog-js";
+
+import { captureEvent, setPersonProperties } from "./index";
 
 /**
  * Where the user clicked a CTA that points at `/download`. Typed union
- * prevents drift across the five touchpoints and lets Amplitude funnels
+ * prevents drift across the five touchpoints and lets PostHog funnels
  * split cleanly by top-of-funnel entry.
  */
 export type DownloadIntentSource =
@@ -54,8 +56,9 @@ export interface DownloadInitiatedPayload {
 
 /**
  * Fires when a user clicks any CTA that navigates to `/download`. We
- * also write `platform_preference` to user properties so the backend
- * can segment subsequent events.
+ * also write `platform_preference` to person properties so the backend
+ * can segment subsequent events — same convention the Step 3 handler
+ * already uses (see `step-platform-fork.tsx`).
  */
 export function captureDownloadIntent(source: DownloadIntentSource): void {
   captureEvent("download_intent_expressed", {
@@ -66,8 +69,8 @@ export function captureDownloadIntent(source: DownloadIntentSource): void {
 
 /**
  * Fires once on /download page mount, after OS detection resolves. The
- * first detection for a given user is mirrored into user properties
- * via `setOnce` so every downstream event gains a platform dimension
+ * first detection for a given person is mirrored into person properties
+ * via `$set_once` so every downstream event gains a platform dimension
  * without re-emitting.
  */
 export function captureDownloadPageViewed(
@@ -96,4 +99,15 @@ export function captureDownloadInitiated(
   payload: DownloadInitiatedPayload,
 ): void {
   captureEvent("download_initiated", { ...payload });
+}
+
+/**
+ * $set_once wire form. Mirrors the backend's `Event.SetOnce` path —
+ * first write wins, subsequent ones are no-ops on PostHog's side.
+ * Wrapping it here keeps call sites free of the no-op `$set_once`
+ * envelope quirk.
+ */
+function setPersonPropertiesOnce(props: Record<string, unknown>): void {
+  if (typeof window === "undefined") return;
+  posthog.capture("$set", { $set_once: props });
 }

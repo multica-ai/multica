@@ -38,11 +38,7 @@ describe("resolvePostAuthDestination", () => {
     );
   });
 
-  it("zero workspaces + !onboarded → /onboarding", () => {
-    expect(resolvePostAuthDestination([], false)).toBe(paths.onboarding());
-  });
-
-  it("zero workspaces + onboarded → /workspaces/new", () => {
+  it("onboarded + zero workspaces → /workspaces/new", () => {
     expect(resolvePostAuthDestination([], true)).toBe(paths.newWorkspace());
   });
 });

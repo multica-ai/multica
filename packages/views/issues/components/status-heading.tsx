@@ -1,6 +1,6 @@
 import type { IssueStatus } from "@multica/core/types";
-import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { StatusIcon } from "./status-icon";
+import { useT } from "../../i18n";
 
 export function StatusHeading({
   status,
@@ -9,12 +9,12 @@ export function StatusHeading({
   status: IssueStatus;
   count: number;
 }) {
-  const cfg = STATUS_CONFIG[status];
+  const { t } = useT("issues");
   return (
     <div className="flex items-center gap-2">
       <span className="inline-flex items-center gap-1.5 text-xs font-semibold">
         <StatusIcon status={status} className="h-3 w-3" />
-        {cfg.label}
+        {t(($) => $.status[status])}
       </span>
       <span className="text-xs text-muted-foreground">{count}</span>
     </div>

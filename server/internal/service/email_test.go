@@ -37,10 +37,10 @@ func TestSanitizeSubjectField(t *testing.T) {
 
 func TestBuildInvitationParams_EscapesHTMLInBody(t *testing.T) {
 	tests := []struct {
-		name          string
-		inviter       string
-		workspace     string
-		wantInBody    []string
+		name        string
+		inviter     string
+		workspace   string
+		wantInBody  []string
 		wantNotInBody []string
 	}{
 		{

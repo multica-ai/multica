@@ -1,0 +1,49 @@
+---
+title: Projects
+description: Group related issues and track them as one unit — with priority, status, progress, and an owner.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+A **project** in Multica is a container for related [issues](/issues). Use it when a body of work is bigger than one issue but smaller than a full workspace — a launch, a migration, a feature with multiple parts, an investigation that branches into several threads.
+
+Each project has a name, an icon, a description, a **lead** (a member or an [agent](/agents)), a **status** (`planned` / `in_progress` / `paused` / `completed` / `cancelled`), a **priority** (`urgent` / `high` / `medium` / `low` / `none`), and a **progress** percentage that's auto-derived from the status of its linked issues.
+
+## How projects relate to issues
+
+Projects and issues are independent objects with a many-to-one relationship: an issue can belong to **at most one** project; a project holds **any number of** issues. Linking and unlinking is reversible at any time — drag in the board view, or use the project picker on the issue's right-side properties panel.
+
+The progress bar on a project is computed from its linked issues — the more issues hit `done`, the further it fills. Issues that are `cancelled` are excluded from the count; issues in `backlog` count toward the denominator but not the numerator.
+
+## Pinning to the sidebar
+
+Click the pin icon in a project's top-right corner to add it to your sidebar's pinned list. Pinned projects stay one click away no matter where you are in the workspace; everyone on the team can pin independently — pins are personal.
+
+The sidebar **Workspace → Projects** link always shows every project in the workspace; pinning is a personal shortcut on top of that.
+
+## Attaching resources
+
+Each project has a **Resources** section where you attach GitHub repositories. Once attached, any [agent](/agents) assigned to issues in this project can read and write to those repos when executing tasks — Multica passes the repo URLs as context to the [daemon](/daemon-runtimes).
+
+Resources are per-project; if multiple projects share a repo, attach it to each one.
+
+## Deleting a project
+
+Deleting a project **does not delete its issues**. The linked issues are simply unlinked and revert to the workspace's flat issue list. This is intentional — work that was scoped to a project is rarely throwaway, even when the framing of the project changes.
+
+<Callout type="info">
+If you want to delete the work too, archive or delete the issues first, then delete the project.
+</Callout>
+
+## Project lead
+
+The lead is the person — or agent — accountable for the project. It's a soft signal, not an access control: any workspace member can edit a project regardless of who's lead. A project's lead can be:
+
+- A workspace member (human teammate)
+- An [agent](/agents) — useful when the project's work is mostly delegated to an agent (e.g., "Weekly bug triage" led by a triage agent)
+
+## Next
+
+- [Issues](/issues) — the unit of work that lives inside projects
+- [Agents as project lead](/agents) — when an agent is the right owner
+- [How Multica works](/how-multica-works) — the broader picture

@@ -1,0 +1,68 @@
+{
+  "page": {
+    "title": "Inbox",
+    "back": "Inbox"
+  },
+  "menu": {
+    "mark_all_read": "Mark all as read",
+    "archive_all": "Archive all",
+    "archive_all_read": "Archive all read",
+    "archive_completed": "Archive completed"
+  },
+  "list": {
+    "empty": "No notifications",
+    "mark_done_tooltip": "Mark as done",
+    "archive_tooltip": "Archive",
+    "time": {
+      "just_now": "just now",
+      "minutes": "{{count}}m",
+      "hours": "{{count}}h",
+      "days": "{{count}}d"
+    }
+  },
+  "detail": {
+    "select_prompt": "Select a notification to view details",
+    "empty": "Your inbox is empty",
+    "original_input": "Original input",
+    "edit_advanced": "Edit as advanced form",
+    "archive": "Archive"
+  },
+  "types": {
+    "issue_assigned": "Assigned",
+    "unassigned": "Unassigned",
+    "assignee_changed": "Assignee changed",
+    "status_changed": "Status changed",
+    "priority_changed": "Priority changed",
+    "due_date_changed": "Due date changed",
+    "new_comment": "New comment",
+    "mentioned": "Mentioned",
+    "review_requested": "Review requested",
+    "task_completed": "Task completed",
+    "task_failed": "Task failed",
+    "agent_blocked": "Agent blocked",
+    "agent_completed": "Agent completed",
+    "reaction_added": "Reacted",
+    "quick_create_done": "Created with agent",
+    "quick_create_failed": "Create with agent failed"
+  },
+  "labels": {
+    "set_status_to": "Set status to",
+    "set_priority_to": "Set priority to",
+    "assigned_to": "Assigned to {{name}}",
+    "removed_assignee": "Removed assignee",
+    "set_due_date_to": "Set due date to {{date}}",
+    "removed_due_date": "Removed due date",
+    "reacted_to_comment": "Reacted {{emoji}} to your comment",
+    "created_with_agent": "Created with agent: {{identifier}}",
+    "failed_with_detail": "Failed: {{detail}}"
+  },
+  "errors": {
+    "mark_read_failed": "Failed to mark as read",
+    "archive_failed": "Failed to archive",
+    "mark_done_failed": "Failed to mark as done",
+    "mark_all_read_failed": "Failed to mark all as read",
+    "archive_all_failed": "Failed to archive all",
+    "archive_all_read_failed": "Failed to archive read items",
+    "archive_completed_failed": "Failed to archive completed"
+  }
+}

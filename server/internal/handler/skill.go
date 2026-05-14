@@ -2,11 +2,13 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -38,6 +40,33 @@ type SkillResponse struct {
 	UpdatedAt   string  `json:"updated_at"`
 }
 
+// SkillSummaryResponse is the list-endpoint shape: everything SkillResponse
+// has except `content`. SKILL.md bodies routinely run 50–200KB and shipping
+// them in list payloads bloats responses past CLI timeouts on high-latency
+// links (GH multica-ai/multica#2174). Detail endpoints still return the full
+// SkillResponse with content.
+type SkillSummaryResponse struct {
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Config      any     `json:"config"`
+	CreatedBy   *string `json:"created_by"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
+}
+
+// AgentSkillSummary is the still-narrower shape used for skills embedded in
+// an Agent payload (`GET /api/agents`, `GET /api/agents/{id}`). The agent
+// list batch query only joins enough columns to render the assignee chip in
+// the UI; the standalone `/api/agents/{id}/skills` endpoint returns the full
+// SkillSummaryResponse for callers that need the source/origin info.
+type AgentSkillSummary struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 type SkillFileResponse struct {
 	ID        string `json:"id"`
 	SkillID   string `json:"skill_id"`
@@ -53,24 +82,48 @@ type SkillWithFilesResponse struct {
 }
 
 func skillToResponse(s db.Skill) SkillResponse {
-	var config any
-	if s.Config != nil {
-		json.Unmarshal(s.Config, &config)
-	}
-	if config == nil {
-		config = map[string]any{}
-	}
-
 	return SkillResponse{
 		ID:          uuidToString(s.ID),
 		WorkspaceID: uuidToString(s.WorkspaceID),
 		Name:        s.Name,
 		Description: s.Description,
 		Content:     s.Content,
-		Config:      config,
+		Config:      decodeSkillConfig(s.Config),
 		CreatedBy:   uuidToPtr(s.CreatedBy),
 		CreatedAt:   timestampToString(s.CreatedAt),
 		UpdatedAt:   timestampToString(s.UpdatedAt),
+	}
+}
+
+// decodeSkillConfig decodes a JSONB skill.config blob, defaulting to {} when
+// missing or unparseable so the API surface always returns a JSON object.
+func decodeSkillConfig(raw []byte) any {
+	var config any
+	if raw != nil {
+		_ = json.Unmarshal(raw, &config)
+	}
+	if config == nil {
+		return map[string]any{}
+	}
+	return config
+}
+
+func skillSummaryToResponse(
+	id, workspaceID pgtype.UUID,
+	name, description string,
+	config []byte,
+	createdBy pgtype.UUID,
+	createdAt, updatedAt pgtype.Timestamptz,
+) SkillSummaryResponse {
+	return SkillSummaryResponse{
+		ID:          uuidToString(id),
+		WorkspaceID: uuidToString(workspaceID),
+		Name:        name,
+		Description: description,
+		Config:      decodeSkillConfig(config),
+		CreatedBy:   uuidToPtr(createdBy),
+		CreatedAt:   timestampToString(createdAt),
+		UpdatedAt:   timestampToString(updatedAt),
 	}
 }
 
@@ -152,15 +205,18 @@ func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id st
 func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 
-	skills, err := h.Queries.ListSkillsByWorkspace(r.Context(), parseUUID(workspaceID))
+	skills, err := h.Queries.ListSkillSummariesByWorkspace(r.Context(), parseUUID(workspaceID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list skills")
 		return
 	}
 
-	resp := make([]SkillResponse, len(skills))
+	resp := make([]SkillSummaryResponse, len(skills))
 	for i, s := range skills {
-		resp[i] = skillToResponse(s)
+		resp[i] = skillSummaryToResponse(
+			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
+			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
+		)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -387,17 +443,54 @@ type ImportSkillRequest struct {
 	URL string `json:"url"`
 }
 
+// Per-import bundle limits. These mirror the local-runtime importer so that
+// URL imports cannot smuggle in payloads that the rest of the stack would
+// reject. fetchRawFile enforces the per-file cap; importedSkill.addFile
+// enforces the bundle-wide caps.
+const (
+	maxImportFileSize  = 1 << 20 // 1 MiB per file
+	maxImportTotalSize = 8 << 20 // 8 MiB per import bundle (sum of supporting files)
+	maxImportFileCount = 128     // max number of supporting files
+)
+
 // importedSkill holds the data extracted from an external source.
 type importedSkill struct {
 	name        string
 	description string
 	content     string // SKILL.md body
 	files       []importedFile
+	bundleSize  int            // running sum of file content bytes for cap enforcement
+	origin      map[string]any // written into skill.config.origin so the UI can show provenance
 }
 
 type importedFile struct {
 	path    string
 	content string
+}
+
+// errImportCapExceeded marks an error caused by a per-file or per-bundle cap.
+// Such errors must abort the import — silently dropping a file would otherwise
+// produce an incomplete skill that looks valid to the user.
+var errImportCapExceeded = errors.New("import cap exceeded")
+
+// isCapError reports whether err is (or wraps) errImportCapExceeded.
+func isCapError(err error) bool {
+	return errors.Is(err, errImportCapExceeded)
+}
+
+// addFile appends a supporting file while enforcing the per-bundle caps. It
+// returns an error when either the file count or aggregate byte budget would
+// be exceeded so the caller fails the import instead of silently truncating.
+func (s *importedSkill) addFile(path, content string) error {
+	if len(s.files) >= maxImportFileCount {
+		return fmt.Errorf("%w: import bundle exceeds %d file limit", errImportCapExceeded, maxImportFileCount)
+	}
+	if s.bundleSize+len(content) > maxImportTotalSize {
+		return fmt.Errorf("%w: import bundle exceeds %d byte limit", errImportCapExceeded, maxImportTotalSize)
+	}
+	s.bundleSize += len(content)
+	s.files = append(s.files, importedFile{path: path, content: content})
+	return nil
 }
 
 // --- ClawHub types ---
@@ -461,7 +554,7 @@ type githubTreeEntry struct {
 func fetchGitHubDefaultBranch(httpClient *http.Client, owner, repo string) string {
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s",
 		url.PathEscape(owner), url.PathEscape(repo))
-	resp, err := httpClient.Get(apiURL)
+	resp, err := doGitHubAPIGet(httpClient, apiURL)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		if resp != nil {
 			resp.Body.Close()
@@ -485,6 +578,7 @@ type importSource int
 const (
 	sourceClawHub importSource = iota
 	sourceSkillsSh
+	sourceGitHub
 )
 
 // detectImportSource determines the source from a URL.
@@ -511,12 +605,14 @@ func detectImportSource(raw string) (importSource, string, error) {
 		return sourceSkillsSh, normalized, nil
 	case host == "clawhub.ai" || host == "www.clawhub.ai":
 		return sourceClawHub, normalized, nil
+	case host == "github.com" || host == "www.github.com":
+		return sourceGitHub, normalized, nil
 	default:
 		// If no host (bare slug), default to clawhub
 		if !strings.Contains(raw, "/") || !strings.Contains(raw, ".") {
 			return sourceClawHub, raw, nil
 		}
-		return 0, "", fmt.Errorf("unsupported source: %s (supported: clawhub.ai, skills.sh)", host)
+		return 0, "", fmt.Errorf("unsupported source: %s (supported: clawhub.ai, skills.sh, github.com)", host)
 	}
 }
 
@@ -600,6 +696,11 @@ func fetchFromClawHub(httpClient *http.Client, rawURL string) (*importedSkill, e
 	result := &importedSkill{
 		name:        chSkill.DisplayName,
 		description: chSkill.Summary,
+		origin: map[string]any{
+			"type":       "clawhub",
+			"source_url": rawURL,
+			"slug":       slug,
+		},
 	}
 	if result.name == "" {
 		result.name = slug
@@ -612,14 +713,26 @@ func fetchFromClawHub(httpClient *http.Client, rawURL string) (*importedSkill, e
 		}
 		body, err := fetchRawFile(httpClient, fileURL)
 		if err != nil {
+			// Cap violations must abort: silently dropping a file would
+			// produce an incomplete bundle that looks valid. SKILL.md is
+			// load-bearing, so any failure on it is fatal too.
+			if isCapError(err) || fp == "SKILL.md" {
+				return nil, fmt.Errorf("clawhub import: %s: %w", fp, err)
+			}
 			slog.Warn("clawhub import: file download failed", "path", fp, "error", err)
 			continue
 		}
 		if fp == "SKILL.md" {
 			result.content = string(body)
-		} else {
-			result.files = append(result.files, importedFile{path: fp, content: string(body)})
+			continue
 		}
+		if err := result.addFile(fp, string(body)); err != nil {
+			return nil, err
+		}
+	}
+
+	if result.content == "" {
+		return nil, fmt.Errorf("clawhub import: SKILL.md is empty or missing for %s", slug)
 	}
 
 	return result, nil
@@ -705,11 +818,18 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 		name:        name,
 		description: description,
 		content:     string(skillMdBody),
+		origin: map[string]any{
+			"type":       "skills_sh",
+			"source_url": rawURL,
+			"owner":      owner,
+			"repo":       repo,
+			"skill":      skillName,
+		},
 	}
 
 	// 2. List supporting files via GitHub API
 	apiURL := buildGitHubContentsURL(owner, repo, skillDir, defaultBranch)
-	dirResp, err := httpClient.Get(apiURL)
+	dirResp, err := doGitHubAPIGet(httpClient, apiURL)
 	if err != nil || dirResp.StatusCode != http.StatusOK {
 		// Can't list files — return what we have (SKILL.md only)
 		if dirResp != nil {
@@ -721,15 +841,15 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 
 	var entries []githubContentEntry
 	if err := json.NewDecoder(dirResp.Body).Decode(&entries); err != nil {
-		slog.Warn("skills.sh import: failed to decode top-level directory listing", "url", apiURL, "error", err)
+		slog.Warn("github import: failed to decode top-level directory listing", "url", apiURL, "error", err)
 		return result, nil
 	}
 
 	// 3. Recursively collect files (excluding SKILL.md and LICENSE)
 	var allFiles []githubContentEntry
-	slog.Info("skills.sh import: collecting supporting files", "skill", skillName, "top_level_entries", len(entries))
+	slog.Info("github import: collecting supporting files", "skill", skillName, "top_level_entries", len(entries))
 	collectGitHubFiles(httpClient, entries, &allFiles, apiURL)
-	slog.Info("skills.sh import: collected supporting files", "skill", skillName, "files", len(allFiles))
+	slog.Info("github import: collected supporting files", "skill", skillName, "files", len(allFiles))
 
 	// 4. Download each file
 	basePath := ""
@@ -742,12 +862,17 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 		}
 		body, err := fetchRawFile(httpClient, entry.DownloadURL)
 		if err != nil {
-			slog.Warn("skills.sh import: file download failed", "path", entry.Path, "error", err)
+			if isCapError(err) {
+				return nil, fmt.Errorf("github import: %s: %w", entry.Path, err)
+			}
+			slog.Warn("github import: file download failed", "path", entry.Path, "error", err)
 			continue
 		}
 		// Convert absolute GitHub path to relative path within skill
 		relPath := strings.TrimPrefix(entry.Path, basePath)
-		result.files = append(result.files, importedFile{path: relPath, content: string(body)})
+		if err := result.addFile(relPath, string(body)); err != nil {
+			return nil, err
+		}
 	}
 
 	return result, nil
@@ -756,7 +881,7 @@ func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, 
 func resolveGitHubSkillDirByName(httpClient *http.Client, owner, repo, defaultBranch, rawPrefix, skillName string) (string, []byte, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1",
 		url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(defaultBranch))
-	resp, err := httpClient.Get(apiURL)
+	resp, err := doGitHubAPIGet(httpClient, apiURL)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to inspect repository %s/%s for skill %s: %w", owner, repo, skillName, err)
 	}
@@ -782,7 +907,7 @@ func resolveGitHubSkillDirByName(httpClient *http.Client, owner, repo, defaultBr
 		return "", nil, skillMdNotFoundError(owner, repo, skillName)
 	}
 
-	slog.Warn("skills.sh import: repository tree listing truncated", "owner", owner, "repo", repo, "branch", defaultBranch)
+	slog.Warn("github import: repository tree listing truncated", "owner", owner, "repo", repo, "branch", defaultBranch)
 	if dir, body, ok := findSkillDirFromConventionalPrefixes(httpClient, owner, repo, defaultBranch, rawPrefix, skillName); ok {
 		return dir, body, nil
 	}
@@ -804,13 +929,13 @@ func collectGitHubFiles(httpClient *http.Client, entries []githubContentEntry, o
 			if subURL == "" {
 				parsed, err := url.Parse(parentURL)
 				if err != nil {
-					slog.Warn("skills.sh import: invalid parent directory url", "url", parentURL, "error", err)
+					slog.Warn("github import: invalid parent directory url", "url", parentURL, "error", err)
 					continue
 				}
 				parsed.Path = strings.TrimSuffix(parsed.Path, "/") + "/" + entry.Name
 				subURL = parsed.String()
 			}
-			subResp, err := httpClient.Get(subURL)
+			subResp, err := doGitHubAPIGet(httpClient, subURL)
 			if err != nil || subResp.StatusCode != http.StatusOK {
 				attrs := []any{"url", subURL}
 				if subResp != nil {
@@ -820,13 +945,13 @@ func collectGitHubFiles(httpClient *http.Client, entries []githubContentEntry, o
 				if err != nil {
 					attrs = append(attrs, "error", err)
 				}
-				slog.Warn("skills.sh import: failed to list subdirectory", attrs...)
+				slog.Warn("github import: failed to list subdirectory", attrs...)
 				continue
 			}
 			var subEntries []githubContentEntry
 			if err := json.NewDecoder(subResp.Body).Decode(&subEntries); err != nil {
 				subResp.Body.Close()
-				slog.Warn("skills.sh import: failed to decode subdirectory listing", "url", subURL, "error", err)
+				slog.Warn("github import: failed to decode subdirectory listing", "url", subURL, "error", err)
 				continue
 			}
 			subResp.Body.Close()
@@ -841,7 +966,7 @@ func findSkillDirFromConventionalPrefixes(httpClient *http.Client, owner, repo, 
 	for _, prefix := range prefixes {
 		paths, err := listGitHubSkillMdPaths(httpClient, owner, repo, prefix, defaultBranch)
 		if err != nil {
-			slog.Warn("skills.sh import: failed to list conventional skill prefix", "prefix", prefix, "error", err)
+			slog.Warn("github import: failed to list conventional skill prefix", "prefix", prefix, "error", err)
 			continue
 		}
 		skillPaths = append(skillPaths, paths...)
@@ -856,7 +981,7 @@ func findSkillDirFromConventionalPrefixes(httpClient *http.Client, owner, repo, 
 
 func listGitHubSkillMdPaths(httpClient *http.Client, owner, repo, repoPath, ref string) ([]string, error) {
 	apiURL := buildGitHubContentsURL(owner, repo, repoPath, ref)
-	resp, err := httpClient.Get(apiURL)
+	resp, err := doGitHubAPIGet(httpClient, apiURL)
 	if err != nil {
 		return nil, err
 	}
@@ -895,14 +1020,14 @@ func collectGitHubSkillMdPaths(httpClient *http.Client, entries []githubContentE
 		if subURL == "" {
 			parsed, err := url.Parse(parentURL)
 			if err != nil {
-				slog.Warn("skills.sh import: invalid parent directory url", "url", parentURL, "error", err)
+				slog.Warn("github import: invalid parent directory url", "url", parentURL, "error", err)
 				continue
 			}
 			parsed.Path = strings.TrimSuffix(parsed.Path, "/") + "/" + entry.Name
 			subURL = parsed.String()
 		}
 
-		subResp, err := httpClient.Get(subURL)
+		subResp, err := doGitHubAPIGet(httpClient, subURL)
 		if err != nil || subResp.StatusCode != http.StatusOK {
 			attrs := []any{"url", subURL}
 			if subResp != nil {
@@ -912,14 +1037,14 @@ func collectGitHubSkillMdPaths(httpClient *http.Client, entries []githubContentE
 			if err != nil {
 				attrs = append(attrs, "error", err)
 			}
-			slog.Warn("skills.sh import: failed to list skill metadata subdirectory", attrs...)
+			slog.Warn("github import: failed to list skill metadata subdirectory", attrs...)
 			continue
 		}
 
 		var subEntries []githubContentEntry
 		if err := json.NewDecoder(subResp.Body).Decode(&subEntries); err != nil {
 			subResp.Body.Close()
-			slog.Warn("skills.sh import: failed to decode skill metadata subdirectory", "url", subURL, "error", err)
+			slog.Warn("github import: failed to decode skill metadata subdirectory", "url", subURL, "error", err)
 			continue
 		}
 		subResp.Body.Close()
@@ -953,7 +1078,7 @@ func findMatchingSkillDirByFrontmatter(httpClient *http.Client, rawPrefix, skill
 	for _, skillPath := range skillPaths {
 		body, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, skillPath))
 		if err != nil {
-			slog.Warn("skills.sh import: fallback SKILL.md fetch failed", "path", skillPath, "error", err)
+			slog.Warn("github import: fallback SKILL.md fetch failed", "path", skillPath, "error", err)
 			continue
 		}
 		name, _ := parseSkillFrontmatter(string(body))
@@ -1026,9 +1151,322 @@ func parseSkillFrontmatter(content string) (name, description string) {
 	return name, description
 }
 
+// --- GitHub import ---
+
+// errGitHubAPIBlocked signals that an api.github.com probe was rejected for
+// auth/rate-limit reasons (401/403/429) rather than because the resource
+// genuinely does not exist. Resolvers treat this as "indeterminate" and may
+// fall back to the optimistic URL split rather than aborting the import.
+var errGitHubAPIBlocked = errors.New("github API blocked (rate limit or auth)")
+
+// doGitHubAPIGet performs a GET against an api.github.com URL, attaching the
+// GITHUB_TOKEN bearer header when the env var is set. Unauthenticated GitHub
+// API requests are capped at 60/hour per IP, which is trivially exhausted on
+// shared self-hosted servers and surfaces to users as 403 errors during
+// skill imports. Setting GITHUB_TOKEN raises the limit to 5000/hour.
+func doGitHubAPIGet(httpClient *http.Client, apiURL string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	addGitHubAuthHeader(req)
+	return httpClient.Do(req)
+}
+
+func addGitHubAuthHeader(req *http.Request) {
+	if req == nil {
+		return
+	}
+	if token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+}
+
+// githubSpec captures the parsed components of a github.com URL pointing at a
+// skill (or single-skill repository).
+type githubSpec struct {
+	owner    string
+	repo     string
+	ref      string // empty → caller resolves the default branch
+	skillDir string // relative directory within the repo, "" for the repository root
+
+	// refSegments holds the raw path segments after /tree/ or /blob/ that
+	// jointly encode (ref, skillDir). GitHub's web URLs do not delimit the
+	// boundary between branch/tag name and in-repo path, so when a ref
+	// contains '/' (e.g. "release/v2") segments[0] alone is not the ref.
+	// fetchFromGitHub uses resolveGitHubRefAndPath to walk these segments
+	// and ask the API which prefix is a real branch/tag/commit. When this
+	// slice is empty, ref/skillDir above are authoritative (root URL).
+	refSegments []string
+	// kind is "tree" or "blob"; "" for root URLs. blob requires the last
+	// segment to be SKILL.md, which is already stripped from refSegments.
+	kind string
+}
+
+// parseGitHubURL extracts the owner, repo, and the raw post-/tree|/blob
+// segments from a github.com URL. Supported forms:
+//
+//	github.com/{owner}/{repo}                                → root, default branch
+//	github.com/{owner}/{repo}/tree/{ref}/{path...}           → ref / skill dir
+//	github.com/{owner}/{repo}/blob/{ref}/{path.../SKILL.md}  → ref / skill dir
+//
+// A simple-ref shortcut (segments[0] is the ref, the rest is the path) is
+// stored in spec.ref/spec.skillDir; refSegments is also populated so that
+// fetchFromGitHub can disambiguate refs containing '/' against the API.
+func parseGitHubURL(raw string) (githubSpec, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return githubSpec{}, fmt.Errorf("invalid URL: %w", err)
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return githubSpec{}, fmt.Errorf("expected URL format: github.com/{owner}/{repo}[/tree/{ref}/{path}], got: %s", parsed.Path)
+	}
+	spec := githubSpec{owner: parts[0], repo: strings.TrimSuffix(parts[1], ".git")}
+	if len(parts) == 2 {
+		return spec, nil
+	}
+	kind := parts[2]
+	if kind != "tree" && kind != "blob" {
+		return githubSpec{}, fmt.Errorf("unsupported URL form: github.com/%s/%s/%s/... (use /tree/{ref}/... or /blob/{ref}/.../SKILL.md)", spec.owner, spec.repo, kind)
+	}
+	if len(parts) < 4 || parts[3] == "" {
+		return githubSpec{}, fmt.Errorf("missing ref after /%s/", kind)
+	}
+	spec.kind = kind
+	rest := parts[3:]
+	if kind == "blob" {
+		if !strings.EqualFold(rest[len(rest)-1], "SKILL.md") {
+			return githubSpec{}, fmt.Errorf("blob URL must point to a SKILL.md file")
+		}
+		rest = rest[:len(rest)-1]
+		if len(rest) == 0 {
+			return githubSpec{}, fmt.Errorf("missing ref after /blob/")
+		}
+	}
+	// Decode URL-escaped segments (e.g. spaces) so paths match the repo's
+	// real on-disk layout. Re-escaping happens in buildRawGitHubURL.
+	decoded := make([]string, len(rest))
+	for i, p := range rest {
+		d, err := url.PathUnescape(p)
+		if err != nil {
+			return githubSpec{}, fmt.Errorf("invalid path segment %q: %w", p, err)
+		}
+		if d == "" {
+			return githubSpec{}, fmt.Errorf("empty path segment in URL")
+		}
+		decoded[i] = d
+	}
+	spec.refSegments = decoded
+	// Optimistic split: assume the simple case where the ref is one segment.
+	// fetchFromGitHub will re-resolve via the API and overwrite both fields
+	// when the optimistic guess does not validate (e.g. release/v2 refs).
+	spec.ref = decoded[0]
+	if len(decoded) > 1 {
+		spec.skillDir = strings.Join(decoded[1:], "/")
+	}
+	return spec, nil
+}
+
+// resolveGitHubRefAndPath walks the parsed refSegments and asks the GitHub
+// commits API which prefix corresponds to a real branch, tag, or commit.
+// This is what makes refs containing '/' (e.g. "release/v2") work correctly:
+// the URL github.com/o/r/tree/release/v2/skills/foo is ambiguous between
+// (ref=release, path=v2/skills/foo) and (ref=release/v2, path=skills/foo),
+// so we probe /repos/{o}/{r}/commits/{candidate} from longest to shortest
+// and accept the first one the server confirms exists.
+//
+// On success spec.ref and spec.skillDir are overwritten with the resolved
+// pair. On failure (no candidate resolves) a single error is returned that
+// names every candidate that was tried.
+func resolveGitHubRefAndPath(httpClient *http.Client, spec *githubSpec) error {
+	if len(spec.refSegments) == 0 {
+		return nil
+	}
+	// Try longest prefix first so that release/v2 wins over release.
+	tried := make([]string, 0, len(spec.refSegments))
+	blocked := false
+	for n := len(spec.refSegments); n >= 1; n-- {
+		candidate := strings.Join(spec.refSegments[:n], "/")
+		tried = append(tried, candidate)
+		ok, err := githubRefExists(httpClient, spec.owner, spec.repo, candidate)
+		if errors.Is(err, errGitHubAPIBlocked) {
+			// 401/403/429 means we can't tell whether the ref exists. Keep
+			// trying the remaining (shorter) candidates so we don't punish
+			// the common single-segment-ref case for one bad probe.
+			blocked = true
+			continue
+		}
+		if err != nil {
+			// Network / transport errors should not be silently treated as
+			// "ref does not exist" — surface them so the caller can retry.
+			return fmt.Errorf("validating ref %q: %w", candidate, err)
+		}
+		if ok {
+			spec.ref = candidate
+			if n == len(spec.refSegments) {
+				spec.skillDir = ""
+			} else {
+				spec.skillDir = strings.Join(spec.refSegments[n:], "/")
+			}
+			return nil
+		}
+	}
+	if blocked {
+		// Every probe was either a confirmed 404 or rate-limited and we never
+		// got a confirmation. Fall back to the optimistic single-segment
+		// split that parseGitHubURL populated. If that's wrong, the
+		// subsequent raw-file fetch will surface a clearer "SKILL.md not
+		// found" error than failing the whole import on a 403.
+		slog.Warn("github import: ref resolution blocked by GitHub API (rate limit or auth); falling back to optimistic single-segment ref. Set GITHUB_TOKEN to enable disambiguation of slash-bearing refs.",
+			"owner", spec.owner, "repo", spec.repo, "tried", tried)
+		return nil
+	}
+	return fmt.Errorf("could not resolve ref in github.com/%s/%s URL — tried: %s. Make sure the branch, tag, or commit exists and that the URL is the canonical /tree/{ref}/{path} or /blob/{ref}/{path}/SKILL.md form",
+		spec.owner, spec.repo, strings.Join(tried, ", "))
+}
+
+// githubRefExists returns true when GitHub recognizes ref as a branch, tag,
+// or commit SHA on owner/repo. It uses the commits endpoint because that
+// single call accepts all three ref kinds (unlike /branches or /tags which
+// only match one). 404 means the ref does not exist; any other non-200
+// status is treated as an error so the caller can distinguish "missing"
+// from "API down".
+func githubRefExists(httpClient *http.Client, owner, repo, ref string) (bool, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/commits/%s",
+		url.PathEscape(owner), url.PathEscape(repo), escapeRefPath(ref))
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return false, err
+	}
+	// Per GitHub docs: Accept: application/vnd.github.v3.sha returns just
+	// the SHA when the ref resolves, which is the cheapest possible probe.
+	req.Header.Set("Accept", "application/vnd.github.v3.sha")
+	addGitHubAuthHeader(req)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound, http.StatusUnprocessableEntity:
+		return false, nil
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+		return false, errGitHubAPIBlocked
+	default:
+		return false, fmt.Errorf("github API returned status %d for ref %q", resp.StatusCode, ref)
+	}
+}
+
+func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, error) {
+	spec, err := parseGitHubURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if len(spec.refSegments) > 0 {
+		// Disambiguate slash-bearing refs (release/v2 etc.) against the API
+		// before issuing any raw or contents requests.
+		if err := resolveGitHubRefAndPath(httpClient, &spec); err != nil {
+			return nil, err
+		}
+	}
+	if spec.ref == "" {
+		spec.ref = fetchGitHubDefaultBranch(httpClient, spec.owner, spec.repo)
+	}
+	rawPrefix := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s",
+		url.PathEscape(spec.owner), url.PathEscape(spec.repo), escapeRefPath(spec.ref))
+
+	skillMdPath := "SKILL.md"
+	if spec.skillDir != "" {
+		skillMdPath = spec.skillDir + "/SKILL.md"
+	}
+	skillMdBody, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, skillMdPath))
+	if err != nil {
+		if spec.skillDir == "" {
+			return nil, fmt.Errorf("SKILL.md not found at the root of %s/%s@%s. For multi-skill repositories, point to a specific directory using github.com/%s/%s/tree/%s/<skill-dir>",
+				spec.owner, spec.repo, spec.ref, spec.owner, spec.repo, spec.ref)
+		}
+		return nil, fmt.Errorf("SKILL.md not found at %s in %s/%s@%s: %w",
+			skillMdPath, spec.owner, spec.repo, spec.ref, err)
+	}
+
+	name, description := parseSkillFrontmatter(string(skillMdBody))
+	if name == "" {
+		if spec.skillDir != "" {
+			name = filepath.Base(spec.skillDir)
+		} else {
+			name = spec.repo
+		}
+	}
+
+	result := &importedSkill{
+		name:        name,
+		description: description,
+		content:     string(skillMdBody),
+		origin: map[string]any{
+			"type":       "github",
+			"source_url": rawURL,
+			"owner":      spec.owner,
+			"repo":       spec.repo,
+			"ref":        spec.ref,
+			"path":       spec.skillDir,
+		},
+	}
+
+	apiURL := buildGitHubContentsURL(spec.owner, spec.repo, spec.skillDir, spec.ref)
+	dirResp, err := doGitHubAPIGet(httpClient, apiURL)
+	if err != nil || dirResp.StatusCode != http.StatusOK {
+		// Cannot list the directory — return what we have (SKILL.md only).
+		// Keep this lenient: a private rate-limited request shouldn't fail
+		// an import that has already produced a valid SKILL.md.
+		if dirResp != nil {
+			dirResp.Body.Close()
+		}
+		return result, nil
+	}
+	defer dirResp.Body.Close()
+
+	var entries []githubContentEntry
+	if err := json.NewDecoder(dirResp.Body).Decode(&entries); err != nil {
+		slog.Warn("github import: failed to decode top-level directory listing", "url", apiURL, "error", err)
+		return result, nil
+	}
+
+	var allFiles []githubContentEntry
+	collectGitHubFiles(httpClient, entries, &allFiles, apiURL)
+
+	basePath := ""
+	if spec.skillDir != "" {
+		basePath = spec.skillDir + "/"
+	}
+	for _, entry := range allFiles {
+		if entry.DownloadURL == "" {
+			continue
+		}
+		body, err := fetchRawFile(httpClient, entry.DownloadURL)
+		if err != nil {
+			if isCapError(err) {
+				return nil, fmt.Errorf("github import: %s: %w", entry.Path, err)
+			}
+			slog.Warn("github import: file download failed", "path", entry.Path, "error", err)
+			continue
+		}
+		relPath := strings.TrimPrefix(entry.Path, basePath)
+		if err := result.addFile(relPath, string(body)); err != nil {
+			return nil, err
+		}
+	}
+
+	return result, nil
+}
+
 // --- Shared helpers ---
 
-// fetchRawFile downloads a URL and returns the body bytes. Limit 1MB.
+// fetchRawFile downloads a URL and returns the body bytes. Returns an error
+// if the response exceeds maxImportFileSize so we never silently truncate a
+// half-downloaded skill file into the workspace.
 func fetchRawFile(httpClient *http.Client, fileURL string) ([]byte, error) {
 	resp, err := httpClient.Get(fileURL)
 	if err != nil {
@@ -1038,7 +1476,26 @@ func fetchRawFile(httpClient *http.Client, fileURL string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxImportFileSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxImportFileSize {
+		return nil, fmt.Errorf("%w: file exceeds %d byte limit", errImportCapExceeded, maxImportFileSize)
+	}
+	return body, nil
+}
+
+// escapeRefPath percent-encodes each segment of a git ref individually so
+// that slash-bearing refs like "release/v2" are sent to GitHub as
+// "release/v2" (path separators preserved) rather than "release%2Fv2"
+// (which GitHub does not accept on the commits / raw endpoints).
+func escapeRefPath(ref string) string {
+	parts := strings.Split(ref, "/")
+	for i, p := range parts {
+		parts[i] = url.PathEscape(p)
+	}
+	return strings.Join(parts, "/")
 }
 
 func buildRawGitHubURL(rawPrefix, repoPath string) string {
@@ -1111,6 +1568,8 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		imported, err = fetchFromClawHub(httpClient, normalized)
 	case sourceSkillsSh:
 		imported, err = fetchFromSkillsSh(httpClient, normalized)
+	case sourceGitHub:
+		imported, err = fetchFromGitHub(httpClient, normalized)
 	}
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
@@ -1128,13 +1587,20 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Persist provenance into skill.config.origin so list/detail UI can show
+	// "Imported from GitHub / ClawHub / Skills.sh" and link back to the source.
+	config := map[string]any{}
+	if imported.origin != nil {
+		config["origin"] = imported.origin
+	}
+
 	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
 		WorkspaceID: workspaceUUID,
 		CreatorID:   creatorUUID,
 		Name:        imported.name,
 		Description: imported.description,
 		Content:     imported.content,
-		Config:      map[string]any{},
+		Config:      config,
 		Files:       files,
 	})
 	if err != nil {
@@ -1244,15 +1710,18 @@ func (h *Handler) ListAgentSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	skills, err := h.Queries.ListAgentSkills(r.Context(), agent.ID)
+	skills, err := h.Queries.ListAgentSkillSummaries(r.Context(), agent.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent skills")
 		return
 	}
 
-	resp := make([]SkillResponse, len(skills))
+	resp := make([]SkillSummaryResponse, len(skills))
 	for i, s := range skills {
-		resp[i] = skillToResponse(s)
+		resp[i] = skillSummaryToResponse(
+			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
+			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
+		)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1307,15 +1776,18 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return the updated skills list.
-	skills, err := h.Queries.ListAgentSkills(r.Context(), agent.ID)
+	skills, err := h.Queries.ListAgentSkillSummaries(r.Context(), agent.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent skills")
 		return
 	}
 
-	resp := make([]SkillResponse, len(skills))
+	resp := make([]SkillSummaryResponse, len(skills))
 	for i, s := range skills {
-		resp[i] = skillToResponse(s)
+		resp[i] = skillSummaryToResponse(
+			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
+			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
+		)
 	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(agent.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(agent.WorkspaceID), actorType, actorID, map[string]any{"agent_id": uuidToString(agent.ID), "skills": resp})

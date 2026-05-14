@@ -9,7 +9,7 @@ import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 
 interface DashboardLayoutProps {
   children: ReactNode;
-  /** Rendered inside SidebarInset — absolute-positioned overlays */
+  /** Rendered inside SidebarInset (e.g. ChatWindow, ChatFab — absolute-positioned overlays) */
   extra?: ReactNode;
   /** Rendered inside sidebar header as a search trigger */
   searchSlot?: ReactNode;

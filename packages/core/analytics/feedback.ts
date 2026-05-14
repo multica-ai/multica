@@ -4,7 +4,7 @@
  * Pairs with the backend's `feedback_submitted` event (emitted from
  * `CreateFeedback` after a successful insert) so we can compute a
  * completion rate: users who open the modal → users who actually send.
- * The message content itself is never sent to Amplitude; see
+ * The message content itself is never sent to PostHog; see
  * docs/analytics.md and the backend `FeedbackSubmitted` helper for the
  * PII contract.
  */

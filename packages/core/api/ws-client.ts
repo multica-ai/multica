@@ -80,9 +80,6 @@ export class WSClient {
         this.onAuthenticated();
         return;
       }
-      if (msg.type === "heartbeat") {
-        return;
-      }
       this.logger.debug("received", msg.type);
       const eventHandlers = this.handlers.get(msg.type);
       if (eventHandlers) {

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import type { AgentRuntime } from "@multica/core/types";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../../locales/en/common.json";
+import enOnboarding from "../../locales/en/onboarding.json";
+
+const TEST_RESOURCES = { en: { common: enCommon, onboarding: enOnboarding } };
 
 // Hoisted mocks — replace analytics and the runtime picker before the SUT
 // imports them. Tests drive picker state via `mocks.pickerState`; every
@@ -60,7 +65,9 @@ function renderStep() {
   const onNext = vi.fn();
   const onBack = vi.fn();
   render(
-    <StepRuntimeConnect wsId="ws_test" onNext={onNext} onBack={onBack} />,
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <StepRuntimeConnect wsId="ws_test" onNext={onNext} onBack={onBack} />
+    </I18nProvider>,
   );
   return { onNext, onBack };
 }
@@ -91,7 +98,9 @@ describe("StepRuntimeConnect — onboarding_runtime_detected", () => {
     const [name, props] = mocks.captureEvent.mock.calls[0]!;
     expect(name).toBe("onboarding_runtime_detected");
     expect(props).toMatchObject({
-      source: "step3_desktop",
+      source: "onboarding",
+      surface: "step3_desktop",
+      workspace_id: "ws_test",
       outcome: "found",
       runtime_count: 1,
       online_count: 1,
@@ -147,7 +156,9 @@ describe("StepRuntimeConnect — onboarding_runtime_detected", () => {
     expect(mocks.captureEvent).toHaveBeenCalledTimes(1);
     const props = mocks.captureEvent.mock.calls[0]![1] as Record<string, unknown>;
     expect(props).toMatchObject({
-      source: "step3_desktop",
+      source: "onboarding",
+      surface: "step3_desktop",
+      workspace_id: "ws_test",
       outcome: "empty",
       runtime_count: 0,
       online_count: 0,

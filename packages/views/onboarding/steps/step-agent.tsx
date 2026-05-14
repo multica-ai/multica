@@ -19,6 +19,7 @@ import type {
 } from "@multica/core/types";
 import { DragStrip } from "@multica/views/platform";
 import { StepHeader } from "../components/step-header";
+import { useT } from "../../i18n";
 
 /**
  * Step 4 — create the user's first agent.
@@ -50,50 +51,32 @@ interface AgentTemplate {
   instructions: string;
 }
 
-const AGENT_TEMPLATES: readonly AgentTemplate[] = [
-  {
-    id: "coding",
-    label: "Coding Agent",
-    defaultName: "Atlas",
-    emoji: "⌘",
-    blurb: "Writes, refactors, and ships code. Reads your repo.",
-    instructions:
-      "You are a Coding Agent on a product team. Pick up coding issues — implement features, fix bugs, write tests, and open pull requests. Read the repository before you start, follow existing code conventions, and keep diffs focused. Ask for clarification when the acceptance criteria are ambiguous.",
-  },
-  {
-    id: "planning",
-    label: "Planning Agent",
-    defaultName: "Orion",
-    emoji: "◐",
-    blurb: "Breaks down work, drafts specs, keeps the board tidy.",
-    instructions:
-      "You are a Planning Agent. Turn loose ideas and open issues into scoped, ready-to-execute work: break them down into subtasks, write acceptance criteria, and propose owners and sequencing. Prefer clarity over speed. When blocked by missing context, ask one specific question rather than guessing.",
-  },
-  {
-    id: "writing",
-    label: "Writing Agent",
-    defaultName: "Mira",
-    emoji: "✎",
-    blurb: "Drafts, summarizes, researches. Long-form friendly.",
-    instructions:
-      "You are a Writing Agent. Draft documents, summarize long content, and research topics on the web when needed. Structure your output as finished prose a reader can use directly — not an outline. Cite sources when you draw from them. Match the tone the user establishes in the issue.",
-  },
-  {
-    id: "assistant",
-    label: "Assistant",
-    defaultName: "Vega",
-    emoji: "✦",
-    blurb: "General-purpose. Good default when the task is unclear.",
-    instructions:
-      "You are a general-purpose teammate. Handle varied tasks — light coding, writing, research, planning — and stay pragmatic about scope. When the task is ambiguous, ask one clarifying question before diving in. Default to short, useful outputs over exhaustive ones.",
-  },
+// Defaults stay constant (names + emoji are visual identity, not copy);
+// label / blurb / instructions resolve from the bundle at render time.
+const TEMPLATE_DEFAULTS: readonly Omit<AgentTemplate, "label" | "blurb" | "instructions">[] = [
+  { id: "coding", defaultName: "Atlas", emoji: "⌘" },
+  { id: "planning", defaultName: "Orion", emoji: "◐" },
+  { id: "writing", defaultName: "Mira", emoji: "✎" },
+  { id: "assistant", defaultName: "Vega", emoji: "✦" },
 ] as const;
 
-const TEMPLATE_BY_ID: Record<AgentTemplateId, AgentTemplate> =
-  Object.fromEntries(AGENT_TEMPLATES.map((t) => [t.id, t])) as Record<
+function useAgentTemplates(): {
+  templates: readonly AgentTemplate[];
+  byId: Record<AgentTemplateId, AgentTemplate>;
+} {
+  const { t } = useT("onboarding");
+  const templates = TEMPLATE_DEFAULTS.map((d) => ({
+    ...d,
+    label: t(($) => $.step_agent.templates[d.id].label),
+    blurb: t(($) => $.step_agent.templates[d.id].blurb),
+    instructions: t(($) => $.step_agent.templates[d.id].instructions),
+  })) as readonly AgentTemplate[];
+  const byId = Object.fromEntries(templates.map((tpl) => [tpl.id, tpl])) as Record<
     AgentTemplateId,
     AgentTemplate
   >;
+  return { templates, byId };
+}
 
 export function StepAgent({
   runtime,
@@ -106,6 +89,8 @@ export function StepAgent({
   onCreated: (agent: Agent) => void | Promise<void>;
   onBack?: () => void;
 }) {
+  const { t } = useT("onboarding");
+  const { templates: AGENT_TEMPLATES, byId: TEMPLATE_BY_ID } = useAgentTemplates();
   const recommendedId = recommendTemplate(questionnaire);
   const recommended = TEMPLATE_BY_ID[recommendedId];
 
@@ -131,7 +116,7 @@ export function StepAgent({
       await onCreated(agent);
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Failed to create agent",
+        err instanceof Error ? err.message : t(($) => $.step_agent.create_failed),
       );
       setCreating(false);
     }
@@ -154,7 +139,7 @@ export function StepAgent({
               className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              Back
+              {t(($) => $.common.back)}
             </button>
           ) : (
             <span aria-hidden className="w-0" />
@@ -174,19 +159,17 @@ export function StepAgent({
         >
           <div className="mx-auto w-full max-w-[620px] px-6 py-10 sm:px-10 md:px-14 lg:px-0 lg:py-14">
             <div className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              Your first agent
+              {t(($) => $.step_agent.eyebrow)}
             </div>
             <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
-              Meet your first teammate.
+              {t(($) => $.step_agent.headline)}
             </h1>
             <p className="mt-4 text-[15.5px] leading-[1.55] text-foreground/80">
-              Your answers point to a{" "}
+              {t(($) => $.step_agent.lede_prefix)}
               <strong className="font-medium text-foreground">
                 {recommended.label}
               </strong>
-              . Pick whichever of the four fits you — each template ships
-              ready to take its first issue. You can retune its
-              instructions from the agent settings page later.
+              {t(($) => $.step_agent.lede_suffix)}
             </p>
 
             <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -208,11 +191,11 @@ export function StepAgent({
             the agent IS this step. */}
         <footer className="flex shrink-0 items-center justify-between gap-4 bg-background px-6 py-4 sm:px-10 md:px-14 lg:px-16">
           <span className="hidden text-xs text-muted-foreground sm:block">
-            One agent is enough to start. Add more from the sidebar later.
+            {t(($) => $.step_agent.footer_hint)}
           </span>
           <Button size="lg" onClick={handleCreate} disabled={creating}>
             {creating && <Loader2 className="h-4 w-4 animate-spin" />}
-            Create {template.defaultName}
+            {t(($) => $.step_agent.create_action, { name: template.defaultName })}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </footer>
@@ -240,6 +223,7 @@ function TemplateCard({
   recommended: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useT("onboarding");
   return (
     <button
       type="button"
@@ -262,7 +246,7 @@ function TemplateCard({
         </span>
         {recommended && (
           <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand">
-            Recommended
+            {t(($) => $.step_agent.recommended_badge)}
           </span>
         )}
       </div>
@@ -279,53 +263,51 @@ function TemplateCard({
 }
 
 function AboutAgentsSide() {
+  const { t } = useT("onboarding");
   return (
     <div className="flex max-w-[380px] flex-col gap-8">
       <section className="flex flex-col gap-4">
         <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-          What&apos;s an agent
+          {t(($) => $.step_agent.about_eyebrow)}
         </div>
         <h2 className="font-serif text-[22px] font-medium leading-[1.25] tracking-tight text-foreground">
-          An AI teammate that lives in your workspace.
+          {t(($) => $.step_agent.about_headline)}
         </h2>
         <p className="text-[14px] leading-[1.6] text-foreground/80">
-          Agents show up in every assignee picker, just like any other
-          colleague — except they can work 24/7 on whatever runtime you
-          give them.
+          {t(($) => $.step_agent.about_body)}
         </p>
       </section>
 
       <section className="flex flex-col gap-4">
         <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-          Ways to work with an agent
+          {t(($) => $.step_agent.ways_eyebrow)}
         </div>
         <div className="flex flex-col gap-4">
           <WayItem
             glyph="→"
-            title="Assign it an issue"
-            body="It picks up the task and reports back in the thread."
+            title={t(($) => $.step_agent.way_assign_title)}
+            body={t(($) => $.step_agent.way_assign_body)}
           />
           <WayItem
             glyph="@"
-            title="@mention in a comment"
-            body="Pull it into a conversation for a quick take."
+            title={t(($) => $.step_agent.way_mention_title)}
+            body={t(($) => $.step_agent.way_mention_body)}
           />
           <WayItem
             glyph="◯"
-            title="Chat one-on-one"
-            body="Ask quick questions without creating an issue."
+            title={t(($) => $.step_agent.way_chat_title)}
+            body={t(($) => $.step_agent.way_chat_body)}
           />
           <WayItem
             glyph="↻"
-            title="Put it on Autopilot"
-            body="Daily triage, weekly digest, monthly audit — on a schedule."
+            title={t(($) => $.step_agent.way_autopilot_title)}
+            body={t(($) => $.step_agent.way_autopilot_body)}
           />
         </div>
       </section>
 
       <p className="text-[13px] leading-[1.55] text-muted-foreground">
-        Add more agents anytime. A small team of specialized agents beats
-        one jack-of-all-trades.
+        {t(($) => $.step_agent.add_more_hint)}
       </p>
 
       <a
@@ -334,7 +316,7 @@ function AboutAgentsSide() {
         rel="noopener noreferrer"
         className="self-start text-[13px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
       >
-        Creating your first agent →
+        {t(($) => $.step_agent.docs_link)}
       </a>
     </div>
   );

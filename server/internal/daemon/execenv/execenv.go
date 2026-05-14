@@ -203,30 +203,52 @@ func writeCodexWorkspaceSkills(codexHome string, skills []SkillContextForEnv) er
 	return writeSkillFiles(filepath.Join(codexHome, "skills"), skills)
 }
 
+// GCMetaKind identifies which kind of parent record a task workdir belongs to.
+// The GC loop dispatches its decision tree on this value so chat / autopilot /
+// quick-create tasks are no longer forced through the issue-centric path.
+type GCMetaKind string
+
+const (
+	GCKindIssue        GCMetaKind = "issue"
+	GCKindChat         GCMetaKind = "chat"
+	GCKindAutopilotRun GCMetaKind = "autopilot_run"
+	GCKindQuickCreate  GCMetaKind = "quick_create"
+)
+
 // GCMeta is persisted to .gc_meta.json inside the env root so the GC loop
-// can determine which issue this directory belongs to.
+// can decide whether the directory is reclaimable. It is a discriminated
+// union keyed on Kind: only the ID field matching Kind is meaningful.
+//
+// Older meta files (pre-v2) lack the Kind field; readers must default empty
+// Kind to GCKindIssue for backward compatibility — only IssueID was written
+// before, and only issue-centric tasks ever produced a meta file.
 type GCMeta struct {
-	IssueID     string    `json:"issue_id"`
-	WorkspaceID string    `json:"workspace_id"`
-	CompletedAt time.Time `json:"completed_at"`
+	Kind           GCMetaKind `json:"kind,omitempty"`
+	IssueID        string     `json:"issue_id,omitempty"`
+	ChatSessionID  string     `json:"chat_session_id,omitempty"`
+	AutopilotRunID string     `json:"autopilot_run_id,omitempty"`
+	TaskID         string     `json:"task_id,omitempty"`
+	WorkspaceID    string     `json:"workspace_id"`
+	CompletedAt    time.Time  `json:"completed_at"`
 }
 
 const gcMetaFile = ".gc_meta.json"
 
-// WriteGCMeta writes GC metadata into the given directory.
-func WriteGCMeta(envRoot, issueID, workspaceID string, logger *slog.Logger) error {
-	if issueID == "" {
-		logger.Warn("execenv: skipping .gc_meta.json write: issue_id is empty", "envRoot", envRoot, "workspaceID", workspaceID)
-		return nil
-	}
+// WriteGCMeta writes GC metadata into the given directory. The caller is
+// responsible for choosing Kind and populating the matching ID field;
+// CompletedAt is stamped here so callers don't have to think about clocks.
+func WriteGCMeta(envRoot string, meta GCMeta, logger *slog.Logger) error {
 	if envRoot == "" {
 		return nil
 	}
-	meta := GCMeta{
-		IssueID:     issueID,
-		WorkspaceID: workspaceID,
-		CompletedAt: time.Now().UTC(),
+	if meta.Kind == "" {
+		// Defensive: a task that doesn't fit any known kind would write a
+		// meta file the GC loop can't dispatch on. Skip silently — the
+		// directory falls back to the orphan-by-mtime path.
+		logger.Debug("execenv: skipping .gc_meta.json write: kind is empty", "envRoot", envRoot)
+		return nil
 	}
+	meta.CompletedAt = time.Now().UTC()
 	data, err := json.Marshal(meta)
 	if err != nil {
 		return fmt.Errorf("marshal gc meta: %w", err)
@@ -234,7 +256,9 @@ func WriteGCMeta(envRoot, issueID, workspaceID string, logger *slog.Logger) erro
 	return os.WriteFile(filepath.Join(envRoot, gcMetaFile), data, 0o644)
 }
 
-// ReadGCMeta reads GC metadata from a task directory root.
+// ReadGCMeta reads GC metadata from a task directory root. Pre-v2 meta files
+// (no kind field) are normalized to GCKindIssue so the legacy issue path
+// keeps working without a migration.
 func ReadGCMeta(envRoot string) (*GCMeta, error) {
 	data, err := os.ReadFile(filepath.Join(envRoot, gcMetaFile))
 	if err != nil {
@@ -243,6 +267,9 @@ func ReadGCMeta(envRoot string) (*GCMeta, error) {
 	var meta GCMeta
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return nil, err
+	}
+	if meta.Kind == "" {
+		meta.Kind = GCKindIssue
 	}
 	return &meta, nil
 }

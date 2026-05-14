@@ -20,13 +20,19 @@ afterEach(() => {
 });
 
 describe("workspace-aware storage", () => {
-  it("uses plain key when no workspace is set", () => {
+  it("drops writes and returns null for reads when no workspace is set", () => {
     const adapter = mockAdapter();
     setCurrentWorkspace(null, null);
     const storage = createWorkspaceAwareStorage(adapter);
 
     storage.setItem("draft", "data");
-    expect(adapter.setItem).toHaveBeenCalledWith("draft", "data");
+    expect(adapter.setItem).not.toHaveBeenCalled();
+
+    expect(storage.getItem("draft")).toBeNull();
+    expect(adapter.getItem).not.toHaveBeenCalled();
+
+    storage.removeItem("draft");
+    expect(adapter.removeItem).not.toHaveBeenCalled();
   });
 
   it("namespaces key with slug when workspace is set", () => {

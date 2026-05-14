@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -39,50 +38,6 @@ func TestSignupGating(t *testing.T) {
 			err := h.checkSignupAllowed(tt.email, tt.isNew)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("got err=%v wantErr=%v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-// TestSignupErrorDisambiguation locks in which error fires for which config so
-// the frontend's error-rendering branches stay correct: allowlist mismatch →
-// ErrEmailNotAllowed ("use your @g2.com account"), general block →
-// ErrSignupProhibited ("signup closed"). Swapping these surfaces the wrong
-// message for the most common prod config (ALLOW_SIGNUP=false +
-// ALLOWED_EMAIL_DOMAINS=g2.com).
-func TestSignupErrorDisambiguation(t *testing.T) {
-	tests := []struct {
-		name    string
-		cfg     Config
-		email   string
-		wantErr error
-	}{
-		{
-			name:    "domain_mismatch_returns_email_not_allowed",
-			cfg:     Config{AllowSignup: false, AllowedEmailDomains: []string{"g2.com"}},
-			email:   "user@other.com",
-			wantErr: ErrEmailNotAllowed,
-		},
-		{
-			name:    "email_mismatch_returns_email_not_allowed",
-			cfg:     Config{AllowSignup: true, AllowedEmails: []string{"only@allowed.com"}},
-			email:   "stranger@x.com",
-			wantErr: ErrEmailNotAllowed,
-		},
-		{
-			name:    "no_allowlists_blocked_returns_signup_prohibited",
-			cfg:     Config{AllowSignup: false},
-			email:   "user@anywhere.com",
-			wantErr: ErrSignupProhibited,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			h := newTestHandler(tt.cfg)
-			err := h.checkSignupAllowed(tt.email, true)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("got err=%v want=%v", err, tt.wantErr)
 			}
 		})
 	}

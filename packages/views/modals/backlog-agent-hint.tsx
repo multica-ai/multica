@@ -3,6 +3,7 @@
 import { toast } from "sonner";
 import { BacklogAgentHintDialog } from "../issues/components/backlog-agent-hint-dialog";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { useT } from "../i18n";
 
 export function BacklogAgentHintModal({
   onClose,
@@ -11,6 +12,7 @@ export function BacklogAgentHintModal({
   onClose: () => void;
   data: Record<string, unknown> | null;
 }) {
+  const { t } = useT("modals");
   const issueId = (data?.issueId as string) || "";
   const updateIssue = useUpdateIssue();
 
@@ -27,7 +29,7 @@ export function BacklogAgentHintModal({
         if (issueId) {
           updateIssue.mutate(
             { id: issueId, status: "todo" },
-            { onError: () => toast.error("Failed to update status") },
+            { onError: () => toast.error(t(($) => $.backlog_hint.toast_status_failed)) },
           );
         }
         onClose();

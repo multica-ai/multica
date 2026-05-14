@@ -1,0 +1,68 @@
+{
+  "page": {
+    "title": "收件箱",
+    "back": "收件箱"
+  },
+  "menu": {
+    "mark_all_read": "全部标为已读",
+    "archive_all": "归档全部",
+    "archive_all_read": "归档全部已读",
+    "archive_completed": "归档已完成"
+  },
+  "list": {
+    "empty": "暂无通知",
+    "mark_done_tooltip": "标为已完成",
+    "archive_tooltip": "归档",
+    "time": {
+      "just_now": "刚刚",
+      "minutes": "{{count}} 分钟",
+      "hours": "{{count}} 小时",
+      "days": "{{count}} 天"
+    }
+  },
+  "detail": {
+    "select_prompt": "选择一条通知查看详情",
+    "empty": "收件箱为空",
+    "original_input": "原始输入",
+    "edit_advanced": "在完整表单中编辑",
+    "archive": "归档"
+  },
+  "types": {
+    "issue_assigned": "已分配",
+    "unassigned": "已取消分配",
+    "assignee_changed": "分配人已更改",
+    "status_changed": "状态已更改",
+    "priority_changed": "优先级已更改",
+    "due_date_changed": "截止日期已更改",
+    "new_comment": "新评论",
+    "mentioned": "提及了你",
+    "review_requested": "请求审阅",
+    "task_completed": "task 已完成",
+    "task_failed": "task 失败",
+    "agent_blocked": "智能体被阻塞",
+    "agent_completed": "智能体已完成",
+    "reaction_added": "添加了表情反应",
+    "quick_create_done": "通过智能体创建",
+    "quick_create_failed": "通过智能体创建失败"
+  },
+  "labels": {
+    "set_status_to": "状态设为",
+    "set_priority_to": "优先级设为",
+    "assigned_to": "分配给 {{name}}",
+    "removed_assignee": "移除了分配人",
+    "set_due_date_to": "截止日期设为 {{date}}",
+    "removed_due_date": "移除了截止日期",
+    "reacted_to_comment": "用 {{emoji}} 回应了你的评论",
+    "created_with_agent": "通过智能体创建：{{identifier}}",
+    "failed_with_detail": "失败：{{detail}}"
+  },
+  "errors": {
+    "mark_read_failed": "标为已读失败",
+    "archive_failed": "归档失败",
+    "mark_done_failed": "标为已完成失败",
+    "mark_all_read_failed": "全部标为已读失败",
+    "archive_all_failed": "归档全部失败",
+    "archive_all_read_failed": "归档已读失败",
+    "archive_completed_failed": "归档已完成失败"
+  }
+}

@@ -11,6 +11,8 @@ const (
 	EventCommentCreated       = "comment:created"
 	EventCommentUpdated       = "comment:updated"
 	EventCommentDeleted       = "comment:deleted"
+	EventCommentResolved      = "comment:resolved"
+	EventCommentUnresolved    = "comment:unresolved"
 	EventReactionAdded        = "reaction:added"
 	EventReactionRemoved      = "reaction:removed"
 	EventIssueReactionAdded   = "issue_reaction:added"
@@ -105,4 +107,11 @@ const (
 	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
 	EventDaemonRegister      = "daemon:register"
 	EventDaemonTaskAvailable = "daemon:task_available"
+
+	// GitHub integration events
+	EventGitHubInstallationCreated = "github_installation:created"
+	EventGitHubInstallationDeleted = "github_installation:deleted"
+	EventPullRequestLinked         = "pull_request:linked"
+	EventPullRequestUpdated        = "pull_request:updated"
+	EventPullRequestUnlinked       = "pull_request:unlinked"
 )

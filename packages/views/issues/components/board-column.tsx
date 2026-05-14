@@ -19,6 +19,7 @@ import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context"
 import { StatusHeading } from "./status-heading";
 import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";
+import { useT } from "../../i18n";
 
 export function BoardColumn({
   status,
@@ -27,6 +28,7 @@ export function BoardColumn({
   childProgressMap,
   totalCount,
   footer,
+  projectId,
 }: {
   status: IssueStatus;
   issueIds: string[];
@@ -34,10 +36,13 @@ export function BoardColumn({
   childProgressMap?: Map<string, ChildProgress>;
   totalCount?: number;
   footer?: ReactNode;
+  /** When set, the per-column "+" pre-fills the project on the create form. */
+  projectId?: string;
 }) {
   const cfg = STATUS_CONFIG[status];
   const { setNodeRef, isOver } = useDroppable({ id: status });
   const viewStoreApi = useViewStoreApi();
+  const { t } = useT("issues");
 
   // Resolve IDs to Issue objects, preserving parent-provided order
   const resolvedIssues = useMemo(
@@ -67,7 +72,7 @@ export function BoardColumn({
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status)}>
                 <EyeOff className="size-3.5" />
-                Hide column
+                {t(($) => $.board.hide_column)}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -78,13 +83,17 @@ export function BoardColumn({
                   variant="ghost"
                   size="icon-sm"
                   className="rounded-full text-muted-foreground"
-                  onClick={() => useModalStore.getState().open("create-issue", { status })}
+                  onClick={() =>
+                    useModalStore
+                      .getState()
+                      .open("create-issue", { status, ...(projectId ? { project_id: projectId } : {}) })
+                  }
                 >
                   <Plus className="size-3.5" />
                 </Button>
               }
             />
-            <TooltipContent>Add issue</TooltipContent>
+            <TooltipContent>{t(($) => $.board.add_issue_tooltip)}</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -101,7 +110,7 @@ export function BoardColumn({
         </SortableContext>
         {issueIds.length === 0 && (
           <p className="py-8 text-center text-xs text-muted-foreground">
-            No issues
+            {t(($) => $.board.empty_column)}
           </p>
         )}
         {footer}

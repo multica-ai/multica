@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -79,6 +80,16 @@ func SetAllowedOrigins(origins []string) {
 func checkOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
+		return true
+	}
+	// Same-origin: native clients (mobile, CLI) have no real page host, so
+	// their WebSocket library fills Origin with the connection target —
+	// which equals the server's own Host. They authenticate via bearer
+	// token, not auto-attached cookies, so CSRF (the attack the explicit
+	// allowlist below defends against) does not apply. This matches the
+	// gorilla/websocket default CheckOrigin behavior; the allowlist exists
+	// in addition to support cross-origin browser clients (web/desktop).
+	if u, err := url.Parse(origin); err == nil && strings.EqualFold(u.Host, r.Host) {
 		return true
 	}
 	origins := allowedWSOrigins.Load().([]string)
@@ -885,14 +896,6 @@ func (c *Client) writePump() {
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				return
-			}
-			// App-level heartbeat: browsers cannot observe TCP ping/pong frames,
-			// so we send a text message the JS client can use to detect half-open
-			// connections and trigger a force-close → reconnect cycle.
-			heartbeat, _ := json.Marshal(map[string]string{"type": "heartbeat"})
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.conn.WriteMessage(websocket.TextMessage, heartbeat); err != nil {
 				return
 			}
 		}

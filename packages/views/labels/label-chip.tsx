@@ -2,6 +2,7 @@
 
 import type { Label } from "@multica/core/types";
 import { X } from "lucide-react";
+import { useT } from "../i18n";
 
 /**
  * Map a label's `#rrggbb` color to a readable text color.
@@ -50,6 +51,7 @@ interface LabelChipProps {
  * and the management dialog.
  */
 export function LabelChip({ label, onRemove, className, fullName }: LabelChipProps) {
+  const { t } = useT("labels");
   const textColor = contrastTextColor(label.color);
   const nameClass = fullName ? "break-all" : "truncate max-w-[12rem]";
   return (
@@ -73,7 +75,7 @@ export function LabelChip({ label, onRemove, className, fullName }: LabelChipPro
           // visible on both light and dark chip backgrounds. hover:bg-black/10
           // was invisible on darker chips (anything requiring light text).
           className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full hover:bg-current/20 focus:outline-none focus:ring-1 focus:ring-current"
-          aria-label={`Remove label ${label.name}`}
+          aria-label={t(($) => $.remove_label, { name: label.name })}
         >
           <X className="h-2.5 w-2.5" strokeWidth={2.5} />
         </button>

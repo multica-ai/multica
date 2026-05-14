@@ -27,7 +27,6 @@ import { useProjectDraftStore } from "@multica/core/projects";
 import {
   PROJECT_STATUS_CONFIG,
   PROJECT_STATUS_ORDER,
-  PROJECT_PRIORITY_CONFIG,
   PROJECT_PRIORITY_ORDER,
 } from "@multica/core/projects/config";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -52,6 +51,11 @@ import { ContentEditor, type ContentEditorRef, TitleEditor } from "../editor";
 import { PriorityIcon } from "../issues/components/priority-icon";
 import { ActorAvatar } from "../common/actor-avatar";
 import { useNavigation } from "../navigation";
+import { useT } from "../i18n";
+import {
+  useProjectStatusLabels,
+  useProjectPriorityLabels,
+} from "../projects/components/labels";
 
 function PillButton({
   children,
@@ -100,6 +104,7 @@ function RepoUrlText({
 }
 
 export function CreateProjectModal({ onClose }: { onClose: () => void }) {
+  const { t } = useT("modals");
   const router = useNavigation();
   const workspace = useCurrentWorkspace();
   const workspaceName = workspace?.name;
@@ -108,6 +113,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { getActorName } = useActorName();
+  const projectStatusLabels = useProjectStatusLabels();
+  const projectPriorityLabels = useProjectPriorityLabels();
 
   const draft = useProjectDraftStore((s) => s.draft);
   const setDraft = useProjectDraftStore((s) => s.setDraft);
@@ -150,7 +157,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     (a) => !a.archived_at && a.name.toLowerCase().includes(leadQuery),
   );
 
-  const leadLabel = leadType && leadId ? getActorName(leadType, leadId) : "Lead";
+  const leadLabel =
+    leadType && leadId ? getActorName(leadType, leadId) : t(($) => $.create_project.lead);
 
   const createProject = useCreateProject();
 
@@ -177,10 +185,10 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
       });
       clearDraft();
       onClose();
-      toast.success("Project created");
+      toast.success(t(($) => $.create_project.toast_created));
       router.push(wsPaths.projectDetail(project.id));
     } catch {
-      toast.error("Failed to create project");
+      toast.error(t(($) => $.create_project.toast_failed));
     } finally {
       setSubmitting(false);
     }
@@ -212,13 +220,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             : "!max-w-2xl !w-full !h-96 !-translate-y-1/2",
         )}
       >
-        <DialogTitle className="sr-only">New Project</DialogTitle>
+        <DialogTitle className="sr-only">{t(($) => $.create_project.title)}</DialogTitle>
 
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-muted-foreground">{workspaceName}</span>
             <ChevronRight className="size-3 text-muted-foreground/50" />
-            <span className="font-medium">New project</span>
+            <span className="font-medium">{t(($) => $.create_project.title_breadcrumb)}</span>
           </div>
           <div className="flex items-center gap-1">
             <Tooltip>
@@ -232,7 +240,11 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   </button>
                 }
               />
-              <TooltipContent side="bottom">{isExpanded ? "Collapse" : "Expand"}</TooltipContent>
+              <TooltipContent side="bottom">
+                {isExpanded
+                  ? t(($) => $.common.collapse_tooltip)
+                  : t(($) => $.common.expand_tooltip)}
+              </TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger
@@ -245,7 +257,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   </button>
                 }
               />
-              <TooltipContent side="bottom">Close</TooltipContent>
+              <TooltipContent side="bottom">{t(($) => $.common.close)}</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -257,7 +269,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   className="text-2xl cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
-                  title="Choose icon"
+                  title={t(($) => $.create_project.icon_tooltip)}
                 >
                   {icon || "📁"}
                 </button>
@@ -275,7 +287,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           <TitleEditor
             autoFocus
             defaultValue={draft.title}
-            placeholder="Project title"
+            placeholder={t(($) => $.create_project.title_placeholder)}
             className="text-lg font-semibold"
             onChange={(v) => updateTitle(v)}
             onSubmit={handleSubmit}
@@ -286,7 +298,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           <ContentEditor
             ref={descEditorRef}
             defaultValue={draft.description}
-            placeholder="Add description..."
+            placeholder={t(($) => $.create_project.description_placeholder)}
             onUpdate={(md) => setDraft({ description: md })}
             debounceMs={500}
           />
@@ -305,7 +317,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               render={
                 <PillButton>
                   <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[status].dotColor)} />
-                  <span>{PROJECT_STATUS_CONFIG[status].label}</span>
+                  <span>{projectStatusLabels[status]}</span>
                 </PillButton>
               }
             />
@@ -313,7 +325,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               {PROJECT_STATUS_ORDER.map((s) => (
                 <DropdownMenuItem key={s} onClick={() => updateStatus(s)}>
                   <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[s].dotColor)} />
-                  <span>{PROJECT_STATUS_CONFIG[s].label}</span>
+                  <span>{projectStatusLabels[s]}</span>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -324,7 +336,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               render={
                 <PillButton>
                   <PriorityIcon priority={priority} />
-                  <span>{PROJECT_PRIORITY_CONFIG[priority].label}</span>
+                  <span>{projectPriorityLabels[priority]}</span>
                 </PillButton>
               }
             />
@@ -332,7 +344,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               {PROJECT_PRIORITY_ORDER.map((pr) => (
                 <DropdownMenuItem key={pr} onClick={() => updatePriority(pr)}>
                   <PriorityIcon priority={pr} />
-                  <span>{PROJECT_PRIORITY_CONFIG[pr].label}</span>
+                  <span>{projectPriorityLabels[pr]}</span>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -354,7 +366,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       <span>{leadLabel}</span>
                     </>
                   ) : (
-                    <span className="text-muted-foreground">Lead</span>
+                    <span className="text-muted-foreground">{t(($) => $.create_project.lead)}</span>
                   )}
                 </PillButton>
               }
@@ -365,7 +377,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   type="text"
                   value={leadFilter}
                   onChange={(e) => setLeadFilter(e.target.value)}
-                  placeholder="Assign lead..."
+                  placeholder={t(($) => $.create_project.lead_placeholder)}
                   className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
                 />
               </div>
@@ -379,12 +391,12 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
                 >
                   <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-muted-foreground">No lead</span>
+                  <span className="text-muted-foreground">{t(($) => $.create_project.no_lead)}</span>
                 </button>
                 {filteredMembers.length > 0 && (
                   <>
                     <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      Members
+                      {t(($) => $.create_project.members_group)}
                     </div>
                     {filteredMembers.map((m) => (
                       <button
@@ -405,7 +417,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 {filteredAgents.length > 0 && (
                   <>
                     <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      Agents
+                      {t(($) => $.create_project.agents_group)}
                     </div>
                     {filteredAgents.map((a) => (
                       <button
@@ -427,7 +439,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   filteredAgents.length === 0 &&
                   leadFilter && (
                     <div className="px-2 py-3 text-center text-sm text-muted-foreground">
-                      No results
+                      {t(($) => $.create_project.no_results)}
                     </div>
                   )}
               </div>
@@ -441,15 +453,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   <GithubIcon className="size-3" />
                   <span>
                     {selectedRepos.length === 0
-                      ? "Repos"
-                      : `${selectedRepos.length} repo${selectedRepos.length === 1 ? "" : "s"}`}
+                      ? t(($) => $.create_project.repos_pill)
+                      : t(($) => $.create_project.repos_pill_count, { count: selectedRepos.length })}
                   </span>
                 </PillButton>
               }
             />
             <PopoverContent align="start" className="w-72 p-2 space-y-2">
               <div className="text-xs font-medium text-muted-foreground">
-                Attach GitHub repos to this project
+                {t(($) => $.create_project.repos_heading)}
               </div>
               {workspaceRepos.length > 0 ? (
                 <div className="space-y-1">
@@ -479,8 +491,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  No workspace-level repos yet. Paste a URL below to attach one
-                  ad-hoc.
+                  {t(($) => $.create_project.repos_empty)}
                 </p>
               )}
               <form
@@ -494,7 +505,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   type="url"
                   value={customRepoUrl}
                   onChange={(e) => setCustomRepoUrl(e.target.value)}
-                  placeholder="https://github.com/owner/repo"
+                  placeholder={t(($) => $.create_project.repos_url_placeholder)}
                   className="flex-1 bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
                 />
                 <Button
@@ -504,13 +515,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   className="h-6 px-2 text-xs"
                   disabled={!customRepoUrl.trim()}
                 >
-                  Add
+                  {t(($) => $.create_project.repos_add)}
                 </Button>
               </form>
               {selectedRepos.length > 0 && (
                 <div className="space-y-1 pt-1 border-t">
                   <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                    Selected
+                    {t(($) => $.create_project.repos_selected)}
                   </div>
                   {selectedRepos.map((url) => (
                     <div
@@ -540,7 +551,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             disabled={!title.trim() || submitting}
             className="shrink-0"
           >
-            {submitting ? "Creating..." : "Create Project"}
+            {submitting ? t(($) => $.create_project.submitting) : t(($) => $.create_project.submit)}
           </Button>
         </div>
       </DialogContent>

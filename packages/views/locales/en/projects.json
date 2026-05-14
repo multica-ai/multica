@@ -1,0 +1,92 @@
+{
+  "page": {
+    "title": "Projects",
+    "new_project": "New project",
+    "empty": "No projects yet",
+    "create_first": "Create your first project"
+  },
+  "table": {
+    "name": "Name",
+    "priority": "Priority",
+    "status": "Status",
+    "progress": "Progress",
+    "lead": "Lead",
+    "created": "Created"
+  },
+  "status": {
+    "planned": "Planned",
+    "in_progress": "In Progress",
+    "paused": "Paused",
+    "completed": "Completed",
+    "cancelled": "Cancelled"
+  },
+  "priority": {
+    "urgent": "Urgent",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low",
+    "none": "No priority"
+  },
+  "lead": {
+    "no_lead": "No lead",
+    "assign_placeholder": "Assign lead...",
+    "members_group": "Members",
+    "agents_group": "Agents",
+    "no_results": "No results"
+  },
+  "relative_date": {
+    "today": "Today",
+    "one_day_ago": "1d ago",
+    "days_ago": "{{count}}d ago",
+    "months_ago": "{{count}}mo ago"
+  },
+  "detail": {
+    "not_found": "Project not found",
+    "breadcrumb_fallback": "Projects",
+    "title_placeholder": "Project title",
+    "icon_tooltip": "Change icon",
+    "pin_tooltip": "Pin to sidebar",
+    "unpin_tooltip": "Unpin from sidebar",
+    "sidebar_tooltip": "Toggle sidebar",
+    "copy_link": "Copy link",
+    "delete_action": "Delete project",
+    "section_properties": "Properties",
+    "section_progress": "Progress",
+    "section_description": "Description",
+    "description_placeholder": "Add description...",
+    "empty_issues_title": "No issues linked",
+    "empty_issues_hint": "Create a new issue or assign existing ones to this project.",
+    "empty_issues_new_button": "New Issue",
+    "toast_link_copied": "Link copied",
+    "toast_project_deleted": "Project deleted",
+    "toast_move_issue_failed": "Failed to move issue"
+  },
+  "resources": {
+    "section_header": "Resources",
+    "empty": "No resources attached.",
+    "add_button": "Add resource",
+    "popover_title": "Attach a GitHub repo",
+    "attached_badge": "attached",
+    "remove_tooltip": "Remove",
+    "url_placeholder": "https://github.com/owner/repo",
+    "url_submit": "Add",
+    "toast_attached": "Repository attached",
+    "toast_attach_failed": "Failed to attach",
+    "toast_removed": "Resource removed",
+    "toast_remove_failed": "Failed to remove resource"
+  },
+  "delete_dialog": {
+    "title": "Delete project",
+    "description": "This will delete the project. Issues will not be deleted but will be unlinked.",
+    "confirm": "Delete",
+    "cancel": "Cancel"
+  },
+  "picker": {
+    "no_project": "No project",
+    "remove": "Remove from project",
+    "empty": "No projects yet"
+  },
+  "chip": {
+    "fallback_label": "Project"
+  }
+}

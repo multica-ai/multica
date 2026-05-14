@@ -25,12 +25,12 @@ These have sensible defaults and only need to be set when tuning a large or cons
 
 ### Email (Required for Authentication)
 
-Multica uses email-based magic link authentication via [Resend](https://resend.com/).
+Multica uses email-based magic link authentication via [Resend](https://resend.com).
 
 | Variable | Description |
 |----------|-------------|
 | `RESEND_API_KEY` | Your Resend API key |
-| `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@multica.ai`). Its domain must be verified in your Resend account. |
+| `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@multica.ai`) |
 
 > **Note:** If Resend is not configured, generated verification codes are printed to backend logs. A fixed local testing code is disabled by default; to opt in on a private test instance, set `APP_ENV=development` and `MULTICA_DEV_VERIFICATION_CODE` to a 6-digit value. It is ignored when `APP_ENV=production`.
 
@@ -43,7 +43,6 @@ Multica uses email-based magic link authentication via [Resend](https://resend.c
 | `GOOGLE_REDIRECT_URI` | OAuth callback URL (e.g. `https://app.example.com/auth/callback`) |
 
 Changes take effect after restarting the backend / compose stack. The web UI reads `GOOGLE_CLIENT_ID` from `/api/config` at runtime, so no web rebuild is needed.
-
 
 ### Signup Controls (Optional)
 
@@ -68,26 +67,6 @@ For file uploads and attachments, configure S3 and (optionally) CloudFront:
 | `CLOUDFRONT_DOMAIN` | CloudFront distribution domain — when set, public URLs use this host instead of the S3 host |
 | `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID for signed URLs |
 | `CLOUDFRONT_PRIVATE_KEY` | CloudFront private key (PEM format) |
-| `AWS_ENDPOINT_URL` | Custom S3-compatible endpoint, e.g. MinIO (see option B below) |
-
-**Option A — CloudFront (recommended for production)**
-
-Set `CLOUDFRONT_DOMAIN`, `CLOUDFRONT_KEY_PAIR_ID`, and `CLOUDFRONT_PRIVATE_KEY`. Multica will issue short-lived CloudFront signed URLs for every attachment download. This keeps the S3 bucket private and serves files via a CDN.
-
-**Option B — Self-hosted S3-compatible storage (MinIO, Garage, R2, etc.)**
-
-Set `AWS_ENDPOINT_URL` to the endpoint of your S3-compatible service. Multica will use path-style URLs pointing at that endpoint. No CloudFront needed; configure your storage service's own access controls.
-
-```
-AWS_ENDPOINT_URL=http://minio.internal:9000
-S3_BUCKET=multica-uploads
-AWS_ACCESS_KEY_ID=minioadmin
-AWS_SECRET_ACCESS_KEY=minioadmin
-```
-
-**Option C — Plain AWS S3 without CloudFront**
-
-Set only `S3_BUCKET` (and optionally `S3_REGION`). Multica will automatically generate short-lived **S3 presigned URLs** for every attachment download, so the bucket can remain private without a CloudFront distribution. This is suitable for development and internal deployments where a CDN is not yet configured.
 
 ### Cookies
 
@@ -207,15 +186,46 @@ In production, put a reverse proxy in front of both the backend and frontend to 
 
 ### Caddy (Recommended)
 
+**Single-domain layout** — frontend and backend served on the same hostname (this is what `docker-compose.selfhost.yml` defaults to):
+
+```
+multica.example.com {
+    # WebSocket route — must come before the catch-all
+    @multica_ws path /ws /ws/*
+    handle @multica_ws {
+        reverse_proxy localhost:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Everything else → frontend
+    reverse_proxy localhost:3000
+}
+```
+
+**Separate-domain layout** — frontend and backend on different hostnames:
+
 ```
 app.example.com {
     reverse_proxy localhost:3000
 }
 
 api.example.com {
+    @multica_ws path /ws /ws/*
+    handle @multica_ws {
+        reverse_proxy localhost:8080 {
+            flush_interval -1
+        }
+    }
+
     reverse_proxy localhost:8080
 }
 ```
+
+Two non-obvious bits inside the `/ws` block are worth calling out — both are common reasons real-time updates "stop working" on a Caddy-fronted self-host:
+
+- **`path /ws /ws/*` (not `/ws*`)** — bare `handle /ws` is an exact match, so future path variants under `/ws/` fall through to the frontend block. The obvious shortcut `handle /ws*` overcorrects in the other direction: Caddy's `*` is a glob without a path-segment boundary, so it would also catch unrelated paths like `/ws-foo`, which is a legitimate workspace URL (only the exact slug `ws` is reserved). Listing `/ws` and `/ws/*` explicitly covers both real cases without overreach.
+- **`flush_interval -1`** — disables response buffering so WebSocket frames are forwarded as soon as they arrive. Without it, frames can sit behind Caddy's default flush window, which looks like delayed comments, missing typing indicators, or "comments only appear after a page refresh."
 
 ### Nginx
 

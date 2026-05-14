@@ -139,6 +139,75 @@ func loadUserPrefs(
 	return result
 }
 
+// terminalStatusForTaskFailedDismiss is the set of issue statuses that mark
+// the issue as "the user no longer needs to triage past failures." When a
+// status change lands on one of these, any pre-existing task_failed inbox
+// rows for the issue are archived so the inbox stays a fresh-signal surface.
+// `in_review` is included because in Multica's agent flow that's the most
+// reliable "work delivered" handoff — and a status flip back to in_progress
+// will simply produce new task_failed rows that surface normally.
+var terminalStatusForTaskFailedDismiss = map[string]bool{
+	"in_review": true,
+	"done":      true,
+	"cancelled": true,
+}
+
+// archiveStaleTaskFailedInbox archives all task_failed inbox rows for the
+// given issue and notifies each affected member recipient via
+// inbox:batch-archived so connected clients self-heal.
+func archiveStaleTaskFailedInbox(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	workspaceID string,
+	issueID string,
+) {
+	rows, err := queries.ArchiveInboxByIssueAndType(ctx, db.ArchiveInboxByIssueAndTypeParams{
+		WorkspaceID: parseUUID(workspaceID),
+		IssueID:     parseUUID(issueID),
+		Type:        "task_failed",
+	})
+	if err != nil {
+		slog.Error("auto-archive task_failed inbox: query failed",
+			"workspace_id", workspaceID, "issue_id", issueID, "error", err)
+		return
+	}
+	if len(rows) == 0 {
+		return
+	}
+
+	// Dedupe recipients: the listener creates one row per failure event per
+	// subscriber, so a long-running issue can yield several rows for the
+	// same recipient.
+	counts := map[string]int{}
+	for _, row := range rows {
+		// Inbox rows for task_failed only target member recipients today
+		// (notifySubscribers skips agent subscribers), but defend the WS
+		// layer against future widening — only members get a personal feed.
+		if row.RecipientType != "member" {
+			continue
+		}
+		counts[util.UUIDToString(row.RecipientID)]++
+	}
+
+	for recipientID, count := range counts {
+		bus.Publish(events.Event{
+			Type:        protocol.EventInboxBatchArchived,
+			WorkspaceID: workspaceID,
+			Payload: map[string]any{
+				"recipient_id": recipientID,
+				"count":        int64(count),
+				"issue_id":     issueID,
+				"reason":       "issue_status_terminal",
+			},
+		})
+	}
+
+	slog.Info("auto-archive task_failed inbox: archived stale rows",
+		"workspace_id", workspaceID, "issue_id", issueID,
+		"row_count", len(rows), "recipient_count", len(counts))
+}
+
 // notifySubscribers queries the subscriber table for an issue, excludes the
 // actor and any extra IDs, and creates inbox items for each remaining member
 // subscriber. Publishes an inbox:new event for each notification.
@@ -269,7 +338,7 @@ func notifyIssueSubscribers(
 			Title:         title,
 			Body:          util.StrToText(body),
 			ActorType:     util.StrToText(e.ActorType),
-			ActorID:       parseUUID(e.ActorID),
+			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,
 		})
 		if err != nil {
@@ -334,7 +403,7 @@ func notifyDirect(
 		Title:         title,
 		Body:          util.StrToText(body),
 		ActorType:     util.StrToText(e.ActorType),
-		ActorID:       parseUUID(e.ActorID),
+		ActorID:       optionalUUID(e.ActorID),
 		Details:       details,
 	})
 	if err != nil {
@@ -421,7 +490,7 @@ func notifyMentionedMembers(
 			IssueID:       parseUUID(issueID),
 			Title:         title,
 			ActorType:     util.StrToText(e.ActorType),
-			ActorID:       parseUUID(e.ActorID),
+			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,
 		})
 		if err != nil {
@@ -568,6 +637,14 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				nil, "status_changed", "info",
 				issue.Title, "",
 				statusDetails)
+
+			// When the issue progresses past the failure (in_review / done /
+			// cancelled), retire any stale task_failed inbox rows so the
+			// inbox reflects the current state of the work, not its history.
+			// The activity log keeps the full failure history for audit.
+			if terminalStatusForTaskFailedDismiss[issue.Status] {
+				archiveStaleTaskFailedInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
+			}
 		}
 
 		if priorityChanged, _ := payload["priority_changed"].(bool); priorityChanged {

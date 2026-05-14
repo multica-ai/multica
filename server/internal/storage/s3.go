@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -218,20 +217,4 @@ func (s *S3Storage) uploadedURL(key string) string {
 		return fmt.Sprintf("https://s3.%s.amazonaws.com/%s/%s", s.region, s.bucket, key)
 	}
 	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucket, s.region, key)
-}
-
-// PresignDownloadURL generates a short-lived presigned GET URL for the object
-// identified by rawURL. This is used when CloudFront is not configured — it
-// lets the caller fetch a private S3 object without needing a CDN in front.
-func (s *S3Storage) PresignDownloadURL(ctx context.Context, rawURL string, expiry time.Duration) (string, error) {
-	key := s.KeyFromURL(rawURL)
-	pc := s3.NewPresignClient(s.client)
-	out, err := pc.PresignGetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(s.bucket),
-		Key:    aws.String(key),
-	}, s3.WithPresignExpires(expiry))
-	if err != nil {
-		return rawURL, fmt.Errorf("s3 presign: %w", err)
-	}
-	return out.URL, nil
 }

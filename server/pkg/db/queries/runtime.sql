@@ -13,8 +13,14 @@ WHERE id = $1 AND workspace_id = $2;
 
 -- name: UpsertAgentRuntime :one
 -- (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
--- that updated an existing row (false). Analytics reads this to fire the
--- runtime_registered event only on first-time registration.
+-- that updated an existing row (false). Analytics reads this to fire
+-- runtime_registered/runtime_ready only on first-time registration.
+--
+-- @timezone is set on INSERT only. On conflict we deliberately KEEP the
+-- existing agent_runtime.timezone — once an operator overrides the tz via
+-- the web UI we don't want a daemon reconnect (which sends its own system
+-- tz) to silently revert it. Daemons can still set the initial value when
+-- they're the first to register a brand-new runtime row.
 INSERT INTO agent_runtime (
     workspace_id,
     daemon_id,
@@ -25,8 +31,9 @@ INSERT INTO agent_runtime (
     device_info,
     metadata,
     owner_id,
+    timezone,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, @timezone, now())
 ON CONFLICT (workspace_id, daemon_id, provider)
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -38,6 +45,77 @@ DO UPDATE SET
     last_seen_at = now(),
     updated_at = now()
 RETURNING *, (xmax = 0) AS inserted;
+
+-- name: LockTaskUsageDailyRollup :exec
+-- Serialize explicit timezone rebuilds with rollup_task_usage_daily(), which
+-- uses the same advisory key in migration 073. This prevents cron from
+-- writing old-timezone buckets while PATCH is deleting/rebuilding rows.
+SELECT pg_advisory_xact_lock(4242);
+
+-- name: UpdateAgentRuntimeTimezone :one
+-- Operator-driven override of the runtime's reporting timezone (MUL-1950).
+UPDATE agent_runtime
+SET timezone = @timezone, updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: UpdateAgentRuntimeVisibility :one
+-- Toggles a runtime between 'private' (only owner can bind agents) and
+-- 'public' (any workspace member can). Default for new rows is 'private'
+-- (see migration 083). Gated at the handler layer to owner / workspace
+-- admin only.
+UPDATE agent_runtime
+SET visibility = @visibility, updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: DeleteTaskUsageDailyForRuntime :execrows
+-- First step of an explicit user timezone edit rebuild. Delete old materialized
+-- rows before re-inserting under the runtime's new timezone.
+DELETE FROM task_usage_daily
+WHERE runtime_id = $1;
+
+-- name: DeleteTaskUsageDailyDirtyForRuntime :execrows
+-- Drop queued dirty keys computed under the old timezone; the ordered rebuild
+-- in the same transaction will write the current aggregate instead.
+DELETE FROM task_usage_daily_dirty
+WHERE runtime_id = $1;
+
+-- name: InsertTaskUsageDailyForRuntime :execrows
+-- Final step of an explicit user timezone edit rebuild. This is intentionally
+-- called only for user edits, not by the migration itself: deploys do not
+-- backfill history, but a user-driven change must not leave old UTC rows next
+-- to newly computed local rows. This scans all history for the edited runtime;
+-- timezone edits are owner/admin operations and are expected to be rare.
+INSERT INTO task_usage_daily AS d (
+    bucket_date, workspace_id, runtime_id, provider, model,
+    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+    event_count
+)
+SELECT
+    DATE(tu.created_at AT TIME ZONE rt.timezone) AS bucket_date,
+    a.workspace_id,
+    atq.runtime_id,
+    tu.provider,
+    tu.model,
+    SUM(tu.input_tokens)::bigint       AS input_tokens,
+    SUM(tu.output_tokens)::bigint      AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint  AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COUNT(*)::bigint                   AS event_count
+  FROM task_usage tu
+  JOIN agent_task_queue atq ON atq.id = tu.task_id
+  JOIN agent            a   ON a.id = atq.agent_id
+  JOIN agent_runtime    rt  ON rt.id = atq.runtime_id
+ WHERE atq.runtime_id = $1
+ GROUP BY 1, 2, 3, 4, 5
+ON CONFLICT (bucket_date, workspace_id, runtime_id, provider, model) DO UPDATE
+    SET input_tokens       = EXCLUDED.input_tokens,
+        output_tokens      = EXCLUDED.output_tokens,
+        cache_read_tokens  = EXCLUDED.cache_read_tokens,
+        cache_write_tokens = EXCLUDED.cache_write_tokens,
+        event_count        = EXCLUDED.event_count,
+        updated_at         = now();
 
 -- name: TouchAgentRuntimeLastSeen :execrows
 -- Bumps last_seen_at on an already-online runtime. Deliberately does NOT
@@ -55,6 +133,20 @@ RETURNING *, (xmax = 0) AS inserted;
 UPDATE agent_runtime
 SET last_seen_at = now()
 WHERE id = $1 AND status = 'online';
+
+-- name: TouchAgentRuntimesLastSeenBatch :execrows
+-- Bulk variant of TouchAgentRuntimeLastSeen used by the BatchedHeartbeatScheduler:
+-- coalesces N per-runtime "bump last_seen_at" requests into a single UPDATE so a
+-- fleet beating every 15s costs ~1 DB transaction per batch tick instead of N.
+--
+-- Same load-bearing predicate as the single-id form: status='online' avoids
+-- silently un-deleting a sweeper-flipped offline row, and we deliberately do
+-- NOT touch updated_at so the rows stay HOT-eligible. Affected-rows < len(ids)
+-- means some IDs raced to offline between Schedule and flush; their next beat
+-- will fall through the recordHeartbeat sync path and call MarkAgentRuntimeOnline.
+UPDATE agent_runtime
+SET last_seen_at = now()
+WHERE id = ANY(@ids::uuid[]) AND status = 'online';
 
 -- name: MarkAgentRuntimeOnline :one
 -- Used on the offline→online transition (and on first heartbeat after
@@ -75,7 +167,7 @@ WHERE id = $1;
 -- sweeper uses this as a candidate set, then optionally filters via the
 -- LivenessStore before flipping rows to offline (a fresh Redis liveness
 -- record means the DB row is just lagging, not actually dead).
-SELECT id, workspace_id FROM agent_runtime
+SELECT id, workspace_id, owner_id, daemon_id, provider FROM agent_runtime
 WHERE status = 'online'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision);
 
@@ -96,7 +188,7 @@ SET status = 'offline', updated_at = now()
 WHERE status = 'online'
   AND id = ANY(@ids::uuid[])
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
-RETURNING id, workspace_id;
+RETURNING id, workspace_id, owner_id, daemon_id, provider;
 
 -- name: FailTasksForOfflineRuntimes :many
 -- Marks dispatched/running tasks as failed when their runtime is offline.
@@ -114,6 +206,39 @@ RETURNING *;
 SELECT * FROM agent_runtime
 WHERE workspace_id = $1 AND owner_id = $2
 ORDER BY created_at ASC;
+
+-- name: ForceOfflineRuntimesByIDs :many
+-- Unconditionally flips a known set of runtime IDs to offline. Distinct from
+-- MarkRuntimesOfflineByIDs (which keeps a stale-window predicate so the
+-- sweeper cannot demote a runtime that just heartbeated): this variant is
+-- used by intentional revocation paths — e.g. removing a workspace member —
+-- where the caller has already decided the runtime should be offline
+-- regardless of recent liveness.
+UPDATE agent_runtime
+SET status = 'offline', updated_at = now()
+WHERE id = ANY(@runtime_ids::uuid[]) AND status = 'online'
+RETURNING id, workspace_id, owner_id, daemon_id, provider;
+
+-- name: CancelAgentTasksByRuntimeOrAgent :many
+-- Cancels every active task that either lives on one of the given runtimes
+-- OR belongs to one of the given agents. Used by the member-revocation flow:
+-- the runtime-side covers tasks queued against the leaving member's runtimes;
+-- the agent-side covers tasks pinned to a different runtime that those agents
+-- left behind from a prior UpdateAgent (agent.runtime_id can change, but
+-- agent_task_queue.runtime_id does not get rewritten when it does, so a task
+-- queued on runtime A by agent X — later moved to runtime B — survives the
+-- runtime-only revoke and could still be claimed because ClaimAgentTask does
+-- not gate on agent.archived_at).
+--
+-- We use 'cancelled' rather than 'failed' so the daemon's per-task status
+-- poller (watchTaskCancellation) interrupts the running agent gracefully.
+-- Returns the affected rows so the caller can broadcast task:cancelled and
+-- reconcile per-agent status.
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now()
+WHERE (runtime_id = ANY(@runtime_ids::uuid[]) OR agent_id = ANY(@agent_ids::uuid[]))
+  AND status IN ('queued', 'dispatched', 'running')
+RETURNING *;
 
 -- name: DeleteAgentRuntime :exec
 DELETE FROM agent_runtime WHERE id = $1;

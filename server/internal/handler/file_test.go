@@ -11,6 +11,26 @@ import (
 	"testing"
 )
 
+// createHandlerTestChatSession seeds a chat_session row owned by testUserID
+// targeting the given agent and returns the session UUID. Cleanup runs after
+// the test. Used by attachment / chat tests that need an existing session.
+func createHandlerTestChatSession(t *testing.T, agentID string) string {
+	t.Helper()
+
+	var sessionID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
+		VALUES ($1, $2, $3, $4, 'active')
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID, "Handler Test Chat Session").Scan(&sessionID); err != nil {
+		t.Fatalf("failed to create handler test chat session: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, sessionID)
+	})
+	return sessionID
+}
+
 type mockStorage struct{}
 
 func (m *mockStorage) Upload(_ context.Context, key string, _ []byte, _ string, _ string) (string, error) {
@@ -158,5 +178,106 @@ func TestUploadFileResolvesWorkspaceViaIDHeaderStill(t *testing.T) {
 		"uuid-upload.txt",
 	); err != nil {
 		t.Fatalf("cleanup attachment: %v", err)
+	}
+}
+
+// TestUploadFile_AttachesToChatSession verifies that a multipart upload with
+// a chat_session_id form field creates an attachment row linked to that chat
+// session (chat_message_id remains NULL — it is back-filled on send).
+func TestUploadFile_AttachesToChatSession(t *testing.T) {
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
+	defer func() { testHandler.Storage = origStorage }()
+
+	agentID := createHandlerTestAgent(t, "ChatUploadAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "chat-upload.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Minimal PNG signature so content-type sniffs as image/png.
+	part.Write([]byte("\x89PNG\r\n\x1a\nrest-of-bytes"))
+	if err := writer.WriteField("chat_session_id", sessionID); err != nil {
+		t.Fatal(err)
+	}
+	writer.Close()
+
+	req := httptest.NewRequest("POST", "/api/upload-file", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	testHandler.UploadFile(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UploadFile with chat_session_id: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp AttachmentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v; body: %s", err, w.Body.String())
+	}
+	if resp.ChatSessionID == nil || *resp.ChatSessionID != sessionID {
+		t.Fatalf("chat_session_id in response: want %s, got %v", sessionID, resp.ChatSessionID)
+	}
+	if resp.ChatMessageID != nil {
+		t.Fatalf("chat_message_id should be NULL before send, got %v", resp.ChatMessageID)
+	}
+	if resp.IssueID != nil || resp.CommentID != nil {
+		t.Fatalf("issue_id/comment_id should be NULL for chat-only upload: %+v", resp)
+	}
+	if resp.URL == "" {
+		t.Fatal("expected non-empty url")
+	}
+
+	// Verify the DB row directly.
+	var dbSession, dbMessage *string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT chat_session_id::text, chat_message_id::text FROM attachment WHERE id = $1`,
+		resp.ID,
+	).Scan(&dbSession, &dbMessage); err != nil {
+		t.Fatalf("query attachment row: %v", err)
+	}
+	if dbSession == nil || *dbSession != sessionID {
+		t.Fatalf("DB chat_session_id mismatch: want %s, got %v", sessionID, dbSession)
+	}
+	if dbMessage != nil {
+		t.Fatalf("DB chat_message_id should be NULL, got %v", dbMessage)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, resp.ID)
+	})
+}
+
+// TestUploadFile_RejectsForeignChatSession verifies a chat_session in another
+// workspace (or owned by another user) is rejected with 403/404, preventing
+// cross-tenant attachment binding.
+func TestUploadFile_RejectsForeignChatSession(t *testing.T) {
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
+	defer func() { testHandler.Storage = origStorage }()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormFile("file", "evil.txt")
+	part.Write([]byte("payload"))
+	// Random non-existent UUID.
+	writer.WriteField("chat_session_id", "00000000-0000-0000-0000-0000deadbeef")
+	writer.Close()
+
+	req := httptest.NewRequest("POST", "/api/upload-file", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+	w := httptest.NewRecorder()
+	testHandler.UploadFile(w, req)
+	if w.Code != http.StatusNotFound && w.Code != http.StatusForbidden && w.Code != http.StatusBadRequest {
+		t.Fatalf("UploadFile with unknown chat_session_id: expected 4xx, got %d: %s", w.Code, w.Body.String())
 	}
 }

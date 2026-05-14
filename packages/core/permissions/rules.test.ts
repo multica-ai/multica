@@ -73,6 +73,9 @@ function makeComment(overrides: Partial<Comment> = {}): Comment {
     attachments: [],
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",
+    resolved_at: null,
+    resolved_by_type: null,
+    resolved_by_id: null,
     ...overrides,
   };
 }
@@ -90,6 +93,8 @@ function makeRuntime(ownerId: string | null): RuntimeDevice {
     device_info: "",
     metadata: {},
     owner_id: ownerId,
+    visibility: "private",
+    timezone: "UTC",
     last_seen_at: null,
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",

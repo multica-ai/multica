@@ -13,7 +13,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -35,21 +34,23 @@ const maxUploadSize = 100 << 20 // 100 MB
 // ---------------------------------------------------------------------------
 
 type AttachmentResponse struct {
-	ID           string  `json:"id"`
-	WorkspaceID  string  `json:"workspace_id"`
-	IssueID      *string `json:"issue_id"`
-	CommentID    *string `json:"comment_id"`
-	UploaderType string  `json:"uploader_type"`
-	UploaderID   string  `json:"uploader_id"`
-	Filename     string  `json:"filename"`
-	URL          string  `json:"url"`
-	DownloadURL  string  `json:"download_url"`
-	ContentType  string  `json:"content_type"`
-	SizeBytes    int64   `json:"size_bytes"`
-	CreatedAt    string  `json:"created_at"`
+	ID            string  `json:"id"`
+	WorkspaceID   string  `json:"workspace_id"`
+	IssueID       *string `json:"issue_id"`
+	CommentID     *string `json:"comment_id"`
+	ChatSessionID *string `json:"chat_session_id"`
+	ChatMessageID *string `json:"chat_message_id"`
+	UploaderType  string  `json:"uploader_type"`
+	UploaderID    string  `json:"uploader_id"`
+	Filename      string  `json:"filename"`
+	URL           string  `json:"url"`
+	DownloadURL   string  `json:"download_url"`
+	ContentType   string  `json:"content_type"`
+	SizeBytes     int64   `json:"size_bytes"`
+	CreatedAt     string  `json:"created_at"`
 }
 
-func (h *Handler) attachmentToResponse(ctx context.Context, a db.Attachment) AttachmentResponse {
+func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 	resp := AttachmentResponse{
 		ID:           uuidToString(a.ID),
 		WorkspaceID:  uuidToString(a.WorkspaceID),
@@ -64,12 +65,6 @@ func (h *Handler) attachmentToResponse(ctx context.Context, a db.Attachment) Att
 	}
 	if h.CFSigner != nil {
 		resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(30*time.Minute))
-	} else if ps, ok := h.Storage.(storage.Presigner); ok {
-		if signed, err := ps.PresignDownloadURL(ctx, a.Url, 30*time.Minute); err == nil {
-			resp.DownloadURL = signed
-		} else {
-			slog.Warn("failed to presign download URL", "url", a.Url, "error", err)
-		}
 	}
 	if a.IssueID.Valid {
 		s := uuidToString(a.IssueID)
@@ -78,6 +73,14 @@ func (h *Handler) attachmentToResponse(ctx context.Context, a db.Attachment) Att
 	if a.CommentID.Valid {
 		s := uuidToString(a.CommentID)
 		resp.CommentID = &s
+	}
+	if a.ChatSessionID.Valid {
+		s := uuidToString(a.ChatSessionID)
+		resp.ChatSessionID = &s
+	}
+	if a.ChatMessageID.Valid {
+		s := uuidToString(a.ChatMessageID)
+		resp.ChatMessageID = &s
 	}
 	return resp
 }
@@ -99,7 +102,31 @@ func (h *Handler) groupAttachments(r *http.Request, commentIDs []pgtype.UUID) ma
 	grouped := make(map[string][]AttachmentResponse, len(commentIDs))
 	for _, a := range attachments {
 		cid := uuidToString(a.CommentID)
-		grouped[cid] = append(grouped[cid], h.attachmentToResponse(r.Context(), a))
+		grouped[cid] = append(grouped[cid], h.attachmentToResponse(a))
+	}
+	return grouped
+}
+
+// groupChatMessageAttachments loads attachments for multiple chat messages
+// and groups them by chat_message_id. Mirrors groupAttachments — used so the
+// chat message list can surface attachment metadata to the UI bubble (file
+// cards, click-through download) without an N+1 query per message.
+func (h *Handler) groupChatMessageAttachments(ctx context.Context, workspaceID string, messageIDs []pgtype.UUID) map[string][]AttachmentResponse {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	attachments, err := h.Queries.ListAttachmentsByChatMessageIDs(ctx, db.ListAttachmentsByChatMessageIDsParams{
+		Column1:     messageIDs,
+		WorkspaceID: parseUUID(workspaceID),
+	})
+	if err != nil {
+		slog.Error("failed to load attachments for chat messages", "error", err)
+		return nil
+	}
+	grouped := make(map[string][]AttachmentResponse, len(messageIDs))
+	for _, a := range attachments {
+		mid := uuidToString(a.ChatMessageID)
+		grouped[mid] = append(grouped[mid], h.attachmentToResponse(a))
 	}
 	return grouped
 }
@@ -221,6 +248,16 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			}
 			params.CommentID = comment.ID
 		}
+		if chatSessionID := r.FormValue("chat_session_id"); chatSessionID != "" {
+			// Re-use the existing private-agent gate so the user can still
+			// reach this session — covers role downgrade and agent
+			// visibility flips. The gate writes 4xx on failure.
+			session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, chatSessionID)
+			if !ok {
+				return
+			}
+			params.ChatSessionID = session.ID
+		}
 
 		link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 		if err != nil {
@@ -236,7 +273,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			// S3 upload succeeded but DB record failed — still return the link
 			// so the file is usable. Log the error for investigation.
 		} else {
-			writeJSON(w, http.StatusOK, h.attachmentToResponse(r.Context(), att))
+			writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
 			return
 		}
 
@@ -285,7 +322,7 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]AttachmentResponse, len(attachments))
 	for i, a := range attachments {
-		resp[i] = h.attachmentToResponse(r.Context(), a)
+		resp[i] = h.attachmentToResponse(a)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -320,7 +357,7 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.attachmentToResponse(r.Context(), att))
+	writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
 }
 
 // ---------------------------------------------------------------------------

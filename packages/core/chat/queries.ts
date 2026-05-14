@@ -10,8 +10,8 @@ import { api } from "../api";
 
 export const chatKeys = {
   all: (wsId: string) => ["chat", wsId] as const,
+  /** Full sessions list (active + archived); the dropdown splits locally. */
   sessions: (wsId: string) => [...chatKeys.all(wsId), "sessions"] as const,
-  allSessions: (wsId: string) => [...chatKeys.all(wsId), "sessions", "all"] as const,
   session: (wsId: string, id: string) => [...chatKeys.all(wsId), "session", id] as const,
   messages: (sessionId: string) => ["chat", "messages", sessionId] as const,
   pendingTask: (sessionId: string) => ["chat", "pending-task", sessionId] as const,
@@ -24,14 +24,6 @@ export const chatKeys = {
 export function chatSessionsOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.sessions(wsId),
-    queryFn: () => api.listChatSessions(),
-    staleTime: Infinity,
-  });
-}
-
-export function allChatSessionsOptions(wsId: string) {
-  return queryOptions({
-    queryKey: chatKeys.allSessions(wsId),
     queryFn: () => api.listChatSessions({ status: "all" }),
     staleTime: Infinity,
   });

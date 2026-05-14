@@ -26,6 +26,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { useNavigation } from "../../navigation";
+import { useT } from "../../i18n";
 
 type Step = "instructions" | "waiting" | "success";
 
@@ -168,23 +169,22 @@ function InstructionsStep({
   onNext: () => void;
   onClose: () => void;
 }) {
+  const { t } = useT("runtimes");
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Connect a remote machine</DialogTitle>
+        <DialogTitle>{t(($) => $.connect.title)}</DialogTitle>
         <DialogDescription>
-          Run these commands on your remote machine (e.g. AWS EC2) to install the
-          Multica CLI and register it as a runtime.
+          {t(($) => $.connect.description)}
         </DialogDescription>
       </DialogHeader>
 
       <div className="-mx-4 min-h-0 flex-1 overflow-y-auto px-4">
         <div className="space-y-3">
-          {/* Step 1: Install */}
           <div>
             <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
               <Terminal className="h-3.5 w-3.5" />
-              1. Install the CLI
+              {t(($) => $.connect.step1)}
             </div>
             <CodeBlock
               code={INSTALL_CMD}
@@ -194,11 +194,10 @@ function InstructionsStep({
             />
           </div>
 
-          {/* Step 2: Configure */}
           <div>
             <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
               <Server className="h-3.5 w-3.5" />
-              2. Configure
+              {t(($) => $.connect.step2)}
             </div>
             <CodeBlock
               code={CONFIGURE_CMD}
@@ -208,10 +207,9 @@ function InstructionsStep({
             />
           </div>
 
-          {/* Step 3: Login */}
           <div>
             <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              3. Login with a personal access token
+              {t(($) => $.connect.step3)}
             </div>
             <CodeBlock
               code={LOGIN_CMD}
@@ -220,18 +218,17 @@ function InstructionsStep({
               onCopy={onCopy}
             />
             <p className="mt-1 text-[11px] text-muted-foreground">
-              Create one in{" "}
+              {t(($) => $.connect.step3_hint_prefix)}
               <span className="font-medium text-foreground">
-                Settings → Tokens
+                {t(($) => $.connect.step3_hint_destination)}
               </span>
-              .
+              {t(($) => $.connect.step3_hint_suffix)}
             </p>
           </div>
 
-          {/* Step 4: Start daemon */}
           <div>
             <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              4. Start the daemon
+              {t(($) => $.connect.step4)}
             </div>
             <CodeBlock
               code={START_CMD}
@@ -241,56 +238,51 @@ function InstructionsStep({
             />
           </div>
 
-          {/* Security tips */}
           <div className="rounded-md border border-warning/30 bg-warning/5 p-2.5">
             <div className="flex items-start gap-2">
               <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
               <div className="text-[11px] leading-relaxed text-muted-foreground">
-                <span className="font-medium text-foreground">Security: </span>
-                Use an EC2 IAM role or least-privilege credentials. Never put
-                root keys into agent{" "}
+                <span className="font-medium text-foreground">{t(($) => $.connect.security_label)}</span>
+                {t(($) => $.connect.security_body)}
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  custom_env
+                  {"custom_env"}
                 </code>
-                . The daemon uses outbound connections only — no inbound ports
-                needed.
+                {t(($) => $.connect.security_body_suffix)}
               </div>
             </div>
           </div>
 
-          {/* Troubleshooting */}
           <details className="group pb-1">
             <summary className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
               <Wrench className="h-3.5 w-3.5" />
-              Troubleshooting
+              {t(($) => $.connect.troubleshooting)}
               <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
             </summary>
             <ul className="mt-1.5 list-disc space-y-0.5 pl-8 text-[11px] text-muted-foreground">
               <li>
-                Check status:{" "}
+                {t(($) => $.connect.trouble_check_status)}
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  multica daemon status
+                  {"multica daemon status"}
                 </code>
               </li>
               <li>
-                View logs:{" "}
+                {t(($) => $.connect.trouble_view_logs)}
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  multica daemon logs -f
+                  {"multica daemon logs -f"}
                 </code>
               </li>
               <li>
-                Verify provider:{" "}
+                {t(($) => $.connect.trouble_verify_provider)}
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  claude --version
+                  {"claude --version"}
                 </code>
               </li>
               <li>
-                Desktop auto-scans only your local machine. Remote machines must
-                run{" "}
+                {t(($) => $.connect.trouble_remote_note_prefix)}
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  multica daemon
-                </code>{" "}
-                separately.
+                  {"multica daemon"}
+                </code>
+                {t(($) => $.connect.trouble_remote_note_suffix)}
               </li>
             </ul>
           </details>
@@ -299,10 +291,10 @@ function InstructionsStep({
 
       <DialogFooter>
         <Button variant="ghost" onClick={onClose}>
-          Cancel
+          {t(($) => $.connect.cancel)}
         </Button>
         <Button onClick={onNext}>
-          I&apos;ve started the daemon
+          {t(($) => $.connect.started_daemon)}
           <ChevronRight className="h-3.5 w-3.5" />
         </Button>
       </DialogFooter>
@@ -315,30 +307,30 @@ function InstructionsStep({
 // ---------------------------------------------------------------------------
 
 function WaitingStep({ onBack }: { onBack: () => void }) {
+  const { t } = useT("runtimes");
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Waiting for runtime…</DialogTitle>
+        <DialogTitle>{t(($) => $.connect.waiting_title)}</DialogTitle>
         <DialogDescription>
-          Listening for your remote daemon to register. This page updates
-          automatically — no need to refresh.
+          {t(($) => $.connect.waiting_description)}
         </DialogDescription>
       </DialogHeader>
 
       <div className="flex flex-col items-center gap-3 py-8">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         <p className="text-sm text-muted-foreground">
-          Run{" "}
+          {t(($) => $.connect.waiting_hint_prefix)}
           <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
-            multica daemon status
-          </code>{" "}
-          on the remote machine to verify it&apos;s running.
+            {"multica daemon status"}
+          </code>
+          {t(($) => $.connect.waiting_hint_suffix)}
         </p>
       </div>
 
       <DialogFooter>
         <Button variant="ghost" onClick={onBack}>
-          Back
+          {t(($) => $.connect.back)}
         </Button>
       </DialogFooter>
     </>
@@ -356,13 +348,13 @@ function SuccessStep({
   onGoToAgents: () => void;
   onGoToRuntime?: () => void;
 }) {
+  const { t } = useT("runtimes");
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Runtime connected!</DialogTitle>
+        <DialogTitle>{t(($) => $.connect.success_title)}</DialogTitle>
         <DialogDescription>
-          Your remote machine has registered as a runtime. You can now create an
-          agent that dispatches tasks to it.
+          {t(($) => $.connect.success_description)}
         </DialogDescription>
       </DialogHeader>
 
@@ -375,11 +367,11 @@ function SuccessStep({
       <DialogFooter>
         {onGoToRuntime && (
           <Button variant="ghost" onClick={onGoToRuntime}>
-            View runtime
+            {t(($) => $.connect.view_runtime)}
           </Button>
         )}
         <Button onClick={onGoToAgents}>
-          Create an agent
+          {t(($) => $.connect.create_agent)}
           <ChevronRight className="h-3.5 w-3.5" />
         </Button>
       </DialogFooter>

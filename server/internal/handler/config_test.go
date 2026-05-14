@@ -14,7 +14,8 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 
 	t.Setenv("ALLOW_SIGNUP", "false")
 	t.Setenv("GOOGLE_CLIENT_ID", "google-client-id")
-	t.Setenv("AMPLITUDE_API_KEY", "amp_test_key")
+	t.Setenv("POSTHOG_API_KEY", "phc_test")
+	t.Setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
@@ -38,7 +39,13 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	if cfg.GoogleClientID != "google-client-id" {
 		t.Fatalf("google_client_id: want google-client-id, got %q", cfg.GoogleClientID)
 	}
-	if cfg.AmplitudeKey != "amp_test_key" {
-		t.Fatalf("amplitude_key: want amp_test_key, got %q", cfg.AmplitudeKey)
+	if cfg.PosthogKey != "phc_test" {
+		t.Fatalf("posthog_key: want phc_test, got %q", cfg.PosthogKey)
+	}
+	if cfg.PosthogHost != "https://eu.i.posthog.com" {
+		t.Fatalf("posthog_host: want https://eu.i.posthog.com, got %q", cfg.PosthogHost)
+	}
+	if cfg.AnalyticsEnvironment != "dev" {
+		t.Fatalf("analytics_environment: want dev, got %q", cfg.AnalyticsEnvironment)
 	}
 }

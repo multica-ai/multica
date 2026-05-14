@@ -32,6 +32,34 @@ mac:
 dmg:
   artifactName: multica-desktop-${version}-mac-${arch}.${ext}
 linux:
+  # Override the Linux executable name to avoid leaking the scoped npm
+  # package name (`@multica/desktop`) into the installed binary, the
+  # `.desktop` file, and the hicolor icon filename. Without this override
+  # electron-builder defaults `executableName` to the package `name`,
+  # which after slash-stripping becomes `@multicadesktop` — producing
+  # `/usr/share/applications/@multicadesktop.desktop`,
+  # `Icon=@multicadesktop`, and
+  # `/usr/share/icons/hicolor/*/apps/@multicadesktop.png`. The leading `@`
+  # violates the freedesktop desktop-entry naming guidance, so GNOME /
+  # Ubuntu fail to associate the running window with the `.desktop` entry
+  # and fall back to the theme's default app icon (the Settings gear on
+  # Yaru). Forcing `multica` makes every Linux identity slot agree and
+  # matches `StartupWMClass=Multica` (productName-derived).
+  executableName: multica
+  # Pin StartupWMClass explicitly to the WM_CLASS that Electron emits on
+  # X11. Electron derives WM_CLASS from `app.getName()`, which in packaged
+  # builds resolves to `productName` (`Multica`). Without an explicit
+  # `StartupWMClass`, electron-builder writes `productName` as the default
+  # — making this declaration redundant with current settings — but
+  # pinning the value here turns a silent future drift (e.g. if anyone
+  # renames productName or sets app.setName at boot) into a visible diff
+  # against this file. The WM_CLASS ↔ StartupWMClass match is what lets
+  # GNOME associate the running window with the `.desktop` entry and
+  # therefore render the right icon. The post-build verification step in
+  # PR #2437 is `xprop WM_CLASS` on a real Ubuntu install.
+  desktop:
+    entry:
+      StartupWMClass: Multica
   target:
     - AppImage
     - deb

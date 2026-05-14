@@ -1,10 +1,14 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ── Fixtures from real Copilot CLI v1.0.28 --output-format json output ──
@@ -434,6 +438,29 @@ func TestCopilotEventLoopNonZeroExit(t *testing.T) {
 	}
 }
 
+func TestCopilotEventLoopSessionErrorSurvivesNonZeroResult(t *testing.T) {
+	t.Parallel()
+	st := newCopilotEventState("copilot")
+
+	for _, line := range []string{fixtureSessionError, fixtureResultNonZero} {
+		var evt copilotEvent
+		if err := json.Unmarshal([]byte(line), &evt); err != nil {
+			t.Fatal(err)
+		}
+		handleCopilotEvent(evt, st)
+	}
+
+	if st.finalStatus != "failed" {
+		t.Fatalf("expected failed, got %q", st.finalStatus)
+	}
+	if !strings.Contains(st.finalError, "Rate limit exceeded") {
+		t.Fatalf("expected session.error detail to survive result event, got %q", st.finalError)
+	}
+	if !strings.Contains(st.finalError, "copilot exited with code 1") {
+		t.Fatalf("expected exit code context, got %q", st.finalError)
+	}
+}
+
 func TestCopilotEventLoopSessionError(t *testing.T) {
 	t.Parallel()
 	lines := []string{fixtureSessionError}
@@ -624,6 +651,57 @@ func TestCopilotEventLoopDeltaFallbackOutput(t *testing.T) {
 
 	if st.output.String() != "hello world" {
 		t.Fatalf("expected output 'hello world', got %q", st.output.String())
+	}
+}
+
+func TestCopilotExecuteSurfacesStderrOnNonZeroResult(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "copilot")
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' '{\"type\":\"result\",\"sessionId\":\"sess-fail\",\"exitCode\":1}'\n" +
+		"echo \"error: authentication failed: refresh token expired\" >&2\n" +
+		"exit 1\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("copilot", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new copilot backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "copilot exited with code 1") {
+			t.Fatalf("expected error to mention exit code, got %q", result.Error)
+		}
+		if !strings.Contains(result.Error, "refresh token expired") {
+			t.Fatalf("expected error to include stderr hint, got %q", result.Error)
+		}
+		if !strings.Contains(result.Error, "copilot stderr:") {
+			t.Fatalf("expected stderr label in error, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
 	}
 }
 

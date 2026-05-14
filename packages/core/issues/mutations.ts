@@ -109,7 +109,7 @@ export function useCreateIssue() {
       );
       // Surface the just-created issue in cmd+k's Recent list without
       // requiring the user to open it first.
-      useRecentIssuesStore.getState().recordVisit(newIssue.id);
+      useRecentIssuesStore.getState().recordVisit(wsId, newIssue.id);
       // Invalidate parent's children query so sub-issues list updates immediately
       if (newIssue.parent_issue_id) {
         qc.invalidateQueries({ queryKey: issueKeys.children(wsId, newIssue.parent_issue_id) });
@@ -139,11 +139,26 @@ export function useUpdateIssue() {
 
       // Resolve parent_issue_id from the freshest source so we can keep the
       // parent's children cache in sync (used by the parent issue's
-      // sub-issues list).
-      const parentId =
+      // sub-issues list). Falls back to scanning loaded children caches —
+      // when the user navigates straight to a parent's detail page, the
+      // child may live only there, not in detail/list.
+      let parentId: string | null =
         prevDetail?.parent_issue_id ??
         (prevList ? findIssueLocation(prevList, id)?.issue.parent_issue_id : null) ??
         null;
+      if (!parentId) {
+        const childrenCaches = qc.getQueriesData<Issue[]>({
+          queryKey: [...issueKeys.all(wsId), "children"],
+        });
+        for (const [key, data] of childrenCaches) {
+          if (!data?.some((c) => c.id === id)) continue;
+          const candidate = key[key.length - 1];
+          if (typeof candidate === "string") {
+            parentId = candidate;
+            break;
+          }
+        }
+      }
       const prevChildren = parentId
         ? qc.getQueryData<Issue[]>(issueKeys.children(wsId, parentId))
         : undefined;
@@ -244,13 +259,46 @@ export function useBatchUpdateIssues() {
         for (const id of ids) next = patchIssueInBuckets(next, id, updates);
         return next;
       });
-      return { prevList };
+
+      // Mirror the optimistic patch into any loaded children cache so
+      // sub-issue rows on a parent's detail page reflect the change too.
+      const idSet = new Set(ids);
+      const childrenCaches = qc.getQueriesData<Issue[]>({
+        queryKey: [...issueKeys.all(wsId), "children"],
+      });
+      const prevChildren = new Map<string, Issue[] | undefined>();
+      const affectedParentIds = new Set<string>();
+      for (const [key, data] of childrenCaches) {
+        if (!data?.some((c) => idSet.has(c.id))) continue;
+        const parentId = key[key.length - 1];
+        if (typeof parentId !== "string") continue;
+        affectedParentIds.add(parentId);
+        prevChildren.set(parentId, data);
+        qc.setQueryData<Issue[]>(issueKeys.children(wsId, parentId), (old) =>
+          old?.map((c) => (idSet.has(c.id) ? { ...c, ...updates } : c)),
+        );
+      }
+
+      return { prevList, prevChildren, affectedParentIds };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevChildren) {
+        for (const [parentId, snapshot] of ctx.prevChildren) {
+          qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
+        }
+      }
     },
-    onSettled: () => {
+    onSettled: (_data, _err, _vars, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
+        for (const parentId of ctx.affectedParentIds) {
+          qc.invalidateQueries({
+            queryKey: issueKeys.children(wsId, parentId),
+          });
+        }
+        qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+      }
     },
   });
 }
@@ -270,16 +318,40 @@ export function useBatchDeleteIssues() {
           if (loc?.issue.parent_issue_id) parentIssueIds.add(loc.issue.parent_issue_id);
         }
       }
+      // Children cache may be the only place sub-issues live when the user
+      // operates from a parent's detail page. Collect affected parents and
+      // optimistically filter the deleted ids out of each children cache so
+      // the row disappears immediately, mirroring the list-cache behaviour.
+      const idSet = new Set(ids);
+      const childrenCaches = qc.getQueriesData<Issue[]>({
+        queryKey: [...issueKeys.all(wsId), "children"],
+      });
+      const prevChildren = new Map<string, Issue[] | undefined>();
+      for (const [key, data] of childrenCaches) {
+        if (!data?.some((c) => idSet.has(c.id))) continue;
+        const parentId = key[key.length - 1];
+        if (typeof parentId !== "string") continue;
+        parentIssueIds.add(parentId);
+        prevChildren.set(parentId, data);
+        qc.setQueryData<Issue[]>(issueKeys.children(wsId, parentId), (old) =>
+          old?.filter((c) => !idSet.has(c.id)),
+        );
+      }
       qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) => {
         if (!old) return old;
         let next = old;
         for (const id of ids) next = removeIssueFromBuckets(next, id);
         return next;
       });
-      return { prevList, parentIssueIds };
+      return { prevList, prevChildren, parentIssueIds };
     },
     onError: (_err, _ids, ctx) => {
       if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevChildren) {
+        for (const [parentId, snapshot] of ctx.prevChildren) {
+          qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
+        }
+      }
     },
     onSettled: (_data, _err, _ids, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
@@ -297,6 +369,8 @@ export function useBatchDeleteIssues() {
 // Comments / Timeline
 // ---------------------------------------------------------------------------
 
+type TimelineCache = TimelineEntry[];
+
 export function useCreateComment(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -312,31 +386,35 @@ export function useCreateComment(issueId: string) {
       attachmentIds?: string[];
     }) => api.createComment(issueId, content, type, parentId, attachmentIds),
     onSuccess: (comment) => {
-      qc.setQueryData<TimelineEntry[]>(
-        issueKeys.timeline(issueId),
-        (old) => {
-          if (!old) return old;
-          const entry: TimelineEntry = {
-            type: "comment",
-            id: comment.id,
-            actor_type: comment.author_type,
-            actor_id: comment.author_id,
-            content: comment.content,
-            parent_id: comment.parent_id,
-            comment_type: comment.type,
-            reactions: comment.reactions ?? [],
-            attachments: comment.attachments ?? [],
-            created_at: comment.created_at,
-            updated_at: comment.updated_at,
-          };
-          if (old.some((e) => e.id === comment.id)) return old;
-          return [...old, entry];
-        },
-      );
+      const entry: TimelineEntry = {
+        type: "comment",
+        id: comment.id,
+        actor_type: comment.author_type,
+        actor_id: comment.author_id,
+        content: comment.content,
+        parent_id: comment.parent_id,
+        comment_type: comment.type,
+        reactions: comment.reactions ?? [],
+        attachments: comment.attachments ?? [],
+        created_at: comment.created_at,
+        updated_at: comment.updated_at,
+      };
+      // Dedupe by id: the `comment:created` WS event may have already added
+      // this entry from the broadcast path before this onSuccess fires. Skip
+      // the append if the entry is already in the cache.
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
+        if (!old) return [entry];
+        if (old.some((e) => e.id === entry.id)) return old;
+        return [...old, entry];
+      });
     },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
-    },
+    // No onSettled invalidate. The `comment:created` WS broadcast keeps
+    // the timeline cache fresh after a successful create, and reconnect
+    // recovery in useIssueTimeline already invalidates if the connection
+    // dropped. Re-fetching on every submit replaces every entry's
+    // reference, which forces every memoized CommentCard subtree to
+    // re-render (visible as a flash across sibling threads during AI
+    // streaming).
   });
 }
 
@@ -347,17 +425,16 @@ export function useUpdateComment(issueId: string) {
       api.updateComment(commentId, content),
     onMutate: async ({ commentId, content }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
-      const prev = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId));
-      qc.setQueryData<TimelineEntry[]>(
-        issueKeys.timeline(issueId),
-        (old) =>
-          old?.map((e) => (e.id === commentId ? { ...e, content } : e)),
+      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
+        old?.map((e) => (e.id === commentId ? { ...e, content } : e)),
       );
       return { prev };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prev)
+      if (ctx?.prev !== undefined) {
         qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
+      }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
@@ -371,16 +448,20 @@ export function useDeleteComment(issueId: string) {
     mutationFn: (commentId: string) => api.deleteComment(commentId),
     onMutate: async (commentId) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
-      const prev = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId));
+      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
 
-      // Cascade: collect all child comment IDs
+      // Cascade: collect all descendants of the deleted comment.
       const toRemove = new Set<string>([commentId]);
       if (prev) {
         let changed = true;
         while (changed) {
           changed = false;
           for (const e of prev) {
-            if (e.parent_id && toRemove.has(e.parent_id) && !toRemove.has(e.id)) {
+            if (
+              e.parent_id &&
+              toRemove.has(e.parent_id) &&
+              !toRemove.has(e.id)
+            ) {
               toRemove.add(e.id);
               changed = true;
             }
@@ -388,15 +469,48 @@ export function useDeleteComment(issueId: string) {
         }
       }
 
-      qc.setQueryData<TimelineEntry[]>(
-        issueKeys.timeline(issueId),
-        (old) => old?.filter((e) => !toRemove.has(e.id)),
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
+        old?.filter((e) => !toRemove.has(e.id)),
       );
       return { prev };
     },
     onError: (_err, _id, ctx) => {
-      if (ctx?.prev)
+      if (ctx?.prev !== undefined) {
         qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
+      }
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+    },
+  });
+}
+
+export function useResolveComment(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ commentId, resolved }: { commentId: string; resolved: boolean }) =>
+      resolved ? api.resolveComment(commentId) : api.unresolveComment(commentId),
+    onMutate: async ({ commentId, resolved }) => {
+      await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
+      const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
+        old?.map((e) =>
+          e.id === commentId
+            ? {
+                ...e,
+                resolved_at: resolved ? new Date().toISOString() : null,
+                resolved_by_type: resolved ? e.resolved_by_type ?? null : null,
+                resolved_by_id: resolved ? e.resolved_by_id ?? null : null,
+              }
+            : e,
+        ),
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev !== undefined) {
+        qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
+      }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });

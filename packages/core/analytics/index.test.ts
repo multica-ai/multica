@@ -1,41 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock @amplitude/analytics-browser before importing the module under test.
-vi.mock("@amplitude/analytics-browser", () => {
-  const Identify = vi.fn().mockImplementation(() => ({
-    set: vi.fn(),
-    setOnce: vi.fn(),
-  }));
+// Mock posthog-js before importing the module under test so the module's
+// top-level `import posthog from "posthog-js"` resolves to the mock.
+vi.mock("posthog-js", () => {
   const mock = {
     init: vi.fn(),
-    track: vi.fn(),
-    identify: vi.fn(),
-    setUserId: vi.fn(),
+    register: vi.fn(),
     reset: vi.fn(),
-    Identify,
-    Types: {},
+    identify: vi.fn(),
+    capture: vi.fn(),
   };
-  return mock;
+  return { default: mock };
 });
 
-// Re-import per test so module-level `initialized` / cached state
+// Re-import per test so module-level `initialized` / cached super-props
 // don't leak between cases.
 async function loadModule() {
   vi.resetModules();
   const analytics = await import("./index");
-  const amp = (await import("@amplitude/analytics-browser")) as unknown as {
+  const posthog = (await import("posthog-js")).default as unknown as {
     init: ReturnType<typeof vi.fn>;
-    track: ReturnType<typeof vi.fn>;
-    identify: ReturnType<typeof vi.fn>;
-    setUserId: ReturnType<typeof vi.fn>;
+    register: ReturnType<typeof vi.fn>;
     reset: ReturnType<typeof vi.fn>;
   };
-  amp.init.mockClear();
-  amp.track.mockClear();
-  amp.identify.mockClear();
-  amp.setUserId.mockClear();
-  amp.reset.mockClear();
-  return { analytics, amp };
+  posthog.init.mockClear();
+  posthog.register.mockClear();
+  posthog.reset.mockClear();
+  return { analytics, posthog };
 }
 
 beforeEach(() => {
@@ -47,57 +38,67 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("initAnalytics", () => {
-  it("calls amplitude.init with the API key", async () => {
-    const { analytics, amp } = await loadModule();
-    analytics.initAnalytics({ key: "amp_test", host: "", appVersion: "1.2.3" });
-    expect(amp.init).toHaveBeenCalledWith("amp_test", {
-      autocapture: false,
-      defaultTracking: false,
-      appVersion: "1.2.3",
+describe("initAnalytics super-properties", () => {
+  it("registers client_type and app_version after posthog.init", async () => {
+    const { analytics, posthog } = await loadModule();
+    analytics.initAnalytics({ key: "k", host: "", appVersion: "1.2.3" });
+    expect(posthog.register).toHaveBeenCalledWith({
+      client_type: "web",
+      app_version: "1.2.3",
+      environment: "dev",
+      event_schema_version: 2,
+      is_demo: false,
     });
   });
 
-  it("omits appVersion when not provided", async () => {
-    const { analytics, amp } = await loadModule();
-    analytics.initAnalytics({ key: "amp_test", host: "" });
-    expect(amp.init).toHaveBeenCalledWith("amp_test", {
-      autocapture: false,
-      defaultTracking: false,
-      appVersion: undefined,
+  it("omits app_version when not provided", async () => {
+    const { analytics, posthog } = await loadModule();
+    analytics.initAnalytics({ key: "k", host: "" });
+    expect(posthog.register).toHaveBeenCalledWith({
+      client_type: "web",
+      environment: "dev",
+      event_schema_version: 2,
+      is_demo: false,
     });
   });
 
-  it("returns false when no key is provided", async () => {
-    const { analytics } = await loadModule();
-    expect(analytics.initAnalytics({ key: "", host: "" })).toBe(false);
-  });
-});
-
-describe("detectClientType", () => {
   it("detects desktop when window.electron is present", async () => {
     vi.stubGlobal("window", { electron: {} });
-    const { analytics } = await loadModule();
-    expect(analytics.detectClientType()).toBe("desktop");
-  });
-
-  it("detects web by default", async () => {
-    const { analytics } = await loadModule();
-    expect(analytics.detectClientType()).toBe("web");
+    const { analytics, posthog } = await loadModule();
+    analytics.initAnalytics({ key: "k", host: "" });
+    expect(posthog.register).toHaveBeenCalledWith({
+      client_type: "desktop",
+      environment: "dev",
+      event_schema_version: 2,
+      is_demo: false,
+    });
   });
 });
 
 describe("resetAnalytics", () => {
-  it("calls amplitude.reset() when initialized", async () => {
-    const { analytics, amp } = await loadModule();
-    analytics.initAnalytics({ key: "k", host: "" });
+  it("re-registers super-properties after reset so subsequent events keep client_type", async () => {
+    const { analytics, posthog } = await loadModule();
+    analytics.initAnalytics({ key: "k", host: "", appVersion: "1.2.3" });
+    posthog.register.mockClear();
+
     analytics.resetAnalytics();
-    expect(amp.reset).toHaveBeenCalledTimes(1);
+
+    // reset() wipes persisted super-props; we re-register the cached set so
+    // the next session's events keep client_type + app_version.
+    expect(posthog.reset).toHaveBeenCalledTimes(1);
+    expect(posthog.register).toHaveBeenCalledWith({
+      client_type: "web",
+      app_version: "1.2.3",
+      environment: "dev",
+      event_schema_version: 2,
+      is_demo: false,
+    });
   });
 
   it("is a no-op when analytics was never initialized", async () => {
-    const { analytics, amp } = await loadModule();
+    const { analytics, posthog } = await loadModule();
     analytics.resetAnalytics();
-    expect(amp.reset).not.toHaveBeenCalled();
+    expect(posthog.reset).not.toHaveBeenCalled();
+    expect(posthog.register).not.toHaveBeenCalled();
   });
 });

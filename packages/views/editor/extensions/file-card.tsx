@@ -18,6 +18,8 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { FileText, Loader2, Download } from "lucide-react";
+import { useT } from "../../i18n";
+import { useAttachmentDownloadResolver } from "../attachment-download-context";
 
 
 // ---------------------------------------------------------------------------
@@ -29,12 +31,14 @@ import { FileText, Loader2, Download } from "lucide-react";
 // ---------------------------------------------------------------------------
 
 function FileCardView({ node }: NodeViewProps) {
+  const { t } = useT("editor");
   const href = (node.attrs.href as string) || "";
   const filename = (node.attrs.filename as string) || "";
   const uploading = node.attrs.uploading as boolean;
+  const { openByUrl } = useAttachmentDownloadResolver();
 
   const openFile = () => {
-    window.open(href, "_blank", "noopener,noreferrer");
+    openByUrl(href);
   };
 
   return (
@@ -50,7 +54,7 @@ function FileCardView({ node }: NodeViewProps) {
           <FileText className="size-4 shrink-0 text-muted-foreground" />
         )}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm">{uploading ? `Uploading ${filename}` : filename}</p>
+          <p className="truncate text-sm">{uploading ? t(($) => $.file_card.uploading, { filename }) : filename}</p>
         </div>
         {!uploading && href && (
           <button

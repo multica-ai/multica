@@ -28,7 +28,6 @@
 .rich-text-editor.ProseMirror {
   color: var(--foreground);
   caret-color: var(--foreground);
-  min-height: 100%;
 }
 
 .rich-text-editor.ProseMirror:focus {

@@ -213,6 +213,28 @@ multica workspace get <workspace-id> --output json
 multica workspace members <workspace-id>
 ```
 
+### Update Workspace
+
+需要 admin 或 owner 权限。所有字段都是部分更新（PATCH 语义）：未传的字段保持不变。
+
+```bash
+multica workspace update <workspace-id> --name "Acme Eng"
+multica workspace update <workspace-id> \
+  --description "Engineering team workspace" \
+  --issue-prefix ENG
+```
+
+长文本走 stdin（保留换行/反斜杠）：
+
+```bash
+cat <<'CTX' | multica workspace update <workspace-id> --context-stdin
+我们是一支 5 人 AI-native 团队。
+工作语言：中文 + 英文混合。
+CTX
+```
+
+可编辑字段：`--name`、`--description` / `--description-stdin`、`--context` / `--context-stdin`、`--issue-prefix`。`slug` 创建后只读，不暴露在 CLI。`--description` 与 `--description-stdin`（以及 `context` 同名对）互斥。未传任何字段 flag 时命令拒绝执行，避免空 PATCH 触发无意义的 workspace 更新事件。`--issue-prefix ""` 也会被拒绝：当前后端在 prefix 为空时静默跳过该字段，CLI 在本地拦下避免“看似成功的 no-op”。
+
 ## Issues
 
 ### List Issues
@@ -222,17 +244,21 @@ multica issue list
 multica issue list --status in_progress
 multica issue list --priority urgent --assignee "Agent Name"
 multica issue list --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
+multica issue list --full-id
 multica issue list --limit 20 --output json
 ```
 
-Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--limit`. 在重名 workspace 下用 `--assignee-id <uuid>` 可以精确锁定一个成员或 agent。
+表格输出默认显示可直接复制到后续命令的 issue `KEY`（例如 `MUL-123`）；需要完整 UUID 时使用 `--full-id`。Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--limit`. 在重名 workspace 下用 `--assignee-id <uuid>` 可以精确锁定一个成员或 agent。
 
 ### Get Issue
 
 ```bash
-multica issue get <id>
+multica issue get MUL-123
+multica issue get <uuid>
 multica issue get <id> --output json
 ```
+
+`<id>` 同时接受 issue key（`multica issue list` 表格里直接显示，例如 `MUL-123`）和完整 UUID（给 `list` 加 `--full-id` 可显示）。同样的规则适用于下面 `update` / `assign` / `status` / `comment` / `subscriber` / `runs` 等接受 `<id>` 的命令。
 
 ### Create Issue
 
@@ -288,15 +314,19 @@ multica issue comment delete <comment-id>
 ```bash
 # List all execution runs for an issue
 multica issue runs <issue-id>
+multica issue runs <issue-id> --full-id
 multica issue runs <issue-id> --output json
 
 # View messages for a specific execution run
 multica issue run-messages <task-id>
+multica issue run-messages <short-task-id> --issue <issue-id>
 multica issue run-messages <task-id> --output json
 
 # Incremental fetch (only messages after a given sequence number)
 multica issue run-messages <task-id> --since 42 --output json
 ```
+
+`runs` 的表格输出默认显示 task UUID 短前缀；需要完整 task UUID 时使用 `--full-id`。`run-messages` 可直接接受完整 task UUID；从 `runs` 表格复制短前缀时需要同时传 `--issue <issue-id>`，CLI 只会在该 issue 的 runs 内解析。
 
 ## Projects
 

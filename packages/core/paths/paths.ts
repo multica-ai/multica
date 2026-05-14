@@ -27,7 +27,6 @@ function workspaceScoped(slug: string) {
     agents: () => `${ws}/agents`,
     agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,
     inbox: () => `${ws}/inbox`,
-    chat: () => `${ws}/chat`,
     myIssues: () => `${ws}/my-issues`,
     runtimes: () => `${ws}/runtimes`,
     runtimeDetail: (id: string) => `${ws}/runtimes/${encode(id)}`,

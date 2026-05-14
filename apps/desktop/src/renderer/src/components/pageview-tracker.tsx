@@ -9,9 +9,9 @@ import {
 import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overlay-store";
 
 /**
- * Fires an Amplitude page view event whenever the user's visible surface
- * changes, EXCEPT for re-activations of an already-known tab on its
- * already-known path.
+ * Fires a PostHog $pageview whenever the user's visible surface changes,
+ * EXCEPT for re-activations of an already-known tab on its already-known
+ * path.
  *
  * Desktop has three layers that can own the visible page:
  *
@@ -26,9 +26,9 @@ import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overl
  * Tab-switch suppression: re-activating an already-open tab surfaces a
  * previously-visited path under a `(workspace, tabId)` we have already
  * seen — the pageview was emitted when the user originally navigated
- * there, so re-emitting on every switch just inflates analytics volume
+ * there, so re-emitting on every switch just inflates PostHog billing
  * without adding signal (real-data audit: desktop tab switches were
- * ~50% of all page view events).
+ * ~50% of all `$pageview` events).
  *
  * Newly opened tabs (`openInNewTab`, `addTab`) and cross-workspace
  * `switchWorkspace(slug, path)` to a previously-unseen tab still fire,
@@ -36,9 +36,9 @@ import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overl
  * from the persisted tab store on first render so tabs restored from a
  * previous session don't all re-emit on first activation.
  *
- * Amplitude's auto-tracking is intentionally off (see `initAnalytics`) so
- * this component owns the event shape, matching the web implementation in
- * `apps/web/components/pageview-tracker.tsx`.
+ * PostHog's `capture_pageview: true` auto-capture is intentionally off (see
+ * `initAnalytics`) so this component owns the event shape, matching the web
+ * implementation in `apps/web/components/pageview-tracker.tsx`.
  */
 export function PageviewTracker() {
   const user = useAuthStore((s) => s.user);

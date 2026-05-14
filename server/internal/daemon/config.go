@@ -283,24 +283,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 
 	// Workspaces root: override > env > default (~/multica_workspaces or ~/multica_workspaces_<profile>)
-	workspacesRoot := strings.TrimSpace(os.Getenv("MULTICA_WORKSPACES_ROOT"))
-	if overrides.WorkspacesRoot != "" {
-		workspacesRoot = overrides.WorkspacesRoot
-	}
-	if workspacesRoot == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return Config{}, fmt.Errorf("resolve home directory: %w (set MULTICA_WORKSPACES_ROOT to override)", err)
-		}
-		if profile != "" {
-			workspacesRoot = filepath.Join(home, "multica_workspaces_"+profile)
-		} else {
-			workspacesRoot = filepath.Join(home, "multica_workspaces")
-		}
-	}
-	workspacesRoot, err = filepath.Abs(workspacesRoot)
+	workspacesRoot, err := ResolveWorkspacesRoot(profile, overrides.WorkspacesRoot)
 	if err != nil {
-		return Config{}, fmt.Errorf("resolve absolute workspaces root: %w", err)
+		return Config{}, err
 	}
 
 	// Health port: override > default
@@ -384,6 +369,43 @@ func NormalizeServerBaseURL(raw string) (string, error) {
 	u.RawQuery = ""
 	u.Fragment = ""
 	return strings.TrimRight(u.String(), "/"), nil
+}
+
+// ResolveWorkspacesRoot returns the absolute path that the daemon and CLI
+// should treat as the workspaces root. Resolution order: explicit override >
+// MULTICA_WORKSPACES_ROOT env > default ($HOME/multica_workspaces, or
+// $HOME/multica_workspaces_<profile> for a named profile). Read-only callers
+// (e.g. `multica daemon disk-usage`) use this directly so they pick the same
+// directory the running daemon would have picked.
+func ResolveWorkspacesRoot(profile, override string) (string, error) {
+	root := strings.TrimSpace(os.Getenv("MULTICA_WORKSPACES_ROOT"))
+	if override != "" {
+		root = override
+	}
+	if root == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home directory: %w (set MULTICA_WORKSPACES_ROOT to override)", err)
+		}
+		if profile != "" {
+			root = filepath.Join(home, "multica_workspaces_"+profile)
+		} else {
+			root = filepath.Join(home, "multica_workspaces")
+		}
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve absolute workspaces root: %w", err)
+	}
+	return abs, nil
+}
+
+// ArtifactPatternsFromEnv returns the configured artifact patternSet — the
+// same list the GC loop consults when it runs the artifact-only cleanup. The
+// disk-usage CLI uses this to make sure the "artifact size" it reports
+// matches what the GC would actually reclaim.
+func ArtifactPatternsFromEnv() []string {
+	return patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", DefaultGCArtifactPatterns)
 }
 
 // patternsFromEnv reads a comma-separated list from env. Patterns containing

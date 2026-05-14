@@ -6,6 +6,7 @@ import { paths } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
 import { useLogout } from "../auth";
 import { DragStrip } from "../platform";
+import { useT } from "../i18n";
 
 /**
  * Rendered when the workspace slug in the URL does not resolve to a workspace
@@ -14,6 +15,7 @@ import { DragStrip } from "../platform";
  * either would let attackers enumerate workspace slugs.
  */
 export function NoAccessPage() {
+  const { t } = useT("workspace");
   const nav = useNavigation();
   const logout = useLogout();
 
@@ -35,18 +37,18 @@ export function NoAccessPage() {
       <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 pb-12 text-center">
         <div className="space-y-2">
           <h1 className="text-2xl font-semibold tracking-tight">
-            Workspace not available
+            {t(($) => $.no_access.title)}
           </h1>
           <p className="max-w-md text-muted-foreground">
-            This workspace doesn't exist or you don't have access.
+            {t(($) => $.no_access.description)}
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button onClick={() => nav.push(paths.root())}>
-            Go to my workspaces
+            {t(($) => $.no_access.go_to_workspaces)}
           </Button>
           <Button variant="outline" onClick={logout}>
-            Sign in as a different user
+            {t(($) => $.no_access.sign_in_different)}
           </Button>
         </div>
       </div>

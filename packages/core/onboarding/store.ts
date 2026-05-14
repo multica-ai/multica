@@ -19,7 +19,7 @@ export async function saveQuestionnaire(
   const user = await api.patchOnboarding({ questionnaire: answers });
   useAuthStore.getState().setUser(user);
   // Mirror the three cohort signals into person properties so every
-  // Amplitude event on this user can be broken down by role / use_case /
+  // PostHog event on this user can be broken down by role / use_case /
   // team_size without re-joining the DB. Matches the $set block the
   // server writes alongside `onboarding_questionnaire_submitted`.
   if (answers.team_size || answers.role || answers.use_case) {
@@ -42,9 +42,12 @@ export async function saveQuestionnaire(
  */
 export async function completeOnboarding(
   completionPath?: OnboardingCompletionPath,
+  workspaceId?: string,
 ): Promise<void> {
   await api.markOnboardingComplete(
-    completionPath ? { completion_path: completionPath } : undefined,
+    completionPath || workspaceId
+      ? { completion_path: completionPath, workspace_id: workspaceId }
+      : undefined,
   );
   await useAuthStore.getState().refreshMe();
 }

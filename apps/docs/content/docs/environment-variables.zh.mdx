@@ -141,18 +141,35 @@ Multica 存储用户上传的附件（评论里的图片、文件等）。**优�
 **`FRONTEND_ORIGIN` 不设就有两个静默失败**：（1）邀请邮件里的链接指向 `https://app.multica.ai`（托管版的域名），用户点了跳不回你的 self-host 实例；（2）WebSocket 连接的 Origin 校验回落到 `localhost:3000 / 5173 / 5174`，生产部署的 WebSocket 全部被拒，前端看起来「实时更新不工作」。
 </Callout>
 
+## GitHub 集成
+
+[GitHub PR ↔ issue 集成](/github-integration) 依赖两个环境变量。两个都配上才会启用 Settings 里的 Connect GitHub 并接受 webhook。
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `GITHUB_APP_SLUG` | 空 | 你的 GitHub App slug（`https://github.com/apps/<slug>` 的尾部）。Settings → Integrations 里安装按钮的跳转 URL 用它拼 |
+| `GITHUB_WEBHOOK_SECRET` | 空 | 你在 GitHub App 上设置的 Webhook secret。每条 `pull_request` / `installation` delivery 都用它做 HMAC-SHA256 校验；同一个值也用作 setup 回调里 state token 的签名密钥 |
+
+**任一变量未设时：**
+
+- Settings → Integrations 里 `Connect GitHub` 按钮 **disable**，对 admin 显示「not configured」提示
+- `/api/webhooks/github` 直接返回 **`503 github webhooks not configured`**——secret 没配置时 Multica 拒绝处理任何 webhook 事件，而不是把所有签名当 valid
+
+**注意：** `GITHUB_WEBHOOK_SECRET` 同时被复用为 install 流程里 state token 的签名密钥，所以运维只需要维护一个 secret。它**不是** GitHub App 的 *Client* secret——Client secret 是 OAuth 用的，和本集成无关。完整配置流程见 [GitHub 集成 → Self-Host 配置](/github-integration#self-host-配置)。
+
 ## 用量统计
 
-默认上报到 Multica 官方 Amplitude 实例。不想上报就把 `ANALYTICS_DISABLED=true`。
+默认上报到 Multica 官方 PostHog 实例。不想上报就把 `ANALYTICS_DISABLED=true`。
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `ANALYTICS_DISABLED` | `false` | 设 `true` 完全关闭后端上报 |
-| `AMPLITUDE_API_KEY` | 内置默认 key | 换成你自己的 Amplitude 项目时填 |
-| `AMPLITUDE_HOST` | `https://api2.amplitude.com` | EU 数据驻留用 `https://api.eu.amplitude.com` |
+| `POSTHOG_API_KEY` | 内置默认 key | 换成你自己的 PostHog 实例时填 |
+| `POSTHOG_HOST` | `https://us.i.posthog.com` | 自建 PostHog 的话改成你自己的地址 |
 
 ## 下一步
 
 - [登录与注册配置](/auth-setup) —— 上面 auth 相关的那几个环境变量怎么真的配、陷阱在哪
+- [GitHub 集成](/github-integration) —— `GITHUB_APP_SLUG` / `GITHUB_WEBHOOK_SECRET` 背后的 GitHub App 怎么建
 - [故障排查](/troubleshooting) —— 配错了常见的症状和修复
 - [守护进程与运行时](/daemon-runtimes) —— `MULTICA_DAEMON_*` 参数的行为含义

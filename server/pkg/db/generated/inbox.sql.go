@@ -91,6 +91,43 @@ func (q *Queries) ArchiveInboxByIssue(ctx context.Context, arg ArchiveInboxByIss
 	return result.RowsAffected(), nil
 }
 
+const archiveInboxByIssueAndType = `-- name: ArchiveInboxByIssueAndType :many
+UPDATE inbox_item SET archived = true
+WHERE workspace_id = $1 AND issue_id = $2 AND type = $3 AND archived = false
+RETURNING recipient_type, recipient_id
+`
+
+type ArchiveInboxByIssueAndTypeParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	Type        string      `json:"type"`
+}
+
+type ArchiveInboxByIssueAndTypeRow struct {
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+}
+
+func (q *Queries) ArchiveInboxByIssueAndType(ctx context.Context, arg ArchiveInboxByIssueAndTypeParams) ([]ArchiveInboxByIssueAndTypeRow, error) {
+	rows, err := q.db.Query(ctx, archiveInboxByIssueAndType, arg.WorkspaceID, arg.IssueID, arg.Type)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ArchiveInboxByIssueAndTypeRow{}
+	for rows.Next() {
+		var i ArchiveInboxByIssueAndTypeRow
+		if err := rows.Scan(&i.RecipientType, &i.RecipientID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const archiveInboxItem = `-- name: ArchiveInboxItem :one
 UPDATE inbox_item SET archived = true
 WHERE id = $1

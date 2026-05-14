@@ -11,10 +11,25 @@ import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 
-// Bundled icon used for dev-mode dock/taskbar branding. In production the
-// app bundle icon (from electron-builder) wins; this path is only consumed
-// by the `is.dev` branch below.
-const DEV_ICON_PATH = join(__dirname, "../../resources/icon.png");
+// Bundled icon used for dock/taskbar branding. macOS/Windows production
+// builds let the OS pick up the icon from the .app bundle / .exe resources,
+// but Linux production needs an explicit BrowserWindow `icon` — AppImage
+// direct-launch doesn't register the .desktop entry, so GNOME has no path
+// from the running window to the hicolor icon and falls back to the
+// theme default. Consumed in createWindow() (all platforms in dev, Linux
+// in prod) and the macOS dev dock branch.
+//
+// `asarUnpack: resources/**` in electron-builder.yml extracts the icon to
+// `app.asar.unpacked/`, but `__dirname` resolves into `app.asar/`. The
+// Linux native window-icon code path expects a real filesystem path
+// (unlike Electron's nativeImage loader which transparently reads from
+// asar), so swap the segment — same pattern as bundledCliPath() in
+// daemon-manager.ts. In dev `__dirname` has no `app.asar`, so the replace
+// is a no-op.
+const BUNDLED_ICON_PATH = join(__dirname, "../../resources/icon.png").replace(
+  "app.asar",
+  "app.asar.unpacked",
+);
 
 // macOS/Linux GUI launches inherit a minimal PATH from launchd that omits
 // the user's shell config (~/.zshrc, Homebrew, nvm, ~/.local/bin, etc.).
@@ -78,7 +93,25 @@ function handleDeepLink(url: string): void {
 
 // --- Window creation -----------------------------------------------------
 
+// Tracks the OS-preferred language as last seen by the running process.
+// Updated on each window-focus check so we can emit a `locale:system-changed`
+// event to the renderer when the user changes their OS language without
+// quitting the app — without restart, app.getPreferredSystemLanguages()
+// would still report the boot value forever.
+let lastKnownSystemLocale = "en";
+
+function getSystemLocale(): string {
+  return app.getPreferredSystemLanguages()[0] ?? "en";
+}
+
 function createWindow(): void {
+  // Pass the OS-preferred language to the renderer via additionalArguments
+  // instead of a sync IPC call. process.argv is available to the preload
+  // script before the first network request, so the renderer's i18next
+  // instance can initialize with the right locale on the very first paint.
+  const systemLocale = getSystemLocale();
+  lastKnownSystemLocale = systemLocale;
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -88,13 +121,19 @@ function createWindow(): void {
     trafficLightPosition: { x: 16, y: 13 },
     show: false,
     autoHideMenuBar: true,
-    // Windows/Linux pick up the window/taskbar icon from this option in
-    // dev — on macOS it's ignored (dock comes from app.dock.setIcon below).
-    ...(is.dev ? { icon: DEV_ICON_PATH } : {}),
+    // Windows/Linux pick up the window/taskbar icon from this option.
+    // On macOS it's ignored (dock comes from app.dock.setIcon below).
+    // Linux production needs this explicitly because AppImage direct-launch
+    // does not install a .desktop entry, so the WM has no other path to
+    // the bundled icon; without it Ubuntu falls back to the theme default.
+    ...(is.dev || process.platform === "linux"
+      ? { icon: BUNDLED_ICON_PATH }
+      : {}),
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
       webSecurity: false,
+      additionalArguments: [`--multica-locale=${systemLocale}`],
     },
   });
 
@@ -110,6 +149,18 @@ function createWindow(): void {
 
   mainWindow.on("ready-to-show", () => {
     mainWindow?.show();
+  });
+
+  // Detect OS language changes while the app is running. Electron has no
+  // dedicated event for this on any platform, so we poll on focus regain —
+  // catches the common case where users switch System Settings → Language
+  // and bring the app back. The renderer decides whether to act (it ignores
+  // the signal when the user has an explicit Settings choice).
+  mainWindow.on("focus", () => {
+    const current = getSystemLocale();
+    if (current === lastKnownSystemLocale) return;
+    lastKnownSystemLocale = current;
+    mainWindow?.webContents.send("locale:system-changed", current);
   });
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -220,7 +271,7 @@ if (!gotTheLock) {
     // so the Canary dev build is visually distinct from a stock Electron
     // run. `app.dock` is macOS-only — guard the call.
     if (is.dev && process.platform === "darwin" && app.dock) {
-      const icon = nativeImage.createFromPath(DEV_ICON_PATH);
+      const icon = nativeImage.createFromPath(BUNDLED_ICON_PATH);
       if (!icon.isEmpty()) app.dock.setIcon(icon);
     }
 

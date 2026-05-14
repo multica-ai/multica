@@ -9,7 +9,7 @@ export const runtimeModelsKeys = {
 };
 
 const POLL_INTERVAL_MS = 500;
-const POLL_TIMEOUT_MS = 45_000;
+const POLL_TIMEOUT_MS = 30_000;
 
 // resolveRuntimeModels initiates a list-models request against the daemon
 // (via heartbeat piggyback) and polls until the daemon reports back or
@@ -47,7 +47,6 @@ export function runtimeModelsOptions(runtimeId: string | null | undefined) {
     // Models rarely change; cache for 60s to match the server-side
     // cache in agent.ListModels.
     staleTime: 60_000,
-    retry: 1,
-    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 5000),
+    retry: false,
   });
 }

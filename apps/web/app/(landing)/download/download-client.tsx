@@ -29,7 +29,7 @@ export function DownloadClient({ release }: { release: LatestRelease }) {
       if (cancelled) return;
       setDetected(result);
       // Fires once per page mount after detect resolves. Carries the
-      // detect outcome + version-unavailable flag so Amplitude can split
+      // detect outcome + version-unavailable flag so PostHog can split
       // Safari-mac-arm64 fallback rate, Intel-Mac dead-end rate, and
       // rate-limit degraded sessions. `first_detected_os/arch` is
       // $set_once'd on the person so every downstream event gains a

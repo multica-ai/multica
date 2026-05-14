@@ -38,11 +38,21 @@ var ErrEmailNotAllowed = SignupError{Message: "email address or domain not allow
 
 const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
 
+// supportedLanguages mirrors `SUPPORTED_LOCALES` in packages/core/i18n/types.ts.
+// Keep both lists in sync when adding a locale — the user-controlled `language`
+// field round-trips through GetMe back into i18n.changeLanguage(), so without
+// validation an arbitrary string would persist and echo to every device.
+var supportedLanguages = map[string]struct{}{
+	"en":      {},
+	"zh-Hans": {},
+}
+
 type UserResponse struct {
 	ID                      string          `json:"id"`
 	Name                    string          `json:"name"`
 	Email                   string          `json:"email"`
 	AvatarURL               *string         `json:"avatar_url"`
+	Language                *string         `json:"language"`
 	OnboardedAt             *string         `json:"onboarded_at"`
 	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
 	StarterContentState     *string         `json:"starter_content_state"`
@@ -63,6 +73,7 @@ func userToResponse(u db.User) UserResponse {
 		Name:                    u.Name,
 		Email:                   u.Email,
 		AvatarURL:               textToPtr(u.AvatarUrl),
+		Language:                textToPtr(u.Language),
 		OnboardedAt:             timestampToPtr(u.OnboardedAt),
 		OnboardingQuestionnaire: json.RawMessage(q),
 		StarterContentState:     textToPtr(u.StarterContentState),
@@ -171,7 +182,7 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 // sets on the first pageview (UTM + referrer bundle). The frontend writes
 // a JSON string URL-encoded into the cookie value — Go does not
 // auto-decode Cookie.Value, so we have to unescape here before the string
-// lands in Amplitude. Missing cookie / decode failures collapse to the
+// lands in PostHog. Missing cookie / decode failures collapse to the
 // empty string; that simply omits signup_source from the event rather
 // than sending percent-encoded garbage. Never fall back to r.Referer() —
 // the frontend has already sanitised attribution and a raw referer can
@@ -217,18 +228,13 @@ func (h *Handler) checkSignupAllowed(email string, isNewUser bool) error {
 		return nil
 	}
 
-	// 3. allowlists exist but the caller's email didn't match — this is a
-	// domain/email restriction, not a blanket signup block, so surface the
-	// specific reason. Checked before AllowSignup so restricted-tenant
-	// deployments (e.g. ALLOW_SIGNUP=false + ALLOWED_EMAIL_DOMAINS=g2.com)
-	// tell the user their email is the problem rather than claiming signup
-	// is disabled outright.
-	if len(h.cfg.AllowedEmailDomains) > 0 || len(h.cfg.AllowedEmails) > 0 {
-		return ErrEmailNotAllowed
+	// 3. general signup flag
+	if !h.cfg.AllowSignup {
+		return ErrSignupProhibited
 	}
 
-	// 4. no allowlists configured — fall back to the global signup flag
-	if !h.cfg.AllowSignup {
+	// 4. if allowlists are set but didn't match, block
+	if len(h.cfg.AllowedEmailDomains) > 0 || len(h.cfg.AllowedEmails) > 0 {
 		return ErrSignupProhibited
 	}
 
@@ -417,6 +423,7 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 type UpdateMeRequest struct {
 	Name      *string `json:"name"`
 	AvatarURL *string `json:"avatar_url"`
+	Language  *string `json:"language"`
 }
 
 type GoogleLoginRequest struct {
@@ -652,6 +659,14 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AvatarURL != nil {
 		params.AvatarUrl = pgtype.Text{String: strings.TrimSpace(*req.AvatarURL), Valid: true}
+	}
+	if req.Language != nil {
+		lang := strings.TrimSpace(*req.Language)
+		if _, ok := supportedLanguages[lang]; !ok {
+			writeError(w, http.StatusBadRequest, "unsupported language")
+			return
+		}
+		params.Language = pgtype.Text{String: lang, Valid: true}
 	}
 
 	updatedUser, err := h.Queries.UpdateUser(r.Context(), params)

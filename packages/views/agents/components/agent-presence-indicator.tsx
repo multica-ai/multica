@@ -3,6 +3,7 @@
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import type { AgentPresenceDetail } from "@multica/core/agents";
 import { availabilityConfig, workloadConfig } from "../presence";
+import { useT } from "../../i18n";
 
 interface PresenceIndicatorProps {
   // null/undefined = still loading. Caller passes the detail computed at
@@ -33,6 +34,7 @@ export function AgentPresenceIndicator({
   detail,
   compact,
 }: PresenceIndicatorProps) {
+  const { t } = useT("agents");
   if (!detail) {
     return compact ? (
       <Skeleton className="h-1.5 w-1.5 rounded-full" />
@@ -43,6 +45,8 @@ export function AgentPresenceIndicator({
 
   const av = availabilityConfig[detail.availability];
   const wl = workloadConfig[detail.workload];
+  const availabilityLabel = t(($) => $.availability[detail.availability]);
+  const workloadLabel = t(($) => $.workload[detail.workload]);
   const isWorking = detail.workload === "working";
   const isQueued = detail.workload === "queued";
   const showQueueBadge = isWorking && detail.queuedCount > 0;
@@ -59,7 +63,7 @@ export function AgentPresenceIndicator({
     return (
       <span
         className="inline-flex items-center"
-        title={`${av.label}${detail.workload !== "idle" ? ` · ${wl.label}` : ""}`}
+        title={`${availabilityLabel}${detail.workload !== "idle" ? ` · ${workloadLabel}` : ""}`}
       >
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${av.dotClass}`} />
       </span>
@@ -71,7 +75,7 @@ export function AgentPresenceIndicator({
       {/* Availability — dot + label. Single dimension, single colour. */}
       <span className="inline-flex items-center gap-1.5">
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${av.dotClass}`} />
-        <span className={`text-xs ${av.textClass}`}>{av.label}</span>
+        <span className={`text-xs ${av.textClass}`}>{availabilityLabel}</span>
       </span>
 
       {/* Workload — separator + label, with counts when working/queued.
@@ -86,7 +90,7 @@ export function AgentPresenceIndicator({
             isQueued ? queuedTone : wl.textClass
           }`}
         >
-          {wl.label}
+          {workloadLabel}
         </span>
         {isWorking && (
           <span className="font-mono text-xs tabular-nums text-muted-foreground">
@@ -95,7 +99,7 @@ export function AgentPresenceIndicator({
         )}
         {showQueueBadge && (
           <span className="rounded-md bg-muted px-1 py-0 text-xs font-medium text-muted-foreground">
-            +{detail.queuedCount} queued
+            {t(($) => $.presence.queue_badge, { count: detail.queuedCount })}
           </span>
         )}
         {/* Queued (no running) — show the queued count directly, since

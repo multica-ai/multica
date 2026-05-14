@@ -51,6 +51,7 @@ type Task struct {
 	TriggerAuthorName       string          `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
 	ChatSessionID           string          `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
 	ChatMessage             string          `json:"chat_message,omitempty"`              // user message content for chat tasks
+	ChatMessageAttachments  []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"` // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
 	AutopilotRunID          string          `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot run_only tasks
 	AutopilotID             string          `json:"autopilot_id,omitempty"`              // autopilot that spawned this run
 	AutopilotTitle          string          `json:"autopilot_title,omitempty"`           // autopilot title used as task context
@@ -58,6 +59,17 @@ type Task struct {
 	AutopilotSource         string          `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
 	AutopilotTriggerPayload json.RawMessage `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
 	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+}
+
+// ChatAttachmentMeta is the structured attachment metadata the daemon
+// hands to the agent for chat tasks. We pass id + filename + content_type
+// so the chat prompt can list them explicitly and instruct the agent to
+// run `multica attachment download <id>` instead of guessing from a
+// signed CDN URL (which expires).
+type ChatAttachmentMeta struct {
+	ID          string `json:"id"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

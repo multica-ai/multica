@@ -40,20 +40,25 @@ For the difference between token types, see [Authentication and tokens](/auth-to
 | `multica workspace list` | List every workspace you can access |
 | `multica workspace get <slug>` | Show details for one workspace |
 | `multica workspace members` | List members of the current workspace |
+| `multica workspace update <id> --name "..." [--description "..."] [--context "..."] [--issue-prefix "..."]` | Update workspace metadata (admin/owner). Long fields accept `--description-stdin` / `--context-stdin`. |
 
 ## Issues and projects
 
+<Callout type="info">
+`list` commands (`multica issue list`, `autopilot list`, `project list`, etc.) print short, copy-paste-ready IDs by default — issue keys like `MUL-123` for issues, short UUID prefixes for the rest. The `<id>` argument on the follow-up commands below accepts either the short ID or the full UUID, so the typical flow is `multica issue list` → copy the key → `multica issue get MUL-123`. Pass `--full-id` to a list command when you need the canonical UUID.
+</Callout>
+
 | Command | Purpose |
 |---|---|
-| `multica issue list` | List issues |
-| `multica issue get <id>` | Show a single issue |
+| `multica issue list` | List issues (prints copy-paste-ready issue keys) |
+| `multica issue get <id>` | Show a single issue (accepts an issue key or a UUID) |
 | `multica issue create --title "..."` | Create a new issue |
 | `multica issue update <id> ...` | Update an issue (status, priority, assignee, etc.) |
 | `multica issue assign <id> --agent <slug>` | Assign to an agent (triggers a task immediately) |
 | `multica issue status <id> --set <status>` | Shortcut to change status |
 | `multica issue search <query>` | Keyword search |
 | `multica issue runs <id>` | Show agent runs on an issue |
-| `multica issue rerun <id>` | Rerun the most recent agent task |
+| `multica issue rerun <id>` | Re-enqueue a fresh task for the issue's current agent assignee |
 | `multica issue comment <id> ...` | Nested: view / post comments |
 | `multica issue subscriber <id> ...` | Nested: subscribe / unsubscribe |
 | `multica project list/get/create/update/delete/status` | Project CRUD |
@@ -98,7 +103,6 @@ For the difference between token types, see [Authentication and tokens](/auth-to
 | `multica runtime list` | List runtimes in the current workspace |
 | `multica runtime usage` | Show resource usage |
 | `multica runtime activity` | Recent activity log |
-| `multica runtime ping <id>` | Ping a runtime to check it's online |
 | `multica runtime update <id> ...` | Update a runtime's configuration |
 
 ## Miscellaneous

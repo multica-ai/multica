@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
 	logger_pkg "github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 var daemonCmd = &cobra.Command{
@@ -56,6 +58,18 @@ var daemonLogsCmd = &cobra.Command{
 	RunE:  runDaemonLogs,
 }
 
+var daemonDiskUsageCmd = &cobra.Command{
+	Use:   "disk-usage",
+	Short: "Show daemon workspace disk usage by task or workspace",
+	Long: "Walks the daemon's workspaces root and reports per-task or per-workspace disk usage.\n" +
+		"Default view is per-task, sorted by size descending. --by-workspace switches to a per-workspace summary;\n" +
+		"--top N keeps only the largest N entries.\n\n" +
+		"Bytes are split into total and the artifact-cleanable subset (node_modules, .next, .turbo by default,\n" +
+		"overridable via MULTICA_GC_ARTIFACT_PATTERNS) so the report stays in sync with what the GC reclaims.\n" +
+		"The walk skips .git and never follows symlinks. The daemon does not need to be running.",
+	RunE: runDaemonDiskUsage,
+}
+
 func init() {
 	f := daemonStartCmd.Flags()
 	f.Bool("foreground", false, "Run in the foreground instead of background")
@@ -85,11 +99,19 @@ func init() {
 	rf.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
 	rf.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 
+	df := daemonDiskUsageCmd.Flags()
+	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by task")
+	df.Bool("by-task", false, "Per-task view (default; mutually exclusive with --by-workspace)")
+	df.Int("top", 0, "Keep only the largest N entries (across all workspaces)")
+	df.String("output", "table", "Output format: table or json")
+	df.String("workspaces-root", "", "Override the workspaces root path (default: same as the daemon)")
+
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
+	daemonCmd.AddCommand(daemonDiskUsageCmd)
 }
 
 // daemonDirForProfile returns the state directory for the given profile.
@@ -280,6 +302,8 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 }
 
 func runDaemonForeground(cmd *cobra.Command) error {
+	util.EnsureHiddenConsole()
+
 	profile := resolveProfile(cmd)
 
 	serverURL := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", "")
@@ -585,4 +609,180 @@ func checkDaemonHealthOnPort(ctx context.Context, port int) map[string]any {
 func flagString(cmd *cobra.Command, name string) string {
 	val, _ := cmd.Flags().GetString(name)
 	return val
+}
+
+// --- daemon disk-usage ---
+
+func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
+	profile := resolveProfile(cmd)
+	rootOverride, _ := cmd.Flags().GetString("workspaces-root")
+	byWorkspace, _ := cmd.Flags().GetBool("by-workspace")
+	byTask, _ := cmd.Flags().GetBool("by-task")
+	top, _ := cmd.Flags().GetInt("top")
+	output, _ := cmd.Flags().GetString("output")
+
+	if byWorkspace && byTask {
+		return fmt.Errorf("--by-workspace and --by-task are mutually exclusive")
+	}
+	if top < 0 {
+		return fmt.Errorf("--top must be a non-negative integer")
+	}
+
+	workspacesRoot, err := daemon.ResolveWorkspacesRoot(profile, rootOverride)
+	if err != nil {
+		return fmt.Errorf("resolve workspaces root: %w", err)
+	}
+
+	report, err := daemon.ScanDiskUsage(workspacesRoot, daemon.ArtifactPatternsFromEnv())
+	if err != nil {
+		return err
+	}
+
+	if top > 0 {
+		if byWorkspace {
+			if top < len(report.Workspaces) {
+				report.Workspaces = report.Workspaces[:top]
+			}
+		} else if top < len(report.Tasks) {
+			report.Tasks = report.Tasks[:top]
+		}
+	}
+
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, report)
+	}
+
+	if byWorkspace {
+		printDiskUsageWorkspaceTable(os.Stdout, report)
+		return nil
+	}
+	printDiskUsageTaskTable(os.Stdout, report)
+	return nil
+}
+
+func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
+	fmt.Fprintf(w, "Workspaces root: %s\n", report.WorkspacesRoot)
+	if report.TotalTaskCount == 0 {
+		fmt.Fprintln(w, "(no task directories)")
+		return
+	}
+	rows := make([][]string, 0, len(report.Tasks))
+	var displayedSize, displayedArtifact int64
+	for _, task := range report.Tasks {
+		displayedSize += task.SizeBytes
+		displayedArtifact += task.ArtifactSizeBytes
+		rows = append(rows, []string{
+			task.WorkspaceShort + "/" + task.TaskShort,
+			task.Kind,
+			emptyDash(task.ParentStatus),
+			formatAge(task.AgeSeconds),
+			formatBytes(task.SizeBytes),
+			formatBytes(task.ArtifactSizeBytes),
+		})
+	}
+	cli.PrintTable(w, []string{"PATH", "KIND", "STATUS", "AGE", "SIZE", "ARTIFACTS"}, rows)
+
+	if len(report.Tasks) < report.TotalTaskCount {
+		// Report-wide totals stay anchored to the full scan; the displayed
+		// row is what the user is currently looking at. Calling these out
+		// separately keeps `--top N` from misleading at-a-glance triage.
+		fmt.Fprintf(w, "\nShowing top %d of %d task(s). Displayed: %s (%s artifacts). Scan total: %s (%s artifacts, %.1f%% reclaimable).\n",
+			len(report.Tasks), report.TotalTaskCount,
+			formatBytes(displayedSize), formatBytes(displayedArtifact),
+			formatBytes(report.TotalSizeBytes), formatBytes(report.TotalArtifactSizeBytes),
+			report.TotalArtifactRatio*100)
+		return
+	}
+	fmt.Fprintf(w, "\nTotal: %s across %d task(s); %s reclaimable as artifacts (%.1f%%).\n",
+		formatBytes(report.TotalSizeBytes), report.TotalTaskCount,
+		formatBytes(report.TotalArtifactSizeBytes), report.TotalArtifactRatio*100)
+}
+
+func printDiskUsageWorkspaceTable(w io.Writer, report daemon.DiskUsageReport) {
+	fmt.Fprintf(w, "Workspaces root: %s\n", report.WorkspacesRoot)
+	if report.TotalWorkspaceCount == 0 {
+		fmt.Fprintln(w, "(no workspaces)")
+		return
+	}
+	rows := make([][]string, 0, len(report.Workspaces))
+	var displayedSize, displayedArtifact int64
+	for _, ws := range report.Workspaces {
+		displayedSize += ws.SizeBytes
+		displayedArtifact += ws.ArtifactSizeBytes
+		rows = append(rows, []string{
+			ws.WorkspaceShort,
+			strconv.Itoa(ws.TaskCount),
+			formatBytes(ws.SizeBytes),
+			formatBytes(ws.ArtifactSizeBytes),
+			formatRatio(ws.ArtifactRatio),
+			formatAge(ws.OldestAgeSeconds),
+		})
+	}
+	cli.PrintTable(w, []string{"WORKSPACE", "TASKS", "SIZE", "ARTIFACTS", "ARTIFACT %", "OLDEST"}, rows)
+
+	if len(report.Workspaces) < report.TotalWorkspaceCount {
+		fmt.Fprintf(w, "\nShowing top %d of %d workspace(s). Displayed: %s (%s artifacts). Scan total: %s (%s artifacts, %.1f%% reclaimable).\n",
+			len(report.Workspaces), report.TotalWorkspaceCount,
+			formatBytes(displayedSize), formatBytes(displayedArtifact),
+			formatBytes(report.TotalSizeBytes), formatBytes(report.TotalArtifactSizeBytes),
+			report.TotalArtifactRatio*100)
+		return
+	}
+	fmt.Fprintf(w, "\nTotal: %s across %d workspace(s); %s reclaimable as artifacts (%.1f%%).\n",
+		formatBytes(report.TotalSizeBytes), report.TotalWorkspaceCount,
+		formatBytes(report.TotalArtifactSizeBytes), report.TotalArtifactRatio*100)
+}
+
+// formatRatio renders a 0..1 fraction as a percentage to one decimal. A
+// non-finite or negative input collapses to "0.0%" — total=0 workspaces
+// shouldn't surface "NaN%".
+func formatRatio(r float64) string {
+	if r != r || r < 0 { // NaN check via inequality
+		return "0.0%"
+	}
+	return fmt.Sprintf("%.1f%%", r*100)
+}
+
+func emptyDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+// formatBytes renders a byte count in IEC units (KiB/MiB/GiB) with one decimal
+// place above 1 KiB. Kept intentionally compact so the table view stays
+// scannable at terminal widths.
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	prefix := "KMGTPE"[exp]
+	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), prefix)
+}
+
+// formatAge renders an age in the most human-friendly unit that still keeps
+// the value above 1. "0s" stands for "less than a second" — matches what the
+// GC log lines look like.
+func formatAge(seconds int64) string {
+	if seconds <= 0 {
+		return "0s"
+	}
+	d := time.Duration(seconds) * time.Second
+	switch {
+	case d >= 24*time.Hour:
+		return fmt.Sprintf("%dd %dh", int(d/(24*time.Hour)), int((d%(24*time.Hour))/time.Hour))
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh %dm", int(d/time.Hour), int((d%time.Hour)/time.Minute))
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm %ds", int(d/time.Minute), int((d%time.Minute)/time.Second))
+	default:
+		return fmt.Sprintf("%ds", seconds)
+	}
 }

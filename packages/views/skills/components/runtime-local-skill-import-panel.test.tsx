@@ -1,8 +1,16 @@
 // @vitest-environment jsdom
 
+import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../../locales/en/common.json";
+import enSkills from "../../locales/en/skills.json";
+
+const TEST_RESOURCES = {
+  en: { common: enCommon, skills: enSkills },
+};
 
 const mockResolveRuntimeLocalSkillImport = vi.hoisted(() => vi.fn());
 const mockRuntimeListOptions = vi.hoisted(() => vi.fn());
@@ -41,14 +49,24 @@ vi.mock("sonner", () => ({
 
 import { RuntimeLocalSkillImportPanel } from "./runtime-local-skill-import-panel";
 
+function I18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
+
 function renderPanel() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
-    <QueryClientProvider client={queryClient}>
-      <RuntimeLocalSkillImportPanel />
-    </QueryClientProvider>,
+    <I18nWrapper>
+      <QueryClientProvider client={queryClient}>
+        <RuntimeLocalSkillImportPanel />
+      </QueryClientProvider>
+    </I18nWrapper>,
   );
 }
 

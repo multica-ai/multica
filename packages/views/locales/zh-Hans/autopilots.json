@@ -1,0 +1,232 @@
+{
+  "page": {
+    "title": "自动化",
+    "new_autopilot": "新建自动化",
+    "start_blank": "从空白开始",
+    "table": {
+      "name": "名称",
+      "agent": "智能体",
+      "mode": "模式",
+      "status": "状态",
+      "last_run": "上次运行"
+    },
+    "last_run_empty": "--",
+    "empty": {
+      "title": "还没有自动化",
+      "hint": "为你的智能体安排周期性 task。从模板选一个，或从空白开始。"
+    }
+  },
+  "status": {
+    "active": "启用",
+    "paused": "已暂停",
+    "archived": "已归档"
+  },
+  "execution_mode": {
+    "create_issue": "创建 issue",
+    "run_only": "仅运行"
+  },
+  "relative_date": {
+    "today": "今天",
+    "one_day_ago": "1 天前",
+    "days_ago": "{{count}} 天前",
+    "months_ago": "{{count}} 个月前"
+  },
+  "templates": {
+    "daily_news": {
+      "title": "每日新闻摘要",
+      "summary": "搜索并汇总今天的新闻给团队"
+    },
+    "pr_review": {
+      "title": "PR review 提醒",
+      "summary": "标记需要 review 的滞留 pull request"
+    },
+    "bug_triage": {
+      "title": "Bug 分诊",
+      "summary": "评估并安排新提交的 bug"
+    },
+    "weekly_progress": {
+      "title": "每周进度报告",
+      "summary": "汇总团队本周进展"
+    },
+    "dependency_audit": {
+      "title": "依赖审计",
+      "summary": "扫描安全漏洞和过时的依赖包"
+    },
+    "documentation_check": {
+      "title": "文档检查",
+      "summary": "检查近期改动是否缺失文档"
+    }
+  },
+  "detail": {
+    "not_found": "未找到该自动化",
+    "pause_aria": "暂停自动化",
+    "activate_aria": "启用自动化",
+    "edit": "编辑",
+    "run_now": "立即运行",
+    "running": "运行中...",
+    "toast_triggered": "已触发自动化",
+    "toast_trigger_failed": "触发自动化失败",
+    "section_properties": "属性",
+    "section_triggers": "触发器",
+    "section_run_history": "运行历史",
+    "section_danger": "危险操作",
+    "field_agent": "智能体",
+    "field_output_mode": "输出模式",
+    "field_prompt": "Prompt",
+    "add_trigger": "添加触发器",
+    "no_triggers": "未配置触发器。添加一个时间表让它自动运行。",
+    "no_runs": "暂无运行记录。点击\"立即运行\"手动触发。",
+    "delete_button": "删除自动化",
+    "toast_deleted": "已删除自动化",
+    "toast_delete_failed": "删除自动化失败",
+    "delete_dialog": {
+      "title": "删除自动化",
+      "description": "将永久删除\"{{title}}\"，连同它的触发器和运行历史。此操作不可撤销。",
+      "cancel": "取消",
+      "confirm": "删除",
+      "deleting": "删除中..."
+    }
+  },
+  "run_status": {
+    "issue_created": "已创建 issue",
+    "running": "运行中",
+    "completed": "已完成",
+    "failed": "失败"
+  },
+  "run": {
+    "issue_linked": "已关联 issue",
+    "view_log": "查看执行日志"
+  },
+  "trigger_row": {
+    "disabled_badge": "已禁用",
+    "next_label": "下次：{{date}}",
+    "toast_deleted": "已删除触发器",
+    "toast_delete_failed": "删除触发器失败",
+    "delete_dialog": {
+      "title": "删除触发器",
+      "description": "将移除该触发器，自动化不再按此时间表运行。此操作不可撤销。",
+      "cancel": "取消",
+      "confirm": "删除",
+      "deleting": "删除中..."
+    }
+  },
+  "add_trigger_dialog": {
+    "title": "添加触发器",
+    "label_field": "标签（可选）",
+    "label_placeholder": "例如：工作日早晨",
+    "submit": "添加触发器",
+    "submitting": "添加中...",
+    "toast_added": "已添加触发器",
+    "toast_add_failed": "添加触发器失败"
+  },
+  "dialog": {
+    "sr_create": "新建自动化",
+    "sr_edit": "编辑自动化",
+    "header_create": "新建自动化",
+    "header_edit": "编辑自动化",
+    "subtitle": "周期性的 AI task",
+    "expand": "展开",
+    "collapse": "收起",
+    "close": "关闭",
+    "title_placeholder": "自动化名称",
+    "runbook_label": "Runbook",
+    "runbook_hint": "智能体每次运行时读取",
+    "description_placeholder": "# 目标\n你希望智能体完成什么？\n\n# 上下文\n这是给谁的？有什么约束？\n\n# 步骤\n1. ...\n2. ...",
+    "auto_run_hint": "保存后会自动运行，直到暂停。",
+    "cancel": "取消",
+    "create": "创建自动化",
+    "save": "保存",
+    "creating": "创建中...",
+    "saving": "保存中...",
+    "toast_created": "已创建自动化",
+    "toast_create_partial": "自动化已创建，但时间表保存失败",
+    "toast_create_failed": "创建自动化失败",
+    "toast_updated": "已更新自动化",
+    "toast_update_partial": "自动化已更新，但时间表保存失败",
+    "toast_update_failed": "更新自动化失败",
+    "section_agent": "智能体",
+    "select_agent": "选择智能体",
+    "section_output_mode": "输出模式",
+    "section_schedule": "时间表",
+    "schedule_disabled_reason": "该自动化有多个时间表——请到详情页编辑。",
+    "next_run_label": "下次运行：",
+    "output_modes": {
+      "create_issue": {
+        "label": "创建 issue",
+        "description": "每次运行都创建一个可追踪的 issue"
+      },
+      "run_only": {
+        "label": "仅运行",
+        "description": "静默运行，不创建 issue"
+      }
+    },
+    "frequency_long": {
+      "hourly": "每小时",
+      "daily": "每天",
+      "weekdays": "每个工作日",
+      "weekly": "每周",
+      "custom": "自定义 cron"
+    },
+    "days": {
+      "sunday": "周日",
+      "monday": "周一",
+      "tuesday": "周二",
+      "wednesday": "周三",
+      "thursday": "周四",
+      "friday": "周五",
+      "saturday": "周六"
+    }
+  },
+  "trigger_config": {
+    "frequencies": {
+      "hourly": "每小时",
+      "daily": "每天",
+      "weekdays": "工作日",
+      "weekly": "按天",
+      "custom": "自定义"
+    },
+    "days_short": {
+      "sun": "日",
+      "mon": "一",
+      "tue": "二",
+      "wed": "三",
+      "thu": "四",
+      "fri": "五",
+      "sat": "六"
+    },
+    "cron_label": "Cron 表达式",
+    "cron_hint": "标准 5 字段 cron（分 时 日 月 星期）",
+    "minute_label": "分钟",
+    "time_label": "时间",
+    "timezone_label": "时区",
+    "days_label": "星期",
+    "summary": {
+      "hourly": "每小时 · :{{min}}",
+      "daily": "每天 {{time}}",
+      "weekdays": "工作日 {{time}}",
+      "weekly": "{{days}} {{time}}",
+      "custom": "自定义 cron",
+      "no_days": "—"
+    },
+    "describe": {
+      "hourly": "每小时整点过 {{min}} 分运行",
+      "daily": "每天 {{time}} {{offset}} 运行",
+      "weekdays": "每个工作日 {{time}} {{offset}} 运行",
+      "weekly": "每 {{days}} 的 {{time}} {{offset}} 运行",
+      "custom": "自定义时间表：{{cron}}"
+    },
+    "countdown": {
+      "days_hours": "{{days}} 天 {{hours}} 小时",
+      "hours_minutes": "{{hours}} 小时 {{minutes}} 分",
+      "minutes": "{{minutes}} 分",
+      "less_than_minute": "不到 1 分"
+    }
+  },
+  "agent_picker": {
+    "filter_placeholder": "筛选智能体...",
+    "select_agent": "选择智能体"
+  },
+  "timezone_picker": {
+    "search_placeholder": "搜索时区..."
+  }
+}

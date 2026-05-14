@@ -25,7 +25,10 @@ func TestMarkRuntimesOfflineByIDs_RespectsConcurrentHeartbeat(t *testing.T) {
 	queries := db.New(testPool)
 
 	// Insert an "online" runtime whose last_seen_at is well past the stale
-	// threshold — the SELECT step would pick this up as a candidate.
+	// threshold — the SELECT step would pick this up as a candidate. Use
+	// 2× the threshold so this stays correct if staleThresholdSeconds is
+	// retuned in the future.
+	staleSeed := time.Duration(staleThresholdSeconds*2) * time.Second
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
@@ -33,9 +36,9 @@ func TestMarkRuntimesOfflineByIDs_RespectsConcurrentHeartbeat(t *testing.T) {
 			status, device_info, metadata, last_seen_at
 		)
 		VALUES ($1, NULL, $2, 'cloud', 'claude',
-			'online', '', '{}'::jsonb, now() - interval '5 minutes')
+			'online', '', '{}'::jsonb, now() - make_interval(secs => $3))
 		RETURNING id
-	`, testWorkspaceID, "race-test-runtime").Scan(&runtimeID); err != nil {
+	`, testWorkspaceID, "race-test-runtime", staleSeed.Seconds()).Scan(&runtimeID); err != nil {
 		t.Fatalf("seed runtime: %v", err)
 	}
 	t.Cleanup(func() {
@@ -91,6 +94,7 @@ func TestMarkRuntimesOfflineByIDs_OfflinesGenuinelyStale(t *testing.T) {
 	ctx := context.Background()
 	queries := db.New(testPool)
 
+	staleSeed := time.Duration(staleThresholdSeconds*2) * time.Second
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
@@ -98,9 +102,9 @@ func TestMarkRuntimesOfflineByIDs_OfflinesGenuinelyStale(t *testing.T) {
 			status, device_info, metadata, last_seen_at
 		)
 		VALUES ($1, NULL, $2, 'cloud', 'claude',
-			'online', '', '{}'::jsonb, now() - interval '5 minutes')
+			'online', '', '{}'::jsonb, now() - make_interval(secs => $3))
 		RETURNING id
-	`, testWorkspaceID, "race-test-stale-runtime").Scan(&runtimeID); err != nil {
+	`, testWorkspaceID, "race-test-stale-runtime", staleSeed.Seconds()).Scan(&runtimeID); err != nil {
 		t.Fatalf("seed runtime: %v", err)
 	}
 	t.Cleanup(func() {

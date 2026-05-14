@@ -231,6 +231,30 @@ func marshalRaw(v any) json.RawMessage {
 	return data
 }
 
+// handleWSHeartbeatAck dispatches one heartbeat_ack received over the WS
+// task-wakeup connection. Extracted from readTaskWakeupMessages so tests can
+// exercise the branching logic without a real WebSocket.
+//
+// A RuntimeGone=true ack is the WebSocket twin of an HTTP 404 "runtime not
+// found": it tells the daemon the runtime row was deleted server-side. We
+// route it through the same self-heal entry point as the HTTP path and do
+// NOT record a heartbeat freshness mark — pretending the runtime is alive
+// would let HTTP keep skipping its own heartbeat against the dead UUID.
+//
+// handleRuntimeGone uses the daemon root context for its register call, so
+// this function can safely pass any caller context here.
+func (d *Daemon) handleWSHeartbeatAck(ctx context.Context, ack *HeartbeatResponse) {
+	if ack == nil || ack.RuntimeID == "" {
+		return
+	}
+	if ack.RuntimeGone {
+		go d.handleRuntimeGone(ack.RuntimeID)
+		return
+	}
+	d.recordWSHeartbeatAck(ack.RuntimeID)
+	d.handleHeartbeatActions(ctx, ack.RuntimeID, ack)
+}
+
 func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<- struct{}) error {
 	conn.SetReadLimit(64 * 1024)
 	for {
@@ -262,11 +286,7 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 				d.logger.Debug("ws heartbeat ack invalid payload", "error", err)
 				continue
 			}
-			if ack.RuntimeID == "" {
-				continue
-			}
-			d.recordWSHeartbeatAck(ack.RuntimeID)
-			d.handleHeartbeatActions(context.Background(), ack.RuntimeID, &ack)
+			d.handleWSHeartbeatAck(context.Background(), &ack)
 		}
 	}
 }

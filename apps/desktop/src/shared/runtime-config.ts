@@ -44,10 +44,9 @@ export function runtimeConfigFromDevEnv(env: RuntimeConfigEnv): RuntimeConfig {
     wsUrl: env.wsUrl
       ? normalizeWsUrl(env.wsUrl, "VITE_WS_URL")
       : deriveWsUrl(apiUrl),
-    appUrl: normalizeHttpUrl(
-      env.appUrl || LOCAL_DEV_RUNTIME_CONFIG.appUrl,
-      "VITE_APP_URL",
-    ),
+    appUrl: env.appUrl
+      ? normalizeHttpUrl(env.appUrl, "VITE_APP_URL")
+      : deriveDevAppUrl(apiUrl),
   };
 }
 
@@ -94,12 +93,35 @@ export function deriveWsUrl(apiUrl: string): string {
   return trimTrailingSlash(url.toString());
 }
 
+// Convention: api hosts are exposed at `api.<web-host>` (api.multica.ai →
+// multica.ai, api.test.multica.ai → test.multica.ai). Strip the leading
+// `api.` label so a single `apiUrl` configuration produces the right
+// shareable web URL. Hosts that don't match the convention (no leading
+// `api.` label, or short two-label hosts like `api.local`) fall through
+// untouched — those deployments must set `appUrl` explicitly.
 export function deriveAppUrl(apiUrl: string): string {
   const url = new URL(apiUrl);
   url.pathname = "";
   url.search = "";
   url.hash = "";
+  if (url.hostname.startsWith("api.") && url.hostname.split(".").length >= 3) {
+    url.hostname = url.hostname.slice("api.".length);
+  }
   return trimTrailingSlash(url.toString());
+}
+
+// Dev variant: when the api host is the local backend (`localhost:8080` /
+// `127.0.0.1:8080`), the renderer is served from a different port (3000),
+// so deriving by host alone is wrong. Fall back to the local dev web URL
+// in that case; for any non-local host (e.g. a remote test environment),
+// trust the production-style derivation so `apiUrl=https://api.test.x`
+// yields `appUrl=https://test.x` without a separate VITE_APP_URL.
+export function deriveDevAppUrl(apiUrl: string): string {
+  const url = new URL(apiUrl);
+  if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+    return LOCAL_DEV_RUNTIME_CONFIG.appUrl;
+  }
+  return deriveAppUrl(apiUrl);
 }
 
 function requiredString(value: unknown, field: string): string {

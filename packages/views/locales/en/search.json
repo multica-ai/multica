@@ -1,0 +1,44 @@
+{
+  "title": "Search",
+  "description": "Search pages, issues, and projects",
+  "placeholder": "Type a command or search...",
+  "groups": {
+    "pages": "Pages",
+    "commands": "Commands",
+    "switch_workspace": "Switch Workspace",
+    "projects": "Projects",
+    "issues": "Issues",
+    "recent": "Recent"
+  },
+  "pages": {
+    "inbox": "Inbox",
+    "my_issues": "My Issues",
+    "issues": "Issues",
+    "projects": "Projects",
+    "agents": "Agents",
+    "runtimes": "Runtimes",
+    "skills": "Skills",
+    "settings": "Settings"
+  },
+  "commands": {
+    "current_theme_aria": "Current theme",
+    "new_issue": "New Issue",
+    "new_project": "New Project",
+    "copy_issue_link": "Copy Issue Link",
+    "copy_identifier": "Copy Identifier ({{identifier}})",
+    "switch_to_light": "Switch to Light Theme",
+    "switch_to_dark": "Switch to Dark Theme",
+    "use_system_theme": "Use System Theme"
+  },
+  "toast": {
+    "link_copied": "Link copied",
+    "copied_identifier": "Copied {{identifier}}"
+  },
+  "empty": {
+    "no_results": "No results found.",
+    "type_to_search": "Type to search issues and projects"
+  },
+  "trigger": {
+    "label": "Search..."
+  }
+}

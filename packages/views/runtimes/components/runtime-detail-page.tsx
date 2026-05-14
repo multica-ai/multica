@@ -6,6 +6,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { RuntimeDetail } from "./runtime-detail";
+import { useT } from "../../i18n";
 
 /**
  * Routed entry for `/{slug}/runtimes/{id}`. Reads the workspace runtime list
@@ -16,6 +17,7 @@ import { RuntimeDetail } from "./runtime-detail";
  * keeps cache invariants simple (one cache, one update path).
  */
 export function RuntimeDetailPage({ runtimeId }: { runtimeId: string }) {
+  const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
   const { data: runtimes, isLoading } = useQuery(runtimeListOptions(wsId));
 
@@ -38,9 +40,9 @@ export function RuntimeDetailPage({ runtimeId }: { runtimeId: string }) {
     return (
       <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
         <Server className="h-10 w-10 text-muted-foreground/30" />
-        <p className="mt-3 text-sm">Runtime not found</p>
+        <p className="mt-3 text-sm">{t(($) => $.detail_page.not_found_title)}</p>
         <p className="mt-1 text-xs text-muted-foreground/70">
-          It may have been deleted or you may not have access.
+          {t(($) => $.detail_page.not_found_hint)}
         </p>
       </div>
     );

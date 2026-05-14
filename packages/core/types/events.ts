@@ -15,6 +15,8 @@ export type WSEventType =
   | "comment:created"
   | "comment:updated"
   | "comment:deleted"
+  | "comment:resolved"
+  | "comment:unresolved"
   | "agent:status"
   | "agent:created"
   | "agent:archived"
@@ -66,7 +68,11 @@ export type WSEventType =
   | "invitation:accepted"
   | "invitation:declined"
   | "invitation:revoked"
-  | "heartbeat";
+  | "github_installation:created"
+  | "github_installation:deleted"
+  | "pull_request:linked"
+  | "pull_request:updated"
+  | "pull_request:unlinked";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -142,6 +148,14 @@ export interface CommentUpdatedPayload {
 export interface CommentDeletedPayload {
   comment_id: string;
   issue_id: string;
+}
+
+export interface CommentResolvedPayload {
+  comment: Comment;
+}
+
+export interface CommentUnresolvedPayload {
+  comment: Comment;
 }
 
 export interface WorkspaceUpdatedPayload {

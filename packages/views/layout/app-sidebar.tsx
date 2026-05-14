@@ -76,6 +76,7 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
 import { ProjectIcon } from "../projects/components/project-icon";
+import { useT } from "../i18n";
 
 // Top-level nav items stay active when the user is on a child route
 // (e.g. "Projects" stays lit on /:slug/projects/:id). Pinned items keep
@@ -109,22 +110,34 @@ type NavKey =
   | "skills"
   | "settings";
 
-const personalNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
-  { key: "inbox", label: "Inbox", icon: Inbox },
-  { key: "myIssues", label: "My Issues", icon: CircleUser },
+// Static schema (key + icon) — labels resolved at render via useT("layout").
+type NavLabelKey =
+  | "inbox"
+  | "my_issues"
+  | "issues"
+  | "projects"
+  | "autopilots"
+  | "agents"
+  | "runtimes"
+  | "skills"
+  | "settings";
+
+const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
+  { key: "inbox", labelKey: "inbox", icon: Inbox },
+  { key: "myIssues", labelKey: "my_issues", icon: CircleUser },
 ];
 
-const workspaceNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
-  { key: "issues", label: "Issues", icon: ListTodo },
-  { key: "projects", label: "Projects", icon: FolderKanban },
-  { key: "autopilots", label: "Autopilot", icon: Zap },
-  { key: "agents", label: "Agents", icon: Bot },
+const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
+  { key: "issues", labelKey: "issues", icon: ListTodo },
+  { key: "projects", labelKey: "projects", icon: FolderKanban },
+  { key: "autopilots", labelKey: "autopilots", icon: Zap },
+  { key: "agents", labelKey: "agents", icon: Bot },
 ];
 
-const configureNav: { key: NavKey; label: string; icon: typeof Inbox }[] = [
-  { key: "runtimes", label: "Runtimes", icon: Monitor },
-  { key: "skills", label: "Skills", icon: BookOpenText },
-  { key: "settings", label: "Settings", icon: Settings },
+const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
+  { key: "runtimes", labelKey: "runtimes", icon: Monitor },
+  { key: "skills", labelKey: "skills", icon: BookOpenText },
+  { key: "settings", labelKey: "settings", icon: Settings },
 ];
 
 function DraftDot() {
@@ -154,6 +167,7 @@ function SortablePinItem({
   label: string;
   iconNode: React.ReactNode;
 }) {
+  const { t } = useT("layout");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: pin.id });
   const wasDragged = useRef(false);
 
@@ -208,7 +222,7 @@ function SortablePinItem({
           >
             <X className="size-1" />
           </TooltipTrigger>
-          <TooltipContent side="top" sideOffset={4}>Unpin</TooltipContent>
+          <TooltipContent side="top" sideOffset={4}>{t(($) => $.sidebar.unpin_tooltip)}</TooltipContent>
         </Tooltip>
       </SidebarMenuButton>
     </SidebarMenuItem>
@@ -317,6 +331,7 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }: AppSidebarProps = {}) {
+  const { t } = useT("layout");
   const { pathname, push } = useNavigation();
   const user = useAuthStore((s) => s.user);
   const userId = useAuthStore((s) => s.user?.id);
@@ -486,7 +501,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
                     <DropdownMenuLabel className="text-xs text-muted-foreground">
-                      Workspaces
+                      {t(($) => $.sidebar.workspaces_label)}
                     </DropdownMenuLabel>
                     {workspaces.map((ws) => (
                       <DropdownMenuItem
@@ -508,7 +523,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       }
                     >
                       <Plus className="h-3.5 w-3.5" />
-                      Create workspace
+                      {t(($) => $.sidebar.create_workspace)}
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
                   {myInvitations.length > 0 && (
@@ -516,12 +531,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <DropdownMenuSeparator />
                       <DropdownMenuGroup>
                         <DropdownMenuLabel className="text-xs text-muted-foreground">
-                          Pending invitations
+                          {t(($) => $.sidebar.pending_invitations_label)}
                         </DropdownMenuLabel>
                         {myInvitations.map((inv) => (
                           <div key={inv.id} className="flex items-center gap-2 px-2 py-1.5">
                             <WorkspaceAvatar name={inv.workspace_name ?? "W"} size="sm" />
-                            <span className="flex-1 truncate text-sm">{inv.workspace_name ?? "Workspace"}</span>
+                            <span className="flex-1 truncate text-sm">{inv.workspace_name ?? t(($) => $.sidebar.invitation_workspace_fallback)}</span>
                             <button
                               type="button"
                               className="text-xs px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
@@ -531,7 +546,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                                 acceptInvitationMut.mutate(inv.id);
                               }}
                             >
-                              Join
+                              {t(($) => $.sidebar.invitation_join)}
                             </button>
                             <button
                               type="button"
@@ -542,7 +557,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                                 declineInvitationMut.mutate(inv.id);
                               }}
                             >
-                              Decline
+                              {t(($) => $.sidebar.invitation_decline)}
                             </button>
                           </div>
                         ))}
@@ -553,7 +568,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   <DropdownMenuGroup>
                     <DropdownMenuItem variant="destructive" onClick={logout}>
                       <LogOut className="h-3.5 w-3.5" />
-                      Log out
+                      {t(($) => $.sidebar.log_out)}
                     </DropdownMenuItem>
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
@@ -575,8 +590,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   <SquarePen />
                   <DraftDot />
                 </span>
-                <span>New Issue</span>
-                <kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">C</kbd>
+                <span>{t(($) => $.sidebar.new_issue)}</span>
+                <kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">{t(($) => $.sidebar.new_issue_shortcut)}</kbd>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -598,8 +613,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
-                        <span>{item.label}</span>
-                        {item.label === "Inbox" && unreadCount > 0 && (
+                        <span>{t(($) => $.nav[item.labelKey])}</span>
+                        {item.key === "inbox" && unreadCount > 0 && (
                           <span className="ml-auto text-xs">
                             {unreadCount > 99 ? "99+" : unreadCount}
                           </span>
@@ -619,7 +634,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   render={<CollapsibleTrigger />}
                   className="group/trigger cursor-pointer hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
                 >
-                  <span>Pinned</span>
+                  <span>{t(($) => $.sidebar.pinned_label)}</span>
                   <ChevronRight className="!size-3 ml-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
                   <span className="ml-auto text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover/pinned:opacity-100">{localPinned.length}</span>
                 </SidebarGroupLabel>
@@ -648,7 +663,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           )}
 
           <SidebarGroup>
-            <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+            <SidebarGroupLabel>{t(($) => $.sidebar.workspace_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {workspaceNav.map((item) => {
@@ -662,7 +677,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
-                        <span>{item.label}</span>
+                        <span>{t(($) => $.nav[item.labelKey])}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
@@ -672,7 +687,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           </SidebarGroup>
 
           <SidebarGroup>
-            <SidebarGroupLabel>Configure</SidebarGroupLabel>
+            <SidebarGroupLabel>{t(($) => $.sidebar.configure_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {configureNav.map((item) => {
@@ -686,8 +701,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                       >
                         <item.icon />
-                        <span>{item.label}</span>
-                        {item.label === "Runtimes" && hasRuntimeUpdates && (
+                        <span>{t(($) => $.nav[item.labelKey])}</span>
+                        {item.key === "runtimes" && hasRuntimeUpdates && (
                           <span className="ml-auto size-1.5 rounded-full bg-destructive" />
                         )}
                       </SidebarMenuButton>

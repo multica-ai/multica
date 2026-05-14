@@ -26,6 +26,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
+import { useT } from "../../i18n";
 
 // Project Resources sidebar section.
 //
@@ -33,6 +34,7 @@ import {
 // so adding a new type means: (1) extend the API validator, (2) add a render
 // case here. No changes to the schema or query layer.
 export function ProjectResourcesSection({ projectId }: { projectId: string }) {
+  const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const workspace = useCurrentWorkspace();
   const [open, setOpen] = useState(true);
@@ -56,9 +58,9 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
         resource_type: "github_repo",
         resource_ref: { url },
       });
-      toast.success("Repository attached");
+      toast.success(t(($) => $.resources.toast_attached));
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to attach";
+      const msg = err instanceof Error ? err.message : t(($) => $.resources.toast_attach_failed);
       toast.error(msg);
     }
   };
@@ -66,9 +68,9 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const handleRemove = async (resource: ProjectResource) => {
     try {
       await deleteResource.mutateAsync(resource.id);
-      toast.success("Resource removed");
+      toast.success(t(($) => $.resources.toast_removed));
     } catch {
-      toast.error("Failed to remove resource");
+      toast.error(t(($) => $.resources.toast_remove_failed));
     }
   };
 
@@ -78,7 +80,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
         className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${open ? "" : "text-muted-foreground hover:text-foreground"}`}
         onClick={() => setOpen(!open)}
       >
-        Resources
+        {t(($) => $.resources.section_header)}
         <ChevronRight
           className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
         />
@@ -87,7 +89,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
         <div className="pl-2 space-y-1.5">
           {resources.length === 0 && (
             <p className="text-xs text-muted-foreground">
-              No resources attached.
+              {t(($) => $.resources.empty)}
             </p>
           )}
           {resources.map((resource) => (
@@ -106,13 +108,13 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                   className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
                 >
                   <Plus className="size-3" />
-                  Add resource
+                  {t(($) => $.resources.add_button)}
                 </Button>
               }
             />
             <PopoverContent align="start" className="w-72 p-2 space-y-2">
               <div className="text-xs font-medium text-muted-foreground">
-                Attach a GitHub repo
+                {t(($) => $.resources.popover_title)}
               </div>
               {workspace?.repos && workspace.repos.length > 0 && (
                 <div className="space-y-1">
@@ -145,7 +147,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                         </Tooltip>
                         {isAttached && (
                           <span className="text-[10px] text-muted-foreground">
-                            attached
+                            {t(($) => $.resources.attached_badge)}
                           </span>
                         )}
                       </button>
@@ -174,6 +176,7 @@ function ResourceRow({
   resource: ProjectResource;
   onRemove: () => void;
 }) {
+  const { t } = useT("projects");
   if (resource.resource_type === "github_repo") {
     const ref = resource.resource_ref as GithubRepoResourceRef;
     return (
@@ -198,7 +201,7 @@ function ResourceRow({
           type="button"
           onClick={onRemove}
           className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
-          title="Remove"
+          title={t(($) => $.resources.remove_tooltip)}
         >
           <Trash2 className="size-3 text-muted-foreground" />
         </button>
@@ -214,7 +217,7 @@ function ResourceRow({
         type="button"
         onClick={onRemove}
         className="rounded-sm p-0.5 hover:bg-accent"
-        title="Remove"
+        title={t(($) => $.resources.remove_tooltip)}
       >
         <Trash2 className="size-3" />
       </button>
@@ -227,6 +230,7 @@ function CustomRepoForm({
 }: {
   onSubmit: (url: string) => Promise<void> | void;
 }) {
+  const { t } = useT("projects");
   const [url, setUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const handle = async (e: React.FormEvent) => {
@@ -247,7 +251,7 @@ function CustomRepoForm({
         type="url"
         value={url}
         onChange={(e) => setUrl(e.target.value)}
-        placeholder="https://github.com/owner/repo"
+        placeholder={t(($) => $.resources.url_placeholder)}
         className="flex-1 bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
       />
       <Button
@@ -257,7 +261,7 @@ function CustomRepoForm({
         className="h-6 px-2 text-xs"
         disabled={!url.trim() || submitting}
       >
-        Add
+        {t(($) => $.resources.url_submit)}
       </Button>
     </form>
   );

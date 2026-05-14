@@ -19,6 +19,7 @@ import type {
 import { DragStrip } from "@multica/views/platform";
 import { StepHeader } from "../components/step-header";
 import { OptionCard, OtherOptionCard } from "../components/option-card";
+import { useT } from "../../i18n";
 
 /**
  * Step 1 — three-question user profile.
@@ -41,6 +42,7 @@ export function StepQuestionnaire({
   onSubmit: (answers: QuestionnaireAnswers) => void | Promise<void>;
   onBack?: () => void;
 }) {
+  const { t } = useT("onboarding");
   const [answers, setAnswers] = useState<QuestionnaireAnswers>(initial);
   const [submitting, setSubmitting] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
@@ -110,7 +112,7 @@ export function StepQuestionnaire({
               className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              Back
+              {t(($) => $.common.back)}
             </button>
           ) : (
             <span aria-hidden className="w-0" />
@@ -134,27 +136,27 @@ export function StepQuestionnaire({
         >
           <div className="mx-auto w-full max-w-[620px] px-6 py-10 sm:px-10 md:px-14 lg:px-0 lg:py-14">
             <div className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-              Before we start
+              {t(($) => $.questionnaire.eyebrow)}
             </div>
             <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
-              Three questions to get to know you.
+              {t(($) => $.questionnaire.headline)}
             </h1>
 
             <div className="mt-10 flex flex-col gap-7">
               <QuestionBlock
                 num={1}
-                question="Who will use this workspace?"
-                ariaLabel="Who will use this workspace?"
+                question={t(($) => $.questionnaire.q1_question)}
+                ariaLabel={t(($) => $.questionnaire.q1_question)}
               >
                 <OptionCard
                   selected={answers.team_size === "solo"}
                   onSelect={() => setTeamSize("solo")}
-                  label="Just me"
+                  label={t(($) => $.questionnaire.q1_solo)}
                 />
                 <OptionCard
                   selected={answers.team_size === "team"}
                   onSelect={() => setTeamSize("team")}
-                  label="My team (2–10 people)"
+                  label={t(($) => $.questionnaire.q1_team)}
                 />
                 <OtherOptionCard
                   selected={answers.team_size === "other"}
@@ -163,34 +165,34 @@ export function StepQuestionnaire({
                   onOtherChange={(v) =>
                     setAnswers((a) => ({ ...a, team_size_other: v }))
                   }
-                  placeholder="e.g. a small community I help run"
+                  placeholder={t(($) => $.questionnaire.q1_other_placeholder)}
                 />
               </QuestionBlock>
 
               <QuestionBlock
                 num={2}
-                question="What best describes you?"
-                ariaLabel="What best describes you?"
+                question={t(($) => $.questionnaire.q2_question)}
+                ariaLabel={t(($) => $.questionnaire.q2_question)}
               >
                 <OptionCard
                   selected={answers.role === "developer"}
                   onSelect={() => setRole("developer")}
-                  label="Software developer"
+                  label={t(($) => $.questionnaire.q2_developer)}
                 />
                 <OptionCard
                   selected={answers.role === "product_lead"}
                   onSelect={() => setRole("product_lead")}
-                  label="Product or project lead"
+                  label={t(($) => $.questionnaire.q2_product_lead)}
                 />
                 <OptionCard
                   selected={answers.role === "writer"}
                   onSelect={() => setRole("writer")}
-                  label="Writer or content creator"
+                  label={t(($) => $.questionnaire.q2_writer)}
                 />
                 <OptionCard
                   selected={answers.role === "founder"}
                   onSelect={() => setRole("founder")}
-                  label="Founder or operator"
+                  label={t(($) => $.questionnaire.q2_founder)}
                 />
                 <OtherOptionCard
                   selected={answers.role === "other"}
@@ -199,34 +201,34 @@ export function StepQuestionnaire({
                   onOtherChange={(v) =>
                     setAnswers((a) => ({ ...a, role_other: v }))
                   }
-                  placeholder="e.g. researcher, designer, ops lead"
+                  placeholder={t(($) => $.questionnaire.q2_other_placeholder)}
                 />
               </QuestionBlock>
 
               <QuestionBlock
                 num={3}
-                question="What do you want to do with Multica?"
-                ariaLabel="What do you want to do with Multica?"
+                question={t(($) => $.questionnaire.q3_question)}
+                ariaLabel={t(($) => $.questionnaire.q3_question)}
               >
                 <OptionCard
                   selected={answers.use_case === "coding"}
                   onSelect={() => setUseCase("coding")}
-                  label="Write and ship code"
+                  label={t(($) => $.questionnaire.q3_coding)}
                 />
                 <OptionCard
                   selected={answers.use_case === "planning"}
                   onSelect={() => setUseCase("planning")}
-                  label="Plan and manage projects"
+                  label={t(($) => $.questionnaire.q3_planning)}
                 />
                 <OptionCard
                   selected={answers.use_case === "writing_research"}
                   onSelect={() => setUseCase("writing_research")}
-                  label="Research or write"
+                  label={t(($) => $.questionnaire.q3_writing_research)}
                 />
                 <OptionCard
                   selected={answers.use_case === "explore"}
                   onSelect={() => setUseCase("explore")}
-                  label="I'm just exploring for now"
+                  label={t(($) => $.questionnaire.q3_explore)}
                 />
                 <OtherOptionCard
                   selected={answers.use_case === "other"}
@@ -235,7 +237,7 @@ export function StepQuestionnaire({
                   onOtherChange={(v) =>
                     setAnswers((a) => ({ ...a, use_case_other: v }))
                   }
-                  placeholder="e.g. automate my weekly reports"
+                  placeholder={t(($) => $.questionnaire.q3_other_placeholder)}
                 />
               </QuestionBlock>
             </div>
@@ -248,7 +250,7 @@ export function StepQuestionnaire({
             aria-live="polite"
             className="text-xs tabular-nums text-muted-foreground"
           >
-            {answeredCount} of 3 answered
+            {t(($) => $.questionnaire.answered_progress, { count: answeredCount })}
           </span>
           <Button
             size="lg"
@@ -256,7 +258,7 @@ export function StepQuestionnaire({
             onClick={submit}
           >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            Continue
+            {t(($) => $.common.continue)}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </footer>
@@ -300,31 +302,32 @@ function QuestionBlock({
 }
 
 function WhyWeAsk() {
+  const { t } = useT("onboarding");
   return (
     <div className="flex max-w-[380px] flex-col gap-8">
       <section className="flex flex-col gap-4">
         <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-          Why three questions
+          {t(($) => $.questionnaire.why_eyebrow)}
         </div>
         <h2 className="font-serif text-[22px] font-medium leading-[1.25] tracking-tight text-foreground">
-          So you land running.
+          {t(($) => $.questionnaire.why_headline)}
         </h2>
       </section>
 
       <section className="flex flex-col gap-4">
         <div className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
-          What you get
+          {t(($) => $.questionnaire.what_eyebrow)}
         </div>
         <div className="flex flex-col gap-4">
           <UnlockItem
             icon={<PenLine className="h-4 w-4" />}
-            title="A starter project, tailored"
-            body="A Getting Started checklist shaped by your answers."
+            title={t(($) => $.questionnaire.unlock_starter_title)}
+            body={t(($) => $.questionnaire.unlock_starter_body)}
           />
           <UnlockItem
             icon={<Sparkles className="h-4 w-4" />}
-            title="A head start with agents"
-            body="Connect a runtime and we'll pick a template for your role — plus write its first task."
+            title={t(($) => $.questionnaire.unlock_agents_title)}
+            body={t(($) => $.questionnaire.unlock_agents_body)}
           />
         </div>
       </section>
@@ -335,7 +338,7 @@ function WhyWeAsk() {
         rel="noopener noreferrer"
         className="self-start text-[13px] text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
       >
-        Learn how agents work →
+        {t(($) => $.questionnaire.learn_more)}
       </a>
     </div>
   );

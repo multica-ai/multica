@@ -80,6 +80,12 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		}
 	}
 
+	// Surface the resulting auth.json state (file kind only, never contents)
+	// so operators diagnosing token-refresh failures can tell whether the
+	// per-task home is tracking the shared ~/.codex/auth.json or has drifted
+	// into a stale local copy.
+	logCodexAuthState(filepath.Join(codexHome, "auth.json"), logger)
+
 	// Copy config files (isolated per task).
 	for _, name := range codexCopiedFiles {
 		src := filepath.Join(sharedHome, name)
@@ -195,31 +201,61 @@ func ensureDirSymlink(src, dst string) error {
 	return createDirLink(src, dst)
 }
 
-// ensureSymlink creates a symlink dst → src. If src doesn't exist, it's a no-op.
-// If dst already exists as a correct symlink, it's a no-op. If dst is a broken
-// symlink, it's replaced.
+// ensureSymlink ensures dst tracks src. If src doesn't exist, it's a no-op.
+// If dst is already a symlink pointing at src, it's a no-op. Otherwise — a
+// wrong-target symlink, a broken symlink, or a regular file left over from a
+// prior createFileLink copy fallback — dst is removed and recreated via
+// createFileLink so the per-task home doesn't drift from the shared source.
+//
+// The "regular file" branch matters on Windows: when os.Symlink fails (no
+// Developer Mode / not elevated), createFileLink falls back to copying the
+// file. Without this re-creation step, a once-stale auth.json would never
+// pick up token refreshes from the shared ~/.codex/auth.json, leaving Codex
+// stuck on a revoked refresh token across env reuses (issue #2081).
 func ensureSymlink(src, dst string) error {
 	if _, err := os.Stat(src); os.IsNotExist(err) {
 		return nil // source doesn't exist — skip
 	}
 
-	// Check if dst already exists.
 	if fi, err := os.Lstat(dst); err == nil {
 		if fi.Mode()&os.ModeSymlink != 0 {
-			// It's a symlink — check if it points to the right place.
-			target, err := os.Readlink(dst)
-			if err == nil && target == src {
-				return nil // already correct
+			if target, err := os.Readlink(dst); err == nil && target == src {
+				return nil // symlink already points to src
 			}
-			// Wrong target — remove and recreate.
-			os.Remove(dst)
-		} else {
-			// Regular file exists — don't overwrite.
-			return nil
+		}
+		// Wrong-target symlink, broken symlink, or stale regular file —
+		// drop it so createFileLink can re-link/re-copy from the current src.
+		if err := os.Remove(dst); err != nil {
+			return fmt.Errorf("remove stale dst %s: %w", dst, err)
 		}
 	}
 
 	return createFileLink(src, dst)
+}
+
+// logCodexAuthState records the kind of auth.json the per-task CODEX_HOME
+// ended up with — symlink (with target), regular file (with size + mtime),
+// or missing — so an operator chasing refresh_token_reused / token_expired
+// reports can immediately tell whether the per-task home is tracking the
+// shared ~/.codex/auth.json or has drifted into a stale local copy.
+//
+// Never logs the file contents.
+func logCodexAuthState(authPath string, logger *slog.Logger) {
+	fi, err := os.Lstat(authPath)
+	if err != nil {
+		logger.Info("execenv: codex auth.json absent", "path", authPath, "error", err)
+		return
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		target, _ := os.Readlink(authPath)
+		logger.Info("execenv: codex auth.json is symlink", "path", authPath, "target", target)
+		return
+	}
+	logger.Info("execenv: codex auth.json is regular file",
+		"path", authPath,
+		"size", fi.Size(),
+		"mtime", fi.ModTime().UTC(),
+	)
 }
 
 // (The daemon used to write a minimal inline config here; the authoritative

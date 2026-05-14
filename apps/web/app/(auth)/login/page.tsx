@@ -26,6 +26,7 @@ import { captureDownloadIntent } from "@multica/core/analytics";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import Link from "next/link";
 import { LoginPage, validateCliCallback } from "@multica/views/auth";
+import { useT } from "@multica/views/i18n";
 
 /**
  * Pick where a logged-in user with no explicit `?next=` should land.
@@ -56,6 +57,7 @@ async function resolveLoggedInDestination(
 function LoginPageContent() {
   const router = useRouter();
   const qc = useQueryClient();
+  const { t } = useT("auth");
   const googleClientId = useConfigStore((state) => state.googleClientId);
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
@@ -93,7 +95,9 @@ function LoginPageContent() {
         })
         .catch((err) => {
           setDesktopError(
-            err instanceof Error ? err.message : "Failed to prepare Desktop sign-in",
+            err instanceof Error
+              ? err.message
+              : t(($) => $.web.desktop_handoff.prepare_failed),
           );
         });
       return;
@@ -140,7 +144,9 @@ function LoginPageContent() {
         <div className="flex min-h-screen items-center justify-center">
           <Card className="w-full max-w-sm">
             <CardHeader className="text-center">
-              <CardTitle className="text-2xl">Sign-in Failed</CardTitle>
+              <CardTitle className="text-2xl">
+                {t(($) => $.web.desktop_handoff.failed_title)}
+              </CardTitle>
               <CardDescription>{desktopError}</CardDescription>
             </CardHeader>
           </Card>
@@ -151,11 +157,13 @@ function LoginPageContent() {
       <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Opening Multica</CardTitle>
+            <CardTitle className="text-2xl">
+              {t(($) => $.web.desktop_handoff.opening_title)}
+            </CardTitle>
             <CardDescription>
               {desktopToken
-                ? "You should see a prompt to open the Multica desktop app. If nothing happens, click the button below."
-                : "Preparing Desktop sign-in..."}
+                ? t(($) => $.web.desktop_handoff.opening_description)
+                : t(($) => $.web.desktop_handoff.preparing)}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center">
@@ -166,7 +174,7 @@ function LoginPageContent() {
                   window.location.href = `multica://auth/callback?token=${encodeURIComponent(desktopToken)}`;
                 }}
               >
-                Open Multica Desktop
+                {t(($) => $.web.desktop_handoff.open_button)}
               </Button>
             ) : (
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -196,18 +204,14 @@ function LoginPageContent() {
       }
       onTokenObtained={setLoggedInCookie}
       extra={
-        // Web-only nudge toward the desktop app. Copy is hardcoded EN
-        // for now because the login route sits outside the landing
-        // group's LocaleProvider — if this page ever becomes
-        // locale-aware, the strings live in positioning doc §3.3.
         <span className="text-xs text-muted-foreground">
-          Prefer the desktop app?{" "}
+          {t(($) => $.web.prefer_desktop)}{" "}
           <Link
             href="/download"
             onClick={() => captureDownloadIntent("login")}
             className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground/70"
           >
-            Download
+            {t(($) => $.web.download)}
           </Link>
         </span>
       }

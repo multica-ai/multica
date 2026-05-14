@@ -1,12 +1,9 @@
 "use client";
 
 import { Globe, Lock } from "lucide-react";
-import {
-  VISIBILITY_LABEL,
-  VISIBILITY_TOOLTIP,
-} from "@multica/core/agents";
 import type { AgentVisibility } from "@multica/core/types";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { useT } from "../../i18n";
 
 /**
  * Read-only visibility badge — used wherever a user should *see* an agent's
@@ -26,9 +23,10 @@ export function VisibilityBadge({
   compact?: boolean;
   className?: string;
 }) {
+  const { t } = useT("agents");
   const Icon = value === "private" ? Lock : Globe;
-  const label = VISIBILITY_LABEL[value];
-  const tooltip = VISIBILITY_TOOLTIP[value];
+  const label = t(($) => $.visibility[value].label);
+  const tooltip = t(($) => $.visibility[value].tooltip);
 
   return (
     <Tooltip>

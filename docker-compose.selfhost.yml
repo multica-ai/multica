@@ -58,9 +58,11 @@ services:
       APP_ENV: ${APP_ENV:-production}
       MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-}
       MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
-      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}                                     
-      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}                                     
-      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-} 
+      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
     restart: unless-stopped
 
   frontend:

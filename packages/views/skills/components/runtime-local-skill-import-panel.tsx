@@ -35,6 +35,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { toast } from "sonner";
+import { useT } from "../../i18n";
 
 function runtimeLabel(runtime: AgentRuntime): string {
   return `${runtime.name} (${runtime.provider})`;
@@ -61,6 +62,7 @@ function SkillItem({
   onNameChange: (v: string) => void;
   onDescriptionChange: (v: string) => void;
 }) {
+  const { t } = useT("skills");
   return (
     <div
       className={`overflow-hidden rounded-lg border transition-colors ${
@@ -90,7 +92,7 @@ function SkillItem({
           </p>
         </div>
         <Badge variant="outline" className="shrink-0">
-          {skill.file_count} file{skill.file_count === 1 ? "" : "s"}
+          {t(($) => $.runtime_import.skill_files, { count: skill.file_count })}
         </Badge>
       </button>
 
@@ -98,7 +100,7 @@ function SkillItem({
         <div className="space-y-2.5 border-t bg-card px-4 py-3">
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">
-              Workspace skill name
+              {t(($) => $.runtime_import.skill_name_label)}
             </Label>
             <Input
               value={name}
@@ -109,12 +111,12 @@ function SkillItem({
           </div>
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">
-              Description
+              {t(($) => $.runtime_import.skill_description_label)}
             </Label>
             <Textarea
               value={description}
               onChange={(e) => onDescriptionChange(e.target.value)}
-              placeholder="Optional — describe when an agent should use this skill."
+              placeholder={t(($) => $.runtime_import.skill_description_placeholder)}
               rows={2}
               className="resize-none text-sm"
             />
@@ -126,11 +128,7 @@ function SkillItem({
 }
 
 // ---------------------------------------------------------------------------
-// Panel — three-section layout: sticky top / scrollable middle / sticky bottom
-//
-// Previously took an `active` prop to defer work inside a tabbed parent; the
-// parent now unmounts the panel when it's not the active method, so `active`
-// is always implicitly true here.
+// Panel
 // ---------------------------------------------------------------------------
 
 export function RuntimeLocalSkillImportPanel({
@@ -138,12 +136,12 @@ export function RuntimeLocalSkillImportPanel({
 }: {
   onImported?: (skill: Skill) => void;
 }) {
+  const { t } = useT("skills");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const userId = useAuthStore((s) => s.user?.id ?? null);
 
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
-  // Only the runtime owner can browse + import local skills (server-side ACL).
   const localRuntimes = useMemo(
     () =>
       runtimes.filter(
@@ -160,15 +158,10 @@ export function RuntimeLocalSkillImportPanel({
   const [description, setDescription] = useState("");
   const [importing, setImporting] = useState(false);
 
-  // Default to the first local runtime once the list lands.
   useEffect(() => {
     setSelectedRuntimeId((prev) => prev || localRuntimes[0]?.id || "");
   }, [localRuntimes]);
 
-  // Switching runtimes: clear the stale skill selection immediately so the
-  // old highlight / inline editor don't flash during the next query's fetch
-  // window. The auto-seed effect below picks the new first-skill once the
-  // scan lands.
   useEffect(() => {
     setSelectedSkillKey("");
     setName("");
@@ -188,8 +181,6 @@ export function RuntimeLocalSkillImportPanel({
   );
   const selectedSkill = runtimeSkills.find((s) => s.key === selectedSkillKey);
 
-  // After a scan, auto-select the first skill so the Import button has a
-  // valid target without requiring a click.
   useEffect(() => {
     if (runtimeSkills.length === 0) return;
     if (runtimeSkills.some((s) => s.key === selectedSkillKey)) return;
@@ -214,7 +205,6 @@ export function RuntimeLocalSkillImportPanel({
         name: name.trim() || undefined,
         description: description.trim() || undefined,
       });
-      // Seed the detail cache so navigation lands with data pre-populated.
       qc.setQueryData(
         skillDetailOptions(wsId, result.skill.id).queryKey,
         result.skill,
@@ -226,11 +216,11 @@ export function RuntimeLocalSkillImportPanel({
         qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) }),
         qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) }),
       ]);
-      toast.success("Skill imported");
+      toast.success(t(($) => $.runtime_import.toast_imported));
       onImported?.(result.skill);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to import skill",
+        error instanceof Error ? error.message : t(($) => $.runtime_import.toast_import_failed),
       );
     } finally {
       setImporting(false);
@@ -244,20 +234,18 @@ export function RuntimeLocalSkillImportPanel({
     !!name.trim() &&
     !importing;
 
-  // --- Scroll fade for the middle region ---
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
 
-  // --- Middle body — depends on discovery state ---
   const middle = (() => {
     if (localRuntimes.length === 0) {
       return (
         <div className="rounded-lg border border-dashed px-4 py-10 text-center">
           <p className="text-sm text-muted-foreground">
-            No local runtimes available
+            {t(($) => $.runtime_import.no_local_runtimes_title)}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Connect a local runtime to browse and import its local skills.
+            {t(($) => $.runtime_import.no_local_runtimes_hint)}
           </p>
         </div>
       );
@@ -266,7 +254,7 @@ export function RuntimeLocalSkillImportPanel({
       return (
         <div className="rounded-lg border border-dashed px-4 py-10 text-center">
           <p className="text-sm text-muted-foreground">
-            Choose a runtime to continue
+            {t(($) => $.runtime_import.choose_runtime)}
           </p>
         </div>
       );
@@ -275,7 +263,7 @@ export function RuntimeLocalSkillImportPanel({
       return (
         <div className="flex items-start gap-2 rounded-md bg-warning/10 px-3 py-2 text-xs text-muted-foreground">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
-          Runtime must be online to browse local skills.
+          {t(($) => $.runtime_import.must_be_online)}
         </div>
       );
     }
@@ -297,7 +285,7 @@ export function RuntimeLocalSkillImportPanel({
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           {skillsQuery.error instanceof Error
             ? skillsQuery.error.message
-            : "Failed to load runtime local skills"}
+            : t(($) => $.runtime_import.load_failed)}
         </div>
       );
     }
@@ -305,16 +293,18 @@ export function RuntimeLocalSkillImportPanel({
       return (
         <div className="flex items-start gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          This runtime provider does not expose local skill inventory yet.
+          {t(($) => $.runtime_import.not_supported)}
         </div>
       );
     }
     if (runtimeSkills.length === 0) {
       return (
         <div className="rounded-lg border border-dashed px-4 py-10 text-center">
-          <p className="text-sm text-muted-foreground">No local skills found</p>
+          <p className="text-sm text-muted-foreground">
+            {t(($) => $.runtime_import.no_skills_title)}
+          </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            This runtime does not have any discoverable local skills yet.
+            {t(($) => $.runtime_import.no_skills_hint)}
           </p>
         </div>
       );
@@ -341,21 +331,21 @@ export function RuntimeLocalSkillImportPanel({
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Sticky top: runtime picker + status */}
       <div
-        // While importing, lock the whole runtime/skill selection so the user
-        // can't switch targets out from under the in-flight request.
         aria-disabled={importing || undefined}
         className={`shrink-0 space-y-2 border-b px-5 py-3 ${
           importing ? "pointer-events-none opacity-60" : ""
         }`}
       >
         <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">Runtime</Label>
+          <Label className="text-xs text-muted-foreground">
+            {t(($) => $.runtime_import.runtime_label)}
+          </Label>
           <Select
             value={selectedRuntimeId}
             onValueChange={(v) => v && setSelectedRuntimeId(v)}
           >
             <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select a local runtime">
+              <SelectValue placeholder={t(($) => $.runtime_import.runtime_placeholder)}>
                 {selectedRuntime ? runtimeLabel(selectedRuntime) : null}
               </SelectValue>
             </SelectTrigger>
@@ -386,7 +376,7 @@ export function RuntimeLocalSkillImportPanel({
         )}
       </div>
 
-      {/* Scrollable middle — also locked during import. */}
+      {/* Scrollable middle */}
       <div
         ref={scrollRef}
         style={fadeStyle}
@@ -397,8 +387,7 @@ export function RuntimeLocalSkillImportPanel({
       >
         {middle}
         <p className="mt-3 text-xs text-muted-foreground">
-          Symlinks, unreadable files, oversized files, and very large bundles
-          are ignored during import.
+          {t(($) => $.runtime_import.ignored_files_hint)}
         </p>
       </div>
 
@@ -407,14 +396,14 @@ export function RuntimeLocalSkillImportPanel({
         <div className="min-w-0 flex-1 text-xs text-muted-foreground">
           {selectedSkill ? (
             <>
-              Ready to import{" "}
+              {t(($) => $.runtime_import.ready)}{" "}
               <span className="font-medium text-foreground">
                 {name.trim() || selectedSkill.name}
               </span>{" "}
-              into this workspace.
+              {t(($) => $.runtime_import.into_workspace)}
             </>
           ) : (
-            "Select a skill to continue."
+            t(($) => $.runtime_import.select_skill)
           )}
         </div>
         <Button
@@ -426,12 +415,12 @@ export function RuntimeLocalSkillImportPanel({
           {importing ? (
             <>
               <Loader2 className="h-3 w-3 animate-spin" />
-              Importing…
+              {t(($) => $.runtime_import.importing)}
             </>
           ) : (
             <>
               <Download className="h-3 w-3" />
-              Import to Workspace
+              {t(($) => $.runtime_import.import_button)}
             </>
           )}
         </Button>

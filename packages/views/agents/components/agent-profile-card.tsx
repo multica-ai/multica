@@ -17,12 +17,14 @@ import { AppLink } from "../../navigation";
 import { HealthIcon } from "../../runtimes/components/shared";
 import { availabilityConfig } from "../presence";
 import { VisibilityBadge } from "./visibility-badge";
+import { useT } from "../../i18n";
 
 interface AgentProfileCardProps {
   agentId: string;
 }
 
 export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
+  const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
   const { data: agents = [], isLoading: agentsLoading } = useQuery(agentListOptions(wsId));
@@ -45,7 +47,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
 
   if (!agent) {
     return (
-      <div className="text-xs text-muted-foreground">Agent unavailable</div>
+      <div className="text-xs text-muted-foreground">{t(($) => $.profile_card.unavailable)}</div>
     );
   }
 
@@ -85,7 +87,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
             {!isArchived && <VisibilityBadge value={agent.visibility} compact />}
             {isArchived && (
               <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                Archived
+                {t(($) => $.row.archived)}
               </span>
             )}
           </div>
@@ -98,7 +100,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
             href={p.agentDetail(agent.id)}
             className="mr-1 mt-0.5 shrink-0 text-xs font-normal text-brand opacity-0 transition-opacity group-hover:opacity-100"
           >
-            Detail →
+            {t(($) => $.profile_card.detail_link)}
           </AppLink>
         )}
       </div>
@@ -118,7 +120,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         {agent.skills.length > 0 && (
           <SkillsRow skills={agent.skills.map((s) => s.name)} />
         )}
-        {owner && <MetaRow label="Owner" value={owner.name} />}
+        {owner && <MetaRow label={t(($) => $.profile_card.owner_label)} value={owner.name} />}
       </div>
     </div>
   );
@@ -135,6 +137,7 @@ function AgentAvailabilityLine({
   wsId: string | undefined;
   agentId: string;
 }) {
+  const { t } = useT("agents");
   const detail = useAgentPresenceDetail(wsId, agentId);
   if (detail === "loading") {
     return <Skeleton className="mt-0.5 h-3 w-16" />;
@@ -143,7 +146,7 @@ function AgentAvailabilityLine({
   return (
     <div className="mt-0.5 inline-flex items-center gap-1.5">
       <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
-      <span className={`text-xs ${av.textClass}`}>{av.label}</span>
+      <span className={`text-xs ${av.textClass}`}>{t(($) => $.availability[detail.availability])}</span>
     </div>
   );
 }
@@ -162,16 +165,21 @@ function RuntimeRow({
   agent: Agent;
   runtime: AgentRuntime | null;
 }) {
+  const { t } = useT("agents");
   const isCloud = agent.runtime_mode === "cloud";
   const health: RuntimeHealth = isCloud
     ? "online"
     : runtime
       ? deriveRuntimeHealth(runtime, Date.now())
       : "offline";
-  const label = runtime?.name ?? (isCloud ? "Cloud" : "Unknown runtime");
+  const label =
+    runtime?.name ??
+    (isCloud
+      ? t(($) => $.row.fallback_runtime_cloud)
+      : t(($) => $.profile_card.unknown_runtime));
   return (
     <div className="flex items-center gap-1.5">
-      <span className="w-12 shrink-0 text-muted-foreground">Runtime</span>
+      <span className="w-12 shrink-0 text-muted-foreground">{t(($) => $.profile_card.runtime_label)}</span>
       <HealthIcon health={health} className="h-3 w-3 shrink-0" />
       <span className="min-w-0 truncate" title={label}>
         {label}
@@ -200,11 +208,12 @@ function MetaRow({
 }
 
 function SkillsRow({ skills }: { skills: string[] }) {
+  const { t } = useT("agents");
   const visible = skills.slice(0, 3);
   const overflow = skills.length - visible.length;
   return (
     <div className="flex items-center gap-1.5">
-      <span className="w-12 shrink-0 text-muted-foreground">Skills</span>
+      <span className="w-12 shrink-0 text-muted-foreground">{t(($) => $.profile_card.skills_label)}</span>
       <div className="flex min-w-0 flex-wrap gap-1">
         {visible.map((s) => (
           <span
