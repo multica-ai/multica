@@ -27,11 +27,10 @@ const (
 
 	// firtalGatewayMaxToolRounds caps how many tool-call rounds the model may
 	// use before the loop forces a final no-tool gateway call to extract the
-	// answer. Three rounds covers the POC chain (get_issue → list_comments →
-	// add_comment); the forced final call on top of that lets the model emit
-	// its confirmation text. Going higher needs the budget + transparency-log
-	// work scheduled for W2/W3.
-	firtalGatewayMaxToolRounds = 3
+	// answer. 8 rounds allows complex multi-step agent work; the forced final
+	// call lets the model emit its confirmation text. Overridable via
+	// MULTICA_SERVER_FIRTAL_GATEWAY_MAX_TOOL_ITERATIONS env var.
+	firtalGatewayMaxToolRounds = 8
 )
 
 // FirtalGatewayRuntimeConfig controls the server-owned HTTPS runtime backed by
@@ -57,6 +56,10 @@ type FirtalGatewayRuntimeConfig struct {
 	// this list see the unchanged chat-only behaviour — no `tools` parameter is
 	// sent and no tool_calls are dispatched.
 	ToolsEnabledAgentIDs []pgtype.UUID
+
+	// MaxToolRounds overrides firtalGatewayMaxToolRounds when > 0. Loaded from
+	// MULTICA_SERVER_FIRTAL_GATEWAY_MAX_TOOL_ITERATIONS.
+	MaxToolRounds int
 }
 
 // ToolsEnabledForAgent reports whether the per-agent allowlist includes
@@ -183,6 +186,10 @@ func LoadFirtalGatewayRuntimeConfig() (FirtalGatewayRuntimeConfig, error) {
 			}
 			cfg.ToolsEnabledAgentIDs = append(cfg.ToolsEnabledAgentIDs, id)
 		}
+	}
+
+	if maxIter := positiveIntFromEnv(0, "MULTICA_SERVER_FIRTAL_GATEWAY_MAX_TOOL_ITERATIONS"); maxIter > 0 {
+		cfg.MaxToolRounds = maxIter
 	}
 
 	if cfg.Enabled && cfg.BaseURL != "" {

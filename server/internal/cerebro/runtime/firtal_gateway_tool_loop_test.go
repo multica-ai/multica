@@ -188,11 +188,10 @@ func TestRunToolLoopForcedFinalCallOmitsTools(t *testing.T) {
 func TestRunToolLoopThreeStepAcceptanceFlow(t *testing.T) {
 	// The Kristian acceptance scenario from JEH-1089: model dispatches
 	// get_issue → list_comments → add_comment in three sequential rounds,
-	// then the forced final call returns the model's confirmation text.
-	// Prior to JEH-1092 this scripted sequence failed with
-	// "tool loop budget exceeded" because all three iterations were consumed
-	// by tool calls. After the fix it must return success with the final
-	// text and exactly firtalGatewayMaxToolRounds+1 gateway calls.
+	// then returns text on the 4th call — the loop exits naturally because
+	// the model produces text before hitting the cap. Prior to JEH-1092 this
+	// failed with "tool loop budget exceeded"; after the fix it succeeds in
+	// exactly 4 gateway calls (3 tool rounds + 1 text response).
 	gateway, calls := fakeGatewayScript(t, []string{
 		`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"get_issue","arguments":"{\"issue_id\":\"JEH-1089\"}"}}]}}],"firtal":{"input_tokens":10,"output_tokens":5}}`,
 		`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c2","type":"function","function":{"name":"list_comments","arguments":"{\"issue_id\":\"JEH-1089\"}"}}]}}],"firtal":{"input_tokens":12,"output_tokens":6}}`,
@@ -233,9 +232,11 @@ func TestRunToolLoopThreeStepAcceptanceFlow(t *testing.T) {
 	if completion.Output != "Færdig — resumé posted." {
 		t.Fatalf("Output = %q, want confirmation text", completion.Output)
 	}
-	want := firtalGatewayMaxToolRounds + 1
-	if int(atomic.LoadInt32(calls)) != want {
-		t.Fatalf("gateway called %d times, want %d (3 tool rounds + 1 final)", *calls, want)
+	// This flow completes naturally in 4 calls (3 tool rounds then text),
+	// regardless of the cap value — as long as cap >= 3.
+	const wantCalls = 4
+	if int(atomic.LoadInt32(calls)) != wantCalls {
+		t.Fatalf("gateway called %d times, want %d (3 tool rounds + 1 text answer)", *calls, wantCalls)
 	}
 	// Usage must sum across all four gateway calls.
 	wantInput := int64(10 + 12 + 14 + 16)
