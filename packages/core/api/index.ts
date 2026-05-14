@@ -1,4 +1,9 @@
-export { ApiClient, ApiError } from "./client";
+export {
+  ApiClient,
+  ApiError,
+  PreviewTooLargeError,
+  PreviewUnsupportedError,
+} from "./client";
 export type {
   ApiClientOptions,
   ImportStarterContentPayload,

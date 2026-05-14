@@ -236,10 +236,14 @@ func TestSubscriberAPI(t *testing.T) {
 
 		// Subscribe with X-Agent-ID set — no body, so the handler must default
 		// to subscribing the agent itself (not the member behind X-User-ID).
+		// resolveActor requires X-Task-ID alongside X-Agent-ID to grant the
+		// "agent" identity (defense against header forgery), so seed a task.
+		agentTask := createHandlerTestTaskForAgent(t, agentID)
 		w := httptest.NewRecorder()
 		req := newRequest("POST", "/api/issues/"+issueID+"/subscribe", nil)
 		req = withURLParam(req, "id", issueID)
 		req.Header.Set("X-Agent-ID", agentID)
+		req.Header.Set("X-Task-ID", agentTask)
 		testHandler.SubscribeToIssue(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("SubscribeToIssue (agent caller): expected 200, got %d: %s", w.Code, w.Body.String())
@@ -270,10 +274,13 @@ func TestSubscriberAPI(t *testing.T) {
 		}
 
 		// Unsubscribe with X-Agent-ID set — same default-to-caller expectation.
+		// Re-use the same task as the subscribe call; resolveActor only
+		// validates that the task belongs to the agent, not which task.
 		w = httptest.NewRecorder()
 		req = newRequest("POST", "/api/issues/"+issueID+"/unsubscribe", nil)
 		req = withURLParam(req, "id", issueID)
 		req.Header.Set("X-Agent-ID", agentID)
+		req.Header.Set("X-Task-ID", agentTask)
 		testHandler.UnsubscribeFromIssue(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("UnsubscribeFromIssue (agent caller): expected 200, got %d: %s", w.Code, w.Body.String())

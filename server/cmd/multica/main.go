@@ -49,6 +49,7 @@ func init() {
 	skillCmd.GroupID = groupCore
 	// CEREBRO-PATCH(cerebro-grants-cli): JEH-1179 grant control plane CLI
 	grantCmd.GroupID = groupCore
+	squadCmd.GroupID = groupCore
 
 	// Runtime commands
 	daemonCmd.GroupID = groupRuntime
@@ -77,6 +78,7 @@ func init() {
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(groupCmd)
 	rootCmd.AddCommand(grantCmd) // CEREBRO-PATCH(cerebro-grants-cli): JEH-1179
+	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(runtimeCmd)
 	rootCmd.AddCommand(authCmd)

@@ -74,11 +74,18 @@ type ChatMessagePayload struct {
 	CreatedAt     string `json:"created_at"`
 }
 
-// ChatDonePayload is broadcast when an agent finishes responding to a chat message.
+// ChatDonePayload is broadcast when an agent finishes responding to a chat
+// message. Carries the freshly-persisted assistant ChatMessage so the client
+// can write it into the messages cache inline — avoids a refetch round-trip
+// during the live-timeline → AssistantMessage handoff that previously caused
+// a visible flicker (#2123).
 type ChatDonePayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 	TaskID        string `json:"task_id"`
-	Content       string `json:"content"`
+	MessageID     string `json:"message_id,omitempty"`
+	Content       string `json:"content,omitempty"`
+	ElapsedMs     int64  `json:"elapsed_ms,omitempty"`
+	CreatedAt     string `json:"created_at,omitempty"`
 }
 
 // ChatSessionReadPayload is broadcast when the creator marks a session as read.
@@ -101,6 +108,7 @@ type ChatSessionUpdatedPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 	Title         string `json:"title"`
 	Status        string `json:"status"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 // DaemonHeartbeatRequestPayload is sent from daemon to server over WebSocket
@@ -134,16 +142,29 @@ type DaemonHeartbeatAccount struct {
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.
 // JSON shape mirrors the HTTP heartbeat response so daemon code can decode either.
+//
+// RuntimeGone is the WebSocket replacement for the HTTP 404 "runtime not found"
+// response. When the server discovers the runtime row was deleted (UI delete,
+// 7-day offline GC), it sends back an ack with Status=HeartbeatStatusRuntimeGone
+// and RuntimeGone=true rather than tearing down the connection with an error.
+// The daemon reads this signal, prunes the stale runtime from its local state
+// and re-registers; without it the dead UUID would keep heartbeating until the
+// daemon process restarts.
 type DaemonHeartbeatAckPayload struct {
-	RuntimeID               string                                  `json:"runtime_id"`
-	Status                  string                                  `json:"status"`
+	RuntimeID string `json:"runtime_id"`
+	Status    string `json:"status"`
 	// CEREBRO-PATCH(heartbeat-account-id-ack): JEH-881 registered cerebro account_id for this runtime.
 	CerebroAccountID        string                                  `json:"cerebro_account_id,omitempty"`
+	RuntimeGone             bool                                    `json:"runtime_gone,omitempty"`
 	PendingUpdate           *DaemonHeartbeatPendingUpdate           `json:"pending_update,omitempty"`
 	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`
 	PendingLocalSkills      *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`
 	PendingLocalSkillImport *DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
 }
+
+// HeartbeatStatusRuntimeGone is the ack Status used when the runtime row no
+// longer exists server-side. Companion to DaemonHeartbeatAckPayload.RuntimeGone.
+const HeartbeatStatusRuntimeGone = "runtime_gone"
 
 // DaemonHeartbeatPendingUpdate describes a CLI-update action the daemon
 // should run for the runtime.

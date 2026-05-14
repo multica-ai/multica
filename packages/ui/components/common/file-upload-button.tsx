@@ -20,7 +20,8 @@ import {
 interface FileUploadButtonProps {
   /** Default attach handler — called for any picked files that are not images,
    *  or for images the user chooses to attach. */
-  onAttach: (files: File[]) => void;
+  onAttach?: (files: File[]) => void;
+  onSelect?: (file: File) => void;
   /** Optional embed-as-image handler. When provided, picking image files
    *  triggers a popup that lets the user choose embed inline vs attach. */
   onEmbed?: (files: File[]) => void;
@@ -31,6 +32,7 @@ interface FileUploadButtonProps {
 
 function FileUploadButton({
   onAttach,
+  onSelect,
   onEmbed,
   disabled,
   className,
@@ -50,7 +52,8 @@ function FileUploadButton({
     e.target.value = "";
 
     if (!onEmbed) {
-      onAttach(arr);
+      onAttach?.(arr);
+      arr.forEach((file) => onSelect?.(file));
       return;
     }
 
@@ -61,13 +64,19 @@ function FileUploadButton({
     for (const f of arr) {
       (f.type.startsWith("image/") ? images : nonImages).push(f);
     }
-    if (nonImages.length > 0) onAttach(nonImages);
+    if (nonImages.length > 0) {
+      onAttach?.(nonImages);
+      nonImages.forEach((file) => onSelect?.(file));
+    }
     if (images.length > 0) setPendingImages(images);
   };
 
   const handleChoice = (mode: "embed" | "attach") => {
     if (mode === "embed") onEmbed?.(pendingImages);
-    else onAttach(pendingImages);
+    else {
+      onAttach?.(pendingImages);
+      pendingImages.forEach((file) => onSelect?.(file));
+    }
     setPendingImages([]);
   };
 

@@ -23,7 +23,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip"
-import { MenuIcon, PanelLeftIcon } from "lucide-react"
+import { PanelLeftIcon } from "lucide-react"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
@@ -33,6 +33,8 @@ const SIDEBAR_WIDTH_MAX = 360
 const SIDEBAR_WIDTH_STORAGE_KEY = "sidebar_width"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
+
+const toggleSidebarLabel = "Toggle sidebar"
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed"
@@ -264,7 +266,7 @@ function SidebarTrigger({
   onClick,
   ...props
 }: React.ComponentProps<typeof Button>) {
-  const { isMobile, toggleSidebar } = useSidebar()
+  const { toggleSidebar } = useSidebar()
 
   return (
     <Button
@@ -279,15 +281,15 @@ function SidebarTrigger({
       }}
       {...props}
     >
-      {/* CEREBRO-PATCH(mobile-sidebar-burger-icon): use the familiar hamburger menu icon for the mobile drawer trigger. */}
-      {isMobile ? <MenuIcon /> : <PanelLeftIcon />}
-      <span className="sr-only">Toggle Sidebar</span>
+      <PanelLeftIcon />
+      <span className="sr-only">{toggleSidebarLabel}</span>
     </Button>
   )
 }
 
 function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
   const { toggleSidebar, setWidth, setIsResizing } = useSidebar()
+  const toggleLabel = toggleSidebarLabel
   const didDragRef = React.useRef(false)
   const dragRef = React.useRef<{ startX: number; startWidth: number } | null>(null)
 
@@ -331,11 +333,11 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
     <button
       data-sidebar="rail"
       data-slot="sidebar-rail"
-      aria-label="Toggle Sidebar"
+      aria-label={toggleLabel}
       tabIndex={-1}
       onClick={handleClick}
       onMouseDown={onMouseDown}
-      title="Toggle Sidebar"
+      title={toggleLabel}
       className={cn(
         "absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
         "in-data-[side=left]:cursor-col-resize in-data-[side=right]:cursor-col-resize",

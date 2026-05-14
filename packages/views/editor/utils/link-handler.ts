@@ -20,6 +20,7 @@ import { isGlobalPath } from "@multica/core/paths";
  * as intentional. Only "/issues/..." style paths get auto-prefixed.
  */
 const WORKSPACE_ROUTE_SEGMENTS = new Set([
+  "usage",
   "issues",
   "channels",
   "projects",

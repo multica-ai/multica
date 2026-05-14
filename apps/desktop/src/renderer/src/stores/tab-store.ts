@@ -350,7 +350,10 @@ export const useTabStore = create<TabStore>()(
         const { slug, group, index } = hit;
 
         const closing = group.tabs[index];
-        closing.router.dispose();
+        const disposeClosingRouter = () => {
+          // Let React unmount the tab's RouterProvider before disposing it.
+          window.setTimeout(() => closing.router.dispose(), 0);
+        };
 
         if (group.tabs.length === 1) {
           // Last tab in this workspace — reseed a default so the workspace
@@ -363,6 +366,7 @@ export const useTabStore = create<TabStore>()(
               [slug]: { tabs: [fresh], activeTabId: fresh.id },
             },
           });
+          disposeClosingRouter();
           return;
         }
 
@@ -378,6 +382,7 @@ export const useTabStore = create<TabStore>()(
             [slug]: { tabs: nextTabs, activeTabId: nextActiveTabId },
           },
         });
+        disposeClosingRouter();
       },
 
       setActiveTab(tabId) {
@@ -402,6 +407,13 @@ export const useTabStore = create<TabStore>()(
         const { slug, group, index } = hit;
         const current = group.tabs[index];
         const next: Tab = { ...current, ...patch };
+        if (
+          next.path === current.path &&
+          next.title === current.title &&
+          next.icon === current.icon
+        ) {
+          return;
+        }
         const nextTabs = [...group.tabs];
         nextTabs[index] = next;
         set({
@@ -418,6 +430,12 @@ export const useTabStore = create<TabStore>()(
         if (!hit) return;
         const { slug, group, index } = hit;
         const current = group.tabs[index];
+        if (
+          current.historyIndex === historyIndex &&
+          current.historyLength === historyLength
+        ) {
+          return;
+        }
         const next: Tab = { ...current, historyIndex, historyLength };
         const nextTabs = [...group.tabs];
         nextTabs[index] = next;

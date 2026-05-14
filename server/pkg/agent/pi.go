@@ -316,7 +316,6 @@ var piBlockedArgs = map[string]blockedArgMode{
 //	--session <path>            session log file (created upfront, reused on resume)
 //	--provider <name>           provider, when Model is "provider/id"
 //	--model <id>                model identifier
-//	--tools read,bash,...       explicit tool allowlist (pi has no --yolo)
 //	--append-system-prompt <s>  extra system instructions
 //
 // Custom args appended before the positional prompt. The prompt is a
@@ -338,7 +337,11 @@ func buildPiArgs(prompt, sessionPath string, opts ExecOptions, logger *slog.Logg
 			args = append(args, "--model", model)
 		}
 	}
-	args = append(args, "--tools", "read,bash,edit,write,grep,find,ls")
+	// Note: we intentionally do NOT pass --tools here. Omitting it lets
+	// Pi use its full tool registry, including user-installed extension
+	// tools. Passing --tools acts as a restrictive allowlist that
+	// silently filters out extension-registered tools (#2379).
+	// Users who want to restrict tools can do so via custom_args.
 	if opts.SystemPrompt != "" {
 		args = append(args, "--append-system-prompt", opts.SystemPrompt)
 	}

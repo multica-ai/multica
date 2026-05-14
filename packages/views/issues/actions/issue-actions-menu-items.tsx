@@ -26,7 +26,6 @@ import {
 import { issueKeys } from "@multica/core/issues/queries";
 import { StatusIcon } from "../components/status-icon";
 import { PriorityIcon } from "../components/priority-icon";
-import { ActorAvatar } from "../../common/actor-avatar";
 import {
   DropdownMenuItem,
   DropdownMenuSub,
@@ -78,6 +77,11 @@ interface IssueActionsMenuItemsProps {
   issue: Issue;
   actions: UseIssueActionsResult;
   primitives: MenuPrimitives;
+  /** Called when the user clicks the Assignee menu item. The parent should
+   *  close the surrounding menu and open the shared `AssigneePicker` popover.
+   *  Decoupled this way so the same item can drive both the dropdown
+   *  (3-dot button) and the context menu (right-click) wrappers. */
+  onOpenAssignee: () => void;
   /** If set, navigate here after the issue is deleted (used by the detail page). */
   onDeletedNavigateTo?: string;
 }
@@ -86,12 +90,11 @@ export function IssueActionsMenuItems({
   issue,
   actions,
   primitives: P,
+  onOpenAssignee,
   onDeletedNavigateTo,
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const {
-    members,
-    agents,
     isPinned,
     updateField,
     togglePin,
@@ -184,55 +187,15 @@ export function IssueActionsMenuItems({
         </P.SubContent>
       </P.Sub>
 
-      {/* Assignee */}
-      <P.Sub>
-        <P.SubTrigger>
-          <UserMinus className="h-3.5 w-3.5" />
-          {t(($) => $.actions.assignee)}
-        </P.SubTrigger>
-        <P.SubContent>
-          <P.Item
-            onClick={() =>
-              updateField({ assignee_type: null, assignee_id: null })
-            }
-          >
-            <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
-            {t(($) => $.actions.unassigned)}
-            {!issue.assignee_type && (
-              <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
-            )}
-          </P.Item>
-          {members.map((m) => (
-            <P.Item
-              key={m.user_id}
-              onClick={() =>
-                updateField({ assignee_type: "member", assignee_id: m.user_id })
-              }
-            >
-              <ActorAvatar actorType="member" actorId={m.user_id} size={16} />
-              {m.name}
-              {issue.assignee_type === "member" &&
-                issue.assignee_id === m.user_id && (
-                  <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
-                )}
-            </P.Item>
-          ))}
-          {agents.map((a) => (
-            <P.Item
-              key={a.id}
-              onClick={() =>
-                updateField({ assignee_type: "agent", assignee_id: a.id })
-              }
-            >
-              <ActorAvatar actorType="agent" actorId={a.id} size={16} />
-              {a.name}
-              {issue.assignee_type === "agent" && issue.assignee_id === a.id && (
-                <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
-              )}
-            </P.Item>
-          ))}
-        </P.SubContent>
-      </P.Sub>
+      {/* Assignee — closes this menu and hands off to the shared
+          AssigneePicker (members + agents + squads, with search and
+          permission checks). Keeps a single source of truth for the
+          assignee UX across detail sidebar, board cards, and right-click /
+          3-dot menus. */}
+      <P.Item onClick={onOpenAssignee}>
+        <UserMinus className="h-3.5 w-3.5" />
+        {t(($) => $.actions.assignee)}
+      </P.Item>
 
       {/* Due date */}
       <P.Sub>

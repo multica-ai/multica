@@ -17,6 +17,7 @@
     "./hooks/*": "./hooks/*.ts",
     "./lib/utils": "./lib/utils.ts",
     "./lib/data-table": "./lib/data-table.ts",
+    "./i18n-types": "./types/i18next.ts",
     "./styles/tokens.css": "./styles/tokens.css",
     "./styles/base.css": "./styles/base.css"
   },
@@ -52,8 +53,10 @@
     "vaul": "^1.1.2"
   },
   "peerDependencies": {
+    "i18next": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "react-i18next": "catalog:"
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",

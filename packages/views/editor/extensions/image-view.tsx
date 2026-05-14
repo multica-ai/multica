@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
+import { useAttachmentDownloadResolver } from "../attachment-download-context";
 
 // ---------------------------------------------------------------------------
 // Lightbox — full-screen image preview (ESC or click backdrop to close)
@@ -62,6 +63,7 @@ function ImageView({ node, editor, selected, deleteNode, getPos }: NodeViewProps
   const alt = (node.attrs.alt as string) || "";
   const title = node.attrs.title as string | undefined;
   const uploading = node.attrs.uploading as boolean;
+  const { openByUrl } = useAttachmentDownloadResolver();
 
   const [lightbox, setLightbox] = useState(false);
   const isEditable = editor.isEditable;
@@ -71,8 +73,9 @@ function ImageView({ node, editor, selected, deleteNode, getPos }: NodeViewProps
   const handleDownload = () => {
     // Cross-origin CDN images can't be fetched as blob (CORS),
     // and <a download> is ignored for cross-origin URLs.
-    // Open in new tab — user can right-click → Save As.
-    window.open(src, "_blank", "noopener,noreferrer");
+    // Re-sign through the provider when the src maps to a known
+    // attachment; otherwise just open externally.
+    openByUrl(src);
   };
 
   const handleCopyLink = async () => {

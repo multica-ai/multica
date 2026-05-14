@@ -65,6 +65,45 @@ export function useMarkChatSessionRead() {
 }
 
 /**
+ * Renames a chat session. Optimistically swaps the title in the cached
+ * list so the dropdown reflects the new label immediately; rolls back on
+ * error. The matching `chat:session_updated` WS event keeps other
+ * tabs/devices in sync — see use-realtime-sync.ts.
+ */
+export function useUpdateChatSession() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: (data: { sessionId: string; title: string }) => {
+      logger.info("updateChatSession.start", {
+        sessionId: data.sessionId,
+        titleLength: data.title.length,
+      });
+      return api.updateChatSession(data.sessionId, { title: data.title });
+    },
+    onMutate: async ({ sessionId, title }) => {
+      await qc.cancelQueries({ queryKey: chatKeys.sessions(wsId) });
+
+      const prevSessions = qc.getQueryData<ChatSession[]>(chatKeys.sessions(wsId));
+
+      const patch = (old?: ChatSession[]) =>
+        old?.map((s) => (s.id === sessionId ? { ...s, title } : s));
+      qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), patch);
+
+      return { prevSessions };
+    },
+    onError: (err, vars, ctx) => {
+      logger.error("updateChatSession.error.rollback", { sessionId: vars.sessionId, err });
+      if (ctx?.prevSessions) qc.setQueryData(chatKeys.sessions(wsId), ctx.prevSessions);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
+/**
  * Hard-deletes a chat session. Optimistically removes the row from the
  * sessions list so the dropdown updates instantly; rolls back on error.
  * The matching `chat:session_deleted` WS event keeps other tabs/devices

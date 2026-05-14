@@ -31,6 +31,8 @@ var extContentTypes = map[string]string{
 
 const maxUploadSize = 100 << 20 // 100 MB
 
+const maxPreviewTextSize = 2 << 20 // 2 MB
+
 // ---------------------------------------------------------------------------
 // Response types
 // ---------------------------------------------------------------------------
@@ -40,6 +42,7 @@ type AttachmentResponse struct {
 	WorkspaceID   string  `json:"workspace_id"`
 	IssueID       *string `json:"issue_id"`
 	CommentID     *string `json:"comment_id"`
+	ChatSessionID *string `json:"chat_session_id"`
 	ChatMessageID *string `json:"chat_message_id"`
 	UploaderType  string  `json:"uploader_type"`
 	UploaderID    string  `json:"uploader_id"`
@@ -74,6 +77,10 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 	if a.CommentID.Valid {
 		s := uuidToString(a.CommentID)
 		resp.CommentID = &s
+	}
+	if a.ChatSessionID.Valid {
+		s := uuidToString(a.ChatSessionID)
+		resp.ChatSessionID = &s
 	}
 	if a.ChatMessageID.Valid {
 		s := uuidToString(a.ChatMessageID)
@@ -242,6 +249,21 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			params.CommentID = comment.ID
+		}
+		if chatSessionID := r.FormValue("chat_session_id"); chatSessionID != "" {
+			sessionUUID, ok := parseUUIDOrBadRequest(w, chatSessionID, "chat_session_id")
+			if !ok {
+				return
+			}
+			session, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
+				ID:          sessionUUID,
+				WorkspaceID: parseUUID(workspaceID),
+			})
+			if err != nil || uuidToString(session.CreatorID) != userID {
+				writeError(w, http.StatusForbidden, "invalid chat_session_id")
+				return
+			}
+			params.ChatSessionID = session.ID
 		}
 		if chatMessageID := r.FormValue("chat_message_id"); chatMessageID != "" {
 			msg, err := h.Queries.GetChatMessage(r.Context(), parseUUID(chatMessageID))
@@ -441,6 +463,120 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// GetAttachmentContent streams text-previewable attachment bytes through the
+// API so the browser can preview them without CloudFront CORS or attachment
+// content-disposition getting in the way.
+func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
+	attachmentID := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
+	attUUID, ok := parseUUIDOrBadRequest(w, attachmentID, "attachment id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
+	att, err := h.Queries.GetAttachment(r.Context(), db.GetAttachmentParams{
+		ID:          attUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+	if !isTextPreviewable(att.ContentType, att.Filename) {
+		writeError(w, http.StatusUnsupportedMediaType, "preview not supported for this file type")
+		return
+	}
+	if h.Storage == nil {
+		writeError(w, http.StatusServiceUnavailable, "storage not configured")
+		return
+	}
+
+	key := h.Storage.KeyFromURL(att.Url)
+	reader, err := h.Storage.GetReader(r.Context(), key)
+	if err != nil {
+		slog.Error("failed to open attachment for preview", "id", attachmentID, "key", key, "error", err)
+		writeError(w, http.StatusNotFound, "attachment object not found")
+		return
+	}
+	defer reader.Close()
+
+	body, err := io.ReadAll(io.LimitReader(reader, maxPreviewTextSize+1))
+	if err != nil {
+		slog.Error("failed to read attachment body for preview", "id", attachmentID, "error", err)
+		writeError(w, http.StatusBadGateway, "failed to read attachment body")
+		return
+	}
+	if len(body) > maxPreviewTextSize {
+		writeError(w, http.StatusRequestEntityTooLarge, "file too large for inline preview")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Original-Content-Type", att.ContentType)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	if _, err := w.Write(body); err != nil {
+		slog.Error("failed to write attachment preview body", "id", attachmentID, "error", err)
+	}
+}
+
+func isTextPreviewable(contentType, filename string) bool {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if idx := strings.Index(ct, ";"); idx >= 0 {
+		ct = strings.TrimSpace(ct[:idx])
+	}
+	if strings.HasPrefix(ct, "text/") {
+		return true
+	}
+	switch ct {
+	case "application/json",
+		"application/javascript",
+		"application/xml",
+		"application/x-yaml",
+		"application/yaml",
+		"application/toml",
+		"application/x-sh",
+		"application/x-httpd-php":
+		return true
+	}
+
+	ext := strings.ToLower(path.Ext(filename))
+	switch ext {
+	case ".md", ".markdown",
+		".txt", ".log",
+		".csv", ".tsv",
+		".html", ".htm",
+		".json", ".xml",
+		".yml", ".yaml", ".toml", ".ini", ".conf",
+		".sh", ".bash", ".zsh",
+		".py", ".rb", ".go", ".rs",
+		".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+		".css", ".scss", ".sass", ".less",
+		".sql",
+		".java", ".kt", ".swift",
+		".c", ".cc", ".cpp", ".h", ".hpp",
+		".cs", ".php", ".lua", ".vim",
+		".dockerfile", ".makefile", ".gitignore":
+		return true
+	}
+	base := strings.ToLower(path.Base(filename))
+	switch base {
+	case "dockerfile", "makefile", ".env":
+		return true
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------

@@ -94,14 +94,24 @@ export function registerForWorkspaceRehydration(fn: () => void) {
 /**
  * Storage that automatically namespaces keys with the current workspace slug.
  * Reads _currentSlug at call time, so it follows workspace switches dynamically.
+ *
+ * When no workspace is active (e.g. zustand persist's initial hydration before
+ * WorkspaceRouteLayout has called setCurrentWorkspace, or a setter firing from
+ * a child component's mount-effect before the parent layout's effect has run),
+ * reads return null and writes are dropped — explicitly NOT a fallback to the
+ * un-namespaced bare key, which used to leak workspace-scoped data across
+ * workspaces. Persisted stores get a real read once setCurrentWorkspace
+ * triggers their registered rehydrate fn.
  */
 export function createWorkspaceAwareStorage(adapter: StorageAdapter): StateStorage {
-  const resolve = (key: string) =>
-    _currentSlug ? `${key}:${_currentSlug}` : key;
-
   return {
-    getItem: (key) => adapter.getItem(resolve(key)),
-    setItem: (key, value) => adapter.setItem(resolve(key), value),
-    removeItem: (key) => adapter.removeItem(resolve(key)),
+    getItem: (key) =>
+      _currentSlug ? adapter.getItem(`${key}:${_currentSlug}`) : null,
+    setItem: (key, value) => {
+      if (_currentSlug) adapter.setItem(`${key}:${_currentSlug}`, value);
+    },
+    removeItem: (key) => {
+      if (_currentSlug) adapter.removeItem(`${key}:${_currentSlug}`);
+    },
   };
 }

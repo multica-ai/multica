@@ -1,4 +1,4 @@
-import { shell } from "electron";
+import { shell, type BrowserWindow } from "electron";
 
 // True when the URL parses and uses http/https — the only schemes we let
 // reach `shell.openExternal`. Scheme comparison is safe because the WHATWG
@@ -17,6 +17,19 @@ export function openExternalSafely(url: string): Promise<void> | void {
     return;
   }
   return shell.openExternal(url);
+}
+
+// Canonical wrapper around webContents.downloadURL. All renderer-controlled
+// URLs that trigger a native download MUST flow through here; direct calls
+// to `webContents.downloadURL` elsewhere in the main process are banned by
+// the no-restricted-syntax rule in apps/desktop/eslint.config.mjs.
+// Reuses the same http/https allowlist as openExternalSafely.
+export function downloadURLSafely(win: BrowserWindow, url: string): void {
+  if (getHttpProtocol(url) === null) {
+    console.warn(`[security] blocked downloadURL: ${describeScheme(url)}`);
+    return;
+  }
+  win.webContents.downloadURL(url);
 }
 
 function getHttpProtocol(url: string): "http:" | "https:" | null {

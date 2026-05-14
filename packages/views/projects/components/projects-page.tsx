@@ -47,6 +47,7 @@ import {
   useProjectPriorityLabels,
   useFormatRelativeDate,
 } from "./labels";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 function ProjectRow({ project }: { project: Project }) {
   const { t } = useT("projects");
@@ -65,8 +66,8 @@ function ProjectRow({ project }: { project: Project }) {
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
   const leadQuery = leadFilter.toLowerCase();
-  const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery));
-  const filteredAgents = agents.filter((a) => !a.archived_at && a.name.toLowerCase().includes(leadQuery));
+  const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
+  const filteredAgents = agents.filter((a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)));
 
   const handleUpdate = useCallback(
     (data: UpdateProjectRequest) => {

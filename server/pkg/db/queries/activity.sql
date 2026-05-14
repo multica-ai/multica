@@ -27,6 +27,17 @@ WHERE workspace_id = $1
   AND ($2::text[] IS NULL OR action = ANY($2::text[]))
 ORDER BY created_at DESC
 LIMIT $3 OFFSET $4;
+-- name: HasSquadLeaderNoActionEvaluationForTask :one
+SELECT EXISTS (
+  SELECT 1
+  FROM activity_log
+  WHERE issue_id = @issue_id
+    AND actor_type = 'agent'
+    AND actor_id = @agent_id
+    AND action = 'squad_leader_evaluated'
+    AND details->>'outcome' = 'no_action'
+    AND details->>'task_id' = @task_id::text
+) AS exists;
 
 -- name: CountAssigneeChangesByActor :many
 -- Count how many times a user assigned each target via assignee_changed activities.

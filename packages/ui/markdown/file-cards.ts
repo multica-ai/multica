@@ -16,6 +16,12 @@
 
 const IMAGE_EXTS = /\.(png|jpe?g|gif|webp|svg|ico|bmp|tiff?)$/i
 
+export const FILE_CARD_URL_PATTERN = /\/uploads\/[^)]*|https?:\/\/[^)]+/
+
+export function isAllowedFileCardHref(href: string): boolean {
+  return /^(https?:\/\/|\/uploads\/)/i.test(href)
+}
+
 /** True if the URL's pathname ends in an image extension. */
 export function isImageUrl(url: string): boolean {
   try {
@@ -30,7 +36,9 @@ export function isImageUrl(url: string): boolean {
 // in addition to absolute `https://` URLs, so chat uploads (which return
 // relative paths) render as file cards instead of literal markdown text.
 /** New syntax: !file[name](url) — unambiguous, no hostname matching needed. */
-const NEW_FILE_CARD_RE = /^!file\[([^\]]*)\]\((https?:\/\/[^)]+|\/[^)]+)\)$/
+const NEW_FILE_CARD_RE = new RegExp(
+  `^!file\\[([^\\]]*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)$`,
+)
 
 /** Legacy syntax: [name](cdnUrl) on its own line — matched by CDN hostname. */
 const FILE_LINK_LINE = /^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/

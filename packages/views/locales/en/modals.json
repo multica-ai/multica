@@ -22,14 +22,15 @@
   },
   "feedback": {
     "title": "Feedback",
-    "description": "We'd love to hear what's working, what isn't, or what you'd like to see next.",
     "placeholder": "Tell us about your experience, bugs you've found, or features you'd like to see…",
     "toast_uploading": "Please wait for uploads to finish…",
     "toast_too_long": "Message is too long",
     "toast_sent": "Thanks for the feedback!",
     "toast_failed": "Failed to send feedback",
     "send": "Send feedback",
-    "sending": "Sending…"
+    "sending": "Sending…",
+    "github_hint_prefix": "Want faster handling and open discussion? Head to ",
+    "github_hint_link": "GitHub"
   },
   "issue_picker": {
     "search_placeholder": "Search issues...",
@@ -51,6 +52,22 @@
   },
   "backlog_hint": {
     "toast_status_failed": "Failed to update status"
+  },
+  "create_squad": {
+    "title": "Create Squad",
+    "description": "Create a collaborative squad with a leader agent who coordinates the team.",
+    "name_label": "Name",
+    "name_placeholder": "e.g. Frontend Team",
+    "description_label": "Description",
+    "description_placeholder": "Describe what this squad is responsible for...",
+    "leader_label": "Leader Agent",
+    "leader_hint": "The leader receives all tasks assigned to this squad and coordinates the team.",
+    "no_agents": "No active agents available. Create an agent first.",
+    "cancel": "Cancel",
+    "submit": "Create Squad",
+    "submitting": "Creating...",
+    "toast_created": "Squad created",
+    "toast_failed": "Failed to create squad"
   },
   "create_project": {
     "title": "New Project",
@@ -117,7 +134,10 @@
       "created_by": "Created by",
       "select_agent_aria": "Select agent",
       "pick_an_agent": "Pick an agent…",
-      "no_agents": "No agents available.",
+      "no_agents": "No agents or squads available.",
+      "search_placeholder": "Search agents and squads…",
+      "agents_group": "Agents",
+      "squads_group": "Squads",
       "version_missing": "This agent's daemon doesn't report a CLI version. Create with agent needs multica CLI ≥ {{min}}. Upgrade the daemon and reconnect, or switch to manual create.",
       "version_below": "This agent's daemon CLI is {{current}} — Create with agent needs ≥ {{min}}. Upgrade the daemon, or switch to manual create.",
       "prompt_placeholder": "Tell the agent what to do, e.g. \"let Bohan fix the inbox loading slowness in the Web project\"",

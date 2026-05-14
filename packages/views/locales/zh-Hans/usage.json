@@ -1,0 +1,42 @@
+{
+  "title": "用量",
+  "subtitle": "查看当前 Workspace 的 token 消耗和智能体运行情况。",
+  "filter": {
+    "project_label": "项目",
+    "all_projects": "全部项目",
+    "period_label": "时间范围"
+  },
+  "kpi": {
+    "cost_label": "费用 · {{days}}天",
+    "tokens_label": "Token · {{days}}天",
+    "tokens_hint": "输入 {{input}} · 输出 {{output}}",
+    "run_time_label": "运行时长 · {{days}}天",
+    "run_time_hint": "共 {{tasks}} 个任务",
+    "tasks_label": "任务数 · {{days}}天",
+    "tasks_hint": "失败 {{failed}} 个"
+  },
+  "daily": {
+    "title_cost": "每日费用",
+    "title_tokens": "每日 Token",
+    "metric_cost": "费用",
+    "metric_tokens": "Token",
+    "no_data": "所选时间范围内暂无消耗。"
+  },
+  "leaderboard": {
+    "title": "排行榜",
+    "caption": "{{count}} 个智能体",
+    "header_agent": "智能体",
+    "header_tokens": "Token",
+    "header_cost": "费用",
+    "header_time": "运行时长",
+    "header_tasks": "任务数",
+    "no_data": "所选时间范围内暂无智能体活动。"
+  },
+  "empty": {
+    "title": "暂无消耗数据",
+    "body": "当智能体在这里开始执行任务后，它们的 token 消耗和运行时长将出现在此处。"
+  },
+  "duration": {
+    "less_than_minute": "<1分钟"
+  }
+}

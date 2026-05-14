@@ -2,6 +2,7 @@ package agent
 
 import (
 	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -88,6 +89,64 @@ func TestBuildGeminiArgsPassesThroughCustomArgs(t *testing.T) {
 
 	if args[len(args)-1] != "--sandbox" {
 		t.Fatalf("expected --sandbox at end of args, got %v", args)
+	}
+}
+
+// envLookup returns the value of key in an env slice, or ("", false) if absent.
+// When the key appears multiple times the last occurrence wins, mirroring how
+// libc's getenv resolves duplicates on the daemon's supported platforms — the
+// caller-supplied override therefore takes precedence over our default.
+func envLookup(env []string, key string) (string, bool) {
+	prefix := key + "="
+	var value string
+	var found bool
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			value = strings.TrimPrefix(entry, prefix)
+			found = true
+		}
+	}
+	return value, found
+}
+
+func TestBuildGeminiEnvSetsTrustWorkspaceDefault(t *testing.T) {
+	t.Parallel()
+
+	env := buildGeminiEnv(nil)
+	got, ok := envLookup(env, "GEMINI_CLI_TRUST_WORKSPACE")
+	if !ok {
+		t.Fatalf("expected GEMINI_CLI_TRUST_WORKSPACE to be set, got env=%v", env)
+	}
+	if got != "true" {
+		t.Fatalf("expected GEMINI_CLI_TRUST_WORKSPACE=true, got %q", got)
+	}
+}
+
+func TestBuildGeminiEnvRespectsExplicitOverride(t *testing.T) {
+	t.Parallel()
+
+	// Users who deliberately set the value (e.g. to "false" to opt back into
+	// gemini's folder-trust gate, or to a future-proofed value) must win over
+	// our daemon default.
+	env := buildGeminiEnv(map[string]string{"GEMINI_CLI_TRUST_WORKSPACE": "false"})
+	got, ok := envLookup(env, "GEMINI_CLI_TRUST_WORKSPACE")
+	if !ok {
+		t.Fatalf("expected GEMINI_CLI_TRUST_WORKSPACE to be set, got env=%v", env)
+	}
+	if got != "false" {
+		t.Fatalf("expected caller's GEMINI_CLI_TRUST_WORKSPACE=false to win, got %q", got)
+	}
+}
+
+func TestBuildGeminiEnvPreservesOtherExtras(t *testing.T) {
+	t.Parallel()
+
+	env := buildGeminiEnv(map[string]string{"GEMINI_API_KEY": "secret"})
+	if got, ok := envLookup(env, "GEMINI_API_KEY"); !ok || got != "secret" {
+		t.Fatalf("expected GEMINI_API_KEY=secret to pass through, got %q (ok=%v)", got, ok)
+	}
+	if got, ok := envLookup(env, "GEMINI_CLI_TRUST_WORKSPACE"); !ok || got != "true" {
+		t.Fatalf("expected default GEMINI_CLI_TRUST_WORKSPACE=true, got %q (ok=%v)", got, ok)
 	}
 }
 

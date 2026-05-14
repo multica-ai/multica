@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import {
   ArrowUpCircle,
+  Globe,
+  Lock,
   MoreHorizontal,
   Trash2,
 } from "lucide-react";
@@ -233,14 +235,14 @@ function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
         <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
       </div>
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <span className="block min-w-0 truncate text-sm font-medium">
+        <span className="block min-w-0 shrink truncate text-sm font-medium">
           {baseName}
         </span>
         {hostname && (
           <Tooltip>
             <TooltipTrigger
               render={
-                <span className="block min-w-0 truncate text-xs text-muted-foreground/70">
+                <span className="block min-w-0 flex-1 basis-0 truncate text-xs text-muted-foreground/70">
                   ({hostname})
                 </span>
               }
@@ -248,8 +250,43 @@ function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
             <TooltipContent>{hostname}</TooltipContent>
           </Tooltip>
         )}
+        <VisibilityBadge runtime={runtime} />
       </div>
     </div>
+  );
+}
+
+// VisibilityBadge — small chip next to the runtime name showing whether
+// the runtime is shareable (public) or owner-only (private). Older backends
+// that don't ship the visibility field render the strict default (private).
+function VisibilityBadge({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  const isPublic = runtime.visibility === "public";
+  const Icon = isPublic ? Globe : Lock;
+  const label = isPublic
+    ? t(($) => $.detail.visibility_label.public)
+    : t(($) => $.detail.visibility_label.private);
+  const tooltip = isPublic
+    ? t(($) => $.detail.visibility_hint.public)
+    : t(($) => $.detail.visibility_hint.private);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className={`shrink-0 inline-flex items-center gap-0.5 rounded px-1 text-[10px] font-medium ${
+              isPublic
+                ? "bg-info/10 text-info"
+                : "bg-muted text-muted-foreground"
+            }`}
+          >
+            <Icon className="h-2.5 w-2.5" />
+            {label}
+          </span>
+        }
+      />
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
   );
 }
 

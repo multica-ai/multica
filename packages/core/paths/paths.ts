@@ -19,6 +19,7 @@ function workspaceScoped(slug: string) {
   const ws = `/${encode(slug)}`;
   return {
     root: () => `${ws}/issues`,
+    usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
     issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
     channels: () => `${ws}/channels`,
@@ -37,6 +38,8 @@ function workspaceScoped(slug: string) {
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
     agents: () => `${ws}/agents`,
     agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,
+    squads: () => `${ws}/squads`,
+    squadDetail: (id: string) => `${ws}/squads/${encode(id)}`,
     inbox: () => `${ws}/inbox`,
     search: () => `${ws}/search`, // CEREBRO-PATCH(search-page-1326): JEH-1326 dedicated search page path
     notifications: () => `${ws}/notifications`,

@@ -61,6 +61,9 @@ export type WSEventType =
   | "project:created"
   | "project:updated"
   | "project:deleted"
+  | "squad:created"
+  | "squad:updated"
+  | "squad:deleted"
   | "label:created"
   | "label:updated"
   | "label:deleted"
@@ -91,7 +94,12 @@ export type WSEventType =
   | "project:group_access_changed"
   // Connection liveness — emitted periodically by the server so the client can
   // detect a half-open or system-suspended (iOS PWA background) socket.
-  | "server:ping";
+  | "server:ping"
+  | "github_installation:created"
+  | "github_installation:deleted"
+  | "pull_request:linked"
+  | "pull_request:updated"
+  | "pull_request:unlinked";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -321,7 +329,16 @@ export interface ChatMessageEventPayload {
 export interface ChatDonePayload {
   chat_session_id: string;
   task_id: string;
+  /**
+   * Server populates these from the freshly-persisted assistant ChatMessage
+   * row so the WS handler can write it into the messages cache inline. Older
+   * servers (pre-#2123) only sent chat_session_id + task_id; treat every field
+   * below as optional and fall back to a refetch when absent.
+   */
+  message_id?: string;
   content?: string;
+  elapsed_ms?: number;
+  created_at?: string;
 }
 
 export interface ChatSessionReadPayload {

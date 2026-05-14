@@ -2,12 +2,13 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "../hooks";
-import { memberListOptions, agentListOptions } from "./queries";
+import { memberListOptions, agentListOptions, squadListOptions } from "./queries";
 
 export function useActorName() {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
 
   const getMemberName = (userId: string) => {
     const m = members.find((m) => m.user_id === userId);
@@ -19,9 +20,16 @@ export function useActorName() {
     return a?.name ?? "Unknown Agent";
   };
 
+  const getSquadName = (squadId: string) => {
+    const s = squads.find((s) => s.id === squadId);
+    return s?.name ?? "Unknown Squad";
+  };
+
   const getActorName = (type: string, id: string) => {
     if (type === "member") return getMemberName(id);
     if (type === "agent") return getAgentName(id);
+    if (type === "squad") return getSquadName(id);
+    if (type === "system") return "Multica";
     return "System";
   };
 
@@ -38,8 +46,9 @@ export function useActorName() {
   const getActorAvatarUrl = (type: string, id: string): string | null => {
     if (type === "member") return members.find((m) => m.user_id === id)?.avatar_url ?? null;
     if (type === "agent") return agents.find((a) => a.id === id)?.avatar_url ?? null;
+    if (type === "squad") return squads.find((s) => s.id === id)?.avatar_url ?? null;
     return null;
   };
 
-  return { getMemberName, getAgentName, getActorName, getActorInitials, getActorAvatarUrl };
+  return { getMemberName, getAgentName, getSquadName, getActorName, getActorInitials, getActorAvatarUrl };
 }

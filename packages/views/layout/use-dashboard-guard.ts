@@ -11,6 +11,7 @@ import {
   useHasOnboarded,
 } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace";
+import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useNavigation } from "../navigation";
 
 /**
@@ -62,6 +63,16 @@ export function useDashboardGuard() {
   useEffect(() => {
     useNavigationStore.getState().onPathChange(pathname);
   }, [pathname]);
+
+  // Drop recent-issues buckets for workspaces the user no longer belongs to.
+  // Runs once the workspace list resolves, and again whenever membership
+  // changes (workspace deleted, user kicked, user left).
+  useEffect(() => {
+    if (!workspaceListFetched) return;
+    useRecentIssuesStore
+      .getState()
+      .pruneWorkspaces(workspaces.map((w) => w.id));
+  }, [workspaceListFetched, workspaces]);
 
   return { user, isLoading, workspace };
 }

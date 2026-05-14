@@ -35,6 +35,8 @@ const baseRuntime: AgentRuntime = {
   owner_id: null,
   sandbox_enabled: null,
   persona_sandbox: "",
+  visibility: "private",
+  timezone: "UTC",
   capabilities: {},
   last_seen_at: null,
   created_at: "2026-01-01T00:00:00Z",
