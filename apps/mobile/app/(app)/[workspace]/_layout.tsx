@@ -6,6 +6,7 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { RealtimeProvider } from "@/data/realtime/realtime-provider";
 import { useInboxRealtime } from "@/data/realtime/use-inbox-realtime";
 import { useMyIssuesRealtime } from "@/data/realtime/use-my-issues-realtime";
+import { useChatSessionsRealtime } from "@/data/realtime/use-chat-sessions-realtime";
 import { ModalCloseButton } from "@/components/ui/modal-close-button";
 
 /**
@@ -20,6 +21,7 @@ import { ModalCloseButton } from "@/components/ui/modal-close-button";
 function RealtimeSubscriptions() {
   useInboxRealtime();
   useMyIssuesRealtime();
+  useChatSessionsRealtime();
   return null;
 }
 

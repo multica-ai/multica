@@ -16,6 +16,9 @@
 import type {
   Agent,
   Attachment,
+  ChatMessage,
+  ChatPendingTask,
+  ChatSession,
   Comment,
   CreateIssueRequest,
   InboxItem,
@@ -28,6 +31,7 @@ import type {
   ListProjectsResponse,
   MemberWithUser,
   Reaction,
+  SendChatMessageResponse,
   TimelinePage,
   UpdateIssueRequest,
   User,
@@ -41,10 +45,18 @@ import {
 } from "@multica/core/api/schemas";
 import {
   AttachmentSchema,
+  ChatMessageListSchema,
+  ChatPendingTaskSchema,
+  ChatSessionListSchema,
+  ChatSessionSchema,
+  EMPTY_CHAT_MESSAGE_LIST,
+  EMPTY_CHAT_PENDING_TASK,
+  EMPTY_CHAT_SESSION_LIST,
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_LIST_PROJECTS_RESPONSE,
   ListLabelsResponseSchema,
   ListProjectsResponseSchema,
+  SendChatMessageResponseSchema,
 } from "./schemas";
 import { getCurrentSlug } from "./workspace-store";
 import { parseWithFallback } from "@/lib/parse-response";
@@ -473,6 +485,115 @@ class ApiClient {
       EMPTY_LIST_PROJECTS_RESPONSE,
       { endpoint: "GET /api/projects" },
     );
+  }
+
+  // --- Chat ---
+  // Mirrors the surface area of packages/core/api/client.ts chat methods.
+  // v1 omits getChatSession + updateChatSession (rename) — see the v1 cut
+  // list in /Users/qingnaiyuan/.claude/plans/plan-velvety-puddle.md.
+
+  async listChatSessions(
+    opts?: { signal?: AbortSignal },
+  ): Promise<ChatSession[]> {
+    const raw = await this.fetch<unknown>("/api/chat/sessions", {
+      signal: opts?.signal,
+    });
+    return parseWithFallback(
+      raw,
+      ChatSessionListSchema,
+      EMPTY_CHAT_SESSION_LIST,
+      { endpoint: "GET /api/chat/sessions" },
+    );
+  }
+
+  async createChatSession(
+    data: { agent_id: string; title?: string },
+  ): Promise<ChatSession> {
+    // Strict parse — a malformed create response derails the optimistic
+    // burst (we need the new session id to seed caches). Fallback would
+    // be worse than the throw.
+    const raw = await this.fetch<unknown>("/api/chat/sessions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    const parsed = ChatSessionSchema.safeParse(raw);
+    if (!parsed.success) {
+      console.error("[api] ← shape mismatch POST /api/chat/sessions", {
+        issues: parsed.error.issues,
+      });
+      throw new ApiError("Create chat session response invalid", 0, raw);
+    }
+    return parsed.data;
+  }
+
+  async deleteChatSession(id: string): Promise<void> {
+    await this.fetch<void>(`/api/chat/sessions/${id}`, { method: "DELETE" });
+  }
+
+  async listChatMessages(
+    sessionId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<ChatMessage[]> {
+    const raw = await this.fetch<unknown>(
+      `/api/chat/sessions/${sessionId}/messages`,
+      { signal: opts?.signal },
+    );
+    return parseWithFallback(
+      raw,
+      ChatMessageListSchema,
+      EMPTY_CHAT_MESSAGE_LIST,
+      { endpoint: "GET /api/chat/sessions/:id/messages" },
+    );
+  }
+
+  async sendChatMessage(
+    sessionId: string,
+    content: string,
+  ): Promise<SendChatMessageResponse> {
+    // Strict parse — we need task_id + created_at to anchor the optimistic
+    // StatusPill. Fallback would silently break the elapsed-time timer.
+    const raw = await this.fetch<unknown>(
+      `/api/chat/sessions/${sessionId}/messages`,
+      {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      },
+    );
+    const parsed = SendChatMessageResponseSchema.safeParse(raw);
+    if (!parsed.success) {
+      console.error("[api] ← shape mismatch POST /api/chat/sessions/:id/messages", {
+        issues: parsed.error.issues,
+      });
+      throw new ApiError("Send message response invalid", 0, raw);
+    }
+    return parsed.data;
+  }
+
+  async getPendingChatTask(
+    sessionId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<ChatPendingTask> {
+    const raw = await this.fetch<unknown>(
+      `/api/chat/sessions/${sessionId}/pending-task`,
+      { signal: opts?.signal },
+    );
+    return parseWithFallback(
+      raw,
+      ChatPendingTaskSchema,
+      EMPTY_CHAT_PENDING_TASK,
+      { endpoint: "GET /api/chat/sessions/:id/pending-task" },
+    );
+  }
+
+  async markChatSessionRead(sessionId: string): Promise<void> {
+    await this.fetch<void>(
+      `/api/chat/sessions/${sessionId}/read`,
+      { method: "POST" },
+    );
+  }
+
+  async cancelTaskById(taskId: string): Promise<void> {
+    await this.fetch<void>(`/api/tasks/${taskId}/cancel`, { method: "POST" });
   }
 
   // --- File Upload ---
