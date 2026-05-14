@@ -27,10 +27,12 @@ export function TasksPage() {
   const range = useCerebroTasksStore((s) => s.range);
   const limit = useCerebroTasksStore((s) => s.limit);
   const offset = useCerebroTasksStore((s) => s.offset);
+  const search = useCerebroTasksStore((s) => s.search);
+  const visibleColumns = useCerebroTasksStore((s) => s.visibleColumns);
 
   const wsId = workspace?.id ?? "";
   const list = useQuery(
-    cerebroTasksListOptions(wsId, { agentId, status, type, range, limit, offset }),
+    cerebroTasksListOptions(wsId, { agentId, status, type, range, search, limit, offset }),
   );
 
   if (!enabled) return null;
@@ -67,6 +69,7 @@ export function TasksPage() {
             isError={list.isError}
             errorMessage={list.error instanceof Error ? list.error.message : undefined}
             workspaceSlug={workspace.slug}
+            visibleColumns={visibleColumns}
           />
 
           {!list.isError && (

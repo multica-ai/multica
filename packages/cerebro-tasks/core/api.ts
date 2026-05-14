@@ -11,5 +11,6 @@ export async function fetchCerebroTasks(filter: TasksFilter): Promise<TasksListR
     since,
     limit: filter.limit,
     offset: filter.offset,
+    q: filter.search || null,
   });
 }

@@ -79,6 +79,7 @@ type listResponse struct {
 //	since      — RFC3339 timestamp; only tasks newer than this point
 //	limit      — page size, default 50, capped at 200
 //	offset     — pagination offset, default 0
+//	q          — free-text search on agent name, task title, and issue title (ILIKE)
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireUserID(w, r); !ok {
 		return
@@ -142,6 +143,11 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		offset = 0
 	}
 
+	var search pgtype.Text
+	if raw := q.Get("q"); raw != "" {
+		search = pgtype.Text{String: raw, Valid: true}
+	}
+
 	ctx := r.Context()
 
 	rows, err := h.Cerebro.ListCerebroTasks(ctx, cerebrodb.ListCerebroTasksParams{
@@ -152,6 +158,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Status:      status,
 		TaskType:    taskType,
 		Since:       since,
+		Q:           search,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list tasks")
@@ -164,6 +171,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Status:      status,
 		TaskType:    taskType,
 		Since:       since,
+		Q:           search,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count tasks")

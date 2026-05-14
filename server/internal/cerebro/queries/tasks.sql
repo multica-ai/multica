@@ -23,6 +23,10 @@ WHERE a.workspace_id = $1
   )
   AND (sqlc.narg('since')::timestamptz IS NULL OR
        COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= sqlc.narg('since')::timestamptz)
+  AND (sqlc.narg('q')::text IS NULL
+       OR a.name ILIKE ('%' || sqlc.narg('q')::text || '%')
+       OR atq.title ILIKE ('%' || sqlc.narg('q')::text || '%')
+       OR i.title ILIKE ('%' || sqlc.narg('q')::text || '%'))
 ORDER BY COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) DESC,
          atq.id DESC
 LIMIT $2 OFFSET $3;
@@ -31,6 +35,7 @@ LIMIT $2 OFFSET $3;
 SELECT COUNT(*)::int
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE a.workspace_id = $1
   AND (sqlc.narg('agent_id')::uuid IS NULL OR atq.agent_id = sqlc.narg('agent_id')::uuid)
   AND (sqlc.narg('status')::text IS NULL OR atq.status = sqlc.narg('status')::text)
@@ -40,4 +45,8 @@ WHERE a.workspace_id = $1
     OR (sqlc.narg('task_type')::text = 'issue' AND atq.chat_session_id IS NULL)
   )
   AND (sqlc.narg('since')::timestamptz IS NULL OR
-       COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= sqlc.narg('since')::timestamptz);
+       COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= sqlc.narg('since')::timestamptz)
+  AND (sqlc.narg('q')::text IS NULL
+       OR a.name ILIKE ('%' || sqlc.narg('q')::text || '%')
+       OR atq.title ILIKE ('%' || sqlc.narg('q')::text || '%')
+       OR i.title ILIKE ('%' || sqlc.narg('q')::text || '%'));

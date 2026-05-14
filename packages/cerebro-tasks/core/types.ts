@@ -10,6 +10,33 @@ export type TaskType = "issue" | "chat";
 
 export type TaskTimeRange = "all" | "24h" | "7d" | "30d";
 
+export type ColumnId = "agent" | "task" | "issue_name" | "issue_id" | "status" | "started" | "duration";
+
+export interface ColumnDef {
+  id: ColumnId;
+  label: string;
+}
+
+export const COLUMN_DEFS: ColumnDef[] = [
+  { id: "agent", label: "Agent" },
+  { id: "task", label: "Task" },
+  { id: "issue_name", label: "Issue navn" },
+  { id: "issue_id", label: "Issue ID" },
+  { id: "status", label: "Status" },
+  { id: "started", label: "Started" },
+  { id: "duration", label: "Varighed" },
+];
+
+export const DEFAULT_VISIBLE_COLUMNS: Record<ColumnId, boolean> = {
+  agent: true,
+  task: true,
+  issue_name: true,
+  issue_id: true,
+  status: true,
+  started: true,
+  duration: true,
+};
+
 export interface CerebroTask {
   task_id: string;
   agent_id: string;
@@ -39,6 +66,7 @@ export interface TasksFilter {
   status: TaskStatus | null;
   type: TaskType | null;
   range: TaskTimeRange;
+  search: string;
   limit: number;
   offset: number;
 }
@@ -47,7 +75,8 @@ export const DEFAULT_TASKS_FILTER: TasksFilter = {
   agentId: null,
   status: null,
   type: null,
-  range: "all",
+  range: "24h",
+  search: "",
   limit: 50,
   offset: 0,
 };

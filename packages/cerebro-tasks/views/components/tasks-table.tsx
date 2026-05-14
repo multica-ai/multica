@@ -3,7 +3,7 @@
 import { useNavigation } from "@multica/views/navigation";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
-import type { CerebroTask } from "../../core/types";
+import type { ColumnId, CerebroTask } from "../../core/types";
 
 interface TasksTableProps {
   tasks: CerebroTask[];
@@ -11,6 +11,7 @@ interface TasksTableProps {
   isError: boolean;
   errorMessage?: string;
   workspaceSlug: string;
+  visibleColumns: Record<ColumnId, boolean>;
 }
 
 export function TasksTable({
@@ -19,6 +20,7 @@ export function TasksTable({
   isError,
   errorMessage,
   workspaceSlug,
+  visibleColumns,
 }: TasksTableProps) {
   if (isError) {
     return (
@@ -54,16 +56,18 @@ export function TasksTable({
       <table className="w-full text-xs">
         <thead className="bg-muted/40 text-[10px] uppercase tracking-wide text-muted-foreground">
           <tr>
-            <th className="px-3 py-2 text-left font-medium">Agent</th>
-            <th className="px-3 py-2 text-left font-medium">Task</th>
-            <th className="px-3 py-2 text-left font-medium">Status</th>
-            <th className="px-3 py-2 text-left font-medium">Started</th>
-            <th className="px-3 py-2 text-left font-medium">Varighed</th>
+            {visibleColumns.agent && <th className="px-3 py-2 text-left font-medium">Agent</th>}
+            {visibleColumns.task && <th className="px-3 py-2 text-left font-medium">Task</th>}
+            {visibleColumns.issue_name && <th className="px-3 py-2 text-left font-medium">Issue navn</th>}
+            {visibleColumns.issue_id && <th className="px-3 py-2 text-left font-medium">Issue ID</th>}
+            {visibleColumns.status && <th className="px-3 py-2 text-left font-medium">Status</th>}
+            {visibleColumns.started && <th className="px-3 py-2 text-left font-medium">Started</th>}
+            {visibleColumns.duration && <th className="px-3 py-2 text-left font-medium">Varighed</th>}
           </tr>
         </thead>
         <tbody>
           {tasks.map((t) => (
-            <Row key={t.task_id} task={t} workspaceSlug={workspaceSlug} />
+            <Row key={t.task_id} task={t} workspaceSlug={workspaceSlug} visibleColumns={visibleColumns} />
           ))}
         </tbody>
       </table>
@@ -71,7 +75,15 @@ export function TasksTable({
   );
 }
 
-function Row({ task, workspaceSlug }: { task: CerebroTask; workspaceSlug: string }) {
+function Row({
+  task,
+  workspaceSlug,
+  visibleColumns,
+}: {
+  task: CerebroTask;
+  workspaceSlug: string;
+  visibleColumns: Record<ColumnId, boolean>;
+}) {
   const { push } = useNavigation();
   const target = rowTarget(task, workspaceSlug);
   const onClick = () => {
@@ -80,7 +92,7 @@ function Row({ task, workspaceSlug }: { task: CerebroTask; workspaceSlug: string
 
   const startedISO = task.started_at ?? task.dispatched_at ?? task.created_at;
   const endedISO = task.completed_at;
-  const title =
+  const taskTitle =
     task.task_title ||
     task.issue_title ||
     (task.chat_session_id ? "Chat task" : "Uden titel");
@@ -93,35 +105,56 @@ function Row({ task, workspaceSlug }: { task: CerebroTask; workspaceSlug: string
         target ? "cursor-pointer hover:bg-accent/40" : "opacity-70",
       )}
     >
-      <td className="px-3 py-2">
-        <div className="flex items-center gap-2">
-          <ActorAvatar
-            name={task.agent_name}
-            initials={task.agent_name.charAt(0).toUpperCase()}
-            avatarUrl={task.agent_avatar_url}
-            size={20}
-          />
-          <span className="truncate font-medium">{task.agent_name}</span>
-        </div>
-      </td>
-      <td className="px-3 py-2">
-        <div className="flex items-center gap-2">
-          <TaskKindBadge isChat={!!task.chat_session_id} />
-          <span className="truncate">{title}</span>
-          {task.issue_number !== undefined && task.issue_number > 0 && (
+      {visibleColumns.agent && (
+        <td className="px-3 py-2">
+          <div className="flex items-center gap-2">
+            <ActorAvatar
+              name={task.agent_name}
+              initials={task.agent_name.charAt(0).toUpperCase()}
+              avatarUrl={task.agent_avatar_url}
+              size={20}
+            />
+            <span className="truncate font-medium">{task.agent_name}</span>
+          </div>
+        </td>
+      )}
+      {visibleColumns.task && (
+        <td className="px-3 py-2">
+          <div className="flex items-center gap-2">
+            <TaskKindBadge isChat={!!task.chat_session_id} />
+            <span className="truncate">{taskTitle}</span>
+          </div>
+        </td>
+      )}
+      {visibleColumns.issue_name && (
+        <td className="px-3 py-2 text-muted-foreground">
+          <span className="truncate">{task.issue_title ?? "—"}</span>
+        </td>
+      )}
+      {visibleColumns.issue_id && (
+        <td className="px-3 py-2 text-muted-foreground">
+          {task.issue_number !== undefined && task.issue_number > 0 ? (
             <span className="shrink-0 rounded-sm bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">
               #{task.issue_number}
             </span>
+          ) : (
+            "—"
           )}
-        </div>
-      </td>
-      <td className="px-3 py-2">
-        <StatusBadge status={task.status} />
-      </td>
-      <td className="px-3 py-2 text-muted-foreground">{formatAbsolute(startedISO)}</td>
-      <td className="px-3 py-2 text-muted-foreground">
-        {formatDuration(startedISO, endedISO)}
-      </td>
+        </td>
+      )}
+      {visibleColumns.status && (
+        <td className="px-3 py-2">
+          <StatusBadge status={task.status} />
+        </td>
+      )}
+      {visibleColumns.started && (
+        <td className="px-3 py-2 text-muted-foreground">{formatAbsolute(startedISO)}</td>
+      )}
+      {visibleColumns.duration && (
+        <td className="px-3 py-2 text-muted-foreground">
+          {formatDuration(startedISO, endedISO)}
+        </td>
+      )}
     </tr>
   );
 }

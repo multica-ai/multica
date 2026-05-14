@@ -15,6 +15,7 @@ const countCerebroTasks = `-- name: CountCerebroTasks :one
 SELECT COUNT(*)::int
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE a.workspace_id = $1
   AND ($2::uuid IS NULL OR atq.agent_id = $2::uuid)
   AND ($3::text IS NULL OR atq.status = $3::text)
@@ -25,6 +26,10 @@ WHERE a.workspace_id = $1
   )
   AND ($5::timestamptz IS NULL OR
        COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $5::timestamptz)
+  AND ($6::text IS NULL
+       OR a.name ILIKE ('%' || $6::text || '%')
+       OR atq.title ILIKE ('%' || $6::text || '%')
+       OR i.title ILIKE ('%' || $6::text || '%'))
 `
 
 type CountCerebroTasksParams struct {
@@ -33,6 +38,7 @@ type CountCerebroTasksParams struct {
 	Status      pgtype.Text        `json:"status"`
 	TaskType    pgtype.Text        `json:"task_type"`
 	Since       pgtype.Timestamptz `json:"since"`
+	Q           pgtype.Text        `json:"q"`
 }
 
 func (q *Queries) CountCerebroTasks(ctx context.Context, arg CountCerebroTasksParams) (int32, error) {
@@ -42,6 +48,7 @@ func (q *Queries) CountCerebroTasks(ctx context.Context, arg CountCerebroTasksPa
 		arg.Status,
 		arg.TaskType,
 		arg.Since,
+		arg.Q,
 	)
 	var column_1 int32
 	err := row.Scan(&column_1)
@@ -68,6 +75,10 @@ WHERE a.workspace_id = $1
   )
   AND ($7::timestamptz IS NULL OR
        COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) >= $7::timestamptz)
+  AND ($8::text IS NULL
+       OR a.name ILIKE ('%' || $8::text || '%')
+       OR atq.title ILIKE ('%' || $8::text || '%')
+       OR i.title ILIKE ('%' || $8::text || '%'))
 ORDER BY COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) DESC,
          atq.id DESC
 LIMIT $2 OFFSET $3
@@ -81,6 +92,7 @@ type ListCerebroTasksParams struct {
 	Status      pgtype.Text        `json:"status"`
 	TaskType    pgtype.Text        `json:"task_type"`
 	Since       pgtype.Timestamptz `json:"since"`
+	Q           pgtype.Text        `json:"q"`
 }
 
 type ListCerebroTasksRow struct {
@@ -114,6 +126,7 @@ func (q *Queries) ListCerebroTasks(ctx context.Context, arg ListCerebroTasksPara
 		arg.Status,
 		arg.TaskType,
 		arg.Since,
+		arg.Q,
 	)
 	if err != nil {
 		return nil, err

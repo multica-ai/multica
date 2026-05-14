@@ -12,6 +12,7 @@ export const cerebroTasksKeys = {
       filter.status,
       filter.type,
       filter.range,
+      filter.search,
       filter.limit,
       filter.offset,
     ] as const,

@@ -3,6 +3,8 @@
 import { create } from "zustand";
 import {
   DEFAULT_TASKS_FILTER,
+  DEFAULT_VISIBLE_COLUMNS,
+  type ColumnId,
   type TaskStatus,
   type TaskTimeRange,
   type TaskType,
@@ -14,11 +16,14 @@ import {
 // currently selected) lives in Zustand, server state lives in TanStack
 // Query keyed on this filter.
 interface TasksPageState extends TasksFilter {
+  visibleColumns: Record<ColumnId, boolean>;
   setAgentId: (id: string | null) => void;
   setStatus: (status: TaskStatus | null) => void;
   setType: (type: TaskType | null) => void;
   setRange: (range: TaskTimeRange) => void;
+  setSearch: (search: string) => void;
   setLimit: (limit: number) => void;
+  setColumnVisible: (column: ColumnId, visible: boolean) => void;
   nextPage: () => void;
   prevPage: () => void;
   goToPage: (offset: number) => void;
@@ -27,13 +32,17 @@ interface TasksPageState extends TasksFilter {
 
 export const useCerebroTasksStore = create<TasksPageState>((set) => ({
   ...DEFAULT_TASKS_FILTER,
+  visibleColumns: { ...DEFAULT_VISIBLE_COLUMNS },
   setAgentId: (agentId) => set({ agentId, offset: 0 }),
   setStatus: (status) => set({ status, offset: 0 }),
   setType: (type) => set({ type, offset: 0 }),
   setRange: (range) => set({ range, offset: 0 }),
+  setSearch: (search) => set({ search, offset: 0 }),
   setLimit: (limit) => set({ limit, offset: 0 }),
+  setColumnVisible: (column, visible) =>
+    set((s) => ({ visibleColumns: { ...s.visibleColumns, [column]: visible } })),
   nextPage: () => set((s) => ({ offset: s.offset + s.limit })),
   prevPage: () => set((s) => ({ offset: Math.max(0, s.offset - s.limit) })),
   goToPage: (offset) => set({ offset: Math.max(0, offset) }),
-  reset: () => set(DEFAULT_TASKS_FILTER),
+  reset: () => set({ ...DEFAULT_TASKS_FILTER, visibleColumns: { ...DEFAULT_VISIBLE_COLUMNS } }),
 }));

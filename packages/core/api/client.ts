@@ -739,6 +739,8 @@ export class ApiClient {
     since?: string | null;
     limit?: number;
     offset?: number;
+    // CEREBRO-PATCH(cerebro-tasks-search): JEH-1237 server-side full-page search param
+    q?: string | null;
   }): Promise<T> {
     const params = new URLSearchParams();
     if (filter.agent_id) params.set("agent_id", filter.agent_id);
@@ -747,6 +749,7 @@ export class ApiClient {
     if (filter.since) params.set("since", filter.since);
     if (filter.limit !== undefined) params.set("limit", String(filter.limit));
     if (filter.offset !== undefined) params.set("offset", String(filter.offset));
+    if (filter.q) params.set("q", filter.q);
     const qs = params.toString();
     return this.fetch<T>(qs ? `/api/cerebro/tasks?${qs}` : `/api/cerebro/tasks`);
   }
