@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, ShieldOff } from "lucide-react";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { useCurrentMember } from "@multica/core/permissions";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import {
   Tabs,
@@ -22,10 +23,14 @@ type PageTab = "grants" | "audit";
 // Top-level workspace admin page for Persona grants (JEH-1180). Backed by
 // the `/api/workspaces/{id}/grants` surface in JEH-1179 — UI is built
 // against the proposed shape and parseWithFallback handles drift. Hidden
-// when the `cerebro_persona_permissions` flag is off.
+// when the `cerebro_persona_permissions` flag is off, and when the viewer
+// is not a workspace owner/admin (JEH-1217 — admin-gate; backend already
+// rejects writes from non-admins, this is defense-in-depth in the UI so a
+// non-admin doesn't see a misleading admin surface).
 export function PermissionsPage() {
   const enabled = useFeatureFlag("cerebro_persona_permissions");
   const workspace = useCurrentWorkspace();
+  const { role, isLoading: isMemberLoading } = useCurrentMember(workspace?.id ?? "");
 
   const [activeTab, setActiveTab] = useState<PageTab>("grants");
   const [showCreate, setShowCreate] = useState(false);
@@ -33,10 +38,23 @@ export function PermissionsPage() {
 
   if (!enabled) return null;
 
-  if (!workspace) {
+  if (!workspace || isMemberLoading) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         Workspace context indlæses…
+      </div>
+    );
+  }
+
+  const isAdmin = role === "owner" || role === "admin";
+  if (!isAdmin) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+        <ShieldOff className="size-8 text-muted-foreground" />
+        <h2 className="text-base font-medium">Adgang nægtet</h2>
+        <p className="max-w-sm text-sm text-muted-foreground">
+          Kun workspace-owners og -admins kan administrere Persona grants.
+        </p>
       </div>
     );
   }

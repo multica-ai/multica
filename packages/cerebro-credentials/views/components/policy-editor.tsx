@@ -13,6 +13,11 @@ import {
 } from "@multica/ui/components/ui/table";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
 
 import {
   ALL_PERMISSIONS,
@@ -65,9 +70,14 @@ export function PolicyEditor({
     );
   }
 
+  // STUB: persistence depends on JEH-1179 (Persona grants admin API at
+  // `/api/workspaces/{id}/grants`). Per JEH-1197 (policy-enforcement), the
+  // credential policy checker reads Persona grants — so "set a credential
+  // policy" in this UI is, at the data layer, "create/update a Persona
+  // grant against the credential". Until JEH-1179 lands, the save button
+  // stays disabled with the tooltip below.
+  const saveBlocked = true;
   async function handleSave() {
-    // STUB: when JEH-1196 ships, POST to /api/credentials/:id/policies.
-    // For now just clear the dirty flag.
     setDirty(false);
   }
 
@@ -139,9 +149,22 @@ export function PolicyEditor({
       </Table>
 
       <div className="flex justify-end">
-        <Button disabled={!dirty} onClick={handleSave} size="sm">
-          Save policy
-        </Button>
+        <Tooltip>
+          <TooltipTrigger render={<span tabIndex={0} />}>
+            <Button
+              disabled={!dirty || saveBlocked}
+              onClick={handleSave}
+              size="sm"
+            >
+              Save policy
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            Saving is disabled until the Persona grants admin API
+            (JEH-1179) is wired. Use `multica autopilot` or the persona-mcp
+            tools for now.
+          </TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );

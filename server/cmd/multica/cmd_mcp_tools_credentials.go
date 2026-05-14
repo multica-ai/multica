@@ -10,14 +10,24 @@ import (
 	"github.com/multica-ai/multica/server/internal/mcp"
 )
 
+// CEREBRO-PATCH(mcp-credentials-tools-jeh1217): refresh stub deps comments.
 // registerCredentialTools wires the credential governance MCP tools to the
-// stdio server. The backend REST API is tracked in JEH-1196 and not yet
-// implemented; until it ships these tools return deterministic mock data
-// matching the shape the @multica/cerebro-credentials UI consumes.
+// stdio server.
 //
-// When JEH-1196 lands, swap each handler's body for a call against
-// client.GetJSON(ctx, "/api/credentials...", &result) and remove the
-// mockCredentials/... fixtures below.
+// Status (JEH-1217):
+//   - The credential registry REST API (JEH-1196) HAS shipped at
+//     `/api/workspaces/{id}/credentials` — `credential_list`,
+//     `credential_audit_log` could be wired to it now. Tracked as a
+//     follow-up to JEH-1199 (UI wiring + this MCP wiring should land
+//     together so admins see consistent state from both surfaces).
+//   - `credential_policy_get` / `credential_policy_set` cannot be wired
+//     persistently until JEH-1179 (Persona grants admin API) ships, since
+//     per JEH-1197 the policy checker reads Persona grants. Until then
+//     these tools return a `_stub` echo so callers can prototype against
+//     the contract.
+//
+// Each handler keeps the `_stub: true` marker so MCP callers can tell
+// they're not looking at live data.
 func registerCredentialTools(srv *mcp.Server, _ *cli.APIClient) {
 	// -----------------------------------------------------------------------
 	// credential_list
@@ -29,7 +39,7 @@ Returns id, type, name, status, redacted value, created_at, updated_at,
 last_rotated_at, and expires_at. Values are ALWAYS redacted — use the
 separate reveal flow (gated by policy) if you need plaintext.
 
-STUB: backend API JEH-1196 not yet shipped — returns deterministic mock data.`,
+STUB: returns deterministic mock data. Live wiring to JEH-1196's /api/workspaces/{id}/credentials is tracked as JEH-1199 follow-up.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -51,7 +61,7 @@ STUB: backend API JEH-1196 not yet shipped — returns deterministic mock data.`
 (member, agent, or group) to the permissions they hold on that credential
 (attach, read_redacted, reveal, rotate, revoke).
 
-STUB: backend API JEH-1196 not yet shipped — returns deterministic mock data.`,
+STUB: returns deterministic mock data. Live wiring to JEH-1196's /api/workspaces/{id}/credentials is tracked as JEH-1199 follow-up.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"credential_id"},
@@ -87,8 +97,9 @@ Pass the full list of permissions you want the subject to hold — the
 backend treats this as a replace, not a merge. Permissions: attach,
 read_redacted, reveal, rotate, revoke.
 
-STUB: backend API JEH-1196 not yet shipped — returns a confirmation echo
-without persisting anything.`,
+STUB: returns a confirmation echo without persisting anything. Real
+persistence depends on JEH-1179 (Persona grants admin API), since
+per JEH-1197 credential policy = persona grant against the credential.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"credential_id", "subject_kind", "subject_id", "permissions"},
@@ -152,7 +163,7 @@ without persisting anything.`,
 whether the action was allowed or denied. Filter optionally by actor_id
 or action.
 
-STUB: backend API JEH-1196 not yet shipped — returns deterministic mock data.`,
+STUB: returns deterministic mock data. Live wiring to JEH-1196's /api/workspaces/{id}/credentials is tracked as JEH-1199 follow-up.`,
 		InputSchema: map[string]any{
 			"type":     "object",
 			"required": []string{"credential_id"},

@@ -47,6 +47,24 @@ vi.mock("@multica/cerebro-feature-flags", () => ({
   useFeatureFlag: mockUseFeatureFlag,
 }));
 
+type MockCurrentMember = {
+  userId: string | null;
+  role: "owner" | "admin" | "member" | null;
+  member: null;
+  isLoading: boolean;
+};
+const mockUseCurrentMember = vi.hoisted(() =>
+  vi.fn<() => MockCurrentMember>(() => ({
+    userId: "user-1",
+    role: "admin",
+    member: null,
+    isLoading: false,
+  })),
+);
+vi.mock("@multica/core/permissions", () => ({
+  useCurrentMember: mockUseCurrentMember,
+}));
+
 vi.mock("sonner", () => ({
   toast: {
     success: vi.fn(),
@@ -95,6 +113,12 @@ beforeEach(() => {
   mockListGrants.mockReset();
   mockCreateGrant.mockReset();
   mockUseFeatureFlag.mockReturnValue(true);
+  mockUseCurrentMember.mockReturnValue({
+    userId: "user-1",
+    role: "admin" as const,
+    member: null,
+    isLoading: false,
+  });
 });
 
 describe("PermissionsPage", () => {
@@ -172,6 +196,21 @@ describe("PermissionsPage", () => {
     await waitFor(() =>
       expect(screen.getByText(/Ingen grants matcher/i)).toBeInTheDocument(),
     );
+  });
+
+  it("renders 'Adgang nægtet' when the current member is not admin/owner", async () => {
+    mockUseCurrentMember.mockReturnValueOnce({
+      userId: "user-1",
+      role: "member" as const,
+      member: null,
+      isLoading: false,
+    });
+    const { ui } = makePage();
+    render(ui);
+    expect(
+      await screen.findByText(/Adgang nægtet/i),
+    ).toBeInTheDocument();
+    expect(mockListGrants).not.toHaveBeenCalled();
   });
 
   it("switches to the Audit tab when clicked", async () => {

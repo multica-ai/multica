@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { KeyRound } from "lucide-react";
+import { KeyRound, ShieldOff } from "lucide-react";
 
 import {
   Table,
@@ -13,6 +13,8 @@ import {
 } from "@multica/ui/components/ui/table";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Input } from "@multica/ui/components/ui/input";
+import { useCurrentMember } from "@multica/core/permissions";
+import { useCurrentWorkspace } from "@multica/core/paths";
 
 import { MOCK_CREDENTIALS } from "../mock-data";
 import { CREDENTIAL_TYPE_LABEL } from "../types";
@@ -21,16 +23,44 @@ import { ExpiryBadge } from "./expiry-badge";
 import { CredentialStatusBadge } from "./credential-status-badge";
 import { CredentialDetailPage } from "./credential-detail-page";
 
-// STUB hook — swap for `useQuery({ queryKey: ["credentials", wsId], ... })`
-// once JEH-1196 ships /api/credentials.
+// STUB hook — JEH-1196 has shipped the registry REST API at
+// `/api/workspaces/{id}/credentials`; live wiring (TanStack Query +
+// parseWithFallback schema) is tracked as follow-up to JEH-1199. The UI
+// currently still renders deterministic mock data so the policy admin
+// surfaces can be reviewed without an admin first seeding real rows.
 function useCredentials(): { data: Credential[]; isLoading: boolean } {
   return { data: MOCK_CREDENTIALS, isLoading: false };
 }
 
 export function CredentialsListPage() {
+  const workspace = useCurrentWorkspace();
+  const { role, isLoading: isMemberLoading } = useCurrentMember(workspace?.id ?? "");
   const { data: credentials } = useCredentials();
   const [filter, setFilter] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  if (!workspace || isMemberLoading) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Indlæser…
+      </div>
+    );
+  }
+
+  const isAdmin = role === "owner" || role === "admin";
+  if (!isAdmin) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+        <ShieldOff className="size-8 text-muted-foreground" />
+        <h2 className="text-base font-medium">Adgang nægtet</h2>
+        <p className="max-w-sm text-sm text-muted-foreground">
+          Kun workspace-owners og -admins kan administrere credentials.
+          Backenden gater alle skrive-handlinger via policy-checkeren
+          (JEH-1197); denne side er skjult i UI'et som et ekstra lag.
+        </p>
+      </div>
+    );
+  }
 
   const visible = credentials.filter((c) => {
     if (!filter) return true;
@@ -53,8 +83,9 @@ export function CredentialsListPage() {
             Credentials
           </h1>
           <p className="text-sm text-muted-foreground">
-            Workspace credentials and governance policies. Mock data — backend
-            API arrives via JEH-1196.
+            Workspace credentials and governance policies. Showing mock data
+            until live wiring lands; policy edit-paths are gated until
+            JEH-1179 ships the Persona grants admin API.
           </p>
         </div>
         <Badge variant="outline">{visible.length} credentials</Badge>

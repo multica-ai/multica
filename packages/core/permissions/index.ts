@@ -18,3 +18,6 @@ export {
   useAgentPermissions,
   useSkillPermissions,
 } from "./use-resource-permissions";
+
+// CEREBRO-PATCH(core-permissions-current-member): JEH-1199 admin-gate hook reused by cerebro-credentials + cerebro-permissions admin surfaces.
+export { useCurrentMember } from "./use-current-member";

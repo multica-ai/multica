@@ -141,6 +141,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `core-channels-listen-q` | packages/core/channels/queries.ts | 11 | JEH-699 — channelAgentSettingsOptions query factory |
 | `core-types-channel-listen` | packages/core/types/channel.ts | 13 | JEH-699 — ChannelAgentListenMode + response/setting shapes |
 | `core-types-index-channel-listen` | packages/core/types/index.ts | 3 | JEH-699 — re-export listen-mode types |
+| `core-permissions-current-member` | packages/core/permissions/index.ts | 2 | JEH-1199/JEH-1217 — re-export `useCurrentMember` so cerebro admin surfaces (cerebro-credentials, cerebro-permissions) can read the viewer's workspace role without duplicating the lookup. |
 | `channel-agent-inline-row` | packages/views/channels/components/channel-detail.tsx | 2 | JEH-698 — mount `<ChannelAgentInlineRow />` (from `@multica/cerebro-channels`) between the comment stream and `CommentInput`. Component itself lives in cerebro-zone; this marker is for the import + JSX in upstream-zone `channel-detail.tsx` |
 | `channel-detail-listeners` | packages/views/channels/components/channel-detail.tsx | 2 | JEH-699 — render Listeners popover in channel header |
 | `channel-listeners-panel` | packages/views/channels/components/channel-listeners-panel.tsx | 3 | JEH-699 — net-new Listeners popover (Switch per agent) |
