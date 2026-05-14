@@ -19,6 +19,7 @@ import {
   useWorkspaceActivityMap,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
+import { useAgentsViewStore } from "@multica/core/agents/stores";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -99,7 +100,10 @@ export function AgentsPage() {
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
 
   const [view, setView] = useState<View>("active");
-  const [scope, setScope] = useState<Scope>("all");
+  // Scope (Mine/All) is persisted per workspace so it survives list →
+  // detail → back navigation. Default is "all" on first visit (fork #88).
+  const scope = useAgentsViewStore((s) => s.scope);
+  const setScope = useAgentsViewStore((s) => s.setScope);
   const [availabilityFilter, setAvailabilityFilter] =
     useState<AvailabilityFilter>("all");
   const [sort, setSort] = useState<SortKey>("recent");
