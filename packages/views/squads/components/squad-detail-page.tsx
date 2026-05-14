@@ -14,7 +14,7 @@ import { CreateAgentDialog } from "../../agents/components/create-agent-dialog";
 import { useNavigation } from "../../navigation";
 import { AppLink } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
-import { Users, Plus, Trash2, ArrowLeft, Crown, Camera, Loader2, Pencil, FileText, Save } from "lucide-react";
+import { Users, Plus, Trash2, ArrowLeft, ArrowUpRight, Crown, Camera, Loader2, Pencil, FileText, Save } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -23,6 +23,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -1039,6 +1044,7 @@ function SquadMembersTab({
   setLeaderPending: boolean;
 }) {
   const { t } = useT("squads");
+  const p = useWorkspacePaths();
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -1082,29 +1088,65 @@ function SquadMembersTab({
                 onSave={async (next) => { await onUpdateRole(m, next); }}
               />
             </div>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+              {m.member_type === "agent" && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <AppLink
+                        href={p.agentDetail(m.member_id)}
+                        className="inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                        aria-label={t(($) => $.members_tab.view_agent_tooltip)}
+                      >
+                        <ArrowUpRight className="size-3.5" />
+                      </AppLink>
+                    }
+                  />
+                  <TooltipContent>
+                    {t(($) => $.members_tab.view_agent_tooltip)}
+                  </TooltipContent>
+                </Tooltip>
+              )}
               {m.member_type === "agent" && !isLeader(m) && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-muted-foreground hover:text-amber-600 h-8 px-2"
-                  title="Make leader"
-                  onClick={() => onSetLeader(m.member_id)}
-                  disabled={setLeaderPending}
-                >
-                  <Crown className="size-3.5" />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-muted-foreground hover:text-amber-600 h-8 w-8 p-0"
+                        onClick={() => onSetLeader(m.member_id)}
+                        disabled={setLeaderPending}
+                        aria-label={t(($) => $.members_tab.make_leader_tooltip)}
+                      >
+                        <Crown className="size-3.5" />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>
+                    {t(($) => $.members_tab.make_leader_tooltip)}
+                  </TooltipContent>
+                </Tooltip>
               )}
               {!isLeader(m) && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-muted-foreground hover:text-destructive h-8 w-8 p-0"
-                  title="Remove from squad"
-                  onClick={() => onRemoveMember(m)}
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-muted-foreground hover:text-destructive h-8 w-8 p-0"
+                        onClick={() => onRemoveMember(m)}
+                        aria-label={t(($) => $.members_tab.remove_member_tooltip)}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>
+                    {t(($) => $.members_tab.remove_member_tooltip)}
+                  </TooltipContent>
+                </Tooltip>
               )}
             </div>
           </div>

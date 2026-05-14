@@ -38,7 +38,10 @@
     "section_count_other": "该小队有 {{count}} 名成员",
     "add_member_button": "添加成员",
     "create_agent_button": "创建智能体",
-    "leader_chip": "负责人"
+    "leader_chip": "负责人",
+    "view_agent_tooltip": "打开智能体详情",
+    "make_leader_tooltip": "设为小队负责人",
+    "remove_member_tooltip": "从小队移除"
   },
   "instructions_tab": {
     "description": "小队指引会在 Leader 智能体处理分配给该小队的 issue 时注入到它的 prompt 中。可用来给 Leader 提供贯穿全队的指导、协作规范，或每次任务都应遵循的上下文。",

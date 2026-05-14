@@ -38,7 +38,10 @@
     "section_count_other": "{{count}} members in this squad",
     "add_member_button": "Add Member",
     "create_agent_button": "Create Agent",
-    "leader_chip": "Leader"
+    "leader_chip": "Leader",
+    "view_agent_tooltip": "Open agent detail",
+    "make_leader_tooltip": "Make squad leader",
+    "remove_member_tooltip": "Remove from squad"
   },
   "instructions_tab": {
     "description": "Squad instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every task.",
