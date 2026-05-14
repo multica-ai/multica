@@ -286,7 +286,7 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 		body["icon"] = v
 	}
 	if v, _ := cmd.Flags().GetString("lead"); v != "" {
-		aType, aID, resolveErr := resolveAssignee(ctx, client, v)
+		aType, aID, resolveErr := resolveAssignee(ctx, client, v, memberOrAgentKinds)
 		if resolveErr != nil {
 			return fmt.Errorf("resolve lead: %w", resolveErr)
 		}
@@ -368,7 +368,7 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if cmd.Flags().Changed("lead") {
 		v, _ := cmd.Flags().GetString("lead")
-		aType, aID, resolveErr := resolveAssignee(ctx, client, v)
+		aType, aID, resolveErr := resolveAssignee(ctx, client, v, memberOrAgentKinds)
 		if resolveErr != nil {
 			return fmt.Errorf("resolve lead: %w", resolveErr)
 		}

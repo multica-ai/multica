@@ -46,7 +46,7 @@ import {
 import { StatusIcon, PriorityIcon } from ".";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { labelListOptions } from "@multica/core/labels/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -65,6 +65,7 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { Issue } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 // ---------------------------------------------------------------------------
 // HoverCheck — shadcn official pattern (PR #6862)
@@ -168,6 +169,7 @@ function ActorSubContent({
   includeNoAssignee,
   onToggleNoAssignee,
   noAssigneeCount,
+  showSquads = true,
 }: {
   counts: Map<string, number>;
   selected: ActorFilterValue[];
@@ -176,21 +178,26 @@ function ActorSubContent({
   includeNoAssignee?: boolean;
   onToggleNoAssignee?: () => void;
   noAssigneeCount?: number;
+  showSquads?: boolean;
 }) {
   const { t } = useT("issues");
   const [search, setSearch] = useState("");
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const query = search.trim().toLowerCase();
   const filteredMembers = members.filter((m) =>
-    m.name.toLowerCase().includes(query),
+    m.name.toLowerCase().includes(query) || matchesPinyin(m.name, query),
   );
   const filteredAgents = agents.filter((a) =>
-    !a.archived_at && a.name.toLowerCase().includes(query),
+    !a.archived_at && (a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)),
+  );
+  const filteredSquads = squads.filter((s) =>
+    !s.archived_at && (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)),
   );
 
-  const isSelected = (type: "member" | "agent", id: string) =>
+  const isSelected = (type: "member" | "agent" | "squad", id: string) =>
     selected.some((f) => f.type === type && f.id === id);
 
   return (
@@ -283,7 +290,36 @@ function ActorSubContent({
           </DropdownMenuGroup>
         )}
 
-        {filteredMembers.length === 0 && filteredAgents.length === 0 && search && (
+        {showSquads && filteredSquads.length > 0 && (
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>{t(($) => $.filters.squads_group)}</DropdownMenuLabel>
+            {filteredSquads.map((s) => {
+              const checked = isSelected("squad", s.id);
+              const count = counts.get(`squad:${s.id}`) ?? 0;
+              return (
+                <DropdownMenuCheckboxItem
+                  key={s.id}
+                  checked={checked}
+                  onCheckedChange={() =>
+                    onToggle({ type: "squad", id: s.id })
+                  }
+                  className={FILTER_ITEM_CLASS}
+                >
+                  <HoverCheck checked={checked} />
+                  <ActorAvatar actorType="squad" actorId={s.id} size={18} />
+                  <span className="truncate">{s.name}</span>
+                  {count > 0 && (
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {count}
+                    </span>
+                  )}
+                </DropdownMenuCheckboxItem>
+              );
+            })}
+          </DropdownMenuGroup>
+        )}
+
+        {filteredMembers.length === 0 && filteredAgents.length === 0 && (!showSquads || filteredSquads.length === 0) && search && (
           <div className="px-2 py-3 text-center text-sm text-muted-foreground">
             {t(($) => $.filters.no_results)}
           </div>
@@ -675,6 +711,7 @@ export function IssuesHeader({ scopedIssues }: { scopedIssues: Issue[] }) {
                   counts={counts.creator}
                   selected={creatorFilters}
                   onToggle={act.toggleCreatorFilter}
+                  showSquads={false}
                 />
               </DropdownMenuSubContent>
             </DropdownMenuSub>

@@ -4,7 +4,8 @@ import { paths, isGlobalPath } from "./paths";
 describe("paths.workspace(slug)", () => {
   const ws = paths.workspace("acme");
 
-  it("builds dashboard paths with slug prefix", () => {
+  it("builds workspace paths with slug prefix", () => {
+    expect(ws.usage()).toBe("/acme/usage");
     expect(ws.issues()).toBe("/acme/issues");
     expect(ws.issueDetail("abc-123")).toBe("/acme/issues/abc-123");
     expect(ws.projects()).toBe("/acme/projects");
@@ -17,6 +18,8 @@ describe("paths.workspace(slug)", () => {
     expect(ws.runtimes()).toBe("/acme/runtimes");
     expect(ws.skills()).toBe("/acme/skills");
     expect(ws.skillDetail("skl_123")).toBe("/acme/skills/skl_123");
+    expect(ws.squads()).toBe("/acme/squads");
+    expect(ws.squadDetail("sq_1")).toBe("/acme/squads/sq_1");
     expect(ws.settings()).toBe("/acme/settings");
   });
 

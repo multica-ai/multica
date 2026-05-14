@@ -103,7 +103,7 @@ vi.mock("@multica/core/issues/config", () => ({
 
 // Mock view store
 const mockViewState = {
-  viewMode: "board" as const,
+  viewMode: "board" as "board" | "list",
   statusFilters: [] as string[],
   priorityFilters: [] as string[],
   assigneeFilters: [] as { type: string; id: string }[],
@@ -172,13 +172,15 @@ vi.mock("@multica/core/issues/stores/view-store-context", () => ({
   useViewStoreApi: () => ({ getState: () => mockViewState, setState: vi.fn(), subscribe: vi.fn() }),
 }));
 
+let mockScope = "all";
+
 vi.mock("@multica/core/issues/stores/issues-scope-store", () => ({
   useIssuesScopeStore: Object.assign(
     (selector?: any) => {
-      const state = { scope: "all", setScope: vi.fn() };
+      const state = { scope: mockScope, setScope: vi.fn() };
       return selector ? selector(state) : state;
     },
-    { getState: () => ({ scope: "all", setScope: vi.fn() }) },
+    { getState: () => ({ scope: mockScope, setScope: vi.fn() }) },
   ),
 }));
 
@@ -330,6 +332,24 @@ const mockIssues: Issue[] = [
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   },
+  {
+    ...issueDefaults,
+    id: "issue-4",
+    workspace_id: "ws-1",
+    number: 4,
+    identifier: "TES-4",
+    title: "Squad task",
+    description: null,
+    status: "todo",
+    priority: "medium",
+    assignee_type: "squad",
+    assignee_id: "squad-1",
+    creator_type: "member",
+    creator_id: "user-1",
+    due_date: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -369,6 +389,7 @@ describe("IssuesPage (shared)", () => {
     mockViewState.viewMode = "board";
     mockViewState.statusFilters = [];
     mockViewState.priorityFilters = [];
+    mockScope = "all";
   });
 
   it("shows loading skeletons initially", () => {
@@ -437,5 +458,39 @@ describe("IssuesPage (shared)", () => {
     await screen.findByText("All");
     expect(screen.getByText("Members")).toBeInTheDocument();
     expect(screen.getByText("Agents")).toBeInTheDocument();
+  });
+
+  it("agents scope includes squad-assigned issues", async () => {
+    mockScope = "agents";
+    mockViewState.viewMode = "list";
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+    renderWithQuery(<IssuesPage />);
+
+    // Squad task and agent task should be visible
+    await screen.findByText("Design landing page");
+    expect(screen.getByText("Squad task")).toBeInTheDocument();
+    // Member task should NOT be visible
+    expect(screen.queryByText("Implement auth")).not.toBeInTheDocument();
+  });
+
+  it("members scope excludes squad-assigned issues", async () => {
+    mockScope = "members";
+    mockViewState.viewMode = "list";
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: mockIssues.filter((i) => i.status === params?.status),
+        total: mockIssues.filter((i) => i.status === params?.status).length,
+      }),
+    );
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findByText("Implement auth");
+    expect(screen.queryByText("Squad task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Design landing page")).not.toBeInTheDocument();
   });
 });

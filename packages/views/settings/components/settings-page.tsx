@@ -10,6 +10,7 @@ import {
   FolderGit2,
   FlaskConical,
   Bell,
+  Plug,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -20,6 +21,7 @@ import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
+import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { useT } from "../../i18n";
@@ -32,16 +34,18 @@ const ACCOUNT_TAB_ICONS = {
   tokens: Key,
 } as const;
 
-const WORKSPACE_TAB_KEYS = ["general", "repositories", "labs", "members"] as const;
+const WORKSPACE_TAB_KEYS = ["general", "repositories", "integrations", "labs", "members"] as const;
 const WORKSPACE_TAB_VALUES = {
   general: "workspace",
   repositories: "repositories",
+  integrations: "integrations",
   labs: "labs",
   members: "members",
 } as const;
 const WORKSPACE_TAB_ICONS = {
   general: Settings,
   repositories: FolderGit2,
+  integrations: Plug,
   labs: FlaskConical,
   members: Users,
 } as const;
@@ -147,6 +151,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="tokens"><TokensTab /></TabsContent>
           <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
+          <TabsContent value="integrations"><IntegrationsTab /></TabsContent>
           <TabsContent value="labs"><LabsTab /></TabsContent>
           <TabsContent value="members"><MembersTab /></TabsContent>
           {extraAccountTabs?.map((tab) => (

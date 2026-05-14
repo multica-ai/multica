@@ -35,8 +35,8 @@ const mockDraftStore = {
     description: "",
     status: "todo" as const,
     priority: "none" as const,
-    assigneeType: undefined,
-    assigneeId: undefined,
+    assigneeType: undefined as "agent" | "squad" | "member" | undefined,
+    assigneeId: undefined as string | undefined,
     dueDate: null,
   },
   lastAssigneeType: undefined,
@@ -265,6 +265,10 @@ describe("CreateIssueModal", () => {
     mockSetKeepOpen.mockImplementation((v: boolean) => {
       mockQuickCreateStore.keepOpen = v;
     });
+    // Reset the shared draft mock so per-test assignee seeding (squad / agent)
+    // doesn't leak into the next test in the suite.
+    mockDraftStore.draft.assigneeType = undefined;
+    mockDraftStore.draft.assigneeId = undefined;
     mockCreateIssue.mockResolvedValue({
       id: "issue-123",
       identifier: "TES-123",
@@ -355,6 +359,37 @@ describe("CreateIssueModal", () => {
       assigneeId: undefined,
       dueDate: null,
     });
+  });
+
+  // Manual → agent must also forward the picked squad. Without this branch
+  // the agent panel silently falls back to the persisted actor / first
+  // visible agent and the user loses the squad they just chose in manual.
+  it("forwards the picked squad when switching to agent mode", async () => {
+    mockDraftStore.draft.assigneeType = "squad";
+    mockDraftStore.draft.assigneeId = "squad-1";
+    const user = userEvent.setup();
+    const onSwitchMode = vi.fn();
+
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={onSwitchMode}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+        backlogHintIssueId={null}
+        setBacklogHintIssueId={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Refactor auth");
+    await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
+
+    expect(onSwitchMode).toHaveBeenCalledTimes(1);
+    const carry = onSwitchMode.mock.calls[0]?.[0];
+    expect(carry).toEqual(
+      expect.objectContaining({ prompt: "Refactor auth", squad_id: "squad-1" }),
+    );
+    expect(carry).not.toHaveProperty("agent_id");
   });
 
   // Manual → agent must forward the picked project so the new modal pins to

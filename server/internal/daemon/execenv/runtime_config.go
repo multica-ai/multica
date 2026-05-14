@@ -112,7 +112,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("**Use `--output json` for structured data.** Human table output now prints routable issue keys (for example `MUL-123`) and short UUID prefixes for workspace resources; use `--full-id` on list commands when you need canonical UUIDs.\n\n")
 	b.WriteString("### Read\n")
 	b.WriteString("- `multica issue get <id> --output json` — Get full issue details (title, description, status, priority, assignee)\n")
-	b.WriteString("- `multica issue list [--status X] [--priority X] [--assignee X | --assignee-id <uuid>] [--limit N] [--offset N] [--full-id] [--output json]` — List issues in workspace (default limit: 50; table output uses routable issue keys; JSON output includes `total`, `has_more` — use offset to paginate when `has_more` is true). Prefer `--assignee-id <uuid>` when scripting from `multica workspace members --output json` / `multica agent list --output json`.\n")
+	b.WriteString("- `multica issue list [--status X] [--priority X] [--assignee X | --assignee-id <uuid>] [--limit N] [--offset N] [--full-id] [--output json]` — List issues in workspace (default limit: 50; table output uses routable issue keys; JSON output includes `total`, `has_more` — use offset to paginate when `has_more` is true). Prefer `--assignee-id <uuid>` when scripting from `multica workspace members --output json` / `multica agent list --output json` / `multica squad list --output json`.\n")
 	b.WriteString("- `multica issue comment list <issue-id> [--since <RFC3339>] --output json` — List all comments on an issue (server caps at 2000 rows). Use `--since` for incremental polling.\n")
 	b.WriteString("- `multica issue label list <issue-id> --output json` — List labels currently attached to an issue\n")
 	b.WriteString("- `multica issue subscriber list <issue-id> --output json` — List members/agents subscribed to an issue\n")
@@ -120,6 +120,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica workspace get --output json` — Get workspace details and context\n")
 	b.WriteString("- `multica workspace members [workspace-id] --output json` — List workspace members (user IDs, names, roles)\n")
 	b.WriteString("- `multica agent list --output json` — List agents in workspace\n")
+	b.WriteString("- `multica squad list --output json` — List squads in workspace (squads are first-class assignees — assigning an issue to a squad routes it to the squad leader, who then delegates)\n")
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
 	b.WriteString("- `multica issue runs <issue-id> [--full-id] --output json` — List all execution runs for an issue (status, timestamps, errors); table task IDs are short prefixes unless `--full-id` is set\n")
 	b.WriteString("- `multica issue run-messages <task-id> [--issue <issue-id>] [--since <seq>] --output json` — List messages for a specific execution run; full task UUIDs work directly, copied short task prefixes must be scoped with `--issue <issue-id>`\n")
@@ -134,7 +135,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica issue create --title \"...\" [--description \"...\"] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue. `--attachment` may be repeated to upload multiple files; labels and subscribers are not accepted here, attach them after create with the commands below.\n")
 	b.WriteString("- `multica issue update <id> [--title X] [--description X] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update one or more issue fields in a single call. Use `--parent \"\"` to clear the parent.\n")
 	b.WriteString("- `multica issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
-	b.WriteString("- `multica issue assign <id> --to <name>|--to-id <uuid>` — Assign an issue to a member or agent. `--to <name>` does fuzzy name matching; pass `--to-id <uuid>` (mutually exclusive with `--to`) to assign by canonical UUID, e.g. when names overlap. Use `--unassign` to clear the assignee.\n")
+	b.WriteString("- `multica issue assign <id> --to <name>|--to-id <uuid>` — Assign an issue to a member, agent, or squad. `--to <name>` does fuzzy name matching; pass `--to-id <uuid>` (mutually exclusive with `--to`) to assign by canonical UUID, e.g. when names overlap. Use `--unassign` to clear the assignee.\n")
 	b.WriteString("- `multica issue label add <issue-id> <label-id>` — Attach a label to an issue (look up the label id via `multica label list`)\n")
 	b.WriteString("- `multica issue label remove <issue-id> <label-id>` — Detach a label from an issue\n")
 	b.WriteString("- `multica issue subscriber add <issue-id> [--user <name>|--user-id <uuid>]` — Subscribe a member or agent to issue updates (defaults to the caller when neither flag is set; the two flags are mutually exclusive)\n")
@@ -272,7 +273,12 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the conversation (returns all comments, capped server-side at 2000)\n", ctx.IssueID)
 		b.WriteString("   - For incremental polling, use `--since <RFC3339-timestamp>` to fetch only comments newer than a known cursor\n")
 		fmt.Fprintf(&b, "3. Find the triggering comment (ID: `%s`) and understand what is being asked — do NOT confuse it with previous comments\n", ctx.TriggerCommentID)
-		b.WriteString("4. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 6 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
+		if ctx.IsSquadLeader {
+			b.WriteString("4. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 6 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
+			fmt.Fprintf(&b, "   - **Squad leader rule:** If your evaluation outcome is `no_action`, call `multica squad activity %s no_action --reason \"...\"` and then EXIT IMMEDIATELY. DO NOT post any comment whose only purpose is to announce that you are taking no action, exiting silently, or acknowledging another agent. A comment like \"No action needed\" or \"Exiting silently\" is noise — the `squad activity` call already records your decision in the timeline.\n", ctx.IssueID)
+		} else {
+			b.WriteString("4. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 6 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
+		}
 		b.WriteString("5. If a reply IS warranted: do any requested work first, then **decide whether to include any `@mention` link.** The default is NO mention. Only mention when you are escalating to a human owner who is not yet involved, delegating a concrete new sub-task to another agent for the first time, or the user explicitly asked you to loop someone in. Never @mention the agent you are replying to as a thank-you or sign-off.\n")
 		b.WriteString("6. **If you reply, post it as a comment — this step is mandatory when you reply.** Text in your terminal or run logs is NOT delivered to the user. ")
 		b.WriteString(BuildCommentReplyInstructions(provider, ctx.IssueID, ctx.TriggerCommentID))
@@ -284,7 +290,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the full comment history (returns all comments, capped server-side at 2000) — this is mandatory, not optional. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions.\n", ctx.IssueID)
 		fmt.Fprintf(&b, "3. Run `multica issue status %s in_progress`\n", ctx.IssueID)
 		b.WriteString("4. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)\n")
-		fmt.Fprintf(&b, "5. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
+		if ctx.IsSquadLeader {
+			fmt.Fprintf(&b, "5. **Post your final results as a comment** (unless your outcome is `no_action` — in that case, calling `multica squad activity %s no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment announcing no_action or saying you are exiting silently): `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID, ctx.IssueID)
+		} else {
+			fmt.Fprintf(&b, "5. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
+		}
 		fmt.Fprintf(&b, "6. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
 		fmt.Fprintf(&b, "7. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
 	}
@@ -351,7 +361,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- Print exactly one final line: `Created MUL-<n>: <title>` after a successful `multica issue create`.\n")
 		b.WriteString("- On CLI failure, exit with the CLI error as the only output. The platform translates that into a `quick_create_failed` inbox item carrying the original prompt for the user.\n")
 	default:
-		b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
+		if ctx.IsSquadLeader {
+			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`** — unless your outcome is `no_action`. When you evaluate a trigger and decide no action is needed, calling `multica squad activity <issue-id> no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment that announces no_action, acknowledges another agent, or says you are exiting silently — such comments are noise. For all other outcomes (`action`, `failed`), a comment is still mandatory.\n\n")
+		} else {
+			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
+		}
 		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
 		b.WriteString("Good: \"Fixed the login redirect. PR: https://...\"\n")
 		b.WriteString("Bad: \"1. Read the issue 2. Found the bug in auth.go 3. Created branch 4. ...\"\n")

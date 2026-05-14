@@ -199,4 +199,122 @@ describe("ApiClient", () => {
       expect(att.download_url).toBe("");
     });
   });
+
+  describe("getAttachmentTextContent", () => {
+    it("returns body text and the original content type from the X-* header", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response("# heading\n\nbody\n", {
+            status: 200,
+            headers: {
+              "Content-Type": "text/plain; charset=utf-8",
+              "X-Original-Content-Type": "text/markdown",
+            },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const { text, originalContentType } =
+        await client.getAttachmentTextContent("att-1");
+
+      expect(text).toBe("# heading\n\nbody\n");
+      expect(originalContentType).toBe("text/markdown");
+    });
+
+    it("throws PreviewTooLargeError on 413", async () => {
+      const { PreviewTooLargeError } = await import("./client");
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response("", { status: 413, statusText: "Payload Too Large" }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getAttachmentTextContent("att-1")).rejects.toBeInstanceOf(
+        PreviewTooLargeError,
+      );
+    });
+
+    it("throws PreviewUnsupportedError on 415", async () => {
+      const { PreviewUnsupportedError } = await import("./client");
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response("", { status: 415, statusText: "Unsupported Media Type" }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getAttachmentTextContent("att-1")).rejects.toBeInstanceOf(
+        PreviewUnsupportedError,
+      );
+    });
+  });
+
+  describe("chat attachment wiring", () => {
+    it("uploadFile includes chat_session_id in the FormData body", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ id: "att-1", url: "https://cdn/x" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const file = new File(["hi"], "hi.png", { type: "image/png" });
+      await client.uploadFile(file, { chatSessionId: "session-123" });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0]!;
+      expect(url).toBe("https://api.example.test/api/upload-file");
+      expect(init?.method).toBe("POST");
+      const body = init?.body as FormData;
+      expect(body).toBeInstanceOf(FormData);
+      expect(body.get("chat_session_id")).toBe("session-123");
+      expect(body.get("issue_id")).toBeNull();
+      expect(body.get("comment_id")).toBeNull();
+    });
+
+    it("sendChatMessage serialises attachment_ids onto the JSON body when present", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ message_id: "m1", task_id: "t1", created_at: "" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      await client.sendChatMessage("session-1", "hello", ["att-1", "att-2"]);
+
+      const [, init] = fetchMock.mock.calls[0]!;
+      expect(JSON.parse(init?.body as string)).toEqual({
+        content: "hello",
+        attachment_ids: ["att-1", "att-2"],
+      });
+    });
+
+    it("sendChatMessage omits attachment_ids when the list is empty or undefined", async () => {
+      const fetchMock = vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ message_id: "m1", task_id: "t1", created_at: "" }), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      await client.sendChatMessage("session-1", "hello");
+      await client.sendChatMessage("session-1", "again", []);
+
+      expect(JSON.parse(fetchMock.mock.calls[0]![1]?.body as string)).toEqual({ content: "hello" });
+      expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({ content: "again" });
+    });
+  });
 });

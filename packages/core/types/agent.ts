@@ -4,6 +4,14 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
+// Runtime visibility is a separate axis from agent visibility — different
+// vocabulary because it gates a different action. "private" (default) means
+// only the runtime owner and workspace admins can bind agents to it;
+// "public" opens binding to any workspace member. Older backends that
+// haven't shipped MUL-2062 omit the field; the consumer must default to
+// "private" so the strictest behavior is the fallback.
+export type RuntimeVisibility = "private" | "public";
+
 export interface RuntimeDevice {
   id: string;
   workspace_id: string;
@@ -16,6 +24,8 @@ export interface RuntimeDevice {
   device_info: string;
   metadata: Record<string, unknown>;
   owner_id: string | null;
+  /** Defaults to "private" when the backend predates the visibility flag. */
+  visibility: RuntimeVisibility;
   timezone: string;
   last_seen_at: string | null;
   created_at: string;
@@ -158,6 +168,76 @@ export interface CreateAgentRequest {
   template?: string;
 }
 
+/** Agent template summary — fields needed by the picker grid. Does NOT
+ *  include `instructions` to keep the list payload small; the detail
+ *  endpoint or the create flow returns the full template body. */
+export interface AgentTemplateSummary {
+  slug: string;
+  name: string;
+  description: string;
+  /** Optional grouping for the picker UI ("Engineering" / "Writing" / …). */
+  category?: string;
+  /** Optional lucide-react icon name (e.g. "Search"). Frontend falls back
+   *  to a generic icon when empty. */
+  icon?: string;
+  /** Optional semantic color token for the icon badge — one of "info" /
+   *  "success" / "warning" / "primary" / "secondary". Frontend has a
+   *  static class map so Tailwind can JIT-scan all variants. */
+  accent?: string;
+  skills: AgentTemplateSkillRef[];
+}
+
+/** Full agent template — same as `AgentTemplateSummary` plus the
+ *  instructions block. Returned by `GET /api/agent-templates/:slug`. */
+export interface AgentTemplate extends AgentTemplateSummary {
+  instructions: string;
+}
+
+/** Skill reference inside an agent template. `source_url` is the upstream
+ *  GitHub / skills.sh URL fetched on create; `cached_*` mirror the upstream
+ *  frontmatter at template-author time and let the picker render without
+ *  HTTP fetches. */
+export interface AgentTemplateSkillRef {
+  source_url: string;
+  cached_name: string;
+  cached_description: string;
+}
+
+export interface CreateAgentFromTemplateRequest {
+  template_slug: string;
+  name: string;
+  runtime_id: string;
+  model?: string;
+  visibility?: AgentVisibility;
+  max_concurrent_tasks?: number;
+  /** Optional overrides applied to the template before creation. nil/omit
+   *  uses the template's own value. */
+  description?: string;
+  instructions?: string;
+  avatar_url?: string;
+  /** Workspace skill IDs attached **in addition to** the template's
+   *  skills. Server dedupes against template skills automatically. */
+  extra_skill_ids?: string[];
+}
+
+export interface CreateAgentFromTemplateResponse {
+  agent: Agent;
+  /** Skill IDs that were newly created in the workspace from upstream URLs. */
+  imported_skill_ids: string[];
+  /** Skill IDs that already existed in the workspace (same name) and were
+   *  reused rather than re-imported. The UI can surface this as a toast so
+   *  the user knows their pre-existing skill wasn't overwritten. */
+  reused_skill_ids: string[];
+}
+
+/** 422 body returned by `POST /api/agents/from-template` when one or more
+ *  template skill URLs cannot be reached. The transaction is rolled back —
+ *  no partial workspace state. */
+export interface CreateAgentFromTemplateFailure {
+  error: string;
+  failed_urls: string[];
+}
+
 export interface UpdateAgentRequest {
   name?: string;
   description?: string;
@@ -277,6 +357,44 @@ export interface RuntimeUsageByHour {
   cache_read_tokens: number;
   cache_write_tokens: number;
   task_count: number;
+}
+
+// One (date, model) bucket of token usage for the workspace dashboard.
+// Same shape as RuntimeUsage but workspace-scoped (no runtime_id, no
+// provider field on the wire) and optionally narrowed to a single project
+// on the server side. Cost stays client-side via the model pricing table.
+export interface DashboardUsageDaily {
+  date: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  task_count: number;
+}
+
+// Per-(agent, model) token totals for the workspace dashboard. Identical
+// wire shape to RuntimeUsageByAgent — the client folds by agent_id and
+// sums cost.
+export interface DashboardUsageByAgent {
+  agent_id: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  task_count: number;
+}
+
+// Per-agent total terminal-task run-time + counts. Powers the workspace
+// dashboard's "time by agent" list. failed_count is a subset of
+// task_count (failed tasks still contribute to total_seconds because
+// they consumed runtime to fail).
+export interface DashboardAgentRunTime {
+  agent_id: string;
+  total_seconds: number;
+  task_count: number;
+  failed_count: number;
 }
 
 export type RuntimeUpdateStatus =

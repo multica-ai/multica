@@ -1933,7 +1933,7 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
-	case "openclaw", "hermes", "kiro", "kimi":
+	case "openclaw", "kiro", "kimi":
 		return true
 	default:
 		return false
@@ -1996,6 +1996,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotSource:         task.AutopilotSource,
 		AutopilotTriggerPayload: strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:       task.QuickCreatePrompt,
+		IsSquadLeader:           strings.Contains(instructions, "## Squad Operating Protocol"),
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
@@ -2166,9 +2167,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// write into the task workdir:
 	//   - openclaw loads bootstrap files (AGENTS.md, SOUL.md, ...) from its own
 	//     workspace dir rather than the task workdir.
-	//   - hermes is driven through ACP and starts from a long-lived Hermes home;
-	//     deployments that cross a wrapper/container boundary can miss the
-	//     task-workdir AGENTS.md even when the prompt itself is delivered.
 	//   - kiro and kimi are wrapped through their own CLIs whose cwd handling
 	//     is opaque enough that we can't trust the file-based path either.
 	// Pass the full runtime brief inline (CLI catalog + workflow steps + agent
@@ -2177,6 +2175,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// these providers silently miss the workflow section and never call
 	// `multica issue status` / `multica issue comment add`, leaving issues
 	// stuck in `todo`.
+	//
+	// Hermes is intentionally excluded: ACP sessions start in the task cwd and
+	// Hermes loads AGENTS.md / .agent_context itself. Prepending the full runtime
+	// brief into the ACP user prompt duplicates that context, bloats every turn,
+	// and has triggered upstream safety filters on harmless tasks.
 	if providerNeedsInlineSystemPrompt(provider) {
 		execOpts.SystemPrompt = runtimeBrief
 	}
@@ -2229,12 +2232,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	switch result.Status {
 	case "completed":
 		if result.Output == "" {
-			// Even an empty-output completion may have established a real
-			// session — surface it through the blocked path so the next chat
-			// turn can still resume from where this one left off.
+			// The agent completed successfully but produced no text output.
+			// This is valid — the agent may have done all its work via tool
+			// calls (e.g. posting comments via CLI, pushing code). Treat as
+			// a normal completion so the task is not incorrectly marked as
+			// blocked.
 			return TaskResult{
-				Status:    "blocked",
-				Comment:   fmt.Sprintf("%s returned empty output", provider),
+				Status:    "completed",
+				Comment:   "",
 				SessionID: result.SessionID,
 				WorkDir:   env.WorkDir,
 				EnvRoot:   env.RootDir,

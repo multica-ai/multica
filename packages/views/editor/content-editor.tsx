@@ -89,9 +89,11 @@ interface ContentEditorProps {
    */
   currentIssueId?: string;
   /**
-   * When true, the @mention extension is not registered. Use for editors
-   * where mentioning members/agents has no business meaning (e.g. agent
-   * system prompts, where the content is fed to an LLM as plain text).
+   * When true, the `@` suggestion picker is disabled but the mention node
+   * type remains in the schema, so existing mentions pasted in from other
+   * Multica editors still render as the normal pill. Use for editors where
+   * *creating* a new mention has no business meaning (e.g. agent system
+   * prompts) but *preserving* an existing one still matters.
    */
   disableMentions?: boolean;
   /**
@@ -211,7 +213,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           },
         },
         attributes: {
-          class: cn("rich-text-editor text-sm outline-none", className),
+          class: cn("flex-1 rich-text-editor text-sm outline-none", className),
         },
       },
     });
@@ -272,10 +274,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       <AttachmentDownloadProvider attachments={attachments}>
         <div
           ref={wrapperRef}
-          className="relative flex min-h-full flex-col"
+          className="relative flex flex-1 min-h-full flex-col"
           onMouseDown={handleContainerMouseDown}
         >
-          <EditorContent className="flex-1 min-h-full" editor={editor} />
+          <EditorContent className="flex flex-1 flex-col" editor={editor} />
           {showBubbleMenu && (
             <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
           )}

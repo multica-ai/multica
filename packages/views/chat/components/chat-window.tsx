@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
-import { Minus, Maximize2, Minimize2, ChevronDown, ChevronRight, Plus, Check, Trash2 } from "lucide-react";
+import { Minus, Maximize2, Minimize2, ChevronDown, ChevronRight, Plus, Check, Trash2, Pencil } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import {
@@ -31,6 +31,7 @@ import { agentListOptions, memberListOptions } from "@multica/core/workspace/que
 import { canAssignAgent } from "@multica/views/issues/components";
 import { api } from "@multica/core/api";
 import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
+import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
@@ -45,6 +46,7 @@ import {
   useCreateChatSession,
   useDeleteChatSession,
   useMarkChatSessionRead,
+  useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
@@ -189,8 +191,76 @@ export function ChatWindow() {
   // (focus mode tracks the user's page, not a per-message attachment).
   const { candidate: anchorCandidate } = useRouteAnchorCandidate(wsId);
 
+  const { uploadWithToast } = useFileUpload(api);
+
+  // Lazy-creates a chat_session the first time the user needs an id —
+  // either to send a message or to attach an uploaded file. Pulled out of
+  // handleSend so the upload path (which fires before any text exists) can
+  // get a session_id to hang the attachment on. Returns null when no agent
+  // is available; callers must early-return in that case.
+  //
+  // Concurrent callers (e.g. user drops a file → handleUploadFile, then
+  // quickly clicks send → handleSend) would each observe activeSessionId
+  // === null and fire a separate createSession.mutateAsync, creating two
+  // sessions and orphaning the attachment on the wrong one. The in-flight
+  // promise ref dedupes those races: the first caller starts the create,
+  // every subsequent caller awaits the same promise until it settles.
+  //
+  // titleSeed is the first 50 chars of the user's message when called from
+  // send; the upload path passes "" and we leave the title empty so the
+  // session-dropdown's existing localized `window.untitled` fallback kicks
+  // in. A follow-up task may back-fill the real title from the first user
+  // message — until then this keeps the session list scannable across locales.
+  //
+  // NOTE: ensureSession does NOT flip `activeSessionId` itself. Callers must
+  // seed `chatKeys.messages(sessionId)` in the Query cache BEFORE calling
+  // `setActiveSession(sessionId)`, otherwise the first useQuery subscription
+  // for the new key reports `isLoading: true` and renders ChatMessageSkeleton
+  // for one frame (the "new-chat first-message" white flash).
+  const sessionPromiseRef = useRef<Promise<string | null> | null>(null);
+  const ensureSession = useCallback(
+    async (titleSeed: string): Promise<string | null> => {
+      if (activeSessionId) return activeSessionId;
+      if (!activeAgent) return null;
+      if (sessionPromiseRef.current) return sessionPromiseRef.current;
+
+      const promise = (async () => {
+        try {
+          const session = await createSession.mutateAsync({
+            agent_id: activeAgent.id,
+            title: titleSeed.slice(0, 50),
+          });
+          return session.id;
+        } finally {
+          sessionPromiseRef.current = null;
+        }
+      })();
+      sessionPromiseRef.current = promise;
+      return promise;
+    },
+    [activeSessionId, activeAgent, createSession],
+  );
+
+  const handleUploadFile = useCallback(
+    async (file: File) => {
+      const sessionId = await ensureSession("");
+      if (!sessionId) return null;
+      // Prime the messages cache as empty before flipping activeSessionId so
+      // ChatMessageList mounts directly (no Skeleton frame). Skip the write
+      // when an entry already exists — a concurrent handleSend may have
+      // seeded an optimistic message we must not clobber.
+      qc.setQueryData<ChatMessage[]>(
+        chatKeys.messages(sessionId),
+        (old) => old ?? [],
+      );
+      setActiveSession(sessionId);
+      return uploadWithToast(file, { chatSessionId: sessionId });
+    },
+    [ensureSession, uploadWithToast, qc, setActiveSession],
+  );
+
   const handleSend = useCallback(
-    async (content: string) => {
+    async (content: string, attachmentIds?: string[]) => {
       if (!activeAgent) {
         apiLogger.warn("sendChatMessage skipped: no active agent");
         return;
@@ -201,24 +271,21 @@ export function ChatWindow() {
         ? `${buildAnchorMarkdown(anchorCandidate)}\n\n${content}`
         : content;
 
-      let sessionId = activeSessionId;
-      const isNewSession = !sessionId;
+      const isNewSession = !activeSessionId;
 
       apiLogger.info("sendChatMessage.start", {
-        sessionId,
+        sessionId: activeSessionId,
         isNewSession,
         agentId: activeAgent.id,
         contentLength: finalContent.length,
         hasAnchor: focusOn && !!anchorCandidate,
+        attachmentCount: attachmentIds?.length ?? 0,
       });
 
+      const sessionId = await ensureSession(finalContent);
       if (!sessionId) {
-        const session = await createSession.mutateAsync({
-          agent_id: activeAgent.id,
-          title: finalContent.slice(0, 50),
-        });
-        sessionId = session.id;
-        setActiveSession(sessionId);
+        apiLogger.warn("sendChatMessage aborted: ensureSession returned null");
+        return;
       }
 
       // Optimistic burst — everything that gives the user "I sent a message
@@ -235,6 +302,12 @@ export function ChatWindow() {
         task_id: null,
         created_at: sentAt,
       };
+      // Seed cache BEFORE flipping activeSessionId. If we set the active
+      // session first, useQuery's first subscription to the new key sees no
+      // cached data and renders ChatMessageSkeleton for one frame — the
+      // "new-chat first-message" white flash. Priming the cache first means
+      // the very first read after activeSessionId flips hits data
+      // synchronously and ChatMessageList mounts directly.
       qc.setQueryData<ChatMessage[]>(
         chatKeys.messages(sessionId),
         (old) => (old ? [...old, optimistic] : [optimistic]),
@@ -249,9 +322,12 @@ export function ChatWindow() {
         status: "queued",
         created_at: sentAt,
       });
+      // Cache primed → safe to publish the new active session. Idempotent
+      // when the session was already active (existing-conversation send).
+      setActiveSession(sessionId);
       apiLogger.debug("sendChatMessage.optimistic", { sessionId, optimisticId: optimistic.id });
 
-      const result = await api.sendChatMessage(sessionId, finalContent);
+      const result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
       apiLogger.info("sendChatMessage.success", {
         sessionId,
         messageId: result.message_id,
@@ -271,9 +347,9 @@ export function ChatWindow() {
       activeSessionId,
       activeAgent,
       anchorCandidate,
-      createSession,
-      setActiveSession,
+      ensureSession,
       qc,
+      setActiveSession,
     ],
   );
 
@@ -494,6 +570,7 @@ export function ChatWindow() {
        *  when there's no agent (the EmptyState above carries the CTA). */}
       <ChatInput
         onSend={handleSend}
+        onUploadFile={handleUploadFile}
         onStop={handleStop}
         isRunning={!!pendingTaskId}
         disabled={isSessionArchived}
@@ -658,7 +735,12 @@ function SessionDropdown({
 
   const [showArchived, setShowArchived] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<ChatSession | null>(null);
+  // Inline rename: only one row can be in edit mode at a time. We track the
+  // session id (not the full session) so a stale closure can't overwrite a
+  // newer rename pulled in via WS.
+  const [renamingId, setRenamingId] = useState<string | null>(null);
   const deleteSession = useDeleteChatSession();
+  const updateSession = useUpdateChatSession();
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const formatTimeAgo = useFormatTimeAgo();
 
@@ -697,14 +779,35 @@ function SessionDropdown({
     });
   };
 
+  const handleSubmitRename = (sessionId: string, raw: string) => {
+    const trimmed = raw.trim();
+    const current = sessions.find((s) => s.id === sessionId);
+    setRenamingId(null);
+    // No-op submits (unchanged or blank) skip the network round-trip — the
+    // server would reject a blank title anyway, and an unchanged title would
+    // just bump updated_at for no user-visible reason.
+    if (!trimmed || trimmed === current?.title) return;
+    updateSession.mutate({ sessionId, title: trimmed });
+  };
+
   const renderRow = (session: ChatSession) => {
     const isCurrent = session.id === activeSessionId;
     const agent = agentById.get(session.agent_id) ?? null;
     const isRunning = inFlightSessionIds.has(session.id);
+    const isRenaming = renamingId === session.id;
     return (
       <DropdownMenuItem
         key={session.id}
-        onClick={() => onSelectSession(session)}
+        // While renaming we don't want a row click to select the session
+        // OR close the menu — the user is editing text, not navigating.
+        // closeOnClick=false keeps the dropdown open across input clicks
+        // / button clicks inside the row; the normal "click row → switch
+        // session → close menu" flow is unchanged when isRenaming=false.
+        closeOnClick={!isRenaming}
+        onClick={() => {
+          if (isRenaming) return;
+          onSelectSession(session);
+        }}
         className="group flex min-w-0 items-center gap-2"
       >
         {agent ? (
@@ -719,45 +822,84 @@ function SessionDropdown({
           <span className="size-6 shrink-0" />
         )}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm">
-            {session.title?.trim() || t(($) => $.window.untitled)}
-          </div>
-          <div className="truncate text-xs text-muted-foreground/70">
-            {formatTimeAgo(session.updated_at)}
-          </div>
+          {isRenaming ? (
+            <SessionRenameInput
+              initialValue={session.title ?? ""}
+              onSubmit={(value) => handleSubmitRename(session.id, value)}
+              onCancel={() => setRenamingId(null)}
+            />
+          ) : (
+            <>
+              <div className="truncate text-sm">
+                {session.title?.trim() || t(($) => $.window.untitled)}
+              </div>
+              <div className="truncate text-xs text-muted-foreground/70">
+                {formatTimeAgo(session.updated_at)}
+              </div>
+            </>
+          )}
         </div>
         {/* Right-edge status pip: in-flight wins over unread because
          *  "still working" is more actionable than "has reply" — and
          *  the two rarely coexist in practice (the unread flag fires
          *  on chat_message write, by which point the task has just
          *  finished). Same pip shape as unread for visual rhythm,
-         *  amber + pulse to read as activity. */}
-        {isRunning ? (
+         *  amber + pulse to read as activity.
+         *
+         *  Hidden while renaming so the inline input has room to
+         *  breathe and trailing pips don't visually trail off-screen
+         *  next to the editor caret. */}
+        {!isRenaming && isRunning ? (
           <span
             aria-label={t(($) => $.window.running)}
             title={t(($) => $.window.running)}
             className="size-1.5 shrink-0 rounded-full bg-amber-500 animate-pulse"
           />
-        ) : session.has_unread ? (
+        ) : !isRenaming && session.has_unread ? (
           <span
             aria-label={t(($) => $.window.unread)}
             title={t(($) => $.window.unread)}
             className="size-1.5 shrink-0 rounded-full bg-brand"
           />
         ) : null}
-        {isCurrent && <Check className="size-3.5 text-muted-foreground shrink-0" />}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            setPendingDelete(session);
-          }}
-          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
-          aria-label={t(($) => $.session_history.row_delete_aria)}
-        >
-          <Trash2 className="size-3.5" />
-        </button>
+        {!isRenaming && isCurrent && (
+          <Check className="size-3.5 text-muted-foreground shrink-0" />
+        )}
+        {!isRenaming && (
+          <>
+            <button
+              type="button"
+              // preventDefault is what tells Base UI's Menu.Item to skip
+              // its close-on-click; stopPropagation prevents the row's
+              // onClick from also firing (which would switch sessions).
+              // onPointerDown is stopped too so the menu's typeahead /
+              // focus tracking doesn't pre-empt the click.
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setRenamingId(session.id);
+              }}
+              className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+              aria-label={t(($) => $.session_history.row_rename_aria)}
+              title={t(($) => $.session_history.row_rename_aria)}
+            >
+              <Pencil className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setPendingDelete(session);
+              }}
+              className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+              aria-label={t(($) => $.session_history.row_delete_aria)}
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          </>
+        )}
       </DropdownMenuItem>
     );
   };
@@ -871,6 +1013,86 @@ function SessionDropdown({
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+/**
+ * Inline editor for a session title. Mounts focused with the existing
+ * title pre-selected so the user can either replace it outright or arrow
+ * into the existing text. Enter commits, Escape cancels, a real click
+ * outside the input also commits.
+ *
+ * We do NOT commit on the input's `blur` event: Base UI's Menu uses
+ * focus-follows-cursor (hovering a sibling row drags DOM focus there),
+ * so a blur handler would fire on every mouse-move and "save" the user's
+ * half-typed title without them clicking anywhere. Instead a document-
+ * level `pointerdown` listener — registered in capture phase so it runs
+ * before Base UI's outside-click close handler — commits when the user
+ * actually clicks outside the input.
+ */
+function SessionRenameInput({
+  initialValue,
+  onSubmit,
+  onCancel,
+}: {
+  initialValue: string;
+  onSubmit: (value: string) => void;
+  onCancel: () => void;
+}) {
+  const { t } = useT("chat");
+  const [value, setValue] = useState(initialValue);
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Hold the latest value + callback in refs so the mount-only effect's
+  // listener always sees fresh state without re-subscribing on every
+  // keystroke (which would briefly leave a window where pointerdown isn't
+  // observed).
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const onSubmitRef = useRef(onSubmit);
+  onSubmitRef.current = onSubmit;
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+
+    const handlePointerDown = (e: PointerEvent) => {
+      const input = inputRef.current;
+      if (!input) return;
+      if (input.contains(e.target as Node)) return;
+      onSubmitRef.current(valueRef.current);
+    };
+    // Capture phase — Base UI registers its own outside-click handler in
+    // bubble; running first lets us commit before the menu starts to
+    // close (and unmount this component).
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+    };
+  }, []);
+
+  return (
+    <input
+      ref={inputRef}
+      type="text"
+      value={value}
+      maxLength={200}
+      aria-label={t(($) => $.session_history.row_rename_aria)}
+      onChange={(e) => setValue(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        // Stop the menu from stealing arrow / typeahead / space input.
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          e.preventDefault();
+          onSubmit(value);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
+      }}
+      className="w-full rounded-sm bg-background px-1 py-0.5 text-sm outline-none ring-1 ring-border focus-visible:ring-brand"
+    />
   );
 }
 

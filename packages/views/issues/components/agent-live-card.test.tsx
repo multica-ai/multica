@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent as rtlFireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { AgentTask } from "@multica/core/types/agent";
 import enCommon from "../../locales/en/common.json";
@@ -249,6 +249,53 @@ describe("AgentLiveCard queued rendering", () => {
     expect(screen.queryByTestId("transcript-button")).toBeNull();
     // Cancel button is still available so users can drop a queued task.
     expect(screen.getByText("Stop")).toBeTruthy();
+  });
+
+  it("Stop button opens a confirm dialog and only calls cancelTask after the user confirms", async () => {
+    const runningTask = makeTask("task-r", { status: "running" });
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({ tasks: [runningTask] });
+    mockApi.cancelTask.mockResolvedValue(undefined);
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(screen.getByText("Stop")).toBeTruthy();
+    });
+
+    // First click should not hit the API — it only opens the confirm.
+    await act(async () => {
+      rtlFireEvent.click(screen.getByText("Stop"));
+    });
+    expect(mockApi.cancelTask).not.toHaveBeenCalled();
+    expect(screen.getByText(/Stop this task\?/)).toBeTruthy();
+
+    // Confirm — now the cancel fires.
+    await act(async () => {
+      rtlFireEvent.click(screen.getByRole("button", { name: "Stop task" }));
+    });
+    expect(mockApi.cancelTask).toHaveBeenCalledWith("issue-1", "task-r");
+  });
+
+  it("Stop confirm dialog dismisses without cancelling when the user picks Keep running", async () => {
+    const runningTask = makeTask("task-r", { status: "running" });
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({ tasks: [runningTask] });
+    mockApi.cancelTask.mockResolvedValue(undefined);
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(screen.getByText("Stop")).toBeTruthy();
+    });
+
+    await act(async () => {
+      rtlFireEvent.click(screen.getByText("Stop"));
+    });
+    expect(screen.getByText(/Stop this task\?/)).toBeTruthy();
+
+    await act(async () => {
+      rtlFireEvent.click(screen.getByRole("button", { name: "Keep running" }));
+    });
+    expect(mockApi.cancelTask).not.toHaveBeenCalled();
   });
 
   it("running tasks sort above queued tasks so the sticky slot stays on the active one", async () => {

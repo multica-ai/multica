@@ -57,6 +57,17 @@ type Config struct {
 	//   2) backfill_task_usage_daily ran successfully,
 	//   3) cron job scheduled and task_usage_rollup_lag_seconds() < 900.
 	UseDailyRollupForRuntimeUsage bool
+	// UseDailyRollupForDashboard routes the workspace `/dashboard` page's
+	// token-aggregation reads to `task_usage_dashboard_daily` (migration
+	// 084). Mirrors UseDailyRollupForRuntimeUsage above with the same
+	// fail-safe default (false → raw scan). Operators flip per
+	// environment AFTER:
+	//   1) migration 084 applied,
+	//   2) `backfill_task_usage_dashboard_daily` succeeded and stamped
+	//      the dashboard rollup watermark,
+	//   3) cron job scheduled (`rollup_task_usage_dashboard_daily`) and
+	//      `task_usage_dashboard_rollup_lag_seconds()` < 900.
+	UseDailyRollupForDashboard bool
 }
 
 type Handler struct {

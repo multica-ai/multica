@@ -45,6 +45,7 @@
     "section_label": "标签",
     "members_group": "成员",
     "agents_group": "智能体",
+    "squads_group": "小队",
     "issue_count_other": "{{count}} 个 issue",
     "reset": "重置全部筛选"
   },
@@ -97,8 +98,15 @@
     "add_sub_issue_aria": "添加子 issue",
     "section_properties": "属性",
     "section_parent_issue": "父 issue",
+    "section_pull_requests": "Pull Request",
     "section_details": "详情",
     "section_token_usage": "Token 用量",
+    "pull_requests_loading": "加载中…",
+    "pull_requests_empty": "还没有关联的 PR。在 PR 的分支名、标题或正文里引用本 issue 的 identifier 即可自动关联。",
+    "pull_request_state_open": "Open",
+    "pull_request_state_draft": "Draft",
+    "pull_request_state_merged": "Merged",
+    "pull_request_state_closed": "Closed",
     "prop_status": "状态",
     "prop_priority": "优先级",
     "prop_assignee": "负责人",
@@ -153,6 +161,13 @@
     "task_completed_other": "完成了 task（{{count}} 次）",
     "task_failed_one": "task 失败",
     "task_failed_other": "task 失败（{{count}} 次）",
+    "squad_leader_evaluated": "评估了小队触发",
+    "squad_leader_action": "已评估并采取了操作",
+    "squad_leader_action_reason": "已评估并采取了操作：{{reason}}",
+    "squad_leader_no_action": "已评估：无需操作",
+    "squad_leader_no_action_reason": "已评估：无需操作（{{reason}}）",
+    "squad_leader_failed": "评估失败",
+    "squad_leader_failed_reason": "评估失败：{{reason}}",
     "coalesced_badge": "×{{count}}"
   },
   "comment": {
@@ -227,6 +242,13 @@
     "status_failed": "失败",
     "status_cancelled": "已取消"
   },
+  "terminate_dialog": {
+    "title": "确定停止该 task？",
+    "body": "Task 会被取消且无法恢复。",
+    "running_note": " 进行中的 task 可能需要几秒才能完全停止。",
+    "keep": "保留运行",
+    "confirm": "停止 task"
+  },
   "batch": {
     "selected": "已选择 {{count}} 个",
     "status": "状态",
@@ -272,7 +294,8 @@
       "trigger_unassigned": "未分配",
       "search_placeholder": "分配给...",
       "members_group": "成员",
-      "agents_group": "智能体"
+      "agents_group": "智能体",
+      "squads_group": "小队"
     },
     "due_date": {
       "trigger_label": "截止日期",

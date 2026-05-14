@@ -185,7 +185,10 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		want     bool
 	}{
 		{provider: "openclaw", want: true},
-		{provider: "hermes", want: true},
+		// Hermes ACP starts in the task cwd and loads AGENTS.md / .agent_context
+		// directly. Inlining the full runtime brief duplicates that context and
+		// can trip upstream provider safety filters on otherwise harmless tasks.
+		{provider: "hermes", want: false},
 		{provider: "kiro", want: true},
 		{provider: "kimi", want: true},
 		{provider: "codex", want: false},
@@ -395,6 +398,53 @@ func TestBuildPromptCommentTriggeredNoContent(t *testing.T) {
 
 	if !strings.Contains(prompt, "multica issue get") {
 		t.Fatal("prompt missing CLI hint")
+	}
+}
+
+// TestBuildPromptSquadLeaderNoActionProhibition verifies that when a squad
+// leader is triggered by another agent's comment, the per-turn prompt
+// explicitly forbids posting a comment whose only purpose is to announce
+// no_action or "exiting silently". This is the fix for MUL-2168.
+func TestBuildPromptSquadLeaderNoActionProhibition(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildPrompt(Task{
+		IssueID:               "issue-1",
+		TriggerCommentID:      "comment-1",
+		TriggerCommentContent: "Progress update: tests passing.",
+		TriggerAuthorType:     "agent",
+		TriggerAuthorName:     "Worker",
+		Agent: &AgentData{
+			Name:         "Leader",
+			Instructions: "You lead the team.\n\n## Squad Operating Protocol\n\nYou are the LEADER.",
+		},
+	}, "claude")
+
+	for _, want := range []string{
+		"Squad leader no_action rule",
+		"DO NOT post any comment",
+		"multica squad activity",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("squad leader prompt missing %q\n---\n%s", want, prompt)
+		}
+	}
+
+	// Non-squad-leader agent should NOT get the squad leader rule.
+	nonLeaderPrompt := BuildPrompt(Task{
+		IssueID:               "issue-1",
+		TriggerCommentID:      "comment-1",
+		TriggerCommentContent: "Progress update: tests passing.",
+		TriggerAuthorType:     "agent",
+		TriggerAuthorName:     "Worker",
+		Agent: &AgentData{
+			Name:         "Regular",
+			Instructions: "You are a regular agent.",
+		},
+	}, "claude")
+
+	if strings.Contains(nonLeaderPrompt, "Squad leader no_action rule") {
+		t.Fatalf("non-squad-leader prompt should NOT contain squad leader rule\n---\n%s", nonLeaderPrompt)
 	}
 }
 
