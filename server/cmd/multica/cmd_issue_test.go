@@ -649,6 +649,16 @@ func TestResolveAssignee(t *testing.T) {
 		}
 	})
 
+	t.Run("match squad by bare @ display name", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "@Super Human", issueAssigneeKinds)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "squad" || aID != "squad-4444" {
+			t.Errorf("got (%q, %q), want (squad, squad-4444)", aType, aID)
+		}
+	})
+
 	t.Run("no match", func(t *testing.T) {
 		_, _, err := resolveAssignee(ctx, client, "nobody", issueAssigneeKinds)
 		if err == nil {
@@ -675,6 +685,31 @@ func TestResolveAssignee(t *testing.T) {
 			t.Fatal("expected error for missing workspace ID")
 		}
 	})
+}
+
+func TestNormalizeAssigneeLookupInput(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain name", "Super Human", "Super Human"},
+		{"bare at name", "@Super Human", "Super Human"},
+		{"fullwidth at name", "＠独立团", "独立团"},
+		{"spaced at name", "  @  Super Human  ", "Super Human"},
+		{
+			name: "mention link",
+			in:   "[@Super Human](mention://squad/ccccccc1-2222-3333-4444-555555555555)",
+			want: "ccccccc1-2222-3333-4444-555555555555",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeAssigneeLookupInput(tt.in); got != tt.want {
+				t.Errorf("normalizeAssigneeLookupInput(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
 }
 
 // TestResolveAssigneeRespectsKinds covers the MUL-2165 follow-up: callers

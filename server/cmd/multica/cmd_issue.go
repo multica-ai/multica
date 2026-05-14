@@ -1374,7 +1374,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 		return "", "", fmt.Errorf("workspace ID is required to resolve assignees; use --workspace-id or set MULTICA_WORKSPACE_ID")
 	}
 
-	input := strings.TrimSpace(name)
+	input := normalizeAssigneeLookupInput(name)
 	if input == "" {
 		return "", "", fmt.Errorf("no %s found matching %q", kinds.describe(), name)
 	}
@@ -1474,6 +1474,20 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 		}
 	}
 	return "", "", fmt.Errorf("no %s found matching %q", kinds.describe(), input)
+}
+
+func normalizeAssigneeLookupInput(raw string) string {
+	input := strings.TrimSpace(raw)
+	if m := util.MentionRe.FindStringSubmatch(input); len(m) == 4 && m[0] == input {
+		switch m[2] {
+		case "member", "agent", "squad":
+			return m[3]
+		}
+	}
+	input = strings.TrimLeftFunc(input, func(r rune) bool {
+		return r == '@' || r == '＠'
+	})
+	return strings.TrimSpace(input)
 }
 
 func ambiguousAssigneeError(input string, matches []assigneeMatch) error {
