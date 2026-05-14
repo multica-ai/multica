@@ -260,9 +260,15 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// the user is talking to someone else, not requesting work from the assignee.
 	// Also skip when replying in a member-started thread without mentioning the
 	// assignee — the user is continuing a member-to-member conversation.
+	// Also skip when the comment effectively @mentions the assignee (explicit
+	// or via parent inheritance) — enqueueMentionedAgentTasks below will
+	// handle that path with the same trigger_comment_id, and double-enqueueing
+	// the same (comment, assignee) pair would create two redundant tasks now
+	// that the per-(issue, agent) coalescing dedup is gone.
 	if authorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue) &&
 		!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
-		!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
+		!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) &&
+		!h.commentMentionsAssignee(comment.Content, parentComment, authorType, issue) {
 		// Always use the current comment as the trigger so the agent reads
 		// the actual new reply, not the thread root. Reply placement (flat
 		// thread grouping) is handled downstream by createAgentComment,
@@ -319,6 +325,34 @@ func (h *Handler) commentMentionsOthersButNotAssignee(content string, issue db.I
 		}
 	}
 	return true // Others mentioned but not assignee — suppress trigger
+}
+
+// commentMentionsAssignee returns true when the assignee agent will be
+// triggered via the @mention path for this comment — either an explicit
+// agent mention in the comment content, or an inherited mention from the
+// thread root when shouldInheritParentMentions applies. Used to make the
+// on_comment trigger and the @mention trigger mutually exclusive on the
+// same (comment, assignee) pair: without this gate a member comment that
+// @mentions the assignee would enqueue two tasks with identical
+// trigger_comment_ids.
+func (h *Handler) commentMentionsAssignee(content string, parent *db.Comment, authorType string, issue db.Issue) bool {
+	if !issue.AssigneeID.Valid {
+		return false
+	}
+	if issue.AssigneeType.String != "agent" {
+		return false
+	}
+	mentions := util.ParseMentions(content)
+	if shouldInheritParentMentions(parent, mentions, authorType) {
+		mentions = util.ParseMentions(parent.Content)
+	}
+	assigneeID := uuidToString(issue.AssigneeID)
+	for _, m := range mentions {
+		if m.Type == "agent" && m.ID == assigneeID {
+			return true
+		}
+	}
+	return false
 }
 
 // isReplyToMemberThread returns true if the comment is a reply in a thread
@@ -450,16 +484,16 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
 			continue
 		}
-		// Dedup: skip if this agent already has a pending task for this issue.
-		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-			IssueID: issue.ID,
-			AgentID: agentUUID,
-		})
-		if err != nil || hasPending {
-			continue
-		}
-		// Always use the current comment as the trigger so the agent reads the
-		// actual reply that mentioned it, not the thread root.
+		// Each @mention enqueues its own task. ClaimAgentTask refuses to
+		// dispatch a queued row when another row for the same (issue, agent)
+		// is already dispatched or running, so under the current
+		// single-poller-per-runtime model multiple queued rows drain one at
+		// a time. (This is a coordination-side property, not a hard DB lock
+		// on the (issue, agent) key — concurrent claimers could in theory
+		// race, but the daemon does not invoke ClaimAgentTask concurrently
+		// for the same agent today.) Always use the current comment as the
+		// trigger so the agent reads the actual reply that mentioned it,
+		// not the thread root.
 		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, comment.ID); err != nil {
 			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", err)
 		}

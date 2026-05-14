@@ -2310,3 +2310,157 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 		t.Fatalf("expected 0 tasks for Agent A (no self-trigger on own mention), got %d", got)
 	}
 }
+
+// TestRepeatedMentionsEnqueueSeparateTasks pins down the post-RFC-0001
+// behavior: each @mention of the same agent on the same issue must enqueue
+// its own queued task, even when an earlier task is still pending. The old
+// coalescing path silently dropped the second mention; per-(issue, agent)
+// serialization at claim time (ClaimAgentTask) is what keeps execution
+// safe, not enqueue-time dedup.
+func TestRepeatedMentionsEnqueueSeparateTasks(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID := createHandlerTestAgent(t, "Repeat Mention Target", nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Repeat-mention enqueue test",
+		"status": "todo",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	mentionBody := func(text string) map[string]any {
+		return map[string]any{
+			"content": fmt.Sprintf("[@Repeat](mention://agent/%s) %s", agentID, text),
+		}
+	}
+
+	// First mention queues a task.
+	w = httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", mentionBody("first request"))
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("first mention: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Second mention while the first task is still queued — must enqueue a
+	// second task, not be coalesced into the first.
+	w = httptest.NewRecorder()
+	r = newRequest("POST", "/api/issues/"+issueID+"/comments", mentionBody("second request"))
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("second mention: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var queued int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+		issueID, agentID,
+	).Scan(&queued); err != nil {
+		t.Fatalf("count queued tasks: %v", err)
+	}
+	if queued != 2 {
+		t.Fatalf("expected 2 queued tasks (one per @mention), got %d", queued)
+	}
+
+	// Each task must reference its own trigger comment for provenance — the
+	// whole point of dropping coalescing.
+	var distinctTriggers int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(DISTINCT trigger_comment_id) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		  AND trigger_comment_id IS NOT NULL
+	`, issueID, agentID).Scan(&distinctTriggers); err != nil {
+		t.Fatalf("count distinct trigger comments: %v", err)
+	}
+	if distinctTriggers != 2 {
+		t.Fatalf("expected 2 distinct trigger_comment_id values, got %d", distinctTriggers)
+	}
+}
+
+// TestAssigneeMentionDoesNotDoubleEnqueue pins down the on_comment / mention
+// path mutual exclusion: when a member comment on an issue assigned to an
+// agent @mentions that same assignee, the post-RFC code must enqueue exactly
+// one task (via the @mention path), not two. Before
+// commentMentionsAssignee was added, the on_comment branch and the
+// enqueueMentionedAgentTasks branch both fired with identical
+// trigger_comment_ids — the old HasPendingTaskForIssueAndAgent dedup masked
+// it, but dropping that dedup exposed the regression.
+func TestAssigneeMentionDoesNotDoubleEnqueue(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID := createHandlerTestAgent(t, "Assignee Dedup Target", nil)
+
+	// Create the issue assigned to the agent up front so the on_comment path
+	// can fire on the first comment.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Assignee mention dedup test",
+		"status":        "todo",
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	issueID := issue.ID
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	// CreateIssue itself enqueues an initial task because the issue is
+	// assigned + non-backlog. Drain that so we can isolate the comment path.
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent_task_queue SET status = 'cancelled', completed_at = now() WHERE issue_id = $1`,
+		issueID,
+	); err != nil {
+		t.Fatalf("clear initial assignment task: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": fmt.Sprintf("[@Target](mention://agent/%s) please look", agentID),
+	})
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("comment with assignee mention: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var queued int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+		issueID, agentID,
+	).Scan(&queued); err != nil {
+		t.Fatalf("count queued tasks: %v", err)
+	}
+	if queued != 1 {
+		t.Fatalf("expected 1 queued task (mention path only), got %d — on_comment and mention paths both fired for the same (comment, assignee)", queued)
+	}
+}

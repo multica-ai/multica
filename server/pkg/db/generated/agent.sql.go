@@ -1358,41 +1358,6 @@ func (q *Queries) HasActiveTaskForIssue(ctx context.Context, issueID pgtype.UUID
 	return has_active, err
 }
 
-const hasPendingTaskForIssue = `-- name: HasPendingTaskForIssue :one
-SELECT count(*) > 0 AS has_pending FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched')
-`
-
-// Returns true if there is a queued or dispatched (but not yet running) task for the issue.
-// Used by the coalescing queue: allow enqueue when a task is running (so
-// the agent picks up new comments on the next cycle) but skip if a pending
-// task already exists (natural dedup).
-func (q *Queries) HasPendingTaskForIssue(ctx context.Context, issueID pgtype.UUID) (bool, error) {
-	row := q.db.QueryRow(ctx, hasPendingTaskForIssue, issueID)
-	var has_pending bool
-	err := row.Scan(&has_pending)
-	return has_pending, err
-}
-
-const hasPendingTaskForIssueAndAgent = `-- name: HasPendingTaskForIssueAndAgent :one
-SELECT count(*) > 0 AS has_pending FROM agent_task_queue
-WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched')
-`
-
-type HasPendingTaskForIssueAndAgentParams struct {
-	IssueID pgtype.UUID `json:"issue_id"`
-	AgentID pgtype.UUID `json:"agent_id"`
-}
-
-// Returns true if a specific agent already has a queued or dispatched task
-// for the given issue. Used by @mention trigger dedup.
-func (q *Queries) HasPendingTaskForIssueAndAgent(ctx context.Context, arg HasPendingTaskForIssueAndAgentParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasPendingTaskForIssueAndAgent, arg.IssueID, arg.AgentID)
-	var has_pending bool
-	err := row.Scan(&has_pending)
-	return has_pending, err
-}
-
 const linkTaskToIssue = `-- name: LinkTaskToIssue :exec
 UPDATE agent_task_queue
 SET issue_id = $2

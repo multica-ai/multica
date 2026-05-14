@@ -278,11 +278,16 @@ func TestOnCommentTriggerDecision(t *testing.T) {
 		Content:    fmt.Sprintf("[@Agent](mention://agent/%s) help me", agentAssigneeID),
 	}
 
-	// Simulates the combined check from CreateComment:
-	//   !commentMentionsOthersButNotAssignee && !isReplyToMemberThread
+	// Simulates the combined on_comment gate from CreateComment. The third
+	// clause makes the on_comment path mutually exclusive with the @mention
+	// path on the same (comment, assignee) pair: when the comment
+	// effectively mentions the assignee (explicitly or via parent
+	// inheritance), enqueueMentionedAgentTasks handles it and on_comment
+	// must skip — otherwise we double-enqueue.
 	shouldTrigger := func(parent *db.Comment, content string) bool {
 		return !h.commentMentionsOthersButNotAssignee(content, issue) &&
-			!h.isReplyToMemberThread(context.Background(), parent, content, issue)
+			!h.isReplyToMemberThread(context.Background(), parent, content, issue) &&
+			!h.commentMentionsAssignee(content, parent, "member", issue)
 	}
 
 	tests := []struct {
@@ -292,15 +297,18 @@ func TestOnCommentTriggerDecision(t *testing.T) {
 		want    bool
 	}{
 		{"top-level, no mention", nil, "hello agent", true},
-		{"top-level, mention assignee", nil, fmt.Sprintf("[@Agent](mention://agent/%s) fix this", agentAssigneeID), true},
+		// Mention path covers the assignee — on_comment must NOT also fire.
+		{"top-level, mention assignee → mention path only", nil, fmt.Sprintf("[@Agent](mention://agent/%s) fix this", agentAssigneeID), false},
 		{"top-level, mention other only", nil, fmt.Sprintf("[@Other](mention://agent/%s) look", otherAgentID), false},
 		{"reply agent thread, no mention", agentParent, "got it", true},
 		{"reply agent thread, mention other member", agentParent, fmt.Sprintf("[@Bob](mention://member/%s) ?", memberID), false},
-		{"reply agent thread, mention assignee", agentParent, fmt.Sprintf("[@Agent](mention://agent/%s) yes", agentAssigneeID), true},
+		{"reply agent thread, mention assignee → mention path only", agentParent, fmt.Sprintf("[@Agent](mention://agent/%s) yes", agentAssigneeID), false},
 		{"reply member thread, no mention", memberParent, "agreed", false},
 		{"reply member thread, mention other member", memberParent, fmt.Sprintf("[@Bob](mention://member/%s) ok", memberID), false},
-		{"reply member thread, mention assignee", memberParent, fmt.Sprintf("[@Agent](mention://agent/%s) help", agentAssigneeID), true},
-		{"reply member thread that @mentioned assignee, no re-mention", memberParentMentioningAssignee, "here is more info", true},
+		{"reply member thread, mention assignee → mention path only", memberParent, fmt.Sprintf("[@Agent](mention://agent/%s) help", agentAssigneeID), false},
+		// Plain reply inherits the assignee mention from the parent — mention
+		// path picks it up via shouldInheritParentMentions, on_comment skips.
+		{"reply member thread that @mentioned assignee, no re-mention → mention path only", memberParentMentioningAssignee, "here is more info", false},
 		{"top-level, @all broadcast", nil, "[@All](mention://all/all) heads up team", false},
 		{"reply agent thread, @all broadcast", agentParent, "[@All](mention://all/all) update for everyone", false},
 		{"reply member thread, @all broadcast", memberParent, "[@All](mention://all/all) fyi", false},

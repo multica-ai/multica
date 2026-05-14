@@ -1726,25 +1726,16 @@ func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bo
 	return h.isAgentAssigneeReady(ctx, issue)
 }
 
-// shouldEnqueueOnComment returns true if a member comment on this issue should
-// trigger the assigned agent. Fires for any status — comments are
+// shouldEnqueueOnComment returns true if a member comment on this issue
+// should trigger the assigned agent. Fires for any status — comments are
 // conversational and can happen at any stage, including after completion
-// (e.g. follow-up questions on a done issue).
+// (e.g. follow-up questions on a done issue). Each comment enqueues its
+// own task; ClaimAgentTask refuses to dispatch a queued row when another
+// row for the same (issue, agent) is already dispatched or running, so
+// under the current single-poller-per-runtime model multiple queued rows
+// drain one at a time.
 func (h *Handler) shouldEnqueueOnComment(ctx context.Context, issue db.Issue) bool {
-	if !h.isAgentAssigneeReady(ctx, issue) {
-		return false
-	}
-	// Coalescing queue: allow enqueue when a task is running (so the agent
-	// picks up new comments on the next cycle) but skip if this agent already
-	// has a pending task (natural dedup for rapid-fire comments).
-	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-		IssueID: issue.ID,
-		AgentID: issue.AssigneeID,
-	})
-	if err != nil || hasPending {
-		return false
-	}
-	return true
+	return h.isAgentAssigneeReady(ctx, issue)
 }
 
 // isAgentAssigneeReady checks if an issue is assigned to an active agent
