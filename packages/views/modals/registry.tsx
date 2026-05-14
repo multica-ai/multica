@@ -9,6 +9,8 @@ import { SetParentIssueModal } from "./set-parent-issue";
 import { AddChildIssueModal } from "./add-child-issue";
 import { DeleteIssueConfirmModal } from "./delete-issue-confirm";
 import { BacklogAgentHintModal } from "./backlog-agent-hint";
+// CEREBRO-PATCH(sidebar-new-message-modal): JEH-1296 global new-message modal
+import { CerebroNewMessageModal } from "./cerebro-new-message";
 
 export function ModalRegistry() {
   const modal = useModalStore((s) => s.modal);
@@ -36,6 +38,9 @@ export function ModalRegistry() {
       return <DeleteIssueConfirmModal onClose={close} data={data} />;
     case "issue-backlog-agent-hint":
       return <BacklogAgentHintModal onClose={close} data={data} />;
+    // CEREBRO-PATCH(sidebar-new-message-modal): JEH-1296 global new-message modal
+    case "new-message":
+      return <CerebroNewMessageModal />;
     default:
       return null;
   }
