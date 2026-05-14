@@ -46,6 +46,7 @@
     "section_label": "标签",
     "members_group": "成员",
     "agents_group": "智能体",
+    "squads_group": "小队",
     "issue_count_other": "{{count}} 个 issue",
     "reset": "重置全部筛选"
   },
