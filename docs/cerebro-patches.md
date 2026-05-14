@@ -8,7 +8,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 
 ## Summary
 
-- **Unique patch names:** 294 (273 baseline + 15 PR #118 markers + 6 JEH-725 markers)
+- **Unique patch names:** 295 (273 baseline + 15 PR #118 markers + 6 JEH-725 markers + 1 JEH-1360 marker)
 - **Files marked (including chunks 4-8 pre-existing markers):** 302
 - **Files newly marked in chunk 11:** 280 (chunk-11 scope)
 - **Total marker lines added in chunk 11:** ~280 (one comment line per file)
@@ -38,6 +38,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `agent-runs-history-expanded-default` | packages/views/issues/components/agent-live-card.tsx | 1 | Initialize `TaskRunHistory` open state to `true` so the "Execution history" section is expanded by default when the Agent Runs tab is opened (JEH-1247). |
 | `agent-tools-api` | packages/core/api/client.ts | 10 | JEH-1290 W8 — `getAgentTools` / `updateAgentTool` wrappers for the W3 registry endpoints (`GET/PUT /api/agents/:id/tools/:name`). Enables the tools tab + toggle. |
 | `agent-tools-tab` | packages/views/agents/components/agent-overview-pane.tsx<br>packages/views/agents/components/tabs/cerebro-tools-tab.tsx (new) | 8 inline + ~220 new | JEH-1290 W8 — "Tools" tab on the agent editor. Fetches tool grants via W3 API, renders name/description/enabled toggle, tool-specific config fields (BQ row-limit, Sheets spreadsheet-id, web-fetch URL-allowlist). Gracefully empty before W3 is deployed. |
+| `agent-tools-tab-local-empty` | packages/views/agents/components/tabs/cerebro-tools-tab.tsx<br>packages/views/agents/components/tabs/cerebro-tools-tab.test.tsx<br>packages/views/locales/en/agents.json<br>packages/views/locales/zh-Hans/agents.json | ~115 | JEH-1360 — local-runtime agents with an empty gateway tool list show a cloud-only explanation instead of the generic gateway registry empty state. Cloud-runtime empty state remains unchanged. |
 | `workspace-tool-credentials` | packages/views/settings/components/workspace-tab.tsx | 50 | JEH-1290 W8 — "Tool Credentials" section in workspace settings. Google Service Account JSON (Sheets) stored in `workspace.settings.tool_credentials`. FDR Gateway Key (BQ) references the existing gateway config with a status indicator. Redacted-on-read pattern matches gateway section. |
 | `fix-paste-image-selection` | packages/views/editor/extensions/file-upload.ts | 1 | Call event.preventDefault() before handleFiles so pasted images are never inserted inline into the editor. Without this the browser inserts the image as an inline node and then selects it, forcing users to click before typing (JEH-1194). |
 | `runtime-pause-cerebro` | server/internal/handler/runtime_pause_cerebro.go | 158 | Net-new fork file: HTTP handlers for cerebro pause/unpause. Delegates to cerebroruntime.Service via the RuntimePauseInvoker seam (JEH-848). |
