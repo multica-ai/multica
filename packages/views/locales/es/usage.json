@@ -16,8 +16,11 @@
     "tasks_hint": "{{failed}} fallidas"
   },
   "daily": {
-    "title": "Coste diario",
-    "no_data": "Sin uso en este período."
+    "no_data": "Sin uso en este período.",
+    "title_cost": "Coste diario",
+    "title_tokens": "Tokens diarios",
+    "metric_cost": "Coste",
+    "metric_tokens": "Tokens"
   },
   "leaderboard": {
     "title": "Clasificación",

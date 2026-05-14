@@ -37,7 +37,8 @@
     "section_count_one": "{{count}} miembro en este equipo",
     "section_count_other": "{{count}} miembros en este equipo",
     "add_member_button": "Añadir miembro",
-    "leader_chip": "Líder"
+    "leader_chip": "Líder",
+    "create_agent_button": "Crear agente"
   },
   "instructions_tab": {
     "description": "Las instrucciones del equipo se inyectan en el prompt del agente líder cada vez que trabaja en una tarea asignada a este equipo. Úsalas para dar al líder orientaciones generales del equipo, acuerdos de trabajo o contexto que debe seguir en cada tarea.",

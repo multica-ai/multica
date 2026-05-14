@@ -47,7 +47,8 @@
     "agents_group": "Agentes",
     "issue_count_one": "{{count}} incidencia",
     "issue_count_other": "{{count}} incidencias",
-    "reset": "Restablecer todos los filtros"
+    "reset": "Restablecer todos los filtros",
+    "squads_group": "Equipos"
   },
   "display": {
     "tooltip": "Configuración de visualización",
@@ -161,7 +162,14 @@
     "task_completed_other": "completó la tarea ({{count}} veces)",
     "task_failed_one": "la tarea falló",
     "task_failed_other": "la tarea falló ({{count}} veces)",
-    "coalesced_badge": "×{{count}}"
+    "coalesced_badge": "×{{count}}",
+    "squad_leader_evaluated": "evaluó el disparador del equipo",
+    "squad_leader_action": "evaluó y tomó acción",
+    "squad_leader_action_reason": "evaluó y tomó acción: {{reason}}",
+    "squad_leader_no_action": "evaluó: no se necesita acción",
+    "squad_leader_no_action_reason": "evaluó: no se necesita acción ({{reason}})",
+    "squad_leader_failed": "la evaluación falló",
+    "squad_leader_failed_reason": "la evaluación falló: {{reason}}"
   },
   "comment": {
     "delete_title": "Eliminar comentario",

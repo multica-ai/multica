@@ -210,7 +210,6 @@
     "runtime_filter_all": "Todos",
     "runtime_loading": "Cargando runtimes...",
     "runtime_none": "No hay runtime disponible",
-    "runtime_register_first": "Registra un runtime antes de crear un agente",
     "runtime_cloud_badge": "Nube",
     "runtime_private_badge": "Privado",
     "runtime_private_locked_tooltip": "Runtime privado — solo su propietario o un administrador del espacio de trabajo puede crear agentes en él. Pide al propietario que lo cambie a Público para compartirlo.",
@@ -235,11 +234,13 @@
       "title": "Elige una plantilla",
       "empty": "Aún no hay plantillas disponibles.",
       "load_failed": "Error al cargar las plantillas",
-      "other_category": "Otros"
+      "other_category": "Otros",
+      "filter_all": "Todos"
     },
     "template_card": {
       "skills_one": "{{count}} habilidad",
-      "skills_other": "{{count}} habilidades"
+      "skills_other": "{{count}} habilidades",
+      "prompt_only": "Solo instrucciones"
     },
     "template_detail": {
       "load_failed": "Error al cargar la plantilla",
@@ -279,7 +280,8 @@
       "remove_aria": "Eliminar avatar",
       "select_image_toast": "Por favor, selecciona un archivo de imagen.",
       "upload_failed_toast": "Error al subir el avatar"
-    }
+    },
+    "squad_join_failed_toast": "El agente \"{{name}}\" fue creado pero no pudo unirse al equipo: {{error}}. Puedes añadirlo manualmente desde Miembros."
   },
   "tab_body": {
     "common": {

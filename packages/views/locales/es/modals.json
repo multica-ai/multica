@@ -131,7 +131,10 @@
       "toast_sent": "Enviado al agente — recibirás una notificación en la bandeja de entrada cuando esté listo",
       "error_agent_unavailable_fallback": "El agente no está disponible. Elige otro agente.",
       "error_daemon_version": "El CLI del daemon de este agente ({{current}}) es inferior al requerido {{min}}. Actualiza el daemon para usar Crear con agente.",
-      "error_unknown": "Error al enviar. Inténtalo de nuevo."
+      "error_unknown": "Error al enviar. Inténtalo de nuevo.",
+      "search_placeholder": "Buscar agentes y equipos…",
+      "agents_group": "Agentes",
+      "squads_group": "Equipos"
     }
   },
   "create_squad": {
