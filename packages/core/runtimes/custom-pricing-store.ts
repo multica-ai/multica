@@ -7,8 +7,8 @@ import { defaultStorage } from "../platform/storage";
 // User-supplied pricing for models we don't ship a maintained rate for.
 // We can't track every model OpenRouter / Codex / Hermes / Kimi etc. release,
 // so the empty-state diagnostic lets users fill in their own rates. Stored
-// globally (not workspace-scoped) because the rate of `gpt-5.5-mini` is the
-// same regardless of which workspace you're viewing.
+// globally (not workspace-scoped) because a model's rate is the same
+// regardless of which workspace you're viewing.
 export interface CustomModelPricing {
   input: number;
   output: number;

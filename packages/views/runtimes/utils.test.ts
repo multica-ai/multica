@@ -81,15 +81,14 @@ describe("estimateCost", () => {
     ).toBeCloseTo(1.75 + 14, 5);
   });
 
-  it("flags catalog SKUs without a published price (gpt-5.5-mini) as unmapped", () => {
-    // `gpt-5.5-mini` is in the Codex catalog but OpenAI hasn't published a
-    // public rate. We refuse to absorb it into `gpt-5.5` — the diagnostic
-    // surfaces it instead so the team knows to add an explicit row.
-    expect(isModelPriced("gpt-5.5-mini")).toBe(false);
+  it("flags unknown dotted variants as unmapped", () => {
+    // We refuse to absorb unknown dotted variants into their base model — the
+    // diagnostic surfaces them instead so the team adds an explicit row.
+    expect(isModelPriced("gpt-5.4-foo")).toBe(false);
     expect(
       estimateCost({
         ...zeroUsage,
-        model: "gpt-5.5-mini",
+        model: "gpt-5.4-foo",
         input_tokens: 1_000_000,
       }),
     ).toBe(0);
@@ -144,17 +143,17 @@ describe("collectUnmappedModels", () => {
 
 describe("user-supplied custom pricing", () => {
   it("prices a model the maintained catalog doesn't ship", () => {
-    useCustomPricingStore.getState().setCustomPricing("gpt-5.5-mini", {
+    useCustomPricingStore.getState().setCustomPricing("custom-model-mini", {
       input: 1,
       output: 4,
       cacheRead: 0.1,
       cacheWrite: 1,
     });
-    expect(isModelPriced("gpt-5.5-mini")).toBe(true);
+    expect(isModelPriced("custom-model-mini")).toBe(true);
     expect(
       estimateCost({
         ...zeroUsage,
-        model: "gpt-5.5-mini",
+        model: "custom-model-mini",
         input_tokens: 1_000_000,
         output_tokens: 1_000_000,
       }),
@@ -198,15 +197,15 @@ describe("user-supplied custom pricing", () => {
 
   it("removeCustomPricing clears the override", () => {
     const store = useCustomPricingStore.getState();
-    store.setCustomPricing("gpt-5.5-mini", {
+    store.setCustomPricing("custom-model-mini", {
       input: 1,
       output: 4,
       cacheRead: 0.1,
       cacheWrite: 1,
     });
-    expect(isModelPriced("gpt-5.5-mini")).toBe(true);
-    useCustomPricingStore.getState().removeCustomPricing("gpt-5.5-mini");
-    expect(isModelPriced("gpt-5.5-mini")).toBe(false);
+    expect(isModelPriced("custom-model-mini")).toBe(true);
+    useCustomPricingStore.getState().removeCustomPricing("custom-model-mini");
+    expect(isModelPriced("custom-model-mini")).toBe(false);
   });
 
   it("priced + unpriced models in the same window produce a mixed-cost aggregate", () => {

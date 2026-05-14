@@ -96,8 +96,7 @@ func TestCodexStaticModelsExposesGPT55(t *testing.T) {
 		ids[m.ID] = m
 	}
 	for _, want := range []string{
-		"gpt-5.5", "gpt-5.5-mini",
-		"gpt-5.4", "gpt-5.4-mini",
+		"gpt-5.5", "gpt-5.4", "gpt-5.4-mini",
 		"gpt-5.3-codex", "gpt-5",
 		"o3", "o3-mini",
 	} {
@@ -117,6 +116,9 @@ func TestCodexStaticModelsExposesGPT55(t *testing.T) {
 		if m.Provider != "openai" {
 			t.Errorf("all Codex entries must carry Provider=openai, got %+v", m)
 		}
+	}
+	if _, ok := ids["gpt-5.5-mini"]; ok {
+		t.Errorf("Codex catalog must not expose unavailable model gpt-5.5-mini")
 	}
 	if defaults != 1 {
 		t.Errorf("expected exactly one default Codex entry, got %d", defaults)
@@ -144,9 +146,9 @@ func TestInferCopilotProvider(t *testing.T) {
 		"raptor-mini":       "",
 		// negative cases: must not be misidentified as OpenAI
 		// reasoning series even though they start with `o`.
-		"opus-fake":         "",
-		"omni":              "",
-		"o":                 "",
+		"opus-fake": "",
+		"omni":      "",
+		"o":         "",
 	}
 	for id, want := range cases {
 		if got := inferCopilotProvider(id); got != want {

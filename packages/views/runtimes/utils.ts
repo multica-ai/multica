@@ -129,7 +129,7 @@ export function formatTokens(n: number): string {
 // The resolver matches exact keys after stripping a trailing date snapshot
 // (see `resolvePricing` below). It deliberately does NOT do startsWith
 // fallbacks: every catalog SKU needs its own row. That keeps unfamiliar
-// variants (`gpt-5.5-mini`, hypothetical `gpt-5.4-foo`) from silently
+// variants (`gpt-5.4-foo`, hypothetical future SKUs) from silently
 // inheriting the price of a near-named relative; they surface in the
 // unmapped diagnostic instead. Mirror new entries in
 // `server/pkg/agent/models.go` so the catalog and pricing stay in sync.
@@ -185,8 +185,8 @@ const MODEL_PRICING: Record<
 // volatile, so we strip a trailing date / "latest" tag and try again.
 // Anything still unmapped in the maintained catalog falls back to the
 // user-supplied custom pricing store before giving up. No startsWith
-// fallback: variants like `gpt-5.5-mini` must have their own row to be
-// priced (otherwise they'd inherit `gpt-5.5`).
+// fallback: variants like `gpt-5.4-foo` must have their own row to be
+// priced (otherwise they'd inherit a near-named relative).
 function resolvePricing(model: string) {
   if (!model) return undefined;
   if (MODEL_PRICING[model]) return MODEL_PRICING[model];
