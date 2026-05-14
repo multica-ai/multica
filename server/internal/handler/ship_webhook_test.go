@@ -155,6 +155,52 @@ func TestWebhook_AcceptsValidSignature(t *testing.T) {
 	}
 }
 
+func TestProcessPullRequest_SyncsReleaseMergeState(t *testing.T) {
+	if !shipHubMigrationApplied(t) {
+		t.Skip("ship hub migration not applied")
+	}
+	enableShipHub(t, false)
+	seedWebhookSecret(t, "secret-sync-release")
+	projectID := createShipProject(t, "https://github.com/multica-ai/multica")
+	releaseID := seedReleaseVerifying(t, projectID, "abc123def4567890", "low")
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE ship_release SET stage = 'merging', merge_paused = FALSE WHERE id = $1`,
+		releaseID); err != nil {
+		t.Fatalf("seed merging release: %v", err)
+	}
+	prID := seedReleasePRState(t, projectID, releaseID, 1, "open", "queued")
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE pull_request
+		 SET repo_url = 'https://github.com/multica-ai/multica',
+		     pr_number = 42,
+		     head_sha = 'abc123def4567890'
+		 WHERE id = $1`,
+		prID); err != nil {
+		t.Fatalf("align pr with webhook fixture: %v", err)
+	}
+
+	body := loadWebhookFixture(t, "pull_request_closed_merged.json")
+	req := newWebhookRequest(t, "pull_request", "delivery-pr-closed-sync", "secret-sync-release", body)
+	rec := httptest.NewRecorder()
+	testHandler.HandleShipHubGitHubWebhook(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	waitForDeliveryProcessed(t, "delivery-pr-closed-sync")
+
+	var mergeState string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT merge_state::text
+		 FROM ship_release_pull_request
+		 WHERE release_id = $1 AND pull_request_id = $2`,
+		releaseID, prID).Scan(&mergeState); err != nil {
+		t.Fatalf("read release membership: %v", err)
+	}
+	if mergeState != "merged" {
+		t.Fatalf("expected membership merge_state=merged, got %q", mergeState)
+	}
+}
+
 // TestWebhook_DeduplicatesRetry — re-delivery of the same X-GitHub-Delivery
 // must respond 200 with deduped=true and not re-process.
 func TestWebhook_DeduplicatesRetry(t *testing.T) {

@@ -59,12 +59,12 @@ import (
 // these to clean status codes; callers should never `==` against the
 // underlying errors-package value.
 var (
-	ErrReleaseStageMismatch  = errors.New("release: stage does not allow this transition")
-	ErrMergeAlreadyRunning   = errors.New("release: merge train already running")
-	ErrMergeNotPaused        = errors.New("release: merge train is not paused")
-	ErrTokenMissing          = errors.New("release: workspace github token is not configured")
-	ErrPreconditionFailed    = errors.New("release: preconditions not met")
-	ErrInvalidMergeMethod    = errors.New("release: invalid merge method")
+	ErrReleaseStageMismatch = errors.New("release: stage does not allow this transition")
+	ErrMergeAlreadyRunning  = errors.New("release: merge train already running")
+	ErrMergeNotPaused       = errors.New("release: merge train is not paused")
+	ErrTokenMissing         = errors.New("release: workspace github token is not configured")
+	ErrPreconditionFailed   = errors.New("release: preconditions not met")
+	ErrInvalidMergeMethod   = errors.New("release: invalid merge method")
 )
 
 // MergePreconditionError carries a human-readable list of reasons the
@@ -690,9 +690,9 @@ func (s *Service) pauseMergeTrain(
 	})
 	if deps != nil && deps.Publisher != nil {
 		deps.Publisher.PublishMergeEvent(protocol.EventReleaseMergePaused, uuidString(updated.WorkspaceID), map[string]any{
-			"release_id":    uuidString(releaseID),
-			"paused_pr_id":  uuidString(pausedPRID),
-			"error":         errMsg,
+			"release_id":   uuidString(releaseID),
+			"paused_pr_id": uuidString(pausedPRID),
+			"error":        errMsg,
 		})
 	}
 	postReleaseChannel(deps, ctx, updated.ChannelID, fmt.Sprintf(
@@ -851,6 +851,54 @@ func (s *Service) completeMergeTrain(
 	return nil
 }
 
+// ReconcileStalledMergeTrain repairs merge-train membership rows after
+// missed webhooks or a server restart kills the goroutine that was
+// walking the train. If GitHub state already says every unresolved PR is
+// merged, it syncs the release membership rows and completes the train.
+func (s *Service) ReconcileStalledMergeTrain(
+	ctx context.Context,
+	releaseID pgtype.UUID,
+	actor pgtype.UUID,
+	deps *MergeTrainDeps,
+) error {
+	rows, err := s.Q.ListReleasePullRequests(ctx, releaseID)
+	if err != nil {
+		return fmt.Errorf("list release prs: %w", err)
+	}
+	now := s.now()
+	for _, row := range rows {
+		if row.State != db.PullRequestStateMerged {
+			continue
+		}
+		if row.MembershipMergeState == db.PrMergeStateMerged ||
+			row.MembershipMergeState == db.PrMergeStateSkipped {
+			continue
+		}
+		if _, err := s.Q.SetReleasePRMergeState(ctx, db.SetReleasePRMergeStateParams{
+			ReleaseID:     releaseID,
+			PullRequestID: row.ID,
+			MergeState:    db.PrMergeStateMerged,
+			MergedSha:     pgtype.Text{String: row.HeadSha, Valid: row.HeadSha != ""},
+			MergedAt:      pgtype.Timestamptz{Time: now, Valid: true},
+		}); err != nil {
+			slog.Warn("ship: stalled train reconcile sync failed",
+				"pr_id", uuidString(row.ID), "error", err)
+		}
+	}
+
+	rows, err = s.Q.ListReleasePullRequests(ctx, releaseID)
+	if err != nil {
+		return fmt.Errorf("re-read release prs: %w", err)
+	}
+	for _, row := range rows {
+		switch row.MembershipMergeState {
+		case db.PrMergeStateQueued, db.PrMergeStateMerging, db.PrMergeStateFailed:
+			return nil
+		}
+	}
+	return s.completeMergeTrain(ctx, releaseID, actor, deps)
+}
+
 // mergeTrainCounts returns (total_membership_rows, merged_count,
 // merged_count_excluding_skipped). Used both for progress payloads and
 // for the completion summary.
@@ -880,11 +928,11 @@ func (s *Service) publishMergeProgress(
 		return
 	}
 	deps.Publisher.PublishMergeEvent(protocol.EventReleaseMergeProgress, uuidString(workspaceID), map[string]any{
-		"release_id":    uuidString(releaseID),
-		"pr_id":         uuidString(prID),
-		"merge_state":   string(state),
-		"merged_count":  mergedNow,
-		"total":         total,
+		"release_id":   uuidString(releaseID),
+		"pr_id":        uuidString(prID),
+		"merge_state":  string(state),
+		"merged_count": mergedNow,
+		"total":        total,
 	})
 }
 

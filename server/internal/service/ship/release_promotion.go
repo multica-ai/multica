@@ -506,6 +506,23 @@ func (s *Service) MarkReleaseDone(
 	return flipped, nil
 }
 
+// TryMarkReleaseDoneIfAllMerged closes an in-production release once
+// every PR in the release is confirmed merged. It is safe to call from
+// periodic reconciliation; MarkReleaseDone handles idempotency for
+// terminal or non-in-production releases.
+func (s *Service) TryMarkReleaseDoneIfAllMerged(
+	ctx context.Context,
+	releaseID pgtype.UUID,
+	deps *StagingDeps,
+) (db.ShipRelease, bool, error) {
+	if !releasePRsAllMerged(ctx, s.Q, releaseID) {
+		rel, err := s.Q.GetRelease(ctx, releaseID)
+		return rel, false, err
+	}
+	rel, err := s.MarkReleaseDone(ctx, releaseID, deps)
+	return rel, err == nil, err
+}
+
 func releasePRsAllMerged(ctx context.Context, q *db.Queries, releaseID pgtype.UUID) bool {
 	rows, err := q.ListReleasePullRequests(ctx, releaseID)
 	if err != nil || len(rows) == 0 {

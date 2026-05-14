@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -520,6 +521,70 @@ func TestLinkProductionDeploy_AllPRsMergedAutoFinalizes(t *testing.T) {
 	}
 }
 
+func TestFinalizer_ClosesInProductionWhenAllPRsMerged(t *testing.T) {
+	enablePromotionTest(t)
+	projectID := createShipProject(t, "https://github.com/multica-ai/finalizer-done")
+	releaseID := seedReleaseVerifying(t, projectID, "main-sha-7d-finalizer", "low")
+	seedReleasePRState(t, projectID, releaseID, 1, "merged", "queued")
+	issueID := seedReleaseTrackingIssue(t, projectID, "- [ ] #1 — Finalize me (@tester)\n")
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE ship_release
+		 SET stage = 'in_production', promoted_at = NOW(), issue_id = $2
+		 WHERE id = $1`,
+		releaseID, issueID); err != nil {
+		t.Fatalf("seed in_production issue: %v", err)
+	}
+
+	svc := &ship.Service{Q: testHandler.Queries}
+	deps := &ship.StagingDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
+	updated, done, err := svc.TryMarkReleaseDoneIfAllMerged(context.Background(), parseUUID(releaseID), deps)
+	if err != nil {
+		t.Fatalf("TryMarkReleaseDoneIfAllMerged: %v", err)
+	}
+	if !done || updated.Stage != db.ReleaseStageDone {
+		t.Fatalf("expected done release, done=%v stage=%q", done, updated.Stage)
+	}
+
+	var status string
+	if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&status); err != nil {
+		t.Fatalf("read issue status: %v", err)
+	}
+	if status != "done" {
+		t.Fatalf("expected tracking issue done, got %q", status)
+	}
+}
+
+func TestReconcileStalledMergeTrain_SyncsAndCompletes(t *testing.T) {
+	enablePromotionTest(t)
+	projectID := createShipProject(t, "https://github.com/multica-ai/stalled-train")
+	releaseID := seedReleaseVerifying(t, projectID, "main-sha-7d-stalled", "low")
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE ship_release SET stage = 'merging', merge_paused = FALSE WHERE id = $1`,
+		releaseID); err != nil {
+		t.Fatalf("seed merging release: %v", err)
+	}
+	seedReleasePRState(t, projectID, releaseID, 1, "merged", "merging")
+	seedReleasePRState(t, projectID, releaseID, 2, "merged", "queued")
+
+	svc := &ship.Service{Q: testHandler.Queries}
+	deps := &ship.MergeTrainDeps{Publisher: &recordingPublisher{}, ParentCtx: context.Background()}
+	if err := svc.ReconcileStalledMergeTrain(context.Background(), parseUUID(releaseID), pgtype.UUID{}, deps); err != nil {
+		t.Fatalf("ReconcileStalledMergeTrain: %v", err)
+	}
+	if got := readReleaseStage(t, releaseID); got != "in_staging" {
+		t.Fatalf("expected release in_staging, got %q", got)
+	}
+	rows, err := testHandler.Queries.ListReleasePullRequests(context.Background(), parseUUID(releaseID))
+	if err != nil {
+		t.Fatalf("list release prs: %v", err)
+	}
+	for _, row := range rows {
+		if row.MembershipMergeState != db.PrMergeStateMerged {
+			t.Fatalf("expected PR %s membership merged, got %q", uuidToString(row.ID), row.MembershipMergeState)
+		}
+	}
+}
+
 // TestUpsertReleaseHealth_Idempotent — two writes for the same release
 // produce one row with the latest values.
 func TestUpsertReleaseHealth_Idempotent(t *testing.T) {
@@ -621,6 +686,36 @@ func seedRollbackPR(t *testing.T, projectID, releaseID string, position int, mer
 		 VALUES ($1, $2, $3, TRUE, $4, $5, NOW())`,
 		releaseID, prID, position, mergeState, "sha-merged-"+prID); err != nil {
 		t.Fatalf("seed membership: %v", err)
+	}
+	return prID
+}
+
+func seedReleasePRState(t *testing.T, projectID, releaseID string, position int, prState, mergeState string) string {
+	t.Helper()
+	var prID string
+	headSHA := fmt.Sprintf("sha-%s-%d", releaseID[:8], position)
+	err := testPool.QueryRow(context.Background(),
+		`INSERT INTO pull_request
+			(workspace_id, project_id, repo_url, pr_number, title, state, is_draft,
+			 author_login, author_avatar_url, base_ref, head_ref, head_sha, html_url,
+			 body, ci_status, review_decision, mergeable,
+			 additions, deletions, changed_files, labels,
+			 pr_created_at, pr_updated_at, pr_merged_at)
+		 VALUES ($1, $2, 'https://github.com/example/example', $3, 'release state test', $4::pull_request_state,
+			 false, 'tester', '', 'main', 'feat', $5, 'https://example.com',
+			 '', 'success', 'APPROVED', 'MERGEABLE', 0, 0, 0, '[]'::jsonb,
+			 NOW(), NOW(), CASE WHEN $4::text = 'merged' THEN NOW() ELSE NULL END)
+		 RETURNING id`,
+		testWorkspaceID, projectID, position+9100, prState, headSHA).Scan(&prID)
+	if err != nil {
+		t.Fatalf("seed release pr state: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`INSERT INTO ship_release_pull_request
+			(release_id, pull_request_id, position, is_active, merge_state, merged_sha, merged_at)
+		 VALUES ($1, $2, $3, TRUE, $4, NULL, NULL)`,
+		releaseID, prID, position, mergeState); err != nil {
+		t.Fatalf("seed release membership state: %v", err)
 	}
 	return prID
 }
