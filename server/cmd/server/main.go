@@ -24,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -349,6 +350,15 @@ func main() {
 	} else if gatewayCfg.Enabled {
 		gatewayExecutor := cerebroruntime.NewFirtalGatewayExecutor(gatewayCfg, queries, cerebrodb.New(pool), taskSvc, bus, nil, nil)
 		go gatewayExecutor.Run(gatewayRuntimeCtx)
+		// CEREBRO-PATCH(main-seed-kristian): JEH-1353 — seed Kristian's MVP tools
+		// on every startup (idempotent upsert). KristianAgentID is the canonical
+		// UUID for Kristian in this workspace.
+		const kristianAgentID = "6fe22e7e-6a81-4403-be26-fafd89871cf6"
+		if kid, err := util.ParseUUID(kristianAgentID); err == nil {
+			if err := cerebroruntime.SeedKristianTools(context.Background(), pool, kid); err != nil {
+				slog.Warn("seed Kristian tools failed", "error", err)
+			}
+		}
 	}
 
 	if metricsServer != nil {

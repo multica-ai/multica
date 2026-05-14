@@ -683,6 +683,261 @@ func (t *SheetsWriteTool) Call(ctx context.Context, args map[string]any) (string
 	return string(raw), nil
 }
 
+// ── get_issue ─────────────────────────────────────────────────────────────────
+
+// FirtalGetIssueTool implements Tool for reading a single issue with comments.
+type FirtalGetIssueTool struct {
+	queries *db.Queries
+	tctx    ToolContext
+}
+
+func (t *FirtalGetIssueTool) Name() string { return "get_issue" }
+func (t *FirtalGetIssueTool) Description() string {
+	return "Get full details of a Multica issue: title, description, status, priority, and comments. issue_id accepts a UUID or identifier like \"JEH-123\"."
+}
+func (t *FirtalGetIssueTool) InputSchema() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"issue_id"},
+		"properties": map[string]any{
+			"issue_id": map[string]any{
+				"type":        "string",
+				"description": "Issue UUID or identifier (e.g. JEH-123)",
+			},
+		},
+	}
+}
+func (t *FirtalGetIssueTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	issueRef, ok := args["issue_id"].(string)
+	if !ok || strings.TrimSpace(issueRef) == "" {
+		return "", fmt.Errorf("get_issue: issue_id is required")
+	}
+	issue, err := resolveIssue(ctx, t.queries, t.tctx.WorkspaceID, issueRef)
+	if err != nil {
+		return "", err
+	}
+	comments, err := t.queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
+		IssueID:     issue.ID,
+		WorkspaceID: t.tctx.WorkspaceID,
+		Limit:       firtalGatewayIssueCommentCap,
+	})
+	if err != nil {
+		return "", fmt.Errorf("get_issue: list comments: %w", err)
+	}
+	result := map[string]any{
+		"id":       util.UUIDToString(issue.ID),
+		"number":   issue.Number,
+		"title":    issue.Title,
+		"status":   issue.Status,
+		"priority": issue.Priority,
+		"comments": formatComments(comments),
+	}
+	if desc := strings.TrimSpace(issue.Description.String); desc != "" {
+		result["description"] = desc
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("get_issue: marshal result: %w", err)
+	}
+	return string(raw), nil
+}
+
+// ── list_comments ─────────────────────────────────────────────────────────────
+
+// FirtalListCommentsTool implements Tool for listing comments on an issue.
+type FirtalListCommentsTool struct {
+	queries *db.Queries
+	tctx    ToolContext
+}
+
+func (t *FirtalListCommentsTool) Name() string { return "list_comments" }
+func (t *FirtalListCommentsTool) Description() string {
+	return "List all comments on a Multica issue in chronological order. issue_id accepts a UUID or identifier like \"JEH-123\"."
+}
+func (t *FirtalListCommentsTool) InputSchema() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"issue_id"},
+		"properties": map[string]any{
+			"issue_id": map[string]any{
+				"type":        "string",
+				"description": "Issue UUID or identifier (e.g. JEH-123)",
+			},
+		},
+	}
+}
+func (t *FirtalListCommentsTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	issueRef, ok := args["issue_id"].(string)
+	if !ok || strings.TrimSpace(issueRef) == "" {
+		return "", fmt.Errorf("list_comments: issue_id is required")
+	}
+	issue, err := resolveIssue(ctx, t.queries, t.tctx.WorkspaceID, issueRef)
+	if err != nil {
+		return "", err
+	}
+	comments, err := t.queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
+		IssueID:     issue.ID,
+		WorkspaceID: t.tctx.WorkspaceID,
+		Limit:       firtalGatewayIssueCommentCap,
+	})
+	if err != nil {
+		return "", fmt.Errorf("list_comments: %w", err)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"issue_id": util.UUIDToString(issue.ID),
+		"comments": formatComments(comments),
+	})
+	if err != nil {
+		return "", fmt.Errorf("list_comments: marshal result: %w", err)
+	}
+	return string(raw), nil
+}
+
+// ── add_comment ───────────────────────────────────────────────────────────────
+
+// FirtalAddCommentTool implements Tool for posting a comment on an issue.
+type FirtalAddCommentTool struct {
+	queries *db.Queries
+	tctx    ToolContext
+}
+
+func (t *FirtalAddCommentTool) Name() string { return "add_comment" }
+func (t *FirtalAddCommentTool) Description() string {
+	return "Post a comment on a Multica issue as the calling agent. issue_id accepts a UUID or identifier like \"JEH-123\"."
+}
+func (t *FirtalAddCommentTool) InputSchema() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"issue_id", "content"},
+		"properties": map[string]any{
+			"issue_id": map[string]any{
+				"type":        "string",
+				"description": "Issue UUID or identifier (e.g. JEH-123)",
+			},
+			"content": map[string]any{
+				"type":        "string",
+				"description": "Markdown body of the comment",
+			},
+		},
+	}
+}
+func (t *FirtalAddCommentTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	issueRef, ok := args["issue_id"].(string)
+	if !ok || strings.TrimSpace(issueRef) == "" {
+		return "", fmt.Errorf("add_comment: issue_id is required")
+	}
+	content, ok := args["content"].(string)
+	if !ok || strings.TrimSpace(content) == "" {
+		return "", fmt.Errorf("add_comment: content is required")
+	}
+	if !t.tctx.AgentID.Valid {
+		return "", fmt.Errorf("add_comment: missing agent context")
+	}
+	issue, err := resolveIssue(ctx, t.queries, t.tctx.WorkspaceID, issueRef)
+	if err != nil {
+		return "", err
+	}
+	comment, err := t.queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: t.tctx.WorkspaceID,
+		AuthorType:  "agent",
+		AuthorID:    t.tctx.AgentID,
+		Content:     content,
+		Type:        "comment",
+	})
+	if err != nil {
+		return "", fmt.Errorf("add_comment: %w", err)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"id":         util.UUIDToString(comment.ID),
+		"issue_id":   util.UUIDToString(comment.IssueID),
+		"created_at": comment.CreatedAt.Time.Format(time.RFC3339),
+	})
+	if err != nil {
+		return "", fmt.Errorf("add_comment: marshal result: %w", err)
+	}
+	return string(raw), nil
+}
+
+// ── list_projects ─────────────────────────────────────────────────────────────
+
+// FirtalListProjectsTool implements Tool for listing projects in the workspace.
+type FirtalListProjectsTool struct {
+	queries *db.Queries
+	tctx    ToolContext
+}
+
+func (t *FirtalListProjectsTool) Name() string { return "list_projects" }
+func (t *FirtalListProjectsTool) Description() string {
+	return "List all projects in the current workspace with their status and priority."
+}
+func (t *FirtalListProjectsTool) InputSchema() map[string]any {
+	return map[string]any{
+		"type":       "object",
+		"required":   []string{},
+		"properties": map[string]any{},
+	}
+}
+func (t *FirtalListProjectsTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	projects, err := t.queries.ListProjects(ctx, db.ListProjectsParams{
+		WorkspaceID: t.tctx.WorkspaceID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("list_projects: %w", err)
+	}
+	out := make([]map[string]any, 0, len(projects))
+	for _, p := range projects {
+		out = append(out, map[string]any{
+			"id":     util.UUIDToString(p.ID),
+			"title":  p.Title,
+			"status": p.Status,
+		})
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return "", fmt.Errorf("list_projects: marshal result: %w", err)
+	}
+	return string(raw), nil
+}
+
+// ── get_me ────────────────────────────────────────────────────────────────────
+
+// FirtalGetMeTool implements Tool for returning the calling agent's identity.
+type FirtalGetMeTool struct {
+	queries *db.Queries
+	tctx    ToolContext
+}
+
+func (t *FirtalGetMeTool) Name() string { return "get_me" }
+func (t *FirtalGetMeTool) Description() string {
+	return "Return the calling agent's ID, name, and workspace context. Use this to confirm your own identity before taking workspace actions."
+}
+func (t *FirtalGetMeTool) InputSchema() map[string]any {
+	return map[string]any{
+		"type":       "object",
+		"required":   []string{},
+		"properties": map[string]any{},
+	}
+}
+func (t *FirtalGetMeTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	if !t.tctx.AgentID.Valid {
+		return "", fmt.Errorf("get_me: missing agent context")
+	}
+	agent, err := t.queries.GetAgent(ctx, t.tctx.AgentID)
+	if err != nil {
+		return "", fmt.Errorf("get_me: %w", err)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"agent_id":     util.UUIDToString(agent.ID),
+		"name":         agent.Name,
+		"workspace_id": util.UUIDToString(agent.WorkspaceID),
+	})
+	if err != nil {
+		return "", fmt.Errorf("get_me: marshal result: %w", err)
+	}
+	return string(raw), nil
+}
+
 // ── Registration helpers ──────────────────────────────────────────────────────
 
 // NewDefaultRegistry creates a Registry, registers all built-in tools, and
@@ -703,10 +958,15 @@ func NewDefaultRegistry(pool interface {
 // registerBuiltinTools registers all built-in tools with the given registry.
 // Called at executor startup with the per-task ToolContext.
 func registerBuiltinTools(r *Registry, queries *db.Queries, tctx ToolContext) {
+	r.Register(&FirtalGetIssueTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalListIssuesTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalCreateIssueTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalUpdateIssueTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalAssignIssueTool{queries: queries, tctx: tctx})
+	r.Register(&FirtalListCommentsTool{queries: queries, tctx: tctx})
+	r.Register(&FirtalAddCommentTool{queries: queries, tctx: tctx})
+	r.Register(&FirtalListProjectsTool{queries: queries, tctx: tctx})
+	r.Register(&FirtalGetMeTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalBQQueryTool{queries: queries, tctx: tctx})
 	r.Register(&WebFetchTool{})
 	r.Register(&SheetsWriteTool{queries: queries, tctx: tctx})

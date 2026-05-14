@@ -135,3 +135,15 @@ export const SubscribersListSchema = z.array(SubscriberSchema);
 export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
 }).loose();
+
+// CEREBRO-PATCH(agent-tools-schema): JEH-1353 — tool grant list response shape.
+// name/description come from the server-side tool registry; enabled from the
+// agent_tool_grant row (or false when no row exists yet).
+const AgentToolSchema = z.object({
+  name: z.string(),
+  description: z.string().default(""),
+  enabled: z.boolean().default(false),
+  config: z.record(z.string(), z.unknown()).optional().default({}),
+}).loose();
+
+export const AgentToolsListSchema = z.array(AgentToolSchema).default([]);

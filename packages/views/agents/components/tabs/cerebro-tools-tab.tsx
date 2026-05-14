@@ -1,9 +1,9 @@
 "use client";
 
-// CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab on agent editor
+// CEREBRO-PATCH(agent-tools-tab): JEH-1290/1353 W8 — tools tab on agent editor
 
 import { useState } from "react";
-import { Wrench, AlertCircle, Loader2 } from "lucide-react";
+import { Wrench, AlertCircle, Loader2, Info } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Agent } from "@multica/core/types";
@@ -243,6 +243,14 @@ export function CerebroToolsTab({ agent }: { agent: Agent }) {
       <p className="text-xs text-muted-foreground">
         {t(($) => $.tab_body.tools.intro)}
       </p>
+      {agent.runtime_mode === "local" && (
+        <div className="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <p className="text-xs text-muted-foreground">
+            {t(($) => $.tab_body.tools.local_agent_note)}
+          </p>
+        </div>
+      )}
       <ul className="space-y-2">
         {tools.map((tool) => (
           <ToolRow

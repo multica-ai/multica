@@ -236,6 +236,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// redaction-audit writer. Always wired (independent of persona env)
 	// so a future persona enablement starts logging from the first read.
 	h.PersonaMaskAudit = newPersonaMaskAuditWriter(cerebroQueries)
+	// CEREBRO-PATCH(router-tool-meta): JEH-1353 — wire tool display metadata so
+	// the admin API can return names + descriptions for every registered tool.
+	{
+		rawMeta := cerebroruntime.AllBuiltinToolMeta()
+		items := make([]handler.CerebroToolItem, len(rawMeta))
+		for i, m := range rawMeta {
+			items[i] = handler.CerebroToolItem{Name: m.Name, Description: m.Description}
+		}
+		h.SetCerebroToolMeta(items)
+	}
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
 	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler

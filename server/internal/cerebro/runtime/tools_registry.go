@@ -133,15 +133,44 @@ func GrantAgentTool(ctx context.Context, pool *pgxpool.Pool, agentID pgtype.UUID
 	return err
 }
 
+// ToolMeta holds display metadata for a registered tool. Used by the admin API
+// to enrich tool grant responses with names and descriptions without requiring
+// a per-task ToolContext.
+type ToolMeta struct {
+	Name        string
+	Description string
+}
+
+// AllBuiltinToolMeta returns display metadata for every built-in tool. The
+// list is authoritative — keep it in sync with registerBuiltinTools.
+func AllBuiltinToolMeta() []ToolMeta {
+	return []ToolMeta{
+		{Name: "get_issue", Description: "Get full details of a Multica issue: title, description, status, priority, and comments."},
+		{Name: "list_issues", Description: "List issues in the current workspace. Optionally filter by status. Returns up to 20 issues."},
+		{Name: "create_issue", Description: "Create a new issue in the current workspace."},
+		{Name: "update_issue", Description: "Update a Multica issue's status, title, or priority."},
+		{Name: "assign_issue", Description: "Assign a Multica issue to an agent or workspace member."},
+		{Name: "list_comments", Description: "List all comments on a Multica issue in chronological order."},
+		{Name: "add_comment", Description: "Post a comment on a Multica issue as the calling agent."},
+		{Name: "list_projects", Description: "List all projects in the current workspace."},
+		{Name: "get_me", Description: "Return the calling agent's ID, name, and workspace context."},
+		{Name: "firtal_bq_query", Description: "Run a BigQuery SQL query via Firtal Data Registry and return results."},
+		{Name: "web_fetch", Description: "Fetch the text content of a web page from an allowlisted URL."},
+		{Name: "gogcli_sheets_write", Description: "Write data to a Google Sheets spreadsheet."},
+	}
+}
+
 // mvpToolNames lists the tool names granted to Kristian's agent as MVP tools.
 var mvpToolNames = []string{
 	"get_issue",
-	"list_comments",
-	"add_comment",
 	"list_issues",
 	"create_issue",
 	"update_issue",
 	"assign_issue",
+	"list_comments",
+	"add_comment",
+	"list_projects",
+	"get_me",
 	"web_fetch",
 	"firtal_bq_query",
 	"gogcli_sheets_write",

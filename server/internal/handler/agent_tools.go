@@ -8,23 +8,44 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// AgentToolGrantResponse is the wire shape for an agent tool grant.
-type AgentToolGrantResponse struct {
-	ID        string          `json:"id"`
-	AgentID   string          `json:"agent_id"`
-	ToolName  string          `json:"tool_name"`
-	ConfigJSON json.RawMessage `json:"config,omitempty"`
-	Enabled   bool            `json:"enabled"`
-	CreatedAt string          `json:"created_at"`
+// CerebroToolItem holds display metadata for one registered tool.
+// Injected into the Handler via SetCerebroToolMeta.
+type CerebroToolItem struct {
+	Name        string
+	Description string
+}
+
+// AgentToolResponse is the wire shape returned by GET /api/agents/{id}/tools.
+// Includes display metadata (name, description) plus the grant's enabled flag
+// and optional config. Tools without a grant row are included with enabled=false.
+type AgentToolResponse struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Enabled     bool            `json:"enabled"`
+	ConfigJSON  json.RawMessage `json:"config,omitempty"`
+}
+
+// SetCerebroToolMeta wires tool display metadata into the handler. Called by
+// the router after construction so the upstream handler.New signature stays
+// unchanged.
+//
+// CEREBRO-PATCH(handler-tool-meta-setter): wires tool metadata without
+// changing the upstream handler.New signature.
+func (h *Handler) SetCerebroToolMeta(items []CerebroToolItem) {
+	h.cerebroToolItems = items
+	m := make(map[string]string, len(items))
+	for _, it := range items {
+		m[it.Name] = it.Description
+	}
+	h.cerebroToolDesc = m
 }
 
 // ListAgentTools handles GET /api/agents/{id}/tools
-// Returns all tool grants for this agent with their enabled status. Includes
-// every grant row regardless of enabled=true/false so the admin UI can toggle
-// them.
+// Returns all registered tools, annotated with description and enabled status.
+// Tools with no grant row are included with enabled=false so the admin UI can
+// toggle them without a pre-existing row.
 func (h *Handler) ListAgentTools(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	agent, ok := h.loadAgentForUser(w, r, id)
@@ -32,11 +53,11 @@ func (h *Handler) ListAgentTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fetch all grant rows for this agent.
 	rows, err := h.DB.Query(r.Context(),
-		`SELECT id, agent_id, tool_name, config_json, enabled, created_at
+		`SELECT tool_name, config_json, enabled
          FROM agent_tool_grant
-         WHERE agent_id = $1
-         ORDER BY tool_name`,
+         WHERE agent_id = $1`,
 		agent.ID,
 	)
 	if err != nil {
@@ -45,37 +66,42 @@ func (h *Handler) ListAgentTools(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	out := make([]AgentToolGrantResponse, 0)
+	type grantRow struct {
+		config  []byte
+		enabled bool
+	}
+	grants := make(map[string]grantRow)
 	for rows.Next() {
 		var (
-			id        pgtype.UUID
-			agentID   pgtype.UUID
-			toolName  string
+			name      string
 			configRaw []byte
 			enabled   bool
-			createdAt pgtype.Timestamptz
 		)
-		if err := rows.Scan(&id, &agentID, &toolName, &configRaw, &enabled, &createdAt); err != nil {
+		if err := rows.Scan(&name, &configRaw, &enabled); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan error: "+err.Error())
 			return
 		}
-		grant := AgentToolGrantResponse{
-			ID:       uuidToString(id),
-			AgentID:  uuidToString(agentID),
-			ToolName: toolName,
-			Enabled:  enabled,
-		}
-		if len(configRaw) > 0 {
-			grant.ConfigJSON = json.RawMessage(configRaw)
-		}
-		if createdAt.Valid {
-			grant.CreatedAt = timestampToString(createdAt)
-		}
-		out = append(out, grant)
+		grants[name] = grantRow{config: configRaw, enabled: enabled}
 	}
 	if err := rows.Err(); err != nil {
 		writeError(w, http.StatusInternalServerError, "rows error: "+err.Error())
 		return
+	}
+
+	// Build response from the ordered tool list merged with grant data.
+	out := make([]AgentToolResponse, 0, len(h.cerebroToolItems))
+	for _, item := range h.cerebroToolItems {
+		resp := AgentToolResponse{
+			Name:        item.Name,
+			Description: item.Description,
+		}
+		if g, ok := grants[item.Name]; ok {
+			resp.Enabled = g.enabled
+			if len(g.config) > 0 {
+				resp.ConfigJSON = json.RawMessage(g.config)
+			}
+		}
+		out = append(out, resp)
 	}
 
 	writeJSON(w, http.StatusOK, out)
@@ -100,7 +126,7 @@ func (h *Handler) UpsertAgentTool(w http.ResponseWriter, r *http.Request) {
 		Enabled bool            `json:"enabled"`
 		Config  json.RawMessage `json:"config"`
 	}
-	body.Enabled = true // default to enabled when not specified
+	body.Enabled = true
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err.Error() != "EOF" {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
@@ -111,7 +137,7 @@ func (h *Handler) UpsertAgentTool(w http.ResponseWriter, r *http.Request) {
 		configJSON = body.Config
 	}
 
-	tag, err := h.DB.Exec(r.Context(),
+	_, err := h.DB.Exec(r.Context(),
 		`INSERT INTO agent_tool_grant (agent_id, tool_name, config_json, enabled)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (agent_id, tool_name)
@@ -119,8 +145,6 @@ func (h *Handler) UpsertAgentTool(w http.ResponseWriter, r *http.Request) {
 		agent.ID, toolName, configJSON, body.Enabled,
 	)
 	if err != nil {
-		// Check for FK violation (agent doesn't exist) — should not happen since
-		// loadAgentForUser already resolved the agent, but be defensive.
 		if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23503" {
 			writeError(w, http.StatusNotFound, "agent not found")
 			return
@@ -128,38 +152,32 @@ func (h *Handler) UpsertAgentTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "upsert tool grant: "+err.Error())
 		return
 	}
-	_ = tag
 
-	// Return the updated grant row.
 	row := h.DB.QueryRow(r.Context(),
-		`SELECT id, agent_id, tool_name, config_json, enabled, created_at
+		`SELECT tool_name, config_json, enabled
          FROM agent_tool_grant
          WHERE agent_id = $1 AND tool_name = $2`,
 		agent.ID, toolName,
 	)
 	var (
-		grantID   pgtype.UUID
-		grantAgent pgtype.UUID
 		name      string
 		cfgRaw    []byte
 		enabled   bool
-		createdAt pgtype.Timestamptz
 	)
-	if err := row.Scan(&grantID, &grantAgent, &name, &cfgRaw, &enabled, &createdAt); err != nil {
+	if err := row.Scan(&name, &cfgRaw, &enabled); err != nil {
 		writeError(w, http.StatusInternalServerError, "fetch updated grant: "+err.Error())
 		return
 	}
-	grant := AgentToolGrantResponse{
-		ID:       uuidToString(grantID),
-		AgentID:  uuidToString(grantAgent),
-		ToolName: name,
-		Enabled:  enabled,
+
+	resp := AgentToolResponse{
+		Name:    name,
+		Enabled: enabled,
+	}
+	if desc, ok := h.cerebroToolDesc[name]; ok {
+		resp.Description = desc
 	}
 	if len(cfgRaw) > 0 {
-		grant.ConfigJSON = json.RawMessage(cfgRaw)
+		resp.ConfigJSON = json.RawMessage(cfgRaw)
 	}
-	if createdAt.Valid {
-		grant.CreatedAt = timestampToString(createdAt)
-	}
-	writeJSON(w, http.StatusOK, grant)
+	writeJSON(w, http.StatusOK, resp)
 }

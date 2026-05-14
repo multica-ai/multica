@@ -110,6 +110,10 @@ type Handler struct {
 	// CEREBRO-PATCH(handler-persona-mask-audit): JEH-1173 redaction ledger.
 	// Wired by the router after construction; nil = no audit row written.
 	PersonaMaskAudit PersonaMaskAuditWriter
+	// CEREBRO-PATCH(handler-tool-meta): JEH-1353 — ordered list of registered
+	// tools and name→description lookup for the tool grant admin API.
+	cerebroToolItems []CerebroToolItem
+	cerebroToolDesc  map[string]string
 	cfg              Config
 }
 

@@ -251,10 +251,11 @@
       "save_failed_toast": "保存自定义参数失败"
     },
     "tools": {
-      "_comment": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab body strings",
+      "_comment": "CEREBRO-PATCH(agent-tools-tab): JEH-1290/1353 W8 — tools tab body strings",
       "intro": "切换此智能体可以使用的工具。工具凭证在工作区设置中配置。",
-      "empty_title": "未注册工具",
-      "empty_hint": "部署 W3 工具注册表后，工具将可用。",
+      "local_agent_note": "此智能体通过本地 daemon 运行。在此启用网关工具不会生效——daemon 使用其自己的 MCP 配置。这些开关仅适用于云端运行时智能体。",
+      "empty_title": "无可用工具",
+      "empty_hint": "网关运行时未注册任何工具。请确认网关服务正在运行。",
       "load_failed": "无法加载此智能体的工具。",
       "toggle_failed_toast": "更新工具失败",
       "config_saved_toast": "工具配置已保存",

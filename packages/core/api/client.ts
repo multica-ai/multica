@@ -123,6 +123,7 @@ import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
+  AgentToolsListSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
   EMPTY_LIST_ISSUES_RESPONSE,
@@ -1742,9 +1743,13 @@ export class ApiClient {
     });
   }
 
-  // CEREBRO-PATCH(agent-tools-api): JEH-1284/1290 — tool grant list + toggle via W3 admin API
+  // CEREBRO-PATCH(agent-tools-api): JEH-1284/1290/1353 — tool grant list +
+  // toggle via W3 admin API. Schema-validated per API Response Compatibility.
   async getAgentTools(agentId: string): Promise<import("@multica/cerebro-types").AgentTool[]> {
-    return this.fetch(`/api/agents/${agentId}/tools`);
+    const raw = await this.fetch(`/api/agents/${agentId}/tools`);
+    return parseWithFallback(raw, AgentToolsListSchema, [], {
+      endpoint: `/api/agents/${agentId}/tools`,
+    }) as import("@multica/cerebro-types").AgentTool[];
   }
 
   async updateAgentTool(agentId: string, toolName: string, data: { enabled: boolean; config?: Record<string, unknown> }): Promise<void> {
