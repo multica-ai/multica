@@ -395,7 +395,7 @@ interface TaskRunHistoryProps {
 
 export function TaskRunHistory({ issueId }: TaskRunHistoryProps) {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true); // CEREBRO-PATCH(agent-runs-history-expanded-default): expand execution history on mount (JEH-1247)
 
   useEffect(() => {
     api.listTasksByIssue(issueId).then(setTasks).catch(console.error);

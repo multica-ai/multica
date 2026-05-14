@@ -35,6 +35,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 
 | Patch name | File(s) | `+` lines | Rationale |
 |---|---|---|---|
+| `agent-runs-history-expanded-default` | packages/views/issues/components/agent-live-card.tsx | 1 | Initialize `TaskRunHistory` open state to `true` so the "Execution history" section is expanded by default when the Agent Runs tab is opened (JEH-1247). |
 | `fix-paste-image-selection` | packages/views/editor/extensions/file-upload.ts | 1 | Call event.preventDefault() before handleFiles so pasted images are never inserted inline into the editor. Without this the browser inserts the image as an inline node and then selects it, forcing users to click before typing (JEH-1194). |
 | `runtime-pause-cerebro` | server/internal/handler/runtime_pause_cerebro.go | 158 | Net-new fork file: HTTP handlers for cerebro pause/unpause. Delegates to cerebroruntime.Service via the RuntimePauseInvoker seam (JEH-848). |
 | `runtime-detail-pause` | packages/views/runtimes/components/runtime-detail.tsx | 4 | Mount PauseRuntimeButton in topbar and PauseBanner above HeroCard from cerebro-runtime. |
