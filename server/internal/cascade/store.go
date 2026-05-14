@@ -61,16 +61,23 @@ type RetriggerInsert struct {
 	EventID   uuid.UUID
 	PRURL     string
 	PRNumber  int32
+	PRTitle   string
 	HeadSHA   string
+	Branch    string
 	EventType string
 	FiredAt   time.Time // optional; zero → DB default now()
 }
 
+// insertRetriggerSQL writes NULLIF on pr_title and branch so empty
+// strings (the natural Go zero value when the source payload didn't
+// expose the field — workflow_run has no title, check_run has neither)
+// land as SQL NULL. The worker's lookup loop reads NULL pr_title and
+// NULL branch as "no lookup data available — scope skip".
 const insertRetriggerSQL = `
 INSERT INTO cascade_retrigger (
-    event_id, pr_url, pr_number, head_sha, event_type, fired_at
+    event_id, pr_url, pr_number, pr_title, head_sha, branch, event_type, fired_at
 ) VALUES (
-    $1, $2, $3, $4, $5, COALESCE($6, now())
+    $1, $2, $3, NULLIF($4, ''), $5, NULLIF($6, ''), $7, COALESCE($8, now())
 )
 ON CONFLICT (event_id) DO NOTHING
 RETURNING id`
@@ -89,7 +96,9 @@ func (s *Store) Insert(ctx context.Context, e webhooks.PersistableEvent) error {
 		EventID:   parsed,
 		PRURL:     e.PRURL,
 		PRNumber:  int32(e.PRNumber),
+		PRTitle:   e.PRTitle,
 		HeadSHA:   e.HeadSHA,
+		Branch:    e.Branch,
 		EventType: e.EventType,
 		FiredAt:   e.FiredAt,
 	})
@@ -118,7 +127,9 @@ func (s *Store) InsertRetrigger(ctx context.Context, p RetriggerInsert) (int64, 
 		pgtype.UUID{Bytes: p.EventID, Valid: true},
 		p.PRURL,
 		p.PRNumber,
+		p.PRTitle,
 		p.HeadSHA,
+		p.Branch,
 		p.EventType,
 		firedAt,
 	)

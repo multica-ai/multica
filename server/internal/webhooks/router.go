@@ -30,11 +30,21 @@ type EventStore interface {
 // layer cares about. Promotes loose coupling — the cascade.Store can
 // add columns (PR4 will add a worker-tracking column) without
 // reshaping TriggerEvent.
+//
+// PRTitle and Branch added in the post-PR8 wiring pass: the worker
+// resolves issue_id by LookupIssueIdentifier(PRTitle, Branch). Both
+// may be empty for events GitHub does not expose at the top-level
+// payload (workflow_run carries head_branch but not title; check_run
+// carries neither). Empty values flow through as NULL in the
+// cascade_retrigger row and the worker falls back to scope-skip
+// when both are empty.
 type PersistableEvent struct {
 	EventID   string // uuid.UUID.String()
 	PRURL     string
 	PRNumber  int
+	PRTitle   string
 	HeadSHA   string
+	Branch    string
 	EventType string
 	FiredAt   time.Time
 }
@@ -289,7 +299,9 @@ func (r *Router) serve(w http.ResponseWriter, req *http.Request) {
 		EventID:   event.EventID.String(),
 		PRURL:     event.PRURL,
 		PRNumber:  event.PRNumber,
+		PRTitle:   event.PRTitle,
 		HeadSHA:   event.HeadSHA,
+		Branch:    event.Branch,
 		EventType: event.EventType,
 		FiredAt:   event.ReceivedAt,
 	})

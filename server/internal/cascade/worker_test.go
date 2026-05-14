@@ -149,7 +149,7 @@ func TestWorker_HappyPath_SpawnsAndMarks(t *testing.T) {
 	defer pool.Exec(context.Background(), `DELETE FROM cascade_retrigger WHERE id = $1`, rowID)
 
 	sp := &fakeSpawner{}
-	w := NewWorker(pool, sp, nil)
+	w := NewWorker(pool, sp, nil, nil)
 	w.PollOnce(context.Background())
 
 	if sp.spawnCalls.Load() != 1 {
@@ -187,7 +187,7 @@ func TestWorker_ActiveRun_QueuesPending(t *testing.T) {
 	sp := &fakeSpawner{}
 	sp.hasActive.Store(true) // active run on this issue
 
-	w := NewWorker(pool, sp, nil)
+	w := NewWorker(pool, sp, nil, nil)
 	w.PollOnce(context.Background())
 
 	if sp.spawnCalls.Load() != 0 {
@@ -235,7 +235,7 @@ func TestWorker_LoopGuard_TripsAfterThreshold(t *testing.T) {
 	defer pool.Exec(context.Background(), `DELETE FROM cascade_retrigger WHERE pr_url = $1`, prURL)
 
 	sp := &fakeSpawner{}
-	w := NewWorker(pool, sp, nil)
+	w := NewWorker(pool, sp, nil, nil)
 	w.PollOnce(context.Background())
 
 	if sp.spawnCalls.Load() != 0 {
@@ -270,7 +270,7 @@ func TestWorker_SpawnFailureLeavesRowUnprocessed(t *testing.T) {
 	defer pool.Exec(context.Background(), `DELETE FROM cascade_retrigger WHERE id = $1`, rowID)
 
 	sp := &fakeSpawner{spawnErr: errors.New("spawn boom")}
-	w := NewWorker(pool, sp, nil)
+	w := NewWorker(pool, sp, nil, nil)
 	w.PollOnce(context.Background())
 
 	if sp.spawnCalls.Load() != 1 {
@@ -314,7 +314,7 @@ func TestWorker_NoIssueIDIsScopeSkip(t *testing.T) {
 	defer pool.Exec(context.Background(), `DELETE FROM cascade_retrigger WHERE id = $1`, rowID)
 
 	sp := &fakeSpawner{}
-	w := NewWorker(pool, sp, nil)
+	w := NewWorker(pool, sp, nil, nil)
 	w.PollOnce(context.Background())
 
 	if sp.spawnCalls.Load() != 0 {
@@ -357,7 +357,7 @@ func TestWorker_DrainPending_SpawnsWhenPending(t *testing.T) {
 	}
 
 	sp := &fakeSpawner{}
-	w := NewWorker(pool, sp, nil)
+	w := NewWorker(pool, sp, nil, nil)
 	w.DrainPending(context.Background(), issueID)
 
 	if sp.spawnCalls.Load() != 1 {
@@ -384,9 +384,194 @@ func TestWorker_DrainPending_NoPendingIsQuiet(t *testing.T) {
 	defer cleanup()
 
 	sp := &fakeSpawner{}
-	w := NewWorker(pool, sp, nil)
+	w := NewWorker(pool, sp, nil, nil)
 	w.DrainPending(context.Background(), issueID)
 	if sp.spawnCalls.Load() != 0 {
 		t.Errorf("expected no spawn when no pending, got %d", sp.spawnCalls.Load())
+	}
+}
+
+// fakeLoader records the identifier the worker resolved and returns
+// the canned response. ErrIssueNotFound surfaces a real
+// scope_filter_skip; any other error tests the retry behavior.
+type fakeLoader struct {
+	want  string
+	resp  uuid.UUID
+	err   error
+	calls int
+}
+
+func (f *fakeLoader) LookupByIdentifier(_ context.Context, id string) (uuid.UUID, error) {
+	f.calls++
+	f.want = id
+	return f.resp, f.err
+}
+
+// insertRetriggerWithLookup seeds a row with the new pr_title +
+// branch columns populated; designed to exercise the
+// PollOnce → resolveIssue → loader → spawn path.
+func insertRetriggerWithLookup(t *testing.T, pool *pgxpool.Pool, prTitle, branch, prURL, headSHA, eventType string) int64 {
+	t.Helper()
+	var id int64
+	err := pool.QueryRow(context.Background(), `
+        INSERT INTO cascade_retrigger (event_id, pr_url, pr_number, pr_title, head_sha, branch, event_type)
+        VALUES ($1, $2, 1, NULLIF($3, ''), $4, NULLIF($5, ''), $6)
+        RETURNING id`,
+		uuid.New(), prURL, prTitle, headSHA, branch, eventType,
+	).Scan(&id)
+	if err != nil {
+		t.Fatalf("insert retrigger: %v", err)
+	}
+	return id
+}
+
+func TestWorker_ResolveIssue_PRTitleMatchTriggersLookup(t *testing.T) {
+	pool, _, issueID, cleanup := setupWorkerTest(t)
+	if pool == nil {
+		return
+	}
+	defer cleanup()
+
+	rowID := insertRetriggerWithLookup(t, pool,
+		"[PUL-9001] feat: x", "some/feat", "https://github.com/o/r/pull/1", "lookup-sha", "ci_failure")
+	defer pool.Exec(context.Background(), `DELETE FROM cascade_retrigger WHERE id = $1`, rowID)
+
+	loader := &fakeLoader{resp: issueID}
+	sp := &fakeSpawner{}
+	w := NewWorker(pool, sp, loader, nil)
+	w.PollOnce(context.Background())
+
+	if loader.calls != 1 || loader.want != "PUL-9001" {
+		t.Fatalf("loader not called with PUL-9001: calls=%d, want=%q", loader.calls, loader.want)
+	}
+	if sp.spawnCalls.Load() != 1 {
+		t.Fatalf("expected spawn after lookup, got %d", sp.spawnCalls.Load())
+	}
+
+	// Row should now have issue_id set + action='spawn'.
+	var issueValid bool
+	var action string
+	_ = pool.QueryRow(context.Background(),
+		`SELECT issue_id IS NOT NULL, action FROM cascade_retrigger WHERE id = $1`, rowID).Scan(&issueValid, &action)
+	if !issueValid {
+		t.Errorf("issue_id not persisted after lookup")
+	}
+	if action != "spawn" {
+		t.Errorf("action = %q, want spawn", action)
+	}
+}
+
+func TestWorker_ResolveIssue_BranchFallbackTriggersLookup(t *testing.T) {
+	// Title doesn't carry [PUL-N] but the branch does — G4 fallback.
+	pool, _, issueID, cleanup := setupWorkerTest(t)
+	if pool == nil {
+		return
+	}
+	defer cleanup()
+
+	rowID := insertRetriggerWithLookup(t, pool,
+		"title was edited", "agent-1/PUL-7777-foo", "u", "branch-sha", "ci_failure")
+	defer pool.Exec(context.Background(), `DELETE FROM cascade_retrigger WHERE id = $1`, rowID)
+
+	loader := &fakeLoader{resp: issueID}
+	sp := &fakeSpawner{}
+	w := NewWorker(pool, sp, loader, nil)
+	w.PollOnce(context.Background())
+
+	if loader.calls != 1 || loader.want != "PUL-7777" {
+		t.Fatalf("branch fallback lookup mismatch: calls=%d, want=%q", loader.calls, loader.want)
+	}
+	if sp.spawnCalls.Load() != 1 {
+		t.Errorf("expected spawn via branch fallback, got %d", sp.spawnCalls.Load())
+	}
+}
+
+func TestWorker_ResolveIssue_IssueNotFoundIsScopeSkip(t *testing.T) {
+	pool, _, _, cleanup := setupWorkerTest(t)
+	if pool == nil {
+		return
+	}
+	defer cleanup()
+
+	rowID := insertRetriggerWithLookup(t, pool,
+		"[PUL-1] x", "agent-1/pul-1-x", "u", "s", "ci_failure")
+	defer pool.Exec(context.Background(), `DELETE FROM cascade_retrigger WHERE id = $1`, rowID)
+
+	loader := &fakeLoader{err: ErrIssueNotFound}
+	sp := &fakeSpawner{}
+	w := NewWorker(pool, sp, loader, nil)
+	w.PollOnce(context.Background())
+
+	if sp.spawnCalls.Load() != 0 {
+		t.Errorf("expected no spawn when issue not found, got %d", sp.spawnCalls.Load())
+	}
+	var action string
+	_ = pool.QueryRow(context.Background(),
+		`SELECT action FROM cascade_retrigger WHERE id = $1`, rowID).Scan(&action)
+	if action != "scope_filter_skip" {
+		t.Errorf("action = %q, want scope_filter_skip", action)
+	}
+}
+
+func TestWorker_ResolveIssue_LoaderRetryableErrorLeavesRow(t *testing.T) {
+	// A non-ErrIssueNotFound error (DB hiccup, etc.) must leave the
+	// row unprocessed so the next tick retries — distinct from
+	// scope-skip which is a terminal mark.
+	pool, _, _, cleanup := setupWorkerTest(t)
+	if pool == nil {
+		return
+	}
+	defer cleanup()
+
+	rowID := insertRetriggerWithLookup(t, pool,
+		"[PUL-1] x", "", "u", "s", "ci_failure")
+	defer pool.Exec(context.Background(), `DELETE FROM cascade_retrigger WHERE id = $1`, rowID)
+
+	loader := &fakeLoader{err: errors.New("transient db error")}
+	sp := &fakeSpawner{}
+	w := NewWorker(pool, sp, loader, nil)
+	w.PollOnce(context.Background())
+
+	if sp.spawnCalls.Load() != 0 {
+		t.Errorf("expected no spawn on transient error, got %d", sp.spawnCalls.Load())
+	}
+	var processedAt *time.Time
+	var action *string
+	_ = pool.QueryRow(context.Background(),
+		`SELECT action, processed_at FROM cascade_retrigger WHERE id = $1`, rowID).Scan(&action, &processedAt)
+	if processedAt != nil {
+		t.Errorf("expected processed_at NULL for retry, got %v", processedAt)
+	}
+	if action != nil {
+		t.Errorf("expected action NULL for retry, got %q", *action)
+	}
+}
+
+func TestWorker_NilLoader_LegacyScopeSkip(t *testing.T) {
+	// Nil loader = pre-wiring deployment. Worker must still scope-
+	// skip rows with NULL issue_id (the pre-FU1 behavior); a row
+	// WITHOUT issue_id never reaches the loader.
+	pool, _, _, cleanup := setupWorkerTest(t)
+	if pool == nil {
+		return
+	}
+	defer cleanup()
+
+	rowID := insertRetriggerWithLookup(t, pool,
+		"[PUL-1] x", "agent-1/pul-1-x", "u", "s", "ci_failure")
+	defer pool.Exec(context.Background(), `DELETE FROM cascade_retrigger WHERE id = $1`, rowID)
+
+	sp := &fakeSpawner{}
+	w := NewWorker(pool, sp, nil, nil) // nil loader
+	w.PollOnce(context.Background())
+
+	if sp.spawnCalls.Load() != 0 {
+		t.Errorf("expected no spawn with nil loader, got %d", sp.spawnCalls.Load())
+	}
+	var action string
+	_ = pool.QueryRow(context.Background(),
+		`SELECT action FROM cascade_retrigger WHERE id = $1`, rowID).Scan(&action)
+	if action != "scope_filter_skip" {
+		t.Errorf("action = %q, want scope_filter_skip", action)
 	}
 }

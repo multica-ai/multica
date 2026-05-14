@@ -205,6 +205,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		)
 	}
 
+	// Cascade background goroutines (worker + reconciliation cron).
+	// No-op when the cascade webhook feature flag is off OR when
+	// MULTICA_CASCADE_WORKSPACE_ID is unset (the worker needs a
+	// workspace context to resolve [PUL-N] → issue UUID via
+	// GetIssueByNumber). Single-tenant by construction; multi-
+	// workspace routing via a repo→workspace mapping table is a
+	// follow-up.
+	startCascadeBackground(pool, queries, h.TaskService, nil)
+
 	// WebSocket
 	mc := &membershipChecker{queries: queries}
 	pr := &patResolver{queries: queries, cache: patCache}
