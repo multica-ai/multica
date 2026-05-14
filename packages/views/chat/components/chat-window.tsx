@@ -5,7 +5,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
-import { Minus, Maximize2, Minimize2, ChevronDown, ChevronRight, Plus, Check, Trash2 } from "lucide-react";
+import { Minus, Maximize2, Minimize2, ChevronDown, ChevronRight, Plus, Check, Trash2, Lock } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import {
@@ -31,8 +32,8 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { canAssignAgent } from "@multica/views/issues/components";
-import { api } from "@multica/core/api";
-import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
+import { api, ApiError } from "@multica/core/api";
+import { useAgentPresenceDetail, useWorkspaceAgentAvailability, GROUP_ACCESS_LOCKED_TOOLTIP } from "@multica/core/agents";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
@@ -122,12 +123,17 @@ export function ChatWindow() {
   const availableAgents = agents.filter(
     (a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole),
   );
+  // CEREBRO-PATCH(chat-picker-group-lock): JEH-1320 — agents the user cannot
+  // trigger are kept in the picker (rendered as locked) but excluded from the
+  // default-active fallback so opening the chat never lands on an agent the
+  // user is blocked from sending to.
+  const triggerableAgents = availableAgents.filter((a) => a.can_trigger !== false);
 
   // CEREBRO-PATCH(chat-session-scoped-agent): JEH-806 — existing sessions own
   // their agent; the stored selected agent is only the new-chat preference.
   const activeAgent = currentSession
     ? agents.find((a) => a.id === currentSession?.agent_id) ?? null
-    : availableAgents.find((a) => a.id === selectedAgentId) ?? availableAgents[0] ?? null;
+    : triggerableAgents.find((a) => a.id === selectedAgentId) ?? triggerableAgents[0] ?? null;
 
   useEffect(() => {
     if (!currentSession || selectedAgentId === currentSession.agent_id) return;
@@ -222,12 +228,24 @@ export function ChatWindow() {
       });
 
       if (!sessionId) {
-        const session = await createSession.mutateAsync({
-          agent_id: activeAgent.id,
-          title: finalContent.slice(0, 50),
-        });
-        sessionId = session.id;
-        setActiveSession(sessionId);
+        try {
+          const session = await createSession.mutateAsync({
+            agent_id: activeAgent.id,
+            title: finalContent.slice(0, 50),
+          });
+          sessionId = session.id;
+          setActiveSession(sessionId);
+        } catch (err) {
+          // CEREBRO-PATCH(chat-trigger-denied-toast): JEH-1320 — surface the
+          // server's friendly 403 message as a toast when the cerebro group
+          // gate rejects starting a chat. Without this the user sees the
+          // network error in devtools but the UI stays silent.
+          if (err instanceof ApiError && err.status === 403) {
+            toast.error(err.message || GROUP_ACCESS_LOCKED_TOOLTIP);
+            return;
+          }
+          throw err;
+        }
       }
 
       // Optimistic burst — everything that gives the user "I sent a message
@@ -344,6 +362,10 @@ export function ChatWindow() {
       // Compare against activeAgent (what the UI shows), not selectedAgentId
       // (which may be null / point to an archived agent on first load).
       if (activeAgent && agent.id === activeAgent.id) return;
+      // CEREBRO-PATCH(chat-picker-group-lock): JEH-1320 — picker rows already
+      // render disabled, but defend the keyboard path here so a group-locked
+      // agent can never become the new chat agent.
+      if (agent.can_trigger === false) return;
       uiLogger.info("selectAgent", {
         from: selectedAgentId,
         to: agent.id,
@@ -644,9 +666,16 @@ function AgentMenuItem({
   isCurrent: boolean;
   onSelect: (agent: Agent) => void;
 }) {
+  // CEREBRO-PATCH(chat-picker-group-lock): JEH-1320 — render group-locked
+  // agents (`can_trigger === false`) with a Lock icon + disabled state so a
+  // workspace member who can SEE the agent can also see why they can't pick
+  // it for chat. `disabled` makes Base UI set aria-disabled and ignore the
+  // click; the explanation lives in the tooltip on hover/focus of the lock.
+  const locked = agent.can_trigger === false;
   return (
     <DropdownMenuItem
       onClick={() => onSelect(agent)}
+      disabled={locked}
       className="flex min-w-0 items-center gap-2"
     >
       <ActorAvatar
@@ -656,7 +685,22 @@ function AgentMenuItem({
         enableHoverCard
         showStatusDot
       />
-      <span className="truncate flex-1">{agent.name}</span>
+      <span className={`truncate flex-1 ${locked ? "text-muted-foreground" : ""}`}>
+        {agent.name}
+      </span>
+      {locked && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Lock
+                className="size-3 shrink-0 text-muted-foreground"
+                aria-label={GROUP_ACCESS_LOCKED_TOOLTIP}
+              />
+            }
+          />
+          <TooltipContent side="top">{GROUP_ACCESS_LOCKED_TOOLTIP}</TooltipContent>
+        </Tooltip>
+      )}
       {isCurrent && <Check className="size-3.5 text-muted-foreground shrink-0" />}
     </DropdownMenuItem>
   );
