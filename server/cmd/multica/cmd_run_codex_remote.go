@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -16,7 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
@@ -25,13 +23,6 @@ const (
 	codexAppServerSource       = "codex-app-server"
 	codexAppServerStartRetries = 5
 )
-
-func shouldUseCodexRemoteRunner(args []string, cliName string) bool {
-	if len(args) == 0 {
-		return false
-	}
-	return strings.EqualFold(cliName, "codex") && strings.EqualFold(inferCLIName(args[0]), "codex")
-}
 
 func executeCodexRemoteCLI(args []string, cwd string, env localCLIEnv, initialPrompt string, reporter *localRunReporter) (int, error) {
 	if err := validateCodexRemoteArgs(args[1:]); err != nil {
@@ -57,33 +48,7 @@ func executeCodexRemoteCLI(args []string, cwd string, env localCLIEnv, initialPr
 	child := exec.Command(args[0], childArgs...)
 	child.Dir = cwd
 	child.Env = localCLIProcessEnv(os.Environ(), env)
-
-	ptmx, err := pty.Start(child)
-	if err != nil {
-		return 1, err
-	}
-	defer ptmx.Close()
-	restore, err := makeStdinRaw()
-	if err != nil {
-		return 1, err
-	}
-	defer restore()
-	stopResizeWatch := watchTerminalResize(ptmx)
-	defer stopResizeWatch()
-	stopSignalForward := forwardSignals(child.Process)
-	defer stopSignalForward()
-
-	go func() {
-		_, _ = io.Copy(ptmx, os.Stdin)
-	}()
-
-	_, _ = io.Copy(os.Stdout, ptmx)
-	err = child.Wait()
-	exitCode := 0
-	if child.ProcessState != nil {
-		exitCode = child.ProcessState.ExitCode()
-	}
-	return exitCode, err
+	return runLocalRunPTYCommand(child, "")
 }
 
 func validateCodexRemoteArgs(args []string) error {

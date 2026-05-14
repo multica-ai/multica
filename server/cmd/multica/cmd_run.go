@@ -166,12 +166,8 @@ func stringValue(v any) string {
 }
 
 func supportsLocalRunAgent(cliName string) bool {
-	switch strings.ToLower(strings.TrimSpace(cliName)) {
-	case "codex":
-		return true
-	default:
-		return false
-	}
+	_, ok := localRunProviderForCLI(cliName)
+	return ok
 }
 
 func localRunPrompt(issueID string) string {
@@ -318,27 +314,46 @@ type localCLIEnv struct {
 }
 
 func executeLocalCLI(args []string, cwd, cliName string, env localCLIEnv, initialPrompt string, reporter *localRunReporter) (int, error) {
-	if shouldUseCodexRemoteRunner(args, cliName) {
-		return executeCodexRemoteCLI(args, cwd, env, initialPrompt, reporter)
+	provider, ok := localRunProviderForCLI(cliName)
+	if !ok {
+		return 1, fmt.Errorf("unsupported local CLI provider %q", cliName)
 	}
+	return provider.Run(args, cwd, env, initialPrompt, reporter)
+}
 
-	childArgs := args[1:]
-	writePromptToPTY := initialPrompt
-	if cliName == "codex" && initialPrompt != "" {
-		childArgs = append(childArgs, initialPrompt)
-		writePromptToPTY = ""
+type localRunPTYOptions struct {
+	Args         []string
+	Cwd          string
+	Env          []string
+	InitialStdin string
+}
+
+func runLocalRunPTY(opts localRunPTYOptions) (int, error) {
+	if len(opts.Args) == 0 {
+		return 1, fmt.Errorf("missing local CLI command")
 	}
-	child := exec.Command(args[0], childArgs...)
-	child.Dir = cwd
-	child.Env = localCLIProcessEnv(os.Environ(), env)
+	child := exec.Command(opts.Args[0], opts.Args[1:]...)
+	child.Dir = opts.Cwd
+	child.Env = opts.Env
+	return runLocalRunPTYCommand(child, opts.InitialStdin)
+}
 
+func runLocalRunPTYCommand(child *exec.Cmd, initialStdin string) (int, error) {
 	ptmx, err := pty.Start(child)
 	if err != nil {
 		return 1, err
 	}
-	defer ptmx.Close()
+	var closePTYOnce sync.Once
+	closePTY := func() {
+		closePTYOnce.Do(func() {
+			_ = ptmx.Close()
+		})
+	}
+	defer closePTY()
+
 	restore, err := makeStdinRaw()
 	if err != nil {
+		stopCommand(child)
 		return 1, err
 	}
 	defer restore()
@@ -348,19 +363,32 @@ func executeLocalCLI(args []string, cwd, cliName string, env localCLIEnv, initia
 	defer stopSignalForward()
 
 	go func() {
-		if writePromptToPTY != "" {
-			_, _ = io.WriteString(ptmx, writePromptToPTY)
+		if initialStdin != "" {
+			_, _ = io.WriteString(ptmx, initialStdin)
 		}
 		_, _ = io.Copy(ptmx, os.Stdin)
 	}()
 
-	_, _ = io.Copy(os.Stdout, ptmx)
-	err = child.Wait()
-	exitCode := 0
-	if child.ProcessState != nil {
-		exitCode = child.ProcessState.ExitCode()
+	type waitResult struct {
+		exitCode int
+		err      error
 	}
-	return exitCode, err
+	waitCh := make(chan waitResult, 1)
+	go func() {
+		err := child.Wait()
+		exitCode := 0
+		if child.ProcessState != nil {
+			exitCode = child.ProcessState.ExitCode()
+		} else if err != nil {
+			exitCode = 1
+		}
+		closePTY()
+		waitCh <- waitResult{exitCode: exitCode, err: err}
+	}()
+
+	_, _ = io.Copy(os.Stdout, ptmx)
+	result := <-waitCh
+	return result.exitCode, result.err
 }
 
 func localCLIProcessEnv(base []string, env localCLIEnv) []string {

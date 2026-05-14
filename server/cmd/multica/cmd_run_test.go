@@ -139,6 +139,15 @@ func TestRunLocalCLIRejectsUnsupportedLocalAgent(t *testing.T) {
 	}
 }
 
+func TestSupportsLocalRunAgentIncludesProviderRegistry(t *testing.T) {
+	if !supportsLocalRunAgent("codex") || !supportsLocalRunAgent("claude") {
+		t.Fatalf("expected codex and claude providers to be supported")
+	}
+	if supportsLocalRunAgent("sh") {
+		t.Fatalf("unexpected support for shell without a provider")
+	}
+}
+
 func newRunCommandForTest() *cobra.Command {
 	cmd := &cobra.Command{Use: "run"}
 	cmd.Flags().String("server-url", "", "")
@@ -233,27 +242,17 @@ func TestLocalRunHeartbeatPatchesRunningUntilStopped(t *testing.T) {
 	}
 }
 
-func TestExecuteLocalCLIReportsExitCode(t *testing.T) {
+func TestRunLocalRunPTYReportsExitCode(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("/bin/sh unavailable")
 	}
 	tmp := t.TempDir()
-	poster := &fakeLocalRunPoster{}
-	reporter := newLocalRunReporter(poster, "run-1")
 
-	exitCode, err := executeLocalCLI(
-		[]string{"/bin/sh", "-c", `printf '{"type":"result","result":"done"}\n'; exit 7`},
-		tmp,
-		"sh",
-		localCLIEnv{
-			RunID:     "run-1",
-			IssueID:   "issue-1",
-			ServerURL: "http://127.0.0.1:8080",
-		},
-		"",
-		reporter,
-	)
-	reporter.Close()
+	exitCode, err := runLocalRunPTY(localRunPTYOptions{
+		Args: []string{"/bin/sh", "-c", `printf '{"type":"result","result":"done"}\n'; exit 7`},
+		Cwd:  tmp,
+		Env:  os.Environ(),
+	})
 
 	if exitCode != 7 {
 		t.Fatalf("exitCode = %d, want 7", exitCode)
@@ -261,74 +260,54 @@ func TestExecuteLocalCLIReportsExitCode(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected non-nil error for exit 7")
 	}
-	if messages := poster.messages(); len(messages) != 0 {
-		t.Fatalf("messages = %+v, want no terminal-captured messages", messages)
-	}
 }
 
-func TestExecuteLocalCLIPassesPromptAsCodexArg(t *testing.T) {
+func TestRunLocalRunPTYWritesInitialStdin(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("/bin/sh unavailable")
 	}
 	tmp := t.TempDir()
-	poster := &fakeLocalRunPoster{}
-	reporter := newLocalRunReporter(poster, "run-1")
-	prompt := "embedded issue context prompt"
 
-	exitCode, err := executeLocalCLI(
-		[]string{"/bin/sh", "-c", `test "$0" = "embedded issue context prompt"`},
-		tmp,
-		"codex",
-		localCLIEnv{RunID: "run-1", IssueID: "issue-1"},
-		prompt,
-		reporter,
-	)
-	reporter.Close()
+	exitCode, err := runLocalRunPTY(localRunPTYOptions{
+		Args:         []string{"/bin/sh", "-c", `read line; test "$line" = "embedded issue context prompt"`},
+		Cwd:          tmp,
+		Env:          os.Environ(),
+		InitialStdin: "embedded issue context prompt\n",
+	})
 
 	if exitCode != 0 || err != nil {
-		t.Fatalf("executeLocalCLI exitCode=%d err=%v", exitCode, err)
-	}
-	if messages := poster.messages(); len(messages) != 0 {
-		t.Fatalf("messages = %+v, want no terminal-captured messages", messages)
+		t.Fatalf("runLocalRunPTY exitCode=%d err=%v", exitCode, err)
 	}
 }
 
-func TestExecuteLocalCLIInitialPromptTerminalFallbackIsSilent(t *testing.T) {
+func TestRunLocalRunPTYReturnsWhenChildExitsWithoutOutput(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("/bin/sh unavailable")
 	}
 	tmp := t.TempDir()
-	poster := &fakeLocalRunPoster{}
-	reporter := newLocalRunReporter(poster, "run-1")
+	done := make(chan struct {
+		exitCode int
+		err      error
+	}, 1)
+	go func() {
+		exitCode, err := runLocalRunPTY(localRunPTYOptions{
+			Args: []string{"/bin/sh", "-c", "exit 0"},
+			Cwd:  tmp,
+			Env:  os.Environ(),
+		})
+		done <- struct {
+			exitCode int
+			err      error
+		}{exitCode: exitCode, err: err}
+	}()
 
-	exitCode, err := executeLocalCLI(
-		[]string{"/bin/sh", "-c", `printf 'Initial result\n'`},
-		tmp,
-		"sh",
-		localCLIEnv{RunID: "run-1", IssueID: "issue-1"},
-		"embedded issue context prompt\n",
-		reporter,
-	)
-	reporter.Close()
-
-	if exitCode != 0 || err != nil {
-		t.Fatalf("executeLocalCLI exitCode=%d err=%v", exitCode, err)
-	}
-	messages := poster.messages()
-	if len(messages) != 0 {
-		t.Fatalf("messages = %+v, want no terminal-captured messages", messages)
-	}
-}
-
-func TestShouldUseCodexRemoteRunnerOnlyForRealCodexCommand(t *testing.T) {
-	if !shouldUseCodexRemoteRunner([]string{"/usr/local/bin/codex"}, "codex") {
-		t.Fatalf("real codex command did not use remote runner")
-	}
-	if shouldUseCodexRemoteRunner([]string{"/bin/sh"}, "codex") {
-		t.Fatalf("non-codex executable used remote runner")
-	}
-	if shouldUseCodexRemoteRunner([]string{"/usr/local/bin/claude"}, "claude") {
-		t.Fatalf("non-codex provider used remote runner")
+	select {
+	case result := <-done:
+		if result.exitCode != 0 || result.err != nil {
+			t.Fatalf("runLocalRunPTY exitCode=%d err=%v", result.exitCode, result.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("runLocalRunPTY did not return after child exited")
 	}
 }
 
@@ -491,6 +470,166 @@ func TestCodexAppServerMapperTracksClearAndResumeThreadsForComments(t *testing.T
 	}
 }
 
+func TestValidateClaudeLocalRunArgsRejectsManagedSettings(t *testing.T) {
+	for _, args := range [][]string{
+		{"--settings", "/tmp/settings.json"},
+		{"--settings=/tmp/settings.json"},
+	} {
+		if err := validateClaudeLocalRunArgs(args); err == nil {
+			t.Fatalf("validateClaudeLocalRunArgs(%v) = nil, want error", args)
+		}
+	}
+	if err := validateClaudeLocalRunArgs([]string{"--model", "sonnet"}); err != nil {
+		t.Fatalf("validateClaudeLocalRunArgs ordinary args: %v", err)
+	}
+}
+
+func TestClaudeHookSettingsIncludesSessionStartForwarder(t *testing.T) {
+	path, cleanup, err := writeClaudeHookSettings(43210)
+	if err != nil {
+		t.Fatalf("writeClaudeHookSettings: %v", err)
+	}
+	defer cleanup()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read hook settings: %v", err)
+	}
+	text := string(data)
+	if !containsAll(text, []string{
+		`"SessionStart"`,
+		`"type": "command"`,
+		`__claude-session-hook --port 43210`,
+	}) {
+		t.Fatalf("settings = %s, want SessionStart command hook", text)
+	}
+}
+
+func TestClaudeHookForwarderReportsSessionToServer(t *testing.T) {
+	var got claudeSessionHookPayload
+	done := make(chan struct{})
+	server, err := startClaudeSessionHookServer(func(payload claudeSessionHookPayload) {
+		got = payload
+		close(done)
+	})
+	if err != nil {
+		t.Fatalf("startClaudeSessionHookServer: %v", err)
+	}
+	defer server.Close(context.Background())
+
+	body := `{"session_id":"sess-1","transcript_path":"/tmp/sess-1.jsonl","cwd":"/tmp/project"}`
+	if err := runClaudeSessionHookForwarder(context.Background(), server.Port(), strings.NewReader(body)); err != nil {
+		t.Fatalf("runClaudeSessionHookForwarder: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatalf("hook server did not receive payload")
+	}
+	if got.SessionID != "sess-1" || got.TranscriptPath != "/tmp/sess-1.jsonl" || got.Cwd != "/tmp/project" {
+		t.Fatalf("payload = %+v, want parsed Claude hook payload", got)
+	}
+}
+
+func TestClaudeTranscriptTrackerMapsUserToolResultAndFinal(t *testing.T) {
+	tmp := t.TempDir()
+	sessionPath := filepath.Join(tmp, "sess-1.jsonl")
+	if err := os.WriteFile(sessionPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	tracker := newClaudeTranscriptTracker(reporter, tmp, "bootstrap prompt", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
+	tracker.ObserveSessionHook(claudeSessionHookPayload{SessionID: "sess-1", TranscriptPath: sessionPath, Cwd: tmp})
+
+	writeClaudeJSONLLines(t, sessionPath, []string{
+		`{"type":"user","uuid":"u1","timestamp":"2026-05-14T12:00:01Z","message":{"role":"user","content":"帮我运行测试"}}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-05-14T12:00:02Z","message":{"role":"assistant","content":[{"type":"thinking","text":"I should run tests"},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"go test ./cmd/multica"}}]}}`,
+		`{"type":"user","uuid":"tr1","timestamp":"2026-05-14T12:00:03Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok\n"}]}}`,
+		`{"type":"assistant","uuid":"a2","timestamp":"2026-05-14T12:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"完成"}]}}`,
+	})
+	tracker.Sync()
+	reporter.Close()
+
+	messages := poster.messages()
+	inputs := userInputMessages(messages)
+	if len(inputs) != 1 || inputs[0].Content != "帮我运行测试" || inputs[0].Source != claudeJSONLSource {
+		t.Fatalf("inputs = %+v, want Claude user input", inputs)
+	}
+	thinking := localMessagesByType(messages, "thinking")
+	if len(thinking) != 1 || thinking[0].Content != "I should run tests" {
+		t.Fatalf("thinking = %+v, want Claude thinking block", thinking)
+	}
+	uses := localMessagesByType(messages, "tool_use")
+	if len(uses) != 1 || uses[0].Tool != "Bash" || uses[0].Input["command"] != "go test ./cmd/multica" {
+		t.Fatalf("tool uses = %+v, want raw Claude Bash tool", uses)
+	}
+	results := localMessagesByType(messages, "tool_result")
+	if len(results) != 1 || results[0].Tool != "Bash" || results[0].Output != "ok" {
+		t.Fatalf("tool results = %+v, want raw Claude tool result", results)
+	}
+	finals := finalMessages(messages)
+	if len(finals) != 1 || finals[0].Content != "完成" {
+		t.Fatalf("finals = %+v, want Claude final reply", finals)
+	}
+}
+
+func TestClaudeTranscriptTrackerPreservesStructuredToolResultContent(t *testing.T) {
+	tmp := t.TempDir()
+	sessionPath := filepath.Join(tmp, "sess-1.jsonl")
+	if err := os.WriteFile(sessionPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	tracker := newClaudeTranscriptTracker(reporter, tmp, "", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
+	tracker.ObserveSessionHook(claudeSessionHookPayload{SessionID: "sess-1", TranscriptPath: sessionPath, Cwd: tmp})
+
+	writeClaudeJSONLLines(t, sessionPath, []string{
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-05-14T12:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"README.md"}}]}}`,
+		`{"type":"user","uuid":"tr1","timestamp":"2026-05-14T12:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"text","text":"hello"}]}]}}`,
+	})
+	tracker.Sync()
+	reporter.Close()
+
+	results := localMessagesByType(poster.messages(), "tool_result")
+	if len(results) != 1 || results[0].Tool != "Read" || results[0].Output != `[{"text":"hello","type":"text"}]` {
+		t.Fatalf("tool results = %+v, want raw Claude tool and JSON content string", results)
+	}
+}
+
+func TestClaudeTranscriptTrackerSkipsBootstrapAndHistoricalLines(t *testing.T) {
+	tmp := t.TempDir()
+	sessionPath := filepath.Join(tmp, "sess-1.jsonl")
+	bootstrap := "bootstrap prompt"
+	writeClaudeJSONLLines(t, sessionPath, []string{
+		`{"type":"user","uuid":"old-u","timestamp":"2026-05-14T11:59:00Z","message":{"role":"user","content":"old question"}}`,
+		`{"type":"assistant","uuid":"old-a","timestamp":"2026-05-14T11:59:01Z","message":{"role":"assistant","content":[{"type":"text","text":"old answer"}]}}`,
+	})
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	tracker := newClaudeTranscriptTracker(reporter, tmp, bootstrap, time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
+	tracker.ObserveSessionHook(claudeSessionHookPayload{SessionID: "sess-1", TranscriptPath: sessionPath, Cwd: tmp})
+
+	writeClaudeJSONLLines(t, sessionPath, []string{
+		`{"type":"user","uuid":"boot-u","timestamp":"2026-05-14T12:00:01Z","message":{"role":"user","content":"bootstrap prompt"}}`,
+		`{"type":"assistant","uuid":"boot-a","timestamp":"2026-05-14T12:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"should not comment"}]}}`,
+	})
+	tracker.Sync()
+	reporter.Close()
+
+	messages := poster.messages()
+	if inputs := userInputMessages(messages); len(inputs) != 0 {
+		t.Fatalf("inputs = %+v, want bootstrap and historical user skipped", inputs)
+	}
+	if finals := finalMessages(messages); len(finals) != 0 {
+		t.Fatalf("finals = %+v, want bootstrap and historical final skipped", finals)
+	}
+	texts := localMessagesByType(messages, "text")
+	if len(texts) != 1 || texts[0].Content != "should not comment" {
+		t.Fatalf("texts = %+v, want bootstrap assistant text in execution log only", texts)
+	}
+}
+
 func TestLocalCLIProcessEnvInjectsRunMetadataAndToken(t *testing.T) {
 	got := localCLIProcessEnv([]string{
 		"MULTICA_SERVER_URL=http://old.example",
@@ -616,6 +755,20 @@ func localMessagesByType(messages []localCLIMessage, msgType string) []localCLIM
 		}
 	}
 	return out
+}
+
+func writeClaudeJSONLLines(t *testing.T, path string, lines []string) {
+	t.Helper()
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		t.Fatalf("open jsonl: %v", err)
+	}
+	defer file.Close()
+	for _, line := range lines {
+		if _, err := file.WriteString(line + "\n"); err != nil {
+			t.Fatalf("write jsonl: %v", err)
+		}
+	}
 }
 
 func mapMessagesByType(messages []map[string]any, msgType string) []map[string]any {
