@@ -36,6 +36,7 @@
     "workspace_group": "工作区",
     "configure_group": "配置",
     "unread_overflow": "99+",
+    "_comment_1296": "CEREBRO-PATCH(i18n-sidebar-1296): JEH-1296 — new_message, notifications, notifications_clear for sidebar restructure",
     "new_message": "新建消息",
     "notifications": "通知",
     "notifications_clear": "清空"
