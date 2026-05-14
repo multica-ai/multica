@@ -16,6 +16,7 @@ import (
 // Codex:    skills → handled separately in Prepare via codex-home
 // Copilot:  skills → {workDir}/.github/skills/{name}/SKILL.md  (native project-level discovery)
 // OpenCode: skills → {workDir}/.opencode/skills/{name}/SKILL.md  (native discovery)
+// OpenClaw: skills → {workDir}/.openclaw/skills/{name}/SKILL.md  (native discovery)
 // Pi:       skills → {workDir}/.pi/skills/{name}/SKILL.md  (native discovery)
 // Cursor:   skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Kimi:     skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
@@ -133,6 +134,12 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 	case "opencode":
 		// OpenCode natively discovers skills from .opencode/skills/ in the workdir.
 		skillsDir = filepath.Join(workDir, ".opencode", "skills")
+	case "openclaw":
+		// OpenClaw natively discovers skills from .openclaw/skills/ in the workdir.
+		// Without this case the provider fell through to .agent_context/skills/,
+		// where the openclaw CLI never looks — so workspace skills attached to
+		// the agent silently disappeared from chat and task runs.
+		skillsDir = filepath.Join(workDir, ".openclaw", "skills")
 	case "pi":
 		// Pi natively discovers skills from .pi/skills/ in the workdir.
 		skillsDir = filepath.Join(workDir, ".pi", "skills")
