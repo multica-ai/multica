@@ -35,6 +35,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 
 | Patch name | File(s) | `+` lines | Rationale |
 |---|---|---|---|
+| `agent-runs-history-expanded-default` | packages/views/issues/components/agent-live-card.tsx | 1 | Initialize `TaskRunHistory` open state to `true` so the "Execution history" section is expanded by default when the Agent Runs tab is opened (JEH-1247). |
 | `fix-paste-image-selection` | packages/views/editor/extensions/file-upload.ts | 1 | Call event.preventDefault() before handleFiles so pasted images are never inserted inline into the editor. Without this the browser inserts the image as an inline node and then selects it, forcing users to click before typing (JEH-1194). |
 | `runtime-pause-cerebro` | server/internal/handler/runtime_pause_cerebro.go | 158 | Net-new fork file: HTTP handlers for cerebro pause/unpause. Delegates to cerebroruntime.Service via the RuntimePauseInvoker seam (JEH-848). |
 | `runtime-detail-pause` | packages/views/runtimes/components/runtime-detail.tsx | 4 | Mount PauseRuntimeButton in topbar and PauseBanner above HeroCard from cerebro-runtime. |
@@ -521,6 +522,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `comment-input-min-height` | packages/views/issues/components/comment-input.tsx | 1 | JEH-1065 — minimum 2 lines on the bottom comment input for the same reason. |
 
 | `cerebro-account-availability` | packages/core/api/client.ts | 4 | JEH-881 — adds `runtime_count`, `available_runtime_count`, `nearest_unpause_at`, `status` fields to `CerebroAccount` interface. Backend derives values from a LEFT JOIN between `cerebro_account` and `agent_runtime`. |
+| `heartbeat-account-id-ack` | server/pkg/protocol/messages.go, server/internal/handler/daemon.go (×2), server/internal/daemon/client.go, server/internal/daemon/daemon.go, server/internal/daemon/wakeup.go | 12 | JEH-881 — server returns the registered `cerebro_account_id` in the heartbeat ack (HTTP + WS). Daemon caches it per runtime. After each task run `maybeReportAccountUsage` parses the adapter output for rate-limit/usage-percent signals and POSTs them to `/api/daemon/accounts/{id}/usage` so `usage_window_pct` / `throttled_until` stay fresh. |
 | `skill-mention-prefix` | packages/views/editor/extensions/mention-extension.ts | 5 | JEH-1094 — `skill` mention type renders bare (no `@` prefix), matching the existing `issue` carve-out, so a skill chip shows the skill name not `@SkillName`. |
 | `skill-mention-view` | packages/views/editor/extensions/mention-view.tsx | 8 | JEH-1094 — adds a `type === "skill"` branch that renders `SkillMentionChip` from `@multica/cerebro-skill-mention`. |
 | `skill-mention-readonly` | packages/views/editor/readonly-content.tsx | 2 | JEH-1094 — imports `SkillMentionChip` for readonly rendering of skill mentions. |

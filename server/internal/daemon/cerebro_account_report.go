@@ -33,16 +33,22 @@ import (
 // We sidestep that with a low-frequency forced re-probe (rebuildIdentity
 // is wired into the heartbeat tick in daemon.go); the cache fills the gap
 // between forced probes only.
+//
+// accountIDs stores the server-registered cerebro account_id per runtime,
+// returned in the heartbeat ack (JEH-881). Used after each task run to
+// POST usage signals back to the server.
 type accountIdentityCache struct {
-	mu      sync.Mutex
-	entries map[string]protocol.DaemonHeartbeatAccount // runtime_id -> last detected
-	probed  map[string]bool                            // runtime_id -> probe has run at least once
+	mu         sync.Mutex
+	entries    map[string]protocol.DaemonHeartbeatAccount // runtime_id -> last detected
+	probed     map[string]bool                            // runtime_id -> probe has run at least once
+	accountIDs map[string]string                          // runtime_id -> cerebro account UUID
 }
 
 func newAccountIdentityCache() *accountIdentityCache {
 	return &accountIdentityCache{
-		entries: make(map[string]protocol.DaemonHeartbeatAccount),
-		probed:  make(map[string]bool),
+		entries:    make(map[string]protocol.DaemonHeartbeatAccount),
+		probed:     make(map[string]bool),
+		accountIDs: make(map[string]string),
 	}
 }
 
@@ -64,6 +70,24 @@ func (c *accountIdentityCache) hasProbed(runtimeID string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.probed[runtimeID]
+}
+
+// setAccountID stores the server-assigned cerebro account_id for a runtime,
+// received in the heartbeat ack. Used by maybeReportAccountUsage (JEH-881).
+func (c *accountIdentityCache) setAccountID(runtimeID, accountID string) {
+	if accountID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.accountIDs[runtimeID] = accountID
+}
+
+// getAccountID returns the cached cerebro account_id for the runtime, or "".
+func (c *accountIdentityCache) getAccountID(runtimeID string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.accountIDs[runtimeID]
 }
 
 // heartbeatAccountFor returns the Account payload to embed in this beat,

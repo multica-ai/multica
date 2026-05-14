@@ -63,12 +63,16 @@ var (
 // account is nil when the daemon could not detect a login identity yet
 // (auth-state file missing, unsupported provider). That is a valid steady
 // state and produces no log noise.
-func (h *Handler) recordHeartbeatAccount(ctx context.Context, rt db.AgentRuntime, account *protocol.DaemonHeartbeatAccount) {
+//
+// Returns the registered account UUID string so callers can forward it in the
+// heartbeat ack (JEH-881). Returns "" on any error or when no identity is
+// available.
+func (h *Handler) recordHeartbeatAccount(ctx context.Context, rt db.AgentRuntime, account *protocol.DaemonHeartbeatAccount) string {
 	if account == nil {
-		return
+		return ""
 	}
 	if h.RuntimeAccount == nil {
-		return
+		return ""
 	}
 	if account.Provider == "" || account.LoginIdentity == "" {
 		// The daemon should never send a half-filled account block; treat
@@ -77,7 +81,7 @@ func (h *Handler) recordHeartbeatAccount(ctx context.Context, rt db.AgentRuntime
 			"runtime_id", uuidToString(rt.ID),
 			"provider", account.Provider,
 			"login_identity_present", account.LoginIdentity != "")
-		return
+		return ""
 	}
 	rec, err := h.RuntimeAccount.RecordAccount(ctx, rt.ID, rt.WorkspaceID, account.Provider, account.LoginIdentity)
 	if err != nil {
@@ -85,7 +89,7 @@ func (h *Handler) recordHeartbeatAccount(ctx context.Context, rt db.AgentRuntime
 			"runtime_id", uuidToString(rt.ID),
 			"provider", account.Provider,
 			"error", err)
-		return
+		return ""
 	}
 	if rec.AccountCreated || rec.RuntimeUpdated {
 		slog.Info("heartbeat account hook: runtime account bound",
@@ -96,4 +100,5 @@ func (h *Handler) recordHeartbeatAccount(ctx context.Context, rt db.AgentRuntime
 			"account_created", rec.AccountCreated,
 			"runtime_link_changed", rec.RuntimeUpdated)
 	}
+	return uuidToString(rec.AccountID)
 }
