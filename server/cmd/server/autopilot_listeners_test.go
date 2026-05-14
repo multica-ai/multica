@@ -66,6 +66,7 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 				AssigneeID:         parseUUID(agentID),
 				Status:             "active",
 				ExecutionMode:      "run_only",
+				SkipIfRunning:      true,
 				IssueTitleTemplate: pgtype.Text{},
 				CreatedByType:      "member",
 				CreatedByID:        parseUUID(testUserID),
@@ -172,6 +173,7 @@ func TestAutopilotDispatchSkipsWhenRuntimeOffline(t *testing.T) {
 		AssigneeID:         parseUUID(agentID),
 		Status:             "active",
 		ExecutionMode:      "run_only",
+		SkipIfRunning:      true,
 		IssueTitleTemplate: pgtype.Text{},
 		CreatedByType:      "member",
 		CreatedByID:        parseUUID(testUserID),
@@ -297,5 +299,107 @@ func TestManualTriggerDoesNotErrorOnPostAdmissionSkip(t *testing.T) {
 	}
 	if run.Status != "skipped" {
 		t.Fatalf("expected run status 'skipped', got %q", run.Status)
+	}
+}
+
+func TestAutopilotDispatchSkipsWhenRunAlreadyActive(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	ap := seedAutopilot(t, queries, "Single-flight autopilot", "member", parseUUID(testUserID), pickFixtureAgent(t))
+
+	activeRun, err := queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
+		AutopilotID: ap.ID,
+		Source:      "manual",
+		Status:      "running",
+	})
+	if err != nil {
+		t.Fatalf("seed active run: %v", err)
+	}
+
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if run == nil {
+		t.Fatal("expected a run, got nil")
+	}
+	if run.Status != "skipped" {
+		t.Fatalf("expected run status 'skipped', got %q", run.Status)
+	}
+	if !run.FailureReason.Valid || !strings.Contains(run.FailureReason.String, "active run") {
+		t.Fatalf("expected failure reason mentioning active run, got %+v", run.FailureReason)
+	}
+	if run.TaskID.Valid {
+		t.Fatalf("expected no task to be enqueued, got task_id %v", run.TaskID)
+	}
+
+	var activeCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM autopilot_run
+		WHERE autopilot_id = $1 AND status IN ('issue_created', 'running')
+	`, ap.ID).Scan(&activeCount); err != nil {
+		t.Fatalf("count active runs: %v", err)
+	}
+	if activeCount != 1 {
+		t.Fatalf("expected exactly 1 active run, got %d", activeCount)
+	}
+
+	loadedActiveRun, err := queries.GetAutopilotRun(ctx, activeRun.ID)
+	if err != nil {
+		t.Fatalf("GetAutopilotRun: %v", err)
+	}
+	if loadedActiveRun.Status != "running" {
+		t.Fatalf("expected existing run to remain running, got %q", loadedActiveRun.Status)
+	}
+}
+
+func TestAutopilotDispatchAllowsOverlapWhenSkipIfRunningDisabled(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	ap := seedAutopilot(t, queries, "Allow-overlap autopilot", "member", parseUUID(testUserID), pickFixtureAgent(t))
+	if _, err := testPool.Exec(ctx, `UPDATE autopilot SET skip_if_running = false WHERE id = $1`, ap.ID); err != nil {
+		t.Fatalf("disable skip_if_running: %v", err)
+	}
+	ap.SkipIfRunning = false
+
+	if _, err := queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
+		AutopilotID: ap.ID,
+		Source:      "manual",
+		Status:      "running",
+	}); err != nil {
+		t.Fatalf("seed active run: %v", err)
+	}
+
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if run == nil {
+		t.Fatal("expected a run, got nil")
+	}
+	if run.Status != "running" {
+		t.Fatalf("expected overlapping run status 'running', got %q", run.Status)
+	}
+	if !run.TaskID.Valid {
+		t.Fatal("expected overlapping run to enqueue a task")
+	}
+
+	var activeCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM autopilot_run
+		WHERE autopilot_id = $1 AND status IN ('issue_created', 'running')
+	`, ap.ID).Scan(&activeCount); err != nil {
+		t.Fatalf("count active runs: %v", err)
+	}
+	if activeCount != 2 {
+		t.Fatalf("expected 2 active runs when skip_if_running is disabled, got %d", activeCount)
 	}
 }

@@ -31,6 +31,8 @@ type AutopilotService struct {
 	TaskSvc   *TaskService
 }
 
+const activeAutopilotRunSkipReason = "autopilot already has an active run"
+
 func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
 	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
 }
@@ -59,48 +61,39 @@ func (s *AutopilotService) DispatchAutopilot(
 		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, reason)
 	}
 
-	// Determine initial status based on execution mode.
-	initialStatus := "issue_created"
-	if autopilot.ExecutionMode == "run_only" {
-		initialStatus = "running"
-	}
-
-	run, err := s.Queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
-		AutopilotID:    autopilot.ID,
-		TriggerID:      triggerID,
-		Source:         source,
-		Status:         initialStatus,
-		TriggerPayload: payload,
-		SquadID:        autopilotSquadAttribution(autopilot),
-	})
+	run, skipped, err := s.createAdmittedRun(ctx, autopilot, triggerID, source, payload)
 	if err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
 	}
-	s.captureAutopilotRunStarted(autopilot, run, source)
+	if skipped {
+		s.finishSkippedRun(ctx, autopilot, *run, source, activeAutopilotRunSkipReason)
+		return run, nil
+	}
+	s.captureAutopilotRunStarted(autopilot, *run, source)
 
 	switch autopilot.ExecutionMode {
 	case "create_issue":
-		if err := s.dispatchCreateIssue(ctx, autopilot, &run); err != nil {
-			if skipped := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
+		if err := s.dispatchCreateIssue(ctx, autopilot, run); err != nil {
+			if skipped := s.handleDispatchSkip(ctx, autopilot, run, err); skipped != nil {
 				return skipped, nil
 			}
 			s.failRun(ctx, run.ID, err.Error())
-			s.captureAutopilotRunFailed(autopilot, run, source, err.Error())
-			return &run, fmt.Errorf("dispatch create_issue: %w", err)
+			s.captureAutopilotRunFailed(autopilot, *run, source, err.Error())
+			return run, fmt.Errorf("dispatch create_issue: %w", err)
 		}
 	case "run_only":
-		if err := s.dispatchRunOnly(ctx, autopilot, &run); err != nil {
-			if skipped := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
+		if err := s.dispatchRunOnly(ctx, autopilot, run); err != nil {
+			if skipped := s.handleDispatchSkip(ctx, autopilot, run, err); skipped != nil {
 				return skipped, nil
 			}
 			s.failRun(ctx, run.ID, err.Error())
-			s.captureAutopilotRunFailed(autopilot, run, source, err.Error())
-			return &run, fmt.Errorf("dispatch run_only: %w", err)
+			s.captureAutopilotRunFailed(autopilot, *run, source, err.Error())
+			return run, fmt.Errorf("dispatch run_only: %w", err)
 		}
 	default:
 		s.failRun(ctx, run.ID, "unknown execution_mode: "+autopilot.ExecutionMode)
-		s.captureAutopilotRunFailed(autopilot, run, source, "unknown execution_mode: "+autopilot.ExecutionMode)
-		return &run, fmt.Errorf("unknown execution_mode: %s", autopilot.ExecutionMode)
+		s.captureAutopilotRunFailed(autopilot, *run, source, "unknown execution_mode: "+autopilot.ExecutionMode)
+		return run, fmt.Errorf("unknown execution_mode: %s", autopilot.ExecutionMode)
 	}
 
 	// Update last_run_at on the autopilot.
@@ -119,7 +112,75 @@ func (s *AutopilotService) DispatchAutopilot(
 		},
 	})
 
-	return &run, nil
+	return run, nil
+}
+
+func (s *AutopilotService) createAdmittedRun(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	source string,
+	payload []byte,
+) (*db.AutopilotRun, bool, error) {
+	if s.TxStarter == nil {
+		return nil, false, fmt.Errorf("tx starter is required")
+	}
+
+	initialStatus := "issue_created"
+	if autopilot.ExecutionMode == "run_only" {
+		initialStatus = "running"
+	}
+
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := s.Queries.WithTx(tx)
+	if err := qtx.LockAutopilotDispatch(ctx, util.UUIDToString(autopilot.ID)); err != nil {
+		return nil, false, fmt.Errorf("lock dispatch: %w", err)
+	}
+
+	activeRuns, err := qtx.CountActiveAutopilotRuns(ctx, autopilot.ID)
+	if err != nil {
+		return nil, false, fmt.Errorf("count active runs: %w", err)
+	}
+
+	status := initialStatus
+	skipped := false
+	if autopilot.SkipIfRunning && activeRuns > 0 {
+		status = "skipped"
+		skipped = true
+	}
+
+	run, err := qtx.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
+		AutopilotID:    autopilot.ID,
+		TriggerID:      triggerID,
+		Source:         source,
+		Status:         status,
+		TriggerPayload: payload,
+		SquadID:        autopilotSquadAttribution(autopilot),
+	})
+	if err != nil {
+		return nil, false, err
+	}
+
+	if skipped {
+		run, err = qtx.UpdateAutopilotRunSkipped(ctx, db.UpdateAutopilotRunSkippedParams{
+			ID:            run.ID,
+			FailureReason: pgtype.Text{String: activeAutopilotRunSkipReason, Valid: true},
+		})
+		if err != nil {
+			return nil, false, fmt.Errorf("mark skipped run: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, fmt.Errorf("commit tx: %w", err)
+	}
+
+	return &run, skipped, nil
 }
 
 // dispatchCreateIssue creates an issue and enqueues a task for the agent.
@@ -676,6 +737,17 @@ func (s *AutopilotService) recordSkippedRun(
 			"run_id", util.UUIDToString(run.ID), "error", err)
 	}
 
+	s.finishSkippedRun(ctx, autopilot, run, source, reason)
+	return &run, nil
+}
+
+func (s *AutopilotService) finishSkippedRun(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	run db.AutopilotRun,
+	source string,
+	reason string,
+) {
 	slog.Info("autopilot dispatch skipped",
 		"autopilot_id", util.UUIDToString(autopilot.ID),
 		"run_id", util.UUIDToString(run.ID),
@@ -688,7 +760,6 @@ func (s *AutopilotService) recordSkippedRun(
 	s.Queries.UpdateAutopilotLastRunAt(ctx, autopilot.ID)
 
 	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), run, "skipped")
-	return &run, nil
 }
 
 func (s *AutopilotService) publishRunDone(workspaceID string, run db.AutopilotRun, status string) {
