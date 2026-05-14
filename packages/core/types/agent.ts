@@ -130,6 +130,7 @@ export interface Agent {
   status: AgentStatus;
   max_concurrent_tasks: number;
   model: string;
+  hermes_profile: string | null;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   created_at: string;
@@ -163,6 +164,7 @@ export interface CreateAgentRequest {
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
   model?: string;
+  hermes_profile?: string;
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
@@ -251,6 +253,7 @@ export interface UpdateAgentRequest {
   status?: AgentStatus;
   max_concurrent_tasks?: number;
   model?: string;
+  hermes_profile?: string | null;
 }
 
 // Skills

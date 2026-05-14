@@ -130,6 +130,7 @@
     "section_skills": "Skills",
     "prop_runtime": "Runtime",
     "prop_model": "Model",
+    "prop_hermes_profile": "Hermes Profile",
     "prop_visibility": "Visibility",
     "prop_concurrency": "Concurrency",
     "prop_owner": "Owner",
@@ -172,7 +173,11 @@
     "model_custom_tooltip": "Use \"{{value}}\" as a custom model id",
     "model_custom_use": "Use \"{{value}}\"",
     "model_clear": "Clear (use provider default)",
-    "model_clear_title": "Clear and fall back to the runtime's provider default"
+    "model_clear_title": "Clear and fall back to the runtime's provider default",
+    "hermes_profile_default": "Default",
+    "hermes_profile_tooltip": "Hermes Profile · {{value}}",
+    "hermes_profile_description": "Profile name passed to Hermes via -p. Leave empty for the default profile.",
+    "hermes_profile_placeholder": "e.g. work"
   },
   "model_dropdown": {
     "label": "Model",

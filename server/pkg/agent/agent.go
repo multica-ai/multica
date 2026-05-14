@@ -35,6 +35,7 @@ type ExecOptions struct {
 	ExtraArgs                 []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
 	CustomArgs                []string        // per-agent CLI arguments appended after ExtraArgs
 	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	HermesProfile             string          // Hermes profile name; non-empty causes -p <profile> flag
 }
 
 // Session represents a running agent execution.

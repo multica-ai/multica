@@ -82,6 +82,7 @@ type AgentData struct {
 	CustomArgs   []string          `json:"custom_args,omitempty"`
 	McpConfig    json.RawMessage   `json:"mcp_config,omitempty"`
 	Model        string            `json:"model,omitempty"`
+	HermesProfile string           `json:"hermes_profile,omitempty"`
 }
 
 // SkillData represents a structured skill for task execution.

@@ -2131,11 +2131,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	taskStart := time.Now()
 
 	var customArgs []string
+	var hermesProfile string
 	extraArgs := defaultArgsForProvider(d.cfg, provider)
 	var mcpConfig json.RawMessage
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = task.Agent.McpConfig
+		hermesProfile = task.Agent.HermesProfile
 	}
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
@@ -2162,6 +2164,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExtraArgs:                 extraArgs,
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
+		HermesProfile:             hermesProfile,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:

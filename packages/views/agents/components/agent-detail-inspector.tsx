@@ -40,6 +40,7 @@ import { availabilityConfig } from "../presence";
 import { CharCounter } from "./char-counter";
 import { useT } from "../../i18n";
 import { ConcurrencyPicker } from "./inspector/concurrency-picker";
+import { HermesProfilePicker } from "./inspector/hermes-profile-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { SkillAttach } from "./inspector/skill-attach";
@@ -130,6 +131,15 @@ export function AgentDetailInspector({
             onChange={(m) => update({ model: m })}
           />
         </PropRow>
+        {runtime?.provider === "hermes" && (
+          <PropRow label={t(($) => $.inspector.prop_hermes_profile)} interactive={false}>
+            <HermesProfilePicker
+              value={agent.hermes_profile ?? null}
+              canEdit={canEdit}
+              onChange={(p) => update({ hermes_profile: p })}
+            />
+          </PropRow>
+        )}
         <PropRow label={t(($) => $.inspector.prop_visibility)} interactive={false}>
           <VisibilityPicker
             value={agent.visibility}

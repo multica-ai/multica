@@ -45,6 +45,7 @@ type AgentResponse struct {
 	Status             string              `json:"status"`
 	MaxConcurrentTasks int32               `json:"max_concurrent_tasks"`
 	Model              string              `json:"model"`
+	HermesProfile      *string             `json:"hermes_profile"`
 	OwnerID            *string             `json:"owner_id"`
 	Skills             []AgentSkillSummary `json:"skills"`
 	CreatedAt          string              `json:"created_at"`
@@ -104,6 +105,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Status:             a.Status,
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
 		Model:              a.Model.String,
+		HermesProfile:      textToPtr(a.HermesProfile),
 		OwnerID:            uuidToPtr(a.OwnerID),
 		Skills:             []AgentSkillSummary{},
 		CreatedAt:          timestampToString(a.CreatedAt),
@@ -200,6 +202,7 @@ type TaskAgentData struct {
 	CustomArgs   []string                 `json:"custom_args,omitempty"`
 	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
 	Model        string                   `json:"model,omitempty"`
+	HermesProfile string                  `json:"hermes_profile,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
@@ -390,6 +393,7 @@ type CreateAgentRequest struct {
 	Visibility         string            `json:"visibility"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 	Model              string            `json:"model"`
+	HermesProfile      *string           `json:"hermes_profile"`
 	// Template records which template slug was used to seed this agent
 	// (e.g. "coding" / "planning" / "writing" / "assistant"). Empty when
 	// the caller didn't come from a template picker — the `agent_created`
@@ -526,6 +530,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		CustomArgs:         ca,
 		McpConfig:          mc,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		HermesProfile:      ptrToText(req.HermesProfile),
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -577,6 +582,7 @@ type UpdateAgentRequest struct {
 	Status             *string            `json:"status"`
 	MaxConcurrentTasks *int32             `json:"max_concurrent_tasks"`
 	Model              *string            `json:"model"`
+	HermesProfile      *string            `json:"hermes_profile"`
 }
 
 // canViewAgentEnv checks whether the requesting user is allowed to see the
@@ -721,6 +727,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Model != nil {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
 	}
+	if req.HermesProfile != nil {
+		params.HermesProfile = pgtype.Text{String: *req.HermesProfile, Valid: true}
+	}
 
 	agent, err = h.Queries.UpdateAgent(r.Context(), params)
 	if err != nil {
@@ -736,6 +745,17 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config: "+err.Error())
+			return
+		}
+	}
+
+	// hermes_profile: empty string means clear to NULL (use default profile).
+	shouldClearHermesProfile := req.HermesProfile != nil && *req.HermesProfile == ""
+	if shouldClearHermesProfile {
+		agent, err = h.Queries.ClearAgentHermesProfile(r.Context(), agent.ID)
+		if err != nil {
+			slog.Warn("clear agent hermes_profile failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear hermes_profile: "+err.Error())
 			return
 		}
 	}
