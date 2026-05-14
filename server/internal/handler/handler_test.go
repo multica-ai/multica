@@ -156,9 +156,13 @@ func newRequest(method, path string, body any) *http.Request {
 }
 
 func withURLParam(req *http.Request, key, value string) *http.Request {
-	rctx := chi.NewRouteContext()
+	rctx := chi.RouteContext(req.Context())
+	if rctx == nil {
+		rctx = chi.NewRouteContext()
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	}
 	rctx.URLParams.Add(key, value)
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	return req
 }
 
 func handlerTestRuntimeID(t *testing.T) string {

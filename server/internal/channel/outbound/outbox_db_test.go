@@ -2,6 +2,7 @@ package outbound
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ func TestDBNotificationStore_ReclaimStaleProcessing(t *testing.T) {
 	pool := newTestPool(t)
 	ctx := context.Background()
 	store := NewDBNotificationStore(pool)
+	suffix := time.Now().UnixNano()
 
 	// Create a user so the FK on target_user_id is satisfied.
 	var userID pgtype.UUID
@@ -44,11 +46,23 @@ func TestDBNotificationStore_ReclaimStaleProcessing(t *testing.T) {
 		INSERT INTO "user" (name, email)
 		VALUES ($1, $2)
 		RETURNING id
-	`, "Outbox Test", "outbox-test@multica.ai").Scan(&userID)
+	`, "Outbox Test", fmt.Sprintf("outbox-test-%d@multica.ai", suffix)).Scan(&userID)
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	defer pool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, userID)
+
+	connID := fmt.Sprintf("conn-outbox-%d", suffix)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO channel_connection (
+			id, provider, display_name, enabled, is_default, config, secret_config, status
+		) VALUES (
+			$1, 'feishu', 'Outbox Test', true, false, '{}', '{}', 'connected'
+		)
+	`, connID); err != nil {
+		t.Fatalf("create connection: %v", err)
+	}
+	defer pool.Exec(ctx, `DELETE FROM channel_connection WHERE id = $1`, connID)
 
 	// Insert a stale processing row.
 	var id pgtype.UUID
@@ -57,11 +71,11 @@ func TestDBNotificationStore_ReclaimStaleProcessing(t *testing.T) {
 			provider, connection_id, event_kind, target_user_id, target_external_user_id,
 			title, body, status, updated_at, next_attempt_at, aggregation_due_at
 		) VALUES (
-			'feishu', 'conn-a', 'test_event', $1, 'ext_1',
+			'feishu', $2, 'test_event', $1, 'ext_1',
 			'Title', 'Body', 'processing', now() - interval '10 minutes', now(), now()
 		)
 		RETURNING id
-	`, userID).Scan(&id)
+	`, userID, connID).Scan(&id)
 	if err != nil {
 		t.Fatalf("insert notification: %v", err)
 	}

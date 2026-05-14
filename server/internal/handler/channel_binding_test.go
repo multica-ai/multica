@@ -53,8 +53,9 @@ func createTestBinding(t *testing.T, workspaceID, provider, externalChatID, chat
 	}
 
 	t.Cleanup(func() {
-		testHandler.Queries.DeleteChannelChatBinding(t.Context(), binding.ID)
-		_, _ = testPool.Exec(t.Context(), `DELETE FROM channel_connection WHERE id = $1`, connID)
+		ctx := context.Background()
+		_, _ = testPool.Exec(ctx, `DELETE FROM channel_chat_binding WHERE id = $1`, binding.ID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM channel_connection WHERE id = $1`, connID)
 	})
 
 	return uuidToString(binding.ID)
@@ -238,14 +239,24 @@ func TestListChannelConnections_RedactsForNonOwner(t *testing.T) {
 	if resp.CanManage {
 		t.Fatal("expected non-owner can_manage=false")
 	}
-	if len(resp.Connections) != 1 || resp.Connections[0].ID != enabledID {
-		t.Fatalf("expected only enabled connection %q, got %#v", enabledID, resp.Connections)
+	var enabledConn *ChannelConnectionResponse
+	for i := range resp.Connections {
+		conn := &resp.Connections[i]
+		if conn.ID == disabledID {
+			t.Fatalf("disabled connection %q should be hidden from non-owners", disabledID)
+		}
+		if conn.ID == enabledID {
+			enabledConn = conn
+		}
 	}
-	if len(resp.Connections[0].Config) != 0 {
-		t.Fatalf("expected config to be redacted, got %#v", resp.Connections[0].Config)
+	if enabledConn == nil {
+		t.Fatalf("expected enabled connection %q in response, got %#v", enabledID, resp.Connections)
 	}
-	if resp.Connections[0].LastError != nil {
-		t.Fatalf("expected last_error to be redacted, got %q", *resp.Connections[0].LastError)
+	if len(enabledConn.Config) != 0 {
+		t.Fatalf("expected config to be redacted, got %#v", enabledConn.Config)
+	}
+	if enabledConn.LastError != nil {
+		t.Fatalf("expected last_error to be redacted, got %q", *enabledConn.LastError)
 	}
 }
 
@@ -268,21 +279,34 @@ func TestCreateChannelConnection_RequiresWorkspaceOwner(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCreateChannelBinding_Success(t *testing.T) {
-	// Create a bind token first
+	connID := fmt.Sprintf("conn-create-success-%d", time.Now().UnixNano())
+	externalUserID := fmt.Sprintf("ext_user_success_%d", time.Now().UnixNano())
 	if _, err := testPool.Exec(t.Context(), `
-		INSERT INTO channel_bind_token (token_hash, provider, external_user_id, expires_at)
-		VALUES (decode('deadbeef', 'hex'), 'feishu', 'ext_user_1', now() + interval '1 hour')
-	`); err != nil {
-		t.Fatalf("failed to create bind token: %v", err)
+		INSERT INTO channel_connection (id, provider, display_name, enabled, is_default, config, secret_config, status)
+		VALUES ($1, 'feishu', 'Test Create Success', true, false, '{}', '{}', 'connected')
+	`, connID); err != nil {
+		t.Fatalf("failed to create channel connection: %v", err)
 	}
+	if _, err := testPool.Exec(t.Context(), `
+		INSERT INTO channel_user_binding (provider, connection_id, external_user_id, user_id)
+		VALUES ('feishu', $1, $2, $3::uuid)
+	`, connID, externalUserID, testUserID); err != nil {
+		t.Fatalf("failed to create user binding: %v", err)
+	}
+	plaintext, _ := seedChatWorkspaceBindToken(t, connID, externalUserID, "oc_create_success")
 	t.Cleanup(func() {
-		testPool.Exec(t.Context(), `DELETE FROM channel_bind_token WHERE token_hash = decode('deadbeef', 'hex')`)
+		ctx := context.Background()
+		_, _ = testPool.Exec(ctx, `DELETE FROM channel_chat_binding WHERE connection_id = $1`, connID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM channel_bind_token WHERE connection_id = $1`, connID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM channel_user_binding WHERE connection_id = $1`, connID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM channel_connection WHERE id = $1`, connID)
 	})
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/channel-bindings", map[string]any{
-		"token":    "deadbeef",
-		"provider": "feishu",
+		"token":         plaintext,
+		"provider":      "feishu",
+		"connection_id": connID,
 	})
 	req = withURLParam(req, "id", testWorkspaceID)
 	testHandler.CreateChannelBinding(w, req)
@@ -307,10 +331,6 @@ func TestCreateChannelBinding_Success(t *testing.T) {
 		t.Error("expected new binding to be primary when it's the first one")
 	}
 
-	// Cleanup the created binding
-	t.Cleanup(func() {
-		testPool.Exec(t.Context(), `DELETE FROM channel_chat_binding WHERE id = $1`, parseUUID(resp.ID))
-	})
 }
 
 func TestCreateChannelBinding_InvalidToken(t *testing.T) {
@@ -328,21 +348,33 @@ func TestCreateChannelBinding_InvalidToken(t *testing.T) {
 }
 
 func TestCreateChannelBinding_ProviderMismatch(t *testing.T) {
-	// Create a feishu token
+	connID := fmt.Sprintf("conn-create-mismatch-%d", time.Now().UnixNano())
+	externalUserID := fmt.Sprintf("ext_user_mismatch_%d", time.Now().UnixNano())
 	if _, err := testPool.Exec(t.Context(), `
-		INSERT INTO channel_bind_token (token_hash, provider, external_user_id, expires_at)
-		VALUES (decode('cafebabe', 'hex'), 'feishu', 'ext_user_1', now() + interval '1 hour')
-	`); err != nil {
-		t.Fatalf("failed to create bind token: %v", err)
+		INSERT INTO channel_connection (id, provider, display_name, enabled, is_default, config, secret_config, status)
+		VALUES ($1, 'feishu', 'Test Create Mismatch', true, false, '{}', '{}', 'connected')
+	`, connID); err != nil {
+		t.Fatalf("failed to create channel connection: %v", err)
 	}
+	if _, err := testPool.Exec(t.Context(), `
+		INSERT INTO channel_user_binding (provider, connection_id, external_user_id, user_id)
+		VALUES ('feishu', $1, $2, $3::uuid)
+	`, connID, externalUserID, testUserID); err != nil {
+		t.Fatalf("failed to create user binding: %v", err)
+	}
+	plaintext, _ := seedChatWorkspaceBindToken(t, connID, externalUserID, "oc_create_mismatch")
 	t.Cleanup(func() {
-		testPool.Exec(t.Context(), `DELETE FROM channel_bind_token WHERE token_hash = decode('cafebabe', 'hex')`)
+		ctx := context.Background()
+		_, _ = testPool.Exec(ctx, `DELETE FROM channel_bind_token WHERE connection_id = $1`, connID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM channel_user_binding WHERE connection_id = $1`, connID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM channel_connection WHERE id = $1`, connID)
 	})
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/channel-bindings", map[string]any{
-		"token":    "cafebabe",
-		"provider": "discord", // mismatch
+		"token":         plaintext,
+		"provider":      "discord", // mismatch
+		"connection_id": connID,
 	})
 	req = withURLParam(req, "id", testWorkspaceID)
 	testHandler.CreateChannelBinding(w, req)
