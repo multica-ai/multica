@@ -5,7 +5,7 @@ description: Hand an issue to an agent and it takes over as the official assigne
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Assign an [issue](/issues) to an [agent](/agents) and it works as the **official assignee** until the work is done — it can read the full issue context (description + all [comments](/comments)) and change status, post comments, and edit fields. This is the **most common and heaviest** of Multica's four trigger paths.
+Assign an [issue](/issues) to an [agent](/agents) and it works as the **official assignee** until the work is done — it can read the full issue context (description + all [comments](/comments)) and change status, post comments, and edit fields. This is the **most common and heaviest** of Multica's four trigger paths. The same flow also accepts a [squad](/squads) as the assignee — Multica then triggers the squad's **leader agent** instead.
 
 | Path | When to use | Changes the issue | Context | Priority | Auto retry |
 |---|---|---|---|---|---|
@@ -18,7 +18,7 @@ Assign an [issue](/issues) to an [agent](/agents) and it works as the **official
 
 ## Assign from the UI
 
-On the issue detail page, click the **Assignee** picker. It lists every member in the workspace plus all non-archived agents. Pick an agent and the issue is assigned right away.
+On the issue detail page, click the **Assignee** picker. It lists every member in the workspace, all non-archived agents, and every non-archived [squad](/squads). Pick an agent (or squad) and the issue is assigned right away.
 
 A few rules:
 
@@ -78,5 +78,6 @@ But **different agents can work on the same issue in parallel** — for example,
 ## Next
 
 - [**@-mention an agent in a comment**](/mentioning-agents) — a lighter trigger that leaves assignee and status untouched
+- [**Squads**](/squads) — assign to a group of agents and let the leader decide who picks it up
 - [**Chat**](/chat) — one-to-one conversation outside any issue
 - [**Autopilots**](/autopilots) — let agents start work automatically on a schedule
