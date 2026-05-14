@@ -24,10 +24,11 @@ func (c *stdinCapture) Write(p []byte) (int, error) {
 		c.editor = &terminalInputEditor{}
 	}
 	for _, content := range c.editor.Write(p) {
-		content = redact.Text(strings.TrimSpace(content))
-		if content == "" {
+		content, _, ok := sanitizeTerminalUserInput(content)
+		if !ok {
 			continue
 		}
+		content = redact.Text(content)
 		if c.turns != nil {
 			c.turns.BeforeUserSubmit()
 		}
@@ -188,22 +189,19 @@ func (e *terminalInputEditor) ctrlW() {
 }
 
 type terminalTurnCapture struct {
-	mu         sync.Mutex
-	stopOnce   sync.Once
-	reporter   *localRunReporter
-	screen     *terminalScreen
-	provider   providerTranscriptExtractor
-	done       chan struct{}
-	active     bool
-	baseline   string
-	source     assistantCaptureSource
-	turnSeq    uint64
-	lastUser   string
-	userInput  string
-	turnStart  time.Time
-	userSynced bool
-	suppress   bool
-	bootstrap  bool
+	mu              sync.Mutex
+	stopOnce        sync.Once
+	reporter        *localRunReporter
+	screen          *terminalScreen
+	provider        providerTranscriptExtractor
+	done            chan struct{}
+	syncedUsers     map[string]bool
+	syncedFinals    map[string]bool
+	active          bool
+	source          assistantCaptureSource
+	suppress        bool
+	bootstrap       bool
+	bootstrapPrompt string
 }
 
 type assistantCaptureSource int
@@ -211,7 +209,6 @@ type assistantCaptureSource int
 const (
 	assistantCaptureNone assistantCaptureSource = iota
 	assistantCaptureStructured
-	assistantCaptureProvider
 )
 
 func newTerminalTurnCapture(reporter *localRunReporter, provider providerTranscriptExtractor) *terminalTurnCapture {
@@ -259,12 +256,6 @@ func (c *terminalTurnCapture) PrepareStructuredFinal() bool {
 	if c == nil {
 		return true
 	}
-	seq, stdinUser, start, shouldExtractUser := c.userInputSnapshot()
-	if shouldExtractUser {
-		if content := c.extractProviderUserInput(stdinUser, start); content != "" {
-			c.completeProviderUserInput(seq, content)
-		}
-	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -274,9 +265,6 @@ func (c *terminalTurnCapture) PrepareStructuredFinal() bool {
 	if c.bootstrap {
 		c.source = assistantCaptureStructured
 		return false
-	}
-	if !c.userSynced {
-		c.syncStdinUserInputLocked(c.lastUser, isSlashInput(c.lastUser))
 	}
 	if c.suppress {
 		c.source = assistantCaptureStructured
@@ -302,36 +290,29 @@ func (c *terminalTurnCapture) StartInitialPrompt(content string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.baseline = c.screen.Text()
 	c.active = true
 	c.source = assistantCaptureNone
-	c.turnSeq++
-	c.lastUser = content
-	c.userInput = content
-	c.turnStart = time.Now()
-	c.userSynced = true
 	c.suppress = false
 	c.bootstrap = true
+	c.bootstrapPrompt = content
 }
 
 func (c *terminalTurnCapture) AfterUserSubmit(content string) {
 	if c == nil {
 		return
 	}
+	content, command, ok := sanitizeTerminalUserInput(content)
+	if !ok {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.baseline = c.screen.Text()
 	c.active = true
 	c.source = assistantCaptureNone
-	c.turnSeq++
-	c.lastUser = content
-	c.userInput = ""
-	c.turnStart = time.Now()
-	c.userSynced = false
 	c.suppress = false
 	c.bootstrap = false
-	if c.provider == nil {
-		c.syncStdinUserInputLocked(content, isSlashInput(content))
+	if command {
+		c.syncStdinUserInputLocked(content, true)
 	}
 }
 
@@ -346,20 +327,8 @@ func (c *terminalTurnCapture) Finalize() {
 }
 
 func (c *terminalTurnCapture) finalize() {
-	seq, stdinUser, start, shouldExtractUser := c.userInputSnapshot()
-	if shouldExtractUser {
-		if content := c.extractProviderUserInput(stdinUser, start); content != "" {
-			c.completeProviderUserInput(seq, content)
-		}
-	}
-
-	seq, user, start, shouldExtract := c.providerSnapshot()
-	if shouldExtract {
-		if content := c.extractProvider(user, start); content != "" {
-			if c.completeProviderFinal(seq, content) {
-				return
-			}
-		}
+	if c.shouldSyncProviderTurns() {
+		c.syncProviderTurns()
 	}
 
 	c.mu.Lock()
@@ -367,22 +336,8 @@ func (c *terminalTurnCapture) finalize() {
 	if !c.active {
 		return
 	}
-	if !c.userSynced {
-		c.syncStdinUserInputLocked(c.lastUser, isSlashInput(c.lastUser))
-	}
-	if c.source == assistantCaptureNone && !c.suppress && !c.bootstrap {
-		if content := extractAssistantCandidate(c.baseline, c.screen.Text(), c.lastUser); content != "" {
-			c.reporter.Post(localCLIMessage{Type: "final", Content: redact.Text(content)})
-		}
-	}
 	c.active = false
-	c.baseline = ""
 	c.source = assistantCaptureNone
-	c.turnSeq++
-	c.lastUser = ""
-	c.userInput = ""
-	c.turnStart = time.Time{}
-	c.userSynced = false
 	c.suppress = false
 	c.bootstrap = false
 }
@@ -393,18 +348,8 @@ func (c *terminalTurnCapture) pollProvider(interval time.Duration) {
 	for {
 		select {
 		case <-ticker.C:
-			seq, stdinUser, start, ok := c.userInputSnapshot()
-			if ok {
-				if content := c.extractProviderUserInput(stdinUser, start); content != "" {
-					c.completeProviderUserInput(seq, content)
-				}
-			}
-			seq, user, start, ok := c.providerSnapshot()
-			if !ok {
-				continue
-			}
-			if content := c.extractProvider(user, start); content != "" {
-				c.completeProviderFinal(seq, content)
+			if c.shouldSyncProviderTurns() {
+				c.syncProviderTurns()
 			}
 		case <-c.done:
 			return
@@ -412,74 +357,88 @@ func (c *terminalTurnCapture) pollProvider(interval time.Duration) {
 	}
 }
 
-func (c *terminalTurnCapture) userInputSnapshot() (uint64, string, time.Time, bool) {
+func (c *terminalTurnCapture) shouldSyncProviderTurns() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.active || c.userSynced || c.provider == nil || strings.TrimSpace(c.lastUser) == "" {
-		return 0, "", time.Time{}, false
-	}
-	return c.turnSeq, c.lastUser, c.turnStart, true
+	return !(c.active && c.source == assistantCaptureStructured)
 }
 
-func (c *terminalTurnCapture) providerSnapshot() (uint64, string, time.Time, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.active || c.bootstrap || !c.userSynced || c.source != assistantCaptureNone || c.suppress || c.provider == nil || strings.TrimSpace(c.userInput) == "" {
-		return 0, "", time.Time{}, false
+func (c *terminalTurnCapture) syncProviderTurns() {
+	if c == nil || c.provider == nil {
+		return
 	}
-	return c.turnSeq, c.userInput, c.turnStart, true
-}
-
-func (c *terminalTurnCapture) extractProviderUserInput(stdinUser string, start time.Time) string {
-	user, ok := c.provider.ExtractUserInput(stdinUser, start)
+	turns, ok := c.provider.ExtractTurns()
 	if !ok {
-		return ""
+		return
 	}
-	return strings.TrimSpace(user)
+	for _, turn := range turns {
+		user := strings.TrimSpace(turn.UserInput)
+		if user == "" || c.isBootstrapProviderUserInput(user) || isSlashInput(user) {
+			continue
+		}
+		c.syncProviderUser(turn.Key, user)
+		final := strings.TrimSpace(turn.Final)
+		if final == "" || isStatusOnly(final) {
+			continue
+		}
+		c.syncProviderFinal(turn.Key, final)
+	}
 }
 
-func (c *terminalTurnCapture) extractProvider(user string, start time.Time) string {
-	answer, ok := c.provider.Extract(user, start)
-	if !ok {
-		return ""
+func (c *terminalTurnCapture) syncProviderUser(key, content string) {
+	if key == "" || strings.TrimSpace(content) == "" {
+		return
 	}
-	answer = strings.TrimSpace(answer)
-	if answer == "" || isStatusOnly(answer) {
-		return ""
-	}
-	return answer
-}
-
-func (c *terminalTurnCapture) completeProviderFinal(seq uint64, content string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.active || c.turnSeq != seq || c.source != assistantCaptureNone || c.suppress {
-		return false
-	}
-	c.reporter.Post(localCLIMessage{Type: "final", Content: redact.Text(content)})
-	c.source = assistantCaptureProvider
-	c.active = false
-	c.baseline = ""
-	c.lastUser = ""
-	c.userInput = ""
-	c.turnStart = time.Time{}
-	c.userSynced = false
-	c.suppress = false
-	c.bootstrap = false
-	return true
-}
-
-func (c *terminalTurnCapture) completeProviderUserInput(seq uint64, content string) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.active || c.turnSeq != seq || c.userSynced || content == "" {
-		return false
+	c.ensureProviderSyncMapsLocked()
+	if c.syncedUsers[key] {
+		return
 	}
 	c.reporter.Post(localCLIMessage{Type: "user_input", Content: redact.Text(content)})
-	c.userInput = content
-	c.userSynced = true
-	c.suppress = false
-	return true
+	c.syncedUsers[key] = true
+}
+
+func (c *terminalTurnCapture) syncProviderFinal(key, content string) {
+	if key == "" || strings.TrimSpace(content) == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ensureProviderSyncMapsLocked()
+	if c.syncedFinals[key] {
+		return
+	}
+	c.reporter.Post(localCLIMessage{Type: "final", Content: redact.Text(content)})
+	c.syncedFinals[key] = true
+}
+
+func (c *terminalTurnCapture) ensureProviderSyncMapsLocked() {
+	if c.syncedUsers == nil {
+		c.syncedUsers = make(map[string]bool)
+	}
+	if c.syncedFinals == nil {
+		c.syncedFinals = make(map[string]bool)
+	}
+}
+
+func (c *terminalTurnCapture) isBootstrapProviderUserInput(content string) bool {
+	c.mu.Lock()
+	bootstrapPrompt := c.bootstrapPrompt
+	c.mu.Unlock()
+	if strings.TrimSpace(bootstrapPrompt) == "" {
+		return false
+	}
+	content = normalizeProviderText(content)
+	bootstrap := normalizeProviderText(bootstrapPrompt)
+	if content == "" || bootstrap == "" {
+		return false
+	}
+	if content == bootstrap {
+		return true
+	}
+	return strings.Contains(content, "You are assigned to Multica issue") &&
+		strings.Contains(content, "Assigned issue ID:")
 }
 
 func (c *terminalTurnCapture) syncStdinUserInputLocked(content string, command bool) {
@@ -487,13 +446,78 @@ func (c *terminalTurnCapture) syncStdinUserInputLocked(content string, command b
 		return
 	}
 	c.reporter.Post(localCLIMessage{Type: "user_input", Content: redact.Text(content), Input: commandInputMetadata(command)})
-	c.userInput = content
-	c.userSynced = true
 	c.suppress = command
 }
 
+func sanitizeTerminalUserInput(content string) (string, bool, bool) {
+	content = normalizeCapturedUserText(strings.TrimSpace(content))
+	if content == "" || isRejectedTerminalUserInput(content) {
+		return "", false, false
+	}
+	return content, isSlashInput(content), true
+}
+
+func normalizeCapturedUserText(s string) string {
+	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	if s == "" {
+		return ""
+	}
+	runes := []rune(s)
+	out := make([]rune, 0, len(runes))
+	for i, r := range runes {
+		if r == ' ' && i > 0 && i+1 < len(runes) && isHan(runes[i-1]) && isHan(runes[i+1]) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func isRejectedTerminalUserInput(content string) bool {
+	s := strings.TrimSpace(content)
+	if s == "" {
+		return true
+	}
+	lower := strings.ToLower(strings.TrimSpace(strings.TrimLeft(s, "✓✔•└─ ")))
+	rejectedPrefixes := []string{
+		"--output json",
+		"status, add comments",
+		"only. do not",
+		"ready, and",
+		"you approved codex to run ",
+		"codex wants to run ",
+		"allow command?",
+		"approval required",
+		"model:",
+		"directory:",
+		"cwd:",
+		"explored",
+		"read ",
+		"listed ",
+	}
+	for _, prefix := range rejectedPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func isSlashInput(content string) bool {
-	return strings.HasPrefix(strings.TrimSpace(content), "/")
+	fields := strings.Fields(strings.TrimSpace(content))
+	if len(fields) == 0 || !strings.HasPrefix(fields[0], "/") {
+		return false
+	}
+	name := strings.TrimPrefix(fields[0], "/")
+	if name == "" || strings.Contains(name, "/") {
+		return false
+	}
+	switch name {
+	case "approvals", "clear", "compact", "diff", "exit", "help", "init", "mcp", "model", "new", "prompts", "quit", "resume", "review", "settings", "status":
+		return true
+	default:
+		return false
+	}
 }
 
 func commandInputMetadata(command bool) map[string]any {
@@ -501,6 +525,29 @@ func commandInputMetadata(command bool) map[string]any {
 		return nil
 	}
 	return map[string]any{"command": true}
+}
+
+func looksLikePathToken(s string) bool {
+	s = strings.Trim(strings.TrimSpace(s), "`'\"")
+	if s == "" || strings.HasSuffix(s, "/") {
+		return false
+	}
+	if strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../") || strings.HasPrefix(s, "/") {
+		return strings.Contains(s, "/") && pathTokenHasFileName(s)
+	}
+	return strings.Contains(s, "/") && pathTokenHasFileName(s)
+}
+
+func pathTokenHasFileName(s string) bool {
+	base := s
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[i+1:]
+	}
+	return strings.Contains(base, ".")
+}
+
+func isHan(r rune) bool {
+	return unicode.Is(unicode.Han, r)
 }
 
 type terminalScreen struct {
@@ -740,42 +787,6 @@ func (s *terminalScreen) Text() string {
 		lines[i] = strings.TrimRight(string(line), " ")
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
-}
-
-func extractAssistantCandidate(before, after, lastUser string) string {
-	before = strings.TrimSpace(before)
-	after = strings.TrimSpace(after)
-	if after == "" || after == before {
-		return ""
-	}
-	candidate := after
-	if before != "" && strings.HasPrefix(after, before) {
-		candidate = strings.TrimSpace(strings.TrimPrefix(after, before))
-	}
-	if lastUser = strings.TrimSpace(lastUser); lastUser != "" && strings.HasPrefix(strings.TrimSpace(candidate), lastUser) {
-		candidate = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(candidate), lastUser))
-	}
-	lines := filterAssistantLines(strings.Split(candidate, "\n"), lastUser)
-	if len(lines) == 0 {
-		return ""
-	}
-	out := strings.TrimSpace(strings.Join(lines, "\n"))
-	if out == "" || isStatusOnly(out) {
-		return ""
-	}
-	return out
-}
-
-func filterAssistantLines(lines []string, lastUser string) []string {
-	var out []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || line == strings.TrimSpace(lastUser) || isStatusOnly(line) {
-			continue
-		}
-		out = append(out, line)
-	}
-	return out
 }
 
 func isStatusOnly(s string) bool {

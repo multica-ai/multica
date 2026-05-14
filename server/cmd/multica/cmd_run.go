@@ -64,6 +64,9 @@ func runLocalCLI(cmd *cobra.Command, args []string) error {
 	if cliName == "" {
 		return fmt.Errorf("unable to infer CLI name")
 	}
+	if !supportsProviderTranscript(cliName) {
+		return fmt.Errorf("当前 Agent 尚未支持，敬请期待")
+	}
 
 	cwd, _ := cmd.Flags().GetString("cwd")
 	if cwd == "" {
@@ -457,7 +460,7 @@ func executeLocalCLI(args []string, cwd, cliName string, env localCLIEnv, initia
 	stopSignalForward := forwardSignals(child.Process)
 	defer stopSignalForward()
 
-	turnCapture := newTerminalTurnCapture(reporter, newProviderTranscriptExtractor(cliName, cwd, startTime))
+	turnCapture := newTerminalTurnCapture(reporter, newProviderTranscriptExtractor(cliName, cwd, startTime, initialPrompt))
 	turnCapture.StartInitialPrompt(initialPrompt)
 	transcript := newTranscriptStream(reporter, turnCapture)
 	go func() {

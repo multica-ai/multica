@@ -3,32 +3,51 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
 type providerTranscriptExtractor interface {
-	ExtractUserInput(stdinPrompt string, turnStart time.Time) (string, bool)
-	Extract(userPrompt string, turnStart time.Time) (string, bool)
+	ExtractTurns() ([]providerTranscriptTurn, bool)
 }
 
-func newProviderTranscriptExtractor(cliName, cwd string, runStart time.Time) providerTranscriptExtractor {
+type providerTranscriptTurn struct {
+	Key       string
+	UserInput string
+	Final     string
+}
+
+func newProviderTranscriptExtractor(cliName, cwd string, runStart time.Time, bootstrapPrompt string) providerTranscriptExtractor {
 	switch strings.ToLower(strings.TrimSpace(cliName)) {
 	case "codex":
-		return codexTranscriptExtractor{cwd: cwd, runStart: runStart}
+		return &codexTranscriptExtractor{cwd: cwd, runStart: runStart, bootstrapPrompt: bootstrapPrompt}
 	default:
 		return nil
 	}
 }
 
-type codexTranscriptExtractor struct {
-	cwd      string
-	runStart time.Time
+func supportsProviderTranscript(cliName string) bool {
+	switch strings.ToLower(strings.TrimSpace(cliName)) {
+	case "codex":
+		return true
+	default:
+		return false
+	}
 }
 
-func (e codexTranscriptExtractor) Extract(userPrompt string, turnStart time.Time) (string, bool) {
+type codexTranscriptExtractor struct {
+	mu              sync.Mutex
+	cwd             string
+	runStart        time.Time
+	bootstrapPrompt string
+	sessionPath     string
+}
+
+func (e *codexTranscriptExtractor) Extract(userPrompt string, turnStart time.Time) (string, bool) {
 	path, ok := e.latestSessionFile(turnStart)
 	if !ok {
 		return "", false
@@ -36,7 +55,7 @@ func (e codexTranscriptExtractor) Extract(userPrompt string, turnStart time.Time
 	return extractCodexAnswerFromJSONL(path, userPrompt)
 }
 
-func (e codexTranscriptExtractor) ExtractUserInput(stdinPrompt string, turnStart time.Time) (string, bool) {
+func (e *codexTranscriptExtractor) ExtractUserInput(stdinPrompt string, turnStart time.Time) (string, bool) {
 	path, ok := e.latestSessionFile(turnStart)
 	if !ok {
 		return "", false
@@ -44,7 +63,23 @@ func (e codexTranscriptExtractor) ExtractUserInput(stdinPrompt string, turnStart
 	return extractCodexUserInputFromJSONL(path, stdinPrompt)
 }
 
-func (e codexTranscriptExtractor) latestSessionFile(turnStart time.Time) (string, bool) {
+func (e *codexTranscriptExtractor) ExtractTurns() ([]providerTranscriptTurn, bool) {
+	path, ok := e.latestSessionFile(time.Time{})
+	if !ok {
+		return nil, false
+	}
+	return extractCodexTurnsFromJSONL(path), true
+}
+
+func (e *codexTranscriptExtractor) latestSessionFile(turnStart time.Time) (string, bool) {
+	e.mu.Lock()
+	if e.sessionPath != "" {
+		path := e.sessionPath
+		e.mu.Unlock()
+		return path, true
+	}
+	e.mu.Unlock()
+
 	roots := codexSessionRoots()
 	if len(roots) == 0 {
 		return "", false
@@ -57,6 +92,8 @@ func (e codexTranscriptExtractor) latestSessionFile(turnStart time.Time) (string
 
 	var bestPath string
 	var bestMod time.Time
+	var bestBoundPath string
+	var bestBoundMod time.Time
 	for _, root := range roots {
 		info, err := os.Stat(root)
 		if err != nil || !info.IsDir() {
@@ -74,10 +111,50 @@ func (e codexTranscriptExtractor) latestSessionFile(turnStart time.Time) (string
 				bestPath = path
 				bestMod = info.ModTime()
 			}
+			if strings.TrimSpace(e.bootstrapPrompt) != "" && codexSessionContainsUserMessage(path, e.bootstrapPrompt) {
+				if bestBoundPath == "" || info.ModTime().After(bestBoundMod) {
+					bestBoundPath = path
+					bestBoundMod = info.ModTime()
+				}
+			}
 			return nil
 		})
 	}
+	if bestBoundPath != "" {
+		e.mu.Lock()
+		e.sessionPath = bestBoundPath
+		e.mu.Unlock()
+		return bestBoundPath, true
+	}
+	if strings.TrimSpace(e.bootstrapPrompt) != "" {
+		return "", false
+	}
 	return bestPath, bestPath != ""
+}
+
+func codexSessionContainsUserMessage(path, prompt string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	want := normalizeProviderText(prompt)
+	if want == "" {
+		return false
+	}
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		payload, ok := codexEventPayload(scanner.Bytes())
+		if !ok || stringValue(payload["type"]) != "user_message" {
+			continue
+		}
+		if normalizeProviderText(codexPayloadText(payload)) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func codexSessionRoots() []string {
@@ -180,6 +257,80 @@ func extractCodexUserInputFromJSONL(path, stdinPrompt string) (string, bool) {
 	return last, true
 }
 
+func extractCodexTurnsFromJSONL(path string) []providerTranscriptTurn {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var (
+		turns      []providerTranscriptTurn
+		collecting bool
+		key        string
+		userInput  string
+		candidates codexAnswerCandidates
+		lineNo     int
+	)
+	flush := func() {
+		if !collecting {
+			return
+		}
+		turn := providerTranscriptTurn{Key: key, UserInput: strings.TrimSpace(userInput)}
+		if answer, ok := candidates.answer(); ok {
+			turn.Final = strings.TrimSpace(answer)
+		}
+		if turn.UserInput != "" {
+			turns = append(turns, turn)
+		}
+		collecting = false
+		key = ""
+		userInput = ""
+		candidates = codexAnswerCandidates{}
+	}
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		lineNo++
+		payload, ok := codexEventPayload(scanner.Bytes())
+		if !ok {
+			continue
+		}
+		switch stringValue(payload["type"]) {
+		case "user_message":
+			flush()
+			text := strings.TrimSpace(codexPayloadText(payload))
+			if text == "" {
+				continue
+			}
+			collecting = true
+			key = fmt.Sprintf("%s:%d", path, lineNo)
+			userInput = text
+			candidates = codexAnswerCandidates{}
+		case "agent_message":
+			if collecting {
+				if text := strings.TrimSpace(codexPayloadText(payload)); text != "" {
+					switch stringValue(payload["phase"]) {
+					case "final_answer":
+						candidates.finalAnswers = append(candidates.finalAnswers, text)
+					case "":
+						candidates.legacyAnswers = append(candidates.legacyAnswers, text)
+					}
+				}
+			}
+		case "task_complete":
+			if collecting {
+				if text := strings.TrimSpace(codexTaskCompleteLastAgentMessage(payload)); text != "" {
+					candidates.taskCompleteAnswer = text
+				}
+			}
+		}
+	}
+	flush()
+	return turns
+}
+
 type codexAnswerCandidates struct {
 	taskCompleteAnswer string
 	finalAnswers       []string
@@ -258,19 +409,110 @@ func codexPayloadText(payload map[string]any) string {
 }
 
 func promptMatches(candidate, prompt string) bool {
-	candidate = normalizeProviderText(candidate)
-	prompt = normalizeProviderText(prompt)
-	if candidate == "" || prompt == "" {
-		return false
+	candidates := canonicalPromptVariants(candidate)
+	prompts := canonicalPromptVariants(prompt)
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		for _, p := range prompts {
+			if p == "" {
+				continue
+			}
+			if c == p {
+				return true
+			}
+			if promptCanMatchAsSubstring(p) && strings.Contains(c, p) {
+				return true
+			}
+		}
 	}
-	if candidate == prompt {
-		return true
-	}
-	return len([]rune(prompt)) >= 20 && strings.Contains(candidate, prompt)
+	return false
 }
 
 func normalizeProviderText(s string) string {
-	return strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	return normalizeCapturedUserText(s)
+}
+
+func canonicalPromptVariants(s string) []string {
+	base := normalizeProviderText(s)
+	if base == "" {
+		return nil
+	}
+	variants := []string{base}
+	if stripped := stripLeadingPathTokens(base); stripped != "" && stripped != base {
+		variants = append(variants, stripped)
+	}
+	if stripped := stripImagePlaceholders(base); stripped != "" && stripped != base {
+		variants = append(variants, stripped)
+	}
+	return uniqueStrings(variants)
+}
+
+func stripLeadingPathTokens(s string) string {
+	fields := strings.Fields(strings.TrimSpace(s))
+	for len(fields) > 0 && looksLikePathToken(fields[0]) {
+		fields = fields[1:]
+	}
+	return normalizeProviderText(strings.Join(fields, " "))
+}
+
+func stripImagePlaceholders(s string) string {
+	fields := strings.Fields(strings.TrimSpace(s))
+	out := make([]string, 0, len(fields))
+	for i := 0; i < len(fields); i++ {
+		if fields[i] == "[Image" && i+1 < len(fields) && strings.HasSuffix(fields[i+1], "]") {
+			i++
+			continue
+		}
+		out = append(out, fields[i])
+	}
+	return normalizeProviderText(strings.Join(out, " "))
+}
+
+func promptCanMatchAsSubstring(s string) bool {
+	return len([]rune(s)) >= 20 || containsLikelyFileName(s)
+}
+
+func containsLikelyFileName(s string) bool {
+	fields := strings.Fields(strings.TrimSpace(s))
+	if len(fields) == 0 {
+		fields = []string{s}
+	}
+	for _, field := range fields {
+		field = strings.Trim(field, "`'\"")
+		dot := strings.LastIndex(field, ".")
+		if dot <= 0 || dot+1 >= len(field) {
+			continue
+		}
+		if hasAlphaNumAfterDot(field[dot+1:]) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAlphaNumAfterDot(s string) bool {
+	for _, r := range s {
+		if r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' {
+			return true
+		}
+		break
+	}
+	return false
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func joinProviderMessages(messages []string) string {

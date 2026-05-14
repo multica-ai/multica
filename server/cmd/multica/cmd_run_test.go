@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/spf13/cobra"
 )
 
@@ -20,6 +21,11 @@ func TestRunLocalCLIEndToEndWithFakeAPI(t *testing.T) {
 		t.Skip("/bin/sh unavailable")
 	}
 	tmp := t.TempDir()
+	isolateCodexSessions(t)
+	codexPath := filepath.Join(tmp, "codex")
+	if err := os.Symlink("/bin/sh", codexPath); err != nil {
+		t.Fatalf("symlink codex shim: %v", err)
+	}
 	var (
 		createBody map[string]any
 		patches    []map[string]any
@@ -80,12 +86,12 @@ func TestRunLocalCLIEndToEndWithFakeAPI(t *testing.T) {
 	t.Setenv("MULTICA_SERVER_URL", "")
 	t.Setenv("MULTICA_WORKSPACE_ID", "")
 
-	err := runLocalCLI(cmd, []string{"MUL-1", "/bin/sh", "-c", `printf '{"type":"result","result":"done"}\n'`})
+	err := runLocalCLI(cmd, []string{"MUL-1", codexPath, "-c", `printf '{"type":"result","result":"done"}\n'`})
 	if err != nil {
 		t.Fatalf("runLocalCLI: %v", err)
 	}
 
-	if createBody["cli_name"] != "sh" || createBody["comments_mode"] != "off" || createBody["work_dir"] != tmp {
+	if createBody["cli_name"] != "codex" || createBody["comments_mode"] != "off" || createBody["work_dir"] != tmp {
 		t.Fatalf("unexpected create body: %+v", createBody)
 	}
 	if len(patches) < 2 {
@@ -101,14 +107,20 @@ func TestRunLocalCLIEndToEndWithFakeAPI(t *testing.T) {
 	if lastPatch["status"] != "completed" || int(lastPatch["exit_code"].(float64)) != 0 {
 		t.Fatalf("last patch = %+v, want completed exit 0", lastPatch)
 	}
-	if len(messages) == 0 {
-		t.Fatalf("expected streamed messages")
-	}
 	if finals := mapMessagesByType(messages, "final"); len(finals) != 0 {
 		t.Fatalf("final messages = %+v, want no bootstrap final", finals)
 	}
 	if _, err := os.Stat(filepath.Join(tmp, ".multica", "runs", "run-1", "issue.md")); !os.IsNotExist(err) {
 		t.Fatalf("issue context file exists or stat failed unexpectedly: %v", err)
+	}
+}
+
+func TestRunLocalCLIRejectsUnsupportedLocalAgent(t *testing.T) {
+	cmd := newRunCommandForTest()
+
+	err := runLocalCLI(cmd, []string{"MUL-1", "/bin/sh", "-c", "true"})
+	if err == nil || !strings.Contains(err.Error(), "当前 Agent 尚未支持，敬请期待") {
+		t.Fatalf("runLocalCLI error = %v, want unsupported agent message", err)
 	}
 }
 
@@ -373,7 +385,7 @@ func TestStdinCaptureDoesNotCommitControlInterrupts(t *testing.T) {
 	}
 }
 
-func TestTerminalTurnCaptureExtractsVisibleAssistantText(t *testing.T) {
+func TestTerminalTurnCaptureDoesNotCreateFinalFromVisibleTerminalText(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
 	capture := newTerminalTurnCapture(reporter, nil)
@@ -384,12 +396,12 @@ func TestTerminalTurnCaptureExtractsVisibleAssistantText(t *testing.T) {
 	reporter.Close()
 
 	finals := finalMessages(poster.messages())
-	if len(finals) != 1 || finals[0].Content != "Final answer" {
-		t.Fatalf("finals = %+v, want final visible answer", finals)
+	if len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no terminal fallback final", finals)
 	}
 }
 
-func TestTerminalTurnCaptureKeepsOnlyRedrawnVisibleText(t *testing.T) {
+func TestTerminalTurnCaptureDoesNotCreateFinalFromRedrawnVisibleText(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
 	capture := newTerminalTurnCapture(reporter, nil)
@@ -400,8 +412,8 @@ func TestTerminalTurnCaptureKeepsOnlyRedrawnVisibleText(t *testing.T) {
 	reporter.Close()
 
 	finals := finalMessages(poster.messages())
-	if len(finals) != 1 || finals[0].Content != "Final answer" {
-		t.Fatalf("finals = %+v, want only final redrawn text", finals)
+	if len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no terminal fallback final", finals)
 	}
 }
 
@@ -448,7 +460,9 @@ func TestTerminalTurnCaptureDoesNotDuplicateStructuredFinal(t *testing.T) {
 func TestTerminalTurnCaptureInitialPromptProviderFinalIsSilent(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	capture := newTerminalTurnCapture(reporter, fakeProviderTranscript{answer: "provider answer", ok: true})
+	capture := newTerminalTurnCapture(reporter, staticProviderTranscript{turns: []providerTranscriptTurn{
+		{Key: "turn:1", UserInput: "issue context prompt", Final: "provider answer"},
+	}})
 
 	capture.StartInitialPrompt("issue context prompt")
 	capture.Finalize()
@@ -499,7 +513,7 @@ func TestTerminalTurnCaptureInitialPromptStructuredFinalIsSilent(t *testing.T) {
 	}
 }
 
-func TestTerminalTurnCaptureAfterInitialPromptCapturesNextUserTurn(t *testing.T) {
+func TestTerminalTurnCaptureAfterInitialPromptIgnoresTerminalFallbackTurn(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
 	capture := newTerminalTurnCapture(reporter, nil)
@@ -514,11 +528,205 @@ func TestTerminalTurnCaptureAfterInitialPromptCapturesNextUserTurn(t *testing.T)
 	messages := poster.messages()
 	inputs := userInputMessages(messages)
 	finals := finalMessages(messages)
-	if len(inputs) != 1 || inputs[0].Content != "real question" {
-		t.Fatalf("inputs = %+v, want real user input", inputs)
+	if len(inputs) != 0 {
+		t.Fatalf("inputs = %+v, want no terminal fallback user input", inputs)
 	}
-	if len(finals) != 1 || finals[0].Content != "Real answer" {
-		t.Fatalf("finals = %+v, want real answer", finals)
+	if len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no terminal fallback final", finals)
+	}
+}
+
+func TestTerminalTurnCaptureDoesNotSyncPendingInputWithoutProviderOrAnswer(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, fakeProviderTranscript{ok: false, userMissing: true}, 0)
+
+	capture.AfterUserSubmit("question before jsonl exists")
+	capture.Finalize()
+	reporter.Close()
+
+	if inputs := userInputMessages(poster.messages()); len(inputs) != 0 {
+		t.Fatalf("inputs = %+v, want pending input not synced without provider or answer", inputs)
+	}
+}
+
+func TestTerminalTurnCaptureSyncsProviderUserInputWithoutStdinPrompt(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, staticProviderTranscript{turns: []providerTranscriptTurn{
+		{Key: "turn:1", UserInput: "same prompt"},
+	}}, 0)
+
+	capture.Finalize()
+	reporter.Close()
+
+	inputs := userInputMessages(poster.messages())
+	if len(inputs) != 1 || inputs[0].Content != "same prompt" {
+		t.Fatalf("inputs = %+v, want one provider user_input", inputs)
+	}
+}
+
+func TestTerminalTurnCaptureAbsolutePathInputIsNotSlashCommand(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	input := "/Users/airthor/WebProjects/multica/server/go.mod what is this"
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, staticProviderTranscript{turns: []providerTranscriptTurn{
+		{Key: "turn:1", UserInput: input},
+	}}, 0)
+
+	capture.Finalize()
+	reporter.Close()
+
+	inputs := userInputMessages(poster.messages())
+	if len(inputs) != 1 || inputs[0].Content != redact.Text(input) || inputs[0].Input != nil {
+		t.Fatalf("inputs = %+v, want absolute path as normal user_input", inputs)
+	}
+}
+
+func TestTerminalTurnCaptureSyncsFileSelectionStyleProviderInput(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, staticProviderTranscript{turns: []providerTranscriptTurn{
+		{Key: "turn:1", UserInput: "internal/util/text.go 这是 go文件吗"},
+	}}, 0)
+
+	capture.Finalize()
+	reporter.Close()
+
+	inputs := userInputMessages(poster.messages())
+	if len(inputs) != 1 || inputs[0].Content != "internal/util/text.go 这是 go文件吗" || inputs[0].Input != nil {
+		t.Fatalf("inputs = %+v, want normalized file prompt", inputs)
+	}
+}
+
+func TestTerminalTurnCaptureDoesNotSyncAtMenuSelectionEnter(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, promptProviderTranscript{
+		"hello.go 这个文件做什么": "它定义了 hello 逻辑。",
+	}, 0)
+
+	capture.AfterUserSubmit("@h")
+	capture.Write([]byte("> @hello\n"))
+	capture.BeforeUserSubmit()
+	capture.AfterUserSubmit("hello.go 这个文件做什么")
+	capture.Finalize()
+	reporter.Close()
+
+	inputs := userInputMessages(poster.messages())
+	if len(inputs) != 1 || inputs[0].Content != "hello.go 这个文件做什么" {
+		t.Fatalf("inputs = %+v, want only final accepted prompt", inputs)
+	}
+}
+
+func TestTerminalTurnCapturePurePathWaitsForProviderConfirmation(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, fakeProviderTranscript{ok: false, userMissing: true}, 0)
+
+	capture.AfterUserSubmit("internal/util/text.go")
+	capture.Finalize()
+	reporter.Close()
+
+	if inputs := userInputMessages(poster.messages()); len(inputs) != 0 {
+		t.Fatalf("inputs = %+v, want pure path pending input dropped without provider confirmation", inputs)
+	}
+}
+
+func TestTerminalTurnCaptureSyncsProviderConfirmedPathInputs(t *testing.T) {
+	for _, input := range []string{
+		"internal/util/text.go",
+		"/Users/airthor/WebProjects/multica/server/cmd/multica/cmd_attachment.go",
+		"/Users/airthor/WebProjects/multica/server/cmd/multica/cmd_attachment.go那这个文件呢",
+		"那这个文件呢/Users/airthor/WebProjects/multica/server/cmd/multica/cmd_attachment.go那这个文件呢",
+	} {
+		t.Run(input, func(t *testing.T) {
+			poster := &fakeLocalRunPoster{}
+			reporter := newLocalRunReporter(poster, "run-1")
+			capture := newTerminalTurnCaptureWithPollInterval(reporter, staticProviderTranscript{turns: []providerTranscriptTurn{
+				{Key: "turn:1", UserInput: input},
+			}}, 0)
+
+			capture.Finalize()
+			reporter.Close()
+
+			inputs := userInputMessages(poster.messages())
+			if len(inputs) != 1 || inputs[0].Content != redact.Text(input) || inputs[0].Input != nil {
+				t.Fatalf("inputs = %+v, want provider-confirmed path input %q", inputs, input)
+			}
+		})
+	}
+}
+
+func TestTerminalTurnCaptureSkipsCapturedBootstrapAndStatusInput(t *testing.T) {
+	for _, input := range []string{
+		"--output json",
+		"status, add comments to report progress",
+		"only. Do not add comments after you are done",
+		"ready, and wait for the user's next request",
+		"✓ You approved codex to run `multica issue get TES-10 --output json`",
+		"• Explored",
+		"└ Read server/go.mod",
+		"└ Listed packages/views/foo.tsx",
+	} {
+		t.Run(input, func(t *testing.T) {
+			poster := &fakeLocalRunPoster{}
+			reporter := newLocalRunReporter(poster, "run-1")
+			capture := newTerminalTurnCaptureWithPollInterval(reporter, fakeProviderTranscript{ok: false, userMissing: true}, 0)
+
+			capture.AfterUserSubmit(input)
+			capture.Finalize()
+			reporter.Close()
+
+			if inputs := userInputMessages(poster.messages()); len(inputs) != 0 {
+				t.Fatalf("inputs = %+v, want captured noise skipped", inputs)
+			}
+		})
+	}
+}
+
+func TestTerminalTurnCaptureSlashCommandsAreMarkedAsCommands(t *testing.T) {
+	for _, input := range []string{"/status", " /help"} {
+		t.Run(input, func(t *testing.T) {
+			poster := &fakeLocalRunPoster{}
+			reporter := newLocalRunReporter(poster, "run-1")
+			capture := newTerminalTurnCaptureWithPollInterval(reporter, fakeProviderTranscript{ok: false, userMissing: true}, 0)
+
+			capture.AfterUserSubmit(input)
+			capture.Finalize()
+			reporter.Close()
+
+			inputs := userInputMessages(poster.messages())
+			if len(inputs) != 1 || inputs[0].Input == nil || inputs[0].Input["command"] != true {
+				t.Fatalf("inputs = %+v, want slash command metadata", inputs)
+			}
+		})
+	}
+}
+
+func TestTerminalTurnCaptureSkipsApprovalAndBootstrapFallbackText(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCapture(reporter, nil)
+
+	capture.AfterUserSubmit("question")
+	capture.Write([]byte("\u2714 You approved codex to run `multica issue get TES-10 --output json`\n"))
+	capture.Write([]byte("Assigned issue ID: TES-10\n"))
+	capture.Write([]byte("- `multica issue get TES-10 --output json`\n"))
+	capture.Write([]byte("- `multica issue comment list TES-10 --output json`\n"))
+	capture.Write([]byte("status, add comments to report progress\n"))
+	capture.Write([]byte("only. Do not add comments after you are done\n"))
+	capture.Write([]byte("ready, and wait for the user's next request\n"))
+	capture.Write([]byte("• Explored\n"))
+	capture.Write([]byte("└ Read server/go.mod\n"))
+	capture.Write([]byte("└ Listed packages/views/foo.tsx\n"))
+	capture.Write([]byte("internal/util/text.go\n"))
+	capture.Write([]byte("cmd/multica/help.go server/go.mod\n"))
+	capture.Finalize()
+	reporter.Close()
+
+	if finals := finalMessages(poster.messages()); len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no approval/bootstrap fallback comment", finals)
 	}
 }
 
@@ -637,6 +845,125 @@ func TestCodexTranscriptExtractsUserInputForAbsolutePathPrompt(t *testing.T) {
 	}
 }
 
+func TestCodexTranscriptExtractsSessionTurns(t *testing.T) {
+	path := writeJSONLForTest(t, []string{
+		`{"type":"event_msg","payload":{"type":"user_message","message":"bootstrap prompt"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"bootstrap answer"}}`,
+		`{"type":"event_msg","payload":{"type":"user_message","message":"/Users/me/project/cmd_autopilot.go这个文件大小多少"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"commentary","message":"checking"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"20,701 字节"}}`,
+		`{"type":"event_msg","payload":{"type":"user_message","message":"[Image #1] 这个图片多大","local_images":["1.png"]}}`,
+		`{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":"500 × 277 像素"}}`,
+	})
+
+	turns := extractCodexTurnsFromJSONL(path)
+	if len(turns) != 3 {
+		t.Fatalf("turns = %+v, want 3", turns)
+	}
+	if turns[1].UserInput != "/Users/me/project/cmd_autopilot.go这个文件大小多少" || turns[1].Final != "20,701 字节" {
+		t.Fatalf("file turn = %+v, want file user/final", turns[1])
+	}
+	if turns[2].UserInput != "[Image #1] 这个图片多大" || turns[2].Final != "500 × 277 像素" {
+		t.Fatalf("image turn = %+v, want image user/final", turns[2])
+	}
+}
+
+func TestCodexTranscriptExtractorBindsToBootstrapSession(t *testing.T) {
+	isolateCodexSessions(t)
+	root := filepath.Join(os.Getenv("CODEX_HOME"), "sessions", "2026", "05", "14")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	bootstrap := "bootstrap prompt for issue"
+	unrelated := filepath.Join(root, "unrelated.jsonl")
+	bound := filepath.Join(root, "bound.jsonl")
+	if err := os.WriteFile(unrelated, []byte(strings.Join([]string{
+		`{"type":"event_msg","payload":{"type":"user_message","message":"unrelated prompt"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"wrong answer"}}`,
+	}, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write unrelated session: %v", err)
+	}
+	if err := os.WriteFile(bound, []byte(strings.Join([]string{
+		`{"type":"event_msg","payload":{"type":"user_message","message":"` + bootstrap + `"}}`,
+		`{"type":"event_msg","payload":{"type":"user_message","message":"real prompt"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"right answer"}}`,
+	}, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write bound session: %v", err)
+	}
+	now := time.Now()
+	if err := os.Chtimes(bound, now.Add(-time.Second), now.Add(-time.Second)); err != nil {
+		t.Fatalf("chtime bound: %v", err)
+	}
+	if err := os.Chtimes(unrelated, now, now); err != nil {
+		t.Fatalf("chtime unrelated: %v", err)
+	}
+
+	extractor := &codexTranscriptExtractor{runStart: now.Add(-time.Minute), bootstrapPrompt: bootstrap}
+	turns, ok := extractor.ExtractTurns()
+	if !ok {
+		t.Fatal("ExtractTurns did not find bound session")
+	}
+	var users []string
+	for _, turn := range turns {
+		users = append(users, turn.UserInput)
+	}
+	if strings.Join(users, "|") != bootstrap+"|real prompt" {
+		t.Fatalf("turn users = %+v, want bound session only", users)
+	}
+}
+
+func TestCodexTranscriptMatchesFileSelectionPromptWithoutPathAndChineseSpacing(t *testing.T) {
+	path := writeJSONLForTest(t, []string{
+		`{"type":"event_msg","payload":{"type":"user_message","message":"这是 go文件吗"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"是，这是 Go 文件。"}}`,
+	})
+
+	got, ok := extractCodexAnswerFromJSONL(path, "internal/util/text.go 这 是 go文 件 吗")
+	if !ok || got != "是，这是 Go 文件。" {
+		t.Fatalf("answer = %q, %v; want file-selection prompt to match JSONL prompt", got, ok)
+	}
+}
+
+func TestCodexTranscriptExtractsCanonicalUserInputForFileSelectionPrompt(t *testing.T) {
+	path := writeJSONLForTest(t, []string{
+		`{"type":"event_msg","payload":{"type":"user_message","message":"这是 go文件吗"}}`,
+	})
+
+	got, ok := extractCodexUserInputFromJSONL(path, "internal/util/text.go 这 是 go文 件 吗")
+	if !ok || got != "这是 go文件吗" {
+		t.Fatalf("user input = %q, %v; want canonical JSONL prompt", got, ok)
+	}
+}
+
+func TestCodexTranscriptMatchesWrappedAbsolutePathPromptByFileName(t *testing.T) {
+	path := writeJSONLForTest(t, []string{
+		`{"type":"event_msg","payload":{"type":"user_message","message":"/Users/airthor/WebProjects/multica/server/cmd/multica/cmd_autopilot.go这个文件大小多少"}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"` + "`/Users/airthor/WebProjects/multica/server/cmd/multica/cmd_autopilot.go` 大小是 `20,701` 字节。" + `"}}`,
+	})
+
+	got, ok := extractCodexAnswerFromJSONL(path, "cmd_autopilot.go这个文件大小多少")
+	if !ok || got != "`/Users/airthor/WebProjects/multica/server/cmd/multica/cmd_autopilot.go` 大小是 `20,701` 字节。" {
+		t.Fatalf("answer = %q, %v; want filename-fragment prompt to match full JSONL path", got, ok)
+	}
+}
+
+func TestCodexTranscriptMatchesImagePlaceholderPrompt(t *testing.T) {
+	path := writeJSONLForTest(t, []string{
+		`{"type":"event_msg","payload":{"type":"user_message","message":"[Image #1] 这个图片多大","images":[],"local_images":["1.png"],"text_elements":[{"placeholder":"[Image #1]"}]}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"这张图片尺寸是 ` + "`500 × 277`" + ` 像素。"}}`,
+	})
+
+	got, ok := extractCodexAnswerFromJSONL(path, "这个图片多大")
+	if !ok || got != "这张图片尺寸是 `500 × 277` 像素。" {
+		t.Fatalf("answer = %q, %v; want image-placeholder prompt to match text-only stdin", got, ok)
+	}
+
+	user, ok := extractCodexUserInputFromJSONL(path, "这个图片多大")
+	if !ok || user != "[Image #1] 这个图片多大" {
+		t.Fatalf("user input = %q, %v; want JSONL image placeholder prompt", user, ok)
+	}
+}
+
 func TestCodexTranscriptDoesNotExtractUserInputForLocalCommand(t *testing.T) {
 	path := writeJSONLForTest(t, []string{
 		`{"type":"event_msg","payload":{"type":"agent_message","phase":"final_answer","message":"status output"}}`,
@@ -719,7 +1046,7 @@ func TestProviderTranscriptPollDoesNotDuplicateOnNextInput(t *testing.T) {
 	}
 }
 
-func TestProviderTranscriptLateOldTurnIsDiscarded(t *testing.T) {
+func TestProviderTranscriptLateTurnSyncsBySessionKey(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
 	provider := newBlockingFirstProvider("old answer")
@@ -733,8 +1060,9 @@ func TestProviderTranscriptLateOldTurnIsDiscarded(t *testing.T) {
 	capture.Finalize()
 	reporter.Close()
 
-	if finals := finalMessages(poster.messages()); len(finals) != 0 {
-		t.Fatalf("finals = %+v, want stale first turn discarded", finals)
+	finals := finalMessages(poster.messages())
+	if len(finals) != 1 || finals[0].Content != "old answer" {
+		t.Fatalf("finals = %+v, want late provider answer once", finals)
 	}
 }
 
@@ -757,7 +1085,7 @@ func TestStructuredFinalSuppressesProviderPollAndTerminalFallback(t *testing.T) 
 	}
 }
 
-func TestProviderTranscriptMissWaitsForTerminalFallbackUntilNextInput(t *testing.T) {
+func TestProviderTranscriptMissDoesNotUseTerminalFallbackOnNextInput(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
 	capture := newTerminalTurnCaptureWithPollInterval(reporter, fakeProviderTranscript{ok: false}, 10*time.Millisecond)
@@ -774,8 +1102,8 @@ func TestProviderTranscriptMissWaitsForTerminalFallbackUntilNextInput(t *testing
 	reporter.Close()
 
 	finals := finalMessages(poster.messages())
-	if len(finals) != 1 || finals[0].Content != "Terminal fallback answer" {
-		t.Fatalf("finals = %+v, want terminal fallback on next input", finals)
+	if len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no terminal fallback", finals)
 	}
 }
 
@@ -798,7 +1126,10 @@ func TestProviderTranscriptWinsOverTerminalCapture(t *testing.T) {
 func TestSlashCommandSuppressesProviderAndTerminalFinals(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
-	capture := newTerminalTurnCaptureWithPollInterval(reporter, fakeProviderTranscript{answer: "provider answer", ok: true, userMissing: true}, 10*time.Millisecond)
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, promptProviderTranscript{
+		" /status":        "provider answer",
+		"normal question": "Normal answer",
+	}, 10*time.Millisecond)
 
 	capture.AfterUserSubmit(" /status")
 	capture.Write([]byte("Terminal command output\n"))
@@ -841,6 +1172,25 @@ func TestSlashPrefixedSessionUserInputIsNotCommand(t *testing.T) {
 	}
 }
 
+func TestProviderSessionSlashCommandIsNotSyncedAsComment(t *testing.T) {
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	capture := newTerminalTurnCaptureWithPollInterval(reporter, staticProviderTranscript{turns: []providerTranscriptTurn{
+		{Key: "turn:1", UserInput: "/help", Final: "help output"},
+	}}, 0)
+
+	capture.Finalize()
+	reporter.Close()
+
+	messages := poster.messages()
+	if inputs := userInputMessages(messages); len(inputs) != 0 {
+		t.Fatalf("inputs = %+v, want no slash command user comment", inputs)
+	}
+	if finals := finalMessages(messages); len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no slash command final comment", finals)
+	}
+}
+
 func TestSlashCommandSuppressesStructuredFinal(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
@@ -875,7 +1225,7 @@ func TestProviderBackedSlashCommandSuppressesStructuredFinalWhenSessionMisses(t 
 	}
 }
 
-func TestProviderTranscriptMissAllowsTerminalFallback(t *testing.T) {
+func TestProviderTranscriptMissDoesNotAllowTerminalFallback(t *testing.T) {
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
 	capture := newTerminalTurnCapture(reporter, fakeProviderTranscript{ok: false})
@@ -886,8 +1236,8 @@ func TestProviderTranscriptMissAllowsTerminalFallback(t *testing.T) {
 	reporter.Close()
 
 	finals := finalMessages(poster.messages())
-	if len(finals) != 1 || finals[0].Content != "Terminal fallback answer" {
-		t.Fatalf("finals = %+v, want terminal fallback", finals)
+	if len(finals) != 0 {
+		t.Fatalf("finals = %+v, want no terminal fallback", finals)
 	}
 }
 
@@ -968,6 +1318,7 @@ func TestExecuteLocalCLIPassesPromptAsCodexArg(t *testing.T) {
 		t.Skip("/bin/sh unavailable")
 	}
 	tmp := t.TempDir()
+	isolateCodexSessions(t)
 	poster := &fakeLocalRunPoster{}
 	reporter := newLocalRunReporter(poster, "run-1")
 	prompt := "embedded issue context prompt"
@@ -1111,6 +1462,21 @@ func (f fakeProviderTranscript) Extract(string, time.Time) (string, bool) {
 	return f.answer, f.ok
 }
 
+func (f fakeProviderTranscript) ExtractTurns() ([]providerTranscriptTurn, bool) {
+	if f.userMissing || !f.ok && f.user == "" {
+		return nil, false
+	}
+	user := f.user
+	if user == "" {
+		user = "question"
+	}
+	turn := providerTranscriptTurn{Key: "fake:" + user, UserInput: user}
+	if f.ok {
+		turn.Final = f.answer
+	}
+	return []providerTranscriptTurn{turn}, true
+}
+
 type promptProviderTranscript map[string]string
 
 func (p promptProviderTranscript) ExtractUserInput(prompt string, _ time.Time) (string, bool) {
@@ -1123,6 +1489,30 @@ func (p promptProviderTranscript) ExtractUserInput(prompt string, _ time.Time) (
 func (p promptProviderTranscript) Extract(prompt string, _ time.Time) (string, bool) {
 	answer, ok := p[prompt]
 	return answer, ok
+}
+
+func (p promptProviderTranscript) ExtractTurns() ([]providerTranscriptTurn, bool) {
+	var turns []providerTranscriptTurn
+	for prompt, answer := range p {
+		turns = append(turns, providerTranscriptTurn{Key: "prompt:" + prompt, UserInput: prompt, Final: answer})
+	}
+	return turns, len(turns) > 0
+}
+
+type staticProviderTranscript struct {
+	turns []providerTranscriptTurn
+}
+
+func (p staticProviderTranscript) ExtractTurns() ([]providerTranscriptTurn, bool) {
+	return p.turns, len(p.turns) > 0
+}
+
+func (p staticProviderTranscript) ExtractUserInput(string, time.Time) (string, bool) {
+	return "", false
+}
+
+func (p staticProviderTranscript) Extract(string, time.Time) (string, bool) {
+	return "", false
 }
 
 type blockingFirstProvider struct {
@@ -1151,6 +1541,12 @@ func (p *blockingFirstProvider) Extract(prompt string, _ time.Time) (string, boo
 
 func (p *blockingFirstProvider) ExtractUserInput(prompt string, _ time.Time) (string, bool) {
 	return prompt, true
+}
+
+func (p *blockingFirstProvider) ExtractTurns() ([]providerTranscriptTurn, bool) {
+	p.seenOnce.Do(func() { close(p.seen) })
+	<-p.release
+	return []providerTranscriptTurn{{Key: "blocking:first", UserInput: "first question", Final: p.answer}}, true
 }
 
 func (p *blockingFirstProvider) waitForFirstPrompt(t *testing.T) {
@@ -1212,6 +1608,13 @@ func writeJSONLForTest(t *testing.T, lines []string) string {
 	return path
 }
 
+func isolateCodexSessions(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+}
+
 func finalMessages(messages []localCLIMessage) []localCLIMessage {
 	var finals []localCLIMessage
 	for _, msg := range messages {
@@ -1262,6 +1665,18 @@ func waitForFinals(t *testing.T, poster *fakeLocalRunPoster, want int) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("finals = %+v, want at least %d", finalMessages(poster.messages()), want)
+}
+
+func waitForUserInputs(t *testing.T, poster *fakeLocalRunPoster, want int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if len(userInputMessages(poster.messages())) >= want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("inputs = %+v, want at least %d", userInputMessages(poster.messages()), want)
 }
 
 func containsAll(s string, needles []string) bool {
