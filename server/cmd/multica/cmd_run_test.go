@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
 )
 
@@ -467,6 +469,76 @@ func TestCodexAppServerMapperTracksClearAndResumeThreadsForComments(t *testing.T
 	finals := finalMessages(poster.messages())
 	if len(finals) != 2 || finals[0].Content != "clear answer" || finals[1].Content != "resume answer" {
 		t.Fatalf("finals = %+v, want clear and resume finals", finals)
+	}
+}
+
+func TestCodexRemoteProxyCloseClosesActiveWebSockets(t *testing.T) {
+	upstreamConnected := make(chan struct{})
+	upstreamClosed := make(chan struct{})
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	upstreamListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen upstream: %v", err)
+	}
+	upstreamServer := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		close(upstreamConnected)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				close(upstreamClosed)
+				return
+			}
+		}
+	})}
+	go func() {
+		_ = upstreamServer.Serve(upstreamListener)
+	}()
+	defer upstreamServer.Shutdown(context.Background())
+
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	proxy, err := newCodexRemoteProxy("ws://"+upstreamListener.Addr().String(), reporter, "")
+	if err != nil {
+		t.Fatalf("newCodexRemoteProxy: %v", err)
+	}
+	defer reporter.Close()
+
+	client, _, err := websocket.DefaultDialer.Dial(proxy.URL(), nil)
+	if err != nil {
+		t.Fatalf("dial proxy: %v", err)
+	}
+	clientClosed := make(chan error, 1)
+	go func() {
+		_, _, err := client.ReadMessage()
+		clientClosed <- err
+	}()
+
+	select {
+	case <-upstreamConnected:
+	case <-time.After(time.Second):
+		t.Fatal("upstream websocket was not connected")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	proxy.Close(ctx)
+
+	select {
+	case err := <-clientClosed:
+		if err == nil {
+			t.Fatal("client read succeeded after proxy close")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("client websocket stayed open after proxy close")
+	}
+	select {
+	case <-upstreamClosed:
+	case <-time.After(time.Second):
+		t.Fatal("upstream websocket stayed open after proxy close")
 	}
 }
 

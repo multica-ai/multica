@@ -33,7 +33,7 @@ func executeCodexRemoteCLI(args []string, cwd string, env localCLIEnv, initialPr
 	if err != nil {
 		return 1, err
 	}
-	defer stopCommand(appServer)
+	defer stopCodexSidecarCommand(appServer)
 
 	proxy, err := newCodexRemoteProxy(upstreamURL, reporter, initialPrompt)
 	if err != nil {
@@ -78,6 +78,7 @@ func startCodexAppServer(command, cwd string, env localCLIEnv) (*exec.Cmd, strin
 		cmd := exec.Command(command, "app-server", "--listen", upstreamURL)
 		cmd.Dir = cwd
 		cmd.Env = localCLIProcessEnv(os.Environ(), env)
+		prepareCodexSidecarCommand(cmd)
 		var logs limitedBuffer
 		cmd.Stdout = &logs
 		cmd.Stderr = &logs
@@ -87,7 +88,7 @@ func startCodexAppServer(command, cwd string, env localCLIEnv) (*exec.Cmd, strin
 		}
 		if err := waitForWebSocket(upstreamURL, 5*time.Second); err != nil {
 			lastErr = fmt.Errorf("%w: %s", err, strings.TrimSpace(logs.String()))
-			stopCommand(cmd)
+			stopCodexSidecarCommand(cmd)
 			continue
 		}
 		return cmd, upstreamURL, nil
@@ -171,6 +172,10 @@ type codexRemoteProxy struct {
 	listener    net.Listener
 	server      *http.Server
 	mapper      *codexAppServerMapper
+	mu          sync.Mutex
+	conns       map[*websocket.Conn]struct{}
+	closing     bool
+	wg          sync.WaitGroup
 }
 
 func newCodexRemoteProxy(upstreamURL string, reporter *localRunReporter, bootstrapPrompt string) (*codexRemoteProxy, error) {
@@ -182,6 +187,7 @@ func newCodexRemoteProxy(upstreamURL string, reporter *localRunReporter, bootstr
 		upstreamURL: upstreamURL,
 		listener:    ln,
 		mapper:      newCodexAppServerMapper(reporter, bootstrapPrompt),
+		conns:       make(map[*websocket.Conn]struct{}),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", p.handle)
@@ -214,7 +220,28 @@ func (p *codexRemoteProxy) Close(ctx context.Context) {
 		ctx, cancel = context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
 	}
+	p.mu.Lock()
+	p.closing = true
+	conns := make([]*websocket.Conn, 0, len(p.conns))
+	for conn := range p.conns {
+		conns = append(conns, conn)
+	}
+	p.mu.Unlock()
+
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
 	_ = p.server.Shutdown(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		p.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 func (p *codexRemoteProxy) handle(w http.ResponseWriter, r *http.Request) {
@@ -241,6 +268,11 @@ func (p *codexRemoteProxy) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	defer upstream.Close()
 
+	if !p.beginConnection(client, upstream) {
+		return
+	}
+	defer p.endConnection(client, upstream)
+
 	var closeOnce sync.Once
 	closeBoth := func() {
 		closeOnce.Do(func() {
@@ -262,6 +294,31 @@ func (p *codexRemoteProxy) handle(w http.ResponseWriter, r *http.Request) {
 		done <- struct{}{}
 	}()
 	<-done
+}
+
+func (p *codexRemoteProxy) beginConnection(conns ...*websocket.Conn) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closing {
+		for _, conn := range conns {
+			_ = conn.Close()
+		}
+		return false
+	}
+	p.wg.Add(1)
+	for _, conn := range conns {
+		p.conns[conn] = struct{}{}
+	}
+	return true
+}
+
+func (p *codexRemoteProxy) endConnection(conns ...*websocket.Conn) {
+	p.mu.Lock()
+	for _, conn := range conns {
+		delete(p.conns, conn)
+	}
+	p.mu.Unlock()
+	p.wg.Done()
 }
 
 func (p *codexRemoteProxy) copyMessages(src, dst *websocket.Conn, dstWriteMu *sync.Mutex, clientToServer bool) {
