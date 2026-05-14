@@ -514,6 +514,8 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 			h.enqueueAgentMention(ctx, issue, comment, m.ID, authorType, authorID, wsID)
 		case "broadcast":
 			h.enqueueBroadcastMention(ctx, issue, comment, m.BroadcastTag(), authorType, authorID, wsID)
+		case "squad":
+			h.enqueueSquadLeaderMention(ctx, issue, comment, m.ID, authorType, authorID, wsID)
 		}
 	}
 }
@@ -579,6 +581,45 @@ func (h *Handler) enqueueAgentMention(ctx context.Context, issue db.Issue, comme
 	}
 	if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, comment.ID); err != nil {
 		slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", agentID, "error", err)
+	}
+}
+
+// enqueueSquadLeaderMention resolves an @squad mention to the squad's leader
+// agent and enqueues a task for it (subject to visibility, dedup, and
+// self-trigger guards). Mirrors enqueueAgentMention but resolves the leader
+// from the squad row first.
+func (h *Handler) enqueueSquadLeaderMention(ctx context.Context, issue db.Issue, comment db.Comment, squadID, authorType, authorID, wsID string) {
+	squadUUID := parseUUID(squadID)
+	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+		ID:          squadUUID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return
+	}
+	leaderID := squad.LeaderID
+	if authorType == "agent" && authorID == uuidToString(leaderID) {
+		return
+	}
+	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          leaderID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		return
+	}
+	if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
+		return
+	}
+	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+		IssueID: issue.ID,
+		AgentID: leaderID,
+	})
+	if err != nil || hasPending {
+		return
+	}
+	if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, leaderID, comment.ID); err != nil {
+		slog.Warn("enqueue squad leader mention task failed", "issue_id", uuidToString(issue.ID), "squad_id", squadID, "error", err)
 	}
 }
 

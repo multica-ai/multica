@@ -286,3 +286,142 @@ func TestCreateComment_SquadLeaderSkipOnlyInspectsCurrentMention(t *testing.T) {
 		t.Fatalf("after plain reply: expected 1 leader task (no parent inheritance), got %d", got)
 	}
 }
+
+// TestCreateComment_SquadMentionPrivateLeaderBlocksPlainMember verifies that
+// a plain workspace member cannot trigger a private squad leader via @squad
+// mention. This is the regression test for the P1 finding: without the
+// canAccessPrivateAgent gate in the squad mention branch, a member could
+// bypass the private-agent restriction by mentioning the squad instead of
+// the agent directly.
+func TestCreateComment_SquadMentionPrivateLeaderBlocksPlainMember(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	// Use privateAgentTestFixture to get a private agent + plain member.
+	agentID, _, memberID := privateAgentTestFixture(t)
+
+	// Create a squad with the private agent as leader.
+	var squadID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, 'Private Leader Squad', '', $2, $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&squadID); err != nil {
+		t.Fatalf("create squad: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+	})
+
+	// Create an issue.
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		VALUES ($1, 'member', $2, 'private leader squad mention test')
+		RETURNING id
+	`, testWorkspaceID, memberID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	// Plain member posts a comment mentioning the squad.
+	w := httptest.NewRecorder()
+	r := newRequestAs(memberID, "POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "[@Squad](mention://squad/" + squadID + ") please handle",
+	})
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// The private leader must NOT have a queued task — plain member lacks access.
+	var count int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+		issueID, agentID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("private leader got %d queued tasks from plain member squad mention; want 0 (access denied)", count)
+	}
+}
+
+// TestCreateComment_SquadMentionTriggersLeader verifies that @mentioning a
+// squad in a comment triggers the squad's leader agent via the mention path,
+// even when the issue is NOT assigned to that squad.
+func TestCreateComment_SquadMentionTriggersLeader(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	// Create a squad with a leader agent.
+	var leaderID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+	`, testWorkspaceID).Scan(&leaderID); err != nil {
+		t.Fatalf("load leader agent: %v", err)
+	}
+
+	var squadID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, $2, '', $3, $4)
+		RETURNING id
+	`, testWorkspaceID, "Mention Trigger Squad", leaderID, testUserID).Scan(&squadID); err != nil {
+		t.Fatalf("create squad: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+	})
+
+	// Create an issue NOT assigned to the squad (assigned to nobody).
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
+		VALUES ($1, 'member', $2, 'squad mention trigger test')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	countQueued := func(agentID string) int {
+		var n int
+		if err := testPool.QueryRow(ctx,
+			`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+			issueID, agentID,
+		).Scan(&n); err != nil {
+			t.Fatalf("count tasks for %s: %v", agentID, err)
+		}
+		return n
+	}
+
+	// Post a comment that @mentions the squad.
+	w := httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "[@Squad](mention://squad/" + squadID + ") please handle this",
+	})
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// The squad's leader should have a queued task.
+	if got := countQueued(leaderID); got != 1 {
+		t.Fatalf("after @squad mention: expected 1 leader task, got %d", got)
+	}
+}
