@@ -36,6 +36,8 @@ import type {
   Project,
   ProjectResource,
   Reaction,
+  SearchIssuesResponse,
+  SearchProjectsResponse,
   SendChatMessageResponse,
   TimelineEntry,
   UpdateIssueRequest,
@@ -62,10 +64,14 @@ import {
   EMPTY_LIST_PROJECT_RESOURCES_RESPONSE,
   EMPTY_LIST_PROJECTS_RESPONSE,
   EMPTY_PROJECT,
+  EMPTY_SEARCH_ISSUES_RESPONSE,
+  EMPTY_SEARCH_PROJECTS_RESPONSE,
   ListLabelsResponseSchema,
   ListProjectResourcesResponseSchema,
   ListProjectsResponseSchema,
   ProjectSchema,
+  SearchIssuesResponseSchema,
+  SearchProjectsResponseSchema,
   SendChatMessageResponseSchema,
 } from "./schemas";
 import { getCurrentSlug } from "./workspace-store";
@@ -340,6 +346,29 @@ class ApiClient {
     });
   }
 
+  /** Workspace-wide issue search. Backend `GET /api/issues/search` with
+   *  workspace resolved by the `X-Workspace-Slug` middleware (same as
+   *  `listIssues`). Caller passes its own `AbortController.signal` so the
+   *  search modal can cancel an in-flight request when the user types
+   *  again — see app/(app)/[workspace]/search.tsx. */
+  async searchIssues(
+    params: { q: string; limit?: number; include_closed?: boolean; offset?: number },
+    opts?: { signal?: AbortSignal },
+  ): Promise<SearchIssuesResponse> {
+    const search = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v == null) continue;
+      search.set(k, String(v));
+    }
+    const raw = await this.fetch<unknown>(
+      `/api/issues/search?${search.toString()}`,
+      { signal: opts?.signal },
+    );
+    return parseWithFallback(raw, SearchIssuesResponseSchema, EMPTY_SEARCH_ISSUES_RESPONSE, {
+      endpoint: "GET /api/issues/search",
+    });
+  }
+
   async getIssue(
     id: string,
     opts?: { signal?: AbortSignal },
@@ -494,6 +523,29 @@ class ApiClient {
       ListProjectsResponseSchema,
       EMPTY_LIST_PROJECTS_RESPONSE,
       { endpoint: "GET /api/projects" },
+    );
+  }
+
+  /** Workspace-wide project search. See `searchIssues` for the signal
+   *  contract. */
+  async searchProjects(
+    params: { q: string; limit?: number; include_closed?: boolean; offset?: number },
+    opts?: { signal?: AbortSignal },
+  ): Promise<SearchProjectsResponse> {
+    const search = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v == null) continue;
+      search.set(k, String(v));
+    }
+    const raw = await this.fetch<unknown>(
+      `/api/projects/search?${search.toString()}`,
+      { signal: opts?.signal },
+    );
+    return parseWithFallback(
+      raw,
+      SearchProjectsResponseSchema,
+      EMPTY_SEARCH_PROJECTS_RESPONSE,
+      { endpoint: "GET /api/projects/search" },
     );
   }
 

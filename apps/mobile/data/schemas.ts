@@ -22,8 +22,11 @@ import type {
   ListProjectsResponse,
   Project,
   ProjectResource,
+  SearchIssuesResponse,
+  SearchProjectsResponse,
   SendChatMessageResponse,
 } from "@multica/core/types";
+import { IssueSchema } from "@multica/core/api/schemas";
 
 /** Upload response. Only fields mobile actually consumes — `url` to put
  *  into the markdown link, `filename` for the `[📎 name](url)` form, `id`
@@ -210,6 +213,48 @@ export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> =
   task_id: z.string(),
   created_at: z.string().default(""),
 }).loose();
+
+// =====================================================
+// Search (issues + projects)
+// =====================================================
+// Mirrors SearchIssueResult / SearchProjectResult in packages/core/types/api.ts.
+// Web does not currently route search responses through parseWithFallback, so
+// the schemas live mobile-side. Promote to core when web adopts the same
+// defense.
+//
+// match_source is the server's hint of which field matched. Enum-drift defense
+// (root CLAUDE.md "Enum drift downgrades, not crashes"): unknown values fall
+// back to "title" so the row still renders without a snippet line.
+
+const SearchIssueResultSchema = IssueSchema.safeExtend({
+  match_source: z.enum(["title", "description", "comment"]).catch("title"),
+  matched_snippet: z.string().optional(),
+});
+
+export const SearchIssuesResponseSchema = z.object({
+  issues: z.array(SearchIssueResultSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
+  issues: [],
+  total: 0,
+};
+
+const SearchProjectResultSchema = ProjectSchema.safeExtend({
+  match_source: z.enum(["title", "description"]).catch("title"),
+  matched_snippet: z.string().optional(),
+});
+
+export const SearchProjectsResponseSchema = z.object({
+  projects: z.array(SearchProjectResultSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
+  projects: [],
+  total: 0,
+};
 
 // Helpers re-exported for ergonomic single-import at the call site.
 export type { Label, Project, ProjectResource };
