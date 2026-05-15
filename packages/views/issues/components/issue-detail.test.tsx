@@ -507,6 +507,7 @@ describe("IssueDetail (shared)", () => {
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
     ]);
     mockApiObj.listAgents.mockResolvedValue([]);
+    mockApiObj.updateIssue.mockResolvedValue({ ...mockIssue, status: "done" });
   });
 
   it("shows loading skeleton while data is loading", () => {
@@ -618,6 +619,22 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
+  });
+
+  it("renders the mark-done button on the issue detail toolbar", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("Mark as done"));
+
+    await waitFor(() => {
+      expect(mockApiObj.updateIssue).toHaveBeenCalledWith("issue-1", {
+        status: "done",
+      });
+    });
   });
 
   describe("highlightCommentId scroll-to-comment", () => {

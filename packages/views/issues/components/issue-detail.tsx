@@ -860,6 +860,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
+  const markDoneIssue = useUpdateIssue();
+
+  const handleMarkDone = useCallback(() => {
+    markDoneIssue.mutate(
+      { id, status: "done" },
+      {
+        onSuccess: () => onDone?.(),
+        onError: () => toast.error(t(($) => $.detail.update_failed)),
+      },
+    );
+  }, [id, markDoneIssue, onDone, t]);
 
   const handleToggleSidebar = useCallback(() => {
     if (isMobile) {
@@ -1194,7 +1205,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
+            {issue.status !== "done" && issue.status !== "cancelled" && (
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -1202,7 +1213,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       variant="ghost"
                       size="icon-sm"
                       className="text-muted-foreground"
-                      onClick={() => { handleUpdateField({ status: "done" }); onDone?.(); }}
+                      onClick={handleMarkDone}
+                      disabled={markDoneIssue.isPending}
+                      aria-label={t(($) => $.detail.mark_done_tooltip)}
                     >
                       <CircleCheck />
                     </Button>
@@ -1220,6 +1233,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       size="icon-sm"
                       className="text-muted-foreground"
                       onClick={() => { onDone(); }}
+                      aria-label={t(($) => $.detail.archive_tooltip)}
                     >
                       <Archive />
                     </Button>
