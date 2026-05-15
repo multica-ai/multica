@@ -87,6 +87,7 @@ type Now func() time.Time
 type Queries interface {
 	GetActiveAgentPassForAgentIssue(ctx context.Context, arg cerebrodb.GetActiveAgentPassForAgentIssueParams) (cerebrodb.CerebroAgentPass, error)
 	MarkAgentPassStatus(ctx context.Context, arg cerebrodb.MarkAgentPassStatusParams) (cerebrodb.CerebroAgentPass, error)
+	GetCerebroAgentPass(ctx context.Context, id pgtype.UUID) (cerebrodb.CerebroAgentPass, error)
 }
 
 // Service is the gate + lifecycle owner. Construct with New; the

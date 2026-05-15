@@ -24,6 +24,9 @@ type fakeQueries struct {
 	markPassID  pgtype.UUID
 	getCalled   bool
 	getArg      cerebrodb.GetActiveAgentPassForAgentIssueParams
+	// getByID is used by ValidateChildScope tests.
+	getByID    cerebrodb.CerebroAgentPass
+	getByIDErr error
 }
 
 func (f *fakeQueries) GetActiveAgentPassForAgentIssue(_ context.Context, arg cerebrodb.GetActiveAgentPassForAgentIssueParams) (cerebrodb.CerebroAgentPass, error) {
@@ -33,6 +36,13 @@ func (f *fakeQueries) GetActiveAgentPassForAgentIssue(_ context.Context, arg cer
 		return cerebrodb.CerebroAgentPass{}, f.passErr
 	}
 	return f.pass, nil
+}
+
+func (f *fakeQueries) GetCerebroAgentPass(_ context.Context, _ pgtype.UUID) (cerebrodb.CerebroAgentPass, error) {
+	if f.getByIDErr != nil {
+		return cerebrodb.CerebroAgentPass{}, f.getByIDErr
+	}
+	return f.getByID, nil
 }
 
 func (f *fakeQueries) MarkAgentPassStatus(_ context.Context, arg cerebrodb.MarkAgentPassStatusParams) (cerebrodb.CerebroAgentPass, error) {
