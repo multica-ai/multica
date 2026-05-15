@@ -30,7 +30,7 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
 // @ts-expect-error -- hast-util-to-html has no bundled type declarations
 import { toHtml } from "hast-util-to-html";
-import { Maximize2, Download, Link as LinkIcon, FileText } from "lucide-react";
+import { Maximize2, Download, Eye, Link as LinkIcon, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
@@ -42,9 +42,12 @@ import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { ImageLightbox } from "./extensions/image-view";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
+import { isAllowedFileCardHref } from "@multica/ui/markdown";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { useDownloadAttachment } from "./use-download-attachment";
+import { useAttachmentPreview, type PreviewSource } from "./attachment-preview-modal";
+import { getPreviewKind } from "./utils/preview";
 import "katex/dist/katex.min.css";
 import "./content-editor.css";
 
@@ -239,21 +242,39 @@ function ReadonlyImage({
 function ReadonlyFileCard({
   href,
   filename,
-  resolveAttachmentId,
+  resolveAttachment,
   onDownload,
+  onPreview,
 }: {
   href: string;
   filename: string;
-  resolveAttachmentId: (url: string) => string | undefined;
+  resolveAttachment: (url: string) => Attachment | undefined;
   onDownload: (attachmentId: string) => void;
+  onPreview: (source: PreviewSource) => boolean;
 }) {
-  const handleClick = () => {
-    const id = resolveAttachmentId(href);
-    if (id) {
-      onDownload(id);
+  const { t } = useT("editor");
+  const attachment = href ? resolveAttachment(href) : undefined;
+  // Mirror file-card.tsx (NodeView) — preview gate widens to "anything that
+  // can be downloaded AND whose filename is a previewable type". Media kinds
+  // fall through to URL-only when the attachment record isn't reachable.
+  const kind = filename
+    ? getPreviewKind(attachment?.content_type ?? "", filename)
+    : null;
+  const isMediaKind = kind === "pdf" || kind === "video" || kind === "audio";
+  const canPreview = !!href && kind !== null && (!!attachment || isMediaKind);
+  const handleDownloadClick = () => {
+    if (attachment) {
+      onDownload(attachment.id);
       return;
     }
     openExternal(href);
+  };
+  const handlePreviewClick = () => {
+    if (attachment) {
+      onPreview({ kind: "full", attachment });
+    } else if (href) {
+      onPreview({ kind: "url", url: href, filename });
+    }
   };
   return (
     <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
@@ -261,11 +282,24 @@ function ReadonlyFileCard({
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm">{filename}</p>
       </div>
+      {canPreview && (
+        <button
+          type="button"
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          title={t(($) => $.attachment.preview)}
+          aria-label={t(($) => $.attachment.preview)}
+          onClick={handlePreviewClick}
+        >
+          <Eye className="size-3.5" />
+        </button>
+      )}
       {href && (
         <button
           type="button"
           className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          onClick={handleClick}
+          title={t(($) => $.image.download)}
+          aria-label={t(($) => $.image.download)}
+          onClick={handleDownloadClick}
         >
           <Download className="size-3.5" />
         </button>
@@ -276,7 +310,9 @@ function ReadonlyFileCard({
 
 function buildComponents(
   resolveAttachmentId: (url: string) => string | undefined,
+  resolveAttachment: (url: string) => Attachment | undefined,
   onDownload: (attachmentId: string) => void,
+  onPreview: (source: PreviewSource) => boolean,
 ): Partial<Components> {
   return {
     // Links — route mention:// to mention components, others show preview card
@@ -297,15 +333,15 @@ function buildComponents(
       const dataType = node?.properties?.dataType as string | undefined;
       if (dataType === "fileCard") {
         const rawHref = (node?.properties?.dataHref as string) || "";
-        // Only allow http(s) URLs to prevent javascript: and other dangerous schemes.
-        const href = /^https?:\/\//i.test(rawHref) ? rawHref : "";
+        const href = isAllowedFileCardHref(rawHref) ? rawHref : "";
         const filename = (node?.properties?.dataFilename as string) || "";
         return (
           <ReadonlyFileCard
             href={href}
             filename={filename}
-            resolveAttachmentId={resolveAttachmentId}
+            resolveAttachment={resolveAttachment}
             onDownload={onDownload}
+            onPreview={onPreview}
           />
         );
       }
@@ -410,9 +446,19 @@ export const ReadonlyContent = memo(function ReadonlyContent({
     [attachments],
   );
 
+  const resolveAttachment = useCallback(
+    (url: string): Attachment | undefined => {
+      if (!url || !attachments?.length) return undefined;
+      return attachments.find((a) => a.url === url);
+    },
+    [attachments],
+  );
+
+  const preview = useAttachmentPreview();
+
   const components = useMemo(
-    () => buildComponents(resolveAttachmentId, download),
-    [resolveAttachmentId, download],
+    () => buildComponents(resolveAttachmentId, resolveAttachment, download, preview.tryOpen),
+    [resolveAttachmentId, resolveAttachment, download, preview.tryOpen],
   );
 
   return (
@@ -426,6 +472,7 @@ export const ReadonlyContent = memo(function ReadonlyContent({
         {processed}
       </ReactMarkdown>
       <LinkHoverCard {...hover} />
+      {preview.modal}
     </div>
   );
 });

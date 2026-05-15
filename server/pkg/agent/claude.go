@@ -443,6 +443,13 @@ func buildClaudeArgs(prompt string, opts ExecOptions, logger *slog.Logger) []str
 		"--verbose",
 		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
+		// AskUserQuestion is Claude Code's built-in interactive question tool.
+		// The daemon runs Claude in non-interactive stream-json mode and has
+		// no UI for the prompt to render in, so a call returns an empty
+		// answer and the agent ends up "inferring" silently — the user
+		// never sees the question (see GitHub #2588). User-facing
+		// clarification belongs in an issue comment instead.
+		"--disallowedTools", "AskUserQuestion",
 	)
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--input-format", "stream-json", "--resume", opts.ResumeSessionID)
@@ -621,7 +628,31 @@ func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("detect version for %s: %w", execPath, err)
 	}
-	return strings.TrimSpace(string(data)), nil
+	return extractVersionLine(string(data)), nil
+}
+
+// extractVersionLine pulls the version line out of a `<cli> --version` capture,
+// discarding leading shell noise. On Windows, npm-installed CLI shims (notably
+// gemini's) emit `chcp` output like `Active code page: 65001` before the real
+// version reaches stdout, and the raw concatenation was being persisted as the
+// runtime version (see #2516).
+//
+// The heuristic: return the first non-empty line that contains a semver-shaped
+// token (matches versionRe). Full version strings like "2.1.5 (Claude Code)"
+// or "codex-cli 0.118.0" survive unchanged because the whole matching line is
+// returned. If no line carries a semver token, fall back to the trimmed raw
+// output so unusual version formats aren't silently dropped to empty.
+func extractVersionLine(raw string) string {
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if versionRe.MatchString(line) {
+			return line
+		}
+	}
+	return strings.TrimSpace(raw)
 }
 
 // logWriter adapts a *slog.Logger to an io.Writer for capturing stderr.

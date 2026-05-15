@@ -180,11 +180,17 @@
   "repositories": {
     "section_title": "代码仓库",
     "description": "与该工作区关联的 Git 仓库。智能体会从这里 clone 代码并完成工作。",
-    "url_placeholder": "https://git.example.com/org/repo.git",
+    "url_placeholder": "https://git.example.com/org/repo.git 或 git@git.example.com:org/repo.git",
+    "url_empty": "（空 URL）",
     "description_placeholder": "描述（例如：Go 后端 + Next.js 前端）",
     "add": "添加仓库",
     "save": "保存",
     "saving": "保存中...",
+    "saved_hint": "所有改动已保存",
+    "empty": "暂无仓库。",
+    "edit_aria": "编辑仓库",
+    "cancel_aria": "取消编辑",
+    "delete_aria": "删除仓库",
     "manage_hint": "只有管理员和所有者可以管理代码仓库。",
     "toast_saved": "已保存代码仓库",
     "toast_save_failed": "保存代码仓库失败"

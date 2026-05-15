@@ -5,7 +5,7 @@ description: 把 issue 交给智能体，它作为正式负责人一直工作到
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-把 [issue](/issues) 分配给 [智能体](/agents)，它会作为**正式负责人**一直工作到结束——能读到 issue 的完整上下文（描述 + 所有 [评论](/comments)），也能改状态、发评论、改字段。这是 Multica 四种触发方式里**最常见也最"重"**的一种。
+把 [issue](/issues) 分配给 [智能体](/agents)，它会作为**正式负责人**一直工作到结束——能读到 issue 的完整上下文（描述 + 所有 [评论](/comments)），也能改状态、发评论、改字段。这是 Multica 四种触发方式里**最常见也最"重"**的一种。同样的流程也接受 [小队（squad）](/squads) 作为 assignee——这种情况下 Multica 会触发小队的**队长智能体**。
 
 | 方式 | 何时用 | 改 issue | 上下文 | 优先级 | 自动重试 |
 |---|---|---|---|---|---|
@@ -18,7 +18,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 在界面里分配
 
-在 issue 详情页点 **Assignee** 选择器，会列出工作区里所有成员和未归档的智能体。选一个智能体，issue 立刻分给它。
+在 issue 详情页点 **Assignee** 选择器，会列出工作区里所有成员、未归档的智能体、以及未归档的 [小队](/squads)。选一个智能体（或小队），issue 立刻分配。
 
 几条规则：
 
@@ -78,5 +78,6 @@ multica issue assign MUL-42 --unassign
 ## 下一步
 
 - [**在评论里 @ 智能体**](/mentioning-agents) —— 更轻量的触发方式，不改 assignee / status
+- [**小队**](/squads) —— 把 issue 分给一组智能体，由队长决定谁接手
 - [**对话**](/chat) —— 脱离 issue 和智能体一对一聊
 - [**Autopilots**](/autopilots) —— 让智能体定时自动开工

@@ -6,6 +6,7 @@ import {
   BookOpenText,
   FileText,
   KeyRound,
+  ListTodo,
   MessageCircle,
   Terminal,
 } from "lucide-react";
@@ -26,18 +27,21 @@ import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { FeishuBotTab } from "./tabs/feishu-bot-tab";
+import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 
 type DetailTab =
   | "activity"
+  | "tasks"
   | "instructions"
   | "skills"
   | "feishu_bot"
   | "env"
   | "custom_args";
 
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "instructions" | "skills" | "feishu_bot" | "environment" | "custom_args"> = {
+const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "feishu_bot" | "environment" | "custom_args"> = {
   activity: "activity",
+  tasks: "tasks",
   instructions: "instructions",
   skills: "skills",
   feishu_bot: "feishu_bot",
@@ -50,6 +54,7 @@ const detailTabs: {
   icon: typeof FileText;
 }[] = [
   { id: "activity", icon: Activity },
+  { id: "tasks", icon: ListTodo },
   { id: "instructions", icon: FileText },
   { id: "skills", icon: BookOpenText },
   { id: "feishu_bot", icon: MessageCircle },
@@ -64,10 +69,11 @@ interface AgentOverviewPaneProps {
 }
 
 /**
- * Right-pane on the agent detail page. Five tabs of equal weight:
+ * Right-pane on the agent detail page:
  *
  *   - Activity (default) — what the agent is doing now / how it's been doing /
  *     what it just finished. The "watch state" surface.
+ *   - Tasks — assigned/created issues using the shared issue board/list.
  *   - Instructions / Skills / Env / Custom Args — four editing surfaces.
  *
  * The previous Settings tab was deleted because every field on it is now
@@ -147,6 +153,11 @@ export function AgentOverviewPane({
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         {activeTab === "activity" && <ActivityTab agent={agent} />}
+        {activeTab === "tasks" && (
+          <div className="flex h-full min-h-[520px] flex-col">
+            <ActorIssuesPanel actorType="agent" actorId={agent.id} />
+          </div>
+        )}
         {activeTab === "instructions" && (
           <TabContent>
             <InstructionsTab
@@ -221,7 +232,7 @@ export function AgentOverviewPane({
   );
 }
 
-// Centred, max-width container shared by every config tab. `h-full flex
+// Padded, full-width container shared by every config tab. `h-full flex
 // flex-col` lets a tab opt into "fill the viewport" by giving its root
 // element `flex-1 min-h-0` (Instructions does this so the editor expands
 // instead of pushing the Save row off-screen). Tabs that don't opt in
@@ -229,6 +240,6 @@ export function AgentOverviewPane({
 // list) still scrolls via the parent's overflow-y-auto.
 function TabContent({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-auto flex h-full max-w-2xl flex-col p-4 md:p-6">{children}</div>
+    <div className="flex h-full flex-col p-4 md:p-6">{children}</div>
   );
 }

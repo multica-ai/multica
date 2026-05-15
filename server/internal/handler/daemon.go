@@ -1108,6 +1108,32 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 
+			// Squad-leader briefing injection: when the issue is assigned
+			// to a squad and the claiming agent is that squad's current
+			// leader, append a full briefing (Operating Protocol + Roster
+			// + user Instructions) to the agent's own Instructions. We
+			// append (not replace) so per-agent instructions remain
+			// authoritative for general behavior; the squad briefing
+			// stacks on top as task-specific squad context.
+			if resp.Agent != nil && issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
+				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+					ID:          issue.AssigneeID,
+					WorkspaceID: issue.WorkspaceID,
+				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
+					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+					if strings.TrimSpace(resp.Agent.Instructions) == "" {
+						resp.Agent.Instructions = briefing
+					} else {
+						resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
+					}
+					slog.Debug("injected squad leader briefing",
+						"squad_id", uuidToString(squad.ID),
+						"squad_name", squad.Name,
+						"leader_agent_id", resp.Agent.ID,
+					)
+				}
+			}
+
 			var projectRepos []RepoData
 			if issue.ProjectID.Valid {
 				resp.ProjectID = uuidToString(issue.ProjectID)
@@ -1189,16 +1215,21 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		// Look up the prior session for this (agent, issue) pair so the daemon
 		// can resume the Claude Code conversation context.
 		//
-		// Skip the lookup when the task was flagged as a manual rerun: the
-		// user just judged the prior output bad, so the daemon must start a
-		// fresh agent session instead of resuming the same conversation that
-		// produced that output.
+		// Skip all prior state when the task was flagged as a manual rerun:
+		// the user just judged the prior output bad, so the daemon must start a
+		// fresh agent session in a fresh workdir instead of resuming anything
+		// from the same conversation that produced that output. For
+		// comment-triggered follow-ups, skip only the session resume: resumed
+		// issue conversations often inherit the prior final assistant message
+		// (for example "Done.") and answer a new human comment with that stale
+		// completion marker instead of the comment itself. Keep reusing the
+		// workdir for comment follow-ups so the agent still sees the same checkout.
 		if !task.ForceFreshSession {
 			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
-				if prior.RuntimeID == task.RuntimeID {
+				if !task.TriggerCommentID.Valid && prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
 				}
 				if prior.WorkDir.Valid {
@@ -1362,6 +1393,40 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				var repos []RepoData
 				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
 					resp.Repos = repos
+				}
+			}
+
+			// Squad-leader briefing injection for quick-create tasks. When
+			// the user picked a squad in the modal, the task runs on the
+			// squad's leader agent (resolved by the handler). Surface the
+			// same Operating Protocol + Roster + user Instructions that
+			// issue-bound squad tasks see, so the leader can decide to
+			// delegate before opening the issue.
+			if resp.Agent != nil && qc.SquadID != "" {
+				wsUUID, wsErr := util.ParseUUID(qc.WorkspaceID)
+				squadUUID, sqErr := util.ParseUUID(qc.SquadID)
+				if wsErr == nil && sqErr == nil {
+					if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+						ID:          squadUUID,
+						WorkspaceID: wsUUID,
+					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
+						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+						if strings.TrimSpace(resp.Agent.Instructions) == "" {
+							resp.Agent.Instructions = briefing
+						} else {
+							resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
+						}
+						// Surface the squad identity to the daemon so the
+						// quick-create prompt defaults the new issue's
+						// assignee to the squad, not the leader agent.
+						resp.SquadID = uuidToString(squad.ID)
+						resp.SquadName = squad.Name
+						slog.Debug("injected squad leader briefing for quick-create",
+							"squad_id", uuidToString(squad.ID),
+							"squad_name", squad.Name,
+							"leader_agent_id", resp.Agent.ID,
+						)
+					}
 				}
 			}
 		}

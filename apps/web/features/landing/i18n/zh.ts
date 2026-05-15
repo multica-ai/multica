@@ -273,6 +273,54 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.0",
+        date: "2026-05-14",
+        title: "Squads 与附件预览",
+        changes: [],
+        features: [
+          "Squads 支持把任务交给一个小组，由 leader agent 负责协调下一步",
+          "附件可以直接预览，支持 PDF、音频、视频、Markdown、代码、日志和纯文本",
+          "中文姓名支持用拼音搜索，适用于 mention、负责人、订阅人、agents、projects 和 squads",
+        ],
+        improvements: [
+          "Squad 页面补齐成员管理、从 squad 内快速创建 agent、清晰的成员操作按钮，以及更宽的详情布局",
+          "快速创建和各类选择器更容易搜索，并能识别 squad 相关的指派和提及",
+          "Usage 图表可以在费用和 token 视图之间切换，并复用 runtime 的时区控制",
+          "工作区管理员可以通过命令行管理 squads，并在必要时停止失控的 issue 执行",
+          "共享界面文案的中英文翻译更完整",
+        ],
+        fixes: [
+          "当成员已经明确把讨论指向某个人或小组时，Squad leader 不再重复发言",
+          "提及 squad 时会正确唤起对应 leader，同时保留私有 agent 的访问限制",
+          "删除 Issue 后列表刷新更准确，后续评论也不再触发过期的 Done 回复",
+          "在撰写或编辑 issue 和评论时新增的附件，也可以稳定使用预览",
+        ],
+      },
+      {
+        version: "0.2.32",
+        date: "2026-05-13",
+        title: "用量洞察、聊天重命名与桌面体验优化",
+        changes: [],
+        features: [
+          "Usage 页面集中展示 workspace 和 project 的 token 使用、runtime 趋势和 agent 排名",
+          "聊天会话可以直接在聊天页顶部重命名",
+          "反馈时可以附带截图或文件，方便团队快速理解问题",
+        ],
+        improvements: [
+          "Dashboard 更名为 Usage，并加入更清晰的 agent 排行展示",
+          "新聊天和消息完成状态切换更顺，不再频繁闪加载状态",
+          "自托管 GitHub 配置更完整，文档里的云端链接也已修正",
+          "用户安装的 Codex Skills 会自动带入新的 agent 任务",
+        ],
+        fixes: [
+          "没有输出内容但成功完成的 agent 任务会显示为 completed，不再误判为 blocked",
+          "在指令编辑器中粘贴的 mention 会保留可点击链接",
+          "Linux 桌面端下载附件时走系统原生流程，关闭标签页也不再触发循环跳转",
+          "Gemini 和 Windows runtime 的启动检查更稳定，适合无人值守执行",
+          "添加项目资源时，较长的 GitHub 仓库列表可以正常滚动",
+        ],
+      },
+      {
         version: "0.2.31",
         date: "2026-05-12",
         title: "GitHub 集成、聊天附件与 Issue 定位优化",

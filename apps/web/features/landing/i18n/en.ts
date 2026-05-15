@@ -273,6 +273,54 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.0",
+        date: "2026-05-14",
+        title: "Squads & Attachment Previews",
+        changes: [],
+        features: [
+          "Squads let teams assign work to a group, with a leader agent coordinating the next step",
+          "Attachments can be previewed in place for PDFs, audio, video, markdown, code, logs, and plain text",
+          "Chinese names can be found by pinyin across mentions, assignees, subscribers, agents, projects, and squads",
+        ],
+        improvements: [
+          "Squad pages now include member management, faster agent creation from a squad, clearer row actions, and a wider detail layout",
+          "Quick-create and picker flows are easier to search and now include squad-aware routing",
+          "Usage charts can switch between cost and token views, with the same timezone controls used by runtimes",
+          "Workspace operators get command-line controls for managing squads and stopping a runaway issue run",
+          "Shared interface labels are translated more consistently in English and Chinese",
+        ],
+        fixes: [
+          "Squad leaders stay quiet when a human already routed the conversation to someone specific",
+          "Mentioning a squad now wakes the right leader while preserving private-agent access rules",
+          "Issue lists stay fresher after deletes and follow-up comments no longer trigger stale Done replies",
+          "Attachment previews keep working for files added while writing or editing issues and comments",
+        ],
+      },
+      {
+        version: "0.2.32",
+        date: "2026-05-13",
+        title: "Usage Insights, Chat Renaming & Smoother Desktop Flows",
+        changes: [],
+        features: [
+          "Usage now shows workspace and project token activity, runtime trends, and per-agent rankings in one place",
+          "Chat sessions can be renamed directly from the chat header",
+          "Feedback reports can include screenshots or files so teams have the context they need",
+        ],
+        improvements: [
+          "The Usage page has clearer naming and a more dynamic agent leaderboard",
+          "New chats and completed chat responses update more smoothly with fewer loading flashes",
+          "Self-hosted GitHub setup is easier to configure and the setup docs point to the right cloud URL",
+          "User-installed Codex skills are available automatically when new tasks run",
+        ],
+        fixes: [
+          "Empty successful agent responses are marked completed instead of blocked",
+          "Pasted mentions in instruction editors keep their mention links",
+          "Desktop attachment downloads use the native Linux flow and tab closing no longer loops",
+          "Gemini and Windows runtime startup checks are more reliable in unattended runs",
+          "Long GitHub repository lists stay usable when adding project resources",
+        ],
+      },
+      {
         version: "0.2.31",
         date: "2026-05-12",
         title: "GitHub Integration, Chat Attachments & Safer Issue Navigation",

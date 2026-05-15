@@ -37,6 +37,7 @@ type PrepareParams struct {
 	AgentName      string            // for git branch naming only
 	Provider       string            // agent provider (determines runtime config and skill injection paths)
 	CodexVersion   string            // detected Codex CLI version (only used when Provider == "codex")
+	OpenclawBin    string            // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
 	Task           TaskContextForEnv // context data for writing files
 }
 
@@ -60,6 +61,7 @@ type TaskContextForEnv struct {
 	AutopilotSource         string
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
+	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
@@ -83,6 +85,19 @@ type Environment struct {
 	WorkDir string
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
+	// OpenclawConfigPath is the path to the per-task synthesized OpenClaw
+	// config (set only for openclaw provider). The daemon exports this as
+	// OPENCLAW_CONFIG_PATH on the openclaw subprocess so its native skill
+	// scanner pins workspaceDir to WorkDir.
+	OpenclawConfigPath string
+	// OpenclawIncludeRoot is the directory of the user's active OpenClaw
+	// config (set only for openclaw provider with an on-disk user config).
+	// The daemon must prepend it to OPENCLAW_INCLUDE_ROOTS so OpenClaw is
+	// allowed to follow the wrapper's `$include` link out of envRoot into
+	// the user's config — by default OpenClaw confines `$include` to the
+	// directory holding the wrapper file. Empty when no $include is
+	// emitted (fresh install).
+	OpenclawIncludeRoot string
 
 	logger *slog.Logger // for cleanup logging
 }
@@ -145,62 +160,127 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
-		if err := writeCodexWorkspaceSkills(codexHome, params.Task.AgentSkills); err != nil {
-			return nil, fmt.Errorf("execenv: write codex skills: %w", err)
+		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, logger); err != nil {
+			return nil, fmt.Errorf("execenv: hydrate codex skills: %w", err)
 		}
 		env.CodexHome = codexHome
+	}
+
+	// For OpenClaw, synthesize a per-task config that pins workspace to
+	// workDir. The skill scanner then reads {workDir}/skills/ (written by
+	// writeContextFiles above). Fail closed on errors: a malformed user
+	// config that the openclaw CLI can't read is a real problem and
+	// silently degrading to a minimal config would mask it by booting
+	// OpenClaw without the agents / providers / API keys it expects.
+	if params.Provider == "openclaw" {
+		result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: params.OpenclawBin})
+		if err != nil {
+			return nil, fmt.Errorf("execenv: prepare openclaw config: %w", err)
+		}
+		env.OpenclawConfigPath = result.ConfigPath
+		env.OpenclawIncludeRoot = result.IncludeRoot
 	}
 
 	logger.Info("execenv: prepared env", "root", envRoot, "repos_available", len(params.Task.Repos))
 	return env, nil
 }
 
+// ReuseParams describes the inputs to Reuse. It mirrors PrepareParams for
+// the per-provider knobs (CodexVersion, OpenclawBin) so callers can pass
+// the same resolved binary path on both first-run and reuse paths.
+type ReuseParams struct {
+	WorkDir      string
+	Provider     string
+	CodexVersion string            // only used when Provider == "codex"
+	OpenclawBin  string            // only used when Provider == "openclaw"; empty = PATH lookup
+	Task         TaskContextForEnv // refreshed context files / skills
+}
+
 // Reuse wraps an existing workdir into an Environment and refreshes context files.
 // Returns nil if the workdir does not exist (caller should fall back to Prepare).
-//
-// codexVersion is the detected Codex CLI version, used (only when provider is
-// "codex") to pick the right sandbox policy for the per-task config.toml.
-// Pass an empty string when the version is unknown.
-func Reuse(workDir, provider, codexVersion string, task TaskContextForEnv, logger *slog.Logger) *Environment {
-	if _, err := os.Stat(workDir); err != nil {
+func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
+	if _, err := os.Stat(params.WorkDir); err != nil {
 		return nil
 	}
 
 	env := &Environment{
-		RootDir: filepath.Dir(workDir),
-		WorkDir: workDir,
+		RootDir: filepath.Dir(params.WorkDir),
+		WorkDir: params.WorkDir,
 		logger:  logger,
 	}
 
 	// Refresh context files (issue_context.md, skills).
-	if err := writeContextFiles(workDir, provider, task); err != nil {
+	if err := writeContextFiles(params.WorkDir, params.Provider, params.Task); err != nil {
 		logger.Warn("execenv: refresh context files failed", "error", err)
 	}
 
 	// Restore CodexHome for Codex provider — the per-task codex-home directory
 	// lives alongside the workdir. Re-run prepareCodexHomeWithOpts to ensure
 	// config (especially sandbox/network access) is up to date.
-	if provider == "codex" {
+	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, "codex-home")
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: codexVersion}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {
 			env.CodexHome = codexHome
-			if err := writeCodexWorkspaceSkills(codexHome, task.AgentSkills); err != nil {
+			if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, logger); err != nil {
 				logger.Warn("execenv: refresh codex skills failed", "error", err)
 			}
 		}
 	}
 
-	logger.Info("execenv: reusing env", "workdir", workDir)
+	// Refresh the per-task OpenClaw config on reuse — the user may have
+	// added/removed agents or rotated providers since the prior task ran,
+	// and the workspace override always re-targets the current workDir.
+	// Fail closed: a user config that can no longer be parsed should block
+	// reuse rather than degrade to a minimal config that boots OpenClaw
+	// without the registered agents.
+	if params.Provider == "openclaw" {
+		result, err := prepareOpenclawConfig(env.RootDir, params.WorkDir, OpenclawConfigPrep{OpenclawBin: params.OpenclawBin})
+		if err != nil {
+			logger.Warn("execenv: refresh openclaw config failed", "error", err)
+			return nil
+		}
+		env.OpenclawConfigPath = result.ConfigPath
+		env.OpenclawIncludeRoot = result.IncludeRoot
+	}
+
+	logger.Info("execenv: reusing env", "workdir", params.WorkDir)
 	return env
 }
 
-func writeCodexWorkspaceSkills(codexHome string, skills []SkillContextForEnv) error {
-	if len(skills) == 0 {
+// hydrateCodexSkills populates the per-task CODEX_HOME/skills directory with
+// both user-installed skills (from the shared ~/.codex/skills/) and
+// workspace-assigned skills. Workspace skills win on name conflict — they are
+// written last and seedUserCodexSkills already pre-filters their names.
+//
+// The skills directory is wiped first so two stale-state classes that the
+// Reuse path would otherwise leak are gone:
+//
+//   - A name now claimed by a workspace skill that previously held only a
+//     user-seeded copy — support files from the user version would otherwise
+//     linger under the workspace skill's directory.
+//   - A user skill removed from the shared ~/.codex/skills/ since the last
+//     run — its old contents would otherwise remain visible to the codex
+//     CLI.
+//
+// Codex is the only runtime that needs this two-stage hydration because the
+// daemon sets CODEX_HOME to a per-task directory, isolating the CLI from the
+// user's real ~/.codex/. Other runtimes leave HOME untouched and discover
+// user-level skills natively (see context.go for the workdir-local paths
+// they use for workspace skills).
+func hydrateCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, logger *slog.Logger) error {
+	skillsDir := filepath.Join(codexHome, "skills")
+	if err := os.RemoveAll(skillsDir); err != nil {
+		return fmt.Errorf("clear codex skills dir: %w", err)
+	}
+	if err := seedUserCodexSkills(codexHome, workspaceSkills, logger); err != nil {
+		logger.Warn("execenv: seed user codex skills failed", "error", err)
+	}
+	if len(workspaceSkills) == 0 {
 		return nil
 	}
-	return writeSkillFiles(filepath.Join(codexHome, "skills"), skills)
+	return writeSkillFiles(skillsDir, workspaceSkills)
 }
 
 // GCMetaKind identifies which kind of parent record a task workdir belongs to.

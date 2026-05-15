@@ -105,6 +105,7 @@ type AgentTaskQueue struct {
 	FailureReason     pgtype.Text        `json:"failure_reason"`
 	TriggerSummary    pgtype.Text        `json:"trigger_summary"`
 	ForceFreshSession bool               `json:"force_fresh_session"`
+	IsLeaderTask      bool               `json:"is_leader_task"`
 }
 
 type Attachment struct {
@@ -485,6 +486,30 @@ type SkillFile struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type Squad struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Name         string             `json:"name"`
+	Description  string             `json:"description"`
+	LeaderID     pgtype.UUID        `json:"leader_id"`
+	CreatorID    pgtype.UUID        `json:"creator_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy   pgtype.UUID        `json:"archived_by"`
+	AvatarUrl    pgtype.Text        `json:"avatar_url"`
+	Instructions string             `json:"instructions"`
+}
+
+type SquadMember struct {
+	ID         pgtype.UUID        `json:"id"`
+	SquadID    pgtype.UUID        `json:"squad_id"`
+	MemberType string             `json:"member_type"`
+	MemberID   pgtype.UUID        `json:"member_id"`
+	Role       string             `json:"role"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
 type TaskMessage struct {
 	ID        pgtype.UUID        `json:"id"`
 	TaskID    pgtype.UUID        `json:"task_id"`
@@ -531,6 +556,39 @@ type TaskUsageDailyDirty struct {
 	Provider    string             `json:"provider"`
 	Model       string             `json:"model"`
 	EnqueuedAt  pgtype.Timestamptz `json:"enqueued_at"`
+}
+
+type TaskUsageDashboardDaily struct {
+	BucketDate       pgtype.Date        `json:"bucket_date"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	Model            string             `json:"model"`
+	InputTokens      int64              `json:"input_tokens"`
+	OutputTokens     int64              `json:"output_tokens"`
+	CacheReadTokens  int64              `json:"cache_read_tokens"`
+	CacheWriteTokens int64              `json:"cache_write_tokens"`
+	TaskCount        int64              `json:"task_count"`
+	EventCount       int64              `json:"event_count"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TaskUsageDashboardDirty struct {
+	BucketDate  pgtype.Date        `json:"bucket_date"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	Model       string             `json:"model"`
+	EnqueuedAt  pgtype.Timestamptz `json:"enqueued_at"`
+}
+
+type TaskUsageDashboardRollupState struct {
+	ID                int16              `json:"id"`
+	WatermarkAt       pgtype.Timestamptz `json:"watermark_at"`
+	LastRunStartedAt  pgtype.Timestamptz `json:"last_run_started_at"`
+	LastRunFinishedAt pgtype.Timestamptz `json:"last_run_finished_at"`
+	LastRunRows       int64              `json:"last_run_rows"`
+	LastError         pgtype.Text        `json:"last_error"`
 }
 
 type TaskUsageRollupState struct {

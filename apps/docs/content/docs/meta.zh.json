@@ -15,6 +15,7 @@
     "agents",
     "agents-create",
     "skills",
+    "squads",
     "---智能体怎么运行---",
     "daemon-runtimes",
     "tasks",

@@ -35,14 +35,28 @@ Multica 的 [自部署](/self-host-quickstart) 服务器启动时从环境变量
 
 ## 怎么配邮件
 
-Multica 用 [Resend](https://resend.com/) 发验证码和邀请邮件。
+Multica 支持两种邮件发送通道——[Resend](https://resend.com/) 适合公网部署，SMTP relay 适合内网/自部署。同时设置时 `SMTP_HOST` 优先级高于 `RESEND_API_KEY`。
+
+### Resend
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `RESEND_API_KEY` | 空 | Resend API key |
-| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | 发件地址（必须是 Resend 账号已验证的域名）|
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | 发件地址（必须是 Resend 账号已验证的域名；走 SMTP 时同时作为 `From:` 头）|
 
-**不设 `RESEND_API_KEY` 时的行为**：server 不会报错，但所有本该发出去的邮件（验证码、邀请链接）**只打到 server 的 stdout**。本地开发时方便——你从 server 日志里抄验证码；**生产环境忘记设就是黑洞**，用户收不到邮件也没任何错误提示。
+### SMTP relay
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `SMTP_HOST` | 空 | SMTP relay 主机名。设置后即启用 SMTP 模式并覆盖 Resend |
+| `SMTP_PORT` | `25` | SMTP 端口。STARTTLS 提交端口用 `587`；**暂不支持 465（SMTPS / 隐式 TLS）** |
+| `SMTP_USERNAME` | 空 | SMTP 用户名。留空表示未认证 relay |
+| `SMTP_PASSWORD` | 空 | SMTP 密码 |
+| `SMTP_TLS_INSECURE` | `false` | 设为 `true` 跳过 TLS 证书校验（仅限私有 CA / 自签证书）|
+
+服务端 advertise STARTTLS 时会自动升级。dial 超时 10s，整个 SMTP 会话有 30s deadline，避免 relay 黑洞把 auth handler 挂死。
+
+**两种都不设的行为**：server 不会报错，但所有本该发出去的邮件（验证码、邀请链接）**只打到 server 的 stdout**。本地开发方便（你从 server 日志里抄验证码）；**生产环境忘记设就是黑洞**，用户收不到邮件也没任何错误提示。
 
 ## 怎么配 Google OAuth
 

@@ -32,6 +32,17 @@ function formatDate(date: string): string {
   });
 }
 
+function descriptionPreview(markdown: string): string {
+  return markdown
+    .replace(/!file\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[*_`~]+/g, "")
+    .replace(/^[\s>#]+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Stops event from bubbling to Link/drag handlers */
 function PickerWrapper({ children }: { children: React.ReactNode }) {
   const stop = (e: React.SyntheticEvent) => {
@@ -117,12 +128,15 @@ export const BoardCardContent = memo(function BoardCardContent({
         </div>
       )}
 
-      {/* Description */}
-      {showDescription && (
-        <p className="mt-1 text-xs text-muted-foreground line-clamp-1">
-          {issue.description}
-        </p>
-      )}
+      {showDescription && (() => {
+        const preview = descriptionPreview(issue.description!);
+        if (!preview) return null;
+        return (
+          <p className="mt-1 text-xs text-muted-foreground line-clamp-1">
+            {preview}
+          </p>
+        );
+      })()}
 
       {/* Row 3: Assignee, priority badge, due date */}
       {(showAssignee || showPriority || showDueDate) && (

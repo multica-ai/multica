@@ -77,12 +77,13 @@ ORDER BY created_at DESC;
 -- name: CreateAgentTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
-    trigger_summary, force_fresh_session
+    trigger_summary, force_fresh_session, is_leader_task
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
     sqlc.narg(trigger_summary),
-    COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE)
+    COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
+    COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE)
 )
 RETURNING *;
 
@@ -108,18 +109,21 @@ WHERE id = $1 AND issue_id IS NULL;
 -- Clones a parent task into a fresh queued attempt. Carries forward the
 -- agent's resume context (session_id/work_dir) so the child can continue
 -- the conversation when the backend supports it. attempt is incremented;
--- max_attempts and trigger_comment_id are inherited.
+-- max_attempts, trigger_comment_id, and is_leader_task are inherited so
+-- the retried task keeps the same squad-role provenance as its parent and
+-- the self-trigger guard in shouldEnqueueSquadLeaderOnComment continues to
+-- recognise it as a leader task.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
-    attempt, max_attempts, parent_task_id
+    attempt, max_attempts, parent_task_id, is_leader_task
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
     'queued', p.priority, p.trigger_comment_id, p.trigger_summary, p.context,
     p.session_id, p.work_dir,
-    p.attempt + 1, p.max_attempts, p.id
+    p.attempt + 1, p.max_attempts, p.id, p.is_leader_task
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;
@@ -400,6 +404,18 @@ WHERE issue_id = $1 AND status IN ('queued', 'dispatched');
 -- for the given issue. Used by @mention trigger dedup.
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched');
+
+-- name: GetLatestTaskIsLeaderForIssueAndAgent :one
+-- Returns the is_leader_task flag of the agent's most recent task on this
+-- issue, or NULL if the agent has never had a task on this issue. Used by
+-- the squad-leader self-trigger guard to tell whether the agent's last
+-- activity on the issue was in the leader role or the worker role (an
+-- agent that holds both roles in a squad would otherwise be skipped by
+-- the role-blind authorID == leaderID check).
+SELECT is_leader_task FROM agent_task_queue
+WHERE issue_id = $1 AND agent_id = $2
+ORDER BY created_at DESC
+LIMIT 1;
 
 -- name: ListPendingTasksByRuntime :many
 SELECT * FROM agent_task_queue

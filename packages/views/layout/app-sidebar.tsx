@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
+import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink, useNavigation } from "../navigation";
 import { HelpLauncher } from "./help-launcher";
 import {
@@ -29,8 +30,10 @@ import {
   SquarePen,
   CircleUser,
   FolderKanban,
+  BarChart3,
   X,
   Zap,
+  Users,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -38,7 +41,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { StatusIcon } from "../issues/components/status-icon";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
-import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
+import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
 import {
   Sidebar,
   SidebarContent,
@@ -106,6 +109,8 @@ type NavKey =
   | "projects"
   | "autopilots"
   | "agents"
+  | "squads"
+  | "usage"
   | "runtimes"
   | "skills"
   | "settings";
@@ -118,6 +123,8 @@ type NavLabelKey =
   | "projects"
   | "autopilots"
   | "agents"
+  | "squads"
+  | "usage"
   | "runtimes"
   | "skills"
   | "settings";
@@ -132,6 +139,8 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
   { key: "projects", labelKey: "projects", icon: FolderKanban },
   { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "agents", labelKey: "agents", icon: Bot },
+  { key: "squads", labelKey: "squads", icon: Users },
+  { key: "usage", labelKey: "usage", icon: BarChart3 },
 ];
 
 const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
@@ -359,6 +368,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const deletePin = useDeletePin();
   const reorderPins = useReorderPins();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const sidebarScrollRef = useRef<HTMLDivElement>(null);
+  const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
 
   // Local presentational copy of pinnedItems for drop-animation stability.
   // Follows TQ at rest; frozen during a drag gesture so a mid-drag cache
@@ -437,16 +448,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
       if (isEditable) return;
       if (useModalStore.getState().modal) return;
       e.preventDefault();
-      const lastMode = useCreateModeStore.getState().lastMode;
-      if (lastMode === "manual") {
-        // Auto-fill project when on a project detail page (manual form only —
-        // agent mode lets the agent infer project from the prompt).
-        const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
-        const data = projectMatch ? { project_id: projectMatch[1] } : undefined;
-        useModalStore.getState().open("create-issue", data);
-      } else {
-        useModalStore.getState().open("quick-create-issue");
-      }
+      // Auto-fill project when on a project detail page. The manual form
+      // consumes `project_id`; quick-create also honours it as a seed for
+      // its project picker, so passing it through is safe for both modes.
+      const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
+      const data = projectMatch ? { project_id: projectMatch[1] } : undefined;
+      openCreateIssueWithPreference(data);
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
@@ -584,7 +591,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarMenuItem>
               <SidebarMenuButton
                 className="text-muted-foreground"
-                onClick={() => useModalStore.getState().open("quick-create-issue")}
+                onClick={() => openCreateIssueWithPreference()}
               >
                 <span className="relative">
                   <SquarePen />
@@ -598,7 +605,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         </SidebarHeader>
 
         {/* Navigation */}
-        <SidebarContent>
+        <SidebarContent ref={sidebarScrollRef} style={sidebarFadeStyle}>
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
