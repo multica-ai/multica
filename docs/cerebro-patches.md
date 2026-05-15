@@ -96,6 +96,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `runtime-provider-logo-firtal-gateway` | packages/views/runtimes/components/provider-logo.tsx | 4 | Show managed gateway runtimes with the cloud provider icon |
 | `agents-page-cerebro-extras` | packages/views/agents/components/agents-page.tsx | 131 | Agents page/tabs cerebro extras |
 | `agents-tasks-tab` | packages/views/agents/components/tabs/tasks-tab.tsx | 35 | Agents page/tabs cerebro extras |
+| `agent-sandbox-tab` | packages/views/agents/components/tabs/sandbox-tab.tsx<br>packages/views/agents/components/agent-overview-pane.tsx | ~150 | JEH-1088 — persona sandbox tab on agent-detail. Operator binds an agent to a persona sandbox (GET /api/persona/sandboxes + PATCH /api/agents/:id.persona_sandbox). Non-admin members see disabled select; admins/owners can re-assign. Runtime-cap badge + cap-baseret disable lives in JEH-1156. |
 | `app-sidebar-cerebro` | packages/views/layout/app-sidebar.tsx | 142 | Layout cerebro additions |
 | `artifact-cli-cmd-artifact` | server/cmd/multica/cmd_artifact.go | 445 | Artifact (documents/files) system |
 | `artifact-handler` | server/internal/handler/artifact_upload.go<br>server/internal/handler/artifact.go<br>server/internal/handler/artifact_test.go<br>...+1 more | 1572 | Artifact (documents/files) system |

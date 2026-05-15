@@ -69,6 +69,12 @@ func TestMain(m *testing.M) {
 	}
 
 	code := m.Run()
+	if err := uninstallHandlerTestIssueNumberTrigger(context.Background(), pool); err != nil {
+		fmt.Printf("Failed to remove handler test issue-number trigger: %v\n", err)
+		if code == 0 {
+			code = 1
+		}
+	}
 	if err := cleanupHandlerTestFixture(context.Background(), pool); err != nil {
 		fmt.Printf("Failed to clean up handler test fixture: %v\n", err)
 		if code == 0 {
@@ -99,6 +105,9 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 		VALUES ($1, $2, $3, $4)
 		RETURNING id
 	`, "Handler Tests", handlerTestWorkspaceSlug, "Temporary workspace for handler tests", "HAN").Scan(&workspaceID); err != nil {
+		return "", "", err
+	}
+	if err := installHandlerTestIssueNumberTrigger(ctx, pool); err != nil {
 		return "", "", err
 	}
 
@@ -132,6 +141,42 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 	}
 
 	return userID, workspaceID, nil
+}
+
+// CEREBRO-PATCH(handler-test-issue-number): direct SQL fixtures need unique issue numbers in the shared handler workspace.
+func installHandlerTestIssueNumberTrigger(ctx context.Context, pool *pgxpool.Pool) error {
+	_, err := pool.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION handler_test_assign_issue_number()
+		RETURNS trigger AS $$
+		BEGIN
+			IF NEW.number = 0 AND EXISTS (
+				SELECT 1 FROM workspace
+				WHERE id = NEW.workspace_id AND slug = 'handler-tests'
+			) THEN
+				SELECT COALESCE(MAX(number), 0) + 1
+				INTO NEW.number
+				FROM issue
+				WHERE workspace_id = NEW.workspace_id;
+			END IF;
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql;
+
+		DROP TRIGGER IF EXISTS handler_test_assign_issue_number ON issue;
+		CREATE TRIGGER handler_test_assign_issue_number
+		BEFORE INSERT ON issue
+		FOR EACH ROW
+		EXECUTE FUNCTION handler_test_assign_issue_number();
+	`)
+	return err
+}
+
+func uninstallHandlerTestIssueNumberTrigger(ctx context.Context, pool *pgxpool.Pool) error {
+	_, err := pool.Exec(ctx, `
+		DROP TRIGGER IF EXISTS handler_test_assign_issue_number ON issue;
+		DROP FUNCTION IF EXISTS handler_test_assign_issue_number();
+	`)
+	return err
 }
 
 func cleanupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) error {

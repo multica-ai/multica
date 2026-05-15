@@ -108,6 +108,44 @@ func TestMaskAttachmentsForCaller_NoInvoker_PreservesPayload(t *testing.T) {
 	}
 }
 
+func TestAttachmentResponsesForCaller_CommentEmbed_MasksPIIFields(t *testing.T) {
+	h := &Handler{
+		PersonaMask: &stubMaskInvoker{decisions: []PersonaMaskDecision{
+			{Allowed: true, MaskedFields: []string{"filename", "url", "download_url"}},
+		}},
+		PersonaMaskAudit: &stubAuditWriter{},
+	}
+	att := newAttachmentRow(1, "pii", "comment-secret.pdf")
+	att.CommentID = uuidFor(9)
+
+	out := h.attachmentResponsesForCaller(newReqWithUser("u-member"), "ws-1", []db.Attachment{att})
+	if len(out) != 1 {
+		t.Fatalf("masked comment attachment should stay embedded, got %d rows", len(out))
+	}
+	if out[0].CommentID == nil || *out[0].CommentID != uuidToString(att.CommentID) {
+		t.Fatalf("comment attachment must keep parent id for grouping, got %+v", out[0].CommentID)
+	}
+	if out[0].Filename != "" || out[0].URL != "" || out[0].DownloadURL != "" {
+		t.Errorf("comment embed must not leak filename/url/download_url, got %+v", out[0])
+	}
+}
+
+func TestAttachmentResponsesForCaller_ChatEmbed_DenyDropsRow(t *testing.T) {
+	h := &Handler{
+		PersonaMask: &stubMaskInvoker{decisions: []PersonaMaskDecision{
+			{Allowed: false, Reason: "no grant"},
+		}},
+		PersonaMaskAudit: &stubAuditWriter{},
+	}
+	att := newAttachmentRow(1, "pii", "chat-secret.pdf")
+	att.ChatMessageID = uuidFor(10)
+
+	out := h.attachmentResponsesForCaller(newReqWithUser("u-member"), "ws-1", []db.Attachment{att})
+	if len(out) != 0 {
+		t.Fatalf("denied chat attachment embed must be dropped, got %+v", out)
+	}
+}
+
 // TestUploadFile_DenyDoesNotLeakResponse is a regression test for Rasp's
 // review feedback on PR #272: the original code wrote `uploadResp` directly
 // after `maskAttachmentsForCaller` returned an empty slice, leaking

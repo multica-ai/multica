@@ -188,6 +188,7 @@
     "skills": "skill",
     "environment": "环境变量",
     "custom_args": "自定义参数",
+    "sandbox": "沙箱",
     "tools": "工具",
     "_comment_tools": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab label",
     "discard_dialog_title": "放弃未保存的修改？",
@@ -279,6 +280,15 @@
       "remove_aria": "移除参数",
       "saved_toast": "已保存自定义参数",
       "save_failed_toast": "保存自定义参数失败"
+    },
+    "sandbox": {
+      "intro": "将该智能体绑定到一个 persona 沙箱，以限制它可以调用的 tool。该选择从下一次 task 启动开始生效 —— 无需重启 daemon。",
+      "label": "Persona 沙箱",
+      "no_gating_option": "— 不启用 persona 沙箱 —",
+      "persona_not_configured": "本工作区尚未配置 persona。管理员启用 persona 后才能进行沙箱绑定。",
+      "admin_only_tooltip": "只有工作区管理员或所有者可以修改沙箱绑定。",
+      "saved_toast": "已保存沙箱绑定",
+      "save_failed_toast": "保存沙箱绑定失败"
     },
     "tools": {
       "_comment": "CEREBRO-PATCH(agent-tools-tab-local-empty): JEH-1290/1353/1360 W8 — tools tab body strings",

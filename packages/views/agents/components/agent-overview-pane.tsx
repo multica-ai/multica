@@ -6,6 +6,7 @@ import {
   BookOpenText,
   FileText,
   KeyRound,
+  Shield,
   Terminal,
   Wrench, // CEREBRO-PATCH(agent-tools-tab): W8 tools tab icon
 } from "lucide-react";
@@ -25,6 +26,8 @@ import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
+// CEREBRO-PATCH(agent-sandbox-tab): JEH-1088 — persona sandbox tab (cerebro-only)
+import { SandboxTab } from "./tabs/sandbox-tab";
 import { CerebroToolsTab } from "./tabs/cerebro-tools-tab"; // CEREBRO-PATCH(agent-tools-tab): W8 tools tab
 import { useT } from "../../i18n";
 
@@ -34,15 +37,17 @@ type DetailTab =
   | "skills"
   | "env"
   | "custom_args"
+  | "sandbox"
   | "tools"; // CEREBRO-PATCH(agent-tools-tab): W8 tools tab
 
 // CEREBRO-PATCH(agent-tools-tab): extended with "tools" key for W8
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "instructions" | "skills" | "environment" | "custom_args" | "tools"> = {
+const TAB_LABEL_KEY: Record<DetailTab, "activity" | "instructions" | "skills" | "environment" | "custom_args" | "sandbox" | "tools"> = {
   activity: "activity",
   instructions: "instructions",
   skills: "skills",
   env: "environment",
   custom_args: "custom_args",
+  sandbox: "sandbox",
   tools: "tools",
 };
 
@@ -55,6 +60,7 @@ const detailTabs: {
   { id: "skills", icon: BookOpenText },
   { id: "env", icon: KeyRound },
   { id: "custom_args", icon: Terminal },
+  { id: "sandbox", icon: Shield },
   { id: "tools", icon: Wrench }, // CEREBRO-PATCH(agent-tools-tab): W8 tools tab entry
 ];
 
@@ -179,6 +185,15 @@ export function AgentOverviewPane({
               runtimeDevice={runtime ?? undefined}
               onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}
+            />
+          </TabContent>
+        )}
+        {activeTab === "sandbox" && (
+          <TabContent>
+            {/* CEREBRO-PATCH(agent-sandbox-tab): JEH-1088 — sandbox tab body */}
+            <SandboxTab
+              agent={agent}
+              onSave={(updates) => onUpdate(agent.id, updates)}
             />
           </TabContent>
         )}

@@ -534,6 +534,31 @@ func (d *Daemon) clearWSHeartbeatAcks() {
 	d.wsHBMu.Unlock()
 }
 
+// refreshAgentVersions re-runs DetectVersion for every configured agent
+// CEREBRO-PATCH(daemon): persona integration additions.
+// and returns a copy of the resulting provider→version map. Logs (info)
+// when a version changed since the last refresh — operators can see CLI
+// upgrades surface in the daemon log even before the server picks them
+// up via heartbeat. Best-effort: a single agent failing logs and is
+// skipped; we don't break the heartbeat tick over CLI introspection.
+func (d *Daemon) refreshAgentVersions(ctx context.Context) map[string]string {
+	out := map[string]string{}
+	for name, entry := range d.cfg.Agents {
+		v, err := agent.DetectVersion(ctx, entry.Path)
+		if err != nil {
+			d.logger.Debug("refreshAgentVersions: detect failed", "provider", name, "error", err)
+			continue
+		}
+		old := d.agentVersion(name)
+		if old != "" && old != v {
+			d.logger.Info("CLI version changed", "provider", name, "old", old, "new", v)
+		}
+		d.setAgentVersion(name, v)
+		out[name] = v
+	}
+	return out
+}
+
 // Run starts the daemon: resolves auth, registers runtimes, then polls for tasks.
 func (d *Daemon) Run(ctx context.Context) error {
 	// Wrap context so handleUpdate can cancel the daemon for restart.
@@ -650,7 +675,7 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 }
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
-	var runtimes []map[string]string
+	var runtimes []map[string]any
 	for name, entry := range d.cfg.Agents {
 		version, err := detectAgentVersion(ctx, entry.Path)
 		if err != nil {
@@ -666,11 +691,12 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
-		runtimes = append(runtimes, map[string]string{
-			"name":    displayName,
-			"type":    name,
-			"version": version,
-			"status":  "online",
+		runtimes = append(runtimes, map[string]any{
+			"name":         displayName,
+			"type":         name,
+			"version":      version,
+			"status":       "online",
+			"capabilities": providerCapabilities(name),
 		})
 	}
 	if len(runtimes) == 0 {
@@ -1056,6 +1082,25 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			}
 		}
 
+		// CEREBRO-PATCH(daemon-account-prime-on-register): JEH-997 warm the
+		// identity-probe cache so the very first heartbeat (which fires
+		// almost immediately after register) already carries the runtime's
+		// detected login identity instead of a nil Account field.
+		for _, rt := range resp.Runtimes {
+			d.refreshHeartbeatAccount(rt.ID)
+		}
+
+		// E3 part 3 ("fornyes ved hver start"): refresh persona actor
+		// attributes for every persona-gated agent in this workspace. Without
+		// this, persona's UI keeps showing whatever attrs were written at the
+		// last spawn — stale tool lists if the daemon was upgraded with new
+		// capabilities, or no attrs at all for agents that haven't spawned
+		// since the actor was created. Best-effort and async: a missing
+		// PERSONA_URL or a 404 from persona shouldn't block daemon startup.
+		if d.personaEnabled() {
+			go d.refreshPersonaActorAttrs(ctx, id)
+		}
+
 		d.logger.Info("watching workspace", "workspace_id", id, "name", name, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos))
 		registered++
 	}
@@ -1151,7 +1196,10 @@ func (d *Daemon) runRuntimeHeartbeat(ctx context.Context, rid string) {
 		}
 	}
 
-	d.runHeartbeatTick(ctx, rid)
+	// First beat — fresh version snapshot so the very first heartbeat
+	// after a daemon (re)start already carries cli_version + capabilities
+	// instead of waiting one tick.
+	d.runHeartbeatTick(ctx, rid, d.refreshAgentVersions(ctx))
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -1160,12 +1208,16 @@ func (d *Daemon) runRuntimeHeartbeat(ctx context.Context, rid string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			d.runHeartbeatTick(ctx, rid)
+			// W4.2: re-detect CLI versions once per tick so the per-runtime
+			// heartbeat carries the current version + a fresh capabilities
+			// snapshot. The server compares against its stored cli_version
+			// and refreshes the runtime's capabilities row when they differ.
+			d.runHeartbeatTick(ctx, rid, d.refreshAgentVersions(ctx))
 		}
 	}
 }
 
-func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
+func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string, currentVersions map[string]string) {
 	// Skip HTTP heartbeat for runtimes that successfully acked a recent
 	// WebSocket heartbeat. The WS path keeps last_seen_at fresh and delivers
 	// actions, so the HTTP write would be a duplicate DB update. If the WS
@@ -1175,7 +1227,23 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 	if d.wsHeartbeatRecentlyAcked(rid) {
 		return
 	}
-	resp, err := d.client.SendHeartbeat(ctx, rid, SendHeartbeatOpts{})
+	// CEREBRO-PATCH(daemon-heartbeat-account-refresh): JEH-997 re-probe the
+	// runtime's login identity right before the beat so a fresh login
+	// propagates within one tick instead of one daemon restart. Probe is
+	// cheap (one fstat + one JSON parse) and the result is cached.
+	d.refreshHeartbeatAccount(rid)
+	opts := SendHeartbeatOpts{Account: d.heartbeatAccountFor(rid)}
+	// W4.2: advertise the runtime's current CLI version + tool capabilities
+	// so the server can update its capabilities snapshot on drift. Skipped
+	// when we couldn't resolve the runtime (e.g. just deregistered) or when
+	// the provider has no detected version yet.
+	if rt := d.findRuntime(rid); rt != nil {
+		if v := currentVersions[rt.Provider]; v != "" {
+			opts.CLIVersion = v
+			opts.Capabilities = providerCapabilities(rt.Provider)
+		}
+	}
+	resp, err := d.client.SendHeartbeat(ctx, rid, opts)
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -2293,7 +2361,50 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			agentEnv[k] = v
 		}
 	}
-	// CEREBRO-PATCH(claude-account-alias): CLAUDE_ACCOUNT=<email> -> CLAUDE_CONFIG_DIR=$HOME/.claude-accounts/<email>
+	// Persona integration (D3): when the agent has persona_sandbox set AND
+	// the daemon is configured for persona, prepare actor + settings.json
+	// before spawn. Adds env vars and a Claude-Code --settings file that
+	// wires the PreToolUse hook. No-op when either side is absent.
+	//
+	// JEH-1080: forward the spawning user + group memberships the server
+	// resolved at claim time. An empty subject is fine — the hook just
+	// won't carry group facts and any group-grant evaluates to no-match.
+	personaSubject := spawnPersonaSubject{
+		UserID:   task.PersonaSpawnUserID,
+		GroupIDs: task.PersonaSpawnGroupIDs,
+	}
+	personaSpawn, perr := d.preparePersonaSpawn(ctx, task.Agent, personaSubject, task.RuntimePersonaSandbox, provider, env.WorkDir, taskLog)
+	if perr != nil {
+		return TaskResult{}, fmt.Errorf("persona prep: %w", perr)
+	}
+	if personaSpawn != nil {
+		for k, v := range personaSpawn.Env {
+			agentEnv[k] = v
+		}
+		// Claude Code reads --settings as a CLI flag; passing the path here
+		// keeps the daemon's handling of provider-specific args local. Each
+		// provider that wants persona integration can opt in similarly.
+		if provider == "claude" && personaSpawn.SettingsPath != "" {
+			extraArgs := []string{"--settings", personaSpawn.SettingsPath}
+			if existing, ok := agentEnv["MULTICA_CLAUDE_EXTRA_ARGS"]; ok && existing != "" {
+				agentEnv["MULTICA_CLAUDE_EXTRA_ARGS"] = existing + " --settings " + personaSpawn.SettingsPath
+			} else {
+				agentEnv["MULTICA_CLAUDE_EXTRA_ARGS"] = extraArgs[0] + " " + extraArgs[1]
+			}
+		}
+		// Clear the per-spawn workdir from the actor's attributes when the
+		// task ends, regardless of outcome. Prevents persona's UI from
+		// showing a stale "currently working in /tmp/xyz" between spawns.
+		// Uses a fresh context so the call survives task-cancellation.
+		if personaSpawn.finishHook != nil {
+			defer func() {
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				personaSpawn.finishHook(cleanupCtx)
+			}()
+		}
+	}
+	// CEREBRO-PATCH(claude-account-alias): CLAUDE_ACCOUNT=<email> → CLAUDE_CONFIG_DIR=$HOME/.claude-accounts/<email>
 	if email := agentEnv["CLAUDE_ACCOUNT"]; email != "" && agentEnv["CLAUDE_CONFIG_DIR"] == "" {
 		agentEnv["CLAUDE_CONFIG_DIR"] = filepath.Join(os.Getenv("HOME"), ".claude-accounts", email)
 	}

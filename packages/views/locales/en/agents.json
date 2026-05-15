@@ -192,6 +192,7 @@
     "skills": "Skills",
     "environment": "Environment",
     "custom_args": "Custom Args",
+    "sandbox": "Sandbox",
     "tools": "Tools",
     "_comment_tools": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab label",
     "discard_dialog_title": "Discard unsaved changes?",
@@ -284,6 +285,15 @@
       "remove_aria": "Remove argument",
       "saved_toast": "Custom arguments saved",
       "save_failed_toast": "Failed to save custom arguments"
+    },
+    "sandbox": {
+      "intro": "Bind this agent to a persona sandbox to gate which tools it may call. The choice applies from the next task spawn — no daemon restart needed.",
+      "label": "Persona sandbox",
+      "no_gating_option": "— No persona gating —",
+      "persona_not_configured": "Persona is not configured for this workspace. Sandbox bindings are unavailable until an admin enables persona.",
+      "admin_only_tooltip": "Only workspace admins or owners can change the sandbox binding.",
+      "saved_toast": "Sandbox binding saved",
+      "save_failed_toast": "Failed to save sandbox binding"
     },
     "skills": {
       "intro": "Workspace skills assigned to this agent. Local runtime skills are always available automatically.",

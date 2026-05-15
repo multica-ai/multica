@@ -89,6 +89,17 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 	return resp
 }
 
+// CEREBRO-PATCH(persona-mask-attachment-embeds): JEH-1184 — shared response
+// builder for embedded attachment payloads. Keeps comment/chat embeds on the
+// same redaction path as the direct attachment endpoints.
+func (h *Handler) attachmentResponsesForCaller(r *http.Request, workspaceID string, attachments []db.Attachment) []AttachmentResponse {
+	resp := make([]AttachmentResponse, len(attachments))
+	for i, a := range attachments {
+		resp[i] = h.attachmentToResponse(a)
+	}
+	return h.maskAttachmentsForCaller(r, workspaceID, attachments, resp)
+}
+
 // groupAttachments loads attachments for multiple comments and groups them by comment ID.
 func (h *Handler) groupAttachments(r *http.Request, commentIDs []pgtype.UUID) map[string][]AttachmentResponse {
 	if len(commentIDs) == 0 {
@@ -104,9 +115,11 @@ func (h *Handler) groupAttachments(r *http.Request, commentIDs []pgtype.UUID) ma
 		return nil
 	}
 	grouped := make(map[string][]AttachmentResponse, len(commentIDs))
-	for _, a := range attachments {
-		cid := uuidToString(a.CommentID)
-		grouped[cid] = append(grouped[cid], h.attachmentToResponse(a))
+	for _, a := range h.attachmentResponsesForCaller(r, workspaceID, attachments) {
+		if a.CommentID == nil {
+			continue
+		}
+		grouped[*a.CommentID] = append(grouped[*a.CommentID], a)
 	}
 	return grouped
 }
@@ -126,9 +139,11 @@ func (h *Handler) groupChatAttachments(r *http.Request, messageIDs []pgtype.UUID
 		return nil
 	}
 	grouped := make(map[string][]AttachmentResponse, len(messageIDs))
-	for _, a := range attachments {
-		mid := uuidToString(a.ChatMessageID)
-		grouped[mid] = append(grouped[mid], h.attachmentToResponse(a))
+	for _, a := range h.attachmentResponsesForCaller(r, workspaceID, attachments) {
+		if a.ChatMessageID == nil {
+			continue
+		}
+		grouped[*a.ChatMessageID] = append(grouped[*a.ChatMessageID], a)
 	}
 	return grouped
 }
