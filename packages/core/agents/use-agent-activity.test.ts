@@ -41,6 +41,8 @@ const fullHistoryAgent: Agent = {
   custom_env: {},
   custom_args: [],
   custom_env_redacted: false,
+  mcp_config: null,
+  mcp_config_redacted: false,
   visibility: "workspace",
   status: "idle",
   max_concurrent_tasks: 1,

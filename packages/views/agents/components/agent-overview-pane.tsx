@@ -6,6 +6,7 @@ import {
   BookOpenText,
   FileText,
   KeyRound,
+  Plug,
   Terminal,
 } from "lucide-react";
 import type { Agent, AgentRuntime } from "@multica/core/types";
@@ -23,6 +24,7 @@ import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
+import { ConnectorsTab } from "./tabs/connectors-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { useT } from "../../i18n";
 
@@ -31,13 +33,15 @@ type DetailTab =
   | "instructions"
   | "skills"
   | "env"
+  | "connectors"
   | "custom_args";
 
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "instructions" | "skills" | "environment" | "custom_args"> = {
+const TAB_LABEL_KEY: Record<DetailTab, "activity" | "instructions" | "skills" | "environment" | "connectors" | "custom_args"> = {
   activity: "activity",
   instructions: "instructions",
   skills: "skills",
   env: "environment",
+  connectors: "connectors",
   custom_args: "custom_args",
 };
 
@@ -49,6 +53,7 @@ const detailTabs: {
   { id: "instructions", icon: FileText },
   { id: "skills", icon: BookOpenText },
   { id: "env", icon: KeyRound },
+  { id: "connectors", icon: Plug },
   { id: "custom_args", icon: Terminal },
 ];
 
@@ -161,6 +166,16 @@ export function AgentOverviewPane({
             <EnvTab
               agent={agent}
               readOnly={agent.custom_env_redacted}
+              onSave={(updates) => onUpdate(agent.id, updates)}
+              onDirtyChange={setActiveDirty}
+            />
+          </TabContent>
+        )}
+        {activeTab === "connectors" && (
+          <TabContent>
+            <ConnectorsTab
+              agent={agent}
+              readOnly={agent.mcp_config_redacted}
               onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}
             />
