@@ -543,42 +543,46 @@ func createPrivateAgent(t *testing.T) string {
 	return id
 }
 
-// adminMember holds credentials for a second user added as admin to the workspace.
-type adminMember struct {
+type testMemberAccount struct {
 	UserID string
 	Token  string
 }
 
-// createAdminMember creates a second user with admin role in the test workspace.
-func createAdminMember(t *testing.T) adminMember {
+func createWorkspaceTestMember(t *testing.T, email, name, role string) testMemberAccount {
 	t.Helper()
 	ctx := context.Background()
-	const (
-		email = "integration-admin@multica.ai"
-		name  = "Admin Tester"
-	)
-	// Cleanup any leftover from previous runs.
 	testPool.Exec(ctx, `DELETE FROM member WHERE user_id IN (SELECT id FROM "user" WHERE email = $1)`, email)
 	testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
 
 	var userID string
 	err := testPool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`, name, email).Scan(&userID)
 	if err != nil {
-		t.Fatalf("failed to create admin user: %v", err)
+		t.Fatalf("failed to create test user: %v", err)
 	}
-	_, err = testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')`, testWorkspaceID, userID)
+	_, err = testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)`, testWorkspaceID, userID, role)
 	if err != nil {
-		t.Fatalf("failed to add admin member: %v", err)
+		t.Fatalf("failed to add test member: %v", err)
 	}
 	token, err := generateTestJWT(userID, email, name)
 	if err != nil {
-		t.Fatalf("failed to generate admin JWT: %v", err)
+		t.Fatalf("failed to generate test JWT: %v", err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM member WHERE user_id = $1`, userID)
 		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
 	})
-	return adminMember{UserID: userID, Token: token}
+	return testMemberAccount{UserID: userID, Token: token}
+}
+
+// createAdminMember creates a second user with admin role in the test workspace.
+func createAdminMember(t *testing.T) testMemberAccount {
+	t.Helper()
+	return createWorkspaceTestMember(t, "integration-admin@multica.ai", "Admin Tester", "admin")
+}
+
+func createPlainMember(t *testing.T) testMemberAccount {
+	t.Helper()
+	return createWorkspaceTestMember(t, "integration-member@multica.ai", "Member Tester", "member")
 }
 
 // authRequestWithToken makes an authenticated request using a specific token.
@@ -605,11 +609,14 @@ func authRequestWithToken(t *testing.T, method, path string, body any, token str
 }
 
 // postCommentWithToken posts a comment using a specific auth token.
-func postCommentWithToken(t *testing.T, issueID, content, token string) string {
+func postCommentWithToken(t *testing.T, issueID, content, token string, parentID ...*string) string {
 	t.Helper()
 	body := map[string]any{
 		"content": content,
 		"type":    "comment",
+	}
+	if len(parentID) > 0 && parentID[0] != nil {
+		body["parent_id"] = *parentID[0]
 	}
 	resp := authRequestWithToken(t, "POST", "/api/issues/"+issueID+"/comments", body, token)
 	if resp.StatusCode != 201 {
@@ -622,9 +629,20 @@ func postCommentWithToken(t *testing.T, issueID, content, token string) string {
 	return comment["id"].(string)
 }
 
-// TestCommentTriggerPrivateAgentVisibility verifies that private agents can
-// only be triggered via @mention by their owner — workspace admins and other
-// members must be blocked.
+func allowPrivateAgentForMember(t *testing.T, privateAgentID string, userIDs ...string) {
+	t.Helper()
+	resp := authRequest(t, "PUT", "/api/agents/"+privateAgentID+"/allowed-principals?workspace_id="+testWorkspaceID, map[string]any{
+		"user_ids": userIDs,
+	})
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("UpdateAgentAllowedPrincipals: expected 200, got %d: %s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+}
+
+// TestCommentTriggerPrivateAgentVisibility verifies private @mention dispatch.
 func TestCommentTriggerPrivateAgentVisibility(t *testing.T) {
 	privateAgentID := createPrivateAgent(t) // owned by testUserID
 	issueID := createIssue(t, "Private agent visibility test")
@@ -650,6 +668,42 @@ func TestCommentTriggerPrivateAgentVisibility(t *testing.T) {
 		postCommentWithToken(t, issueID, content, admin.Token) // posted by admin (not owner)
 		if n := countPendingTasks(t, issueID); n != 0 {
 			t.Errorf("expected 0 pending tasks (admin should not trigger private agent), got %d", n)
+		}
+	})
+
+	t.Run("allowed member can mention private agent", func(t *testing.T) {
+		clearTasks(t, issueID)
+		member := createPlainMember(t)
+		allowPrivateAgentForMember(t, privateAgentID, member.UserID)
+
+		content := fmt.Sprintf("[@PrivateAgent](mention://agent/%s) do something", privateAgentID)
+		postCommentWithToken(t, issueID, content, member.Token)
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (allowed member mentions private agent), got %d", n)
+		}
+	})
+
+	t.Run("allowed member can reply directly to private agent comment", func(t *testing.T) {
+		clearTasks(t, issueID)
+		member := createPlainMember(t)
+		allowPrivateAgentForMember(t, privateAgentID, member.UserID)
+		threadID := postCommentAsAgent(t, issueID, "I can help with this.", privateAgentID, nil)
+
+		postCommentWithToken(t, issueID, "Please continue with the next step", member.Token, strPtr(threadID))
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (allowed member replies to private agent), got %d", n)
+		}
+	})
+
+	t.Run("admin cannot reply directly to private agent comment without allowlist", func(t *testing.T) {
+		clearTasks(t, issueID)
+		admin := createAdminMember(t)
+		allowPrivateAgentForMember(t, privateAgentID)
+		threadID := postCommentAsAgent(t, issueID, "I can help with this.", privateAgentID, nil)
+
+		postCommentWithToken(t, issueID, "Please continue with the next step", admin.Token, strPtr(threadID))
+		if n := countPendingTasks(t, issueID); n != 0 {
+			t.Errorf("expected 0 pending tasks (admin is not allowed for private agent), got %d", n)
 		}
 	})
 }

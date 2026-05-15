@@ -12,6 +12,8 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Agent, CreateAgentRequest, UpdateAgentRequest } from "@multica/core/types";
 import {
+  agentAllowedPrincipalKeys,
+  agentAllowedPrincipalsOptions,
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
@@ -85,6 +87,13 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   // returns below don't violate the rules of hooks. Backend gates archive
   // and restore identically to edit, so a single `canEdit` covers them all.
   const { canEdit } = useAgentPermissions(agent, wsId);
+  const canManageAllowedPrincipals =
+    !!agent?.owner_id && agent.owner_id === currentUser?.id;
+  const { data: allowedPrincipals = [], isLoading: allowedPrincipalsLoading } =
+    useQuery({
+      ...agentAllowedPrincipalsOptions(wsId, agentId),
+      enabled: !!agent && agent.visibility === "private" && canManageAllowedPrincipals,
+    });
 
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [showDuplicate, setShowDuplicate] = useState(false);
@@ -110,6 +119,23 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     try {
       await api.updateAgent(id, data as UpdateAgentRequest);
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      toast.success(t(($) => $.detail.agent_updated_toast));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
+      throw e;
+    }
+  };
+
+  const handleUpdateAllowedPrincipals = async (userIds: string[]) => {
+    if (!canManageAllowedPrincipals || !agent) return;
+    try {
+      await api.updateAgentAllowedPrincipals(agent.id, { user_ids: userIds });
+      await Promise.all([
+        qc.invalidateQueries({
+          queryKey: agentAllowedPrincipalKeys.detail(wsId, agent.id),
+        }),
+        qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) }),
+      ]);
       toast.success(t(($) => $.detail.agent_updated_toast));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
@@ -237,7 +263,11 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           members={members}
           currentUserId={currentUser?.id ?? null}
           canEdit={canEdit.allowed}
+          canManageAllowedPrincipals={canManageAllowedPrincipals}
+          allowedPrincipalUserIds={allowedPrincipals.map((p) => p.user_id)}
+          allowedPrincipalsLoading={allowedPrincipalsLoading}
           onUpdate={handleUpdate}
+          onUpdateAllowedPrincipals={handleUpdateAllowedPrincipals}
         />
 
         <AgentOverviewPane

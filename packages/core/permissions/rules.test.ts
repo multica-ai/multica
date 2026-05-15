@@ -155,6 +155,14 @@ describe("isAgentSelectable", () => {
     const a = makeAgent({ visibility: "private", owner_id: ALICE });
     expect(isAgentSelectable(a, BOB)).toBe(false);
   });
+  it("private agent is selectable by an allowed user", () => {
+    const a = makeAgent({
+      visibility: "private",
+      owner_id: ALICE,
+      allowed_user_ids: [BOB],
+    });
+    expect(isAgentSelectable(a, BOB)).toBe(true);
+  });
   it("archived agent is never selectable", () => {
     const a = makeAgent({
       visibility: "workspace",
@@ -189,6 +197,16 @@ describe("canAssignAgentToIssue", () => {
     const a = makeAgent({ visibility: "private", owner_id: ALICE });
     expect(
       canAssignAgentToIssue(a, { userId: ALICE, role: "member" }).allowed,
+    ).toBe(true);
+  });
+  it("allows an allowed user to assign a private agent", () => {
+    const a = makeAgent({
+      visibility: "private",
+      owner_id: ALICE,
+      allowed_user_ids: [BOB],
+    });
+    expect(
+      canAssignAgentToIssue(a, { userId: BOB, role: "member" }).allowed,
     ).toBe(true);
   });
   it("denies workspace admin from assigning someone else's private agent", () => {

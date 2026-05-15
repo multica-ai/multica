@@ -45,6 +45,16 @@ type Agent struct {
 	CustomEnvCopiedPending bool `json:"custom_env_copied_pending"`
 }
 
+type AgentAllowedPrincipal struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	PrincipalType string             `json:"principal_type"`
+	PrincipalID   pgtype.UUID        `json:"principal_id"`
+	CreatedBy     pgtype.UUID        `json:"created_by"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type AgentRuntime struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

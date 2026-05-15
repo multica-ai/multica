@@ -12,6 +12,8 @@ import type {
   Agent,
   CreateAgentRequest,
   UpdateAgentRequest,
+  AgentAllowedPrincipal,
+  UpdateAgentAllowedPrincipalsRequest,
   AgentTask,
   TaskInteraction,
   TaskTraceResponse,
@@ -839,6 +841,20 @@ export class ApiClient {
 
   async updateAgent(id: string, data: UpdateAgentRequest): Promise<Agent> {
     return this.fetch(`/api/agents/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listAgentAllowedPrincipals(agentId: string): Promise<AgentAllowedPrincipal[]> {
+    return this.fetch(`/api/agents/${agentId}/allowed-principals`);
+  }
+
+  async updateAgentAllowedPrincipals(
+    agentId: string,
+    data: UpdateAgentAllowedPrincipalsRequest,
+  ): Promise<AgentAllowedPrincipal[]> {
+    return this.fetch(`/api/agents/${agentId}/allowed-principals`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
