@@ -27,3 +27,10 @@ export interface Comment {
   resolved_by_type: CommentAuthorType | null;
   resolved_by_id: string | null;
 }
+
+// CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 frontend response for moving a thread to a sub-issue.
+export interface MoveCommentToSubIssueResponse {
+  issue_id: string;
+  identifier: string;
+  number: number;
+}

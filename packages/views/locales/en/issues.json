@@ -209,6 +209,16 @@
       "bar_authors_more_other": "{{names}} and {{count}} others",
       "resolve_failed": "Failed to resolve thread",
       "unresolve_failed": "Failed to unresolve thread"
+    },
+    "_move_to_subissue": "CEREBRO-PATCH(i18n-comment-move-subissue): JEH-1309 move comment thread to sub-issue UI",
+    "move": {
+      "action": "Move to sub-issue",
+      "moving_action": "Moving...",
+      "title": "Move thread to sub-issue?",
+      "description_one": "This comment will become a new sub-issue. The original comment will be replaced with a link.",
+      "description_other": "This comment and {{count}} replies will become a new sub-issue. The original thread will be replaced with a link.",
+      "success_toast": "Moved to {{identifier}}",
+      "failed_toast": "Failed to move thread"
     }
   },
   "reply": {

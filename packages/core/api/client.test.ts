@@ -126,6 +126,26 @@ describe("ApiClient", () => {
     expect(init?.body).toBe(JSON.stringify({ paused: true }));
   });
 
+  it("moveCommentToSubIssue POSTs to the comment thread move endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        issue_id: "issue-2",
+        identifier: "JEH-1310",
+        number: 1310,
+      }), { status: 201, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const res = await client.moveCommentToSubIssue("comment-1", "Follow-up thread");
+
+    expect(res.identifier).toBe("JEH-1310");
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://api.example.test/api/comments/comment-1/move-to-subissue");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ title: "Follow-up thread" }));
+  });
+
   it("updateMyPreferences PATCHes the preferences endpoint with the partial blob", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

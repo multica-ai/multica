@@ -65,7 +65,8 @@ export type {
   InboxItemType,
 } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
-export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
+// CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 export thread move response type.
+export type { Comment, CommentType, CommentAuthorType, Reaction, MoveCommentToSubIssueResponse } from "./comment";
 export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
 export type {
   TimelineEntry,

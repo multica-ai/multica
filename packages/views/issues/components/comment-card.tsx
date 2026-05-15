@@ -3,7 +3,7 @@
 // CEREBRO-PATCH(comment-card-cerebro): cerebro modification of upstream file
 
 import { memo, useCallback, useRef, useState } from "react";
-import { CheckCircle2, ChevronRight, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, Copy, GitFork, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -94,6 +94,9 @@ interface CommentCardProps {
   onEdit: (commentId: string, content: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
+  /** True when the root thread can be lifted into a child issue. */
+  canMoveToSubIssue?: boolean;
+  onMoveToSubIssue?: (commentId: string) => Promise<void>;
   /** Toggle the resolved state on the thread root. Only invoked for root entries. */
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
   /**
@@ -137,6 +140,47 @@ function DeleteCommentDialog({
           <AlertDialogCancel>{t(($) => $.comment.cancel_action)}</AlertDialogCancel>
           <AlertDialogAction variant="destructive" onClick={onConfirm}>
             {t(($) => $.comment.delete_action)}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+// CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 confirmation before lifting a thread to a sub-issue.
+function MoveCommentToSubIssueDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+  moving,
+  replyCount,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+  moving?: boolean;
+  replyCount: number;
+}) {
+  const { t } = useT("issues");
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t(($) => $.comment.move.title)}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t(($) => $.comment.move.description, { count: replyCount })}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={moving}>{t(($) => $.comment.cancel_action)}</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={moving}
+            onClick={(event) => {
+              event.preventDefault();
+              onConfirm();
+            }}
+          >
+            {moving ? t(($) => $.comment.move.moving_action) : t(($) => $.comment.move.action)}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -353,6 +397,8 @@ function CommentCardImpl({
   onEdit,
   onDelete,
   onToggleReaction,
+  canMoveToSubIssue = false,
+  onMoveToSubIssue,
   onResolveToggle,
   onCollapseResolved,
   highlightedCommentId,
@@ -379,8 +425,11 @@ function CommentCardImpl({
   // own their own outputs.
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
   const canDeleteEntry = isOwn || canModerate;
+  const canMoveEntry = canMoveToSubIssue && !!onMoveToSubIssue && (isOwn || canModerate);
   const isTemp = entry.id.startsWith("temp-");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmMove, setConfirmMove] = useState(false);
+  const [moving, setMoving] = useState(false);
 
   const startEdit = () => {
     cancelledRef.current = false;
@@ -422,6 +471,18 @@ function CommentCardImpl({
   const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
 
   const isHighlighted = highlightedCommentId === entry.id;
+  const handleConfirmMove = useCallback(async () => {
+    if (!onMoveToSubIssue) return;
+    setMoving(true);
+    try {
+      await onMoveToSubIssue(entry.id);
+      setConfirmMove(false);
+    } catch {
+      toast.error(t(($) => $.comment.move.failed_toast));
+    } finally {
+      setMoving(false);
+    }
+  }, [entry.id, onMoveToSubIssue, t]);
 
   return (
     <Card className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isTemp && "opacity-60", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
@@ -514,6 +575,15 @@ function CommentCardImpl({
                       </DropdownMenuItem>
                     </>
                   )}
+                  {canMoveEntry && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => setConfirmMove(true)}>
+                        <GitFork className="h-3.5 w-3.5" />
+                        {t(($) => $.comment.move.action)}
+                      </DropdownMenuItem>
+                    </>
+                  )}
                   {(canEditEntry || canDeleteEntry) && (
                     <>
                       <DropdownMenuSeparator />
@@ -539,6 +609,13 @@ function CommentCardImpl({
                 onOpenChange={setConfirmDelete}
                 onConfirm={() => onDelete(entry.id)}
                 hasReplies
+              />
+              <MoveCommentToSubIssueDialog
+                open={confirmMove}
+                onOpenChange={setConfirmMove}
+                onConfirm={handleConfirmMove}
+                moving={moving}
+                replyCount={replyCount}
               />
               </div>
             )}

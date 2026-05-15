@@ -77,7 +77,7 @@ import { PropRow } from "../../common/prop-row";
 import type { Issue, IssueStatus, IssuePriority, TimelineEntry, IssueSubscriber, UpdateIssueRequest } from "@multica/core/types";
 import { ALL_STATUSES, STATUS_CONFIG, PRIORITY_ORDER, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, DueDatePicker, AssigneePicker, LabelPicker, canAssignAgent } from ".";
-import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { useMoveCommentToSubIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { PrivacyToggle } from "@multica/cerebro-access/views";
@@ -547,6 +547,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
+  const { mutateAsync: moveCommentToSubIssue } = useMoveCommentToSubIssue(id, wsId);
+  const handleMoveCommentToSubIssue = useCallback(
+    async (commentId: string) => {
+      const result = await moveCommentToSubIssue({ commentId });
+      toast.success(t(($) => $.comment.move.success_toast, { identifier: result.identifier }));
+    },
+    [moveCommentToSubIssue, t],
+  );
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
@@ -730,6 +738,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // When feature is disabled, fall back to plain issue rendering so direct URLs still resolve,
   // just without channel chrome.
   const channelsEnabled = useFeatureFlag("cerebro_channels");
+  // CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 gate the thread lift UI.
+  const moveCommentToSubIssueEnabled = useFeatureFlag("cerebro_move_comment_to_subissue");
   const issueKind = issue?.kind ?? "issue";
   const isChannel = channelsEnabled && issueKind === "channel";
   const isDM = channelsEnabled && issueKind === "dm";
@@ -1790,6 +1800,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                         onDelete={deleteComment}
                         onToggleReaction={handleToggleReaction}
                         onResolveToggle={handleResolveToggle}
+                        canMoveToSubIssue={moveCommentToSubIssueEnabled && issue?.status !== "cancelled"}
+                        onMoveToSubIssue={handleMoveCommentToSubIssue}
                         onCollapseResolved={isResolved ? () => toggleResolvedExpand(entry.id, false) : undefined}
                         highlightedCommentId={highlightedId}
                       />

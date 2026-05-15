@@ -567,6 +567,22 @@ export function useDeleteComment(issueId: string) {
   });
 }
 
+// CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 move a root comment thread into a new child issue.
+export function useMoveCommentToSubIssue(issueId: string, wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ commentId, title }: { commentId: string; title?: string }) =>
+      api.moveCommentToSubIssue(commentId, title),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.children(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+    },
+  });
+}
+
 export function useResolveComment(issueId: string) {
   const qc = useQueryClient();
   return useMutation({

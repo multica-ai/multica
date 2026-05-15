@@ -23,6 +23,7 @@ import type {
   InboxItem,
   IssueSubscriber,
   Comment,
+  MoveCommentToSubIssueResponse,
   Reaction,
   IssueReaction,
   Workspace,
@@ -1151,6 +1152,14 @@ export class ApiClient {
 
   async deleteComment(commentId: string): Promise<void> {
     await this.fetch(`/api/comments/${commentId}`, { method: "DELETE" });
+  }
+
+  // CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 call backend thread lift endpoint.
+  async moveCommentToSubIssue(commentId: string, title?: string): Promise<MoveCommentToSubIssueResponse> {
+    return this.fetch(`/api/comments/${commentId}/move-to-subissue`, {
+      method: "POST",
+      body: JSON.stringify(title ? { title } : {}),
+    });
   }
 
   async resolveComment(commentId: string): Promise<Comment> {
