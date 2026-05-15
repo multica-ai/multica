@@ -2344,6 +2344,7 @@ type CRMAISettingResponse struct {
 	AssigneeAgentID *string         `json:"assignee_agent_id"`
 	MaxItemsPerRun  int32           `json:"max_items_per_run"`
 	Config          json.RawMessage `json:"config"`
+	LastResult      json.RawMessage `json:"last_result"`
 	LastCheckedAt   *time.Time      `json:"last_checked_at"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
@@ -2360,8 +2361,8 @@ type UpdateCRMAISettingRequest struct {
 func defaultCRMAISettings(workspaceID pgtype.UUID) []CRMAISettingResponse {
 	now := time.Now().UTC()
 	return []CRMAISettingResponse{
-		{WorkspaceID: uuidToString(workspaceID), AutomationKey: "email_pending_reply", Enabled: true, IntervalMinutes: 5, MaxItemsPerRun: 5, Config: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now},
-		{WorkspaceID: uuidToString(workspaceID), AutomationKey: "due_followup", Enabled: true, IntervalMinutes: 15, MaxItemsPerRun: 10, Config: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now},
+		{WorkspaceID: uuidToString(workspaceID), AutomationKey: "email_pending_reply", Enabled: true, IntervalMinutes: 5, MaxItemsPerRun: 5, Config: json.RawMessage(`{}`), LastResult: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now},
+		{WorkspaceID: uuidToString(workspaceID), AutomationKey: "due_followup", Enabled: true, IntervalMinutes: 15, MaxItemsPerRun: 10, Config: json.RawMessage(`{}`), LastResult: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now},
 	}
 }
 
@@ -2383,6 +2384,7 @@ func (h *Handler) ListCRMAISettings(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(s.assignee_agent_id, d.assignee_agent_id) AS assignee_agent_id,
 		       COALESCE(s.max_items_per_run, d.max_items_per_run) AS max_items_per_run,
 		       COALESCE(s.config, d.config) AS config,
+		       COALESCE(s.last_result, '{}'::jsonb) AS last_result,
 		       s.last_checked_at,
 		       COALESCE(s.created_at, now()) AS created_at,
 		       COALESCE(s.updated_at, now()) AS updated_at
@@ -2401,7 +2403,8 @@ func (h *Handler) ListCRMAISettings(w http.ResponseWriter, r *http.Request) {
 		var assignee pgtype.UUID
 		var lastChecked pgtype.Timestamptz
 		var config []byte
-		if err := rows.Scan(&item.WorkspaceID, &item.AutomationKey, &item.Enabled, &item.IntervalMinutes, &assignee, &item.MaxItemsPerRun, &config, &lastChecked, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		var lastResult []byte
+		if err := rows.Scan(&item.WorkspaceID, &item.AutomationKey, &item.Enabled, &item.IntervalMinutes, &assignee, &item.MaxItemsPerRun, &config, &lastResult, &lastChecked, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to scan CRM AI settings")
 			return
 		}
@@ -2414,6 +2417,7 @@ func (h *Handler) ListCRMAISettings(w http.ResponseWriter, r *http.Request) {
 			item.LastCheckedAt = &t
 		}
 		item.Config = json.RawMessage(config)
+		item.LastResult = json.RawMessage(lastResult)
 		settings = append(settings, item)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"settings": settings})
@@ -2477,6 +2481,7 @@ func (h *Handler) UpdateCRMAISetting(w http.ResponseWriter, r *http.Request) {
 	var assigneeOut pgtype.UUID
 	var lastChecked pgtype.Timestamptz
 	var configOut []byte
+	var lastResultOut []byte
 	err := h.DB.QueryRow(r.Context(), `
 		INSERT INTO crm_ai_setting (workspace_id, automation_key, enabled, interval_minutes, assignee_agent_id, max_items_per_run, config)
 		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
@@ -2487,8 +2492,8 @@ func (h *Handler) UpdateCRMAISetting(w http.ResponseWriter, r *http.Request) {
 		  max_items_per_run = EXCLUDED.max_items_per_run,
 		  config = EXCLUDED.config,
 		  updated_at = now()
-		RETURNING workspace_id, automation_key, enabled, interval_minutes, assignee_agent_id, max_items_per_run, config, last_checked_at, created_at, updated_at`,
-		workspaceID, key, enabled, intervalMinutes, assignee, maxItems, string(config)).Scan(&item.WorkspaceID, &item.AutomationKey, &item.Enabled, &item.IntervalMinutes, &assigneeOut, &item.MaxItemsPerRun, &configOut, &lastChecked, &item.CreatedAt, &item.UpdatedAt)
+		RETURNING workspace_id, automation_key, enabled, interval_minutes, assignee_agent_id, max_items_per_run, config, COALESCE(last_result, '{}'::jsonb), last_checked_at, created_at, updated_at`,
+		workspaceID, key, enabled, intervalMinutes, assignee, maxItems, string(config)).Scan(&item.WorkspaceID, &item.AutomationKey, &item.Enabled, &item.IntervalMinutes, &assigneeOut, &item.MaxItemsPerRun, &configOut, &lastResultOut, &lastChecked, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save CRM AI setting")
 		return
@@ -2502,5 +2507,6 @@ func (h *Handler) UpdateCRMAISetting(w http.ResponseWriter, r *http.Request) {
 		item.LastCheckedAt = &t
 	}
 	item.Config = json.RawMessage(configOut)
+	item.LastResult = json.RawMessage(lastResultOut)
 	writeJSON(w, http.StatusOK, item)
 }
