@@ -74,7 +74,8 @@ func resolveCRMIMAPSecret(ref string) (string, error) {
 		}
 		return value, nil
 	}
-	return "", fmt.Errorf("unsupported IMAP secret_ref")
+	// Backward compatibility for existing rows where secret_ref stored the password directly.
+	return ref, nil
 }
 
 func encodeCRMIMAPInlineSecret(secret string) string {
