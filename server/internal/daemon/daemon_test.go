@@ -670,6 +670,8 @@ func TestEnrichTaskNotificationPayloadUsesTimeout(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed >= 4*time.Second {
 		t.Fatalf("issue lookup did not timeout quickly enough: %s", elapsed)
+	}
+}
 
 // TestBuildPromptSquadLeaderNoActionProhibition verifies that when a squad
 // leader is triggered by another agent's comment, the per-turn prompt
@@ -688,7 +690,7 @@ func TestBuildPromptSquadLeaderNoActionProhibition(t *testing.T) {
 			Name:         "Leader",
 			Instructions: "You lead the team.\n\n## Squad Operating Protocol\n\nYou are the LEADER.",
 		},
-	}, "claude")
+	})
 
 	for _, want := range []string{
 		"Squad leader no_action rule",
@@ -711,7 +713,7 @@ func TestBuildPromptSquadLeaderNoActionProhibition(t *testing.T) {
 			Name:         "Regular",
 			Instructions: "You are a regular agent.",
 		},
-	}, "claude")
+	})
 
 	if strings.Contains(nonLeaderPrompt, "Squad leader no_action rule") {
 		t.Fatalf("non-squad-leader prompt should NOT contain squad leader rule\n---\n%s", nonLeaderPrompt)
