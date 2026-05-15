@@ -298,6 +298,13 @@ func (h *Handler) resolveFeishuSender(ctx context.Context, client *service.Feish
 }
 
 func (h *Handler) handleFeishuChatMessage(ctx context.Context, client *service.FeishuBotClient, cfg db.AgentFeishuBotConfig, user db.User, senderID, chatID, text string) error {
+	if isNewFeishuChatCommand(text) {
+		if _, err := h.createFeishuChatSession(ctx, cfg, user, senderID, chatID); err != nil {
+			return err
+		}
+		return client.SendText(ctx, "chat_id", chatID, "已新建对话，后续消息会从新的上下文开始。")
+	}
+
 	binding, err := h.Queries.GetFeishuAgentChatBinding(ctx, db.GetFeishuAgentChatBindingParams{
 		AppID:          cfg.AppID,
 		FeishuChatID:   chatID,
@@ -308,28 +315,8 @@ func (h *Handler) handleFeishuChatMessage(ctx context.Context, client *service.F
 		session, err = h.Queries.GetChatSession(ctx, binding.ChatSessionID)
 	}
 	if err != nil {
-		agent, err := h.Queries.GetAgent(ctx, cfg.AgentID)
+		session, err = h.createFeishuChatSession(ctx, cfg, user, senderID, chatID)
 		if err != nil {
-			return err
-		}
-		session, err = h.Queries.CreateChatSession(ctx, db.CreateChatSessionParams{
-			WorkspaceID: cfg.WorkspaceID,
-			AgentID:     cfg.AgentID,
-			CreatorID:   user.ID,
-			Title:       "Feishu - " + agent.Name,
-		})
-		if err != nil {
-			return err
-		}
-		if _, err := h.Queries.UpsertFeishuAgentChatBinding(ctx, db.UpsertFeishuAgentChatBindingParams{
-			AppID:          cfg.AppID,
-			WorkspaceID:    cfg.WorkspaceID,
-			AgentID:        cfg.AgentID,
-			UserID:         user.ID,
-			FeishuChatID:   chatID,
-			FeishuSenderID: senderID,
-			ChatSessionID:  session.ID,
-		}); err != nil {
 			return err
 		}
 	}
@@ -355,6 +342,43 @@ func (h *Handler) handleFeishuChatMessage(ctx context.Context, client *service.F
 		CreatedAt:     timestampToString(msg.CreatedAt),
 	})
 	return client.SendText(ctx, "chat_id", chatID, "已收到，正在处理。")
+}
+
+func (h *Handler) createFeishuChatSession(ctx context.Context, cfg db.AgentFeishuBotConfig, user db.User, senderID, chatID string) (db.ChatSession, error) {
+	agent, err := h.Queries.GetAgent(ctx, cfg.AgentID)
+	if err != nil {
+		return db.ChatSession{}, err
+	}
+	session, err := h.Queries.CreateChatSession(ctx, db.CreateChatSessionParams{
+		WorkspaceID: cfg.WorkspaceID,
+		AgentID:     cfg.AgentID,
+		CreatorID:   user.ID,
+		Title:       "Feishu - " + agent.Name,
+	})
+	if err != nil {
+		return db.ChatSession{}, err
+	}
+	if _, err := h.Queries.UpsertFeishuAgentChatBinding(ctx, db.UpsertFeishuAgentChatBindingParams{
+		AppID:          cfg.AppID,
+		WorkspaceID:    cfg.WorkspaceID,
+		AgentID:        cfg.AgentID,
+		UserID:         user.ID,
+		FeishuChatID:   chatID,
+		FeishuSenderID: senderID,
+		ChatSessionID:  session.ID,
+	}); err != nil {
+		return db.ChatSession{}, err
+	}
+	return session, nil
+}
+
+func isNewFeishuChatCommand(text string) bool {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "/new", "new", "/reset", "reset", "新建对话", "开始新对话", "新对话", "重新开始":
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *Handler) handleFeishuIssueMessage(ctx context.Context, client *service.FeishuBotClient, cfg db.AgentFeishuBotConfig, user db.User, issue db.Issue, chatID, threadID, text string) error {

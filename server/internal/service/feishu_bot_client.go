@@ -53,6 +53,27 @@ func (c *FeishuBotClient) SendText(ctx context.Context, receiveIDType, receiveID
 	return c.doFeishuPost(ctx, token, endpoint, body, "Feishu message send failed")
 }
 
+func (c *FeishuBotClient) SendCard(ctx context.Context, receiveIDType, receiveID string, card map[string]any) error {
+	token, err := c.tenantAccessToken(ctx)
+	if err != nil {
+		return err
+	}
+	content, err := json.Marshal(card)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(map[string]string{
+		"receive_id": receiveID,
+		"msg_type":   "interactive",
+		"content":    string(content),
+	})
+	if err != nil {
+		return err
+	}
+	endpoint := c.baseURL + "/open-apis/im/v1/messages?receive_id_type=" + url.QueryEscape(receiveIDType)
+	return c.doFeishuPost(ctx, token, endpoint, body, "Feishu card send failed")
+}
+
 func (c *FeishuBotClient) ReplyText(ctx context.Context, messageID, text string) error {
 	token, err := c.tenantAccessToken(ctx)
 	if err != nil {

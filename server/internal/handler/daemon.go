@@ -1560,14 +1560,15 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 
 		if workspaceID != "" {
 			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID, protocol.TaskMessagePayload{
-				TaskID:  taskID,
-				IssueID: uuidToString(task.IssueID),
-				Seq:     msg.Seq,
-				Type:    msg.Type,
-				Tool:    msg.Tool,
-				Content: msg.Content,
-				Input:   msg.Input,
-				Output:  msg.Output,
+				TaskID:        taskID,
+				IssueID:       uuidToString(task.IssueID),
+				ChatSessionID: uuidToString(task.ChatSessionID),
+				Seq:           msg.Seq,
+				Type:          msg.Type,
+				Tool:          msg.Tool,
+				Content:       msg.Content,
+				Input:         msg.Input,
+				Output:        msg.Output,
 			})
 		}
 	}
