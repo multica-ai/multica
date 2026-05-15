@@ -22,9 +22,10 @@ type CRMAISetting = {
   assignee_agent_id?: string | null;
   max_items_per_run: number;
   last_checked_at?: string | null;
+  config?: { follow_up_lead_days?: number } | null;
 };
 
-type FormState = Pick<CRMAISetting, "enabled" | "interval_minutes" | "assignee_agent_id" | "max_items_per_run">;
+type FormState = Pick<CRMAISetting, "enabled" | "interval_minutes" | "assignee_agent_id" | "max_items_per_run"> & { follow_up_lead_days: number };
 
 const meta: Record<SettingKey, { title: string; description: string; icon: typeof Mail }> = {
   email_pending_reply: {
@@ -34,7 +35,7 @@ const meta: Record<SettingKey, { title: string; description: string; icon: typeo
   },
   due_followup: {
     title: "到期客户跟进",
-    description: "定时检查 next_follow_up_at 到期客户；只有无未完成跟进 issue 时才启动 AI。",
+    description: "定时检查到期或即将到期的客户；只有无未完成跟进 issue 时才启动 AI。",
     icon: Users,
   },
 };
@@ -54,6 +55,7 @@ function SettingCard({ setting, agents }: { setting: CRMAISetting; agents: Array
     interval_minutes: setting.interval_minutes,
     assignee_agent_id: setting.assignee_agent_id || "",
     max_items_per_run: setting.max_items_per_run,
+    follow_up_lead_days: setting.config?.follow_up_lead_days ?? 0,
   });
 
   useEffect(() => {
@@ -62,6 +64,7 @@ function SettingCard({ setting, agents }: { setting: CRMAISetting; agents: Array
       interval_minutes: setting.interval_minutes,
       assignee_agent_id: setting.assignee_agent_id || "",
       max_items_per_run: setting.max_items_per_run,
+      follow_up_lead_days: setting.config?.follow_up_lead_days ?? 0,
     });
   }, [setting]);
 
@@ -71,7 +74,7 @@ function SettingCard({ setting, agents }: { setting: CRMAISetting; agents: Array
       interval_minutes: numberValue(form.interval_minutes, 1, 1440),
       assignee_agent_id: form.assignee_agent_id || null,
       max_items_per_run: numberValue(form.max_items_per_run, 1, 100),
-      config: {},
+      config: setting.automation_key === "due_followup" ? { follow_up_lead_days: numberValue(form.follow_up_lead_days, 0, 365) } : {},
     }),
     onSuccess: () => qc.invalidateQueries({ queryKey: crmKeys.aiSettings(wsId) }),
   });
@@ -91,7 +94,7 @@ function SettingCard({ setting, agents }: { setting: CRMAISetting; agents: Array
           启用
         </label>
       </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
+      <div className="mt-4 grid gap-4 md:grid-cols-4">
         <label className="space-y-1 text-sm">
           <span className="text-muted-foreground">检查间隔（分钟）</span>
           <Input type="number" min={1} max={1440} value={form.interval_minutes} onChange={(e) => setForm((s) => ({ ...s, interval_minutes: Number(e.target.value) }))} />
@@ -100,6 +103,13 @@ function SettingCard({ setting, agents }: { setting: CRMAISetting; agents: Array
           <span className="text-muted-foreground">单次最多创建</span>
           <Input type="number" min={1} max={100} value={form.max_items_per_run} onChange={(e) => setForm((s) => ({ ...s, max_items_per_run: Number(e.target.value) }))} />
         </label>
+
+        {setting.automation_key === "due_followup" ? (
+          <label className="space-y-1 text-sm">
+            <span className="text-muted-foreground">到期前几天开始</span>
+            <Input type="number" min={0} max={365} value={form.follow_up_lead_days} onChange={(e) => setForm((s) => ({ ...s, follow_up_lead_days: Number(e.target.value) }))} />
+          </label>
+        ) : null}
         <label className="space-y-1 text-sm">
           <span className="text-muted-foreground">执行 Agent</span>
           <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={form.assignee_agent_id || ""} onChange={(e) => setForm((s) => ({ ...s, assignee_agent_id: e.target.value }))}>
@@ -126,7 +136,7 @@ export function CRMAISettingsPage() {
       <PageHeader className="justify-between px-5">
         <div className="flex items-center gap-2">
           <Bot className="size-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">CRM AI 设置</h1>
+          <h1 className="text-sm font-medium">CRM AI</h1>
         </div>
       </PageHeader>
       <div className="space-y-4 p-5">
