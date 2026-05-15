@@ -17,6 +17,7 @@ package agent
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -39,6 +40,11 @@ var safePipeCommands = map[string]bool{
 	"tee":    false, // writes to file — NOT safe
 }
 
+// safeRedirectRe matches harmless stderr-to-/dev/null redirections that
+// agents commonly append (e.g. "2>/dev/null", "2> /dev/null").
+// These are safe because they only discard stderr output.
+var safeRedirectRe = regexp.MustCompile(`\s*2>\s*/dev/null\s*`)
+
 // IsTrustedPlatformCommand reports whether a Bash command is a trusted
 // Multica platform command that can be auto-allowed without user approval.
 //
@@ -54,7 +60,11 @@ func IsTrustedPlatformCommand(command string) bool {
 		return false
 	}
 
-	segments := strings.Split(command, "|")
+	// Strip safe stderr redirections before splitting so that "2>/dev/null"
+	// does not trigger the ">" blocker.
+	cleaned := safeRedirectRe.ReplaceAllString(command, " ")
+
+	segments := strings.Split(cleaned, "|")
 	foundMultica := false
 	for _, segment := range segments {
 		header := strings.TrimSpace(strings.SplitN(segment, "\n", 2)[0])
