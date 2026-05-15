@@ -80,6 +80,7 @@ import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { useT } from "../i18n";
+import { getDirection, type SupportedLocale } from "@multica/core/i18n";
 
 // Top-level nav items stay active when the user is on a child route
 // (e.g. "Projects" stays lit on /:slug/projects/:id). Pinned items keep
@@ -340,7 +341,13 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }: AppSidebarProps = {}) {
-  const { t } = useT("layout");
+  const { t, i18n } = useT("layout");
+  // In RTL locales the workspace sidebar must anchor to the literal right
+  // edge of the window. The shadcn Sidebar uses physical `left-0`/`right-0`
+  // positioning that ignores `dir` on <html>, so we have to pass `side`
+  // explicitly based on the active locale.
+  const sidebarSide: "left" | "right" =
+    getDirection(i18n.language as SupportedLocale) === "rtl" ? "right" : "left";
   const { pathname, push } = useNavigation();
   const user = useAuthStore((s) => s.user);
   const userId = useAuthStore((s) => s.user?.id);
@@ -464,7 +471,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   }, [pathname]);
 
   return (
-      <Sidebar variant="inset">
+      <Sidebar variant="inset" side={sidebarSide}>
         {topSlot}
         {/* Workspace Switcher */}
         <SidebarHeader className={cn("py-3", headerClassName)} style={headerStyle}>

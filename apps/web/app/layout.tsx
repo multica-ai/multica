@@ -8,6 +8,7 @@ import { WebProviders } from "@/components/web-providers";
 import {
   DEFAULT_LOCALE,
   SUPPORTED_LOCALES,
+  HTML_LANG,
   getDirection,
   type SupportedLocale,
 } from "@multica/core/i18n";
@@ -113,17 +114,6 @@ export const metadata: Metadata = {
 function isSupportedLocale(value: string | null): value is SupportedLocale {
   return value !== null && (SUPPORTED_LOCALES as readonly string[]).includes(value);
 }
-
-// HTML lang attribute uses BCP-47 region tags that screen readers and font
-// stacks recognize widely. i18next keeps `zh-Hans` as its internal locale
-// (script subtag is what we actually translate against), but the html element
-// expects a region-flavoured tag for accessibility tooling and CJK fallback.
-// Hebrew uses the plain `he` tag — no region subtag is conventional.
-const HTML_LANG: Record<SupportedLocale, string> = {
-  en: "en",
-  "zh-Hans": "zh-CN",
-  he: "he",
-};
 
 export default async function RootLayout({
   children,

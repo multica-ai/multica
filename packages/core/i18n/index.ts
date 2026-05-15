@@ -15,7 +15,7 @@ export type {
   LocaleResources,
   SupportedLocale,
 } from "./types";
-export { DEFAULT_LOCALE, SUPPORTED_LOCALES } from "./types";
+export { DEFAULT_LOCALE, SUPPORTED_LOCALES, HTML_LANG } from "./types";
 export { matchLocale, pickLocale } from "./pick-locale";
 export { LOCALE_COOKIE } from "./browser-cookie-adapter";
 export { RTL_LOCALES, getDirection } from "./direction";
