@@ -21,6 +21,8 @@ func TestIsTrustedPlatformCommand(t *testing.T) {
 		{"non-multica command rejected", "rm -rf /tmp/x", false},
 		{"mixed pipeline rejected", "rm -rf /tmp/x | multica issue comment add TES-1 --content-stdin", false},
 		{"substitution rejected", "multica issue get $(cat secret)", false},
+		{"backslash n in content is trusted", "multica issue comment add TES-1 --content \"hello \\\\n world\"", true},
+		{"backslash underscore in content is trusted", "multica issue comment add TES-1 --content \"test\\_agent\"", true},
 	}
 
 	for _, tt := range tests {

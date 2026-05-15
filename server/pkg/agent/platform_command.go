@@ -58,7 +58,7 @@ func IsTrustedPlatformCommand(command string) bool {
 	foundMultica := false
 	for _, segment := range segments {
 		header := strings.TrimSpace(strings.SplitN(segment, "\n", 2)[0])
-		if header == "" || strings.Contains(header, "&&") || strings.Contains(header, "||") || strings.ContainsAny(header, ";>`$\\\r") {
+		if header == "" || strings.Contains(header, "&&") || strings.Contains(header, "||") || strings.ContainsAny(header, ";>`$\r") {
 			return false
 		}
 		words := strings.Fields(header)
