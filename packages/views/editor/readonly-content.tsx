@@ -37,6 +37,8 @@ import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import type { Attachment } from "@multica/core/types";
 import { isViewableAttachment } from "@multica/cerebro-attachments/core/viewable";
+// CEREBRO-PATCH(issue-link-open-mode): honor the account-level issue-link open preference.
+import { useIssueLinkOpenMode } from "@multica/cerebro-preferences/views";
 // CEREBRO-PATCH(skill-mention-readonly): render `mention://skill/<id>` links as SkillMentionChip.
 import { SkillMentionChip } from "@multica/cerebro-skill-mention";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
@@ -115,18 +117,25 @@ function urlTransform(url: string): string {
 function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
   const { openInNewTab, push } = useNavigation();
   const isMobile = useIsMobile();
+  const openMode = useIssueLinkOpenMode();
   const p = useWorkspacePaths();
   const path = p.issueDetail(issueId);
+  const opensInNewTab = !isMobile && openMode === "always_new_tab";
   return (
     <a
       href={path}
-      target={isMobile ? undefined : "_blank"}
-      rel={isMobile ? undefined : "noopener noreferrer"}
+      target={opensInNewTab ? "_blank" : undefined}
+      rel={opensInNewTab ? "noopener noreferrer" : undefined}
       className="issue-mention not-prose inline-flex"
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (isMobile) {
+        if (isMobile || openMode === "modifier_click") {
+          if (!isMobile && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+            if (openInNewTab) openInNewTab(path, label);
+            else window.open(path, "_blank", "noopener,noreferrer");
+            return;
+          }
           push(path);
           return;
         }

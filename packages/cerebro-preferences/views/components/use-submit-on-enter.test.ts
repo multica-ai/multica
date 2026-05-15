@@ -15,7 +15,12 @@ vi.mock("@multica/core/auth", () => ({
   ),
 }));
 
-import { useSubmitOnEnter, SUBMIT_ON_ENTER_KEY } from "./use-submit-on-enter";
+import {
+  ISSUE_LINK_OPEN_MODE_KEY,
+  SUBMIT_ON_ENTER_KEY,
+  useIssueLinkOpenMode,
+  useSubmitOnEnter,
+} from "./use-submit-on-enter";
 
 // matchMedia stub. Driven by `coarsePointer` so each test can pretend to be
 // on a touch-primary device or a fine-pointer (mouse / trackpad) device.
@@ -94,5 +99,29 @@ describe("useSubmitOnEnter", () => {
 
   it("exports the storage key string used by the settings UI", () => {
     expect(SUBMIT_ON_ENTER_KEY).toBe("submit_on_enter");
+  });
+});
+
+describe("useIssueLinkOpenMode", () => {
+  it("defaults to modifier-click when unset", () => {
+    authState.user = { preferences: {} };
+    const { result } = renderHook(() => useIssueLinkOpenMode());
+    expect(result.current).toBe("modifier_click");
+  });
+
+  it("returns always-new-tab only for the explicit preference", () => {
+    authState.user = { preferences: { [ISSUE_LINK_OPEN_MODE_KEY]: "always_new_tab" } };
+    const { result } = renderHook(() => useIssueLinkOpenMode());
+    expect(result.current).toBe("always_new_tab");
+  });
+
+  it("ignores invalid preference values", () => {
+    authState.user = { preferences: { [ISSUE_LINK_OPEN_MODE_KEY]: "new_window" } };
+    const { result } = renderHook(() => useIssueLinkOpenMode());
+    expect(result.current).toBe("modifier_click");
+  });
+
+  it("exports the storage key string used by the settings UI", () => {
+    expect(ISSUE_LINK_OPEN_MODE_KEY).toBe("issue_link_open_mode");
   });
 });

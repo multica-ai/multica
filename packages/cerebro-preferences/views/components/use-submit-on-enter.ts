@@ -25,6 +25,17 @@ export function useSubmitOnEnter(): boolean {
 
 export const SUBMIT_ON_ENTER_KEY = "submit_on_enter";
 
+export type IssueLinkOpenMode = "modifier_click" | "always_new_tab";
+
+export const ISSUE_LINK_OPEN_MODE_KEY = "issue_link_open_mode";
+export const DEFAULT_ISSUE_LINK_OPEN_MODE: IssueLinkOpenMode = "modifier_click";
+
+export function useIssueLinkOpenMode(): IssueLinkOpenMode {
+  const user = useAuthStore((s) => s.user);
+  const value = user?.preferences?.[ISSUE_LINK_OPEN_MODE_KEY];
+  return value === "always_new_tab" ? "always_new_tab" : DEFAULT_ISSUE_LINK_OPEN_MODE;
+}
+
 function useIsCoarsePointer(): boolean {
   const [coarse, setCoarse] = useState<boolean>(() => readCoarsePointer());
   useEffect(() => {

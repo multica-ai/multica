@@ -39,6 +39,7 @@ vi.mock("sonner", () => ({
 }));
 
 import { EnterPreferenceSection } from "./enter-preference-section";
+import { ISSUE_LINK_OPEN_MODE_KEY } from "./use-submit-on-enter";
 
 beforeEach(() => {
   authState.user = {
@@ -59,6 +60,10 @@ describe("EnterPreferenceSection", () => {
     );
     // Default copy mentions Enter inserts a newline.
     expect(screen.getByText(/Enter inserts a new line/i)).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /use modifier-click/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
   });
 
   it("reflects an opted-in preference as a checked switch with chat-style copy", () => {
@@ -108,6 +113,42 @@ describe("EnterPreferenceSection", () => {
     // Toast string starts with the modifier key (⌘ or Ctrl depending on platform);
     // assert on the unambiguous suffix instead of the platform-dependent prefix.
     expect(mockToastSuccess).toHaveBeenCalledWith(expect.stringMatching(/\+Enter now sends$/));
+  });
+
+  it("PATCHes issue link mode and updates the auth store", async () => {
+    const user = userEvent.setup();
+    const updatedUser = {
+      id: "u1",
+      preferences: { [ISSUE_LINK_OPEN_MODE_KEY]: "always_new_tab" },
+    };
+    mockUpdateMyPreferences.mockResolvedValue(updatedUser);
+
+    render(<EnterPreferenceSection />);
+    await user.click(screen.getByRole("radio", { name: /always open a new tab/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateMyPreferences).toHaveBeenCalledTimes(1);
+    });
+    expect(mockUpdateMyPreferences).toHaveBeenCalledWith({
+      [ISSUE_LINK_OPEN_MODE_KEY]: "always_new_tab",
+    });
+    expect(authState.setUser).toHaveBeenCalledWith(updatedUser);
+    expect(mockToastSuccess).toHaveBeenCalledWith("Issue links now open in a new tab");
+  });
+
+  it("reflects an always-new-tab issue link preference", () => {
+    authState.user = { preferences: { [ISSUE_LINK_OPEN_MODE_KEY]: "always_new_tab" } };
+    render(<EnterPreferenceSection />);
+    const alwaysNewTab = screen.getByText("Always open a new tab").closest("button");
+    const modifierClick = screen.getByText("Use modifier-click").closest("button");
+    expect(alwaysNewTab).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(modifierClick).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
   });
 
   it("surfaces API errors via toast.error and leaves the user unchanged", async () => {

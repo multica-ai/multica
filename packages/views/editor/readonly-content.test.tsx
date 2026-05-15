@@ -23,6 +23,12 @@ vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => useIsMobileMock(),
 }));
 
+const useIssueLinkOpenModeMock = vi.fn(() => "modifier_click");
+
+vi.mock("@multica/cerebro-preferences/views", () => ({
+  useIssueLinkOpenMode: () => useIssueLinkOpenModeMock(),
+}));
+
 vi.mock("../issues/components/issue-chip", () => ({
   IssueChip: ({ issueId, fallbackLabel }: { issueId: string; fallbackLabel?: string }) => (
     <span data-testid="issue-chip">{fallbackLabel ?? issueId}</span>
@@ -66,6 +72,7 @@ import { ReadonlyContent } from "./readonly-content";
 beforeEach(() => {
   vi.clearAllMocks();
   useIsMobileMock.mockReturnValue(false);
+  useIssueLinkOpenModeMock.mockReturnValue("modifier_click");
 });
 
 afterEach(() => {
@@ -126,19 +133,43 @@ describe("ReadonlyContent line breaks", () => {
 });
 
 describe("ReadonlyContent issue mention chip", () => {
-  // JEH-874: on desktop / wide web, the chip opens the referenced issue in a new
-  // tab so the comment thread stays put. JEH-1112: on mobile the PWA is
+  // Default desktop behavior follows regular browser links: plain click
+  // navigates in the current view, modifier-click opens a new tab. JEH-1112:
+  // on mobile the PWA is
   // `display: standalone` with no tab UI — `target="_blank"` either navigates
   // the current window (iOS) or breaks out into the system browser (Android),
   // both of which drop the thread context. Fall back to SPA push so the browser
   // back-button restores scroll + draft state via the router cache.
   const chipMarkdown = "Reference: [JEH-9](mention://issue/issue-9)";
 
-  it("opens in a new tab when not on mobile", () => {
+  it("uses SPA push for a plain desktop click by default", () => {
     useIsMobileMock.mockReturnValue(false);
     const { getByTestId } = render(<ReadonlyContent content={chipMarkdown} />);
     const chip = getByTestId("issue-chip");
     const anchor = chip.closest("a");
+    expect(anchor?.getAttribute("target")).toBeNull();
+    expect(anchor?.getAttribute("rel")).toBeNull();
+    fireEvent.click(anchor!);
+    expect(navigation.push).toHaveBeenCalledWith("/test/issues/issue-9");
+    expect(navigation.openInNewTab).not.toHaveBeenCalled();
+  });
+
+  it("opens a new tab for cmd/ctrl desktop click in modifier-click mode", () => {
+    useIsMobileMock.mockReturnValue(false);
+    const { getByTestId } = render(<ReadonlyContent content={chipMarkdown} />);
+    const anchor = getByTestId("issue-chip").closest("a");
+    fireEvent.click(anchor!, { metaKey: true });
+    expect(navigation.openInNewTab).toHaveBeenCalledWith(
+      "/test/issues/issue-9",
+      "JEH-9",
+    );
+    expect(navigation.push).not.toHaveBeenCalled();
+  });
+
+  it("opens in a new tab for plain desktop clicks when the user opts in", () => {
+    useIssueLinkOpenModeMock.mockReturnValue("always_new_tab");
+    const { getByTestId } = render(<ReadonlyContent content={chipMarkdown} />);
+    const anchor = getByTestId("issue-chip").closest("a");
     expect(anchor?.getAttribute("target")).toBe("_blank");
     fireEvent.click(anchor!);
     expect(navigation.openInNewTab).toHaveBeenCalledWith(
@@ -150,6 +181,7 @@ describe("ReadonlyContent issue mention chip", () => {
 
   it("uses SPA push (same window) when on mobile", () => {
     useIsMobileMock.mockReturnValue(true);
+    useIssueLinkOpenModeMock.mockReturnValue("always_new_tab");
     const { getByTestId } = render(<ReadonlyContent content={chipMarkdown} />);
     const chip = getByTestId("issue-chip");
     const anchor = chip.closest("a");
