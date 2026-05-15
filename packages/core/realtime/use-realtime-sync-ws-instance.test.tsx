@@ -38,9 +38,11 @@ function createStores(): RealtimeSyncStores {
 }
 
 function createWrapper(qc: QueryClient) {
-  return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
-  );
+  // Named function (not arrow) so react/display-name lint rule passes —
+  // anonymous render-fn components break that rule even in test files.
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  };
 }
 
 describe("useRealtimeSync — ws instance change", () => {
