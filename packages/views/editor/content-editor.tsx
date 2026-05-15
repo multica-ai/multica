@@ -105,11 +105,27 @@ interface ContentEditorProps {
    * available (NodeView buttons fall back to opening the raw URL).
    */
   attachments?: Attachment[];
+  /** Optional actions for quoting the current editor selection into issue comments. */
+  selectionQuoteActions?: SelectionQuoteActions;
+}
+
+interface SelectionQuoteActions {
+  onQuoteToNewComment?: (markdown: string) => void;
+  onQuoteToReply?: (markdown: string) => void;
+  onQuoteToReplyTarget?: (targetId: string, markdown: string) => void;
+  replyTargets?: SelectionQuoteReplyTarget[];
+}
+
+interface SelectionQuoteReplyTarget {
+  id: string;
+  label: string;
+  meta?: string;
 }
 
 interface ContentEditorRef {
   getMarkdown: () => string;
   setMarkdown: (markdown: string) => void;
+  appendMarkdown: (markdown: string) => void;
   clearContent: () => void;
   focus: () => void;
   /** Drop focus from the editor — used by chat after send so the caret
@@ -141,6 +157,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       currentIssueId,
       disableMentions = false,
       attachments,
+      selectionQuoteActions,
     },
     ref,
   ) {
@@ -237,6 +254,27 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           editor.commands.clearContent();
         }
       },
+      appendMarkdown: (markdown: string) => {
+        if (!editor) return;
+        const current = stripBlobUrls(editor.getMarkdown()).trimEnd();
+        const next = current
+          ? `${current}\n\n${markdown.trimEnd()}`
+          : markdown.trimEnd();
+        const processed = next ? preprocessMarkdown(next) : "";
+        if (processed) {
+          editor.commands.setContent(processed, { contentType: "markdown" });
+          const { doc, schema } = editor.state;
+          const paragraphType = schema.nodes.paragraph;
+          if (doc.lastChild?.type.name === "blockquote" && paragraphType) {
+            editor.view.dispatch(
+              editor.state.tr.insert(doc.content.size, paragraphType.create()),
+            );
+          }
+          editor.commands.focus("end");
+        } else {
+          editor.commands.clearContent();
+        }
+      },
       clearContent: () => {
         editor?.commands.clearContent();
       },
@@ -289,7 +327,11 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         >
           <EditorContent className="flex flex-1 flex-col" editor={editor} />
           {showBubbleMenu && (
-            <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
+            <EditorBubbleMenu
+              editor={editor}
+              currentIssueId={currentIssueId}
+              selectionQuoteActions={selectionQuoteActions}
+            />
           )}
           <LinkHoverCard {...hover} />
         </div>
@@ -298,4 +340,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
   },
 );
 
-export { ContentEditor, type ContentEditorProps, type ContentEditorRef };
+export {
+  ContentEditor,
+  type ContentEditorProps,
+  type ContentEditorRef,
+  type SelectionQuoteActions,
+  type SelectionQuoteReplyTarget,
+};

@@ -20,6 +20,8 @@ import {
   Pin,
   PinOff,
   Plus,
+  MessageSquare,
+  MessageSquareReply,
   Users,
 } from "lucide-react";
 import { PageHeader } from "../../layout/page-header";
@@ -68,7 +70,8 @@ import { useIssueActions } from "../actions";
 import { IssueActionsMenuItems, dropdownPrimitives } from "../actions/issue-actions-menu-items";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
-import { CommentInput } from "./comment-input";
+import { CommentInput, type CommentInputRef } from "./comment-input";
+import type { ReplyInputRef } from "./reply-input";
 import { AgentStreamSidebar } from "./agent-stream-sidebar";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies } from "./thread-utils";
@@ -84,6 +87,7 @@ import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOpt
 import { useClearIssueHistory } from "@multica/core/issues/mutations";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useCommentCollapseStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
@@ -324,6 +328,24 @@ function flattenGroups(
 }
 
 const EMPTY_REPLIES: TimelineEntry[] = [];
+const MAX_SELECTED_QUOTE_CHARS = 4000;
+const SELECTION_BLOCKED_SELECTOR = [
+  "input",
+  "textarea",
+  "button",
+  "a",
+  "[contenteditable='true']",
+  ".ProseMirror",
+  "[role='button']",
+  "[data-node-view-wrapper]",
+].join(",");
+
+type QuoteSelectionMenuState = {
+  text: string;
+  x: number;
+  y: number;
+  threadRootId: string | null;
+};
 
 // Shallow array equality by element identity. Used to reuse the previous
 // render's per-thread reply slice when nothing in *this* thread changed,
@@ -353,6 +375,44 @@ function TimelineSkeleton() {
       ))}
     </div>
   );
+}
+
+function formatSelectedTextAsQuote(text: string): { markdown: string; truncated: boolean } {
+  const normalized = text.replace(/\r\n?/g, "\n").trim();
+  const truncated = normalized.length > MAX_SELECTED_QUOTE_CHARS;
+  const selected = truncated
+    ? normalized.slice(0, MAX_SELECTED_QUOTE_CHARS).trimEnd()
+    : normalized;
+  const quoted = selected
+    .split("\n")
+    .map((line) => (line.trim().length > 0 ? `> ${line}` : ">"))
+    .join("\n");
+  return { markdown: `${quoted}\n\n`, truncated };
+}
+
+function elementFromSelectionNode(node: Node | null): Element | null {
+  if (!node) return null;
+  return node.nodeType === Node.ELEMENT_NODE
+    ? (node as Element)
+    : node.parentElement;
+}
+
+function isBlockedSelectionTarget(node: Node | null): boolean {
+  return !!elementFromSelectionNode(node)?.closest(SELECTION_BLOCKED_SELECTOR);
+}
+
+function closestThreadRootId(node: Node | null): string | null {
+  const el = elementFromSelectionNode(node);
+  return el?.closest("[data-thread-root-id]")?.getAttribute("data-thread-root-id") ?? null;
+}
+
+function inferThreadRootId(selection: Selection): string | null {
+  const anchorRoot = closestThreadRootId(selection.anchorNode);
+  const focusRoot = closestThreadRootId(selection.focusNode);
+  if (anchorRoot && focusRoot && anchorRoot === focusRoot) return anchorRoot;
+  if (anchorRoot && !focusRoot) return anchorRoot;
+  if (focusRoot && !anchorRoot) return focusRoot;
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -487,7 +547,7 @@ export function IssueDetail({
   sidebarMaxSize = 560,
   highlightCommentId,
 }: IssueDetailProps) {
-  const { t } = useT("issues");
+  const { t, i18n } = useT("issues");
   // `issueId` is the raw route param — may be a UUID *or* a human-readable
   // identifier (e.g. "OPE-460") when the URL has been canonicalized.  We keep
   // it around only for the initial detail query (the API accepts both formats)
@@ -540,6 +600,22 @@ export function IssueDetail({
   // Virtuoso prop would never receive the element. Callback ref + state fixes
   // that: setState triggers the re-render that hands Virtuoso the element.
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  const detailRootRef = useRef<HTMLDivElement>(null);
+  const commentInputRef = useRef<CommentInputRef>(null);
+  const replyControllersRef = useRef<Map<string, ReplyInputRef>>(new Map());
+  const [quoteMenu, setQuoteMenu] = useState<QuoteSelectionMenuState | null>(null);
+  const [quoteChooserOpen, setQuoteChooserOpen] = useState(false);
+  const closeQuoteMenu = useCallback(() => {
+    setQuoteMenu(null);
+    setQuoteChooserOpen(false);
+  }, []);
+  const registerReplyController = useCallback((threadRootId: string, controller: ReplyInputRef | null) => {
+    if (controller) {
+      replyControllersRef.current.set(threadRootId, controller);
+    } else {
+      replyControllersRef.current.delete(threadRootId);
+    }
+  }, []);
   const scrollToTop = useCallback(() => {
     scrollContainerEl?.scrollTo({ top: 0, behavior: "smooth" });
   }, [scrollContainerEl]);
@@ -787,6 +863,19 @@ export function IssueDetail({
     subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
   } = useIssueSubscribers(resolvedId, user?.id);
 
+  const topLevelComments = useMemo(
+    () => timeline.filter((entry) => entry.type === "comment" && !entry.parent_id),
+    [timeline],
+  );
+  const selectionQuoteReplyTargets = useMemo(
+    () => topLevelComments.map((comment) => ({
+      id: comment.id,
+      label: getActorName(comment.actor_type, comment.actor_id),
+      meta: new Date(comment.created_at).toLocaleString(i18n.language),
+    })),
+    [getActorName, i18n.language, topLevelComments],
+  );
+
   // Token usage
   const { data: usage } = useQuery(issueUsageOptions(resolvedId));
 
@@ -920,6 +1009,145 @@ export function IssueDetail({
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
+
+  const insertQuoteToNewComment = useCallback((markdown: string) => {
+    closeQuoteMenu();
+    scrollToBottom();
+    window.setTimeout(() => {
+      commentInputRef.current?.appendMarkdown(markdown);
+    }, 120);
+  }, [closeQuoteMenu, scrollToBottom]);
+
+  const insertQuoteToReply = useCallback((threadRootId: string, markdown: string) => {
+    closeQuoteMenu();
+    toggleResolvedExpand(threadRootId, true);
+    const collapsed = useCommentCollapseStore.getState().isCollapsed(resolvedId, threadRootId);
+    if (collapsed) {
+      useCommentCollapseStore.getState().toggle(resolvedId, threadRootId);
+    }
+
+    const append = () => {
+      const controller = replyControllersRef.current.get(threadRootId);
+      if (!controller) return false;
+      controller.appendMarkdown(markdown);
+      return true;
+    };
+
+    if (append()) return;
+
+    const target = document.getElementById(`comment-${threadRootId}`);
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    window.setTimeout(() => {
+      if (append()) return;
+      window.setTimeout(() => {
+        if (!append()) {
+          toast.error(t(($) => $.quote.reply_input_not_ready));
+        }
+      }, 250);
+    }, 180);
+  }, [closeQuoteMenu, resolvedId, t, toggleResolvedExpand]);
+
+  const buildQuoteFromMenu = useCallback(() => {
+    if (!quoteMenu) return null;
+    const result = formatSelectedTextAsQuote(quoteMenu.text);
+    if (result.truncated) {
+      toast.message(t(($) => $.quote.truncated, { count: MAX_SELECTED_QUOTE_CHARS }));
+    }
+    return result.markdown;
+  }, [quoteMenu, t]);
+
+  const formatMarkdownSelectionAsQuote = useCallback((markdown: string) => {
+    const result = formatSelectedTextAsQuote(markdown);
+    if (result.truncated) {
+      toast.message(t(($) => $.quote.truncated, { count: MAX_SELECTED_QUOTE_CHARS }));
+    }
+    return result.markdown;
+  }, [t]);
+
+  const handleQuoteToNewComment = useCallback(() => {
+    const markdown = buildQuoteFromMenu();
+    if (!markdown) return;
+    insertQuoteToNewComment(markdown);
+  }, [buildQuoteFromMenu, insertQuoteToNewComment]);
+
+  const handleEditorQuoteToNewComment = useCallback((markdown: string) => {
+    insertQuoteToNewComment(formatMarkdownSelectionAsQuote(markdown));
+  }, [formatMarkdownSelectionAsQuote, insertQuoteToNewComment]);
+
+  const handleEditorQuoteToReplyInThread = useCallback((threadRootId: string, markdown: string) => {
+    insertQuoteToReply(threadRootId, formatMarkdownSelectionAsQuote(markdown));
+  }, [formatMarkdownSelectionAsQuote, insertQuoteToReply]);
+
+  const handleEditorQuoteToReplyTarget = useCallback((threadRootId: string, markdown: string) => {
+    insertQuoteToReply(threadRootId, formatMarkdownSelectionAsQuote(markdown));
+  }, [formatMarkdownSelectionAsQuote, insertQuoteToReply]);
+
+  const handleQuoteToReply = useCallback(() => {
+    const markdown = buildQuoteFromMenu();
+    if (!markdown || !quoteMenu) return;
+    if (quoteMenu.threadRootId) {
+      insertQuoteToReply(quoteMenu.threadRootId, markdown);
+      return;
+    }
+    setQuoteChooserOpen(true);
+  }, [buildQuoteFromMenu, insertQuoteToReply, quoteMenu]);
+
+  const handleSelectReplyTarget = useCallback((threadRootId: string) => {
+    const markdown = buildQuoteFromMenu();
+    if (!markdown) return;
+    insertQuoteToReply(threadRootId, markdown);
+  }, [buildQuoteFromMenu, insertQuoteToReply]);
+
+  const updateQuoteMenuFromSelection = useCallback(() => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !detailRootRef.current) {
+      closeQuoteMenu();
+      return;
+    }
+    if (
+      isBlockedSelectionTarget(selection.anchorNode) ||
+      isBlockedSelectionTarget(selection.focusNode)
+    ) {
+      closeQuoteMenu();
+      return;
+    }
+    const text = selection.toString().trim();
+    if (!text) {
+      closeQuoteMenu();
+      return;
+    }
+    const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    if (!range || !detailRootRef.current.contains(range.commonAncestorContainer)) {
+      closeQuoteMenu();
+      return;
+    }
+    const rect = range.getBoundingClientRect();
+    if (!rect.width && !rect.height) {
+      closeQuoteMenu();
+      return;
+    }
+    setQuoteMenu({
+      text,
+      x: Math.min(Math.max(rect.left + rect.width / 2, 16), window.innerWidth - 16),
+      y: Math.max(rect.top - 8, 12),
+      threadRootId: inferThreadRootId(selection),
+    });
+    setQuoteChooserOpen(false);
+  }, [closeQuoteMenu]);
+
+  const handleSelectionGestureEnd = useCallback(() => {
+    window.setTimeout(updateQuoteMenuFromSelection, 0);
+  }, [updateQuoteMenuFromSelection]);
+
+  useEffect(() => {
+    if (!quoteMenu) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeQuoteMenu();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [closeQuoteMenu, quoteMenu]);
 
   const handleToggleSidebar = useCallback(() => {
     if (isMobile) {
@@ -1178,6 +1406,13 @@ export function IssueDetail({
             onResolveToggle={handleResolveToggle}
             onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
             highlightedCommentId={highlightedId}
+            onRegisterReplyController={registerReplyController}
+            selectionQuoteActions={{
+              onQuoteToNewComment: handleEditorQuoteToNewComment,
+              onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
+              replyTargets: selectionQuoteReplyTargets,
+            }}
+            onQuoteToReplyInThread={handleEditorQuoteToReplyInThread}
           />
         </div>
       );
@@ -1252,7 +1487,12 @@ export function IssueDetail({
     </Tabs>
   );
   const detailContent = (
-    <div className="flex h-full min-w-0 flex-1 flex-col">
+    <div
+      ref={detailRootRef}
+      className="flex h-full min-w-0 flex-1 flex-col"
+      onMouseUp={handleSelectionGestureEnd}
+      onKeyUp={handleSelectionGestureEnd}
+    >
         <PageHeader className="gap-2 bg-background text-sm">
           <div className="flex flex-1 items-center gap-1.5 min-w-0">
             {workspace && (
@@ -1438,6 +1678,11 @@ export function IssueDetail({
               debounceMs={1500}
               currentIssueId={resolvedId}
               attachments={descEditorAttachments}
+              selectionQuoteActions={{
+                onQuoteToNewComment: handleEditorQuoteToNewComment,
+                onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
+                replyTargets: selectionQuoteReplyTargets,
+              }}
             />
 
             <div className="flex items-center gap-1 mt-3">
@@ -1654,7 +1899,17 @@ export function IssueDetail({
 
             {/* Bottom comment input — no avatar, full width */}
             <div className="mt-4">
-              <CommentInput key={resolvedId} issueId={resolvedId} onSubmit={submitComment} />
+              <CommentInput
+                ref={commentInputRef}
+                key={resolvedId}
+                issueId={resolvedId}
+                onSubmit={submitComment}
+                selectionQuoteActions={{
+                  onQuoteToNewComment: handleEditorQuoteToNewComment,
+                  onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
+                  replyTargets: selectionQuoteReplyTargets,
+                }}
+              />
             </div>
           </div>
           </div>
@@ -1674,6 +1929,56 @@ export function IssueDetail({
           </div>
         )}
         </div>
+        {quoteMenu && (
+          <div
+            className="fixed z-50 min-w-44 -translate-x-1/2 -translate-y-full rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+            style={{ left: quoteMenu.x, top: quoteMenu.y }}
+            onMouseDown={(event) => event.preventDefault()}
+            onMouseUp={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              onClick={handleQuoteToNewComment}
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              <span>{t(($) => $.quote.add_to_new_comment)}</span>
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              onClick={handleQuoteToReply}
+            >
+              <MessageSquareReply className="h-3.5 w-3.5" />
+              <span>{t(($) => $.quote.add_to_reply)}</span>
+            </button>
+            {quoteChooserOpen && (
+              <div className="mt-1 max-h-64 min-w-64 overflow-y-auto border-t border-border pt-1">
+                {topLevelComments.length === 0 ? (
+                  <div className="px-2.5 py-2 text-xs text-muted-foreground">
+                    {t(($) => $.quote.no_comments_to_reply)}
+                  </div>
+                ) : (
+                  topLevelComments.map((comment) => (
+                    <button
+                      key={comment.id}
+                      type="button"
+                      className="flex w-full items-center justify-between gap-4 rounded-sm px-2.5 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                      onClick={() => handleSelectReplyTarget(comment.id)}
+                    >
+                      <span className="min-w-0 truncate font-medium">
+                        {getActorName(comment.actor_type, comment.actor_id)}
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {new Date(comment.created_at).toLocaleString(i18n.language)}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
   );
 

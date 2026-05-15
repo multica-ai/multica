@@ -150,6 +150,13 @@
   "timeline": {
     "loading": "加载中…"
   },
+  "quote": {
+    "add_to_new_comment": "放到新评论",
+    "add_to_reply": "放到回复",
+    "no_comments_to_reply": "暂无可回复的评论。",
+    "reply_input_not_ready": "回复输入框还没有准备好，请等待评论加载完成后重试。",
+    "truncated": "选中文本已截断为 {{count}} 个字符。"
+  },
   "activity": {
     "created": "创建了这个 issue",
     "self_assigned": "把这个 issue 分配给了自己",
