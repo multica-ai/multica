@@ -34,11 +34,6 @@ archives:
         formats:
           - zip
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
-    files:
-      - src: .dist/cli-runtime/{{ .Os }}-{{ .Arch }}/package.json
-        dst: package.json
-      - src: .dist/cli-runtime/{{ .Os }}-{{ .Arch }}/node_modules
-        dst: node_modules
   # Versioned archive name used by current CLI / install scripts /
   # desktop bootstrap going forward.
   - id: versioned
@@ -49,11 +44,6 @@ archives:
         formats:
           - zip
     name_template: "{{ .ProjectName }}-cli-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
-    files:
-      - src: .dist/cli-runtime/{{ .Os }}-{{ .Arch }}/package.json
-        dst: package.json
-      - src: .dist/cli-runtime/{{ .Os }}-{{ .Arch }}/node_modules
-        dst: node_modules
 
 checksum:
   name_template: "checksums.txt"
@@ -81,7 +71,5 @@ brews:
     license: "Apache-2.0"
     install: |
       bin.install "multica"
-      prefix.install "package.json"
-      prefix.install Dir["node_modules"]
     test: |
       system "#{bin}/multica", "version"

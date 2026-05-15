@@ -48,13 +48,30 @@ func BuildPlanAwareApprovalCallback(policy, taskID, providerName string, client 
 	base := BuildApprovalCallback(policy, taskID, providerName, client)
 	return func(ctx context.Context, req agent.ApprovalRequest) (string, bool, error) {
 		if req.Type == protocol.InteractionPlanApproval {
-			return promptViaServer(ctx, taskID, providerName, client, req)
+			chosen, approved, err := promptViaServer(ctx, taskID, providerName, client, req)
+			// When plan is approved, report the plan content as a task message
+			// so it's visible in the issue timeline before execution begins.
+			if approved && req.Detail != "" {
+				reportPlanAsMessage(ctx, taskID, client, req.Detail)
+			}
+			return chosen, approved, err
 		}
 		if base == nil {
 			return "allow", true, nil
 		}
 		return base(ctx, req)
 	}
+}
+
+// reportPlanAsMessage sends the approved plan content as a task message so it
+// appears in the issue timeline. This lets reviewers see what plan was approved
+// without having to inspect the execution output.
+func reportPlanAsMessage(ctx context.Context, taskID string, client *Client, planContent string) {
+	_ = client.ReportTaskMessages(ctx, taskID, []TaskMessageData{{
+		Seq:     0,
+		Type:    "text",
+		Content: "**Approved plan:**\n\n" + planContent,
+	}})
 }
 
 func approvalSimilarKey(req agent.ApprovalRequest) string {
@@ -148,9 +165,7 @@ func promptViaServer(ctx context.Context, taskID, providerName string, client *C
 		"provider":       providerName,
 		"options":        options,
 		"default_option": defaultOption,
-	}
-	if req.Type == protocol.InteractionPlanApproval {
-		body["expires_in"] = -1
+		"expires_in":     -1,
 	}
 
 	interactionID, err := client.ReportInteraction(ctx, taskID, body)

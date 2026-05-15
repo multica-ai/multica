@@ -1,9 +1,6 @@
 package cli
 
 import (
-	"archive/tar"
-	"bytes"
-	"compress/gzip"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -166,76 +163,4 @@ func TestResolveInstalledBinaryPathPrefersManagedInstall(t *testing.T) {
 	if got != managed {
 		t.Fatalf("ResolveInstalledBinaryPath() = %q, want %q", got, managed)
 	}
-}
-
-func TestExtractTarGzToDirAndInstallManagedArchive(t *testing.T) {
-	stage := t.TempDir()
-	archive := buildTarGzArchive(t, map[string]string{
-		"multica":      "binary-v2",
-		"package.json": `{"name":"multica-claude-sdk-runtime"}`,
-		"node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs": "export {};",
-	})
-	if err := extractTarGzToDir(bytes.NewReader(archive), stage); err != nil {
-		t.Fatalf("extractTarGzToDir() error = %v", err)
-	}
-
-	installDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(installDir, "multica"), []byte("binary-v1"), 0o755); err != nil {
-		t.Fatalf("WriteFile() old binary error = %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(installDir, "node_modules", "old"), 0o755); err != nil {
-		t.Fatalf("MkdirAll() old node_modules error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(installDir, "package.json"), []byte(`{"old":true}`), 0o600); err != nil {
-		t.Fatalf("WriteFile() old package error = %v", err)
-	}
-
-	if err := installManagedArchive(stage, installDir, "multica"); err != nil {
-		t.Fatalf("installManagedArchive() error = %v", err)
-	}
-
-	gotBinary, err := os.ReadFile(filepath.Join(installDir, "multica"))
-	if err != nil {
-		t.Fatalf("ReadFile() binary error = %v", err)
-	}
-	if string(gotBinary) != "binary-v2" {
-		t.Fatalf("binary contents = %q, want %q", string(gotBinary), "binary-v2")
-	}
-	if _, err := os.Stat(filepath.Join(installDir, "node_modules", "@anthropic-ai", "claude-agent-sdk", "sdk.mjs")); err != nil {
-		t.Fatalf("expected sdk bundle file to be installed: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(installDir, "node_modules", "old")); !os.IsNotExist(err) {
-		t.Fatalf("expected old node_modules to be replaced, stat err = %v", err)
-	}
-}
-
-func buildTarGzArchive(t *testing.T, files map[string]string) []byte {
-	t.Helper()
-
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	for name, content := range files {
-		hdr := &tar.Header{
-			Name: name,
-			Mode: 0o644,
-			Size: int64(len(content)),
-		}
-		if name == "multica" {
-			hdr.Mode = 0o755
-		}
-		if err := tw.WriteHeader(hdr); err != nil {
-			t.Fatalf("WriteHeader(%q): %v", name, err)
-		}
-		if _, err := tw.Write([]byte(content)); err != nil {
-			t.Fatalf("Write(%q): %v", name, err)
-		}
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatalf("tar close: %v", err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatalf("gzip close: %v", err)
-	}
-	return buf.Bytes()
 }

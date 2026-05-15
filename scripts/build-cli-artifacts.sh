@@ -139,7 +139,6 @@ target_supported() {
 need_cmd go
 need_cmd tar
 need_cmd zip
-need_cmd node
 validate_download_base_url "$DOWNLOAD_BASE_URL"
 
 VERSION_RAW=""
@@ -181,8 +180,6 @@ printf '  releases:  %s\n' "$RELEASES_DIR"
 printf '  manifest:  %s\n' "$MANIFEST_FILE"
 printf '\n'
 
-bash "${SCRIPT_DIR}/prepare-cli-runtime-assets.sh"
-
 for target in "${TARGETS[@]}"; do
   target="$(trim "$target")"
   [[ -n "$target" ]] || continue
@@ -210,13 +207,11 @@ for target in "${TARGETS[@]}"; do
         ./cmd/multica
   )
 
-  cp -R "${REPO_ROOT}/.dist/cli-runtime/${goos}-${goarch}/." "$stage_dir/"
-
   if [[ "$goos" == "windows" ]]; then
-    (cd "$stage_dir" && zip -q -9 -r "$archive_path" .)
+    (cd "$stage_dir" && zip -q -9 "$archive_path" "$bin_name")
   else
     chmod 0755 "${stage_dir}/${bin_name}"
-    tar -C "$stage_dir" -czf "$archive_path" .
+    tar -C "$stage_dir" -czf "$archive_path" "$bin_name"
   fi
 
   checksum="$(sha256_file "$archive_path")"

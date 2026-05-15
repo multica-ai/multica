@@ -208,10 +208,8 @@ install_cli_binary() {
   fi
 
   mkdir -p "$CLI_BIN_DIR"
-  local extract_dir="$tmp_dir/extract"
-  mkdir -p "$extract_dir"
-  tar -xzf "$archive_path" -C "$extract_dir"
-  staged_binary="$extract_dir/multica"
+  tar -xzf "$archive_path" -C "$tmp_dir" multica
+  staged_binary="$tmp_dir/multica"
   chmod +x "$staged_binary"
 
   backup_path="$CLI_BIN_PATH.bak"
@@ -222,27 +220,6 @@ install_cli_binary() {
     if ! mv "$CLI_BIN_PATH" "$backup_path"; then
       rm -rf "$tmp_dir"
       fail "Failed to move existing CLI out of the way before installing the new version."
-    fi
-  fi
-
-  rm -rf "$CLI_BIN_DIR/node_modules"
-  rm -f "$CLI_BIN_DIR/package.json"
-  if [ -d "$extract_dir/node_modules" ]; then
-    if ! mv "$extract_dir/node_modules" "$CLI_BIN_DIR/node_modules"; then
-      if [ "$had_existing_cli" -eq 1 ] && [ -e "$backup_path" ]; then
-        mv "$backup_path" "$CLI_BIN_PATH" || true
-      fi
-      rm -rf "$tmp_dir"
-      fail "Failed to install Claude SDK runtime assets."
-    fi
-  fi
-  if [ -f "$extract_dir/package.json" ]; then
-    if ! mv "$extract_dir/package.json" "$CLI_BIN_DIR/package.json"; then
-      if [ "$had_existing_cli" -eq 1 ] && [ -e "$backup_path" ]; then
-        mv "$backup_path" "$CLI_BIN_PATH" || true
-      fi
-      rm -rf "$tmp_dir"
-      fail "Failed to install CLI runtime package metadata."
     fi
   fi
 
