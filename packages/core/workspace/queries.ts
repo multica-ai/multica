@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Agent, Workspace } from "../types";
+import type { Agent, Squad, Workspace } from "../types";
 
 export const workspaceKeys = {
   all: (wsId: string) => ["workspaces", wsId] as const,
@@ -11,6 +11,7 @@ export const workspaceKeys = {
   myInvitations: () => ["invitations", "mine"] as const,
   agents: (wsId: string) => ["workspaces", wsId, "agents"] as const,
   agentsMine: (wsId: string) => ["workspaces", wsId, "agents", "mine"] as const,
+  squads: (wsId: string) => ["workspaces", wsId, "squads"] as const,
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
   mentionFrequency: (wsId: string) => ["workspaces", wsId, "mention-frequency"] as const,
@@ -43,6 +44,14 @@ export function agentListOptions(wsId: string, owner?: "me") {
     queryKey: owner === "me" ? workspaceKeys.agentsMine(wsId) : workspaceKeys.agents(wsId),
     queryFn: () =>
       api.listAgents({ workspace_id: wsId, include_archived: true, owner }),
+  });
+}
+
+export function squadListOptions(wsId: string) {
+  return queryOptions<Squad[]>({
+    queryKey: workspaceKeys.squads(wsId),
+    queryFn: () => api.listSquads(),
+    enabled: !!wsId,
   });
 }
 

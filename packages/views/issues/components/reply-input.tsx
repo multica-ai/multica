@@ -8,10 +8,10 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
+import type { Attachment } from "@multica/core/types";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
-import { toast } from "sonner";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -56,8 +56,10 @@ function ReplyInput({
   const [isEmpty, setIsEmpty] = useState(!initialDraft?.trim());
   const [isExpanded, setIsExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const uploadMapRef = useRef<Map<string, string>>(new Map());
-  const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
+  // Attachments uploaded in this composer session — see CommentInput for the
+  // rationale (drives both submit-time attachment_ids and editor previews).
+  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+  const { uploadWithToast } = useFileUpload(api);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
@@ -81,7 +83,7 @@ function ReplyInput({
   const handleUpload = useCallback(async (file: File) => {
     const result = await uploadWithToast(file, { issueId });
     if (result) {
-      uploadMapRef.current.set(result.link, result.id);
+      setPendingAttachments((prev) => [...prev, result]);
     }
     return result;
   }, [uploadWithToast, issueId]);
@@ -90,16 +92,15 @@ function ReplyInput({
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
     // Only send attachment IDs for uploads still present in the content.
-    const activeIds: string[] = [];
-    for (const [url, id] of uploadMapRef.current) {
-      if (content.includes(url)) activeIds.push(id);
-    }
+    const activeIds = pendingAttachments
+      .filter((a) => content.includes(a.url))
+      .map((a) => a.id);
     setSubmitting(true);
     try {
       await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
       editorRef.current?.clearContent();
       setIsEmpty(true);
-      uploadMapRef.current.clear();
+      setPendingAttachments([]);
       if (draftKey) clearDraft(draftKey);
     } catch {
       // The timeline hook already shows the error toast. Keep the reply text intact.
@@ -144,6 +145,7 @@ function ReplyInput({
             onUploadFile={handleUpload}
             debounceMs={100}
             currentIssueId={issueId}
+            attachments={pendingAttachments}
           />
         </div>
         <div className="absolute bottom-0 right-0 flex items-center gap-1">

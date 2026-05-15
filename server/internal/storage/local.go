@@ -82,6 +82,28 @@ func (s *LocalStorage) KeyFromURL(rawURL string) string {
 	return rawURL
 }
 
+// GetReader opens the underlying file for streaming. Refuses keys that
+// resolve outside uploadDir (defense against a stored key with traversal
+// components) and refuses the sidecar suffix so /content can't be coaxed
+// into leaking the .meta.json blob.
+func (s *LocalStorage) GetReader(ctx context.Context, key string) (io.ReadCloser, error) {
+	if key == "" {
+		return nil, fmt.Errorf("local GetReader: empty key")
+	}
+	if strings.HasSuffix(key, metaSuffix) {
+		return nil, fmt.Errorf("local GetReader: refusing to serve sidecar key %q", key)
+	}
+	filePath := filepath.Join(s.uploadDir, key)
+	if !isUnder(s.uploadDir, filePath) {
+		return nil, fmt.Errorf("local GetReader: key escapes upload dir: %q", key)
+	}
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("local GetReader: %w", err)
+	}
+	return f, nil
+}
+
 func (s *LocalStorage) Delete(ctx context.Context, key string) {
 	if key == "" {
 		return

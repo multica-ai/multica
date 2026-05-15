@@ -285,6 +285,30 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.0",
+        date: "2026-05-14",
+        title: "Squads 与附件预览",
+        changes: [],
+        features: [
+          "Squads 支持把任务交给一个小组，由 leader agent 负责协调下一步",
+          "附件可以直接预览，支持 PDF、音频、视频、Markdown、代码、日志和纯文本",
+          "中文姓名支持用拼音搜索，适用于 mention、负责人、订阅人、agents、projects 和 squads",
+        ],
+        improvements: [
+          "Squad 页面补齐成员管理、从 squad 内快速创建 agent、清晰的成员操作按钮，以及更宽的详情布局",
+          "快速创建和各类选择器更容易搜索，并能识别 squad 相关的指派和提及",
+          "Usage 图表可以在费用和 token 视图之间切换，并复用 runtime 的时区控制",
+          "工作区管理员可以通过命令行管理 squads，并在必要时停止失控的 issue 执行",
+          "共享界面文案的中英文翻译更完整",
+        ],
+        fixes: [
+          "当成员已经明确把讨论指向某个人或小组时，Squad leader 不再重复发言",
+          "提及 squad 时会正确唤起对应 leader，同时保留私有 agent 的访问限制",
+          "删除 Issue 后列表刷新更准确，后续评论也不再触发过期的 Done 回复",
+          "在撰写或编辑 issue 和评论时新增的附件，也可以稳定使用预览",
+        ],
+      },
+      {
         version: "0.2.32",
         date: "2026-05-13",
         title: "用量洞察、聊天重命名与桌面体验优化",

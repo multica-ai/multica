@@ -16,6 +16,7 @@
     "agents",
     "agents-create",
     "skills",
+    "squads",
     "---How agents run---",
     "daemon-runtimes",
     "tasks",
