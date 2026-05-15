@@ -60,6 +60,13 @@ function useSidebar() {
   return context
 }
 
+// Same context, but returns null instead of throwing when no provider is
+// in the tree. Use this from components that may render in both
+// sidebar-wrapped pages (dashboard) and standalone pages (auth, error).
+function useSidebarOptional(): SidebarContextProps | null {
+  return React.useContext(SidebarContext)
+}
+
 function SidebarProvider({
   defaultOpen = true,
   open: openProp,
@@ -770,4 +777,5 @@ export {
   SidebarSeparator,
   SidebarTrigger,
   useSidebar,
+  useSidebarOptional,
 }
