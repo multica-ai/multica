@@ -15,6 +15,8 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	// CEREBRO-PATCH(main-agent-pass-gate): JEH-1327 cerebro agent-pass gate import
+	cerebroagentpass "github.com/multica-ai/multica/server/internal/cerebro/agentpass"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
 	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 cerebro workflow engine import
@@ -319,6 +321,12 @@ func main() {
 	gatewayRuntimeCtx, gatewayRuntimeCancel := context.WithCancel(context.Background())
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	taskSvc.Analytics = analyticsClient
+	// CEREBRO-PATCH(main-agent-pass-gate): JEH-1327 wire the agent-pass pre-enqueue gate.
+	if agentPassSvc, err := cerebroagentpass.New(cerebrodb.New(pool), nil); err != nil {
+		slog.Error("agent-pass gate construction failed; gate disabled", "error", err)
+	} else {
+		taskSvc.AgentPass = agentPassSvc
+	}
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
 

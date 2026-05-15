@@ -54,6 +54,9 @@ type TaskService struct {
 	// CEREBRO-PATCH(auto-pause-invoker): cerebro auto-pause seam called
 	// from FailTask. Set from router.go; nil-safe.
 	AutoPause AutoPauseInvoker
+	// CEREBRO-PATCH(agent-pass-gate): JEH-1327 pre-enqueue gate seam. Set
+	// from main.go; nil-safe (gate skipped when unwired).
+	AgentPass AgentPassGate
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
@@ -445,6 +448,10 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		slog.Info("task enqueue blocked: workspace paused", "issue_id", util.UUIDToString(issue.ID))
 		return db.AgentTaskQueue{}, fmt.Errorf("workspace tasks are paused")
 	}
+	// CEREBRO-PATCH(agent-pass-gate): JEH-1327 pre-enqueue gate.
+	if reason, blocked := s.blockedByAgentPass(ctx, issue.AssigneeID, issue.ID); blocked {
+		return db.AgentTaskQueue{}, fmt.Errorf("blocked by agent-pass: %s", reason)
+	}
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -519,6 +526,10 @@ func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Is
 }
 
 func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool) (db.AgentTaskQueue, error) {
+	// CEREBRO-PATCH(agent-pass-gate): JEH-1327 pre-enqueue gate (mention path).
+	if reason, blocked := s.blockedByAgentPass(ctx, agentID, issue.ID); blocked {
+		return db.AgentTaskQueue{}, fmt.Errorf("blocked by agent-pass: %s", reason)
+	}
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)

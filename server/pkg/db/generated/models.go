@@ -261,6 +261,27 @@ type CerebroAccount struct {
 	PausedManual   bool               `json:"paused_manual"`
 }
 
+type CerebroAgentPass struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	IssuerType         string             `json:"issuer_type"`
+	IssuerID           pgtype.UUID        `json:"issuer_id"`
+	AgentID            pgtype.UUID        `json:"agent_id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	ParentPassID       pgtype.UUID        `json:"parent_pass_id"`
+	Scope              []byte             `json:"scope"`
+	SpendCeilingMicros pgtype.Int8        `json:"spend_ceiling_micros"`
+	Status             string             `json:"status"`
+	IssuedAt           pgtype.Timestamptz `json:"issued_at"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	RevokedByType      pgtype.Text        `json:"revoked_by_type"`
+	RevokedByID        pgtype.UUID        `json:"revoked_by_id"`
+	RevokedAt          pgtype.Timestamptz `json:"revoked_at"`
+	RevokeReason       pgtype.Text        `json:"revoke_reason"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroChannelAgentSetting struct {
 	ChannelID  pgtype.UUID        `json:"channel_id"`
 	AgentID    pgtype.UUID        `json:"agent_id"`
