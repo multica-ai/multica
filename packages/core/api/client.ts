@@ -1256,6 +1256,17 @@ export class ApiClient {
     });
   }
 
+  async listCRMAISettings(): Promise<{ settings: unknown[] }> {
+    return this.fetch("/api/crm/ai-settings");
+  }
+
+  async updateCRMAISetting(key: string, data: unknown): Promise<unknown> {
+    return this.fetch(`/api/crm/ai-settings/${key}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
   async listCRMIMAPSettings(): Promise<ListCRMIMAPSettingsResponse> {
     return this.fetch("/api/crm/imap-settings");
   }

@@ -21,6 +21,7 @@ export const crmKeys = {
     [...crmKeys.all(wsId), "email-threads", threadId] as const,
   emailMessages: (wsId: string, threadId: string) =>
     [...crmKeys.emailThread(wsId, threadId), "messages"] as const,
+  aiSettings: (wsId: string) => [...crmKeys.all(wsId), "ai-settings"] as const,
 };
 
 export function crmAccountListOptions(wsId: string, params: ListCRMAccountsParams = {}) {

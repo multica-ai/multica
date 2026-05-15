@@ -22,6 +22,7 @@ import {
   ChevronDown,
   ChevronRight,
   Settings,
+  SlidersHorizontal,
   LogOut,
   Plus,
   Check,
@@ -109,6 +110,7 @@ type NavKey =
   | "crm"
   | "crmCustomers"
   | "crmEmails"
+  | "crmAISettings"
   | "autopilots"
   | "agents"
   | "runtimes"
@@ -124,6 +126,7 @@ type NavLabelKey =
   | "crm"
   | "customers"
   | "emails"
+  | "ai_settings"
   | "autopilots"
   | "agents"
   | "runtimes"
@@ -146,6 +149,7 @@ const crmNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "crm", labelKey: "crm", icon: Users },
   { key: "crmCustomers", labelKey: "customers", icon: Users },
   { key: "crmEmails", labelKey: "emails", icon: Mail },
+  { key: "crmAISettings", labelKey: "ai_settings", icon: SlidersHorizontal },
 ];
 
 const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
