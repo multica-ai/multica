@@ -101,6 +101,7 @@ function ToolRow({ tool, onToggle, onConfigSave, toggling }: ToolRowProps) {
   const [localConfig, setLocalConfig] = useState<Record<string, unknown>>(tool.config ?? {});
   const [savingConfig, setSavingConfig] = useState(false);
 
+  const isExcluded = tool.status === "explicitly_excluded"; // CEREBRO-PATCH(agent-tools-status): excluded tools are visible but cannot be toggled callable.
   const isDirty = JSON.stringify(localConfig) !== JSON.stringify(tool.config ?? {});
 
   const handleConfigChange = (key: string, value: string) => {
@@ -123,7 +124,14 @@ function ToolRow({ tool, onToggle, onConfigSave, toggling }: ToolRowProps) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
             <div>
-              <span className="text-sm font-medium">{tool.name}</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium">{tool.name}</span>
+                {isExcluded && (
+                  <span className="rounded border border-dashed px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                    Excluded
+                  </span>
+                )}
+              </div>
               {tool.description && (
                 <p className="mt-0.5 text-xs text-muted-foreground">{tool.description}</p>
               )}
@@ -131,7 +139,7 @@ function ToolRow({ tool, onToggle, onConfigSave, toggling }: ToolRowProps) {
             <Switch
               checked={tool.enabled}
               onCheckedChange={(v) => onToggle(tool.name, v)}
-              disabled={toggling}
+              disabled={toggling || isExcluded}
               aria-label={`Toggle ${tool.name}`}
             />
           </div>

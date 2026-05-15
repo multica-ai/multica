@@ -15,6 +15,7 @@ import (
 type CerebroToolItem struct {
 	Name        string
 	Description string
+	Status      string // CEREBRO-PATCH(agent-tools-status): carries implemented/excluded registry state into admin API.
 }
 
 // AgentToolResponse is the wire shape returned by GET /api/agents/{id}/tools.
@@ -23,6 +24,7 @@ type CerebroToolItem struct {
 type AgentToolResponse struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
+	Status      string          `json:"status"` // CEREBRO-PATCH(agent-tools-status-response): let UI show explicit exclusions.
 	Enabled     bool            `json:"enabled"`
 	ConfigJSON  json.RawMessage `json:"config,omitempty"`
 }
@@ -36,10 +38,13 @@ type AgentToolResponse struct {
 func (h *Handler) SetCerebroToolMeta(items []CerebroToolItem) {
 	h.cerebroToolItems = items
 	m := make(map[string]string, len(items))
+	statuses := make(map[string]string, len(items))
 	for _, it := range items {
 		m[it.Name] = it.Description
+		statuses[it.Name] = it.Status
 	}
 	h.cerebroToolDesc = m
+	h.cerebroToolStatus = statuses
 }
 
 // ListAgentTools handles GET /api/agents/{id}/tools
@@ -94,9 +99,13 @@ func (h *Handler) ListAgentTools(w http.ResponseWriter, r *http.Request) {
 		resp := AgentToolResponse{
 			Name:        item.Name,
 			Description: item.Description,
+			Status:      item.Status,
 		}
 		if g, ok := grants[item.Name]; ok {
 			resp.Enabled = g.enabled
+			if item.Status == "explicitly_excluded" {
+				resp.Enabled = false
+			}
 			if len(g.config) > 0 {
 				resp.ConfigJSON = json.RawMessage(g.config)
 			}
@@ -119,6 +128,13 @@ func (h *Handler) UpsertAgentTool(w http.ResponseWriter, r *http.Request) {
 	toolName := chi.URLParam(r, "name")
 	if toolName == "" {
 		writeError(w, http.StatusBadRequest, "tool name is required")
+		return
+	}
+	if status, ok := h.cerebroToolStatus[toolName]; !ok {
+		writeError(w, http.StatusNotFound, "tool not registered")
+		return
+	} else if status == "explicitly_excluded" {
+		writeError(w, http.StatusBadRequest, "tool is explicitly excluded and cannot be enabled")
 		return
 	}
 
@@ -160,9 +176,9 @@ func (h *Handler) UpsertAgentTool(w http.ResponseWriter, r *http.Request) {
 		agent.ID, toolName,
 	)
 	var (
-		name      string
-		cfgRaw    []byte
-		enabled   bool
+		name    string
+		cfgRaw  []byte
+		enabled bool
 	)
 	if err := row.Scan(&name, &cfgRaw, &enabled); err != nil {
 		writeError(w, http.StatusInternalServerError, "fetch updated grant: "+err.Error())
@@ -171,6 +187,7 @@ func (h *Handler) UpsertAgentTool(w http.ResponseWriter, r *http.Request) {
 
 	resp := AgentToolResponse{
 		Name:    name,
+		Status:  h.cerebroToolStatus[name],
 		Enabled: enabled,
 	}
 	if desc, ok := h.cerebroToolDesc[name]; ok {

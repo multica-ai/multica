@@ -49,6 +49,7 @@ declare module "@multica/core/types/autopilot" {
 export interface AgentTool {
   name: string;
   description: string;
+  status: "implemented" | "newly_implemented" | "explicitly_excluded";
   enabled: boolean;
   config: Record<string, unknown>;
 }

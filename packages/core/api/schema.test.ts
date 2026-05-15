@@ -130,7 +130,7 @@ describe("ApiClient schema fallback", () => {
         expect.any(Object),
       );
       expect(tools).toEqual([
-        { name: "list_issues", description: "", enabled: true, config: {} },
+        { name: "list_issues", description: "", status: "implemented", enabled: true, config: {} },
       ]);
     });
   });

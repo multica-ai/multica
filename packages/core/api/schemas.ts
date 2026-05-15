@@ -193,6 +193,7 @@ const AgentToolSchema = z.preprocess((value) => {
 }, z.object({
   name: z.string().min(1),
   description: z.string().default(""),
+  status: z.enum(["implemented", "newly_implemented", "explicitly_excluded"]).default("implemented"), // CEREBRO-PATCH(agent-tools-status): preserve explicit exclusion state at the API boundary.
   enabled: z.boolean().default(false),
   config: z.record(z.string(), z.unknown()).optional().default({}),
 }).loose());

@@ -251,7 +251,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		rawMeta := cerebroruntime.AllBuiltinToolMeta()
 		items := make([]handler.CerebroToolItem, len(rawMeta))
 		for i, m := range rawMeta {
-			items[i] = handler.CerebroToolItem{Name: m.Name, Description: m.Description}
+			items[i] = handler.CerebroToolItem{Name: m.Name, Description: m.Description, Status: m.Status} // CEREBRO-PATCH(router-tool-status): expose explicit exclusion status to the tools API.
 		}
 		h.SetCerebroToolMeta(items)
 	}

@@ -24,13 +24,15 @@ func TestListAgentTools_ReturnsRegisteredMetadataWithEnabledStatus(t *testing.T)
 
 	prevItems := testHandler.cerebroToolItems
 	prevDesc := testHandler.cerebroToolDesc
+	prevStatus := testHandler.cerebroToolStatus
 	testHandler.SetCerebroToolMeta([]CerebroToolItem{
-		{Name: "list_issues", Description: "List workspace issues."},
-		{Name: "get_issue", Description: "Read one workspace issue."},
+		{Name: "list_issues", Description: "List workspace issues.", Status: "implemented"},
+		{Name: "get_issue", Description: "Read one workspace issue.", Status: "implemented"},
 	})
 	t.Cleanup(func() {
 		testHandler.cerebroToolItems = prevItems
 		testHandler.cerebroToolDesc = prevDesc
+		testHandler.cerebroToolStatus = prevStatus
 	})
 
 	if _, err := testPool.Exec(ctx,
@@ -58,6 +60,9 @@ func TestListAgentTools_ReturnsRegisteredMetadataWithEnabledStatus(t *testing.T)
 	if tools[0].Name != "list_issues" || tools[0].Description != "List workspace issues." || !tools[0].Enabled {
 		t.Fatalf("enabled tool mismatch: %+v", tools[0])
 	}
+	if tools[0].Status != "implemented" {
+		t.Fatalf("enabled tool status = %q, want implemented", tools[0].Status)
+	}
 	var cfg map[string]int
 	if err := json.Unmarshal(tools[0].ConfigJSON, &cfg); err != nil {
 		t.Fatalf("decode config: %v", err)
@@ -67,5 +72,93 @@ func TestListAgentTools_ReturnsRegisteredMetadataWithEnabledStatus(t *testing.T)
 	}
 	if tools[1].Name != "get_issue" || tools[1].Description != "Read one workspace issue." || tools[1].Enabled {
 		t.Fatalf("disabled registered tool mismatch: %+v", tools[1])
+	}
+}
+
+func TestListAgentToolsShowsExcludedToolsDisabled(t *testing.T) { // CEREBRO-PATCH(agent-tools-status-test): stale excluded grants must render disabled.
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "agent-tools-excluded-list", []byte(`{}`))
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_tool_grant WHERE agent_id = $1`, agentID)
+		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	prevItems := testHandler.cerebroToolItems
+	prevDesc := testHandler.cerebroToolDesc
+	prevStatus := testHandler.cerebroToolStatus
+	testHandler.SetCerebroToolMeta([]CerebroToolItem{
+		{Name: "delete_group", Description: "Delete a workspace group.", Status: "explicitly_excluded"},
+	})
+	t.Cleanup(func() {
+		testHandler.cerebroToolItems = prevItems
+		testHandler.cerebroToolDesc = prevDesc
+		testHandler.cerebroToolStatus = prevStatus
+	})
+
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO agent_tool_grant (agent_id, tool_name, enabled)
+		 VALUES ($1, 'delete_group', true)`,
+		agentID,
+	); err != nil {
+		t.Fatalf("insert stale grant: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodGet, "/api/agents/"+agentID+"/tools", nil), "id", agentID)
+	testHandler.ListAgentTools(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListAgentTools: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var tools []AgentToolResponse
+	if err := json.NewDecoder(w.Body).Decode(&tools); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Status != "explicitly_excluded" || tools[0].Enabled {
+		t.Fatalf("excluded tool should be visible but disabled: %+v", tools)
+	}
+}
+
+func TestUpsertAgentToolRejectsExplicitlyExcludedTools(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "agent-tools-excluded", []byte(`{}`))
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_tool_grant WHERE agent_id = $1`, agentID)
+		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	prevItems := testHandler.cerebroToolItems
+	prevDesc := testHandler.cerebroToolDesc
+	prevStatus := testHandler.cerebroToolStatus
+	testHandler.SetCerebroToolMeta([]CerebroToolItem{
+		{Name: "delete_group", Description: "Delete a workspace group.", Status: "explicitly_excluded"},
+	})
+	t.Cleanup(func() {
+		testHandler.cerebroToolItems = prevItems
+		testHandler.cerebroToolDesc = prevDesc
+		testHandler.cerebroToolStatus = prevStatus
+	})
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPut, "/api/agents/"+agentID+"/tools/delete_group", nil), "id", agentID)
+	req = withURLParam(req, "name", "delete_group")
+	testHandler.UpsertAgentTool(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for excluded tool, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM agent_tool_grant WHERE agent_id = $1 AND tool_name = 'delete_group'`, agentID).Scan(&count); err != nil {
+		t.Fatalf("count grants: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("excluded tool grant count = %d, want 0", count)
 	}
 }

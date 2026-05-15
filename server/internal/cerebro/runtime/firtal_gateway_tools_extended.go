@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -240,13 +241,13 @@ func (t *FirtalUpdateIssueTool) Call(ctx context.Context, args map[string]any) (
 	}
 
 	params := db.UpdateIssueParams{
-		ID:          issue.ID,
-		Title:       pgtype.Text{String: issue.Title, Valid: true},
-		Description: issue.Description,
-		Status:      pgtype.Text{String: issue.Status, Valid: true},
-		Priority:    pgtype.Text{String: issue.Priority, Valid: true},
+		ID:           issue.ID,
+		Title:        pgtype.Text{String: issue.Title, Valid: true},
+		Description:  issue.Description,
+		Status:       pgtype.Text{String: issue.Status, Valid: true},
+		Priority:     pgtype.Text{String: issue.Priority, Valid: true},
 		AssigneeType: issue.AssigneeType,
-		AssigneeID:  issue.AssigneeID,
+		AssigneeID:   issue.AssigneeID,
 	}
 
 	if s, ok := args["status"].(string); ok && s != "" {
@@ -474,7 +475,7 @@ func (t *FirtalBQQueryTool) Call(ctx context.Context, args map[string]any) (stri
 // ── web_fetch ─────────────────────────────────────────────────────────────────
 
 var (
-	htmlTagRE  = regexp.MustCompile(`<[^>]+>`)
+	htmlTagRE   = regexp.MustCompile(`<[^>]+>`)
 	htmlSpaceRE = regexp.MustCompile(`\s{2,}`)
 )
 
@@ -900,6 +901,70 @@ func (t *FirtalListProjectsTool) Call(ctx context.Context, args map[string]any) 
 	return string(raw), nil
 }
 
+// ── create_project ───────────────────────────────────────────────────────────
+
+type FirtalCreateProjectTool struct {
+	queries *db.Queries
+	tctx    ToolContext
+}
+
+func (t *FirtalCreateProjectTool) Name() string { return "create_project" }
+func (t *FirtalCreateProjectTool) Description() string {
+	return "Create a project in the current workspace."
+}
+func (t *FirtalCreateProjectTool) InputSchema() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"title"},
+		"properties": map[string]any{
+			"title":       map[string]any{"type": "string", "description": "Project title."},
+			"description": map[string]any{"type": "string", "description": "Project description."},
+			"status":      map[string]any{"type": "string", "description": "Project status (default: planned)."},
+			"priority":    map[string]any{"type": "string", "description": "Priority: urgent, high, medium, low (default: medium)."},
+		},
+	}
+}
+func (t *FirtalCreateProjectTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	title, ok := args["title"].(string)
+	if !ok || strings.TrimSpace(title) == "" {
+		return "", fmt.Errorf("create_project: title is required")
+	}
+	status := "planned"
+	if s, ok := args["status"].(string); ok && strings.TrimSpace(s) != "" {
+		status = strings.TrimSpace(s)
+	}
+	priority := "medium"
+	if p, ok := args["priority"].(string); ok && strings.TrimSpace(p) != "" {
+		priority = strings.TrimSpace(p)
+	}
+	project, err := t.queries.CreateProject(ctx, db.CreateProjectParams{
+		WorkspaceID: t.tctx.WorkspaceID,
+		Title:       strings.TrimSpace(title),
+		Description: pgtype.Text{String: stringArg(args, "description"), Valid: stringArg(args, "description") != ""},
+		Status:      status,
+		Priority:    priority,
+		LeadType:    pgtype.Text{String: "agent", Valid: t.tctx.AgentID.Valid},
+		LeadID:      t.tctx.AgentID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("create_project: %w", err)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"id":     util.UUIDToString(project.ID),
+		"title":  project.Title,
+		"status": project.Status,
+	})
+	if err != nil {
+		return "", fmt.Errorf("create_project: marshal result: %w", err)
+	}
+	return string(raw), nil
+}
+
+func stringArg(args map[string]any, key string) string {
+	v, _ := args[key].(string)
+	return strings.TrimSpace(v)
+}
+
 // ── get_me ────────────────────────────────────────────────────────────────────
 
 // FirtalGetMeTool implements Tool for returning the calling agent's identity.
@@ -938,6 +1003,278 @@ func (t *FirtalGetMeTool) Call(ctx context.Context, args map[string]any) (string
 	return string(raw), nil
 }
 
+// ── list_artifacts / search_artifacts ────────────────────────────────────────
+
+type FirtalListArtifactsTool struct {
+	queries *db.Queries
+	tctx    ToolContext
+}
+
+func (t *FirtalListArtifactsTool) Name() string { return "list_artifacts" }
+func (t *FirtalListArtifactsTool) Description() string {
+	return "List workspace artifacts. Optionally filter by query text with q."
+}
+func (t *FirtalListArtifactsTool) InputSchema() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{},
+		"properties": map[string]any{
+			"q": map[string]any{"type": "string", "description": "Optional text query for artifact title/body."},
+			"limit": map[string]any{
+				"type":        "integer",
+				"description": "Max artifacts to return (default 20, max 50).",
+			},
+		},
+	}
+}
+func (t *FirtalListArtifactsTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	limit := int32(20)
+	if lv, ok := args["limit"]; ok {
+		switch v := lv.(type) {
+		case float64:
+			limit = int32(v)
+		case int:
+			limit = int32(v)
+		}
+		if limit <= 0 || limit > 50 {
+			limit = 20
+		}
+	}
+	q, _ := args["q"].(string)
+	artifacts, err := t.queries.SearchArtifactsInWorkspace(ctx, db.SearchArtifactsInWorkspaceParams{
+		WorkspaceID: t.tctx.WorkspaceID,
+		Limit:       limit,
+		Offset:      0,
+		Q:           pgtype.Text{String: strings.TrimSpace(q), Valid: strings.TrimSpace(q) != ""},
+	})
+	if err != nil {
+		return "", fmt.Errorf("list_artifacts: %w", err)
+	}
+	raw, err := json.Marshal(formatArtifacts(artifacts))
+	if err != nil {
+		return "", fmt.Errorf("list_artifacts: marshal result: %w", err)
+	}
+	return string(raw), nil
+}
+
+type FirtalSearchArtifactsTool struct {
+	queries *db.Queries
+	tctx    ToolContext
+}
+
+func (t *FirtalSearchArtifactsTool) Name() string { return "search_artifacts" }
+func (t *FirtalSearchArtifactsTool) Description() string {
+	return "Search workspace artifacts by query text."
+}
+func (t *FirtalSearchArtifactsTool) InputSchema() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"q"},
+		"properties": map[string]any{
+			"q":     map[string]any{"type": "string", "description": "Text query for artifact title/body."},
+			"limit": map[string]any{"type": "integer", "description": "Max artifacts to return (default 20, max 50)."},
+		},
+	}
+}
+func (t *FirtalSearchArtifactsTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	q, ok := args["q"].(string)
+	if !ok || strings.TrimSpace(q) == "" {
+		return "", fmt.Errorf("search_artifacts: q is required")
+	}
+	return (&FirtalListArtifactsTool{queries: t.queries, tctx: t.tctx}).Call(ctx, args)
+}
+
+func formatArtifacts(artifacts []db.Artifact) []map[string]any {
+	out := make([]map[string]any, 0, len(artifacts))
+	for _, a := range artifacts {
+		item := map[string]any{
+			"id":          util.UUIDToString(a.ID),
+			"kind":        a.Kind,
+			"format":      a.Format,
+			"title":       a.Title,
+			"author_type": a.AuthorType,
+			"author_id":   util.UUIDToString(a.AuthorID),
+		}
+		if strings.TrimSpace(a.Body) != "" {
+			item["body"] = a.Body
+		}
+		if a.ProjectID.Valid {
+			item["project_id"] = util.UUIDToString(a.ProjectID)
+		}
+		if a.IssueID.Valid {
+			item["issue_id"] = util.UUIDToString(a.IssueID)
+		}
+		if a.FolderID.Valid {
+			item["folder_id"] = util.UUIDToString(a.FolderID)
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+// ── list_groups / get_grant / credential_list ────────────────────────────────
+
+type FirtalListGroupsTool struct {
+	cerebro *cerebrodb.Queries
+	tctx    ToolContext
+}
+
+func (t *FirtalListGroupsTool) Name() string { return "list_groups" }
+func (t *FirtalListGroupsTool) Description() string {
+	return "List workspace groups."
+}
+func (t *FirtalListGroupsTool) InputSchema() map[string]any {
+	return map[string]any{"type": "object", "required": []string{}, "properties": map[string]any{}}
+}
+func (t *FirtalListGroupsTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	if t.cerebro == nil {
+		return "", fmt.Errorf("list_groups: cerebro queries unavailable")
+	}
+	groups, err := t.cerebro.ListCerebroGroups(ctx, t.tctx.WorkspaceID)
+	if err != nil {
+		return "", fmt.Errorf("list_groups: %w", err)
+	}
+	out := make([]map[string]any, 0, len(groups))
+	for _, g := range groups {
+		item := map[string]any{
+			"id":   util.UUIDToString(g.ID),
+			"name": g.Name,
+		}
+		if g.Description.Valid {
+			item["description"] = g.Description.String
+		}
+		out = append(out, item)
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return "", fmt.Errorf("list_groups: marshal result: %w", err)
+	}
+	return string(raw), nil
+}
+
+type FirtalGetGrantTool struct {
+	cerebro *cerebrodb.Queries
+	tctx    ToolContext
+}
+
+func (t *FirtalGetGrantTool) Name() string { return "get_grant" }
+func (t *FirtalGetGrantTool) Description() string {
+	return "Fetch one Persona grant by grant_id."
+}
+func (t *FirtalGetGrantTool) InputSchema() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"grant_id"},
+		"properties": map[string]any{
+			"grant_id": map[string]any{"type": "string", "description": "Persona grant UUID."},
+		},
+	}
+}
+func (t *FirtalGetGrantTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	if t.cerebro == nil {
+		return "", fmt.Errorf("get_grant: cerebro queries unavailable")
+	}
+	grantRef, ok := args["grant_id"].(string)
+	if !ok || strings.TrimSpace(grantRef) == "" {
+		return "", fmt.Errorf("get_grant: grant_id is required")
+	}
+	grantID, err := util.ParseUUID(strings.TrimSpace(grantRef))
+	if err != nil {
+		return "", fmt.Errorf("get_grant: invalid grant_id: %w", err)
+	}
+	grant, err := t.cerebro.GetCerebroWorkspaceGrant(ctx, cerebrodb.GetCerebroWorkspaceGrantParams{
+		ID:          grantID,
+		WorkspaceID: t.tctx.WorkspaceID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("get_grant: %w", err)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"id":               util.UUIDToString(grant.ID),
+		"subject_type":     grant.SubjectType,
+		"subject_id":       util.UUIDToString(grant.SubjectID),
+		"resource_pattern": grant.ResourcePattern,
+		"capability":       grant.Capability,
+		"status":           grant.Status,
+	})
+	if err != nil {
+		return "", fmt.Errorf("get_grant: marshal result: %w", err)
+	}
+	return string(raw), nil
+}
+
+type FirtalCredentialListTool struct {
+	cerebro *cerebrodb.Queries
+	tctx    ToolContext
+}
+
+func (t *FirtalCredentialListTool) Name() string { return "credential_list" }
+func (t *FirtalCredentialListTool) Description() string {
+	return "List credential registry entries visible in the workspace without secret values."
+}
+func (t *FirtalCredentialListTool) InputSchema() map[string]any {
+	return map[string]any{"type": "object", "required": []string{}, "properties": map[string]any{}}
+}
+func (t *FirtalCredentialListTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	if t.cerebro == nil {
+		return "", fmt.Errorf("credential_list: cerebro queries unavailable")
+	}
+	credentials, err := t.cerebro.ListCerebroCredentials(ctx, t.tctx.WorkspaceID)
+	if err != nil {
+		return "", fmt.Errorf("credential_list: %w", err)
+	}
+	out := make([]map[string]any, 0, len(credentials))
+	for _, c := range credentials {
+		out = append(out, map[string]any{
+			"id":         util.UUIDToString(c.ID),
+			"type":       c.Type,
+			"name":       c.Name,
+			"value_hint": c.ValueHint,
+		})
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return "", fmt.Errorf("credential_list: marshal result: %w", err)
+	}
+	return string(raw), nil
+}
+
+// ── list_runtimes ────────────────────────────────────────────────────────────
+
+type FirtalListRuntimesTool struct {
+	queries *db.Queries
+	tctx    ToolContext
+}
+
+func (t *FirtalListRuntimesTool) Name() string { return "list_runtimes" }
+func (t *FirtalListRuntimesTool) Description() string {
+	return "List agent runtimes in the current workspace."
+}
+func (t *FirtalListRuntimesTool) InputSchema() map[string]any {
+	return map[string]any{"type": "object", "required": []string{}, "properties": map[string]any{}}
+}
+func (t *FirtalListRuntimesTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	runtimes, err := t.queries.ListAgentRuntimes(ctx, t.tctx.WorkspaceID)
+	if err != nil {
+		return "", fmt.Errorf("list_runtimes: %w", err)
+	}
+	out := make([]map[string]any, 0, len(runtimes))
+	for _, rt := range runtimes {
+		out = append(out, map[string]any{
+			"id":           util.UUIDToString(rt.ID),
+			"name":         rt.Name,
+			"runtime_mode": rt.RuntimeMode,
+			"provider":     rt.Provider,
+			"status":       rt.Status,
+		})
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return "", fmt.Errorf("list_runtimes: marshal result: %w", err)
+	}
+	return string(raw), nil
+}
+
 // ── Registration helpers ──────────────────────────────────────────────────────
 
 // NewDefaultRegistry creates a Registry, registers all built-in tools, and
@@ -946,18 +1283,22 @@ func NewDefaultRegistry(pool interface {
 	// We accept a pgxpool.Pool but avoid importing pgxpool at call sites by
 	// letting callers pass nil to get a stub. The real pool arrives via
 	// NewRegistry.
-}, queries *db.Queries, tctx ToolContext) *Registry {
+}, queries *db.Queries, tctx ToolContext, cerebroQueries ...*cerebrodb.Queries) *Registry {
 	// For compatibility, the registry only needs a *pgxpool.Pool for DB-backed
 	// lookups. Callers that wire the full stack pass it via NewRegistry.
 	// This helper focuses on tool registration.
+	var cq *cerebrodb.Queries
+	if len(cerebroQueries) > 0 {
+		cq = cerebroQueries[0]
+	}
 	r := &Registry{tools: make(map[string]Tool)}
-	registerBuiltinTools(r, queries, tctx)
+	registerBuiltinTools(r, queries, cq, tctx)
 	return r
 }
 
 // registerBuiltinTools registers all built-in tools with the given registry.
 // Called at executor startup with the per-task ToolContext.
-func registerBuiltinTools(r *Registry, queries *db.Queries, tctx ToolContext) {
+func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cerebrodb.Queries, tctx ToolContext) {
 	r.Register(&FirtalGetIssueTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalListIssuesTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalCreateIssueTool{queries: queries, tctx: tctx})
@@ -965,8 +1306,15 @@ func registerBuiltinTools(r *Registry, queries *db.Queries, tctx ToolContext) {
 	r.Register(&FirtalAssignIssueTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalListCommentsTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalAddCommentTool{queries: queries, tctx: tctx})
+	r.Register(&FirtalCreateProjectTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalListProjectsTool{queries: queries, tctx: tctx})
+	r.Register(&FirtalListArtifactsTool{queries: queries, tctx: tctx})
+	r.Register(&FirtalSearchArtifactsTool{queries: queries, tctx: tctx})
+	r.Register(&FirtalListRuntimesTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalGetMeTool{queries: queries, tctx: tctx})
+	r.Register(&FirtalListGroupsTool{cerebro: cerebroQueries, tctx: tctx})
+	r.Register(&FirtalGetGrantTool{cerebro: cerebroQueries, tctx: tctx})
+	r.Register(&FirtalCredentialListTool{cerebro: cerebroQueries, tctx: tctx})
 	r.Register(&FirtalBQQueryTool{queries: queries, tctx: tctx})
 	r.Register(&WebFetchTool{})
 	r.Register(&SheetsWriteTool{queries: queries, tctx: tctx})

@@ -432,16 +432,20 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	var (
 		anthropicTools []AnthropicTool
 		toolSrv        *mcp.Server
+		activeRegistry *Registry
 		useRegistry    bool
 	)
 	if e.registry != nil {
-		enabledTools := e.registry.GetEnabledToolsForAgent(ctx, agentID)
+		taskRegistry := NewDefaultRegistry(nil, e.queries, tctx, e.cerebro) // CEREBRO-PATCH(firtal-gateway-cerebro-tools): wire concrete Cerebro-family handlers into per-task registries.
+		taskRegistry.db = e.registry.db
+		enabledTools := taskRegistry.GetEnabledToolsForAgent(ctx, agentID)
 		if len(enabledTools) > 0 {
 			// Also register the MCP-backed tools (get_issue, list_comments,
 			// add_comment) that the Registry wraps via its Call method.
 			// For backward compat, create an MCP server and also expose its
 			// tools — the registry dispatch handles the extended tools.
-			anthropicTools = e.registry.ToAnthropicTools(enabledTools)
+			anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
+			activeRegistry = taskRegistry
 			useRegistry = true
 		}
 	}
@@ -460,7 +464,7 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		}
 	}
 
-	return e.runAnthropicToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, anthropicTools, tctx, toolSrv, useRegistry)
+	return e.runAnthropicToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, anthropicTools, tctx, toolSrv, activeRegistry, useRegistry)
 }
 
 // runToolLoopWithServer is the testable inner form of the legacy OpenAI-compat
@@ -554,6 +558,7 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 	tools []AnthropicTool,
 	tctx ToolContext,
 	toolSrv *mcp.Server,
+	registry *Registry,
 	useRegistry bool,
 ) (GatewayCompletion, error) {
 	// Extract system prompt from the first message if present.
@@ -635,7 +640,7 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 				resultText string
 				isError    bool
 			)
-			if useRegistry && e.registry != nil {
+			if useRegistry && registry != nil {
 				args := map[string]any{}
 				if raw := strings.TrimSpace(call.Function.Arguments); raw != "" {
 					if err := json.Unmarshal([]byte(raw), &args); err != nil {
@@ -644,7 +649,7 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 					}
 				}
 				if !isError {
-					resultText, err = e.registry.Call(ctx, call.Function.Name, args)
+					resultText, err = registry.Call(ctx, call.Function.Name, args)
 					if err != nil {
 						// Fall through to MCP server if registry doesn't know this tool.
 						if toolSrv != nil {

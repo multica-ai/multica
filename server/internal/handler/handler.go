@@ -61,7 +61,7 @@ type Config struct {
 	//   3) cron job scheduled and task_usage_rollup_lag_seconds() < 900.
 	UseDailyRollupForRuntimeUsage bool
 	// ScannerDiscoveryToken protects the cross-workspace
-// CEREBRO-PATCH(handler): persona integration additions.
+	// CEREBRO-PATCH(handler): persona integration additions.
 	// /api/scanner-discovery/runtimes endpoint consumed by persona's scanner.
 	// Empty disables the endpoint entirely.
 	ScannerDiscoveryToken string
@@ -79,12 +79,12 @@ type Config struct {
 }
 
 type Handler struct {
-	Queries   *db.Queries
-	DB        dbExecutor
-	TxStarter txStarter
-	Hub       *realtime.Hub
-	DaemonHub *daemonws.Hub
-	Bus       *events.Bus
+	Queries               *db.Queries
+	DB                    dbExecutor
+	TxStarter             txStarter
+	Hub                   *realtime.Hub
+	DaemonHub             *daemonws.Hub
+	Bus                   *events.Bus
 	TaskService           *service.TaskService
 	AutopilotService      *service.AutopilotService
 	EmailService          *service.EmailService
@@ -123,9 +123,10 @@ type Handler struct {
 	PersonaMaskAudit PersonaMaskAuditWriter
 	// CEREBRO-PATCH(handler-tool-meta): JEH-1353 — ordered list of registered
 	// tools and name→description lookup for the tool grant admin API.
-	cerebroToolItems []CerebroToolItem
-	cerebroToolDesc  map[string]string
-	cfg              Config
+	cerebroToolItems  []CerebroToolItem
+	cerebroToolDesc   map[string]string
+	cerebroToolStatus map[string]string // CEREBRO-PATCH(handler-tool-status): reject stale grants for excluded tools.
+	cfg               Config
 }
 
 // RuntimePauseInvoker is the upstream-side seam that the cerebro runtime

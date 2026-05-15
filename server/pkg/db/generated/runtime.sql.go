@@ -1164,7 +1164,8 @@ INSERT INTO agent_runtime (
     owner_id,
     timezone,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+-- CEREBRO-PATCH(runtime-timezone-default): zero-value sqlc params must not persist an invalid empty timezone.
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE(NULLIF($10, ''), 'UTC'), now())
 ON CONFLICT (workspace_id, daemon_id, provider)
 DO UPDATE SET
     name = EXCLUDED.name,

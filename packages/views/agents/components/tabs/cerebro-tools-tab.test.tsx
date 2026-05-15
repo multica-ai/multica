@@ -83,6 +83,7 @@ describe("CerebroToolsTab", () => {
       {
         name: "list_issues",
         description: "List workspace issues.",
+        status: "implemented",
         enabled: true,
         config: {},
       },
@@ -92,6 +93,7 @@ describe("CerebroToolsTab", () => {
         {
           name: "list_issues",
           description: "List workspace issues.",
+          status: "implemented",
           enabled: true,
           config: {},
         },

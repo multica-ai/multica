@@ -26,9 +26,9 @@ import (
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
-	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/redis/go-redis/v9"
 )
@@ -356,11 +356,11 @@ func main() {
 		slog.Error("invalid firtal gateway server runtime config", "error", err)
 		os.Exit(1)
 	} else if gatewayCfg.Enabled {
-		gatewayExecutor := cerebroruntime.NewFirtalGatewayExecutor(gatewayCfg, queries, cerebrodb.New(pool), taskSvc, bus, nil, nil)
+		gatewayExecutor := cerebroruntime.NewFirtalGatewayExecutor(gatewayCfg, queries, cerebrodb.New(pool), taskSvc, bus, nil, nil, cerebroruntime.NewRegistry(pool)) // CEREBRO-PATCH(main-firtal-gateway-tool-registry): give server runtime DB-backed tool grants.
 		go gatewayExecutor.Run(gatewayRuntimeCtx)
-		// CEREBRO-PATCH(main-seed-kristian): JEH-1353 — seed Kristian's MVP tools
-		// on every startup (idempotent upsert). KristianAgentID is the canonical
-		// UUID for Kristian in this workspace.
+		// CEREBRO-PATCH(main-seed-kristian): JEH-1353 — seed Kristian's approved
+		// Multica MCP tool package on every startup (idempotent upsert).
+		// KristianAgentID is the canonical UUID for Kristian in this workspace.
 		const kristianAgentID = "6fe22e7e-6a81-4403-be26-fafd89871cf6"
 		if kid, err := util.ParseUUID(kristianAgentID); err == nil {
 			if err := cerebroruntime.SeedKristianTools(context.Background(), pool, kid); err != nil {
