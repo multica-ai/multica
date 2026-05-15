@@ -26,6 +26,20 @@ import (
 // server refresh.
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
 
+// taskRunner executes a single agent task and returns the result.
+// Extracted as an interface so tests can inject a fake without spawning real
+// agent processes, while keeping test scaffolding out of the production struct.
+type taskRunner interface {
+	run(ctx context.Context, task Task, provider string, slot int, log *slog.Logger) (TaskResult, error)
+}
+
+// taskRunnerFunc adapts a plain function to the taskRunner interface.
+type taskRunnerFunc func(context.Context, Task, string, int, *slog.Logger) (TaskResult, error)
+
+func (f taskRunnerFunc) run(ctx context.Context, task Task, provider string, slot int, log *slog.Logger) (TaskResult, error) {
+	return f(ctx, task, provider, slot, log)
+}
+
 var (
 	isBrewInstall        = cli.IsBrewInstall
 	getBrewPrefix        = cli.GetBrewPrefix
@@ -82,19 +96,37 @@ type Daemon struct {
 	wsHBMu      sync.RWMutex         // guards wsHBLastAck
 	wsHBLastAck map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 
-	// runtimeGoneMu guards runtimeGoneInflight and reregisterNextAttempt. The
-	// state lets heartbeat / poller / WS-ack handlers converge on a single
-	// recovery path when they each detect that a runtime row was deleted
-	// server-side without three of them stampeding registerRuntimesForWorkspace.
-	runtimeGoneMu         sync.Mutex
-	runtimeGoneInflight   map[string]struct{}  // runtime_id -> currently recovering
-	reregisterNextAttempt map[string]time.Time // workspace_id -> earliest time the next re-register attempt may run
+	// runtimeGoneMu guards runtimeGoneInflight, reregisterNextAttempt, and
+	// reregisterLastCompletedAt. The state lets heartbeat / poller / WS-ack
+	// handlers converge on a single recovery path when they each detect that a
+	// runtime row was deleted server-side without three of them stampeding
+	// registerRuntimesForWorkspace.
+	runtimeGoneMu             sync.Mutex
+	runtimeGoneInflight       map[string]struct{}  // runtime_id -> currently recovering
+	reregisterNextAttempt     map[string]time.Time // workspace_id -> earliest time the next re-register attempt may run
+	reregisterLastCompletedAt map[string]time.Time // workspace_id -> wall-clock at which the last SUCCESSFUL re-register call returned (failures intentionally not stamped — see recordRegisterCompletion)
 
 	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
 	rootCtx       context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
 	restartBinary string             // non-empty after a successful update; path to the new binary
 	updating      atomic.Bool        // prevents concurrent update attempts
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
+
+	// claimMu guards pauseClaims and claimsInFlight. It is held only for the
+	// microseconds it takes to make a decision; ClaimTask itself runs without
+	// the lock so a slow per-runtime claim cannot stall auto-update or any
+	// other poller.
+	//
+	// The pair is the auto-update path's barrier against the issue's
+	// requirement that "升级过程中如果有 task 进来，会延后升级而不是中断 task":
+	// runRuntimePoller refuses to call ClaimTask while pauseClaims is set, and
+	// tryAutoUpdate refuses to flip pauseClaims while any poller is mid-claim
+	// or any task is in handleTask. Together that closes the fetch-then-claim
+	// race where a new task slipping in during the release-metadata fetch
+	// would be cancelled by triggerRestart's root-ctx cancel.
+	claimMu        sync.Mutex
+	pauseClaims    bool // when true, runRuntimePoller skips ClaimTask
+	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
@@ -105,6 +137,13 @@ type Daemon struct {
 	// goroutine can race against t.TempDir cleanup, leaving a partially
 	// deleted bare clone and an unrelated `not empty` cleanup failure.
 	bgSyncs sync.WaitGroup
+
+	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
+	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
+	// runUpdateFn executes the brew-or-download upgrade. Set to d.runUpdate by
+	// New() and overridable in tests so the auto-update poller can be exercised
+	// without touching the real network or the brew CLI.
+	runUpdateFn func(targetVersion string) (string, error)
 }
 
 // New creates a new Daemon instance.
@@ -114,20 +153,25 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
-	return &Daemon{
-		cfg:                   cfg,
-		client:                client,
-		repoCache:             repocache.New(cacheRoot, logger),
-		logger:                logger,
-		workspaces:            make(map[string]*workspaceState),
-		runtimeIndex:          make(map[string]Runtime),
-		runtimeSet:            newRuntimeSetWatcher(),
-		agentVersions:         make(map[string]string),
-		wsHBLastAck:           make(map[string]time.Time),
-		activeEnvRoots:        make(map[string]int),
-		runtimeGoneInflight:   make(map[string]struct{}),
-		reregisterNextAttempt: make(map[string]time.Time),
+	d := &Daemon{
+		cfg:                       cfg,
+		client:                    client,
+		repoCache:                 repocache.New(cacheRoot, logger),
+		logger:                    logger,
+		workspaces:                make(map[string]*workspaceState),
+		runtimeIndex:              make(map[string]Runtime),
+		runtimeSet:                newRuntimeSetWatcher(),
+		agentVersions:             make(map[string]string),
+		wsHBLastAck:               make(map[string]time.Time),
+		activeEnvRoots:            make(map[string]int),
+		runtimeGoneInflight:       make(map[string]struct{}),
+		reregisterNextAttempt:     make(map[string]time.Time),
+		reregisterLastCompletedAt: make(map[string]time.Time),
+		cancelPollInterval:        5 * time.Second,
 	}
+	d.runner = taskRunnerFunc(d.runTask)
+	d.runUpdateFn = d.runUpdate
+	return d
 }
 
 // setAgentVersion records the detected CLI version for an agent provider so
@@ -170,12 +214,17 @@ const reregisterFailureBackoff = 60 * time.Second
 // each other, so this function:
 //
 //   - keys an in-flight set on runtimeID to drop concurrent calls for the same
-//     ID after the first one is already cleaning up; and
+//     ID after the first one is already cleaning up;
 //   - keys a per-workspace next-attempt timestamp on workspaceID so that
 //     concurrent recoveries triggered by the SAME initial event coalesce to a
 //     single registerRuntimesForWorkspace call. The slot is cleared on success
 //     so a later distinct runtime deletion in the same workspace can trigger
-//     its own recovery without waiting for the coalesce window to expire.
+//     its own recovery without waiting for the coalesce window to expire; and
+//   - keys a per-workspace last-completed timestamp so that a straggler whose
+//     removeStaleRuntime took long enough that a sibling fully ran AND cleared
+//     the slot can still recognize itself as same-wave and bail. Without this,
+//     the success-case slot clear opens a race where the late caller re-claims
+//     an empty slot and double-registers.
 //
 // On failure of the underlying re-register, the next-attempt timestamp is
 // extended by reregisterFailureBackoff so we don't replace a server-side log
@@ -190,6 +239,11 @@ func (d *Daemon) handleRuntimeGone(runtimeID string) {
 	if runtimeID == "" {
 		return
 	}
+
+	// entryAt anchors the same-wave-straggler check at the bottom of the
+	// function. Captured at the very top so removeStaleRuntime mutex
+	// contention can't push it past a sibling's register completion.
+	entryAt := time.Now()
 
 	// Stampede control per runtime ID.
 	d.runtimeGoneMu.Lock()
@@ -216,40 +270,75 @@ func (d *Daemon) handleRuntimeGone(runtimeID string) {
 		"runtime_id", runtimeID, "workspace_id", workspaceID)
 	d.notifyRuntimeSetChanged()
 
-	// Per-workspace coalescing: claim the slot atomically. The first caller
-	// past this check is the only one that will run
-	// registerRuntimesForWorkspace while the coalesce window is open. We
-	// clear the slot on success so a separate later deletion in the same
-	// workspace is NOT suppressed; the inflight set above is what keeps two
-	// callers from racing the same recovery.
-	now := time.Now()
-	d.runtimeGoneMu.Lock()
-	if next, ok := d.reregisterNextAttempt[workspaceID]; ok && now.Before(next) {
-		d.runtimeGoneMu.Unlock()
+	if !d.tryClaimRegisterSlot(workspaceID, entryAt, time.Now()) {
 		d.logger.Debug("skip re-register: coalescing with recent attempt",
 			"workspace_id", workspaceID)
 		return
 	}
-	d.reregisterNextAttempt[workspaceID] = now.Add(reregisterCoalesceWindow)
-	d.runtimeGoneMu.Unlock()
 
-	if err := d.reregisterWorkspaceAfterRuntimeGone(d.recoveryContext(), workspaceID); err != nil {
-		d.runtimeGoneMu.Lock()
-		d.reregisterNextAttempt[workspaceID] = time.Now().Add(reregisterFailureBackoff)
-		d.runtimeGoneMu.Unlock()
+	err := d.reregisterWorkspaceAfterRuntimeGone(d.recoveryContext(), workspaceID)
+	d.recordRegisterCompletion(workspaceID, time.Now(), err)
+	if err != nil {
 		// Logged at Warn (not Error) because workspaceSyncLoop retries
 		// independently every DefaultWorkspaceSyncInterval, so a transient
 		// failure here is not a stuck state — just an extra wait.
 		d.logger.Warn("re-register after runtime gone failed",
 			"workspace_id", workspaceID, "error", err)
+	}
+}
+
+// tryClaimRegisterSlot atomically decides whether the calling goroutine should
+// run registerRuntimesForWorkspace. Returns true and claims the in-flight slot
+// when the caller may proceed; returns false (without mutating state) when the
+// call must be coalesced with a peer.
+//
+// Two gates are checked under runtimeGoneMu:
+//
+//  1. reregisterNextAttempt: a future timestamp means a peer holds the slot or
+//     a previous attempt failed and we are inside the failure backoff window.
+//  2. reregisterLastCompletedAt: a timestamp at or after our entryAt means a
+//     peer's register SUCCEEDED after we entered handleRuntimeGone, so the
+//     workspace state is already covered for our wave and we can bail.
+//     Failures intentionally don't stamp this field (see
+//     recordRegisterCompletion), so a same-wave straggler whose entryAt
+//     predates a failed sibling can still retry once the failure backoff
+//     expires — failures don't cover anything.
+//
+// entryAt is the wall-clock captured at the top of handleRuntimeGone. now is
+// passed in (rather than read inside) so tests can drive the gate
+// deterministically without sleeping.
+func (d *Daemon) tryClaimRegisterSlot(workspaceID string, entryAt, now time.Time) bool {
+	d.runtimeGoneMu.Lock()
+	defer d.runtimeGoneMu.Unlock()
+	if next, ok := d.reregisterNextAttempt[workspaceID]; ok && now.Before(next) {
+		return false
+	}
+	if last, ok := d.reregisterLastCompletedAt[workspaceID]; ok && !last.Before(entryAt) {
+		return false
+	}
+	d.reregisterNextAttempt[workspaceID] = now.Add(reregisterCoalesceWindow)
+	return true
+}
+
+// recordRegisterCompletion records the outcome of a register call. On success
+// it stamps lastCompletedAt (which suppresses same-wave stragglers via
+// tryClaimRegisterSlot) and clears the in-flight slot so a genuinely later
+// runtime deletion can claim immediately. On failure it extends
+// reregisterNextAttempt by the failure backoff and intentionally does NOT
+// stamp lastCompletedAt — a failed register did not cover any workspace
+// state, so a same-wave straggler whose entryAt predates the failure must
+// still be allowed to retry once the backoff expires. workspaceSyncLoop only
+// retries when the workspace's runtimeIDs fully drain, so partial-deletion
+// recovery has to come from the straggler path.
+func (d *Daemon) recordRegisterCompletion(workspaceID string, completedAt time.Time, err error) {
+	d.runtimeGoneMu.Lock()
+	defer d.runtimeGoneMu.Unlock()
+	if err != nil {
+		d.reregisterNextAttempt[workspaceID] = completedAt.Add(reregisterFailureBackoff)
 		return
 	}
-	// Success: clear the coalesce slot so a future distinct runtime deletion
-	// in this workspace can trigger its own recovery immediately. The
-	// inflight set on runtimeID still prevents same-event stampedes.
-	d.runtimeGoneMu.Lock()
+	d.reregisterLastCompletedAt[workspaceID] = completedAt
 	delete(d.reregisterNextAttempt, workspaceID)
-	d.runtimeGoneMu.Unlock()
 }
 
 // recoveryContext returns the daemon root context for long-running recovery
@@ -528,6 +617,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.taskWakeupLoop(ctx, taskWakeups)
 	go d.heartbeatLoop(ctx)
 	go d.gcLoop(ctx)
+	go d.autoUpdateLoop(ctx)
 	go d.serveHealth(ctx, healthLn, time.Now())
 	return d.pollLoop(ctx, taskWakeups)
 }
@@ -1388,32 +1478,14 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		"status": "running",
 	})
 
-	// Try Homebrew first, fall back to direct download.
-	var output string
-	if cli.IsBrewInstall() {
-		d.logger.Info("updating CLI via Homebrew...")
-		var err error
-		output, err = cli.UpdateViaBrew()
-		if err != nil {
-			d.logger.Error("CLI update failed", "error", err, "output", output)
-			d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
-				"status": "failed",
-				"error":  fmt.Sprintf("brew upgrade failed: %v", err),
-			})
-			return
-		}
-	} else {
-		d.logger.Info("updating CLI via direct download...", "target_version", update.TargetVersion)
-		var err error
-		output, err = cli.UpdateViaDownload(update.TargetVersion)
-		if err != nil {
-			d.logger.Error("CLI update failed", "error", err)
-			d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
-				"status": "failed",
-				"error":  fmt.Sprintf("download update failed: %v", err),
-			})
-			return
-		}
+	output, err := d.runUpdateFn(update.TargetVersion)
+	if err != nil {
+		d.logger.Error("CLI update failed", "error", err, "output", output)
+		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			"status": "failed",
+			"error":  err.Error(),
+		})
+		return
 	}
 
 	d.logger.Info("CLI update completed successfully", "output", output)
@@ -1424,6 +1496,29 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 
 	// Trigger daemon restart with the new binary.
 	d.triggerRestart()
+}
+
+// runUpdate executes the brew-or-download upgrade against targetVersion and
+// returns the human-readable output (always populated, even on failure when
+// brew gives us a useful diagnostic). The caller is responsible for the
+// `updating` CAS guard and for reporting status back to the server / triggering
+// the restart — extracted so the server-triggered path (handleUpdate) and the
+// auto-update poller (autoUpdateLoop) share the exact same execution body.
+func (d *Daemon) runUpdate(targetVersion string) (string, error) {
+	if cli.IsBrewInstall() {
+		d.logger.Info("updating CLI via Homebrew...")
+		out, err := cli.UpdateViaBrew()
+		if err != nil {
+			return out, fmt.Errorf("brew upgrade failed: %w", err)
+		}
+		return out, nil
+	}
+	d.logger.Info("updating CLI via direct download...", "target_version", targetVersion)
+	out, err := cli.UpdateViaDownload(targetVersion)
+	if err != nil {
+		return out, fmt.Errorf("download update failed: %w", err)
+	}
+	return out, nil
 }
 
 // updateReportBackoffs defines the retry schedule for delivering CLI update
@@ -1480,6 +1575,55 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 	}
 	d.logger.Error("CLI update report exhausted retries",
 		"runtime_id", runtimeID, "update_id", updateID, "error", lastErr)
+}
+
+// tryEnterClaim records the intent to call ClaimTask. Returns true if the
+// caller may proceed, false if the auto-update barrier is in effect. Every
+// successful call MUST be paired with an exitClaim() on every exit path —
+// either right after a failed/empty claim, or via the handleTask goroutine's
+// defer once the task is handed off.
+func (d *Daemon) tryEnterClaim() bool {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	if d.pauseClaims {
+		return false
+	}
+	d.claimsInFlight++
+	return true
+}
+
+// exitClaim releases the in-flight claim recorded by tryEnterClaim.
+func (d *Daemon) exitClaim() {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	d.claimsInFlight--
+}
+
+// trySetClaimBarrier atomically pauses new ClaimTask calls if the daemon is
+// fully idle (no claims in flight, no tasks running). Returns true if the
+// caller now holds the barrier and must release it with releaseClaimBarrier
+// on every non-restart exit path; false if the daemon is busy and the caller
+// should defer to the next tick. Used by tryAutoUpdate to close the race
+// where a task slips in between the cheap pre-fetch idle check and the
+// actual upgrade kick-off.
+func (d *Daemon) trySetClaimBarrier() bool {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	if d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
+		return false
+	}
+	d.pauseClaims = true
+	return true
+}
+
+// releaseClaimBarrier clears the auto-update claim barrier so pollers may
+// resume claiming. Called on failure paths only — a successful upgrade leaves
+// the barrier set because triggerRestart is about to take the process down
+// and clearing it would open a window for new claims during shutdown.
+func (d *Daemon) releaseClaimBarrier() {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	d.pauseClaims = false
 }
 
 // triggerRestart initiates a graceful daemon restart after a successful CLI update.
@@ -1656,8 +1800,22 @@ func (d *Daemon) runRuntimePoller(
 			continue
 		}
 
+		// Refuse new claims while an auto-update is preparing to roll the
+		// process. The barrier is paired with a re-check of claimsInFlight +
+		// activeTasks inside tryAutoUpdate, so once we get past tryEnterClaim
+		// the auto-update path is guaranteed to defer until this poller has
+		// handed the task off (or given up).
+		if !d.tryEnterClaim() {
+			sem <- slot
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
+			}
+			continue
+		}
+
 		task, err := d.client.ClaimTask(pollerCtx, rid)
 		if err != nil {
+			d.exitClaim()
 			sem <- slot
 			if pollerCtx.Err() == nil {
 				if isRuntimeNotFoundError(err) {
@@ -1677,6 +1835,7 @@ func (d *Daemon) runRuntimePoller(
 		}
 
 		if task == nil {
+			d.exitClaim()
 			sem <- slot
 			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
 				return
@@ -1693,6 +1852,7 @@ func (d *Daemon) runRuntimePoller(
 		d.activeTasks.Add(1)
 		go func(t Task, slot int) {
 			defer taskWG.Done()
+			defer d.exitClaim()
 			defer d.activeTasks.Add(-1)
 			defer func() { sem <- slot }()
 			d.handleTask(parentCtx, t, slot)
@@ -1800,7 +1960,14 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
-	cancelledByPoll := d.watchTaskCancellation(runCtx, task.ID, 5*time.Second, taskLog)
+	// Poll interval is d.cancelPollInterval (5s in production, reduced in tests
+	// via direct field override). Guard against zero so a misconfigured daemon
+	// doesn't panic time.NewTicker.
+	pollInterval := d.cancelPollInterval
+	if pollInterval == 0 {
+		pollInterval = 5 * time.Second
+	}
+	cancelledByPoll := d.watchTaskCancellation(runCtx, task.ID, pollInterval, taskLog)
 	go func() {
 		select {
 		case <-cancelledByPoll:
@@ -1809,7 +1976,18 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		}
 	}()
 
-	result, err := d.runTask(runCtx, task, provider, slot, taskLog)
+	result, err := d.runner.run(runCtx, task, provider, slot, taskLog)
+
+	// Report usage before any early return — the agent accumulates tokens
+	// whether the task completes, errors, or is cancelled mid-run by the poll
+	// goroutine. Both claude.go and codex.go populate result.Usage even when
+	// runCtx is cancelled, so dropping this on the cancelled path silently
+	// under-reports billing.
+	if len(result.Usage) > 0 {
+		if usageErr := d.client.ReportTaskUsage(ctx, task.ID, result.Usage); usageErr != nil {
+			taskLog.Warn("report task usage failed", "error", usageErr)
+		}
+	}
 
 	// Check if we were cancelled by the polling goroutine.
 	select {
@@ -1838,13 +2016,6 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	if status, err := d.client.GetTaskStatus(ctx, task.ID); shouldInterruptAgent(status, err) {
 		taskLog.Info("task cancelled during execution, discarding result", "status", status, "error", err)
 		return
-	}
-
-	// Report usage independently so it's captured even for failed/blocked tasks.
-	if len(result.Usage) > 0 {
-		if err := d.client.ReportTaskUsage(ctx, task.ID, result.Usage); err != nil {
-			taskLog.Warn("report task usage failed", "error", err)
-		}
 	}
 
 	d.reportTaskResult(ctx, task.ID, result, taskLog)
@@ -2017,8 +2188,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
 	var env *execenv.Environment
 	codexVersion := d.agentVersion("codex")
+	openclawBin := ""
+	if provider == "openclaw" {
+		openclawBin = entry.Path
+	}
 	if task.PriorWorkDir != "" {
-		env = execenv.Reuse(task.PriorWorkDir, provider, codexVersion, taskCtx, d.logger)
+		env = execenv.Reuse(execenv.ReuseParams{
+			WorkDir:      task.PriorWorkDir,
+			Provider:     provider,
+			CodexVersion: codexVersion,
+			OpenclawBin:  openclawBin,
+			Task:         taskCtx,
+		}, d.logger)
 	}
 	if env == nil {
 		var err error
@@ -2029,6 +2210,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			AgentName:      agentName,
 			Provider:       provider,
 			CodexVersion:   codexVersion,
+			OpenclawBin:    openclawBin,
 			Task:           taskCtx,
 		}, d.logger)
 		if err != nil {
@@ -2093,6 +2275,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
+	}
+	// Point OpenClaw at the per-task synthesized config. The config pins
+	// agents.defaults.workspace (and any agents.list[].workspace) to the
+	// task workdir, so the CLI's native skill scanner picks up the per-task
+	// skills written under {workDir}/skills/. Falls back silently when the
+	// preparer didn't run (non-openclaw provider, or write failure).
+	if env.OpenclawConfigPath != "" {
+		agentEnv["OPENCLAW_CONFIG_PATH"] = env.OpenclawConfigPath
+	}
+	// Grant the wrapper config permission to $include the user's active
+	// config across directories. OpenClaw's $include defaults to confining
+	// resolution to the wrapper's own directory; without this, the
+	// wrapper-out-of-envRoot $include into ~/.openclaw/openclaw.json is
+	// rejected and the run boots with no user-registered agents.
+	if rootsValue, ok := composeOpenclawIncludeRoots(env.OpenclawIncludeRoot, os.Getenv("OPENCLAW_INCLUDE_ROOTS")); ok {
+		agentEnv["OPENCLAW_INCLUDE_ROOTS"] = rootsValue
 	}
 	// Inject user-configured custom environment variables (e.g. ANTHROPIC_API_KEY,
 	// ANTHROPIC_BASE_URL for router/proxy mode, or CLAUDE_CODE_USE_BEDROCK for
@@ -2165,8 +2363,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
-	//   - openclaw loads bootstrap files (AGENTS.md, SOUL.md, ...) from its own
-	//     workspace dir rather than the task workdir.
+	//   - openclaw is pinned to the task workdir via the per-task config we
+	//     synthesize (see prepareOpenclawConfig), so AGENTS.md / .agent_context/
+	//     in the workdir ARE picked up by the CLI. Inline injection is retained
+	//     as a belt-and-suspenders for older openclaw releases until that load
+	//     path stabilises in production; remove this once a release tracks the
+	//     workdir bootstrap reliably end-to-end.
 	//   - kiro and kimi are wrapped through their own CLIs whose cwd handling
 	//     is opaque enough that we can't trust the file-based path either.
 	// Pass the full runtime brief inline (CLI catalog + workflow steps + agent
@@ -2666,6 +2868,40 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 	return result
 }
 
+// composeOpenclawIncludeRoots returns the value the daemon should set for
+// OPENCLAW_INCLUDE_ROOTS on the child openclaw process so its `$include`
+// loader will follow the wrapper's reference out of envRoot into the
+// user's active config directory.
+//
+// addRoot is the directory we must grant (typically dirname of the user's
+// active openclaw.json). userValue is whatever the daemon's own
+// environment already has under OPENCLAW_INCLUDE_ROOTS — the user's own
+// cross-directory layout. We prepend addRoot, dedupe by string equality,
+// drop empty path segments, and return ok=false when there's nothing to
+// grant (addRoot is empty — fresh install case), so callers can leave the
+// env var alone in that case.
+//
+// Path separator is the OS-native list separator (`:` on Unix, `;` on
+// Windows) to match how OpenClaw splits the env var.
+func composeOpenclawIncludeRoots(addRoot, userValue string) (string, bool) {
+	if addRoot == "" {
+		return "", false
+	}
+	parts := []string{addRoot}
+	seen := map[string]struct{}{addRoot: {}}
+	for _, p := range strings.Split(userValue, string(os.PathListSeparator)) {
+		if p == "" {
+			continue
+		}
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		parts = append(parts, p)
+	}
+	return strings.Join(parts, string(os.PathListSeparator)), true
+}
+
 // isBlockedEnvKey returns true if the key must not be overridden by user-
 // configured custom_env. This prevents accidental or malicious override of
 // daemon-internal variables and critical system paths.
@@ -2675,7 +2911,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
 		return true
 	}
 	return false

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -636,6 +637,431 @@ func TestCreateSubIssueUsesExplicitProjectOverParentProject(t *testing.T) {
 	}
 	if child.ProjectID == nil || *child.ProjectID != childProjectID {
 		t.Fatalf("CreateIssue child: expected explicit project_id %q, got %v", childProjectID, child.ProjectID)
+	}
+}
+
+func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	var projectID, parentID, issueID, duplicateID string
+	defer func() {
+		for _, id := range []string{duplicateID, issueID, parentID} {
+			if id != "" {
+				testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id)
+			}
+		}
+		if projectID != "" {
+			testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+		}
+	}()
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id
+	`, testWorkspaceID, "Duplicate guard project "+suffix).Scan(&projectID); err != nil {
+		t.Fatalf("create project fixture: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Duplicate guard parent " + suffix,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue parent: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var parent IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&parent); err != nil {
+		t.Fatalf("decode parent: %v", err)
+	}
+	parentID = parent.ID
+
+	title := "SH-PM-SYNTH-01 Synthesize recommendation-to-shortlist planning outputs " + suffix
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":           title,
+		"status":          "in_progress",
+		"parent_issue_id": parentID,
+		"project_id":      projectID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue original: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var original IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&original); err != nil {
+		t.Fatalf("decode original: %v", err)
+	}
+	issueID = original.ID
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":           "  sh-pm-synth-01   synthesize recommendation-to-shortlist planning outputs " + suffix + "  ",
+		"parent_issue_id": parentID,
+		"project_id":      projectID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("CreateIssue duplicate: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	var conflict struct {
+		Code  string        `json:"code"`
+		Error string        `json:"error"`
+		Issue IssueResponse `json:"issue"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&conflict); err != nil {
+		t.Fatalf("decode conflict: %v", err)
+	}
+	if conflict.Code != "active_duplicate_issue" {
+		t.Fatalf("code = %q, want active_duplicate_issue", conflict.Code)
+	}
+	if conflict.Issue.ID != issueID || conflict.Issue.Status != "in_progress" {
+		t.Fatalf("conflict issue = %#v, want original %s in_progress", conflict.Issue, issueID)
+	}
+	if !strings.Contains(conflict.Error, original.Identifier+" "+title) || !strings.Contains(conflict.Error, "allow_duplicate=true") || !strings.Contains(conflict.Error, "--allow-duplicate") {
+		t.Fatalf("unexpected duplicate message: %q", conflict.Error)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":           title,
+		"parent_issue_id": parentID,
+		"project_id":      projectID,
+		"allow_duplicate": true,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue allow duplicate: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var duplicate IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&duplicate); err != nil {
+		t.Fatalf("decode duplicate: %v", err)
+	}
+	duplicateID = duplicate.ID
+	if duplicateID == issueID {
+		t.Fatalf("allow duplicate returned original issue id %s", duplicateID)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":           title,
+		"parent_issue_id": parentID,
+		"project_id":      projectID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("CreateIssue duplicate after allow-duplicate: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := json.NewDecoder(w.Body).Decode(&conflict); err != nil {
+		t.Fatalf("decode second conflict: %v", err)
+	}
+	if conflict.Issue.ID != issueID {
+		t.Fatalf("conflict issue = %s, want oldest active issue %s", conflict.Issue.ID, issueID)
+	}
+}
+
+func TestCreateIssueAllowsDuplicateAfterCancelled(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Cancelled duplicate guard %d", time.Now().UnixNano())
+	var firstID, secondID string
+	defer func() {
+		for _, id := range []string{secondID, firstID} {
+			if id != "" {
+				testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id)
+			}
+		}
+	}()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  title,
+		"status": "cancelled",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue cancelled: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var first IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&first); err != nil {
+		t.Fatalf("decode cancelled: %v", err)
+	}
+	firstID = first.ID
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": title,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue after cancelled: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var second IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&second); err != nil {
+		t.Fatalf("decode second: %v", err)
+	}
+	secondID = second.ID
+	if secondID == firstID {
+		t.Fatalf("new issue reused cancelled issue id %s", secondID)
+	}
+}
+
+func TestCreateIssueAllowsDuplicateAfterDone(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Done duplicate guard %d", time.Now().UnixNano())
+	var firstID, secondID string
+	defer func() {
+		for _, id := range []string{secondID, firstID} {
+			if id != "" {
+				testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id)
+			}
+		}
+	}()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  title,
+		"status": "done",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue done: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var first IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&first); err != nil {
+		t.Fatalf("decode done: %v", err)
+	}
+	firstID = first.ID
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": title,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue after done: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var second IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&second); err != nil {
+		t.Fatalf("decode second: %v", err)
+	}
+	secondID = second.ID
+	if secondID == firstID {
+		t.Fatalf("new issue reused done issue id %s", secondID)
+	}
+}
+
+func TestTriggerAutopilotRejectsActiveDuplicateIssue(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Autopilot duplicate guard %d", time.Now().UnixNano())
+	var issueID, autopilotID string
+	defer func() {
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+		if issueID != "" {
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+	}()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  title,
+		"status": "todo",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue existing: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var existing IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&existing); err != nil {
+		t.Fatalf("decode existing issue: %v", err)
+	}
+	issueID = existing.ID
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Duplicate guard autopilot",
+		"assignee_id":          agentID,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger?workspace_id="+testWorkspaceID, nil)
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.TriggerAutopilot(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("TriggerAutopilot duplicate: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	var conflict struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+		Issue struct {
+			ID         string `json:"id"`
+			Identifier string `json:"identifier"`
+			Title      string `json:"title"`
+			Status     string `json:"status"`
+		} `json:"issue"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&conflict); err != nil {
+		t.Fatalf("decode duplicate conflict: %v", err)
+	}
+	if conflict.Code != "active_duplicate_issue" {
+		t.Fatalf("code = %q, want active_duplicate_issue", conflict.Code)
+	}
+	if conflict.Issue.ID != issueID || conflict.Issue.Identifier != existing.Identifier || conflict.Issue.Status != "todo" {
+		t.Fatalf("conflict issue = %#v, want existing %s %s todo", conflict.Issue, issueID, existing.Identifier)
+	}
+	if !strings.Contains(conflict.Error, "Active duplicate issue exists: "+existing.Identifier+" "+title) {
+		t.Fatalf("duplicate error did not mention existing issue: %s", conflict.Error)
+	}
+
+	assertAutopilotDuplicateRunSkipped(t, ctx, autopilotID, issueID, existing.Identifier, title)
+	assertAutopilotNotFailureMonitorCandidate(t, ctx, autopilotID)
+
+	var count int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&count); err != nil {
+		t.Fatalf("count issues: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("autopilot duplicate guard should leave one matching issue, got %d", count)
+	}
+}
+
+func TestScheduledAutopilotDuplicateIssueSkipsRun(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Scheduled autopilot duplicate guard %d", time.Now().UnixNano())
+	var issueID, autopilotID string
+	defer func() {
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+		if issueID != "" {
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+	}()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  title,
+		"status": "todo",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue existing: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var existing IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&existing); err != nil {
+		t.Fatalf("decode existing issue: %v", err)
+	}
+	issueID = existing.ID
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Scheduled duplicate guard autopilot",
+		"assignee_id":          agentID,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+
+	queries := db.New(testPool)
+	ap, err := queries.GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot schedule duplicate: %v", err)
+	}
+	if run == nil {
+		t.Fatal("expected skipped run, got nil")
+	}
+	if run.Status != "skipped" {
+		t.Fatalf("run status = %q, want skipped", run.Status)
+	}
+	assertAutopilotDuplicateRunSkipped(t, ctx, autopilotID, issueID, existing.Identifier, title)
+	assertAutopilotNotFailureMonitorCandidate(t, ctx, autopilotID)
+}
+
+func assertAutopilotDuplicateRunSkipped(t *testing.T, ctx context.Context, autopilotID, issueID, identifier, title string) {
+	t.Helper()
+	var status, failureReason string
+	var result []byte
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, failure_reason, result
+		FROM autopilot_run
+		WHERE autopilot_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, autopilotID).Scan(&status, &failureReason, &result); err != nil {
+		t.Fatalf("load autopilot run: %v", err)
+	}
+	if status != "skipped" {
+		t.Fatalf("autopilot duplicate run status = %q, want skipped", status)
+	}
+	if !strings.Contains(failureReason, identifier+" "+title) {
+		t.Fatalf("duplicate run failure_reason = %q, want existing issue details", failureReason)
+	}
+	var payload struct {
+		Code  string `json:"code"`
+		Issue struct {
+			ID         string `json:"id"`
+			Identifier string `json:"identifier"`
+			Title      string `json:"title"`
+			Status     string `json:"status"`
+		} `json:"issue"`
+	}
+	if err := json.Unmarshal(result, &payload); err != nil {
+		t.Fatalf("decode duplicate run result: %v", err)
+	}
+	if payload.Code != "active_duplicate_issue" || payload.Issue.ID != issueID || payload.Issue.Identifier != identifier || payload.Issue.Title != title {
+		t.Fatalf("duplicate run result = %#v, want issue %s %s %q", payload, issueID, identifier, title)
+	}
+}
+
+func assertAutopilotNotFailureMonitorCandidate(t *testing.T, ctx context.Context, autopilotID string) {
+	t.Helper()
+	candidates, err := db.New(testPool).SelectAutopilotsExceedingFailureThreshold(ctx, db.SelectAutopilotsExceedingFailureThresholdParams{
+		MinRuns:            1,
+		FailRatioThreshold: 1,
+		Since:              pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("SelectAutopilotsExceedingFailureThreshold: %v", err)
+	}
+	for _, candidate := range candidates {
+		if uuidToString(candidate.ID) == autopilotID {
+			t.Fatalf("duplicate skipped run should not be a failure monitor candidate: %+v", candidate)
+		}
 	}
 }
 

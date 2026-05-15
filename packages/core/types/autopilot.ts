@@ -4,7 +4,7 @@ export type AutopilotExecutionMode = "create_issue" | "run_only";
 
 export type AutopilotTriggerKind = "schedule" | "webhook" | "api";
 
-export type AutopilotRunStatus = "issue_created" | "running" | "completed" | "failed";
+export type AutopilotRunStatus = "issue_created" | "running" | "skipped" | "completed" | "failed";
 
 export type AutopilotRunSource = "schedule" | "manual" | "webhook" | "api";
 

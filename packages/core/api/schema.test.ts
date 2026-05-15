@@ -91,6 +91,15 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listGroupedIssues", () => {
+    it("falls back to empty groups when the response is malformed", async () => {
+      stubFetchJson({ groups: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listGroupedIssues({ group_by: "assignee" });
+      expect(res).toEqual({ groups: [] });
+    });
+  });
+
   describe("listComments", () => {
     it("returns [] when the response is not an array", async () => {
       stubFetchJson({ wrong: "shape" });

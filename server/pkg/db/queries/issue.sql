@@ -68,6 +68,19 @@ INSERT INTO issue (
     sqlc.narg('origin_type'), sqlc.narg('origin_id')
 ) RETURNING *;
 
+-- name: LockIssueDuplicateKey :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
+
+-- name: FindActiveDuplicateIssue :one
+SELECT * FROM issue
+WHERE workspace_id = $1
+  AND status NOT IN ('done', 'cancelled')
+  AND project_id IS NOT DISTINCT FROM $2::uuid
+  AND parent_issue_id IS NOT DISTINCT FROM $3::uuid
+  AND lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) = $4
+ORDER BY created_at ASC
+LIMIT 1;
+
 -- name: DeleteIssue :exec
 DELETE FROM issue WHERE id = $1;
 

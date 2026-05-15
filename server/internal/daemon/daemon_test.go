@@ -205,6 +205,80 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 	}
 }
 
+// TestComposeOpenclawIncludeRoots — the Elon must-fix regression: the
+// daemon must grant OpenClaw permission to follow the wrapper's $include
+// link from envRoot into the user's active config dir, while preserving
+// any roots the user already configured in their shell env so their own
+// cross-directory layouts keep working.
+func TestComposeOpenclawIncludeRoots(t *testing.T) {
+	t.Parallel()
+
+	sep := string(os.PathListSeparator)
+	cases := []struct {
+		name    string
+		add     string
+		user    string
+		want    string
+		wantSet bool
+	}{
+		{
+			// Fresh install — preparer emits no $include, so daemon
+			// shouldn't touch OPENCLAW_INCLUDE_ROOTS at all.
+			name:    "fresh_install_no_root_to_grant",
+			add:     "",
+			user:    "/some/user/dir",
+			wantSet: false,
+		},
+		{
+			// User has no existing value — output is just the granted dir.
+			name:    "no_user_value",
+			add:     "/home/alice/.openclaw",
+			user:    "",
+			want:    "/home/alice/.openclaw",
+			wantSet: true,
+		},
+		{
+			// User has their own include roots — daemon must prepend
+			// granted dir AND preserve user's entries verbatim.
+			name:    "preserves_user_value",
+			add:     "/home/alice/.openclaw",
+			user:    "/etc/openclaw" + sep + "/opt/openclaw/shared",
+			want:    "/home/alice/.openclaw" + sep + "/etc/openclaw" + sep + "/opt/openclaw/shared",
+			wantSet: true,
+		},
+		{
+			// User's value already contains the granted dir — daemon
+			// must dedupe rather than emit a redundant entry that would
+			// trip OpenClaw confused-deputy heuristics.
+			name:    "dedupes_when_user_already_grants_same_dir",
+			add:     "/home/alice/.openclaw",
+			user:    "/home/alice/.openclaw" + sep + "/etc/openclaw",
+			want:    "/home/alice/.openclaw" + sep + "/etc/openclaw",
+			wantSet: true,
+		},
+		{
+			// Stray empty segments from a malformed user env are skipped.
+			name:    "skips_empty_segments_in_user_value",
+			add:     "/home/alice/.openclaw",
+			user:    "" + sep + "/etc/openclaw" + sep + "",
+			want:    "/home/alice/.openclaw" + sep + "/etc/openclaw",
+			wantSet: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := composeOpenclawIncludeRoots(tc.add, tc.user)
+			if ok != tc.wantSet {
+				t.Fatalf("ok = %v, want %v (got = %q)", ok, tc.wantSet, got)
+			}
+			if got != tc.want {
+				t.Errorf("got = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestBuildPromptContainsIssueID(t *testing.T) {
 	t.Parallel()
 
@@ -1437,5 +1511,204 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 				t.Errorf("session_id should be forwarded on failure paths so chat resume keeps working, got %v", rec.payload["session_id"])
 			}
 		})
+	}
+}
+
+// TestHandleTask_ReportsUsageBeforeCancel verifies that ReportTaskUsage is called
+// even when the server marks the task as cancelled during the post-run status
+// check. Regression test for the ordering bug where the cancel check ran before
+// usage was reported, silently discarding accumulated tokens.
+func TestHandleTask_ReportsUsageBeforeCancel(t *testing.T) {
+	t.Parallel()
+
+	var callOrder []string
+	var mu sync.Mutex
+	recordCall := func(name string) {
+		mu.Lock()
+		callOrder = append(callOrder, name)
+		mu.Unlock()
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/start"):
+			recordCall("start")
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/progress"):
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/usage"):
+			recordCall("usage")
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/status"):
+			recordCall("status")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"cancelled"}`))
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:         make(map[string]*workspaceState),
+		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		cancelPollInterval: time.Hour, // effectively disable poll-cancel path; we want the post-run status check
+	}
+
+	// Inject a fake runner that returns a result with usage tokens, bypassing
+	// real agent process execution.
+	d.runner = taskRunnerFunc(func(_ context.Context, _ Task, _ string, _ int, _ *slog.Logger) (TaskResult, error) {
+		return TaskResult{
+			Status: "completed",
+			Usage: []TaskUsageEntry{
+				{Provider: "anthropic", Model: "claude-opus-4-6", InputTokens: 100, OutputTokens: 50},
+			},
+		}, nil
+	})
+
+	task := Task{
+		ID:        "task-abc",
+		RuntimeID: "rt-1",
+		IssueID:   "issue-xyz",
+		Agent:     &AgentData{Name: "test-agent"},
+	}
+
+	d.handleTask(context.Background(), task, 0)
+
+	mu.Lock()
+	order := make([]string, len(callOrder))
+	copy(order, callOrder)
+	mu.Unlock()
+
+	// usage must appear before status in the call order.
+	usageIdx, statusIdx := -1, -1
+	for i, name := range order {
+		switch name {
+		case "usage":
+			usageIdx = i
+		case "status":
+			statusIdx = i
+		}
+	}
+
+	if usageIdx == -1 {
+		t.Fatal("ReportTaskUsage was never called — usage is lost for cancelled tasks")
+	}
+	if statusIdx == -1 {
+		t.Fatal("GetTaskStatus was never called")
+	}
+	if usageIdx > statusIdx {
+		t.Fatalf("usage was reported AFTER status check (order: %v) — regression", order)
+	}
+}
+
+// TestHandleTask_ReportsUsageWhenCancelledByPoll verifies that ReportTaskUsage is
+// called even when the task is cancelled mid-execution by the poll goroutine.
+// Regression test for the cancelledByPoll early-return path that previously
+// discarded accumulated usage before calling ReportTaskUsage.
+func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
+	t.Parallel()
+
+	var callOrder []string
+	var mu sync.Mutex
+	recordCall := func(name string) {
+		mu.Lock()
+		callOrder = append(callOrder, name)
+		mu.Unlock()
+	}
+
+	// statusCallCount lets the poll goroutine return "cancelled" on first call
+	// while still handling later calls from the post-run status check.
+	var statusCallCount atomic.Int64
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/start"):
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/progress"):
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/usage"):
+			recordCall("usage")
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/status"):
+			// First call is from the poll goroutine — return "cancelled" to
+			// trigger runCancel() and close(cancelledByPoll).
+			if statusCallCount.Add(1) == 1 {
+				recordCall("poll-status")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"status":"cancelled"}`))
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"status":"running"}`))
+			}
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:         make(map[string]*workspaceState),
+		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		cancelPollInterval: 10 * time.Millisecond, // fire quickly so test is fast
+	}
+
+	// Inject a runner that blocks until runCtx is cancelled (simulating a real
+	// agent being interrupted), then returns usage tokens as claude.go does.
+	d.runner = taskRunnerFunc(func(runCtx context.Context, _ Task, _ string, _ int, _ *slog.Logger) (TaskResult, error) {
+		<-runCtx.Done()
+		return TaskResult{
+			Status: "aborted",
+			Usage: []TaskUsageEntry{
+				{Provider: "anthropic", Model: "claude-opus-4-6", InputTokens: 200, OutputTokens: 80},
+			},
+		}, nil
+	})
+
+	task := Task{
+		ID:        "task-poll",
+		RuntimeID: "rt-1",
+		IssueID:   "issue-poll",
+		Agent:     &AgentData{Name: "test-agent"},
+	}
+
+	d.handleTask(context.Background(), task, 0)
+
+	mu.Lock()
+	order := make([]string, len(callOrder))
+	copy(order, callOrder)
+	mu.Unlock()
+
+	// Verify the poll goroutine actually fired — without this assertion the test
+	// could pass via the post-run GetTaskStatus check without ever taking the
+	// cancelledByPoll path, making it a vacuous regression guard.
+	pollStatusIdx := -1
+	usageIdx := -1
+	for i, name := range order {
+		switch name {
+		case "poll-status":
+			pollStatusIdx = i
+		case "usage":
+			usageIdx = i
+		}
+	}
+	if pollStatusIdx == -1 {
+		t.Fatalf("poll goroutine never fired (order: %v) — cancelledByPoll path not exercised", order)
+	}
+	if usageIdx == -1 {
+		t.Fatalf("ReportTaskUsage was never called on poll-cancelled path (order: %v) — tokens lost", order)
+	}
+	// poll-status must precede usage: poll fires → runCtx cancelled → runner unblocks → usage flushed.
+	// If usage comes first, usage was reported before the runner was interrupted, which is impossible
+	// given that the runner blocks on runCtx.Done().
+	if usageIdx < pollStatusIdx {
+		t.Fatalf("usage reported before poll-status (order: %v) — poll-status must come first", order)
 	}
 }

@@ -46,10 +46,50 @@ export interface ListIssuesParams {
   open_only?: boolean;
 }
 
+export interface IssueActorRef {
+  type: IssueAssigneeType;
+  id: string;
+}
+
+export interface ListGroupedIssuesParams {
+  group_by: "assignee";
+  limit?: number;
+  offset?: number;
+  workspace_id?: string;
+  statuses?: IssueStatus[];
+  priorities?: IssuePriority[];
+  assignee_types?: IssueAssigneeType[];
+  assignee_id?: string;
+  assignee_ids?: string[];
+  creator_id?: string;
+  project_id?: string;
+  assignee_filters?: IssueActorRef[];
+  include_no_assignee?: boolean;
+  creator_filters?: IssueActorRef[];
+  project_ids?: string[];
+  include_no_project?: boolean;
+  label_ids?: string[];
+  group_assignee_type?: IssueAssigneeType | "none";
+  group_assignee_id?: string;
+}
+
 /** Raw backend response shape for `GET /api/issues`. */
 export interface ListIssuesResponse {
   issues: Issue[];
   total: number;
+}
+
+export interface IssueAssigneeGroup {
+  id: string;
+  assignee_type: IssueAssigneeType | null;
+  assignee_id: string | null;
+  issues: Issue[];
+  total: number;
+}
+
+/** Raw backend response shape for `GET /api/issues/grouped?group_by=assignee`. */
+export interface GroupedIssuesResponse {
+  groups: IssueAssigneeGroup[];
 }
 
 /** Per-status bucket in the paginated issue cache. `total` is the server count (all pages), not the length of `issues`. */

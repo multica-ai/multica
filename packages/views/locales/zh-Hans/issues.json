@@ -52,10 +52,13 @@
   },
   "display": {
     "tooltip": "显示设置",
+    "grouping_section": "分组",
     "ordering_section": "排序",
     "card_properties_section": "卡片属性",
     "ascending_title": "升序",
     "descending_title": "降序",
+    "group_status": "状态",
+    "group_assignee": "负责人",
     "sort_manual": "手动",
     "sort_priority": "优先级",
     "sort_due_date": "截止日期",
@@ -76,6 +79,28 @@
     "board": "看板",
     "list": "列表"
   },
+  "actor_issues": {
+    "scope": {
+      "assigned": {
+        "label": "已分配",
+        "description": "分配给这个成员或智能体的 issue"
+      },
+      "created": {
+        "label": "已创建",
+        "description": "这个成员或智能体创建的 issue"
+      }
+    },
+    "empty": {
+      "assigned": {
+        "title": "没有已分配的 issue",
+        "description": "分配到这里的 issue 会显示在此视图中。"
+      },
+      "created": {
+        "title": "没有已创建的 issue",
+        "description": "由这里创建的 issue 会显示在此视图中。"
+      }
+    }
+  },
   "list": {
     "empty_status": "无 issue",
     "add_issue_tooltip": "新建 issue"
@@ -85,7 +110,8 @@
     "hide_column": "隐藏列",
     "show_column": "显示列",
     "add_issue_tooltip": "新建 issue",
-    "empty_column": "无 issue"
+    "empty_column": "无 issue",
+    "empty_grouping": "没有匹配的 issue"
   },
   "detail": {
     "not_found": "这个 issue 不存在或已在该工作区被删除。",
@@ -114,6 +140,7 @@
     "prop_due_date": "截止日期",
     "prop_project": "项目",
     "prop_labels": "标签",
+    "add_property_action": "添加字段",
     "prop_created_by": "创建者",
     "prop_created": "创建时间",
     "prop_updated": "更新时间",
@@ -169,7 +196,9 @@
     "squad_leader_no_action_reason": "已评估：无需操作（{{reason}}）",
     "squad_leader_failed": "评估失败",
     "squad_leader_failed_reason": "评估失败：{{reason}}",
-    "coalesced_badge": "×{{count}}"
+    "coalesced_badge": "×{{count}}",
+    "activity_count_one": "{{count}} 条动态",
+    "activity_count_other": "{{count}} 条动态"
   },
   "comment": {
     "delete_title": "删除评论",

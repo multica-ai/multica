@@ -49,3 +49,46 @@ describe("useCreateModeStore", () => {
     );
   });
 });
+
+describe("openCreateIssueWithPreference", () => {
+  const initialMode = "manual" as const;
+
+  beforeEach(async () => {
+    const { useModalStore } = await import("../../modals");
+    useModalStore.getState().close();
+  });
+
+  it("opens quick-create-issue when last mode is agent", async () => {
+    const { openCreateIssueWithPreference, useCreateModeStore } = await import("./create-mode-store");
+    const { useModalStore } = await import("../../modals");
+    useCreateModeStore.getState().setLastMode("agent");
+    openCreateIssueWithPreference();
+    expect(useModalStore.getState().modal).toBe("quick-create-issue");
+    expect(useModalStore.getState().data).toBeNull();
+  });
+
+  it("opens create-issue when last mode is manual", async () => {
+    const { openCreateIssueWithPreference, useCreateModeStore } = await import("./create-mode-store");
+    const { useModalStore } = await import("../../modals");
+    useCreateModeStore.getState().setLastMode("manual");
+    openCreateIssueWithPreference();
+    expect(useModalStore.getState().modal).toBe("create-issue");
+  });
+
+  it("forwards seed data to whichever modal is opened", async () => {
+    const { openCreateIssueWithPreference, useCreateModeStore } = await import("./create-mode-store");
+    const { useModalStore } = await import("../../modals");
+    useCreateModeStore.getState().setLastMode("manual");
+    openCreateIssueWithPreference({ project_id: "p1" });
+    expect(useModalStore.getState().modal).toBe("create-issue");
+    expect(useModalStore.getState().data).toEqual({ project_id: "p1" });
+
+    useCreateModeStore.getState().setLastMode("agent");
+    openCreateIssueWithPreference({ project_id: "p2" });
+    expect(useModalStore.getState().modal).toBe("quick-create-issue");
+    expect(useModalStore.getState().data).toEqual({ project_id: "p2" });
+
+    useCreateModeStore.getState().setLastMode(initialMode);
+    useModalStore.getState().close();
+  });
+});

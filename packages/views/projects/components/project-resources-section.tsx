@@ -248,7 +248,7 @@ function CustomRepoForm({
   return (
     <form onSubmit={handle} className="flex items-center gap-1.5 pt-1 border-t">
       <input
-        type="url"
+        type="text"
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         placeholder={t(($) => $.resources.url_placeholder)}

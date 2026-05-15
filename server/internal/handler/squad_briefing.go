@@ -60,6 +60,11 @@ Your responsibilities, in order:
    record ` + "`" + `no_action` + "`" + ` and exit silently.
 
 Hard rules:
+- EVERY delegation MUST use the full mention markdown syntax
+  ` + "`" + `[@Name](mention://<type>/<UUID>)` + "`" + ` exactly as shown in the Squad
+  Roster. A plain "@name" or bare name does NOT trigger the agent —
+  if you skip the mention link, the task is never delivered and the
+  issue stalls. This is non-negotiable: no mention link = no delegation.
 - Do NOT restate the issue body or prior comments in your delegation —
   the assignee already has them. Repeating context is noise that
   buries the actual instruction.

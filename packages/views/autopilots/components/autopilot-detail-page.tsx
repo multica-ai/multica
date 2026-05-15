@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil } from "lucide-react";
+import { Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil, Ban, ChevronDown, ChevronRight } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions } from "@multica/core/autopilots/queries";
 import {
@@ -59,11 +59,12 @@ function formatDate(date: string): string {
   });
 }
 
-type RunStatus = "issue_created" | "running" | "completed" | "failed";
+type RunStatus = "issue_created" | "running" | "skipped" | "completed" | "failed";
 
 const RUN_VISUAL: Record<RunStatus, { color: string; icon: typeof CheckCircle2; spin?: boolean }> = {
   issue_created: { color: "text-blue-500", icon: Clock },
   running: { color: "text-blue-500", icon: Loader2, spin: true },
+  skipped: { color: "text-muted-foreground", icon: Ban },
   completed: { color: "text-emerald-500", icon: CheckCircle2 },
   failed: { color: "text-destructive", icon: XCircle },
 };
@@ -137,6 +138,77 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
   }
 
   return <div className={rowClass}>{content}</div>;
+}
+
+function RunHistoryList({
+  runs,
+  agentId,
+  agentName,
+}: {
+  runs: AutopilotRun[];
+  agentId: string;
+  agentName: string;
+}) {
+  const visibleRuns = runs.filter((run) => run.status !== "skipped");
+  const skippedRuns = runs.filter((run) => run.status === "skipped");
+
+  return (
+    <div className="rounded-md border overflow-hidden">
+      {visibleRuns.map((run) => (
+        <RunRow key={run.id} run={run} agentId={agentId} agentName={agentName} />
+      ))}
+      {skippedRuns.length > 0 && (
+        <SkippedRunsGroup runs={skippedRuns} agentId={agentId} agentName={agentName} />
+      )}
+    </div>
+  );
+}
+
+function SkippedRunsGroup({
+  runs,
+  agentId,
+  agentName,
+}: {
+  runs: AutopilotRun[];
+  agentId: string;
+  agentName: string;
+}) {
+  const { t } = useT("autopilots");
+  const [open, setOpen] = useState(false);
+  const latestRun = runs[0];
+  const ToggleIcon = open ? ChevronDown : ChevronRight;
+
+  return (
+    <div className="border-t bg-muted/20">
+      <button
+        type="button"
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-accent/30 transition-colors"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
+        <ToggleIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <Ban className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span className="w-24 shrink-0 text-xs font-medium text-muted-foreground">
+          {t(($) => $.run.skipped_group.label)}
+        </span>
+        <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
+          {t(($) => $.run.skipped_group.summary, { count: runs.length })}
+        </span>
+        {latestRun && (
+          <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+            {formatDate(latestRun.triggered_at || latestRun.created_at)}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="border-t bg-background">
+          {runs.map((run) => (
+            <RunRow key={run.id} run={run} agentId={agentId} agentName={agentName} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autopilotId: string }) {
@@ -501,11 +573,11 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 {t(($) => $.detail.no_runs)}
               </div>
             ) : (
-              <div className="rounded-md border overflow-hidden">
-                {runs.map((run) => (
-                  <RunRow key={run.id} run={run} agentId={autopilot.assignee_id} agentName={getActorName("agent", autopilot.assignee_id)} />
-                ))}
-              </div>
+              <RunHistoryList
+                runs={runs}
+                agentId={autopilot.assignee_id}
+                agentName={getActorName("agent", autopilot.assignee_id)}
+              />
             )}
           </section>
 

@@ -8,6 +8,7 @@ import { useNavigation } from "../../navigation";
 import {
   Archive,
   Calendar,
+  CalendarDays,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -17,6 +18,7 @@ import {
   Pin,
   PinOff,
   Plus,
+  Tag,
   Users,
 } from "lucide-react";
 import { PageHeader } from "../../layout/page-header";
@@ -58,6 +60,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueKeys, issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -265,6 +268,41 @@ function formatTokenCount(n: number): string {
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
 const EMPTY_REPLIES: TimelineEntry[] = [];
 
+// ---------------------------------------------------------------------------
+// Sidebar progressive disclosure
+// ---------------------------------------------------------------------------
+//
+// Properties shown in the sidebar split into two groups:
+//   - core: always rendered (status / assignee / project)
+//   - optional: rendered only when the issue has a value for that field OR
+//     the user explicitly added it via "+ Add property" in this session
+//     (priority / due_date / labels)
+//
+// Parent is not in either group — it has its own standalone section below
+// the Properties block, rendered only when the issue actually has a parent.
+//
+// `OPTIONAL_PROP_KEYS` is the open set — adding a new optional field
+// (e.g. `start_date`) means appending here, wiring its row in the JSX
+// switch below, and adding a locale key. The picker, visibility rules,
+// and add-property menu all flow from this one list.
+const OPTIONAL_PROP_KEYS = ["priority", "due_date", "labels"] as const;
+type OptionalPropKey = (typeof OPTIONAL_PROP_KEYS)[number];
+
+function isOptionalPropSet(
+  issue: Issue,
+  key: OptionalPropKey,
+  attachedLabelsCount: number,
+): boolean {
+  switch (key) {
+    case "priority":
+      return issue.priority !== "none";
+    case "due_date":
+      return !!issue.due_date;
+    case "labels":
+      return attachedLabelsCount > 0;
+  }
+}
+
 // Shallow array equality by element identity. Used to reuse the previous
 // render's per-thread reply slice when nothing in *this* thread changed,
 // even if the surrounding `timeline` array was rebuilt by a WS event in
@@ -332,6 +370,101 @@ function TimelineSkeleton() {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// Collapsible wrapper for an activity block. Older blocks default to a single
+// "N activities" summary line so the timeline isn't dominated by status /
+// priority / assignee churn; the trailing block stays expanded because it
+// usually answers "what just happened?". Expansion state is owned by the
+// parent so it survives Virtuoso's mount/unmount on scroll.
+function ActivityBlock({
+  entries,
+  expanded,
+  onToggle,
+  getActorName,
+  t,
+}: {
+  entries: TimelineEntry[];
+  expanded: boolean;
+  onToggle: () => void;
+  getActorName: (type: string, id: string) => string;
+  t: ActivityT;
+}) {
+  if (!expanded) {
+    const count = entries.length;
+    return (
+      <div className="pb-3 px-4">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronRight className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.activity.activity_count, { count })}</span>
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="pb-3 px-4 flex flex-col gap-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ChevronDown className="h-3 w-3 shrink-0" />
+        <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
+      </button>
+      {entries.map((entry) => {
+        const details = (entry.details ?? {}) as Record<string, string>;
+        const isStatusChange = entry.action === "status_changed";
+        const isPriorityChange = entry.action === "priority_changed";
+        const isDueDateChange = entry.action === "due_date_changed";
+
+        let leadIcon: React.ReactNode;
+        if (isStatusChange && details.to) {
+          leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
+        } else if (isPriorityChange && details.to) {
+          leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
+        } else if (isDueDateChange) {
+          leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
+        } else {
+          leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
+        }
+
+        return (
+          <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
+            <div className="mr-2 flex w-4 shrink-0 justify-center">
+              {leadIcon}
+            </div>
+            <div className="flex min-w-0 flex-1 items-center gap-1">
+              <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
+              <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+              {(entry.coalesced_count ?? 1) > 1 &&
+                entry.action !== "task_completed" &&
+                entry.action !== "task_failed" && (
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                    {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
+                  </span>
+                )}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="ml-auto shrink-0 cursor-default">
+                      {timeAgo(entry.created_at)}
+                    </span>
+                  }
+                />
+                <TooltipContent side="top">
+                  {new Date(entry.created_at).toLocaleString()}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -502,6 +635,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
+
+  // Per-issue, per-session set of optional properties currently visible in
+  // the sidebar Properties section. Seeded on issue switch with whichever
+  // fields are already set; "+ Add property" adds an entry, clearing a
+  // value does *not* remove one (avoids row-flicker on edit → clear).
+  // Resets when the user navigates to a different issue.
+  const [visibleOptionalProps, setVisibleOptionalProps] = useState<Set<OptionalPropKey>>(
+    () => new Set(),
+  );
+  // Optional property to auto-open as soon as it's mounted (the user just
+  // picked it from "+ Add property" and we want them dropped straight into
+  // edit state). Consumed by the row that matches this key, cleared after.
+  const [autoOpenProp, setAutoOpenProp] = useState<OptionalPropKey | null>(null);
+  // Controlled state for the "+ Add property" popover. Base UI's Popover
+  // doesn't auto-dismiss on item click (it's not a Menu primitive), so the
+  // popover would stay open behind the newly auto-opened picker — two
+  // popovers stacked. We close it explicitly in `addOptionalProp`.
+  const [addPropPopoverOpen, setAddPropPopoverOpen] = useState(false);
   // Virtuoso's `customScrollParent` wants the HTMLElement, not a ref. A plain
   // `useRef.current` does not trigger a re-render when it populates, so the
   // Virtuoso prop would never receive the element. Callback ref + state fixes
@@ -527,6 +678,43 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       next.delete(commentId);
       return next;
     });
+  }, []);
+
+  // Per-session activity-block expansion overrides. The default rule is
+  // "only the trailing block is expanded" (computed from timelineView.groups
+  // below); these two sets capture user clicks that diverge from the default.
+  // Two sets are needed because "default" can flip when a new activity block
+  // appends — without an explicit collapse override, a manually-collapsed
+  // older block would re-expand when it stops being the trailing one (or vice
+  // versa). Not persisted, matches the resolved-thread behaviour above.
+  const [expandedActivityIds, setExpandedActivityIds] = useState<Set<string>>(() => new Set());
+  const [collapsedActivityIds, setCollapsedActivityIds] = useState<Set<string>>(() => new Set());
+  const toggleActivityBlock = useCallback((id: string, currentlyExpanded: boolean) => {
+    if (currentlyExpanded) {
+      setCollapsedActivityIds((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+      setExpandedActivityIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    } else {
+      setExpandedActivityIds((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+      setCollapsedActivityIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   }, []);
   const didHighlightRef = useRef<string | null>(null);
   const requestedMissingHighlightRef = useRef<string | null>(null);
@@ -690,6 +878,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     () => flattenGroups(timelineView.groups, expandedResolved),
     [timelineView.groups, expandedResolved],
   );
+
+  // ID of the trailing activity block — the only one expanded by default.
+  const lastActivityGroupId = useMemo(() => {
+    for (let i = timelineView.groups.length - 1; i >= 0; i--) {
+      const g = timelineView.groups[i]!;
+      if (g.type === "activities") return g.entries[0]!.id;
+    }
+    return null;
+  }, [timelineView.groups]);
 
   // Map of reply-comment id → root-comment id, so a deep-link to a reply
   // (which lives inside a CommentCard, not in the flat items array) can fall
@@ -886,6 +1083,66 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
 
+  // Labels live in their own query (not on the issue body) — fetch the count
+  // here so seeding can decide whether the "Labels" optional row should be
+  // shown for an issue that already has labels attached.
+  const { data: attachedLabels = [] } = useQuery(issueLabelsOptions(wsId, id));
+  const attachedLabelsCount = attachedLabels.length;
+
+  // Seed the visible-optional-props set:
+  //   - on issue switch, reset to whichever fields are currently set
+  //   - on the SAME issue, additively pick up fields the user just set
+  //     (so the row stays visible after they edit + clear in one session)
+  // Removal happens only on issue switch — never on clear.
+  const seededIssueIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!issue) return;
+    if (seededIssueIdRef.current !== issue.id) {
+      seededIssueIdRef.current = issue.id;
+      setAutoOpenProp(null);
+      const seed = new Set<OptionalPropKey>();
+      for (const k of OPTIONAL_PROP_KEYS) {
+        if (isOptionalPropSet(issue, k, attachedLabelsCount)) seed.add(k);
+      }
+      setVisibleOptionalProps(seed);
+      return;
+    }
+    setVisibleOptionalProps((prev) => {
+      let next = prev;
+      for (const k of OPTIONAL_PROP_KEYS) {
+        if (isOptionalPropSet(issue, k, attachedLabelsCount) && !next.has(k)) {
+          if (next === prev) next = new Set(prev);
+          next.add(k);
+        }
+      }
+      return next;
+    });
+  }, [issue, attachedLabelsCount]);
+
+  const addOptionalProp = useCallback(
+    (key: OptionalPropKey) => {
+      setVisibleOptionalProps((prev) => {
+        if (prev.has(key)) return prev;
+        const next = new Set(prev);
+        next.add(key);
+        return next;
+      });
+      setAutoOpenProp(key);
+      // Dismiss the "+ Add property" popover so it doesn't sit stacked
+      // behind the picker we're about to auto-open.
+      setAddPropPopoverOpen(false);
+    },
+    [],
+  );
+
+  // Clear the auto-open flag after the next render so pickers (which read
+  // `defaultOpen` once via a useState initializer) keep the open state they
+  // captured on mount, but later interactions don't re-trigger it.
+  useEffect(() => {
+    if (autoOpenProp === null) return;
+    setAutoOpenProp(null);
+  }, [autoOpenProp]);
+
   const handleToggleSidebar = useCallback(() => {
     if (isMobile) {
       setMobileSidebarOpen((open) => !open);
@@ -974,28 +1231,104 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
         </button>
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+          {/* Core props — always rendered. */}
           <PropRow label={t(($) => $.detail.prop_status)}>
             <StatusPicker status={issue.status} onUpdate={handleUpdateField} align="start" />
-          </PropRow>
-          <PropRow label={t(($) => $.detail.prop_priority)}>
-            <PriorityPicker priority={issue.priority} onUpdate={handleUpdateField} align="start" />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
-          <PropRow label={t(($) => $.detail.prop_due_date)}>
-            <DueDatePicker dueDate={issue.due_date} onUpdate={handleUpdateField} />
-          </PropRow>
           <PropRow label={t(($) => $.detail.prop_project)}>
-            <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
+            <ProjectPicker
+              projectId={issue.project_id}
+              onUpdate={handleUpdateField}
+            />
           </PropRow>
-          <PropRow label={t(($) => $.detail.prop_labels)}>
-            <LabelPicker issueId={issue.id} align="start" />
-          </PropRow>
+
+          {/* Optional props — rendered only when set on the issue OR added
+              via "+ Add property" in this session. Row order follows the
+              order of `OPTIONAL_PROP_KEYS`. */}
+          {visibleOptionalProps.has("priority") && (
+            <PropRow label={t(($) => $.detail.prop_priority)}>
+              <PriorityPicker
+                priority={issue.priority}
+                onUpdate={handleUpdateField}
+                align="start"
+                defaultOpen={autoOpenProp === "priority"}
+              />
+            </PropRow>
+          )}
+          {visibleOptionalProps.has("due_date") && (
+            <PropRow label={t(($) => $.detail.prop_due_date)}>
+              <DueDatePicker
+                dueDate={issue.due_date}
+                onUpdate={handleUpdateField}
+                defaultOpen={autoOpenProp === "due_date"}
+              />
+            </PropRow>
+          )}
+          {visibleOptionalProps.has("labels") && (
+            <PropRow label={t(($) => $.detail.prop_labels)}>
+              <LabelPicker
+                issueId={issue.id}
+                align="start"
+                defaultOpen={autoOpenProp === "labels"}
+              />
+            </PropRow>
+          )}
+
+          {/* "+ Add property" — opens a Popover listing optional fields
+              not yet displayed. Hidden once every optional field is on
+              screen. Sits inside the same grid as a full-row, with its
+              own padding so the visual rhythm follows the rows above. */}
+          {OPTIONAL_PROP_KEYS.some((k) => !visibleOptionalProps.has(k)) && (
+            <div className="col-span-2 mt-1">
+              <Popover open={addPropPopoverOpen} onOpenChange={setAddPropPopoverOpen}>
+                <PopoverTrigger
+                  className="flex items-center gap-1.5 rounded-md px-2 py-1 -mx-2 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+                >
+                  <Plus className="h-3 w-3 shrink-0" />
+                  <span>{t(($) => $.detail.add_property_action)}</span>
+                </PopoverTrigger>
+                {/* Item visuals mirror the inspector rows' typography
+                    (text-xs, muted icons) and each option leads with the
+                    icon the resulting picker uses, so the dropdown reads
+                    as a preview of what will show up below. */}
+                <PopoverContent align="start" className="w-44 p-1">
+                  {OPTIONAL_PROP_KEYS.filter((k) => !visibleOptionalProps.has(k)).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => addOptionalProp(k)}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-foreground/90 transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                    >
+                      {k === "priority" && (
+                        <PriorityIcon priority="medium" inheritColor className="text-muted-foreground" />
+                      )}
+                      {k === "due_date" && (
+                        <CalendarDays className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      )}
+                      {k === "labels" && (
+                        <Tag className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="truncate">
+                        {k === "priority" && t(($) => $.detail.prop_priority)}
+                        {k === "due_date" && t(($) => $.detail.prop_due_date)}
+                        {k === "labels" && t(($) => $.detail.prop_labels)}
+                      </span>
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+            </div>
+          )}
         </div>}
       </div>
 
-      {/* Parent issue */}
+      {/* Parent issue — standalone section, only when the issue has a
+          parent. Setting a parent is reachable via the issue actions menu;
+          this card surfaces an existing parent without occupying sidebar
+          space for issues that don't have one. */}
       {parentIssue && (
         <div>
           <button
@@ -1131,57 +1464,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       );
     }
     // activity-group
+    const expanded = expandedActivityIds.has(item.id)
+      ? true
+      : collapsedActivityIds.has(item.id)
+        ? false
+        : item.id === lastActivityGroupId;
     return (
-      <div className="pb-3 px-4 flex flex-col gap-3">
-        {item.entries.map((entry) => {
-          const details = (entry.details ?? {}) as Record<string, string>;
-          const isStatusChange = entry.action === "status_changed";
-          const isPriorityChange = entry.action === "priority_changed";
-          const isDueDateChange = entry.action === "due_date_changed";
-
-          let leadIcon: React.ReactNode;
-          if (isStatusChange && details.to) {
-            leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
-          } else if (isPriorityChange && details.to) {
-            leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
-          } else if (isDueDateChange) {
-            leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
-          } else {
-            leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
-          }
-
-          return (
-            <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
-              <div className="mr-2 flex w-4 shrink-0 justify-center">
-                {leadIcon}
-              </div>
-              <div className="flex min-w-0 flex-1 items-center gap-1">
-                <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
-                <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
-                {(entry.coalesced_count ?? 1) > 1 &&
-                  entry.action !== "task_completed" &&
-                  entry.action !== "task_failed" && (
-                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
-                      {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
-                    </span>
-                  )}
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span className="ml-auto shrink-0 cursor-default">
-                        {timeAgo(entry.created_at)}
-                      </span>
-                    }
-                  />
-                  <TooltipContent side="top">
-                    {new Date(entry.created_at).toLocaleString()}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <ActivityBlock
+        entries={item.entries}
+        expanded={expanded}
+        onToggle={() => toggleActivityBlock(item.id, expanded)}
+        getActorName={getActorName}
+        t={t}
+      />
     );
   };
 

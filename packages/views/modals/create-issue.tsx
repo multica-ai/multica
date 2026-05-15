@@ -100,8 +100,18 @@ export function ManualCreatePanel({
   const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.status);
   const [priority, setPriority] = useState<IssuePriority>(draft.priority);
   const [submitting, setSubmitting] = useState(false);
-  const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(draft.assigneeType);
-  const [assigneeId, setAssigneeId] = useState<string | undefined>(draft.assigneeId);
+  const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(() => {
+    if (data && "assignee_type" in data) {
+      return (data.assignee_type as IssueAssigneeType | null) ?? undefined;
+    }
+    return draft.assigneeType;
+  });
+  const [assigneeId, setAssigneeId] = useState<string | undefined>(() => {
+    if (data && "assignee_id" in data) {
+      return (data.assignee_id as string | null) ?? undefined;
+    }
+    return draft.assigneeId;
+  });
   const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
   const [projectId, setProjectId] = useState<string | undefined>(
     (data?.project_id as string) || undefined,

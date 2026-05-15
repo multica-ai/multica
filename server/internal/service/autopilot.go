@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -73,6 +76,14 @@ func (s *AutopilotService) DispatchAutopilot(
 	switch autopilot.ExecutionMode {
 	case "create_issue":
 		if err := s.dispatchCreateIssue(ctx, autopilot, &run); err != nil {
+			var duplicate *issueguard.ActiveDuplicateError
+			if errors.As(err, &duplicate) {
+				updatedRun := s.skipDuplicateRun(ctx, autopilot, run, source, duplicate)
+				if source == "manual" {
+					return &updatedRun, fmt.Errorf("dispatch create_issue: %w", err)
+				}
+				return &updatedRun, nil
+			}
 			s.failRun(ctx, run.ID, err.Error())
 			s.captureAutopilotRunFailed(autopilot, run, source, err.Error())
 			return &run, fmt.Errorf("dispatch create_issue: %w", err)
@@ -118,14 +129,21 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 
 	qtx := s.Queries.WithTx(tx)
 
-	// Get next issue number.
+	title := s.interpolateTemplate(ap)
+	description := s.buildIssueDescription(ap)
+
+	duplicate, foundDuplicate, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, ap.WorkspaceID, pgtype.UUID{}, pgtype.UUID{}, title, false)
+	if err != nil {
+		return fmt.Errorf("check duplicate issue: %w", err)
+	}
+	if foundDuplicate {
+		return issueguard.NewActiveDuplicateError(duplicate, s.getIssuePrefix(ap.WorkspaceID))
+	}
+
 	issueNumber, err := qtx.IncrementIssueCounter(ctx, ap.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("increment issue counter: %w", err)
 	}
-
-	title := s.interpolateTemplate(ap)
-	description := s.buildIssueDescription(ap)
 
 	issue, err := qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 		WorkspaceID:   ap.WorkspaceID,
@@ -343,6 +361,55 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 	}); err != nil {
 		slog.Warn("failed to mark autopilot run as failed", "run_id", util.UUIDToString(runID), "error", err)
 	}
+}
+
+func (s *AutopilotService) skipDuplicateRun(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	run db.AutopilotRun,
+	source string,
+	duplicate *issueguard.ActiveDuplicateError,
+) db.AutopilotRun {
+	reason := duplicate.Error()
+	result, err := json.Marshal(map[string]any{
+		"code": "active_duplicate_issue",
+		"issue": map[string]any{
+			"id":         duplicate.ID,
+			"identifier": duplicate.Identifier,
+			"title":      duplicate.Title,
+			"status":     duplicate.Status,
+		},
+	})
+	if err != nil {
+		slog.Warn("failed to marshal duplicate autopilot result",
+			"run_id", util.UUIDToString(run.ID),
+			"error", err,
+		)
+	}
+
+	updatedRun, err := s.Queries.UpdateAutopilotRunSkippedWithResult(ctx, db.UpdateAutopilotRunSkippedWithResultParams{
+		ID:            run.ID,
+		FailureReason: pgtype.Text{String: reason, Valid: true},
+		Result:        result,
+	})
+	if err != nil {
+		slog.Warn("failed to mark duplicate autopilot run as skipped",
+			"run_id", util.UUIDToString(run.ID),
+			"error", err,
+		)
+		return run
+	}
+
+	slog.Info("autopilot duplicate issue skipped",
+		"autopilot_id", util.UUIDToString(autopilot.ID),
+		"run_id", util.UUIDToString(run.ID),
+		"source", source,
+		"existing_issue_id", duplicate.ID,
+	)
+
+	s.Queries.UpdateAutopilotLastRunAt(ctx, autopilot.ID)
+	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), updatedRun, "skipped")
+	return updatedRun
 }
 
 // shouldSkipDispatch is the pre-flight admission check from MUL-1899.

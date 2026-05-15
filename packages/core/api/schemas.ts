@@ -5,6 +5,7 @@ import type {
   AgentTemplateSummary,
   Attachment,
   CreateAgentFromTemplateResponse,
+  GroupedIssuesResponse,
   ListIssuesResponse,
   TimelineEntry,
 } from "../types";
@@ -162,6 +163,22 @@ export const ListIssuesResponseSchema = z.object({
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
   issues: [],
   total: 0,
+};
+
+const IssueAssigneeGroupSchema = z.object({
+  id: z.string(),
+  assignee_type: z.string().nullable(),
+  assignee_id: z.string().nullable(),
+  issues: z.array(IssueSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const GroupedIssuesResponseSchema = z.object({
+  groups: z.array(IssueAssigneeGroupSchema).default([]),
+}).loose();
+
+export const EMPTY_GROUPED_ISSUES_RESPONSE: GroupedIssuesResponse = {
+  groups: [],
 };
 
 const SubscriberSchema = z.object({
