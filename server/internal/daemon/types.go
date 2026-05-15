@@ -61,7 +61,6 @@ type Task struct {
 	QuickCreatePrompt       string          `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
 	SquadID                 string          `json:"squad_id,omitempty"`                  // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName               string          `json:"squad_name,omitempty"`                // display name for the picker squad, used in prompt text
-	ClaimToken              string          `json:"claim_token,omitempty"`               // opaque token to present in StartTask as proof of claim receipt
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1853,48 +1852,13 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		taskLog.Info("picked task", "issue", task.IssueID, "agent", agentName, "provider", provider)
 	}
 
-	if err := d.client.StartTask(ctx, task.ID, task.ClaimToken); err != nil {
-		var reqErr *requestError
-		if errors.As(err, &reqErr) && reqErr.StatusCode == http.StatusConflict {
-			// 409: claim expired or superseded — task is no longer ours.
-			// Release slot (via defer) without calling FailTask.
-			taskLog.Warn("start task: claim superseded (409), releasing slot", "error", err)
-			return
+	if err := d.client.StartTask(ctx, task.ID); err != nil {
+		taskLog.Error("start task failed", "error", err)
+		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("start task failed: %s", err.Error()), "", "", "agent_error"); failErr != nil {
+			taskLog.Error("fail task after start error", "error", failErr)
 		}
-
-		// Transport error or 5xx: retry once with the same token before giving up.
-		if !errors.As(err, &reqErr) || reqErr.StatusCode >= 500 {
-			taskLog.Warn("start task: transient error, retrying", "error", err)
-			time.Sleep(2 * time.Second)
-			if retryErr := d.client.StartTask(ctx, task.ID, task.ClaimToken); retryErr != nil {
-				var retryReqErr *requestError
-				if errors.As(retryErr, &retryReqErr) && retryReqErr.StatusCode == http.StatusConflict {
-					taskLog.Warn("start task retry: claim superseded (409), releasing slot")
-					return
-				}
-				// Retry failed — check task status before calling FailTask.
-				if status, statusErr := d.client.GetTaskStatus(ctx, task.ID); statusErr == nil && status == "running" {
-					taskLog.Info("start task retry failed but task is already running, proceeding")
-					// Fall through to continue execution.
-					goto startOK
-				}
-				taskLog.Error("start task failed after retry", "error", retryErr)
-				if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("start task failed: %s", retryErr.Error()), "", "", "agent_error", task.ClaimToken); failErr != nil {
-					taskLog.Error("fail task after start error", "error", failErr)
-				}
-				return
-			}
-			// Retry succeeded, fall through.
-		} else {
-			// 4xx (non-409): deterministic failure, no retry.
-			taskLog.Error("start task failed", "error", err)
-			if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("start task failed: %s", err.Error()), "", "", "agent_error", task.ClaimToken); failErr != nil {
-				taskLog.Error("fail task after start error", "error", failErr)
-			}
-			return
-		}
+		return
 	}
-startOK:
 
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
@@ -1945,7 +1909,7 @@ startOK:
 		taskLog.Error("task failed", "error", err)
 		// runTask returned without a TaskResult, so we don't have a SessionID
 		// to forward — best we can do is record the failure.
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "agent_error", task.ClaimToken); failErr != nil {
+		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "agent_error"); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
 		return
@@ -1962,7 +1926,7 @@ startOK:
 		return
 	}
 
-	d.reportTaskResult(ctx, task.ID, result, task.ClaimToken, taskLog)
+	d.reportTaskResult(ctx, task.ID, result, taskLog)
 
 	// Write GC metadata after the task finishes so the periodic GC loop
 	// can look up the parent record (issue / chat session / autopilot run /
@@ -1987,13 +1951,13 @@ startOK:
 // the agent may have built a real session before getting stuck, and we want
 // the next chat turn to resume there rather than start over and "forget"
 // the conversation.
-func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, claimToken string, taskLog *slog.Logger) {
+func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) {
 	switch result.Status {
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
 		if err := d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
 			taskLog.Error("complete task failed, falling back to fail", "error", err)
-			if failErr := d.client.FailTask(ctx, taskID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error", claimToken); failErr != nil {
+			if failErr := d.client.FailTask(ctx, taskID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error"); failErr != nil {
 				taskLog.Error("fail task fallback also failed", "error", failErr)
 			}
 		}
@@ -2007,7 +1971,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			}
 		}
 		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
-		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason, claimToken); err != nil {
+		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
 			taskLog.Error("report failed task failed", "error", err)
 		}
 	}

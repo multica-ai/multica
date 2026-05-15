@@ -1500,29 +1500,8 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read optional claim_token from body (new daemons send it; old ones don't).
-	var body struct {
-		ClaimToken string `json:"claim_token"`
-	}
-	// Best-effort decode; empty body is fine for legacy daemons.
-	json.NewDecoder(r.Body).Decode(&body)
-
-	var claimToken pgtype.UUID
-	if body.ClaimToken != "" {
-		parsed, err := util.ParseUUID(body.ClaimToken)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "malformed claim_token")
-			return
-		}
-		claimToken = parsed
-	}
-
-	task, err := h.TaskService.StartTask(r.Context(), parseUUID(taskID), claimToken)
+	task, err := h.TaskService.StartTask(r.Context(), parseUUID(taskID))
 	if err != nil {
-		if errors.Is(err, service.ErrClaimTokenInvalid) {
-			writeError(w, http.StatusConflict, "claim token expired or superseded")
-			return
-		}
 		slog.Warn("start task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -1707,7 +1686,6 @@ type TaskFailRequest struct {
 	SessionID     string `json:"session_id,omitempty"`
 	WorkDir       string `json:"work_dir,omitempty"`
 	FailureReason string `json:"failure_reason,omitempty"`
-	ClaimToken    string `json:"claim_token,omitempty"`
 }
 
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
@@ -1724,16 +1702,8 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason, req.ClaimToken)
+	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason)
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidClaimToken) {
-			writeError(w, http.StatusBadRequest, "malformed claim token")
-			return
-		}
-		if errors.Is(err, service.ErrClaimTokenInvalid) {
-			writeError(w, http.StatusConflict, "claim token expired or superseded")
-			return
-		}
 		slog.Warn("fail task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
