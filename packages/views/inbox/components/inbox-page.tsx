@@ -113,6 +113,7 @@ export function InboxPage() {
   // chat — the lookup further down decides which one matches.
   const urlChat = searchParams.get("chat") ?? "";
   const urlIssue = searchParams.get("issue") ?? "";
+  const urlAgent = searchParams.get("agent") ?? ""; // CEREBRO-PATCH(sidebar-agent-chat-start-url): JEH-1443 carry sidebar-picked agent through inbox navigation.
   const urlSelected = urlChat || urlIssue;
   const wsPaths = useWorkspacePaths();
 
@@ -982,6 +983,7 @@ export function InboxPage() {
     <InboxChatPanel
       key={selectedChatSession?.id ?? "new"}
       sessionId={selectedChatSession?.id ?? null}
+      initialAgentId={selectedKey === "new-chat" ? urlAgent || null : null}
       onSessionCreated={(id) => {
         pendingChatIdRef.current = id;
         setSelectedKey("chat", id);

@@ -56,6 +56,6 @@ describe("CerebroNewMessageModal", () => {
 
     expect(mockSetSelectedAgentId).toHaveBeenCalledWith("agent-123");
     expect(mockClose).toHaveBeenCalled();
-    expect(mockPush).toHaveBeenCalledWith("/ws-test/inbox?chat=new-chat");
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/inbox?chat=new-chat&agent=agent-123");
   });
 });

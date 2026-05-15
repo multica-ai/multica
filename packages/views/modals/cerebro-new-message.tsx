@@ -24,7 +24,7 @@ export function CerebroNewMessageModal() {
     // CEREBRO-PATCH(sidebar-agent-chat-start): carry the selected agent into the inbox chat surface.
     useChatStore.getState().setSelectedAgentId(agentId);
     close();
-    push(`${p.inbox()}?chat=new-chat`);
+    push(`${p.inbox()}?chat=new-chat&agent=${encodeURIComponent(agentId)}`); // CEREBRO-PATCH(sidebar-agent-chat-start-url): JEH-1443 keep selected agent across inbox navigation.
   };
 
   return (
