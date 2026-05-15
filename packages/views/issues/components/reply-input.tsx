@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect } from "react";
+import { forwardRef, useRef, useState, useCallback, useEffect, useImperativeHandle } from "react";
 import { ArrowUp, Loader2, Maximize2, Minimize2 } from "lucide-react";
-import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, type SelectionQuoteActions, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -28,13 +28,19 @@ interface ReplyInputProps {
    *  Required for replies inside virtualized timeline threads, where the
    *  enclosing CommentCard may unmount on scroll-out. */
   draftKey?: CommentDraftKey;
+  selectionQuoteActions?: SelectionQuoteActions;
+}
+
+interface ReplyInputRef {
+  appendMarkdown: (markdown: string) => void;
+  focus: () => void;
 }
 
 // ---------------------------------------------------------------------------
 // ReplyInput
 // ---------------------------------------------------------------------------
 
-function ReplyInput({
+const ReplyInput = forwardRef<ReplyInputRef, ReplyInputProps>(function ReplyInput({
   issueId,
   placeholder,
   avatarType,
@@ -42,7 +48,8 @@ function ReplyInput({
   onSubmit,
   size = "default",
   draftKey,
-}: ReplyInputProps) {
+  selectionQuoteActions,
+}: ReplyInputProps, ref) {
   const { t } = useT("issues");
   const placeholderText = placeholder ?? t(($) => $.reply.placeholder);
   const editorRef = useRef<ContentEditorRef>(null);
@@ -87,6 +94,22 @@ function ReplyInput({
     }
     return result;
   }, [uploadWithToast, issueId]);
+
+  useImperativeHandle(ref, () => ({
+    appendMarkdown: (markdown: string) => {
+      editorRef.current?.appendMarkdown(markdown);
+      const next = editorRef.current?.getMarkdown() ?? "";
+      setIsEmpty(!next.trim());
+      if (draftKey) {
+        if (next.trim().length > 0) setDraft(draftKey, next);
+        else clearDraft(draftKey);
+      }
+      editorRef.current?.focus();
+    },
+    focus: () => {
+      editorRef.current?.focus();
+    },
+  }), [clearDraft, draftKey, setDraft]);
 
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
@@ -145,6 +168,7 @@ function ReplyInput({
             onUploadFile={handleUpload}
             debounceMs={100}
             currentIssueId={issueId}
+            selectionQuoteActions={selectionQuoteActions}
             attachments={pendingAttachments}
           />
         </div>
@@ -187,6 +211,6 @@ function ReplyInput({
       </div>
     </div>
   );
-}
+});
 
-export { ReplyInput, type ReplyInputProps };
+export { ReplyInput, type ReplyInputProps, type ReplyInputRef };

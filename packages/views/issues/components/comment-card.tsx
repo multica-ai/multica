@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { CheckCircle2, ChevronRight, Copy, Download, Eye, FileText, Link2, MoreHorizontal, Pencil, RotateCcw, RotateCw, Trash2 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -32,14 +32,14 @@ import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-pick
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
-import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment, useAttachmentPreview, isPreviewable } from "../../editor";
+import { ContentEditor, type ContentEditorRef, type SelectionQuoteActions, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment, useAttachmentPreview, isPreviewable } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { Agent } from "@multica/core/types/agent";
 import { useNavigation } from "../../navigation";
-import { ReplyInput } from "./reply-input";
+import { ReplyInput, type ReplyInputRef } from "./reply-input";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
@@ -85,6 +85,9 @@ interface CommentCardProps {
   onCollapseResolved?: () => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
+  onRegisterReplyController?: (threadRootId: string, controller: ReplyInputRef | null) => void;
+  selectionQuoteActions?: SelectionQuoteActions;
+  onQuoteToReplyInThread?: (threadRootId: string, markdown: string) => void;
 }
 
 function findMemberAncestorComment(
@@ -270,6 +273,7 @@ function CommentRow({
   onEdit,
   onDelete,
   onToggleReaction,
+  selectionQuoteActions,
 }: {
   issueId: string;
   entry: TimelineEntry;
@@ -281,6 +285,7 @@ function CommentRow({
   onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
+  selectionQuoteActions?: SelectionQuoteActions;
 }) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
@@ -492,6 +497,7 @@ function CommentRow({
               debounceMs={100}
               currentIssueId={issueId}
               attachments={editorAttachments}
+              selectionQuoteActions={selectionQuoteActions}
             />
           </div>
           <div className="flex items-center justify-between mt-2">
@@ -548,6 +554,9 @@ function CommentCardImpl({
   onResolveToggle,
   onCollapseResolved,
   highlightedCommentId,
+  onRegisterReplyController,
+  selectionQuoteActions,
+  onQuoteToReplyInThread,
 }: CommentCardProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
@@ -659,9 +668,40 @@ function CommentCardImpl({
   const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
 
   const isHighlighted = highlightedCommentId === entry.id;
+  const registerReplyInput = useCallback(
+    (controller: ReplyInputRef | null) => {
+      onRegisterReplyController?.(entry.id, controller);
+    },
+    [entry.id, onRegisterReplyController],
+  );
+  const threadSelectionQuoteActions = useMemo<SelectionQuoteActions | undefined>(() => {
+    if (!selectionQuoteActions?.onQuoteToNewComment && !onQuoteToReplyInThread && !selectionQuoteActions?.onQuoteToReplyTarget) {
+      return undefined;
+    }
+    return {
+      onQuoteToNewComment: selectionQuoteActions?.onQuoteToNewComment,
+      onQuoteToReply: selectionQuoteActions?.onQuoteToReplyTarget
+        ? undefined
+        : onQuoteToReplyInThread
+        ? (markdown) => onQuoteToReplyInThread(entry.id, markdown)
+        : undefined,
+      onQuoteToReplyTarget: selectionQuoteActions?.onQuoteToReplyTarget,
+      replyTargets: selectionQuoteActions?.replyTargets,
+    };
+  }, [
+    entry.id,
+    onQuoteToReplyInThread,
+    selectionQuoteActions?.onQuoteToNewComment,
+    selectionQuoteActions?.onQuoteToReplyTarget,
+    selectionQuoteActions?.replyTargets,
+  ]);
 
   return (
-    <Card className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isTemp && "opacity-60", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}>
+    <Card
+      data-comment-id={entry.id}
+      data-thread-root-id={entry.id}
+      className={cn("!py-0 !gap-0 overflow-hidden transition-colors duration-700", isTemp && "opacity-60", isHighlighted && "ring-2 ring-brand/50 bg-brand/5")}
+    >
       {onCollapseResolved && (
         <button
           type="button"
@@ -799,7 +839,7 @@ function CommentCardImpl({
         {/* Collapsible body */}
         <CollapsibleContent>
           {/* Parent comment body */}
-          <div className="px-4 pb-3">
+          <div className="px-4 pb-3" data-comment-id={entry.id} data-thread-root-id={entry.id}>
             {editing ? (
               <div
                 {...parentDropZoneProps}
@@ -820,6 +860,7 @@ function CommentCardImpl({
                     debounceMs={100}
                     currentIssueId={issueId}
                     attachments={parentEditorAttachments}
+                    selectionQuoteActions={threadSelectionQuoteActions}
                   />
                 </div>
                 <div className="flex items-center justify-between mt-2">
@@ -856,7 +897,13 @@ function CommentCardImpl({
 
           {/* Replies */}
           {allNestedReplies.map((reply) => (
-            <div key={reply.id} id={`comment-${reply.id}`} className={cn("border-t border-border/50 px-4 transition-colors duration-700", highlightedCommentId === reply.id && "bg-brand/5")}>
+            <div
+              key={reply.id}
+              id={`comment-${reply.id}`}
+              data-comment-id={reply.id}
+              data-thread-root-id={entry.id}
+              className={cn("border-t border-border/50 px-4 transition-colors duration-700", highlightedCommentId === reply.id && "bg-brand/5")}
+            >
               <CommentRow
                 issueId={issueId}
                 entry={reply}
@@ -868,6 +915,7 @@ function CommentCardImpl({
                 onEdit={onEdit}
                 onDelete={onDelete}
                 onToggleReaction={onToggleReaction}
+                selectionQuoteActions={threadSelectionQuoteActions}
               />
             </div>
           ))}
@@ -875,6 +923,7 @@ function CommentCardImpl({
           {/* Reply input */}
           <div className="border-t border-border/50 px-4 py-2.5">
             <ReplyInput
+              ref={registerReplyInput}
               issueId={issueId}
               placeholder={t(($) => $.reply.placeholder)}
               size="sm"
@@ -882,6 +931,7 @@ function CommentCardImpl({
               avatarId={currentUserId ?? ""}
               draftKey={`reply:${issueId}:${entry.id}`}
               onSubmit={(content, attachmentIds) => onReply(entry.id, content, attachmentIds)}
+              selectionQuoteActions={threadSelectionQuoteActions}
             />
           </div>
         </CollapsibleContent>

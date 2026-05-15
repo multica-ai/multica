@@ -151,6 +151,13 @@
   "timeline": {
     "loading": "Loading..."
   },
+  "quote": {
+    "add_to_new_comment": "Add to new comment",
+    "add_to_reply": "Add to reply",
+    "no_comments_to_reply": "No comments to reply to.",
+    "reply_input_not_ready": "Reply input is not ready yet. Please try again after the comment finishes loading.",
+    "truncated": "Selected text was truncated to {{count}} characters."
+  },
   "activity": {
     "created": "created this issue",
     "self_assigned": "self-assigned this issue",
