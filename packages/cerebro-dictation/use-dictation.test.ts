@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useDictation } from "./use-dictation";
+import type { StreamingTranscriberOptions } from "./types";
 
 interface FakeRecorder {
   state: "inactive" | "recording" | "paused";
@@ -143,6 +144,60 @@ describe("useDictation", () => {
     expect(result.current.lastTranscript).toBe("hej verden");
     expect(onTranscribed).toHaveBeenCalledWith("hej verden");
     expect(transcribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("streams chunks and surfaces partial and final transcripts", async () => {
+    const recorder = createFakeRecorder();
+    installFakeMediaRecorder(recorder);
+    installGetUserMedia(() => Promise.resolve(fakeStream()));
+    const onPartial = vi.fn();
+    const onTranscribed = vi.fn();
+    const sendAudio = vi.fn();
+    let streamOptions: StreamingTranscriberOptions | undefined;
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const streamTranscribe = vi.fn((options: StreamingTranscriberOptions) => {
+      streamOptions = options;
+      return {
+        sendAudio,
+        endUtterance: vi.fn(() => {
+          options.onFinal?.("hej streaming", {
+            type: "final",
+            text: "hej streaming",
+          });
+          finish();
+        }),
+        cancel: vi.fn(),
+        finished,
+      };
+    });
+
+    const { result } = renderHook(() =>
+      useDictation({ streamTranscribe, onPartial, onTranscribed }),
+    );
+
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(result.current.status).toBe("recording");
+
+    act(() => {
+      streamOptions?.onPartial?.("hej", { type: "partial", text: "hej" });
+    });
+    expect(onPartial).toHaveBeenCalledWith("hej");
+
+    await act(async () => {
+      await result.current.stop();
+    });
+
+    await waitFor(() => {
+      expect(result.current.status).toBe("idle");
+    });
+    expect(sendAudio).toHaveBeenCalledTimes(1);
+    expect(result.current.lastTranscript).toBe("hej streaming");
+    expect(onTranscribed).toHaveBeenCalledWith("hej streaming");
   });
 
   it("surfaces a permission-denied error when getUserMedia rejects with NotAllowedError", async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-// CEREBRO-PATCH(agent-tools-tab): JEH-1290/1353 W8 — tools tab on agent editor
+// CEREBRO-PATCH(agent-tools-tab): JEH-1290/1353/1359/1360 W8 — tools tab on agent editor
 
 import { useState } from "react";
 import { Wrench, AlertCircle, Loader2, Info } from "lucide-react";
@@ -17,17 +17,12 @@ import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../../../i18n";
 
-function agentToolsQueryKey(agentId: string) {
-  return ["cerebro", "agent-tools", agentId] as const;
+function agentToolsQueryKey(agentId: string, wsId: string) {
+  return ["cerebro", "agent-tools", wsId, agentId] as const;
 }
 
-async function fetchAgentTools(agentId: string): Promise<AgentTool[]> {
-  try {
-    return await api.getAgentTools(agentId);
-  } catch {
-    // W3 API not yet deployed — return empty list gracefully
-    return [];
-  }
+async function fetchAgentTools(agentId: string, wsId: string): Promise<AgentTool[]> {
+  return await api.getAgentTools(agentId, { workspace_id: wsId });
 }
 
 interface ToolConfigFieldsProps {
@@ -171,17 +166,19 @@ export function CerebroToolsTab({ agent }: { agent: Agent }) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const [toggling, setToggling] = useState(false);
+  const isLocalAgent = agent.runtime_mode === "local";
 
   const { data: tools = [], isLoading, isError } = useQuery({
-    queryKey: agentToolsQueryKey(agent.id),
-    queryFn: () => fetchAgentTools(agent.id),
+    queryKey: agentToolsQueryKey(agent.id, wsId),
+    queryFn: () => fetchAgentTools(agent.id, wsId),
+    enabled: !isLocalAgent,
   });
 
   const handleToggle = async (toolName: string, enabled: boolean) => {
     setToggling(true);
     try {
-      await api.updateAgentTool(agent.id, toolName, { enabled });
-      qc.invalidateQueries({ queryKey: agentToolsQueryKey(agent.id) });
+      await api.updateAgentTool(agent.id, toolName, { enabled }, { workspace_id: wsId });
+      qc.invalidateQueries({ queryKey: agentToolsQueryKey(agent.id, wsId) });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.tab_body.tools.toggle_failed_toast));
@@ -192,13 +189,32 @@ export function CerebroToolsTab({ agent }: { agent: Agent }) {
 
   const handleConfigSave = async (toolName: string, config: Record<string, unknown>) => {
     try {
-      await api.updateAgentTool(agent.id, toolName, { enabled: true, config });
-      qc.invalidateQueries({ queryKey: agentToolsQueryKey(agent.id) });
+      await api.updateAgentTool(agent.id, toolName, { enabled: true, config }, { workspace_id: wsId });
+      qc.invalidateQueries({ queryKey: agentToolsQueryKey(agent.id, wsId) });
       toast.success(t(($) => $.tab_body.tools.config_saved_toast));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.tab_body.tools.config_save_failed_toast));
     }
   };
+
+  if (isLocalAgent) {
+    return (
+      <div className="space-y-4">
+        <p className="text-xs text-muted-foreground">
+          {t(($) => $.tab_body.tools.intro)}
+        </p>
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
+          <Info className="h-8 w-8 text-muted-foreground/40" />
+          <p className="mt-3 text-sm text-muted-foreground">
+            {t(($) => $.tab_body.tools.local_empty_title)}
+          </p>
+          <p className="mt-1 max-w-xs text-center text-xs text-muted-foreground">
+            {t(($) => $.tab_body.tools.local_agent_note)}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -220,28 +236,18 @@ export function CerebroToolsTab({ agent }: { agent: Agent }) {
   }
 
   if (tools.length === 0) {
-    // CEREBRO-PATCH(agent-tools-tab-local-empty): local agents never use gateway tools.
-    const isLocalAgent = agent.runtime_mode === "local";
     return (
       <div className="space-y-4">
         <p className="text-xs text-muted-foreground">
           {t(($) => $.tab_body.tools.intro)}
         </p>
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
-          {isLocalAgent ? (
-            <Info className="h-8 w-8 text-muted-foreground/40" />
-          ) : (
-            <Wrench className="h-8 w-8 text-muted-foreground/40" />
-          )}
+          <Wrench className="h-8 w-8 text-muted-foreground/40" />
           <p className="mt-3 text-sm text-muted-foreground">
-            {isLocalAgent
-              ? t(($) => $.tab_body.tools.local_empty_title)
-              : t(($) => $.tab_body.tools.empty_title)}
+            {t(($) => $.tab_body.tools.empty_title)}
           </p>
           <p className="mt-1 max-w-xs text-center text-xs text-muted-foreground">
-            {isLocalAgent
-              ? t(($) => $.tab_body.tools.local_agent_note)
-              : t(($) => $.tab_body.tools.empty_hint)}
+            {t(($) => $.tab_body.tools.empty_hint)}
           </p>
         </div>
       </div>
@@ -253,14 +259,6 @@ export function CerebroToolsTab({ agent }: { agent: Agent }) {
       <p className="text-xs text-muted-foreground">
         {t(($) => $.tab_body.tools.intro)}
       </p>
-      {agent.runtime_mode === "local" && (
-        <div className="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2">
-          <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-          <p className="text-xs text-muted-foreground">
-            {t(($) => $.tab_body.tools.local_agent_note)}
-          </p>
-        </div>
-      )}
       <ul className="space-y-2">
         {tools.map((tool) => (
           <ToolRow

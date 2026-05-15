@@ -17,6 +17,7 @@ export type DictationErrorKind =
   | "no-microphone"
   | "recording-failed"
   | "transcription-failed"
+  | "streaming-failed"
   | "aborted";
 
 export interface DictationError {
@@ -37,8 +38,52 @@ export type Transcriber = (
   signal: AbortSignal,
 ) => Promise<string>;
 
+export interface DictationPartialEvent {
+  type: "partial";
+  text: string;
+  stable_until?: number;
+}
+
+export interface DictationFinalEvent {
+  type: "final";
+  text: string;
+  started_at?: number;
+  ended_at?: number;
+}
+
+export interface DictationBackendErrorEvent {
+  type: "error";
+  code: string;
+  message: string;
+}
+
+export type DictationStreamEvent =
+  | DictationPartialEvent
+  | DictationFinalEvent
+  | DictationBackendErrorEvent;
+
+export interface StreamingTranscriberSession {
+  sendAudio: (audio: Blob) => void;
+  endUtterance: () => void;
+  cancel: () => void;
+  finished: Promise<void>;
+}
+
+export interface StreamingTranscriberOptions {
+  mimeType?: string;
+  signal: AbortSignal;
+  onPartial?: (text: string, event: DictationPartialEvent) => void;
+  onFinal?: (text: string, event: DictationFinalEvent) => void;
+  onError?: (error: Error, event?: DictationBackendErrorEvent) => void;
+}
+
+export type StreamingTranscriber = (
+  options: StreamingTranscriberOptions,
+) => StreamingTranscriberSession;
+
 export interface UseDictationOptions {
-  transcribe: Transcriber;
+  transcribe?: Transcriber;
+  streamTranscribe?: StreamingTranscriber;
   /**
    * Audio MIME type passed to MediaRecorder. When omitted, the hook picks
    * the first entry of {@link DEFAULT_MIME_TYPE_PREFERENCE} that the
@@ -50,6 +95,8 @@ export interface UseDictationOptions {
   maxDurationMs?: number;
   /** Called once a transcription resolves successfully. */
   onTranscribed?: (text: string) => void;
+  /** Called as streaming dictation emits partial text. */
+  onPartial?: (text: string) => void;
   /** Called whenever the hook captures a non-recoverable error. */
   onError?: (error: DictationError) => void;
 }

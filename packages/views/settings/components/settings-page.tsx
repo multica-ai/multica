@@ -85,20 +85,20 @@ export interface ExtraSettingsTab {
 interface SettingsPageProps {
   /** Additional tabs injected by platform (e.g. desktop daemon settings) */
   extraAccountTabs?: ExtraSettingsTab[];
+  // CEREBRO-PATCH(settings-page-cerebro-members-extras): JEH-1067 platform-injected Groups column + filter for MembersTab
+  membersTabCerebroExtras?: MembersTabCerebroExtrasProp;
   /**
    * Content rendered inside the Documentation tab. The platform layer is
    * responsible for loading MDX/source data; SettingsPage only frames it.
    * When omitted, the Documentation tab is hidden entirely.
    */
   documentationContent?: React.ReactNode;
-  /** CEREBRO-PATCH(settings-page-cerebro-members-extras): JEH-1067 Groups column/filter slot for MembersTab */
-  membersTabCerebroExtras?: MembersTabCerebroExtrasProp;
 }
 
 export function SettingsPage({
   extraAccountTabs,
-  documentationContent,
   membersTabCerebroExtras,
+  documentationContent,
 }: SettingsPageProps = {}) {
   const { t } = useT("settings");
   const workspaceName = useCurrentWorkspace()?.name;
@@ -107,7 +107,6 @@ export function SettingsPage({
   const navigation = useNavigation();
   // CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 feature-flagged Groups tab
   const groupsEnabled = useFeatureFlag("cerebro_groups_enabled");
-
   // Whitelist of valid tab values; unknown ?tab=… values silently fall back to
   // the default. Whitelisting also blocks junk like ?tab=<script> from
   // surfacing in the DOM via Radix Tabs internals.

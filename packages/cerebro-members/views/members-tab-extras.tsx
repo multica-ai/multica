@@ -50,6 +50,7 @@ export function useMembersTabCerebroExtras(): MembersTabCerebroExtras {
   });
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
 
+  // Membership index: groupId -> Set<user_id>. Built once per data update.
   const membershipByGroup = useMemo(() => {
     const m = new Map<string, Set<string>>();
     groups.forEach((g, idx) => {
@@ -62,7 +63,9 @@ export function useMembersTabCerebroExtras(): MembersTabCerebroExtras {
   const filterMember = useCallback(
     (member: MemberWithUser) => {
       if (!selectedGroupId) return true;
-      return membershipByGroup.get(selectedGroupId)?.has(member.user_id) === true;
+      return (
+        membershipByGroup.get(selectedGroupId)?.has(member.user_id) === true
+      );
     },
     [selectedGroupId, membershipByGroup],
   );

@@ -12,6 +12,7 @@
     "./views": "./views/index.ts"
   },
   "dependencies": {
+    "@multica/cerebro-members": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",

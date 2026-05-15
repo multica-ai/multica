@@ -35,6 +35,7 @@ import { NotificationsPage } from "@multica/cerebro-notifications/views";
 import { SettingsPage } from "@multica/views/settings";
 import { MemberDetailPage } from "@multica/cerebro-users/views";
 import { GroupDetailView } from "@multica/cerebro-groups/views";
+import { useMembersTabCerebroExtras } from "@multica/cerebro-members/views";
 import { useNavigation } from "@multica/views/navigation";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { TasksPage } from "@multica/cerebro-tasks";
@@ -74,6 +75,31 @@ function PageShell() {
       <TitleSync />
       <Outlet />
     </>
+  );
+}
+
+function SettingsRoute() {
+  const membersTabCerebroExtras = useMembersTabCerebroExtras();
+
+  return (
+    <SettingsPage
+      extraAccountTabs={[
+        {
+          value: "daemon",
+          label: "Daemon",
+          icon: Server,
+          content: <DaemonSettingsTab />,
+        },
+        {
+          value: "updates",
+          label: "Updates",
+          icon: Download,
+          content: <UpdatesSettingsTab />,
+        },
+        ...cerebroFeatureFlagTabs,
+      ]}
+      membersTabCerebroExtras={membersTabCerebroExtras}
+    />
   );
 }
 
@@ -231,25 +257,7 @@ export const appRoutes: RouteObject[] = [
           },
           {
             path: "settings",
-            element: (
-              <SettingsPage
-                extraAccountTabs={[
-                  {
-                    value: "daemon",
-                    label: "Daemon",
-                    icon: Server,
-                    content: <DaemonSettingsTab />,
-                  },
-                  {
-                    value: "updates",
-                    label: "Updates",
-                    icon: Download,
-                    content: <UpdatesSettingsTab />,
-                  },
-                  ...cerebroFeatureFlagTabs,
-                ]}
-              />
-            ),
+            element: <SettingsRoute />,
             handle: { title: "Settings" },
           },
         ],

@@ -15,5 +15,14 @@ export {
   groupKeys,
   groupListOptions,
   groupMembersOptions,
+  groupAgentsOptions,
+  groupRuntimesOptions,
+  groupCapabilitiesOptions,
+  projectGroupsOptions,
 } from "./queries";
+export type {
+  CerebroGroupCapabilityRow,
+  CerebroGroupRuntimeAccess,
+  CerebroGroupAgentAccess,
+} from "./types";
 export { registerCerebroGroupHandlers } from "./realtime";

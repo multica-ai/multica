@@ -4,7 +4,10 @@
 //
 // Lists the cerebro groups this user is a member of, with admin-only add /
 // remove buttons. Group membership is derived client-side by intersecting
-// the workspace's groupList with each group's member roster.
+// the workspace's groupList with each group's member roster — there is no
+// dedicated `listMemberGroups(memberId)` endpoint today. For the small
+// number of groups a workspace typically has, the per-group fan-out is
+// cheap and TanStack Query dedupes across rerenders.
 
 import { useMemo, useState } from "react";
 import { Plus, Users, X } from "lucide-react";
@@ -39,7 +42,7 @@ export function MemberGroupsSection({
   if (isPending) {
     return (
       <SectionFrame>
-        <p className="text-xs text-muted-foreground">Loading groups...</p>
+        <p className="text-xs text-muted-foreground">Loading groups…</p>
       </SectionFrame>
     );
   }
@@ -67,10 +70,15 @@ function MemberGroupsInner({
   const wsId = useWorkspaceId();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState("");
+
+  // Per-group membership queries. We rely on TanStack's per-key cache so
+  // mounting MultipleMembershipProbe in a loop doesn't fan out beyond the
+  // cache.
   const membership = useGroupMembershipMap(wsId, groups, userId);
 
   const inGroup = useMemo(
-    () => groups.filter((g) => membership.get(g.id) === true),
+    () =>
+      groups.filter((g) => membership.get(g.id) === true),
     [groups, membership],
   );
   const notInGroup = useMemo(
@@ -142,7 +150,7 @@ function MemberGroupsInner({
           data-testid="member-groups-picker"
         >
           <Input
-            placeholder="Search groups..."
+            placeholder="Search groups…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             aria-label="Search groups"
@@ -171,6 +179,10 @@ function MemberGroupsInner({
   );
 }
 
+// Returns a Map<groupId, boolean | undefined> where the boolean is true if
+// `userId` is a member of that group. `undefined` = still loading. Uses
+// `useQueries` so the per-group fan-out doesn't violate the Rules of Hooks
+// (which forbid calling useQuery inside a loop).
 function useGroupMembershipMap(
   wsId: string,
   groups: { id: string }[],
@@ -205,7 +217,9 @@ function AddToGroupButton({
       await add.mutateAsync(userId);
       toast.success("Member added to group");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to add to group");
+      toast.error(
+        e instanceof Error ? e.message : "Failed to add to group",
+      );
     }
   };
   return (
@@ -233,7 +247,9 @@ function RemoveFromGroupButton({
       await remove.mutateAsync(userId);
       toast.success("Member removed from group");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to remove from group");
+      toast.error(
+        e instanceof Error ? e.message : "Failed to remove from group",
+      );
     }
   };
   return (
@@ -260,6 +276,8 @@ function SectionFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Compact chip-row used by MembersTab Groups column. Renders up to 3 group
+// names; further entries collapse into a `+N` badge.
 export function MemberGroupChips({
   userId,
   maxVisible = 3,
@@ -273,7 +291,7 @@ export function MemberGroupChips({
   const inGroup = groups.filter((g) => membership.get(g.id) === true);
 
   if (inGroup.length === 0) {
-    return <span className="text-xs text-muted-foreground">-</span>;
+    return <span className="text-xs text-muted-foreground">—</span>;
   }
 
   const visible = inGroup.slice(0, maxVisible);

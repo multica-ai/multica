@@ -49,6 +49,10 @@ vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: vi.fn() }),
 }));
 
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "ws-1",
+}));
+
 vi.mock("@multica/core/api", () => ({ api: {} }));
 
 vi.mock("@multica/core/logger", () => ({
@@ -81,6 +85,9 @@ vi.mock("../../editor", () => {
         blur: () => void;
         focus: () => void;
         insertText: (text: string) => void;
+        replaceDictationPreview: (text: string) => void;
+        commitDictationPreview: (text: string) => void;
+        clearDictationPreview: () => void;
       }>,
     ) => {
       lastAutoFocus.value = props.autoFocus;
@@ -94,6 +101,15 @@ vi.mock("../../editor", () => {
         focus: editorFocus,
         insertText: (text: string) => {
           editorMarkdown.value += text;
+        },
+        replaceDictationPreview: (text: string) => {
+          editorMarkdown.value = text;
+        },
+        commitDictationPreview: (text: string) => {
+          editorMarkdown.value = text;
+        },
+        clearDictationPreview: () => {
+          editorMarkdown.value = "";
         },
       }));
       return (

@@ -28,6 +28,12 @@ import {
   AlertDialogAction,
 } from "@multica/ui/components/ui/alert-dialog";
 import { useNavigation } from "@multica/views/navigation";
+import {
+  MemberGroupsSection,
+  EffectiveAccessSection,
+  OwnedResourcesSection,
+  OverridesPlaceholder,
+} from "@multica/cerebro-members/views";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, paths } from "@multica/core/paths";
@@ -251,6 +257,14 @@ export function MemberDetailPage({ memberId }: { memberId: string }) {
       {canManage && (
         <MemberProjectsCard wsId={wsId} memberId={memberId} memberName={member.name} />
       )}
+
+      {/* JEH-1067 (Bundle B / PR-B) — cerebro groups / effective access /
+          owned resources / overrides placeholder. Section components live in
+          @multica/cerebro-members so the upstream/cerebro split stays clean. */}
+      <MemberGroupsSection userId={member.user_id} isAdmin={canManage} />
+      <EffectiveAccessSection userId={member.user_id} role={member.role} />
+      <OwnedResourcesSection userId={member.user_id} isAdmin={canManage} />
+      <OverridesPlaceholder />
 
       {canRemove && (
         <Card>
