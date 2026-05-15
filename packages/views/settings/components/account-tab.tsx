@@ -12,10 +12,10 @@ import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { EnterPreferenceSection } from "@multica/cerebro-preferences/views";
 import { useT } from "../../i18n";
 
 export function AccountTab() {
+  // CEREBRO-PATCH(jeh-1446-preferences-tab): issue-link preferences moved out of Account.
   const { t } = useT("settings");
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
@@ -134,7 +134,6 @@ export function AccountTab() {
         </Card>
       </section>
 
-      <EnterPreferenceSection />
     </div>
   );
 }

@@ -9,10 +9,14 @@ import enSettings from "../../locales/en/settings.json";
 
 const mockPersist = vi.hoisted(() => vi.fn());
 const mockUpdateMe = vi.hoisted(() => vi.fn());
+const mockUpdateMyPreferences = vi.hoisted(() => vi.fn());
 const mockReload = vi.hoisted(() => vi.fn());
+const mockToastSuccess = vi.hoisted(() => vi.fn());
+const mockToastError = vi.hoisted(() => vi.fn());
 const mockToastWarning = vi.hoisted(() => vi.fn());
+const mockSetUser = vi.hoisted(() => vi.fn());
 const userRef = vi.hoisted(() => ({
-  current: null as { id: string } | null,
+  current: null as { id: string; preferences?: Record<string, unknown> } | null,
 }));
 
 vi.mock("@multica/ui/components/common/theme-provider", () => ({
@@ -35,11 +39,18 @@ vi.mock("@multica/core/i18n/react", async () => {
 });
 
 vi.mock("@multica/core/api", () => ({
-  api: { updateMe: mockUpdateMe },
+  api: {
+    updateMe: mockUpdateMe,
+    updateMyPreferences: mockUpdateMyPreferences,
+  },
 }));
 
 vi.mock("sonner", () => ({
-  toast: { warning: mockToastWarning },
+  toast: {
+    success: mockToastSuccess,
+    error: mockToastError,
+    warning: mockToastWarning,
+  },
 }));
 
 vi.mock("@multica/core/auth", async () => {
@@ -48,9 +59,16 @@ vi.mock("@multica/core/auth", async () => {
       "@multica/core/auth",
     );
   const useAuthStore = Object.assign(
-    (sel?: (s: { user: typeof userRef.current }) => unknown) =>
-      sel ? sel({ user: userRef.current }) : { user: userRef.current },
-    { getState: () => ({ user: userRef.current }) },
+    (
+      sel?: (s: {
+        user: typeof userRef.current;
+        setUser: typeof mockSetUser;
+      }) => unknown,
+    ) =>
+      sel
+        ? sel({ user: userRef.current, setUser: mockSetUser })
+        : { user: userRef.current, setUser: mockSetUser },
+    { getState: () => ({ user: userRef.current, setUser: mockSetUser }) },
   );
   return { ...actual, useAuthStore };
 });
@@ -73,6 +91,10 @@ describe("PreferencesTab — Language switcher", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     userRef.current = null;
+    Object.defineProperty(window.navigator, "platform", {
+      configurable: true,
+      value: "MacIntel",
+    });
     vi.useFakeTimers({ shouldAdvanceTime: true });
     Object.defineProperty(window, "location", {
       writable: true,
@@ -142,5 +164,17 @@ describe("PreferencesTab — Language switcher", () => {
       vi.advanceTimersByTime(2500);
     });
     expect(mockReload).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders issue-link behavior settings in Preferences", () => {
+    userRef.current = { id: "user-1", preferences: {} };
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    expect(
+      screen.getByRole("heading", { name: "Issue links" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: /Always open a new tab/i }),
+    ).toBeInTheDocument();
   });
 });

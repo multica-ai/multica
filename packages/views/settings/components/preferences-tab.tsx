@@ -11,8 +11,10 @@ import {
 import { useLocaleAdapter } from "@multica/core/i18n/react";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
+import { EnterPreferenceSection } from "@multica/cerebro-preferences/views";
 import { useT } from "../../i18n";
 
+// CEREBRO-PATCH(jeh-1446-preferences-tab): show issue-link behavior settings in Preferences.
 const LIGHT_COLORS = {
   titleBar: "#e8e8e8",
   content: "#ffffff",
@@ -227,6 +229,8 @@ export function PreferencesTab() {
           })}
         </div>
       </section>
+
+      <EnterPreferenceSection />
     </div>
   );
 }
