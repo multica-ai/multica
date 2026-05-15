@@ -37,6 +37,7 @@ import {
   recordMentionUsage,
   sortUserItemsByRecency,
 } from "./mention-recency";
+import { matchesPinyin } from "./pinyin-match";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -407,7 +408,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
         : [];
 
     const memberItems: MentionItem[] = members
-      .filter((m) => m.name.toLowerCase().includes(q))
+      .filter((m) => m.name.toLowerCase().includes(q) || matchesPinyin(m.name, q))
       .map((m) => ({
         id: m.user_id,
         label: m.name,
@@ -418,13 +419,13 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
       .filter(
         (a) =>
           !a.archived_at &&
-          a.name.toLowerCase().includes(q) &&
+          (a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q)) &&
           canAssignAgentToIssue(a, { userId, role: myRole }).allowed,
       )
       .map((a) => ({ id: a.id, label: a.name, type: "agent" as const }));
 
     const squadItems: MentionItem[] = squads
-      .filter((s) => !s.archived_at && s.name.toLowerCase().includes(q))
+      .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(q) || matchesPinyin(s.name, q)))
       .map((s) => ({ id: s.id, label: s.name, type: "squad" as const }));
 
     // Members and agents share a single ranked list — recently mentioned

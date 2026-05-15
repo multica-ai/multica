@@ -34,8 +34,7 @@ const {
   mockTheme,
   mockPathname,
   mockGetShareableUrl,
-  mockWorkspaces,
-  mockCurrentWorkspace,
+  mockMembers,
   mockOpenModal,
   mockToastSuccess,
   mockClipboardWrite,
@@ -49,11 +48,17 @@ const {
   mockTheme: { current: "system" as "light" | "dark" | "system" },
   mockPathname: { current: "/ws-test/issues" as string },
   mockGetShareableUrl: vi.fn((p: string) => `https://app.multica/${p}`),
-  mockWorkspaces: {
-    current: [] as Array<{ id: string; name: string; slug: string }>,
-  },
-  mockCurrentWorkspace: {
-    current: null as { id: string; name: string; slug: string } | null,
+  mockMembers: {
+    current: [] as Array<{
+      id: string;
+      workspace_id: string;
+      user_id: string;
+      role: "owner" | "admin" | "member";
+      created_at: string;
+      name: string;
+      email: string;
+      avatar_url: string | null;
+    }>,
   },
   mockOpenModal: vi.fn(),
   mockToastSuccess: vi.fn(),
@@ -82,6 +87,8 @@ vi.mock("@multica/core/issues/stores", () => {
       (wsId: string | null) =>
       (state: { byWorkspace: Record<string, typeof mockRecentItems.current> }) =>
         wsId ? (state.byWorkspace[wsId] ?? EMPTY) : EMPTY,
+    openCreateIssueWithPreference: (data?: Record<string, unknown> | null) =>
+      mockOpenModal("quick-create-issue", data ?? null),
   };
 });
 
@@ -90,12 +97,6 @@ vi.mock("@multica/core", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({
-  paths: {
-    workspace: (slug: string) => ({
-      issues: () => `/${slug}/issues`,
-    }),
-  },
-  useCurrentWorkspace: () => mockCurrentWorkspace.current,
   useWorkspacePaths: () => ({
     inbox: () => "/ws-test/inbox",
     myIssues: () => "/ws-test/my-issues",
@@ -106,6 +107,7 @@ vi.mock("@multica/core/paths", () => ({
     skills: () => "/ws-test/skills",
     settings: () => "/ws-test/settings",
     issueDetail: (id: string) => `/ws-test/issues/${id}`,
+    memberDetail: (id: string) => `/ws-test/members/${id}`,
     projectDetail: (id: string) => `/ws-test/projects/${id}`,
   }),
 }));
@@ -117,7 +119,7 @@ vi.mock("@multica/core/issues/queries", () => ({
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
-  workspaceListOptions: () => ({ queryKey: ["workspaces", "list"], enabled: false }),
+  memberListOptions: () => ({ queryKey: ["workspaces", "ws-test", "members"] }),
 }));
 
 vi.mock("@multica/core/modals", () => ({
@@ -138,7 +140,9 @@ function resolveIssue(key: readonly unknown[]) {
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (opts: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     const key = opts.queryKey;
-    if (key[0] === "workspaces") return { data: mockWorkspaces.current };
+    if (key[0] === "workspaces" && key[2] === "members") {
+      return { data: mockMembers.current };
+    }
     if (opts.enabled === false) return { data: undefined };
     return { data: resolveIssue(key) };
   },
@@ -173,8 +177,7 @@ describe("SearchCommand", () => {
     mockTheme.current = "system";
     mockPathname.current = "/ws-test/issues";
     mockGetShareableUrl.mockReset().mockImplementation((p: string) => `https://app.multica/${p}`);
-    mockWorkspaces.current = [];
-    mockCurrentWorkspace.current = null;
+    mockMembers.current = [];
     mockOpenModal.mockReset();
     mockToastSuccess.mockReset();
     mockClipboardWrite.mockReset().mockResolvedValue(undefined);
@@ -205,11 +208,10 @@ describe("SearchCommand", () => {
     expect(screen.queryByPlaceholderText("Type a command or search...")).not.toBeInTheDocument();
   });
 
-  it("shows only New Issue by default and hides Pages / Switch Workspace / low-frequency commands until query", () => {
+  it("shows only New Issue by default and hides Pages / low-frequency commands until query", () => {
     renderSearch();
 
     expect(screen.queryByText("Pages")).not.toBeInTheDocument();
-    expect(screen.queryByText("Switch Workspace")).not.toBeInTheDocument();
     // Only the primary creation action surfaces on empty query; everything
     // else (theme, copy, New Project) must be revealed by typing.
     expect(screen.getByText("Commands")).toBeInTheDocument();
@@ -247,6 +249,55 @@ describe("SearchCommand", () => {
     await user.click(settingsItem);
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/settings");
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("lists workspace members and navigates to the member page on selection", async () => {
+    const user = userEvent.setup();
+    mockMembers.current = [
+      {
+        id: "member-1",
+        workspace_id: "ws-test",
+        user_id: "user-1",
+        role: "member",
+        created_at: "2026-01-01T00:00:00Z",
+        name: "Alice Zhang",
+        email: "alice@example.com",
+        avatar_url: null,
+      },
+      {
+        id: "member-2",
+        workspace_id: "ws-test",
+        user_id: "user-2",
+        role: "admin",
+        created_at: "2026-01-01T00:00:00Z",
+        name: "Bob Liu",
+        email: "bob@example.com",
+        avatar_url: null,
+      },
+    ];
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "alice");
+
+    await waitFor(() => {
+      expect(screen.getByText("Members")).toBeInTheDocument();
+      expect(
+        screen.getByText((_, el) => el?.textContent === "Alice Zhang" && el?.tagName === "DIV"),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText((_, el) => el?.textContent === "alice@example.com" && el?.tagName === "DIV"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Bob Liu")).not.toBeInTheDocument();
+
+    const aliceItem = await screen.findByText(
+      (_, el) => el?.textContent === "Alice Zhang" && el?.tagName === "DIV",
+    );
+    await user.click(aliceItem);
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/members/user-1");
     expect(useSearchStore.getState().open).toBe(false);
   });
 
@@ -291,7 +342,7 @@ describe("SearchCommand", () => {
     );
     await user.click(newIssue);
 
-    expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue");
+    expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue", null);
     expect(useSearchStore.getState().open).toBe(false);
   });
 
@@ -403,62 +454,6 @@ describe("SearchCommand", () => {
       ).toBeInTheDocument();
     });
     expect(screen.getByLabelText("Current theme")).toBeInTheDocument();
-  });
-
-  it("lists other workspaces under Switch Workspace and navigates on select", async () => {
-    const user = userEvent.setup();
-    mockCurrentWorkspace.current = { id: "ws-current", name: "Current", slug: "current" };
-    mockWorkspaces.current = [
-      { id: "ws-current", name: "Current", slug: "current" },
-      { id: "ws-alpha", name: "Alpha Co", slug: "alpha" },
-      { id: "ws-beta", name: "Beta Co", slug: "beta" },
-    ];
-    renderSearch();
-
-    const input = screen.getByPlaceholderText("Type a command or search...");
-    await user.type(input, "alpha");
-
-    await waitFor(() => {
-      expect(screen.getByText("Switch Workspace")).toBeInTheDocument();
-      expect(
-        screen.getByText((_, el) => el?.textContent === "Alpha Co" && el?.tagName === "SPAN"),
-      ).toBeInTheDocument();
-    });
-    expect(screen.queryByText("Beta Co")).not.toBeInTheDocument();
-    expect(screen.queryByText("Current")).not.toBeInTheDocument();
-
-    const alphaItem = await screen.findByText(
-      (_, el) => el?.textContent === "Alpha Co" && el?.tagName === "SPAN",
-    );
-    await user.click(alphaItem);
-
-    expect(mockPush).toHaveBeenCalledWith("/alpha/issues");
-    expect(useSearchStore.getState().open).toBe(false);
-  });
-
-  it("shows all other workspaces when typing 'workspace'", async () => {
-    const user = userEvent.setup();
-    mockCurrentWorkspace.current = { id: "ws-current", name: "Current", slug: "current" };
-    mockWorkspaces.current = [
-      { id: "ws-current", name: "Current", slug: "current" },
-      { id: "ws-alpha", name: "Alpha Co", slug: "alpha" },
-      { id: "ws-beta", name: "Beta Co", slug: "beta" },
-    ];
-    renderSearch();
-
-    const input = screen.getByPlaceholderText("Type a command or search...");
-    await user.type(input, "workspace");
-
-    await waitFor(() => {
-      expect(screen.getByText("Switch Workspace")).toBeInTheDocument();
-      expect(
-        screen.getByText((_, el) => el?.textContent === "Alpha Co" && el?.tagName === "SPAN"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText((_, el) => el?.textContent === "Beta Co" && el?.tagName === "SPAN"),
-      ).toBeInTheDocument();
-    });
-    expect(screen.queryByText("Current")).not.toBeInTheDocument();
   });
 
   it("filters out recent items not present in query cache", () => {

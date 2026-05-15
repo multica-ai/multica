@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -121,9 +122,10 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		LeaderID    string `json:"leader_id"`
+		Name        string  `json:"name"`
+		Description string  `json:"description"`
+		LeaderID    string  `json:"leader_id"`
+		AvatarURL   *string `json:"avatar_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -157,12 +159,18 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	avatarURL := pgtype.Text{}
+	if req.AvatarURL != nil {
+		avatarURL = pgtype.Text{String: *req.AvatarURL, Valid: true}
+	}
+
 	squad, err := h.Queries.CreateSquad(r.Context(), db.CreateSquadParams{
 		WorkspaceID: wsUUID,
 		Name:        req.Name,
 		Description: req.Description,
 		LeaderID:    leaderUUID,
 		CreatorID:   member.UserID,
+		AvatarUrl:   avatarURL,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create squad")
@@ -433,12 +441,17 @@ func (h *Handler) RemoveSquadMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.RemoveSquadMember(r.Context(), db.RemoveSquadMemberParams{
+	rows, err := h.Queries.RemoveSquadMember(r.Context(), db.RemoveSquadMemberParams{
 		SquadID:    squad.ID,
 		MemberType: req.MemberType,
 		MemberID:   memberUUID,
-	}); err != nil {
+	})
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to remove squad member")
+		return
+	}
+	if rows == 0 {
+		writeError(w, http.StatusNotFound, "squad member not found")
 		return
 	}
 
@@ -540,8 +553,20 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	taskID := r.Header.Get("X-Task-ID")
+	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task id")
+	if !ok {
+		return
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
+	if err != nil || !task.IssueID.Valid || uuidToString(task.IssueID) != uuidToString(issue.ID) {
+		writeError(w, http.StatusBadRequest, "task does not belong to issue")
+		return
+	}
+
 	details, _ := json.Marshal(map[string]string{
 		"squad_id": uuidToString(squad.ID),
+		"task_id":  util.UUIDToString(taskUUID),
 		"outcome":  req.Outcome,
 		"reason":   req.Reason,
 	})
@@ -583,7 +608,14 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 
 // shouldEnqueueSquadLeaderOnComment returns true if the issue is assigned to a
 // squad and the comment author is NOT a member of that squad (anti-loop).
-func (h *Handler) shouldEnqueueSquadLeaderOnComment(ctx context.Context, issue db.Issue, authorType, authorID string) bool {
+// commentContent is the new comment's markdown body; when a member explicitly
+// @mentions anyone (agent, member, squad, or @all) in that body, the leader
+// is skipped — the @ marks deliberate routing and the leader would otherwise
+// just observe and record no_action. Issue cross-reference mentions
+// (mention://issue/...) are NOT a routing signal and do not suppress the
+// leader. Agent-authored comments always go through the leader (subject to
+// the leader self-trigger guard) so agent updates still drive coordination.
+func (h *Handler) shouldEnqueueSquadLeaderOnComment(ctx context.Context, issue db.Issue, commentContent, authorType, authorID string) bool {
 	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
 		return false
 	}
@@ -597,10 +629,23 @@ func (h *Handler) shouldEnqueueSquadLeaderOnComment(ctx context.Context, issue d
 		return false
 	}
 
-	// Skip if the comment author is the squad leader itself (prevent self-trigger).
-	// Other squad members ARE allowed to trigger the leader — the leader uses
-	// silent/no-op turns when no action is needed.
-	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) {
+	// Skip if the comment author is the squad leader itself AND the agent's
+	// last activity on this issue was in the leader role (prevent self-trigger
+	// loop). An agent that is simultaneously the squad's leader and one of its
+	// workers must still wake the leader role after posting a comment from
+	// its worker task — role is inferred from the agent's most recent task
+	// on the issue, not from author ID alone.
+	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) &&
+		h.lastTaskWasLeader(ctx, issue.ID, squad.LeaderID) {
+		return false
+	}
+
+	// Member explicitly @mentioned someone → that someone owns the next step,
+	// skip the leader. Covers @agent / @member / @squad / @all; issue
+	// cross-references do NOT count as routing. Agent-authored comments are
+	// intentionally exempt: when an agent posts a result that @mentions
+	// another agent, the leader still needs to coordinate the thread.
+	if authorType == "member" && commentMentionsAnyone(commentContent) {
 		return false
 	}
 
@@ -611,6 +656,39 @@ func (h *Handler) shouldEnqueueSquadLeaderOnComment(ctx context.Context, issue d
 	}
 
 	return true
+}
+
+// lastTaskWasLeader returns true when the agent's most recent task on the
+// issue was enqueued in the squad-leader role. Used by the self-trigger
+// guards to tell apart a comment posted while the agent was acting as
+// leader (skip) from one posted while it was acting as a worker (do not
+// skip). When the agent has no prior task on this issue the role is
+// undetermined and we treat it as non-leader so a brand-new external
+// trigger can still reach the leader.
+func (h *Handler) lastTaskWasLeader(ctx context.Context, issueID, agentID pgtype.UUID) bool {
+	flag, err := h.Queries.GetLatestTaskIsLeaderForIssueAndAgent(ctx, db.GetLatestTaskIsLeaderForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
+	if err != nil {
+		return false
+	}
+	return flag
+}
+
+// commentMentionsAnyone returns true when the comment body contains at least
+// one routing-style mention — [@Name](mention://agent|member|squad|all/<id>).
+// Issue cross-references (mention://issue/...) are ignored because they are
+// not directed at a participant. Only the current comment is inspected —
+// parent (thread root) mentions are NOT inherited here.
+func commentMentionsAnyone(content string) bool {
+	for _, m := range util.ParseMentions(content) {
+		switch m.Type {
+		case "agent", "member", "squad", "all":
+			return true
+		}
+	}
+	return false
 }
 
 // shouldEnqueueSquadLeaderOnAssign returns true when assigning an issue to a
@@ -664,7 +742,7 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		return
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, squad.LeaderID, triggerCommentID); err != nil {
+	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, triggerCommentID); err != nil {
 		slog.Warn("enqueue squad leader task failed",
 			"issue_id", uuidToString(issue.ID),
 			"squad_id", uuidToString(squad.ID),

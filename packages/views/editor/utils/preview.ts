@@ -114,6 +114,15 @@ const TEXT_CONTENT_TYPES = new Set<string>([
 
 const TEXT_BASENAMES = new Set<string>(["dockerfile", "makefile"]);
 
+// Extension fallbacks for media kinds — used when contentType is empty
+// (URL-only preview source, no server-side metadata available).
+const VIDEO_EXTS = new Set<string>([
+  "mp4", "m4v", "mov", "webm", "mkv", "avi", "ogv",
+]);
+const AUDIO_EXTS = new Set<string>([
+  "mp3", "wav", "m4a", "ogg", "oga", "flac", "aac", "opus",
+]);
+
 function extOf(filename: string): string {
   const base = filename.toLowerCase().split(/[\\/]/).pop() ?? "";
   const dot = base.lastIndexOf(".");
@@ -149,13 +158,14 @@ export function getPreviewKind(
 ): PreviewKind | null {
   const ct = normalizeContentType(contentType);
 
-  if (ct === "application/pdf" || extOf(filename) === "pdf") return "pdf";
-  if (ct.startsWith("video/")) return "video";
-  if (ct.startsWith("audio/")) return "audio";
+  const ext = extOf(filename);
+
+  if (ct === "application/pdf" || ext === "pdf") return "pdf";
+  if (ct.startsWith("video/") || (ext && VIDEO_EXTS.has(ext))) return "video";
+  if (ct.startsWith("audio/") || (ext && AUDIO_EXTS.has(ext))) return "audio";
 
   // Markdown — covers both the well-typed case and the common
   // server-side sniffer fallback (text/plain for .md).
-  const ext = extOf(filename);
   if (ct === "text/markdown" || ext === "md" || ext === "markdown") {
     return "markdown";
   }

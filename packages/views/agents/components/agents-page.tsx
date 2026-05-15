@@ -19,6 +19,7 @@ import {
   useWorkspaceActivityMap,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
+import { useAgentsViewStore } from "@multica/core/agents/stores";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -46,6 +47,7 @@ import { availabilityConfig, availabilityOrder } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { type AgentRow, createAgentColumns } from "./agent-columns";
 import { useT } from "../../i18n";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 // Filter axes:
 //
@@ -99,10 +101,10 @@ export function AgentsPage() {
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
 
   const [view, setView] = useState<View>("active");
-  // Default to "mine" — matches runtimes page convention and the visual
-  // ordering (Mine first). All is one click away when users want the
-  // workspace-wide view.
-  const [scope, setScope] = useState<Scope>("mine");
+  // Scope (Mine/All) is persisted per workspace so it survives list →
+  // detail → back navigation. Default is "mine" on first visit.
+  const scope = useAgentsViewStore((s) => s.scope);
+  const setScope = useAgentsViewStore((s) => s.setScope);
   const [availabilityFilter, setAvailabilityFilter] =
     useState<AvailabilityFilter>("all");
   const [sort, setSort] = useState<SortKey>("recent");
@@ -196,6 +198,7 @@ export function AgentsPage() {
       if (q) {
         if (
           !a.name.toLowerCase().includes(q) &&
+          !matchesPinyin(a.name, q) &&
           !(a.description ?? "").toLowerCase().includes(q)
         ) {
           return false;
@@ -456,7 +459,6 @@ export function AgentsPage() {
           members={members}
           currentUserId={currentUser?.id ?? null}
           template={duplicateTemplate}
-          existingAgentNames={agents.map((a) => a.name)}
           onClose={() => {
             setShowCreate(false);
             setDuplicateTemplate(null);

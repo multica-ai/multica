@@ -45,6 +45,7 @@
     "section_label": "标签",
     "members_group": "成员",
     "agents_group": "智能体",
+    "squads_group": "小队",
     "issue_count_other": "{{count}} 个 issue",
     "reset": "重置全部筛选"
   },
@@ -73,6 +74,28 @@
     "section": "视图",
     "board": "看板",
     "list": "列表"
+  },
+  "actor_issues": {
+    "scope": {
+      "assigned": {
+        "label": "已分配",
+        "description": "分配给这个成员或智能体的 issue"
+      },
+      "created": {
+        "label": "已创建",
+        "description": "这个成员或智能体创建的 issue"
+      }
+    },
+    "empty": {
+      "assigned": {
+        "title": "没有已分配的 issue",
+        "description": "分配到这里的 issue 会显示在此视图中。"
+      },
+      "created": {
+        "title": "没有已创建的 issue",
+        "description": "由这里创建的 issue 会显示在此视图中。"
+      }
+    }
   },
   "list": {
     "empty_status": "无 issue",
@@ -160,7 +183,16 @@
     "task_completed_other": "完成了 task（{{count}} 次）",
     "task_failed_one": "task 失败",
     "task_failed_other": "task 失败（{{count}} 次）",
-    "coalesced_badge": "×{{count}}"
+    "squad_leader_evaluated": "评估了小队触发",
+    "squad_leader_action": "已评估并采取了操作",
+    "squad_leader_action_reason": "已评估并采取了操作：{{reason}}",
+    "squad_leader_no_action": "已评估：无需操作",
+    "squad_leader_no_action_reason": "已评估：无需操作（{{reason}}）",
+    "squad_leader_failed": "评估失败",
+    "squad_leader_failed_reason": "评估失败：{{reason}}",
+    "coalesced_badge": "×{{count}}",
+    "activity_count_one": "{{count}} 条动态",
+    "activity_count_other": "{{count}} 条动态"
   },
   "comment": {
     "delete_title": "删除评论",

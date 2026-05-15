@@ -146,13 +146,6 @@ function renderDialog(runtimes: RuntimeDevice[], template?: Agent) {
       </QueryClientProvider>
     </I18nProvider>,
   );
-  // Without a `template`, the dialog opens on the blank-vs-template
-  // chooser. These tests target the manual form's runtime picker, so
-  // advance through the chooser to the form. Duplicate mode jumps
-  // straight to the form and doesn't render the chooser.
-  if (!template) {
-    fireEvent.click(screen.getByText(enAgents.create_dialog.chooser.blank_title));
-  }
   return { onCreate, onClose };
 }
 

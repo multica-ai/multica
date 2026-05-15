@@ -23,6 +23,13 @@ import (
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
+// LivenessChecker is a subset of handler.LivenessStore used by TaskService
+// to verify runtime liveness without importing the handler package.
+type LivenessChecker interface {
+	Available() bool
+	IsAliveBatch(ctx context.Context, runtimeIDs []string) (alive map[string]bool, ok bool)
+}
+
 type TaskService struct {
 	Queries   *db.Queries
 	TxStarter TxStarter
@@ -36,6 +43,11 @@ type TaskService struct {
 	// goes through the DB. Wired in router.go from the shared Redis
 	// client.
 	EmptyClaim *EmptyClaimCache
+	// Liveness provides real-time heartbeat verification for runtimes.
+	// Currently unused — the global backstop no longer requeues tasks
+	// (alive runtimes self-requeue via preflight, dead runtimes stay
+	// dispatched for the offline sweeper). Retained for future use.
+	Liveness LivenessChecker
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
@@ -50,6 +62,24 @@ type TaskWakeupNotifier interface {
 // transmit (it ends up in every task list response). 200 is enough for a
 // recognisable preview of a one-paragraph comment.
 const triggerSummaryMaxLen = 200
+
+// claimLeaseSeconds is the duration (in seconds) a dispatched task's claim
+// lease is valid. The daemon must call StartTask with the claim_token within
+// this window; otherwise the expired-lease sweeper requeues the task.
+const claimLeaseSeconds = 60.0
+
+// ErrClaimTokenInvalid is returned when StartTask is called with a claim_token
+// that does not match or whose lease has expired (task may have been requeued
+// and re-claimed by another runtime).
+var ErrClaimTokenInvalid = errors.New("claim token expired or superseded")
+
+// ErrInvalidClaimToken is returned when a malformed (non-UUID) claim_token is
+// supplied. The caller should surface this as a 400 Bad Request.
+var ErrInvalidClaimToken = errors.New("malformed claim token")
+
+// requeueMaxPerTick caps how many expired-lease rows a single sweeper tick
+// requeues back to 'queued'. Keeps the sweep transaction short.
+const RequeueMaxPerTick = 50
 
 // truncateForSummary returns s shortened to maxRunes, with a trailing
 // `…` when truncated. Operates on runes (not bytes) so multibyte characters
@@ -104,6 +134,26 @@ func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.
 		wakeup = wakeups[0]
 	}
 	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup}
+}
+
+var trivialDoneMarkers = []string{
+	"done",
+	"готово",
+	"готова",
+	"сделано",
+	"完成",
+	"完了",
+}
+
+func isTrivialDoneOutput(output string) bool {
+	normalized := strings.TrimSpace(strings.ToLower(output))
+	normalized = strings.Trim(normalized, ".!！。… ")
+	for _, marker := range trivialDoneMarkers {
+		if normalized == marker {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *TaskService) captureTaskQueued(ctx context.Context, task db.AgentTaskQueue) {
@@ -421,6 +471,20 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false)
+}
+
+// EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
+// The resulting task carries is_leader_task=true so that downstream
+// self-trigger guards can distinguish a comment posted while the agent was
+// acting as the squad's leader (skip) from one posted while it was acting
+// as a worker (do not skip). This matters for agents that are simultaneously
+// the leader and a worker of the same squad — see migration 090.
+func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true)
+}
+
+func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -442,13 +506,14 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 		Priority:         priorityToInt(issue.Priority),
 		TriggerCommentID: triggerCommentID,
 		TriggerSummary:   s.buildCommentTriggerSummary(ctx, triggerCommentID),
+		IsLeaderTask:     pgtype.Bool{Bool: isLeader, Valid: isLeader},
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
 
-	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
 	// See EnqueueTaskForIssue for ordering rationale.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
@@ -697,7 +762,7 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 
 // ClaimTask atomically claims the next queued task for an agent,
 // respecting max_concurrent_tasks.
-func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.AgentTaskQueue, error) {
+func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID, runtimeID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	start := time.Now()
 	var (
 		outcome                                                              = "unknown"
@@ -729,7 +794,11 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 	}
 
 	t0 = time.Now()
-	task, err := s.Queries.ClaimAgentTask(ctx, agentID)
+	task, err := s.Queries.ClaimAgentTaskForRuntime(ctx, db.ClaimAgentTaskForRuntimeParams{
+		AgentID:      agentID,
+		RuntimeID:    runtimeID,
+		LeaseSeconds: claimLeaseSeconds,
+	})
 	claimAgentMs = time.Since(t0).Milliseconds()
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -795,6 +864,15 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	}()
 
 	runtimeKey := util.UUIDToString(runtimeID)
+
+	// Preflight: requeue this runtime's own expired leases BEFORE the
+	// empty-cache fast-path. The runtime is actively claiming so it's
+	// provably alive — safe to requeue without any heartbeat/liveness
+	// check. Must run first because lease expiry is time-driven and
+	// won't bump the empty cache on its own; without this, an expired
+	// lease would be invisible behind a stale empty verdict.
+	s.RequeueExpiredClaimLeasesForRuntime(ctx, runtimeID)
+
 	if s.EmptyClaim.IsEmpty(ctx, runtimeKey) {
 		outcome = "empty_cache_hit"
 		return nil, nil
@@ -834,13 +912,13 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 		triedAgents[agentKey] = struct{}{}
 		tried++
 
-		task, err := s.ClaimTask(ctx, candidate.AgentID)
+		task, err := s.ClaimTask(ctx, candidate.AgentID, runtimeID)
 		if err != nil {
 			loopMs = time.Since(loopStart).Milliseconds()
 			outcome = "error_claim"
 			return nil, err
 		}
-		if task != nil && task.RuntimeID == runtimeID {
+		if task != nil {
 			claimed = task
 			break
 		}
@@ -878,15 +956,102 @@ func (s *TaskService) maybeLogClaimSlow(agentID pgtype.UUID, outcome string, sta
 
 // StartTask transitions a dispatched task to running.
 // Issue status is NOT changed here — the agent manages it via the CLI.
-func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
-	task, err := s.Queries.StartAgentTask(ctx, taskID)
-	if err != nil {
-		return nil, fmt.Errorf("start task: %w", err)
+// When claimToken is valid, uses the token-verified path; otherwise falls
+// back to the legacy tokenless start for old daemons (only works on rows
+// without a claim_token).
+func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID, claimToken pgtype.UUID) (*db.AgentTaskQueue, error) {
+	var task db.AgentTaskQueue
+	var err error
+	if claimToken.Valid {
+		row, rowErr := s.Queries.StartAgentTaskWithClaimToken(ctx, db.StartAgentTaskWithClaimTokenParams{
+			ID:         taskID,
+			ClaimToken: claimToken,
+		})
+		if rowErr != nil {
+			if errors.Is(rowErr, pgx.ErrNoRows) {
+				return nil, ErrClaimTokenInvalid
+			}
+			return nil, fmt.Errorf("start task: %w", rowErr)
+		}
+		task = startAgentTaskRowToQueue(row)
+	} else {
+		task, err = s.Queries.StartAgentTask(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("start task: %w", err)
+		}
 	}
 
 	slog.Info("task started", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskStarted(ctx, task)
 	return &task, nil
+}
+
+func startAgentTaskRowToQueue(r db.StartAgentTaskWithClaimTokenRow) db.AgentTaskQueue {
+	return db.AgentTaskQueue{
+		ID:                r.ID,
+		AgentID:           r.AgentID,
+		IssueID:           r.IssueID,
+		Status:            r.Status,
+		Priority:          r.Priority,
+		DispatchedAt:      r.DispatchedAt,
+		StartedAt:         r.StartedAt,
+		CompletedAt:       r.CompletedAt,
+		Result:            r.Result,
+		Error:             r.Error,
+		CreatedAt:         r.CreatedAt,
+		Context:           r.Context,
+		RuntimeID:         r.RuntimeID,
+		SessionID:         r.SessionID,
+		WorkDir:           r.WorkDir,
+		TriggerCommentID:  r.TriggerCommentID,
+		ChatSessionID:     r.ChatSessionID,
+		AutopilotRunID:    r.AutopilotRunID,
+		Attempt:           r.Attempt,
+		MaxAttempts:       r.MaxAttempts,
+		ParentTaskID:      r.ParentTaskID,
+		FailureReason:     r.FailureReason,
+		TriggerSummary:    r.TriggerSummary,
+		ForceFreshSession: r.ForceFreshSession,
+		IsLeaderTask:      r.IsLeaderTask,
+		ClaimToken:        r.ClaimToken,
+		ClaimExpiresAt:    r.ClaimExpiresAt,
+	}
+}
+
+// RequeueExpiredClaimLeases is the global backstop. It does NOT requeue
+// tasks directly — alive runtimes handle their own expired leases via the
+// preflight in ClaimTaskForRuntime, and dead runtimes must stay dispatched
+// so FailTasksForOfflineRuntimes can fail+retry them properly. Requeuing
+// dead runtime tasks to 'queued' would create a blackhole: offline sweeper
+// only handles dispatched/running, and queued tasks wait up to 2h TTL.
+//
+// This method exists as an observability hook and returns 0.
+func (s *TaskService) RequeueExpiredClaimLeases(ctx context.Context, staleThresholdSecs float64) int {
+	// No-op: alive runtimes self-requeue via preflight, dead runtimes
+	// stay dispatched for the offline sweeper to fail+retry.
+	return 0
+}
+
+// RequeueExpiredClaimLeasesForRuntime requeues this runtime's own expired
+// leases as a preflight step before claiming. Safe because the runtime is
+// actively proving liveness by calling ClaimTask.
+func (s *TaskService) RequeueExpiredClaimLeasesForRuntime(ctx context.Context, runtimeID pgtype.UUID) int {
+	requeued, err := s.Queries.RequeueExpiredClaimLeasesForRuntime(ctx, db.RequeueExpiredClaimLeasesForRuntimeParams{
+		RuntimeID:  runtimeID,
+		MaxPerTick: RequeueMaxPerTick,
+	})
+	if err != nil {
+		slog.Warn("requeue expired claim leases for runtime failed", "error", err)
+		return 0
+	}
+	if len(requeued) == 0 {
+		return 0
+	}
+	slog.Info("requeued expired claim leases for runtime", "count", len(requeued), "runtime_id", util.UUIDToString(runtimeID))
+	for _, task := range requeued {
+		s.notifyTaskAvailable(task)
+	}
+	return len(requeued)
 }
 
 // CompleteTask marks a task as completed.
@@ -975,12 +1140,21 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// for assignment-triggered tasks it is NULL and the fallback is top-level.
 	// Chat tasks have no IssueID and are handled separately below.
 	if task.IssueID.Valid {
+		suppressNoActionComment, err := HasSquadLeaderNoActionEvaluationForTask(ctx, s.Queries, task)
+		if err != nil {
+			slog.Warn("checking squad leader no_action evaluation failed",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(task.IssueID),
+				"agent_id", util.UUIDToString(task.AgentID),
+				"error", err,
+			)
+		}
 		agentCommented, _ := s.Queries.HasAgentCommentedSince(ctx, db.HasAgentCommentedSinceParams{
 			IssueID:  task.IssueID,
 			AuthorID: task.AgentID,
 			Since:    task.StartedAt,
 		})
-		if !agentCommented {
+		if !suppressNoActionComment && !agentCommented {
 			var payload protocol.TaskCompletedPayload
 			if err := json.Unmarshal(result, &payload); err == nil {
 				if payload.Output != "" {
@@ -989,7 +1163,15 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 					// decoded into real newlines before the comment hits the DB. See
 					// util.UnescapeBackslashEscapes for the exact contract.
 					body := util.UnescapeBackslashEscapes(payload.Output)
-					s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID)
+					if task.TriggerCommentID.Valid && isTrivialDoneOutput(body) {
+						slog.Warn("suppressing trivial comment-trigger fallback output",
+							"task_id", util.UUIDToString(task.ID),
+							"issue_id", util.UUIDToString(task.IssueID),
+							"agent_id", util.UUIDToString(task.AgentID),
+						)
+					} else {
+						s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID)
+					}
 				}
 			}
 		}
@@ -1058,7 +1240,16 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 //
 // failureReason is a coarse classifier consumed by the auto-retry path.
 // Pass "" when unknown (treated as 'agent_error').
-func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason string) (*db.AgentTaskQueue, error) {
+func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason, claimToken string) (*db.AgentTaskQueue, error) {
+	var claimTokenUUID pgtype.UUID
+	if claimToken != "" {
+		parsed, err := util.ParseUUID(claimToken)
+		if err != nil {
+			return nil, ErrInvalidClaimToken
+		}
+		claimTokenUUID = parsed
+	}
+
 	var task db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
@@ -1067,6 +1258,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			FailureReason: pgtype.Text{String: failureReason, Valid: failureReason != ""},
 			SessionID:     pgtype.Text{String: sessionID, Valid: sessionID != ""},
 			WorkDir:       pgtype.Text{String: workDir, Valid: workDir != ""},
+			ClaimToken:    claimTokenUUID,
 		})
 		if err != nil {
 			return err
@@ -1095,6 +1287,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	}); err != nil {
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
 			if errors.Is(err, pgx.ErrNoRows) {
+				// If the task is still active, the token didn't match — reject.
+				if existing.Status == "dispatched" || existing.Status == "running" {
+					return nil, ErrClaimTokenInvalid
+				}
 				slog.Info("fail task: already finalized",
 					"task_id", util.UUIDToString(taskID),
 					"current_status", existing.Status,
@@ -1318,12 +1514,13 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, trigg
 
 // enqueueRerunTask enqueues a fresh task for the given agent on the issue.
 // For agent-assigned issues it uses enqueueIssueTask (which reads AssigneeID);
-// for squad-assigned issues it uses EnqueueTaskForMention with the leader ID.
+// for squad-assigned issues the rerun targets the squad leader and is flagged
+// as a leader task so the self-trigger guard treats it correctly.
 func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" {
 		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true)
 	}
-	return s.EnqueueTaskForMention(ctx, issue, agentID, triggerCommentID)
+	return s.EnqueueTaskForSquadLeader(ctx, issue, agentID, triggerCommentID)
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of

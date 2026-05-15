@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { agentListOptions, memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
+import { useSquadsViewStore } from "@multica/core/squads/stores";
 import { AppLink } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { Users, Plus, Search, Bot, User } from "lucide-react";
@@ -14,6 +15,7 @@ import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/ac
 import { useModalStore } from "@multica/core/modals";
 import type { Agent, Squad } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 type Scope = "mine" | "all";
 
@@ -42,7 +44,8 @@ export function SquadsPage() {
     return m;
   }, [members]);
 
-  const [scope, setScope] = useState<Scope>("mine");
+  const scope = useSquadsViewStore((s) => s.scope);
+  const setScope = useSquadsViewStore((s) => s.setScope);
   const [search, setSearch] = useState("");
 
   const scopeCounts = useMemo(() => {
@@ -57,7 +60,7 @@ export function SquadsPage() {
     const q = search.trim().toLowerCase();
     return squads.filter((s) => {
       if (scope === "mine" && currentUser && s.creator_id !== currentUser.id) return false;
-      if (q && !s.name.toLowerCase().includes(q) && !s.description.toLowerCase().includes(q)) return false;
+      if (q && !s.name.toLowerCase().includes(q) && !matchesPinyin(s.name, q) && !s.description.toLowerCase().includes(q)) return false;
       return true;
     });
   }, [squads, scope, currentUser, search]);

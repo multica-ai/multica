@@ -421,6 +421,13 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--verbose",
 		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
+		// AskUserQuestion is Claude Code's built-in interactive question tool.
+		// The daemon runs Claude in non-interactive stream-json mode and has
+		// no UI for the prompt to render in, so a call returns an empty
+		// answer and the agent ends up "inferring" silently — the user
+		// never sees the question (see GitHub #2588). User-facing
+		// clarification belongs in an issue comment instead.
+		"--disallowedTools", "AskUserQuestion",
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)

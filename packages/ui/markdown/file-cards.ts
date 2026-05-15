@@ -15,8 +15,28 @@
 
 const IMAGE_EXTS = /\.(png|jpe?g|gif|webp|svg|ico|bmp|tiff?)$/i
 
+/**
+ * URL alternation accepted inside `!file[name](url)` markdown.
+ *
+ * Restricted to:
+ * - `/uploads/...` site-relative paths (LocalStorage backend with no LOCAL_UPLOAD_BASE_URL)
+ * - `http(s)://...` absolute URLs (S3 / CloudFront / hosted)
+ *
+ * Anything else — `javascript:`, `data:`, protocol-relative `//host/x`, other
+ * APIs `/api/…`, path-traversal `/../…` — is rejected so a stored file-card
+ * cannot be turned into an out-of-band navigation.
+ */
+export const FILE_CARD_URL_PATTERN = /\/uploads\/[^)]*|https?:\/\/[^)]+/
+
+/** Prefix test applied by renderers to validate `data-href` before opening it. */
+export function isAllowedFileCardHref(href: string): boolean {
+  return /^(https?:\/\/|\/uploads\/)/i.test(href)
+}
+
 /** New syntax: !file[name](url) — unambiguous, no hostname matching needed. */
-const NEW_FILE_CARD_RE = /^!file\[([^\]]*)\]\((https?:\/\/[^)]+)\)$/
+const NEW_FILE_CARD_RE = new RegExp(
+  `^!file\\[([^\\]]*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)$`,
+)
 
 /** Legacy syntax: [name](cdnUrl) on its own line — matched by CDN hostname. */
 const FILE_LINK_LINE = /^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/

@@ -1,6 +1,6 @@
 -- name: CreateSquad :one
-INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO squad (workspace_id, name, description, leader_id, creator_id, avatar_url)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetSquad :one
@@ -36,7 +36,7 @@ INSERT INTO squad_member (squad_id, member_type, member_id, role)
 VALUES ($1, $2, $3, $4)
 RETURNING *;
 
--- name: RemoveSquadMember :exec
+-- name: RemoveSquadMember :execrows
 DELETE FROM squad_member
 WHERE squad_id = $1 AND member_type = $2 AND member_id = $3;
 

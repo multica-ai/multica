@@ -182,6 +182,7 @@
   },
   "tabs": {
     "activity": "动态",
+    "tasks": "task",
     "instructions": "指令",
     "skills": "skill",
     "environment": "环境变量",
@@ -206,7 +207,6 @@
     "runtime_filter_all": "全部",
     "runtime_loading": "加载运行时...",
     "runtime_none": "暂无可用运行时",
-    "runtime_register_first": "请先注册一个运行时再创建智能体",
     "runtime_cloud_badge": "云端",
     "runtime_private_badge": "私有",
     "runtime_private_locked_tooltip": "私有运行时——只有 runtime 所有者或工作区管理员可在其上创建智能体。如果需要共享，请联系所有者切换为「公开」。",
@@ -215,38 +215,8 @@
     "creating": "创建中...",
     "cancel": "取消",
     "create_failed_toast": "创建智能体失败",
-    "back_aria": "返回",
-    "no_runtime_toast": "暂无可用运行时。请先添加运行时再试。",
-    "template_created_toast": "智能体「{{name}}」已创建",
-    "template_created_with_reuse_toast_other": "智能体「{{name}}」已创建。复用了 {{count}} 个现有 skill。",
     "skill_attach_failed_toast": "智能体已创建，但 skill 关联失败：{{error}}",
-    "chooser": {
-      "blank_title": "从零开始",
-      "blank_desc": "全部由你来填写。",
-      "template_title": "使用模板",
-      "template_desc": "预配置指令并精选 skill 的智能体。"
-    },
-    "template_picker": {
-      "title": "选择模板",
-      "empty": "暂无可用模板。",
-      "load_failed": "加载模板失败",
-      "other_category": "其他"
-    },
-    "template_card": {
-      "skills_other": "{{count}} 个 skill"
-    },
-    "template_detail": {
-      "load_failed": "加载模板失败",
-      "skill_count_other": "包含 {{count}} 个 skill",
-      "instructions_label": "指令",
-      "instructions_loading": "加载指令中…",
-      "use": "使用该模板",
-      "creating": "创建中…"
-    },
-    "template_failure": {
-      "title": "部分模板 skill 不可用",
-      "body": "因部分上游 URL 返回错误，模板无法应用。未写入任何变更。请将下方 URL 反馈给模板维护者。"
-    },
+    "squad_join_failed_toast": "智能体「{{name}}」已创建，但加入小队失败：{{error}}。你可以在 Members 标签里手动添加。",
     "instructions": {
       "label": "指令",
       "placeholder_blank": "点击撰写指令…",
@@ -389,6 +359,13 @@
     "skills_label": "skill",
     "owner_label": "所有者",
     "unknown_runtime": "未知运行时"
+  },
+  "live_peek": {
+    "current_issue_label": "正在处理",
+    "no_current_issue": "暂无任务",
+    "last_activity_label": "最近活动",
+    "no_recent_activity": "暂无活动",
+    "failed_indicator": "失败"
   },
   "transcript": {
     "dialog_title": "智能体执行记录",

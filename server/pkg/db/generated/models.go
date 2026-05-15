@@ -94,6 +94,9 @@ type AgentTaskQueue struct {
 	FailureReason     pgtype.Text        `json:"failure_reason"`
 	TriggerSummary    pgtype.Text        `json:"trigger_summary"`
 	ForceFreshSession bool               `json:"force_fresh_session"`
+	IsLeaderTask      bool               `json:"is_leader_task"`
+	ClaimToken        pgtype.UUID        `json:"claim_token"`
+	ClaimExpiresAt    pgtype.Timestamptz `json:"claim_expires_at"`
 }
 
 type Attachment struct {

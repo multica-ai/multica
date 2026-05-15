@@ -86,8 +86,8 @@ func (q *Queries) CountSquadMembers(ctx context.Context, squadID pgtype.UUID) (i
 }
 
 const createSquad = `-- name: CreateSquad :one
-INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO squad (workspace_id, name, description, leader_id, creator_id, avatar_url)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, workspace_id, name, description, leader_id, creator_id, created_at, updated_at, archived_at, archived_by, avatar_url, instructions
 `
 
@@ -97,6 +97,7 @@ type CreateSquadParams struct {
 	Description string      `json:"description"`
 	LeaderID    pgtype.UUID `json:"leader_id"`
 	CreatorID   pgtype.UUID `json:"creator_id"`
+	AvatarUrl   pgtype.Text `json:"avatar_url"`
 }
 
 func (q *Queries) CreateSquad(ctx context.Context, arg CreateSquadParams) (Squad, error) {
@@ -106,6 +107,7 @@ func (q *Queries) CreateSquad(ctx context.Context, arg CreateSquadParams) (Squad
 		arg.Description,
 		arg.LeaderID,
 		arg.CreatorID,
+		arg.AvatarUrl,
 	)
 	var i Squad
 	err := row.Scan(
@@ -380,7 +382,7 @@ func (q *Queries) ListSquadsByMember(ctx context.Context, arg ListSquadsByMember
 	return items, nil
 }
 
-const removeSquadMember = `-- name: RemoveSquadMember :exec
+const removeSquadMember = `-- name: RemoveSquadMember :execrows
 DELETE FROM squad_member
 WHERE squad_id = $1 AND member_type = $2 AND member_id = $3
 `
@@ -391,9 +393,12 @@ type RemoveSquadMemberParams struct {
 	MemberID   pgtype.UUID `json:"member_id"`
 }
 
-func (q *Queries) RemoveSquadMember(ctx context.Context, arg RemoveSquadMemberParams) error {
-	_, err := q.db.Exec(ctx, removeSquadMember, arg.SquadID, arg.MemberType, arg.MemberID)
-	return err
+func (q *Queries) RemoveSquadMember(ctx context.Context, arg RemoveSquadMemberParams) (int64, error) {
+	result, err := q.db.Exec(ctx, removeSquadMember, arg.SquadID, arg.MemberType, arg.MemberID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const transferSquadAssignees = `-- name: TransferSquadAssignees :exec

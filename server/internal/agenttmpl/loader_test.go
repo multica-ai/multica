@@ -93,11 +93,6 @@ func TestLoadFromFS_Invalid(t *testing.T) {
 			wantErr: "missing instructions",
 		},
 		{
-			name: "no skills",
-			content: `{"slug":"x","name":"X","instructions":"do","skills":[]}`,
-			wantErr: "at least one skill",
-		},
-		{
 			name: "skill missing url",
 			content: `{"slug":"x","name":"X","instructions":"do","skills":[{}]}`,
 			wantErr: "missing source_url",
@@ -121,6 +116,32 @@ func TestLoadFromFS_Invalid(t *testing.T) {
 				t.Errorf("error = %v, want substring %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestLoadFromFS_PromptOnlyTemplate(t *testing.T) {
+	// 0-skill templates are legitimate. Most starter templates ship prompt-only
+	// (no skill fan-out, just an instructions block). Regression guard so the
+	// "must declare at least one skill" rule doesn't sneak back in.
+	fsys := fstest.MapFS{
+		"templates/prompt-only.json": &fstest.MapFile{Data: []byte(`{
+			"slug":"prompt-only",
+			"name":"Prompt Only",
+			"description":"no skills here",
+			"instructions":"just write good prose",
+			"skills":[]
+		}`)},
+	}
+	reg, err := loadFromFS(fsys, "templates")
+	if err != nil {
+		t.Fatalf("loadFromFS: %v", err)
+	}
+	tmpl, ok := reg.Get("prompt-only")
+	if !ok {
+		t.Fatal("Get(prompt-only) = false, want true")
+	}
+	if len(tmpl.Skills) != 0 {
+		t.Errorf("len(Skills) = %d, want 0", len(tmpl.Skills))
 	}
 }
 

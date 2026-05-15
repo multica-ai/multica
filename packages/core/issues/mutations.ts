@@ -200,6 +200,13 @@ export function useUpdateIssue() {
     onSettled: (_data, _err, vars, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars.id) });
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      // Refresh the issue's attachments cache when the description editor
+      // bound new uploads — the description editor reads `issueAttachments`
+      // to resolve text-preview Eye gates, and unlike other mutations this
+      // payload mutates the attachment join table.
+      if (vars.attachment_ids?.length) {
+        qc.invalidateQueries({ queryKey: issueKeys.attachments(vars.id) });
+      }
       // Invalidate old parent's children cache
       if (ctx?.parentId) {
         qc.invalidateQueries({
@@ -496,8 +503,8 @@ export function useCreateComment(issueId: string) {
 export function useUpdateComment(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ commentId, content }: { commentId: string; content: string }) =>
-      api.updateComment(commentId, content),
+    mutationFn: ({ commentId, content, attachmentIds }: { commentId: string; content: string; attachmentIds?: string[] }) =>
+      api.updateComment(commentId, content, attachmentIds),
     onMutate: async ({ commentId, content }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));

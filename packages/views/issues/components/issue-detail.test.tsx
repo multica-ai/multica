@@ -620,6 +620,73 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
   });
 
+  it("collapses non-trailing activity blocks and expands the last one by default", async () => {
+    // Timeline shape:
+    //   [activities: status_changed, priority_changed] ← block A (older)
+    //   [comment-1]
+    //   [activities: due_date_changed]                  ← block B (latest)
+    // Block A should be collapsed; block B should be expanded.
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-1",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: { from: "todo", to: "in_progress" },
+        created_at: "2026-01-16T00:00:00Z",
+      },
+      {
+        type: "activity",
+        id: "act-2",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "priority_changed",
+        details: { from: "low", to: "high" },
+        created_at: "2026-01-16T01:00:00Z",
+      },
+      {
+        type: "comment",
+        id: "comment-1",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "Talking it through",
+        parent_id: null,
+        created_at: "2026-01-17T00:00:00Z",
+        updated_at: "2026-01-17T00:00:00Z",
+        comment_type: "comment",
+      },
+      {
+        type: "activity",
+        id: "act-3",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "due_date_changed",
+        details: { to: "2026-02-01T00:00:00Z" },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    // Latest block (single activity) is expanded — its rendered text is visible.
+    await waitFor(() => {
+      expect(screen.getByText(/set due date to/i)).toBeInTheDocument();
+    });
+
+    // Older block is collapsed: shows the summary, hides the individual entries.
+    expect(screen.getByText("2 activities")).toBeInTheDocument();
+    expect(screen.queryByText(/changed status/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/changed priority/i)).not.toBeInTheDocument();
+
+    // Clicking the summary expands the older block.
+    fireEvent.click(screen.getByText("2 activities"));
+    await waitFor(() => {
+      expect(screen.getByText(/changed status/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/changed priority/i)).toBeInTheDocument();
+  });
+
   describe("highlightCommentId scroll-to-comment", () => {
     it("scrolls to the highlighted comment after both issue and timeline finish loading", async () => {
       renderIssueDetailWithHighlight("comment-2");

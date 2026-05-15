@@ -47,6 +47,7 @@ import {
 } from "../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useT } from "../i18n";
+import { matchesPinyin } from "../editor/extensions/pinyin-match";
 
 type ActorSelection =
   | { type: "agent"; id: string }
@@ -552,11 +553,11 @@ function ActorPicker({
   const query = filter.trim().toLowerCase();
 
   const filteredAgents = useMemo(
-    () => visibleAgents.filter((a) => a.name.toLowerCase().includes(query)),
+    () => visibleAgents.filter((a) => a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)),
     [visibleAgents, query],
   );
   const filteredSquads = useMemo(
-    () => visibleSquads.filter((s) => s.name.toLowerCase().includes(query)),
+    () => visibleSquads.filter((s) => s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)),
     [visibleSquads, query],
   );
 

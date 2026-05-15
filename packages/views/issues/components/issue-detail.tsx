@@ -38,7 +38,7 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
-import type { Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
@@ -72,7 +72,90 @@ import { timeAgo } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
+
+function SubscriberPopoverContent({
+  members,
+  agents,
+  subscribers,
+  toggleSubscriber,
+  t,
+}: {
+  members: { user_id: string; name: string }[];
+  agents: { id: string; name: string; archived_at?: string | null }[];
+  subscribers: { user_type: string; user_id: string }[];
+  toggleSubscriber: (id: string, type: "member" | "agent", subscribed: boolean) => void;
+  t: ActivityT;
+}) {
+  const [search, setSearch] = useState("");
+  const q = search.trim().toLowerCase();
+
+  const uniqueMembers = members.filter((m, i, arr) => arr.findIndex((x) => x.user_id === m.user_id) === i);
+  const activeAgents = agents.filter((a) => !a.archived_at);
+
+  const filteredMembers = q
+    ? uniqueMembers.filter((m) => m.name.toLowerCase().includes(q) || matchesPinyin(m.name, q))
+    : uniqueMembers;
+  const filteredAgents = q
+    ? activeAgents.filter((a) => a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q))
+    : activeAgents;
+
+  return (
+    <PopoverContent align="end" className="w-64 p-0">
+      <Command shouldFilter={false}>
+        <CommandInput
+          placeholder={t(($) => $.detail.change_subscribers_placeholder)}
+          value={search}
+          onValueChange={setSearch}
+        />
+        <CommandList className="max-h-64">
+          {filteredMembers.length === 0 && filteredAgents.length === 0 && (
+            <CommandEmpty>{t(($) => $.detail.no_subscribers_results)}</CommandEmpty>
+          )}
+          {filteredMembers.length > 0 && (
+            <CommandGroup heading={t(($) => $.detail.members_group)}>
+              {filteredMembers.map((m) => {
+                const sub = subscribers.find((s) => s.user_type === "member" && s.user_id === m.user_id);
+                const isSubbed = !!sub;
+                return (
+                  <CommandItem
+                    key={`member-${m.user_id}`}
+                    onSelect={() => toggleSubscriber(m.user_id, "member", isSubbed)}
+                    className="flex items-center gap-2.5"
+                  >
+                    <Checkbox checked={isSubbed} className="pointer-events-none" />
+                    <ActorAvatar actorType="member" actorId={m.user_id} size={22} />
+                    <span className="truncate flex-1">{m.name}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          )}
+          {filteredAgents.length > 0 && (
+            <CommandGroup heading={t(($) => $.detail.agents_group)}>
+              {filteredAgents.map((a) => {
+                const sub = subscribers.find((s) => s.user_type === "agent" && s.user_id === a.id);
+                const isSubbed = !!sub;
+                return (
+                  <CommandItem
+                    key={`agent-${a.id}`}
+                    onSelect={() => toggleSubscriber(a.id, "agent", isSubbed)}
+                    className="flex items-center gap-2.5"
+                  >
+                    <Checkbox checked={isSubbed} className="pointer-events-none" />
+                    <ActorAvatar actorType="agent" actorId={a.id} size={22} showStatusDot />
+                    <span className="truncate flex-1">{a.name}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          )}
+        </CommandList>
+      </Command>
+    </PopoverContent>
+  );
+}
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -143,6 +226,25 @@ function formatActivity(
       return t(($) => $.activity.task_completed, { count: entry.coalesced_count ?? 1 });
     case "task_failed":
       return t(($) => $.activity.task_failed, { count: entry.coalesced_count ?? 1 });
+    case "squad_leader_evaluated": {
+      const reason = details.reason?.trim();
+      switch (details.outcome) {
+        case "action":
+          return reason
+            ? t(($) => $.activity.squad_leader_action_reason, { reason })
+            : t(($) => $.activity.squad_leader_action);
+        case "no_action":
+          return reason
+            ? t(($) => $.activity.squad_leader_no_action_reason, { reason })
+            : t(($) => $.activity.squad_leader_no_action);
+        case "failed":
+          return reason
+            ? t(($) => $.activity.squad_leader_failed_reason, { reason })
+            : t(($) => $.activity.squad_leader_failed);
+        default:
+          return t(($) => $.activity.squad_leader_evaluated);
+      }
+    }
     default:
       return entry.action ?? "";
   }
@@ -230,6 +332,101 @@ function TimelineSkeleton() {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// Collapsible wrapper for an activity block. Older blocks default to a single
+// "N activities" summary line so the timeline isn't dominated by status /
+// priority / assignee churn; the trailing block stays expanded because it
+// usually answers "what just happened?". Expansion state is owned by the
+// parent so it survives Virtuoso's mount/unmount on scroll.
+function ActivityBlock({
+  entries,
+  expanded,
+  onToggle,
+  getActorName,
+  t,
+}: {
+  entries: TimelineEntry[];
+  expanded: boolean;
+  onToggle: () => void;
+  getActorName: (type: string, id: string) => string;
+  t: ActivityT;
+}) {
+  if (!expanded) {
+    const count = entries.length;
+    return (
+      <div className="pb-3 px-4">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronRight className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.activity.activity_count, { count })}</span>
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="pb-3 px-4 flex flex-col gap-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ChevronDown className="h-3 w-3 shrink-0" />
+        <span>{t(($) => $.activity.activity_count, { count: entries.length })}</span>
+      </button>
+      {entries.map((entry) => {
+        const details = (entry.details ?? {}) as Record<string, string>;
+        const isStatusChange = entry.action === "status_changed";
+        const isPriorityChange = entry.action === "priority_changed";
+        const isDueDateChange = entry.action === "due_date_changed";
+
+        let leadIcon: React.ReactNode;
+        if (isStatusChange && details.to) {
+          leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
+        } else if (isPriorityChange && details.to) {
+          leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
+        } else if (isDueDateChange) {
+          leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
+        } else {
+          leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
+        }
+
+        return (
+          <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
+            <div className="mr-2 flex w-4 shrink-0 justify-center">
+              {leadIcon}
+            </div>
+            <div className="flex min-w-0 flex-1 items-center gap-1">
+              <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
+              <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+              {(entry.coalesced_count ?? 1) > 1 &&
+                entry.action !== "task_completed" &&
+                entry.action !== "task_failed" && (
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                    {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
+                  </span>
+                )}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="ml-auto shrink-0 cursor-default">
+                      {timeAgo(entry.created_at)}
+                    </span>
+                  }
+                />
+                <TooltipContent side="top">
+                  {new Date(entry.created_at).toLocaleString()}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -422,6 +619,43 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       return next;
     });
   }, []);
+
+  // Per-session activity-block expansion overrides. The default rule is
+  // "only the trailing block is expanded" (computed from timelineView.groups
+  // below); these two sets capture user clicks that diverge from the default.
+  // Two sets are needed because "default" can flip when a new activity block
+  // appends — without an explicit collapse override, a manually-collapsed
+  // older block would re-expand when it stops being the trailing one (or vice
+  // versa). Not persisted, matches the resolved-thread behaviour above.
+  const [expandedActivityIds, setExpandedActivityIds] = useState<Set<string>>(() => new Set());
+  const [collapsedActivityIds, setCollapsedActivityIds] = useState<Set<string>>(() => new Set());
+  const toggleActivityBlock = useCallback((id: string, currentlyExpanded: boolean) => {
+    if (currentlyExpanded) {
+      setCollapsedActivityIds((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+      setExpandedActivityIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    } else {
+      setExpandedActivityIds((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+      setCollapsedActivityIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  }, []);
   const didHighlightRef = useRef<string | null>(null);
 
   // Issue data from TQ — uses detail query, seeded from list cache if available.
@@ -533,13 +767,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // Coalesce consecutive activities from the same actor + action.
     // - task_completed / task_failed: no time limit (these repeat across runs)
     // - all other actions: within a 2-minute window
+    // - squad_leader_evaluated: never coalesce; outcome/reason are audit data
     const COALESCE_MS = 2 * 60 * 1000;
     const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
+    const NEVER_COALESCE_ACTIONS = new Set(["squad_leader_evaluated"]);
     const coalesced: TimelineEntry[] = [];
     for (const entry of topLevel) {
       if (entry.type === "activity") {
         const prev = coalesced[coalesced.length - 1];
         if (
+          !NEVER_COALESCE_ACTIONS.has(entry.action!) &&
           prev?.type === "activity" &&
           prev.action === entry.action &&
           prev.actor_type === entry.actor_type &&
@@ -580,6 +817,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     () => flattenGroups(timelineView.groups, expandedResolved),
     [timelineView.groups, expandedResolved],
   );
+
+  // ID of the trailing activity block — the only one expanded by default.
+  const lastActivityGroupId = useMemo(() => {
+    for (let i = timelineView.groups.length - 1; i >= 0; i--) {
+      const g = timelineView.groups[i]!;
+      if (g.type === "activities") return g.entries[0]!.id;
+    }
+    return null;
+  }, [timelineView.groups]);
 
   // Map of reply-comment id → root-comment id, so a deep-link to a reply
   // (which lives inside a CommentCard, not in the flat items array) can fall
@@ -733,10 +979,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
-  // Description uploads don't pass issueId — the URL lives in the markdown.
-  // This avoids stale attachment records when users delete images from the editor.
+  // Pending uploads in the description editor. We don't pass `issueId` on
+  // upload (to avoid orphaning attachments when the user deletes the file
+  // from the markdown), so they start unattached and we re-bind them via
+  // `attachment_ids` on the next description save. Drives editor previews
+  // so text/code attachments show an Eye before the bind round-trips.
+  const [descPendingAttachments, setDescPendingAttachments] = useState<Attachment[]>([]);
+  const descEditorAttachments = descPendingAttachments.length > 0
+    ? [...(issueAttachments ?? []), ...descPendingAttachments]
+    : issueAttachments;
   const handleDescriptionUpload = useCallback(
-    (file: File) => uploadWithToast(file),
+    async (file: File) => {
+      const result = await uploadWithToast(file);
+      if (result) setDescPendingAttachments((prev) => [...prev, result]);
+      return result;
+    },
     [uploadWithToast],
   );
 
@@ -990,57 +1247,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       );
     }
     // activity-group
+    const expanded = expandedActivityIds.has(item.id)
+      ? true
+      : collapsedActivityIds.has(item.id)
+        ? false
+        : item.id === lastActivityGroupId;
     return (
-      <div className="pb-3 px-4 flex flex-col gap-3">
-        {item.entries.map((entry) => {
-          const details = (entry.details ?? {}) as Record<string, string>;
-          const isStatusChange = entry.action === "status_changed";
-          const isPriorityChange = entry.action === "priority_changed";
-          const isDueDateChange = entry.action === "due_date_changed";
-
-          let leadIcon: React.ReactNode;
-          if (isStatusChange && details.to) {
-            leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
-          } else if (isPriorityChange && details.to) {
-            leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
-          } else if (isDueDateChange) {
-            leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
-          } else {
-            leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
-          }
-
-          return (
-            <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
-              <div className="mr-2 flex w-4 shrink-0 justify-center">
-                {leadIcon}
-              </div>
-              <div className="flex min-w-0 flex-1 items-center gap-1">
-                <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
-                <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
-                {(entry.coalesced_count ?? 1) > 1 &&
-                  entry.action !== "task_completed" &&
-                  entry.action !== "task_failed" && (
-                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
-                      {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
-                    </span>
-                  )}
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span className="ml-auto shrink-0 cursor-default">
-                        {timeAgo(entry.created_at)}
-                      </span>
-                    }
-                  />
-                  <TooltipContent side="top">
-                    {new Date(entry.created_at).toLocaleString()}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <ActivityBlock
+        entries={item.entries}
+        expanded={expanded}
+        onToggle={() => toggleActivityBlock(item.id, expanded)}
+        getActorName={getActorName}
+        t={t}
+      />
     );
   };
 
@@ -1204,11 +1423,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               key={id}
               defaultValue={issue.description || ""}
               placeholder={t(($) => $.detail.desc_placeholder)}
-              onUpdate={(md) => handleUpdateField({ description: md })}
+              onUpdate={(md) => {
+                // Bind any pending uploads still referenced in the markdown
+                // so they appear in `issueAttachments` after refresh and the
+                // editor's text/code preview keeps working past reload.
+                const ids = descPendingAttachments
+                  .filter((a) => md.includes(a.url))
+                  .map((a) => a.id);
+                handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
+              }}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
               currentIssueId={id}
-              attachments={issueAttachments}
+              attachments={descEditorAttachments}
             />
 
             <div className="flex items-center gap-1 mt-3">
@@ -1350,54 +1577,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       </span>
                     )}
                   </PopoverTrigger>
-                  <PopoverContent align="end" className="w-64 p-0">
-                    <Command>
-                      <CommandInput placeholder={t(($) => $.detail.change_subscribers_placeholder)} />
-                      <CommandList className="max-h-64">
-                        <CommandEmpty>{t(($) => $.detail.no_subscribers_results)}</CommandEmpty>
-                        {members.length > 0 && (
-                          <CommandGroup heading={t(($) => $.detail.members_group)}>
-                            {members.filter((m, i, arr) => arr.findIndex((x) => x.user_id === m.user_id) === i).map((m) => {
-                              const sub = subscribers.find((s) => s.user_type === "member" && s.user_id === m.user_id);
-                              const isSubbed = !!sub;
-                              return (
-                                <CommandItem
-                                  key={`member-${m.user_id}`}
-                                  onSelect={() => toggleSubscriber(m.user_id, "member", isSubbed)}
-                                  className="flex items-center gap-2.5"
-                                >
-                                  <Checkbox checked={isSubbed} className="pointer-events-none" />
-                                  <ActorAvatar actorType="member" actorId={m.user_id} size={22} />
-                                  <span className="truncate flex-1">{m.name}</span>
-
-                                </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
-                        )}
-                        {agents.filter((a) => !a.archived_at).length > 0 && (
-                          <CommandGroup heading={t(($) => $.detail.agents_group)}>
-                            {agents.filter((a) => !a.archived_at).map((a) => {
-                              const sub = subscribers.find((s) => s.user_type === "agent" && s.user_id === a.id);
-                              const isSubbed = !!sub;
-                              return (
-                                <CommandItem
-                                  key={`agent-${a.id}`}
-                                  onSelect={() => toggleSubscriber(a.id, "agent", isSubbed)}
-                                  className="flex items-center gap-2.5"
-                                >
-                                  <Checkbox checked={isSubbed} className="pointer-events-none" />
-                                  <ActorAvatar actorType="agent" actorId={a.id} size={22} showStatusDot />
-                                  <span className="truncate flex-1">{a.name}</span>
-
-                                </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
-                        )}
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
+                  <SubscriberPopoverContent
+                    members={members}
+                    agents={agents}
+                    subscribers={subscribers}
+                    toggleSubscriber={toggleSubscriber}
+                    t={t}
+                  />
                 </Popover>
               </div>
             </div>

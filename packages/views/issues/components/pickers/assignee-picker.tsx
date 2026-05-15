@@ -17,6 +17,7 @@ import {
   PickerEmpty,
 } from "./property-picker";
 import { useT } from "../../../i18n";
+import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
 
 /**
  * Legacy boolean shape kept around for callers (e.g. `use-issue-actions.ts`)
@@ -84,13 +85,13 @@ export function AssigneePicker({
 
   const query = filter.trim().toLowerCase();
   const filteredMembers = members
-    .filter((m) => m.name.toLowerCase().includes(query))
+    .filter((m) => m.name.toLowerCase().includes(query) || matchesPinyin(m.name, query))
     .sort((a, b) => getFreq("member", b.user_id) - getFreq("member", a.user_id));
   const filteredAgents = agents
-    .filter((a) => !a.archived_at && a.name.toLowerCase().includes(query))
+    .filter((a) => !a.archived_at && (a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)))
     .sort((a, b) => getFreq("agent", b.id) - getFreq("agent", a.id));
   const filteredSquads = squads
-    .filter((s) => !s.archived_at && s.name.toLowerCase().includes(query))
+    .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)))
     .sort((a, b) => getFreq("squad", b.id) - getFreq("squad", a.id));
 
   const isSelected = (type: string, id: string) =>

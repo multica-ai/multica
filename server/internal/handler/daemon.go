@@ -1215,16 +1215,21 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		// Look up the prior session for this (agent, issue) pair so the daemon
 		// can resume the Claude Code conversation context.
 		//
-		// Skip the lookup when the task was flagged as a manual rerun: the
-		// user just judged the prior output bad, so the daemon must start a
-		// fresh agent session instead of resuming the same conversation that
-		// produced that output.
+		// Skip all prior state when the task was flagged as a manual rerun:
+		// the user just judged the prior output bad, so the daemon must start a
+		// fresh agent session in a fresh workdir instead of resuming anything
+		// from the same conversation that produced that output. For
+		// comment-triggered follow-ups, skip only the session resume: resumed
+		// issue conversations often inherit the prior final assistant message
+		// (for example "Done.") and answer a new human comment with that stale
+		// completion marker instead of the comment itself. Keep reusing the
+		// workdir for comment follow-ups so the agent still sees the same checkout.
 		if !task.ForceFreshSession {
 			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
-				if prior.RuntimeID == task.RuntimeID {
+				if !task.TriggerCommentID.Valid && prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
 				}
 				if prior.WorkDir.Valid {
@@ -1411,6 +1416,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						} else {
 							resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
 						}
+						// Surface the squad identity to the daemon so the
+						// quick-create prompt defaults the new issue's
+						// assignee to the squad, not the leader agent.
+						resp.SquadID = uuidToString(squad.ID)
+						resp.SquadName = squad.Name
 						slog.Debug("injected squad leader briefing for quick-create",
 							"squad_id", uuidToString(squad.ID),
 							"squad_name", squad.Name,
@@ -1490,8 +1500,29 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.StartTask(r.Context(), parseUUID(taskID))
+	// Read optional claim_token from body (new daemons send it; old ones don't).
+	var body struct {
+		ClaimToken string `json:"claim_token"`
+	}
+	// Best-effort decode; empty body is fine for legacy daemons.
+	json.NewDecoder(r.Body).Decode(&body)
+
+	var claimToken pgtype.UUID
+	if body.ClaimToken != "" {
+		parsed, err := util.ParseUUID(body.ClaimToken)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "malformed claim_token")
+			return
+		}
+		claimToken = parsed
+	}
+
+	task, err := h.TaskService.StartTask(r.Context(), parseUUID(taskID), claimToken)
 	if err != nil {
+		if errors.Is(err, service.ErrClaimTokenInvalid) {
+			writeError(w, http.StatusConflict, "claim token expired or superseded")
+			return
+		}
 		slog.Warn("start task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -1676,6 +1707,7 @@ type TaskFailRequest struct {
 	SessionID     string `json:"session_id,omitempty"`
 	WorkDir       string `json:"work_dir,omitempty"`
 	FailureReason string `json:"failure_reason,omitempty"`
+	ClaimToken    string `json:"claim_token,omitempty"`
 }
 
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
@@ -1692,8 +1724,16 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason)
+	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason, req.ClaimToken)
 	if err != nil {
+		if errors.Is(err, service.ErrInvalidClaimToken) {
+			writeError(w, http.StatusBadRequest, "malformed claim token")
+			return
+		}
+		if errors.Is(err, service.ErrClaimTokenInvalid) {
+			writeError(w, http.StatusConflict, "claim token expired or superseded")
+			return
+		}
 		slog.Warn("fail task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
