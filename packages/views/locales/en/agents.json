@@ -186,6 +186,7 @@
     "activity": "Activity",
     "instructions": "Instructions",
     "skills": "Skills",
+    "feishu_bot": "Feishu Bot",
     "environment": "Environment",
     "custom_args": "Custom Args",
     "discard_dialog_title": "Discard unsaved changes?",
@@ -262,6 +263,24 @@
       "add_dialog_empty": "All workspace skills are already assigned.",
       "add_dialog_cancel": "Cancel",
       "add_failed_toast": "Failed to add skill"
+    },
+    "feishu_bot": {
+      "loading": "Loading Feishu bot config...",
+      "load_failed": "Couldn't load the Feishu bot config.",
+      "retry": "Retry",
+      "intro": "Connect a Feishu app to this agent. Messages sent to that bot are routed to this agent; group messages that include an issue identifier assign the issue first.",
+      "console_hint": "In the Feishu developer console, set the event Request URL to:",
+      "event_hint": "Subscribe to im.message.receive_v1, enable im:message.p2p_msg:readonly, im:message:send_as_bot, contact:user.base:readonly, and contact:user.email:readonly, then publish the app version.",
+      "enable_label": "Enable Feishu bot",
+      "enable_hint": "Use this Feishu app as the agent's bot proxy.",
+      "app_id_label": "App ID",
+      "app_secret_label": "App Secret",
+      "verification_token_label": "Verification token",
+      "secret_placeholder_set": "Leave blank to keep the current secret",
+      "app_id_required_toast": "App ID is required",
+      "app_secret_required_toast": "App Secret is required",
+      "saved_toast": "Feishu bot config saved",
+      "save_failed_toast": "Failed to save Feishu bot config"
     },
     "activity": {
       "section_now": "Now",

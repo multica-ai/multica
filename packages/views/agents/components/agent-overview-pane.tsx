@@ -6,6 +6,7 @@ import {
   BookOpenText,
   FileText,
   KeyRound,
+  MessageCircle,
   Terminal,
 } from "lucide-react";
 import type { Agent, AgentRuntime } from "@multica/core/types";
@@ -24,19 +25,22 @@ import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
+import { FeishuBotTab } from "./tabs/feishu-bot-tab";
 import { useT } from "../../i18n";
 
 type DetailTab =
   | "activity"
   | "instructions"
   | "skills"
+  | "feishu_bot"
   | "env"
   | "custom_args";
 
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "instructions" | "skills" | "environment" | "custom_args"> = {
+const TAB_LABEL_KEY: Record<DetailTab, "activity" | "instructions" | "skills" | "feishu_bot" | "environment" | "custom_args"> = {
   activity: "activity",
   instructions: "instructions",
   skills: "skills",
+  feishu_bot: "feishu_bot",
   env: "environment",
   custom_args: "custom_args",
 };
@@ -48,6 +52,7 @@ const detailTabs: {
   { id: "activity", icon: Activity },
   { id: "instructions", icon: FileText },
   { id: "skills", icon: BookOpenText },
+  { id: "feishu_bot", icon: MessageCircle },
   { id: "env", icon: KeyRound },
   { id: "custom_args", icon: Terminal },
 ];
@@ -154,6 +159,14 @@ export function AgentOverviewPane({
         {activeTab === "skills" && (
           <TabContent>
             <SkillsTab agent={agent} />
+          </TabContent>
+        )}
+        {activeTab === "feishu_bot" && (
+          <TabContent>
+            <FeishuBotTab
+              agent={agent}
+              onDirtyChange={setActiveDirty}
+            />
           </TabContent>
         )}
         {activeTab === "env" && (

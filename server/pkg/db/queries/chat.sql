@@ -86,6 +86,10 @@ ORDER BY created_at ASC;
 SELECT * FROM chat_message
 WHERE id = $1;
 
+-- name: GetChatMessageByTaskID :one
+SELECT * FROM chat_message
+WHERE task_id = $1;
+
 -- name: CreateChatTask :one
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
 VALUES ($1, $2, NULL, 'queued', $3, $4)

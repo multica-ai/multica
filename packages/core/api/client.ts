@@ -82,6 +82,8 @@ import type {
   ListAutopilotRunsResponse,
   NotificationPreferenceResponse,
   NotificationPreferences,
+  AgentFeishuBotConfig,
+  UpdateAgentFeishuBotConfigRequest,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -605,6 +607,20 @@ export class ApiClient {
 
   async updateAgent(id: string, data: UpdateAgentRequest): Promise<Agent> {
     return this.fetch(`/api/agents/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getAgentFeishuBotConfig(id: string): Promise<AgentFeishuBotConfig> {
+    return this.fetch(`/api/agents/${id}/feishu-bot`);
+  }
+
+  async updateAgentFeishuBotConfig(
+    id: string,
+    data: UpdateAgentFeishuBotConfigRequest,
+  ): Promise<AgentFeishuBotConfig> {
+    return this.fetch(`/api/agents/${id}/feishu-bot`, {
       method: "PUT",
       body: JSON.stringify(data),
     });

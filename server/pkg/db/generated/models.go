@@ -43,6 +43,17 @@ type Agent struct {
 	Model              pgtype.Text        `json:"model"`
 }
 
+type AgentFeishuBotConfig struct {
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	AppID             string             `json:"app_id"`
+	AppSecret         string             `json:"app_secret"`
+	VerificationToken pgtype.Text        `json:"verification_token"`
+	Enabled           bool               `json:"enabled"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type AgentRuntime struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -232,6 +243,32 @@ type Feedback struct {
 	Message     string             `json:"message"`
 	Metadata    []byte             `json:"metadata"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type FeishuAgentChatBinding struct {
+	ID             pgtype.UUID        `json:"id"`
+	AppID          string             `json:"app_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	FeishuChatID   string             `json:"feishu_chat_id"`
+	FeishuSenderID string             `json:"feishu_sender_id"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type FeishuIssueThread struct {
+	ID             pgtype.UUID        `json:"id"`
+	AppID          string             `json:"app_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	FeishuChatID   string             `json:"feishu_chat_id"`
+	FeishuThreadID string             `json:"feishu_thread_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type InboxItem struct {

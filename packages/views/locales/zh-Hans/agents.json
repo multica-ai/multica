@@ -182,6 +182,7 @@
     "activity": "动态",
     "instructions": "指令",
     "skills": "skill",
+    "feishu_bot": "飞书机器人",
     "environment": "环境变量",
     "custom_args": "自定义参数",
     "discard_dialog_title": "放弃未保存的修改？",
@@ -258,6 +259,24 @@
       "add_dialog_empty": "全部工作区 skill 都已分配。",
       "add_dialog_cancel": "取消",
       "add_failed_toast": "添加 skill 失败"
+    },
+    "feishu_bot": {
+      "loading": "正在加载飞书机器人配置...",
+      "load_failed": "无法加载飞书机器人配置。",
+      "retry": "重试",
+      "intro": "把一个飞书应用连接到这个智能体。发给这个机器人的消息会路由给该智能体；群消息里包含 issue 编号时，会先派单再同步评论。",
+      "console_hint": "在飞书开发者后台将事件订阅 Request URL 配置为：",
+      "event_hint": "需要订阅事件 im.message.receive_v1，并启用 im:message.p2p_msg:readonly、im:message:send_as_bot、contact:user.base:readonly、contact:user.email:readonly 权限后发布应用版本。",
+      "enable_label": "启用飞书机器人",
+      "enable_hint": "将这个飞书应用作为该智能体的机器人代理。",
+      "app_id_label": "App ID",
+      "app_secret_label": "App Secret",
+      "verification_token_label": "Verification Token",
+      "secret_placeholder_set": "留空则保留当前 secret",
+      "app_id_required_toast": "App ID 必填",
+      "app_secret_required_toast": "App Secret 必填",
+      "saved_toast": "已保存飞书机器人配置",
+      "save_failed_toast": "保存飞书机器人配置失败"
     },
     "activity": {
       "section_now": "当前",

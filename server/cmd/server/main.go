@@ -257,6 +257,7 @@ func main() {
 	if feishuNotifier := service.NewFeishuNotifierFromEnv(); feishuNotifier != nil {
 		registerExternalNotificationListeners(bus, queries, feishuNotifier)
 	}
+	registerFeishuAgentBotListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
@@ -294,6 +295,7 @@ func main() {
 	// Start background workers.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
+	feishuBotCtx, feishuBotCancel := context.WithCancel(context.Background())
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
@@ -312,6 +314,10 @@ func main() {
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
+	feishuBotHandler := handler.New(queries, pool, hub, bus, service.NewEmailService(), nil, nil, analyticsClient, handler.Config{}, daemonHub)
+	feishuBotHandler.TaskService.Wakeup = daemonWakeup
+	feishuBotHandler.TaskService.EmptyClaim = service.NewEmptyClaimCache(storeRedis)
+	go newFeishuAgentBotWSRunner(pool, queries, feishuBotHandler).Run(feishuBotCtx)
 
 	if metricsServer != nil {
 		go func() {
@@ -337,6 +343,7 @@ func main() {
 	slog.Info("shutting down server")
 	sweepCancel()
 	autopilotCancel()
+	feishuBotCancel()
 
 	apiShutdownCtx, apiShutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := srv.Shutdown(apiShutdownCtx); err != nil {

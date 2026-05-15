@@ -125,6 +125,23 @@ export interface Agent {
   archived_by: string | null;
 }
 
+export interface AgentFeishuBotConfig {
+  enabled: boolean;
+  app_id: string;
+  has_app_secret: boolean;
+  verification_token: string | null;
+  callback_url_path: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface UpdateAgentFeishuBotConfigRequest {
+  enabled: boolean;
+  app_id: string;
+  app_secret?: string;
+  verification_token?: string | null;
+}
+
 /**
  * Minimal skill shape embedded in an Agent payload (`GET /api/agents`,
  * `GET /api/agents/:id`). Only id/name/description are populated — the
