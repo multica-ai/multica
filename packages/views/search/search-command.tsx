@@ -28,7 +28,11 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { SearchIssueResult, SearchProjectResult } from "@multica/core/types";
 import { api } from "@multica/core/api";
-import { selectRecentIssues, useRecentIssuesStore } from "@multica/core/issues/stores";
+import {
+  openCreateIssueWithPreference,
+  selectRecentIssues,
+  useRecentIssuesStore,
+} from "@multica/core/issues/stores";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useWorkspaceId } from "@multica/core";
 import { paths, useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -203,7 +207,7 @@ export function SearchCommand() {
         icon: Plus,
         keywords: ["new", "issue", "create", "add"],
         onSelect: () => {
-          useModalStore.getState().open("quick-create-issue");
+          openCreateIssueWithPreference();
           setOpen(false);
         },
       },

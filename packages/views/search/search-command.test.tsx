@@ -82,6 +82,8 @@ vi.mock("@multica/core/issues/stores", () => {
       (wsId: string | null) =>
       (state: { byWorkspace: Record<string, typeof mockRecentItems.current> }) =>
         wsId ? (state.byWorkspace[wsId] ?? EMPTY) : EMPTY,
+    openCreateIssueWithPreference: (data?: Record<string, unknown> | null) =>
+      mockOpenModal("quick-create-issue", data ?? null),
   };
 });
 
@@ -291,7 +293,7 @@ describe("SearchCommand", () => {
     );
     await user.click(newIssue);
 
-    expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue");
+    expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue", null);
     expect(useSearchStore.getState().open).toBe(false);
   });
 
