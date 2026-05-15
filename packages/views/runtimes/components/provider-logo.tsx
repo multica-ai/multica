@@ -165,6 +165,19 @@ function KiroLogo({ className }: { className: string }) {
   );
 }
 
+// DeepSeek — whale mark, simplified "D" block with the brand gradient (blue #4D6BFE)
+function DeepSeekLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="6" fill="#4D6BFE" />
+      <path
+        d="M7 7.5C7 6.672 7.672 6 8.5 6h2.5v2.5h-1.5v7h-2.5v-8zM13 8.5c0-.828.672-1.5 1.5-1.5h1c.828 0 1.5.672 1.5 1.5v7c0 .828-.672 1.5-1.5 1.5h-1c-.828 0-1.5-.672-1.5-1.5v-7zm2.5 0v7h1v-7h-1zM10 17.5H7.5V20h2.5v-2.5z"
+        fill="#FFFFFF"
+      />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -193,6 +206,8 @@ export function ProviderLogo({
       return <KimiLogo className={className} />;
     case "kiro":
       return <KiroLogo className={className} />;
+    case "deepseek":
+      return <DeepSeekLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }
