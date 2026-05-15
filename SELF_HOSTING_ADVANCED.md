@@ -25,14 +25,30 @@ These have sensible defaults and only need to be set when tuning a large or cons
 
 ### Email (Required for Authentication)
 
-Multica uses email-based magic link authentication via [Resend](https://resend.com).
+Multica supports two email backends. `SMTP_HOST` takes priority when set; otherwise `RESEND_API_KEY` is used. In local development with neither configured, verification codes are printed to the server log and the master code `888888` is active (only when `APP_ENV=development`).
+
+#### Option A: Resend (recommended for cloud deployments)
 
 | Variable | Description |
 |----------|-------------|
 | `RESEND_API_KEY` | Your Resend API key |
 | `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@multica.ai`) |
 
-> **Note:** If Resend is not configured, generated verification codes are printed to backend logs. A fixed local testing code is disabled by default; to opt in on a private test instance, set `APP_ENV=development` and `MULTICA_DEV_VERIFICATION_CODE` to a 6-digit value. It is ignored when `APP_ENV=production`.
+#### Option B: SMTP relay (for self-hosted / on-premise deployments)
+
+Use this option when your deployment cannot reach the public internet or you already have an internal mail relay (e.g. Exchange, Postfix, SendGrid on-prem).
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `SMTP_HOST` | SMTP relay hostname (setting this activates SMTP mode) | - |
+| `SMTP_PORT` | SMTP port | `25` |
+| `SMTP_USERNAME` | SMTP username (leave empty for unauthenticated relay) | - |
+| `SMTP_PASSWORD` | SMTP password | - |
+| `SMTP_TLS_INSECURE` | Set `true` to skip TLS certificate verification (self-signed / private CA certs) | `false` |
+
+STARTTLS is used automatically when advertised by the server. Port 465 (SMTPS / implicit TLS) is not currently supported - use ports 25 or 587 with STARTTLS.
+
+> **Note:** If Resend is not configured, generated verification codes are printed to backend logs. The dev master verification code `888888` is gated by `APP_ENV != "production"`. The Docker self-host stack defaults to `APP_ENV=production` (so `888888` is disabled). For local development without email configured, set `APP_ENV=development` in your `.env` to enable `888888` - never do this on a public instance.
 
 ### Google OAuth (Optional)
 
