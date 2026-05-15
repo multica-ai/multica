@@ -21,11 +21,17 @@ var webhookTriggerIDKey = webhookTriggerIDKeyType{}
 // so the request logger can include it in the audit line without revealing
 // the bearer token in the URL path. Called by the webhook handler right after
 // the trigger row is looked up.
-func SetWebhookTriggerID(r *http.Request, triggerID string) *http.Request {
+//
+// Mutates `*r` in place so the wrapping middleware (which is still holding the
+// original `*http.Request`) reads the value back out of context after
+// ServeHTTP returns. Reassigning a local `r` variable would not propagate the
+// new context back up to the caller, which is the trap a previous version of
+// this helper fell into.
+func SetWebhookTriggerID(r *http.Request, triggerID string) {
 	if triggerID == "" {
-		return r
+		return
 	}
-	return r.WithContext(context.WithValue(r.Context(), webhookTriggerIDKey, triggerID))
+	*r = *r.WithContext(context.WithValue(r.Context(), webhookTriggerIDKey, triggerID))
 }
 
 // webhookTriggerIDFromContext returns the trigger ID stashed by

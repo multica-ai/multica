@@ -174,23 +174,19 @@ func TestRequestLogger_RedactsWebhookTokenInPath(t *testing.T) {
 }
 
 func TestRequestLogger_IncludesWebhookTriggerIDFromContext(t *testing.T) {
+	// Exercise the real production flow: the webhook handler resolves the
+	// trigger, then calls SetWebhookTriggerID(r, ...) which mutates *r in
+	// place. After the handler returns, the wrapping RequestLogger
+	// middleware reads the stashed ID off the (now-updated) request
+	// context. If SetWebhookTriggerID didn't mutate in place, the
+	// middleware would see the old context and the trigger ID would
+	// silently drop from the audit line.
 	logs := withCapturedLogs(t)
 	handler := RequestLogger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The webhook handler stashes the resolved trigger ID on the
-		// context after a successful lookup; the request logger reads
-		// it from there.
-		*r = *SetWebhookTriggerID(r, "trigger-abc")
-		_ = r
-		// Simulate the slog call path that would emit on this context.
-		// The request logger reads the context AFTER next.ServeHTTP, so
-		// we mutate the request before returning.
+		SetWebhookTriggerID(r, "trigger-abc")
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/autopilots/awt_supersecret", nil)
-	// Pre-stash on the context so the assertion exercises the read path —
-	// production code calls SetWebhookTriggerID from the handler, but the
-	// middleware reads from the same context after the handler returns.
-	req = SetWebhookTriggerID(req, "trigger-abc")
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 	out := logs.String()
 	if !strings.Contains(out, "webhook_trigger_id=trigger-abc") {
