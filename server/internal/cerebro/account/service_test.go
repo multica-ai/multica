@@ -296,6 +296,91 @@ func TestServiceUpdateUsage_PatchSemantics(t *testing.T) {
 	}
 }
 
+func TestServiceUpdateUsage_RecordsRollingTokens(t *testing.T) {
+	svc, cleanup := newAccountTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	created, err := svc.Create(ctx, accountTestWorkspaceID, accountTestUserID, "claude", "tokens@firtal.dk")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	tokens := int64(100)
+	a, err := svc.UpdateUsage(ctx, accountTestWorkspaceID, accountTestUserID, created.ID, "daemon", UsageUpdate{
+		Tokens: &tokens,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUsage(tokens) failed: %v", err)
+	}
+	if a.Tokens5h != 100 || a.Tokens7d != 100 {
+		t.Fatalf("fresh tokens: got 5h=%d 7d=%d, want 100/100", a.Tokens5h, a.Tokens7d)
+	}
+
+	if _, err := accountTestPool.Exec(ctx, `
+		INSERT INTO cerebro_account_token_usage (account_id, workspace_id, tokens, created_at)
+		VALUES ($1, $2, 50, now() - interval '6 hours'),
+		       ($1, $2, 900, now() - interval '8 days')
+	`, created.ID, accountTestWorkspaceID); err != nil {
+		t.Fatalf("insert historical token usage: %v", err)
+	}
+
+	got, err := svc.Get(ctx, accountTestWorkspaceID, created.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.Tokens5h != 100 || got.Tokens7d != 150 {
+		t.Fatalf("rolling tokens: got 5h=%d 7d=%d, want 100/150", got.Tokens5h, got.Tokens7d)
+	}
+
+	rows, err := svc.ListWithAvailability(ctx, accountTestWorkspaceID)
+	if err != nil {
+		t.Fatalf("ListWithAvailability failed: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Tokens5h != 100 || rows[0].Tokens7d != 150 {
+		t.Fatalf("availability tokens: got len=%d row=%+v, want one row with 100/150", len(rows), rows)
+	}
+}
+
+func TestDeleteOldCerebroAccountTokenUsage(t *testing.T) {
+	svc, cleanup := newAccountTestService(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	created, err := svc.Create(ctx, accountTestWorkspaceID, accountTestUserID, "claude", "retention@firtal.dk")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	if _, err := accountTestPool.Exec(ctx, `
+		INSERT INTO cerebro_account_token_usage (account_id, workspace_id, tokens, created_at)
+		VALUES ($1, $2, 100, now() - interval '9 days'),
+		       ($1, $2, 200, now() - interval '7 days')
+	`, created.ID, accountTestWorkspaceID); err != nil {
+		t.Fatalf("insert token usage rows: %v", err)
+	}
+
+	deleted, err := svc.Cerebro.DeleteOldCerebroAccountTokenUsage(ctx)
+	if err != nil {
+		t.Fatalf("DeleteOldCerebroAccountTokenUsage failed: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted rows = %d, want 1", deleted)
+	}
+
+	var remaining int
+	if err := accountTestPool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM cerebro_account_token_usage
+		WHERE account_id = $1
+	`, created.ID).Scan(&remaining); err != nil {
+		t.Fatalf("count remaining rows: %v", err)
+	}
+	if remaining != 1 {
+		t.Fatalf("remaining rows = %d, want 1", remaining)
+	}
+}
+
 func TestServiceUpdateControls_PatchSemantics(t *testing.T) {
 	svc, cleanup := newAccountTestService(t)
 	defer cleanup()

@@ -261,6 +261,14 @@ type CerebroAccount struct {
 	PausedManual   bool               `json:"paused_manual"`
 }
 
+type CerebroAccountTokenUsage struct {
+	ID          pgtype.UUID        `json:"id"`
+	AccountID   pgtype.UUID        `json:"account_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Tokens      int64              `json:"tokens"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type CerebroAgentPass struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`

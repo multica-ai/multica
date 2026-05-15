@@ -19,6 +19,8 @@ type Account struct {
 	LoginIdentity  string
 	UsageWindowPct pgtype.Float4
 	ThrottledUntil pgtype.Timestamptz
+	Tokens5h       int64
+	Tokens7d       int64
 	ExtraSpendOn   bool
 	PausedManual   bool
 	CreatedAt      pgtype.Timestamptz
@@ -29,6 +31,7 @@ func accountFromList(r cerebrodb.ListCerebroAccountsRow) Account {
 	return Account{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, Provider: r.Provider, LoginIdentity: r.LoginIdentity,
 		UsageWindowPct: r.UsageWindowPct, ThrottledUntil: r.ThrottledUntil,
+		Tokens5h: r.Tokens5h, Tokens7d: r.Tokens7d,
 		ExtraSpendOn: r.ExtraSpendOn, PausedManual: r.PausedManual,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
@@ -38,6 +41,7 @@ func accountFromGet(r cerebrodb.GetCerebroAccountRow) Account {
 	return Account{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, Provider: r.Provider, LoginIdentity: r.LoginIdentity,
 		UsageWindowPct: r.UsageWindowPct, ThrottledUntil: r.ThrottledUntil,
+		Tokens5h: r.Tokens5h, Tokens7d: r.Tokens7d,
 		ExtraSpendOn: r.ExtraSpendOn, PausedManual: r.PausedManual,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
@@ -47,6 +51,7 @@ func accountFromCreate(r cerebrodb.CreateCerebroAccountRow) Account {
 	return Account{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, Provider: r.Provider, LoginIdentity: r.LoginIdentity,
 		UsageWindowPct: r.UsageWindowPct, ThrottledUntil: r.ThrottledUntil,
+		Tokens5h: r.Tokens5h, Tokens7d: r.Tokens7d,
 		ExtraSpendOn: r.ExtraSpendOn, PausedManual: r.PausedManual,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
@@ -56,6 +61,7 @@ func accountFromUpdateUsage(r cerebrodb.UpdateCerebroAccountUsageRow) Account {
 	return Account{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, Provider: r.Provider, LoginIdentity: r.LoginIdentity,
 		UsageWindowPct: r.UsageWindowPct, ThrottledUntil: r.ThrottledUntil,
+		Tokens5h: r.Tokens5h, Tokens7d: r.Tokens7d,
 		ExtraSpendOn: r.ExtraSpendOn, PausedManual: r.PausedManual,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
@@ -65,6 +71,7 @@ func accountFromUpdateControls(r cerebrodb.UpdateCerebroAccountControlsRow) Acco
 	return Account{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, Provider: r.Provider, LoginIdentity: r.LoginIdentity,
 		UsageWindowPct: r.UsageWindowPct, ThrottledUntil: r.ThrottledUntil,
+		Tokens5h: r.Tokens5h, Tokens7d: r.Tokens7d,
 		ExtraSpendOn: r.ExtraSpendOn, PausedManual: r.PausedManual,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
@@ -77,6 +84,8 @@ type accountResponse struct {
 	LoginIdentity         string   `json:"login_identity"`
 	UsageWindowPct        *float32 `json:"usage_window_pct"`
 	ThrottledUntil        *string  `json:"throttled_until"`
+	Tokens5h              int64    `json:"tokens_5h"`
+	Tokens7d              int64    `json:"tokens_7d"`
 	ExtraSpendOn          bool     `json:"extra_spend_on"`
 	PausedManual          bool     `json:"paused_manual"`
 	CreatedAt             string   `json:"created_at"`
@@ -93,6 +102,8 @@ func accountResponseFromModel(a Account) accountResponse {
 		WorkspaceID:   util.UUIDToString(a.WorkspaceID),
 		Provider:      a.Provider,
 		LoginIdentity: a.LoginIdentity,
+		Tokens5h:      a.Tokens5h,
+		Tokens7d:      a.Tokens7d,
 		ExtraSpendOn:  a.ExtraSpendOn,
 		PausedManual:  a.PausedManual,
 		CreatedAt:     util.TimestampToString(a.CreatedAt),
@@ -114,11 +125,15 @@ func accountResponseFromAvailabilityRow(r cerebrodb.ListCerebroAccountsWithAvail
 		nearestUnpauseAt = &s
 	}
 	status := deriveAccountStatus(r.RuntimeCount, r.AvailableRuntimeCount, nearestUnpauseAt)
-	return accountResponse{
+	resp := accountResponse{
 		ID:                    util.UUIDToString(r.ID),
 		WorkspaceID:           util.UUIDToString(r.WorkspaceID),
 		Provider:              r.Provider,
 		LoginIdentity:         r.LoginIdentity,
+		Tokens5h:              r.Tokens5h,
+		Tokens7d:              r.Tokens7d,
+		ExtraSpendOn:          r.ExtraSpendOn,
+		PausedManual:          r.PausedManual,
 		CreatedAt:             util.TimestampToString(r.CreatedAt),
 		UpdatedAt:             util.TimestampToString(r.UpdatedAt),
 		RuntimeCount:          r.RuntimeCount,
@@ -126,6 +141,12 @@ func accountResponseFromAvailabilityRow(r cerebrodb.ListCerebroAccountsWithAvail
 		NearestUnpauseAt:      nearestUnpauseAt,
 		Status:                status,
 	}
+	if r.UsageWindowPct.Valid {
+		v := r.UsageWindowPct.Float32
+		resp.UsageWindowPct = &v
+	}
+	resp.ThrottledUntil = util.TimestampToPtr(r.ThrottledUntil)
+	return resp
 }
 
 // deriveAccountStatus maps runtime availability counters to a human-readable

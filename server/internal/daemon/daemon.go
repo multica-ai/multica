@@ -2066,6 +2066,10 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			taskLog.Warn("report task usage failed", "error", err)
 		}
 	}
+	// CEREBRO-PATCH(daemon-task-account-usage): JEH-881 parse the task output
+	// for account-level usage signals (429 / usage-window-%) and persist them
+	// on the cerebro_account row so the UI can show exact quota state.
+	d.maybeReportAccountUsage(ctx, task.RuntimeID, result.Comment, result.Usage, taskLog) // CEREBRO-PATCH(daemon-task-account-token-usage): include exact task tokens in account usage telemetry.
 
 	d.reportTaskResult(ctx, task.ID, result, taskLog)
 

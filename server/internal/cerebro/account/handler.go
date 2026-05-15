@@ -135,13 +135,14 @@ func (h *Handler) UpdateControls(w http.ResponseWriter, r *http.Request) {
 
 // daemonUsageRequest is the payload posted by the local daemon when it
 // observes a 429 retry-after or a usage-window-percent signal in adapter
-// output. Both fields are optional and use pointer semantics so a 429
-// patch can ship without disturbing a previously-reported usage value
-// (and vice versa). A pointer that wraps an explicit null value clears
-// the column.
+// output, or exact token usage from the agent result. All fields are optional.
+// RawMessage fields use pointer semantics so a 429 patch can ship without
+// disturbing a previously-reported usage value (and vice versa). A pointer
+// that wraps an explicit null value clears the column.
 type daemonUsageRequest struct {
 	UsageWindowPct json.RawMessage `json:"usage_window_pct,omitempty"`
 	ThrottledUntil json.RawMessage `json:"throttled_until,omitempty"`
+	Tokens         *int64          `json:"tokens,omitempty"`
 }
 
 // UpdateUsage handles the daemon-callable usage-telemetry endpoint.
@@ -223,6 +224,12 @@ func parseDaemonUsageUpdate(raw daemonUsageRequest) (UsageUpdate, error) {
 			update.ThrottledUntil.Value = &ts
 		}
 	}
+	if raw.Tokens != nil {
+		if *raw.Tokens < 0 {
+			return UsageUpdate{}, errors.New("tokens must be zero or greater")
+		}
+		update.Tokens = raw.Tokens
+	}
 	return update, nil
 }
 
@@ -249,6 +256,8 @@ func (h *Handler) writeServiceError(w http.ResponseWriter, r *http.Request, err 
 		writeError(w, http.StatusBadRequest, "login_identity is required")
 	case errors.Is(err, ErrInvalidUsagePct):
 		writeError(w, http.StatusBadRequest, "usage_window_pct must be between 0 and 100")
+	case errors.Is(err, ErrInvalidTokenCount):
+		writeError(w, http.StatusBadRequest, "tokens must be zero or greater")
 	case errors.Is(err, ErrAccountAlreadyExists):
 		writeError(w, http.StatusConflict, "account already exists for this provider and login_identity")
 	default:

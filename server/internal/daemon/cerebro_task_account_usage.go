@@ -18,17 +18,20 @@ import (
 )
 
 // maybeReportAccountUsage inspects the task result for account-level usage
-// signals and POSTs them to the server when found. Always best-effort:
-// errors are logged but never block the task-completion path.
+// CEREBRO-PATCH(daemon-task-account-token-usage): It also reports exact
+// input+output tokens from the task result so the server can expose rolling
+// account load even when the provider emitted no quota warning. Always
+// best-effort: errors are logged but never block the task-completion path.
 //
 // Signal sources:
 //   - 429 retry-after in result.Comment → ThrottledUntil on the account row.
 //   - Usage-window-percent in result.Comment → UsageWindowPct on the account row.
+//   - Task usage entries → rolling 5h/7d token totals for the account.
 //
 // The account_id is resolved from the identity cache populated on each
 // heartbeat ack. If no account has been registered for this runtime yet the
 // call is a no-op.
-func (d *Daemon) maybeReportAccountUsage(ctx context.Context, runtimeID, comment string, log *slog.Logger) {
+func (d *Daemon) maybeReportAccountUsage(ctx context.Context, runtimeID, comment string, usage []TaskUsageEntry, log *slog.Logger) { // CEREBRO-PATCH(daemon-task-account-token-usage): include task token usage in account telemetry.
 	if d.accountIdentities == nil {
 		return
 	}
@@ -37,13 +40,22 @@ func (d *Daemon) maybeReportAccountUsage(ctx context.Context, runtimeID, comment
 		return
 	}
 	ev := cerebroaccount.ParseAdapterOutput(comment, time.Now())
-	if !ev.HasSignal() {
+	tokens := accountUsageTokens(usage)
+	if !ev.HasSignal() && tokens <= 0 {
 		return
 	}
-	if err := d.client.ReportAccountUsage(ctx, accountID, ev.ThrottledUntil, ev.UsageWindowPct); err != nil {
+	if err := d.client.ReportAccountUsage(ctx, accountID, ev.ThrottledUntil, ev.UsageWindowPct, tokens); err != nil {
 		log.Warn("report account usage failed",
 			"account_id", accountID,
 			"runtime_id", runtimeID,
 			"error", err)
 	}
+}
+
+func accountUsageTokens(usage []TaskUsageEntry) int64 { // CEREBRO-PATCH(daemon-task-account-token-usage): sum tokens for rolling account windows.
+	var total int64
+	for _, u := range usage {
+		total += u.InputTokens + u.OutputTokens
+	}
+	return total
 }

@@ -16,7 +16,9 @@ INSERT INTO cerebro_account (workspace_id, provider, login_identity)
 VALUES ($1, $2, $3)
 RETURNING id, workspace_id, provider, login_identity,
           usage_window_pct, throttled_until, extra_spend_on, paused_manual,
-          created_at, updated_at
+          created_at, updated_at,
+          0::bigint AS tokens_5h,
+          0::bigint AS tokens_7d
 `
 
 type CreateCerebroAccountParams struct {
@@ -36,6 +38,8 @@ type CreateCerebroAccountRow struct {
 	PausedManual   bool               `json:"paused_manual"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Tokens5h       int64              `json:"tokens_5h"`
+	Tokens7d       int64              `json:"tokens_7d"`
 }
 
 func (q *Queries) CreateCerebroAccount(ctx context.Context, arg CreateCerebroAccountParams) (CreateCerebroAccountRow, error) {
@@ -52,6 +56,8 @@ func (q *Queries) CreateCerebroAccount(ctx context.Context, arg CreateCerebroAcc
 		&i.PausedManual,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Tokens5h,
+		&i.Tokens7d,
 	)
 	return i, err
 }
@@ -66,12 +72,37 @@ func (q *Queries) DeleteCerebroAccount(ctx context.Context, id pgtype.UUID) erro
 	return err
 }
 
+const deleteOldCerebroAccountTokenUsage = `-- name: DeleteOldCerebroAccountTokenUsage :execrows
+DELETE FROM cerebro_account_token_usage
+WHERE created_at < now() - interval '8 days'
+`
+
+func (q *Queries) DeleteOldCerebroAccountTokenUsage(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOldCerebroAccountTokenUsage)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getCerebroAccount = `-- name: GetCerebroAccount :one
-SELECT id, workspace_id, provider, login_identity,
-       usage_window_pct, throttled_until, extra_spend_on, paused_manual,
-       created_at, updated_at
-FROM cerebro_account
-WHERE id = $1
+SELECT ca.id, ca.workspace_id, ca.provider, ca.login_identity,
+       ca.usage_window_pct, ca.throttled_until, ca.extra_spend_on, ca.paused_manual,
+       ca.created_at, ca.updated_at,
+       (
+           SELECT COALESCE(SUM(catu.tokens), 0)::bigint
+           FROM cerebro_account_token_usage catu
+           WHERE catu.account_id = ca.id
+             AND catu.created_at >= now() - interval '5 hours'
+       ) AS tokens_5h,
+       (
+           SELECT COALESCE(SUM(catu.tokens), 0)::bigint
+           FROM cerebro_account_token_usage catu
+           WHERE catu.account_id = ca.id
+             AND catu.created_at >= now() - interval '7 days'
+       ) AS tokens_7d
+FROM cerebro_account ca
+WHERE ca.id = $1
 `
 
 type GetCerebroAccountRow struct {
@@ -85,6 +116,8 @@ type GetCerebroAccountRow struct {
 	PausedManual   bool               `json:"paused_manual"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Tokens5h       int64              `json:"tokens_5h"`
+	Tokens7d       int64              `json:"tokens_7d"`
 }
 
 func (q *Queries) GetCerebroAccount(ctx context.Context, id pgtype.UUID) (GetCerebroAccountRow, error) {
@@ -101,17 +134,47 @@ func (q *Queries) GetCerebroAccount(ctx context.Context, id pgtype.UUID) (GetCer
 		&i.PausedManual,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Tokens5h,
+		&i.Tokens7d,
 	)
 	return i, err
 }
 
+const insertCerebroAccountTokenUsage = `-- name: InsertCerebroAccountTokenUsage :exec
+INSERT INTO cerebro_account_token_usage (account_id, workspace_id, tokens)
+VALUES ($1, $2, $3)
+`
+
+type InsertCerebroAccountTokenUsageParams struct {
+	AccountID   pgtype.UUID `json:"account_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Tokens      int64       `json:"tokens"`
+}
+
+func (q *Queries) InsertCerebroAccountTokenUsage(ctx context.Context, arg InsertCerebroAccountTokenUsageParams) error {
+	_, err := q.db.Exec(ctx, insertCerebroAccountTokenUsage, arg.AccountID, arg.WorkspaceID, arg.Tokens)
+	return err
+}
+
 const listCerebroAccounts = `-- name: ListCerebroAccounts :many
-SELECT id, workspace_id, provider, login_identity,
-       usage_window_pct, throttled_until, extra_spend_on, paused_manual,
-       created_at, updated_at
-FROM cerebro_account
-WHERE workspace_id = $1
-ORDER BY provider ASC, lower(login_identity) ASC, created_at ASC
+SELECT ca.id, ca.workspace_id, ca.provider, ca.login_identity,
+       ca.usage_window_pct, ca.throttled_until, ca.extra_spend_on, ca.paused_manual,
+       ca.created_at, ca.updated_at,
+       (
+           SELECT COALESCE(SUM(catu.tokens), 0)::bigint
+           FROM cerebro_account_token_usage catu
+           WHERE catu.account_id = ca.id
+             AND catu.created_at >= now() - interval '5 hours'
+       ) AS tokens_5h,
+       (
+           SELECT COALESCE(SUM(catu.tokens), 0)::bigint
+           FROM cerebro_account_token_usage catu
+           WHERE catu.account_id = ca.id
+             AND catu.created_at >= now() - interval '7 days'
+       ) AS tokens_7d
+FROM cerebro_account ca
+WHERE ca.workspace_id = $1
+ORDER BY ca.provider ASC, lower(ca.login_identity) ASC, ca.created_at ASC
 `
 
 type ListCerebroAccountsRow struct {
@@ -125,6 +188,8 @@ type ListCerebroAccountsRow struct {
 	PausedManual   bool               `json:"paused_manual"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Tokens5h       int64              `json:"tokens_5h"`
+	Tokens7d       int64              `json:"tokens_7d"`
 }
 
 func (q *Queries) ListCerebroAccounts(ctx context.Context, workspaceID pgtype.UUID) ([]ListCerebroAccountsRow, error) {
@@ -147,6 +212,8 @@ func (q *Queries) ListCerebroAccounts(ctx context.Context, workspaceID pgtype.UU
 			&i.PausedManual,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Tokens5h,
+			&i.Tokens7d,
 		); err != nil {
 			return nil, err
 		}
@@ -164,17 +231,35 @@ SELECT
     ca.workspace_id,
     ca.provider,
     ca.login_identity,
+    ca.usage_window_pct,
+    ca.throttled_until,
+    ca.extra_spend_on,
+    ca.paused_manual,
     ca.created_at,
     ca.updated_at,
+    COALESCE(t5.tokens, 0)::bigint                                                              AS tokens_5h,
+    COALESCE(t7.tokens, 0)::bigint                                                              AS tokens_7d,
     COUNT(ar.id)::int                                                                         AS runtime_count,
     COUNT(ar.id) FILTER (WHERE ar.paused_at IS NULL)::int                                    AS available_runtime_count,
     (MIN(ar.unpause_at) FILTER (WHERE ar.paused_at IS NOT NULL AND ar.unpause_at IS NOT NULL))::timestamptz  AS nearest_unpause_at
 FROM cerebro_account ca
+LEFT JOIN LATERAL (
+    SELECT SUM(catu.tokens)::bigint AS tokens
+    FROM cerebro_account_token_usage catu
+    WHERE catu.account_id = ca.id
+      AND catu.created_at >= now() - interval '5 hours'
+) t5 ON true
+LEFT JOIN LATERAL (
+    SELECT SUM(catu.tokens)::bigint AS tokens
+    FROM cerebro_account_token_usage catu
+    WHERE catu.account_id = ca.id
+      AND catu.created_at >= now() - interval '7 days'
+) t7 ON true
 LEFT JOIN agent_runtime ar
     ON  ar.current_account_id = ca.id
     AND ar.workspace_id       = ca.workspace_id
 WHERE ca.workspace_id = $1
-GROUP BY ca.id
+GROUP BY ca.id, COALESCE(t5.tokens, 0), COALESCE(t7.tokens, 0)
 ORDER BY
     COUNT(ar.id) FILTER (WHERE ar.paused_at IS NULL) DESC,
     ca.provider ASC,
@@ -186,8 +271,14 @@ type ListCerebroAccountsWithAvailabilityRow struct {
 	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
 	Provider              string             `json:"provider"`
 	LoginIdentity         string             `json:"login_identity"`
+	UsageWindowPct        pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntil        pgtype.Timestamptz `json:"throttled_until"`
+	ExtraSpendOn          bool               `json:"extra_spend_on"`
+	PausedManual          bool               `json:"paused_manual"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	Tokens5h              int64              `json:"tokens_5h"`
+	Tokens7d              int64              `json:"tokens_7d"`
 	RuntimeCount          int32              `json:"runtime_count"`
 	AvailableRuntimeCount int32              `json:"available_runtime_count"`
 	NearestUnpauseAt      pgtype.Timestamptz `json:"nearest_unpause_at"`
@@ -207,8 +298,14 @@ func (q *Queries) ListCerebroAccountsWithAvailability(ctx context.Context, works
 			&i.WorkspaceID,
 			&i.Provider,
 			&i.LoginIdentity,
+			&i.UsageWindowPct,
+			&i.ThrottledUntil,
+			&i.ExtraSpendOn,
+			&i.PausedManual,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Tokens5h,
+			&i.Tokens7d,
 			&i.RuntimeCount,
 			&i.AvailableRuntimeCount,
 			&i.NearestUnpauseAt,
@@ -224,6 +321,7 @@ func (q *Queries) ListCerebroAccountsWithAvailability(ctx context.Context, works
 }
 
 const updateCerebroAccountControls = `-- name: UpdateCerebroAccountControls :one
+WITH updated AS (
 UPDATE cerebro_account
 SET extra_spend_on = CASE WHEN $2::boolean
                           THEN $3::boolean
@@ -232,10 +330,25 @@ SET extra_spend_on = CASE WHEN $2::boolean
                           THEN $5::boolean
                           ELSE paused_manual END,
     updated_at     = now()
-WHERE id = $1
+WHERE cerebro_account.id = $1
 RETURNING id, workspace_id, provider, login_identity,
           usage_window_pct, throttled_until, extra_spend_on, paused_manual,
           created_at, updated_at
+)
+SELECT updated.id, updated.workspace_id, updated.provider, updated.login_identity, updated.usage_window_pct, updated.throttled_until, updated.extra_spend_on, updated.paused_manual, updated.created_at, updated.updated_at,
+       (
+           SELECT COALESCE(SUM(catu.tokens), 0)::bigint
+           FROM cerebro_account_token_usage catu
+           WHERE catu.account_id = updated.id
+             AND catu.created_at >= now() - interval '5 hours'
+       ) AS tokens_5h,
+       (
+           SELECT COALESCE(SUM(catu.tokens), 0)::bigint
+           FROM cerebro_account_token_usage catu
+           WHERE catu.account_id = updated.id
+             AND catu.created_at >= now() - interval '7 days'
+       ) AS tokens_7d
+FROM updated
 `
 
 type UpdateCerebroAccountControlsParams struct {
@@ -257,6 +370,8 @@ type UpdateCerebroAccountControlsRow struct {
 	PausedManual   bool               `json:"paused_manual"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Tokens5h       int64              `json:"tokens_5h"`
+	Tokens7d       int64              `json:"tokens_7d"`
 }
 
 // UI-driven control toggles. Same partial-update pattern as usage above.
@@ -280,11 +395,14 @@ func (q *Queries) UpdateCerebroAccountControls(ctx context.Context, arg UpdateCe
 		&i.PausedManual,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Tokens5h,
+		&i.Tokens7d,
 	)
 	return i, err
 }
 
 const updateCerebroAccountUsage = `-- name: UpdateCerebroAccountUsage :one
+WITH updated AS (
 UPDATE cerebro_account
 SET usage_window_pct = CASE WHEN $2::boolean
                             THEN $3::real
@@ -293,10 +411,25 @@ SET usage_window_pct = CASE WHEN $2::boolean
                             THEN $5::timestamptz
                             ELSE throttled_until END,
     updated_at       = now()
-WHERE id = $1
+WHERE cerebro_account.id = $1
 RETURNING id, workspace_id, provider, login_identity,
           usage_window_pct, throttled_until, extra_spend_on, paused_manual,
           created_at, updated_at
+)
+SELECT updated.id, updated.workspace_id, updated.provider, updated.login_identity, updated.usage_window_pct, updated.throttled_until, updated.extra_spend_on, updated.paused_manual, updated.created_at, updated.updated_at,
+       (
+           SELECT COALESCE(SUM(catu.tokens), 0)::bigint
+           FROM cerebro_account_token_usage catu
+           WHERE catu.account_id = updated.id
+             AND catu.created_at >= now() - interval '5 hours'
+       ) AS tokens_5h,
+       (
+           SELECT COALESCE(SUM(catu.tokens), 0)::bigint
+           FROM cerebro_account_token_usage catu
+           WHERE catu.account_id = updated.id
+             AND catu.created_at >= now() - interval '7 days'
+       ) AS tokens_7d
+FROM updated
 `
 
 type UpdateCerebroAccountUsageParams struct {
@@ -318,6 +451,8 @@ type UpdateCerebroAccountUsageRow struct {
 	PausedManual   bool               `json:"paused_manual"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Tokens5h       int64              `json:"tokens_5h"`
+	Tokens7d       int64              `json:"tokens_7d"`
 }
 
 // Daemon-driven usage telemetry. Each field is updated only when the
@@ -343,6 +478,8 @@ func (q *Queries) UpdateCerebroAccountUsage(ctx context.Context, arg UpdateCereb
 		&i.PausedManual,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Tokens5h,
+		&i.Tokens7d,
 	)
 	return i, err
 }

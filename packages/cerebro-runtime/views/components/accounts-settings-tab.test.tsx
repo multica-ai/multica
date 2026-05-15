@@ -83,6 +83,8 @@ const acc1: CerebroAccount = {
   login_identity: "user-a@example.com",
   usage_window_pct: null,
   throttled_until: null,
+  tokens_5h: 0,
+  tokens_7d: 0,
   extra_spend_on: false,
   paused_manual: false,
   created_at: "2026-01-01T00:00:00Z",

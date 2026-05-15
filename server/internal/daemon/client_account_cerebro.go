@@ -13,7 +13,7 @@ import (
 )
 
 // ReportAccountUsage posts a partial usage update for the given account.
-// Both parameters are pointer-typed:
+// The signal parameters are pointer-typed:
 //
 //   - A nil pointer means "leave that column alone" on the server.
 //   - A non-nil pointer wrapping a value writes the value.
@@ -23,11 +23,11 @@ import (
 //
 // The endpoint is daemon-auth-scoped: the server validates that the
 // account belongs to the workspace this daemon authenticated against.
-func (c *Client) ReportAccountUsage(ctx context.Context, accountID string, throttledUntil *time.Time, usageWindowPct *float32) error {
+func (c *Client) ReportAccountUsage(ctx context.Context, accountID string, throttledUntil *time.Time, usageWindowPct *float32, tokens int64) error { // CEREBRO-PATCH(daemon-client-account-token-usage): include exact task token total.
 	if accountID == "" {
 		return fmt.Errorf("ReportAccountUsage: accountID is empty")
 	}
-	if throttledUntil == nil && usageWindowPct == nil {
+	if throttledUntil == nil && usageWindowPct == nil && tokens <= 0 {
 		// Nothing to report — avoid an empty round-trip.
 		return nil
 	}
@@ -41,6 +41,9 @@ func (c *Client) ReportAccountUsage(ctx context.Context, accountID string, throt
 	}
 	if usageWindowPct != nil {
 		body["usage_window_pct"] = *usageWindowPct
+	}
+	if tokens > 0 { // CEREBRO-PATCH(daemon-client-account-token-usage): omit absent/zero token reports.
+		body["tokens"] = tokens
 	}
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/accounts/%s/usage", accountID), body, nil)
 }

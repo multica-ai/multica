@@ -236,6 +236,8 @@ export interface CerebroAccount {
   login_identity: string;
   usage_window_pct: number | null;
   throttled_until: string | null;
+  tokens_5h: number; // CEREBRO-PATCH(cerebro-account-client): JEH-1365 rolling account token load.
+  tokens_7d: number;
   extra_spend_on: boolean;
   paused_manual: boolean;
   created_at: string;

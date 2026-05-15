@@ -345,6 +345,8 @@ func main() {
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
+	// CEREBRO-PATCH(cerebro-account-token-retention): bound token telemetry storage to the rolling windows.
+	go runCerebroAccountTokenUsageCleanup(sweepCtx, cerebrodb.New(pool))
 	// CEREBRO-PATCH(main-runtime-pause-sweeper): cerebro auto-unpause sweeper.
 	go cerebroruntime.New(cerebrodb.New(pool), taskSvc, bus).RunUnpauseSweeper(sweepCtx)
 	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 workflow engine subscribe + retry sweeper, wired to the event bus.

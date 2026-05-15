@@ -7,6 +7,10 @@ export interface Account {
   usage_window_pct: number | null;
   /** RFC3339 timestamp when a 429 cooldown lifts. Null when not throttled. */
   throttled_until: string | null;
+  /** Input + output tokens reported by daemons in the last 5 hours. */
+  tokens_5h: number;
+  /** Input + output tokens reported by daemons in the last 7 days. */
+  tokens_7d: number;
   /** User opted in to "allow extra spend" (Claude pro/max). */
   extra_spend_on: boolean;
   /** User manually paused this account from the UI. */

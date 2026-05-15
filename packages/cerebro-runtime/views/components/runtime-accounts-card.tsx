@@ -88,6 +88,10 @@ function AccountRow({ account }: { account: CerebroAccount }) {
           </span>
         </div>
       )}
+      <div className="mt-2 text-[11px] tabular-nums text-muted-foreground">
+        {formatTokenCount(account.tokens_5h)} tokens sidste 5 timer /{" "}
+        {formatTokenCount(account.tokens_7d)} sidste 7 dage
+      </div>
     </li>
   );
 }
@@ -162,4 +166,8 @@ function usageBarColor(pct: number): string {
   if (pct >= 90) return "h-full bg-red-500";
   if (pct >= 75) return "h-full bg-amber-500";
   return "h-full bg-emerald-500";
+}
+
+function formatTokenCount(value: number | null | undefined): string {
+  return new Intl.NumberFormat("da-DK").format(value ?? 0);
 }

@@ -50,6 +50,8 @@ const account: CerebroAccount = {
   login_identity: "user@example.com",
   usage_window_pct: null,
   throttled_until: null,
+  tokens_5h: 0,
+  tokens_7d: 0,
   extra_spend_on: false,
   paused_manual: false,
   created_at: "2026-01-01T00:00:00Z",
@@ -85,8 +87,28 @@ describe("RuntimeAccountsCard", () => {
     expect(screen.getByText("user@example.com")).toBeInTheDocument();
     expect(screen.getByText("claude")).toBeInTheDocument();
     expect(
+      screen.getByText("0 tokens sidste 5 timer / 0 sidste 7 dage"),
+    ).toBeInTheDocument();
+    expect(
       screen.queryByText("someone-else@example.com"),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows rolling token usage for the account", () => {
+    mockUseCerebroAccountsList.mockReturnValue({
+      data: [{ ...account, tokens_5h: 1234, tokens_7d: 987654 }],
+      isLoading: false,
+    });
+
+    render(
+      <RuntimeAccountsCard
+        runtime={{ ...baseRuntime, current_account_id: account.id }}
+      />,
+    );
+
+    expect(
+      screen.getByText("1.234 tokens sidste 5 timer / 987.654 sidste 7 dage"),
+    ).toBeInTheDocument();
   });
 
   it("shows the unknown-account empty state when current_account_id is null", () => {

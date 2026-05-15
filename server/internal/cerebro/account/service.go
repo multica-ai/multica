@@ -25,6 +25,7 @@ var (
 	ErrInvalidLoginIdentity = errors.New("login_identity is required")
 	ErrAccountAlreadyExists = errors.New("account already exists for this provider and login_identity")
 	ErrInvalidUsagePct      = errors.New("usage_window_pct must be between 0 and 100")
+	ErrInvalidTokenCount    = errors.New("tokens must be zero or greater")
 )
 
 type Service struct {
@@ -144,6 +145,7 @@ func (s *Service) Delete(ctx context.Context, workspaceID, actorID, accountID pg
 type UsageUpdate struct {
 	UsageWindowPct *NullableFloat32
 	ThrottledUntil *NullableTime
+	Tokens         *int64
 }
 
 // NullableFloat32 / NullableTime distinguish "absent from the patch" (the
@@ -181,7 +183,29 @@ func (s *Service) UpdateUsage(ctx context.Context, workspaceID, actorID, account
 			params.ThrottledUntil = *v
 		}
 	}
+	if update.Tokens != nil {
+		if *update.Tokens < 0 {
+			return Account{}, ErrInvalidTokenCount
+		}
+		if *update.Tokens > 0 {
+			if err := s.Cerebro.InsertCerebroAccountTokenUsage(ctx, cerebrodb.InsertCerebroAccountTokenUsageParams{
+				AccountID:   existing.ID,
+				WorkspaceID: existing.WorkspaceID,
+				Tokens:      *update.Tokens,
+			}); err != nil {
+				return Account{}, err
+			}
+		}
+	}
 	if !params.UsageWindowPctSet && !params.ThrottledUntilSet {
+		if update.Tokens != nil {
+			a, err := s.Get(ctx, workspaceID, accountID)
+			if err != nil {
+				return Account{}, err
+			}
+			s.publish(EventAccountUpdated, workspaceID, actorID, actorType, map[string]any{"account": accountResponseFromModel(a)})
+			return a, nil
+		}
 		return existing, nil
 	}
 	r, err := s.Cerebro.UpdateCerebroAccountUsage(ctx, params)
