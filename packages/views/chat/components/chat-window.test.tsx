@@ -202,4 +202,14 @@ describe("ChatWindow", () => {
     expect(screen.getByTestId("chat-input")).toHaveTextContent("Charlotte");
     expect(chatState.setSelectedAgentId).toHaveBeenCalledWith("agent-charlotte");
   });
+
+  it("does not intercept clicks while the floating chat is hidden", () => {
+    chatState.hideFloatingChat = true;
+
+    const { container } = renderChatWindow();
+
+    expect(container.firstElementChild).toHaveStyle({
+      pointerEvents: "none",
+    });
+  });
 });

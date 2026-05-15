@@ -430,7 +430,7 @@ export function ChatWindow() {
   const containerStyle: React.CSSProperties = {
     ...(!isExpanded ? { width: renderWidth, height: renderHeight } : {}),
     transformOrigin: "bottom right",
-    pointerEvents: isOpen ? "auto" : "none",
+    pointerEvents: isVisible ? "auto" : "none", // CEREBRO-PATCH(chat-window-hidden-hit-test): hidden admin chat must not intercept mobile row taps.
   };
 
   return (
