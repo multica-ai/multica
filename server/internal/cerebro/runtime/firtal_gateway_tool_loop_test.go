@@ -373,6 +373,45 @@ func TestGatewayCompatRegistryToolLoopDispatchesTools(t *testing.T) { // CEREBRO
 	}
 }
 
+func TestRunToolLoopUsesGatewayCompatTransportForToolEnabledTasks(t *testing.T) { // CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): tool-enabled tasks must not fail before fallback on Anthropic-native /messages.
+	var paths []string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.URL.Path == "/api/ai/proxy/v1/messages" {
+			http.Error(w, `{"error":"upstream_rejected_request","message":"Upstream provider anthropic rejected the request as malformed."}`, http.StatusBadRequest)
+			return
+		}
+		if r.URL.Path != "/api/ai/proxy/v1/chat/completions" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"content":"compat final"}}],"firtal":{"input_tokens":2,"output_tokens":3}}`))
+	}))
+	defer srv.Close()
+
+	e := &FirtalGatewayExecutor{
+		gateway: NewGatewayClient(FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096}, srv.Client()),
+		logger:  testLogger(),
+	}
+	completion, err := e.runToolLoop(context.Background(),
+		FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096},
+		db.Agent{},
+		[]GatewayMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "go"}},
+		GatewayRequestMeta{TaskID: "t1"},
+		pgtype.UUID{},
+		pgtype.UUID{},
+	)
+	if err != nil {
+		t.Fatalf("runToolLoop error = %v", err)
+	}
+	if completion.Output != "compat final" {
+		t.Fatalf("Output = %q, want compat final", completion.Output)
+	}
+	if len(paths) != 1 || paths[0] != "/api/ai/proxy/v1/chat/completions" {
+		t.Fatalf("paths = %v, want only chat-completions", paths)
+	}
+}
+
 func TestWithToolUsageHintAppendsToSystemPrompt(t *testing.T) {
 	in := []GatewayMessage{
 		{Role: "system", Content: "Base prompt."},

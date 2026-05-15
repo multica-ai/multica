@@ -465,6 +465,15 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		}
 	}
 
+	if useRegistry && activeRegistry != nil {
+		// CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): use the provider-compatible tool loop as the primary path for enabled registry tools; prod Anthropic-native failures did not reliably lift Kristian into fallback.
+		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, activeRegistry, enabledTools)
+	}
+	if toolSrv != nil {
+		// CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): keep the legacy three-tool path on the same compat transport so tool-enabled tasks avoid Anthropic-native malformed requests entirely.
+		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools))
+	}
+
 	completion, err := e.runAnthropicToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, anthropicTools, tctx, toolSrv, activeRegistry, useRegistry)
 	if err == nil || !isAnthropicMalformedToolRequest(err) || len(anthropicTools) == 0 {
 		return completion, err
