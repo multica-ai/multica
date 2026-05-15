@@ -34,6 +34,7 @@ func (b *claudeBackend) executeWithGoSDK(ctx context.Context, prompt string, opt
 
 		startTime := time.Now()
 		var output strings.Builder
+		var resultOutput string // fallback: ResultMessage.Result when no TextBlocks
 		var approvedPlanSnapshot string
 		var sessionID string
 		finalStatus := "completed"
@@ -108,6 +109,19 @@ func (b *claudeBackend) executeWithGoSDK(ctx context.Context, prompt string, opt
 					if m.Usage != nil {
 						goSDKParseUsage(*m.Usage, opts.Model, usage)
 					}
+					// Capture final result text as fallback. In streaming mode the CLI
+					// delivers assistant text via TextBlocks which we accumulate above;
+					// ResultMessage.Result is typically empty. However if no TextBlocks
+					// were emitted (e.g. agent action-only response), this is the only
+					// output we have.
+					if m.Result != nil && *m.Result != "" {
+						resultOutput = *m.Result
+					}
+					// ResultMessage signals the end of this query. In streaming mode the CLI
+					// process stays alive waiting for the next query, so the message channel
+					// will NOT close on its own. We must break out to avoid hanging until the
+					// 30-minute context timeout.
+					return nil
 				}
 			}
 			return nil
@@ -132,6 +146,9 @@ func (b *claudeBackend) executeWithGoSDK(ctx context.Context, prompt string, opt
 		emitDisplayEvent(opts.TraceCallback, "status", "Claude SDK", finalStatus, map[string]any{"error": finalError})
 
 		finalOutput := output.String()
+		if finalOutput == "" && resultOutput != "" {
+			finalOutput = resultOutput
+		}
 		if approvedPlanSnapshot != "" {
 			finalOutput = mergeApprovedPlanIntoOutput(opts.VisibleLanguage, approvedPlanSnapshot, finalOutput)
 		}
