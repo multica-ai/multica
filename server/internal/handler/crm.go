@@ -1608,26 +1608,20 @@ func (h *Handler) TestCRMIMAPSetting(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	mailboxID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "mailboxId"), "mailbox id")
+	mailboxID := chi.URLParam(r, "mailboxId")
+	cfg, ok := h.loadCRMIMAPConfig(w, r, workspaceID, &mailboxID)
 	if !ok {
 		return
 	}
-	var host string
-	var port int32
-	err := h.DB.QueryRow(r.Context(), `SELECT host, port FROM crm_imap_setting WHERE id=$1 AND workspace_id=$2`, mailboxID, workspaceID).Scan(&host, &port)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "CRM IMAP setting not found")
-		return
+
+	status := "ok"
+	msg := "IMAP connection successful"
+	if _, err := fetchCRMIMAPMessages(cfg, "INBOX", 1, nil); err != nil {
+		status = "failed"
+		msg = "IMAP connection failed: " + err.Error()
 	}
-	okStatus := strings.TrimSpace(host) != "" && port > 0
-	status := "failed"
-	msg := "IMAP config is incomplete"
-	if okStatus {
-		status = "ok"
-		msg = "IMAP config validated; network connection not attempted"
-	}
-	_, _ = h.DB.Exec(r.Context(), `UPDATE crm_imap_setting SET last_test_status=$3,last_test_message=$4,last_tested_at=now(),updated_at=now() WHERE id=$1 AND workspace_id=$2`, mailboxID, workspaceID, status, msg)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": okStatus, "status": status, "message": msg})
+	_, _ = h.DB.Exec(r.Context(), `UPDATE crm_imap_setting SET last_test_status=$3,last_test_message=$4,last_tested_at=now(),updated_at=now() WHERE id=$1 AND workspace_id=$2`, cfg.UUID, workspaceID, status, msg)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": status == "ok", "status": status, "message": msg})
 }
 
 func (h *Handler) PreviewCRMIMAP(w http.ResponseWriter, r *http.Request) {
