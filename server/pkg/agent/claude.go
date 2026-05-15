@@ -24,7 +24,7 @@ type claudeBackend struct {
 
 func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	if opts.ClaudeUseSDKBridge {
-		return b.executeWithSDKBridge(ctx, prompt, opts)
+		return b.executeWithGoSDK(ctx, prompt, opts)
 	}
 
 	execPath := b.cfg.ExecutablePath
@@ -398,7 +398,7 @@ func (b *claudeBackend) handleControlRequest(ctx context.Context, msg claudeSDKM
 	behavior := "allow"
 	if onApproval != nil {
 		if req.ToolName == "Bash" {
-			if command, _ := inputMap["command"].(string); isTrustedReadOnlyPlatformCommand(command) {
+			if command, _ := inputMap["command"].(string); isTrustedPlatformCommand(command) {
 				behavior = "allow"
 				goto respond
 			}

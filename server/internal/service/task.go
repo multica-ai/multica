@@ -154,6 +154,44 @@ func isTrivialDoneOutput(output string) bool {
 	return false
 }
 
+// noActionSignals are substrings that indicate the agent's output is internal
+// reasoning about choosing silence, not user-facing content. When the fallback
+// output of a comment-triggered task contains any of these, suppress it.
+var noActionSignals = []string{
+	"silence is the correct response",
+	"silence is the right response",
+	"silence is the preferred",
+	"no reply needed",
+	"no reply is needed",
+	"no reply is warranted",
+	"no reply warranted",
+	"no action needed",
+	"no action is needed",
+	"no work was produced",
+	"no work produced",
+	"not going to reply",
+	"choosing not to reply",
+	"choose not to respond",
+	"choosing silence",
+	"exiting silently",
+	"exit silently",
+	"simply exit with no output",
+}
+
+// isNoActionReasoning returns true when the output looks like internal
+// reasoning about why the agent chose not to reply, rather than content
+// intended for the user. Only used as a fallback-comment suppression
+// heuristic for comment-triggered tasks.
+func isNoActionReasoning(output string) bool {
+	lower := strings.ToLower(output)
+	for _, sig := range noActionSignals {
+		if strings.Contains(lower, sig) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *TaskService) captureTaskQueued(ctx context.Context, task db.AgentTaskQueue) {
 	s.captureTaskEvent(ctx, analytics.AgentTaskQueued(s.taskAnalyticsContext(ctx, task)))
 }
@@ -1068,6 +1106,12 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 					body := util.UnescapeBackslashEscapes(payload.Output)
 					if task.TriggerCommentID.Valid && isTrivialDoneOutput(body) {
 						slog.Warn("suppressing trivial comment-trigger fallback output",
+							"task_id", util.UUIDToString(task.ID),
+							"issue_id", util.UUIDToString(task.IssueID),
+							"agent_id", util.UUIDToString(task.AgentID),
+						)
+					} else if task.TriggerCommentID.Valid && isNoActionReasoning(body) {
+						slog.Warn("suppressing no-action reasoning leaked as fallback output",
 							"task_id", util.UUIDToString(task.ID),
 							"issue_id", util.UUIDToString(task.IssueID),
 							"agent_id", util.UUIDToString(task.AgentID),

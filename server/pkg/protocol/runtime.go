@@ -14,6 +14,7 @@ const (
 	InteractionCommandApproval    = "command_approval"
 	InteractionFileChangeApproval = "file_change_approval"
 	InteractionPlanApproval       = "plan_approval"
+	InteractionUserInputRequest   = "user_input_request"
 )
 
 // Interaction status values.

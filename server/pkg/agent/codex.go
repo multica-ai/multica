@@ -723,7 +723,7 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 				detail, _ = params["command"].(string)
 			}
 		}
-		if isTrustedReadOnlyPlatformCommand(detail) {
+		if isTrustedPlatformCommand(detail) {
 			c.respond(id, map[string]any{"decision": "accept"})
 			return
 		}
