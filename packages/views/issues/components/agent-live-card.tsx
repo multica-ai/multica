@@ -16,6 +16,7 @@ import {
   type TimelineItem,
 } from "../../common/task-transcript";
 import { useT } from "../../i18n";
+import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 
 // AgentLiveCard renders a sticky banner at the top of the issue's main
 // column for every active task. Each banner shows "agent X is working",
@@ -276,6 +277,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
   const [elapsed, setElapsed] = useState("");
   const [paused, setPaused] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const isQueued = task.status === "queued";
 
@@ -322,6 +324,11 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
       setCancelling(false);
     }
   }, [task.id, issueId, cancelling, t]);
+
+  const requestCancel = useCallback(() => {
+    if (cancelling) return;
+    setConfirmOpen(true);
+  }, [cancelling]);
 
   const toolCount = items.filter((i) => i.type === "tool_use").length;
 
@@ -382,7 +389,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
             />
           )}
           <button
-            onClick={handleCancel}
+            onClick={requestCancel}
             disabled={cancelling}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
             title={t(($) => $.agent_live.stop_tooltip)}
@@ -392,6 +399,12 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
           </button>
         </div>
       </div>
+      <TerminateTaskConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        onConfirm={() => void handleCancel()}
+        showRunningNote={!isQueued}
+      />
     </div>
   );
 }

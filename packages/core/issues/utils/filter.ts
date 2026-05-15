@@ -1,7 +1,7 @@
 import type { Issue, IssuePriority, IssueStatus } from "../../types";
 
 export interface ActorFilterValue {
-  type: "member" | "agent";
+  type: "member" | "agent" | "squad";
   id: string;
 }
 

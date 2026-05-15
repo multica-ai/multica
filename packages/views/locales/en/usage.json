@@ -1,0 +1,42 @@
+{
+  "title": "Usage",
+  "subtitle": "Token spend and agent activity across this workspace.",
+  "filter": {
+    "project_label": "Project",
+    "all_projects": "All projects",
+    "period_label": "Period"
+  },
+  "kpi": {
+    "cost_label": "Cost · {{days}}D",
+    "tokens_label": "Tokens · {{days}}D",
+    "tokens_hint": "Input {{input}} · Output {{output}}",
+    "run_time_label": "Run time · {{days}}D",
+    "run_time_hint": "Across {{tasks}} tasks",
+    "tasks_label": "Tasks · {{days}}D",
+    "tasks_hint": "{{failed}} failed"
+  },
+  "daily": {
+    "title_cost": "Daily cost",
+    "title_tokens": "Daily tokens",
+    "metric_cost": "Cost",
+    "metric_tokens": "Tokens",
+    "no_data": "No usage in this window."
+  },
+  "leaderboard": {
+    "title": "Leaderboard",
+    "caption": "{{count}} agents",
+    "header_agent": "Agent",
+    "header_tokens": "Tokens",
+    "header_cost": "Cost",
+    "header_time": "Time",
+    "header_tasks": "Tasks",
+    "no_data": "No agent activity in this window."
+  },
+  "empty": {
+    "title": "No usage yet",
+    "body": "Once agents start running tasks here, their token spend and run time will appear in this view."
+  },
+  "duration": {
+    "less_than_minute": "<1m"
+  }
+}

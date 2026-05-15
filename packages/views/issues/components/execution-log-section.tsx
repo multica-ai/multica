@@ -18,6 +18,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
+import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 
 // ─── Agent group coloring ──────────────────────────────────────────────────
 // 8-color palette; each unique agent_id gets a stable color based on
@@ -322,16 +323,22 @@ function activeTimeText(task: AgentTask): string {
 
 // ─── Active row ────────────────────────────────────────────────────────────
 
+import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
+
 function useTriggerText(task: AgentTask): string {
   const { t } = useT("issues");
   const isRetry = !!task.parent_task_id;
+  const retryPrefix = isRetry
+    ? task.attempt && task.attempt > 1
+      ? t(($) => $.execution_log.trigger_retry_attempt_prefix, { attempt: task.attempt })
+      : t(($) => $.execution_log.trigger_retry_prefix)
+    : "";
 
-  // Retry: label prefix + summary
+  if (task.trigger_summary) return retryPrefix + stripMentionMarkdown(task.trigger_summary);
   if (isRetry) {
-    const retryLabel = task.attempt && task.attempt > 1
+    return task.attempt && task.attempt > 1
       ? t(($) => $.execution_log.trigger_retry_attempt, { attempt: task.attempt })
       : t(($) => $.execution_log.trigger_retry);
-    return task.trigger_summary ? `${retryLabel} · ${task.trigger_summary}` : retryLabel;
   }
 
   // Semantic label + cleaned context summary
@@ -373,6 +380,7 @@ function ActiveRow({
 }) {
   const { t } = useT("issues");
   const [cancelling, setCancelling] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
@@ -398,6 +406,11 @@ function ActiveRow({
       ? () => onHighlightComment(task.trigger_comment_id!)
       : undefined;
 
+  const requestCancel = () => {
+    if (cancelling) return;
+    setConfirmOpen(true);
+  };
+
   return (
     <RowShell task={task} runIndex={runIndex} colorClass={colorClass}>
       <TriggerText text={trigger} fullText={task.trigger_summary} onClick={handleTriggerClick} />
@@ -421,7 +434,7 @@ function ActiveRow({
             render={
               <button
                 type="button"
-                onClick={handleCancel}
+                onClick={requestCancel}
                 disabled={cancelling}
                 aria-label={t(($) => $.execution_log.cancel_task_aria)}
               />
@@ -437,6 +450,12 @@ function ActiveRow({
           <TooltipContent>{t(($) => $.execution_log.cancel_task_tooltip)}</TooltipContent>
         </Tooltip>
       </RowActions>
+      <TerminateTaskConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        onConfirm={() => void handleCancel()}
+        showRunningNote={task.status === "running" || task.status === "dispatched"}
+      />
     </RowShell>
   );
 }

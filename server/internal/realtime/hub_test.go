@@ -81,46 +81,6 @@ func connectWS(t *testing.T, server *httptest.Server) *websocket.Conn {
 	return conn
 }
 
-func TestCheckOrigin_AllowsMobileClientWithoutCookie(t *testing.T) {
-	prevOrigins := allowedWSOrigins.Load().([]string)
-	SetAllowedOrigins([]string{"https://app.example.com"})
-	t.Cleanup(func() { SetAllowedOrigins(prevOrigins) })
-
-	req := httptest.NewRequest(http.MethodGet, "/ws?client_platform=mobile", nil)
-	req.Header.Set("Origin", "https://not-allowed.example.com")
-
-	if !checkOrigin(req) {
-		t.Fatal("expected mobile request without browser auth cookie to bypass Origin whitelist")
-	}
-}
-
-func TestCheckOrigin_RejectsDisallowedOriginWithoutMobileClient(t *testing.T) {
-	prevOrigins := allowedWSOrigins.Load().([]string)
-	SetAllowedOrigins([]string{"https://app.example.com"})
-	t.Cleanup(func() { SetAllowedOrigins(prevOrigins) })
-
-	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
-	req.Header.Set("Origin", "https://not-allowed.example.com")
-
-	if checkOrigin(req) {
-		t.Fatal("expected disallowed Origin without mobile client platform to be rejected")
-	}
-}
-
-func TestCheckOrigin_RejectsMobileClientWithBrowserCookie(t *testing.T) {
-	prevOrigins := allowedWSOrigins.Load().([]string)
-	SetAllowedOrigins([]string{"https://app.example.com"})
-	t.Cleanup(func() { SetAllowedOrigins(prevOrigins) })
-
-	req := httptest.NewRequest(http.MethodGet, "/ws?client_platform=mobile", nil)
-	req.Header.Set("Origin", "https://not-allowed.example.com")
-	req.AddCookie(&http.Cookie{Name: auth.AuthCookieName, Value: "browser-session"})
-
-	if checkOrigin(req) {
-		t.Fatal("expected disallowed mobile Origin with browser auth cookie to be rejected")
-	}
-}
-
 // totalClients counts all currently registered clients.
 func totalClients(hub *Hub) int {
 	hub.mu.RLock()
@@ -350,4 +310,42 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.w.Write(p)
+}
+
+func TestCheckOrigin(t *testing.T) {
+	prev := allowedWSOrigins.Load().([]string)
+	SetAllowedOrigins([]string{
+		"http://localhost:3000",
+		"https://multica.ai",
+	})
+	t.Cleanup(func() { SetAllowedOrigins(prev) })
+
+	cases := []struct {
+		name   string
+		host   string
+		origin string
+		want   bool
+	}{
+		{"empty origin allowed", "api.multica.ai", "", true},
+		{"same-origin allowed (native client default)", "localhost:8080", "http://localhost:8080", true},
+		{"same-origin allowed (https)", "api.multica.ai", "https://api.multica.ai", true},
+		{"same-origin allowed (case-insensitive host, RFC 7230)", "API.Multica.AI", "https://api.multica.ai", true},
+		{"whitelisted origin allowed (web cross-origin)", "localhost:8080", "http://localhost:3000", true},
+		{"whitelisted origin allowed (prod web)", "api.multica.ai", "https://multica.ai", true},
+		{"unknown origin rejected (CSWSH defense)", "api.multica.ai", "https://evil.com", false},
+		{"different port rejected", "localhost:8080", "http://localhost:9999", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+			r.Host = tc.host
+			if tc.origin != "" {
+				r.Header.Set("Origin", tc.origin)
+			}
+			if got := checkOrigin(r); got != tc.want {
+				t.Fatalf("checkOrigin(host=%q, origin=%q) = %v, want %v", tc.host, tc.origin, got, tc.want)
+			}
+		})
+	}
 }

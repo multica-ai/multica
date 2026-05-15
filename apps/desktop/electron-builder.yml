@@ -32,6 +32,45 @@ mac:
 dmg:
   artifactName: multica-desktop-${version}-mac-${arch}.${ext}
 linux:
+  # Override the Linux executable name to avoid leaking the scoped npm
+  # package name (`@multica/desktop`) into the installed binary, the
+  # `.desktop` file, and the hicolor icon filename. Without this override
+  # electron-builder defaults `executableName` to the package `name`,
+  # which after slash-stripping becomes `@multicadesktop` — producing
+  # `/usr/share/applications/@multicadesktop.desktop`,
+  # `Icon=@multicadesktop`, and
+  # `/usr/share/icons/hicolor/*/apps/@multicadesktop.png`. The leading `@`
+  # violates the freedesktop desktop-entry naming guidance, so GNOME /
+  # Ubuntu fail to associate the running window with the `.desktop` entry
+  # and fall back to the theme's default app icon (the Settings gear on
+  # Yaru). Forcing `multica` makes every Linux identity slot agree and
+  # matches `StartupWMClass=Multica` (productName-derived).
+  executableName: multica
+  # Pin StartupWMClass to the WM_CLASS Electron emits on X11. Electron
+  # derives WM_CLASS from `app.getName()`, which reads the *packaged*
+  # ASAR's `package.json` — `productName` if present, otherwise `name`.
+  # PR #2437 assumed electron-builder.yml's productName fed app.getName()
+  # directly; it does not. With our source package.json carrying only
+  # `name: "@multica/desktop"`, packaged Electron emitted
+  # `WM_CLASS=@multica/desktop`, which broke association with this entry
+  # and reproduced #2515 on Ubuntu 0.2.31. The fix lives in two places
+  # outside this file — `productName: "Multica"` on the source
+  # package.json (so the ASAR carries it) and `app.setName("Multica")`
+  # in the production branch of `src/main/index.ts` (belt-and-braces).
+  # Keep `StartupWMClass: Multica` pinned here so any future drift in
+  # those two anchors shows up as a diff against this declaration.
+  # Verification on a real Ubuntu install: `xprop WM_CLASS` on a running
+  # window prints `Multica` for both fields.
+  desktop:
+    entry:
+      StartupWMClass: Multica
+  # Point at pre-rendered hicolor sizes. electron-builder *can* generate
+  # 16/24/32/48/64/128/256/512 from a single build/icon.png, but the
+  # auto-generation silently shipped only the 1024×1024 source in our
+  # v0.2.31 .deb (#2515 reproduces this) — leaving GNOME's hicolor lookup
+  # with no usable size and falling back to the theme default. Shipping
+  # the sizes from source removes the toolchain dependency entirely.
+  icon: build/icons
   target:
     - AppImage
     - deb

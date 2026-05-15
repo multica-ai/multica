@@ -852,18 +852,25 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 }
 
 // QuickCreateIssueRequest is the body for POST /api/issues/quick-create. The
-// user picks an agent in the modal and types one line of natural language;
-// the server validates the agent's reachability up front, queues a quick-
-// create task, and returns 202 immediately. The agent translates the prompt
-// into a `multica issue create` invocation in the background; success and
-// failure both surface as inbox notifications to the requester.
+// user picks an actor (agent or squad) in the modal and types one line of
+// natural language; the server validates the actor's reachability up front,
+// queues a quick-create task, and returns 202 immediately. The agent
+// translates the prompt into a `multica issue create` invocation in the
+// background; success and failure both surface as inbox notifications to
+// the requester.
+//
+// Exactly one of AgentID / SquadID is required. When SquadID is set, the
+// task is enqueued against the squad's leader agent and the leader receives
+// the same Operating Protocol briefing it would for an issue assigned to
+// the squad, so it can choose to delegate to a squad member as usual.
 //
 // ProjectID is optional and lets the modal target a specific project so
 // the agent's `multica issue create` invocation passes `--project <uuid>`
 // instead of letting it default. The frontend remembers the user's last
 // pick per workspace, so frequent users skip retyping "in project X".
 type QuickCreateIssueRequest struct {
-	AgentID   string `json:"agent_id"`
+	AgentID   string `json:"agent_id,omitempty"`
+	SquadID   string `json:"squad_id,omitempty"`
 	Prompt    string `json:"prompt"`
 	ProjectID string `json:"project_id,omitempty"`
 }
@@ -885,8 +892,11 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "prompt is required")
 		return
 	}
-	agentUUID, ok := parseUUIDOrBadRequest(w, req.AgentID, "agent_id")
-	if !ok {
+
+	hasAgent := strings.TrimSpace(req.AgentID) != ""
+	hasSquad := strings.TrimSpace(req.SquadID) != ""
+	if hasAgent == hasSquad {
+		writeError(w, http.StatusBadRequest, "exactly one of agent_id or squad_id is required")
 		return
 	}
 
@@ -905,10 +915,48 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve the actor to the agent that will actually run the task. For
+	// agent picks that's the agent itself; for squad picks it's the squad's
+	// leader agent. The leader receives a squad-leader briefing on dispatch
+	// (see daemon.go), matching the behavior of an issue assigned to the
+	// squad — picking a squad here is functionally "ask the squad leader to
+	// create this issue, on behalf of the squad".
+	var agentUUID pgtype.UUID
+	var squadUUID pgtype.UUID
+	if hasSquad {
+		var ok bool
+		squadUUID, ok = parseUUIDOrBadRequest(w, req.SquadID, "squad_id")
+		if !ok {
+			return
+		}
+		squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+			ID:          squadUUID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "squad not found")
+			return
+		}
+		if squad.ArchivedAt.Valid {
+			writeError(w, http.StatusBadRequest, "squad is archived")
+			return
+		}
+		agentUUID = squad.LeaderID
+	} else {
+		var ok bool
+		agentUUID, ok = parseUUIDOrBadRequest(w, req.AgentID, "agent_id")
+		if !ok {
+			return
+		}
+	}
+
 	// Reuse the same workspace-membership / archived / private-agent
 	// ownership rules as `validateAssigneePair` so a user can't POST a
 	// private agent_id they shouldn't be able to dispatch (the frontend
-	// filters them out, but the handler is the trust boundary).
+	// filters them out, but the handler is the trust boundary). Squad
+	// picks reach this with the resolved leader agent; the same rules
+	// apply — a private leader behind a squad the user can't reach
+	// should still be rejected.
 	if status, msg := h.validateAssigneePair(
 		r.Context(), r, workspaceID,
 		pgtype.Text{String: "agent", Valid: true},
@@ -971,7 +1019,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		projectUUID = pid
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, prompt, projectUUID)
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
@@ -1350,6 +1398,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 		}
+		// Squad assigned at creation: trigger the squad leader (skipping
+		// backlog, same parking-lot semantics as agent assignment).
+		if h.shouldEnqueueSquadLeaderOnAssign(r.Context(), issue) {
+			h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, creatorType, actualCreatorID)
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, resp)
@@ -1366,6 +1419,11 @@ type UpdateIssueRequest struct {
 	DueDate            *string  `json:"due_date"`
 	ParentIssueID      *string  `json:"parent_issue_id"`
 	ProjectID          *string  `json:"project_id"`
+	// AttachmentIDs lets the description editor bind newly uploaded files to
+	// this issue so they surface in `GET /api/issues/:id/attachments` and the
+	// editor's preview Eye keeps working past a refresh. Existing bindings
+	// are idempotent — re-sending the same id is a no-op.
+	AttachmentIDs []string `json:"attachment_ids"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -1524,11 +1582,20 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
+	if !ok {
+		return
+	}
+
 	issue, err := h.Queries.UpdateIssue(r.Context(), params)
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
 		return
+	}
+
+	if len(attachmentIDs) > 0 {
+		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
 	}
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
@@ -1572,6 +1639,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		if h.shouldEnqueueAgentTask(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 		}
+
+		// Squad assign: trigger the squad leader, respecting the backlog
+		// parking-lot rule used by agent assignment.
+		if h.shouldEnqueueSquadLeaderOnAssign(r.Context(), issue) {
+			h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
+		}
 	}
 
 	// Trigger the assigned agent when a member moves an issue out of backlog.
@@ -1581,6 +1654,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 		if h.isAgentAssigneeReady(r.Context(), issue) {
 			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+		}
+		if h.isSquadLeaderReady(r.Context(), issue) {
+			h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
 		}
 	}
 
@@ -1596,9 +1672,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 // validateAssigneePair verifies the (assignee_type, assignee_id) pair refers
 // to an existing entity in the workspace. For agent assignees it also rejects
-// archived agents and enforces uniform visibility: private agents are only
-// assignable by their owner — admin/owner roles do NOT bypass this gate
-// (OPE-531).
+// archived agents and enforces uniform visibility (OPE-531): private agents
+// are only assignable by their owner — admin/owner roles do NOT bypass this
+// gate. Agent callers (A2A via X-Agent-ID) are exempt so inter-agent
+// delegation still works.
 //
 // Returns (statusCode, errorMessage). statusCode == 0 means the pair is valid;
 // callers should treat any non-zero status as a rejection and surface it back
@@ -1636,17 +1713,35 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 		if agent.ArchivedAt.Valid {
 			return http.StatusBadRequest, "cannot assign to archived agent"
 		}
-		// Uniform selection policy: private agents are only assignable by
-		// their owner. No admin/owner bypass (OPE-531).
-		if agent.Visibility == "private" {
+		// Uniform selection policy (OPE-531): private agents are only
+		// assignable by their owner — no admin/owner bypass. Agent callers
+		// (A2A) are exempt so inter-agent delegation still works.
+		actorType, _ := h.resolveActor(r, requestUserID(r), workspaceID)
+		if agent.Visibility == "private" && actorType != "agent" {
 			userID := requestUserID(r)
 			if uuidToString(agent.OwnerID) != userID {
 				return http.StatusForbidden, "cannot assign to private agent"
 			}
 		}
 		return 0, ""
+	case "squad":
+		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID:          assigneeID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			return http.StatusBadRequest, "assignee_id does not refer to a squad in this workspace"
+		}
+		if squad.ArchivedAt.Valid {
+			return http.StatusBadRequest, "cannot assign to an archived squad"
+		}
+		leader, err := h.Queries.GetAgent(ctx, squad.LeaderID)
+		if err != nil || leader.ArchivedAt.Valid {
+			return http.StatusBadRequest, "squad leader is archived; cannot assign to this squad"
+		}
+		return 0, ""
 	default:
-		return http.StatusBadRequest, "assignee_type must be 'member' or 'agent'"
+		return http.StatusBadRequest, "assignee_type must be 'member', 'agent', or 'squad'"
 	}
 }
 
@@ -1979,6 +2074,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if h.shouldEnqueueAgentTask(r.Context(), issue) {
 				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
 			}
+			if h.shouldEnqueueSquadLeaderOnAssign(r.Context(), issue) {
+				h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
+			}
 		}
 
 		// Trigger agent when moving out of backlog (batch).
@@ -1986,6 +2084,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 			if h.isAgentAssigneeReady(r.Context(), issue) {
 				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
+			}
+			if h.isSquadLeaderReady(r.Context(), issue) {
+				h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
 			}
 		}
 

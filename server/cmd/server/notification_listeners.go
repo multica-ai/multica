@@ -810,7 +810,7 @@ func notifyIssueSubscribers(
 			Title:         title,
 			Body:          util.StrToText(body),
 			ActorType:     util.StrToText(e.ActorType),
-			ActorID:       parseUUID(e.ActorID),
+			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,
 		})
 		if err != nil {
@@ -878,7 +878,7 @@ func notifyDirect(
 		Title:         title,
 		Body:          util.StrToText(body),
 		ActorType:     util.StrToText(e.ActorType),
-		ActorID:       parseUUID(e.ActorID),
+		ActorID:       optionalUUID(e.ActorID),
 		Details:       details,
 	})
 	if err != nil {
@@ -929,6 +929,7 @@ func notifyMentionedMembers(
 	explicitRecipientIDs := map[string]bool{}
 
 	hasAll := false
+	var squadIDs []string
 	for _, m := range mentions {
 		if m.Type == "all" {
 			hasAll = true
@@ -937,6 +938,29 @@ func notifyMentionedMembers(
 		if m.Type == "member" {
 			recipientIDs[m.ID] = true
 			explicitRecipientIDs[m.ID] = true
+		}
+		if m.Type == "squad" {
+			squadIDs = append(squadIDs, m.ID)
+		}
+	}
+
+	// Expand each @squad mention to its human members. Agent members of a
+	// squad are reached via comment-trigger / assignment paths, not the
+	// mention-inbox path, so we only seed member-typed recipients here.
+	for _, sid := range squadIDs {
+		squadUUID, err := util.ParseUUID(sid)
+		if err != nil {
+			continue
+		}
+		members, err := queries.ListSquadMembers(context.Background(), squadUUID)
+		if err != nil {
+			slog.Error("failed to list squad members for @squad mention", "squad_id", sid, "error", err)
+			continue
+		}
+		for _, sm := range members {
+			if sm.MemberType == "member" {
+				recipientIDs[util.UUIDToString(sm.MemberID)] = true
+			}
 		}
 	}
 
@@ -989,7 +1013,7 @@ func notifyMentionedMembers(
 			Title:         title,
 			Body:          util.StrToText(body),
 			ActorType:     util.StrToText(e.ActorType),
-			ActorID:       parseUUID(e.ActorID),
+			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,
 		})
 		if err != nil {
