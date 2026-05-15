@@ -2216,6 +2216,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	prompt := BuildPrompt(task, provider)
 
+	model := resolveTaskModel(task, entry)
+
 	// Pass the daemon's auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
 	// MULTICA_TASK_SLOT is allocated from the daemon-wide concurrency pool, not
@@ -2230,6 +2232,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
 		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
+	}
+	// CEREBRO-PATCH(daemon-current-model-env): expose resolved model to the agent before backend construction (JEH-1310 Phase 2a).
+	if model != "" {
+		agentEnv["MULTICA_CURRENT_MODEL"] = model
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
@@ -2321,26 +2327,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = task.Agent.McpConfig
 	}
-	// Three-tier model resolution: explicit task.ModelOverride wins (set by
-	// the autopilot dispatcher per JEH-1310), then agent.model, then the
-	// daemon-wide MULTICA_<PROVIDER>_MODEL env var. If all are empty we
-	// deliberately pass "" through — each backend omits `--model` from the
-	// CLI invocation, so the provider picks its own default (Claude Code's
-	// shipped default, codex app-server's account-scoped default, etc.).
-	// Baking a Go-side "recommended default" here is how the cursor
-	// regression happened — static guesses drift from whatever the upstream
-	// CLI actually accepts.
-	model := ""
-	// CEREBRO-PATCH(daemon-task-model-override-tier): per-task override wins (JEH-1310).
-	if task.ModelOverride != "" {
-		model = task.ModelOverride
-	}
-	if model == "" && task.Agent != nil && task.Agent.Model != "" {
-		model = task.Agent.Model
-	}
-	if model == "" {
-		model = entry.Model
-	}
 	execOpts := agent.ExecOptions{
 		Cwd:                       env.WorkDir,
 		Model:                     model,
@@ -2350,10 +2336,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExtraArgs:                 extraArgs,
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
-	}
-	// CEREBRO-PATCH(daemon-current-model-env): expose resolved model to the agent (JEH-1310 Phase 2a).
-	if model != "" {
-		agentEnv["MULTICA_CURRENT_MODEL"] = model
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -2912,6 +2894,17 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	return false
+}
+
+// CEREBRO-PATCH(daemon-task-model-override-tier): per-task override wins (JEH-1310).
+func resolveTaskModel(task Task, entry AgentEntry) string {
+	if task.ModelOverride != "" {
+		return task.ModelOverride
+	}
+	if task.Agent != nil && task.Agent.Model != "" {
+		return task.Agent.Model
+	}
+	return entry.Model
 }
 
 func defaultArgsForProvider(cfg Config, provider string) []string {

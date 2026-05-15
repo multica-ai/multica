@@ -866,6 +866,30 @@ func TestMergeUsage(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(daemon-current-model-test): lock JEH-1310 model resolution priority.
+func TestResolveTaskModelPriority(t *testing.T) {
+	t.Parallel()
+
+	entry := AgentEntry{Model: "env-model"}
+	if got := resolveTaskModel(Task{
+		ModelOverride: "task-model",
+		Agent:         &AgentData{Model: "agent-model"},
+	}, entry); got != "task-model" {
+		t.Fatalf("task override should win, got %q", got)
+	}
+	if got := resolveTaskModel(Task{
+		Agent: &AgentData{Model: "agent-model"},
+	}, entry); got != "agent-model" {
+		t.Fatalf("agent model should win over entry model, got %q", got)
+	}
+	if got := resolveTaskModel(Task{}, entry); got != "env-model" {
+		t.Fatalf("entry model should be fallback, got %q", got)
+	}
+	if got := resolveTaskModel(Task{}, AgentEntry{}); got != "" {
+		t.Fatalf("empty model should remain empty for CLI default, got %q", got)
+	}
+}
+
 // fakeBackend is a test double for agent.Backend that returns preconfigured
 // results. Each call to Execute pops the next entry from the results slice.
 type fakeBackend struct {
