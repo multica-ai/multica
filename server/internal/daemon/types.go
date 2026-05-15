@@ -99,6 +99,10 @@ type Task struct {
 	// and ignore the agent-level value so an operator's runtime-wide cap
 	// can't be bypassed by an agent owner picking a permissive sandbox.
 	RuntimePersonaSandbox string `json:"runtime_persona_sandbox,omitempty"`
+	// CEREBRO-PATCH(daemon-task-model-override): per-task model override
+	// from agent_task_queue.model_override (JEH-1310). Empty = fall back to
+	// Agent.Model, then env, then CLI default — see daemon.go model-resolution.
+	ModelOverride string `json:"model_override,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

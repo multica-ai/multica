@@ -148,6 +148,13 @@
     "select_agent": "选择智能体",
     "section_output_mode": "输出模式",
     "section_schedule": "时间表",
+    "cerebro_model": {
+      "_comment": "CEREBRO-PATCH(autopilot-model-i18n-zh): JEH-1310 — model picker labels.",
+      "label": "模型覆盖",
+      "agent_default_label": "智能体默认",
+      "agent_default_hint": "使用指派智能体配置的模型",
+      "footnote": "覆盖所有运行的智能体默认模型。可用于让简单的状态检查跑在 Haiku 上而不必复制智能体。"
+    },
     "schedule_disabled_reason": "该自动化有多个时间表——请到详情页编辑。",
     "next_run_label": "下次运行：",
     "output_modes": {

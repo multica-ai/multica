@@ -541,6 +541,8 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             description: autopilot.description ?? "",
             assignee_id: autopilot.assignee_id,
             execution_mode: autopilot.execution_mode as AutopilotExecutionMode,
+            // CEREBRO-PATCH(autopilot-model-edit-seed): seed model picker on edit (JEH-1310).
+            model: autopilot.model ?? null,
           }}
           triggers={triggers}
         />

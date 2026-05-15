@@ -284,3 +284,24 @@ SET scope         = sqlc.arg('scope')::text,
     group_id      = sqlc.narg('group_id'),
     updated_at    = now()
 WHERE id = sqlc.arg('id')::uuid;
+
+-- =====================
+-- CEREBRO-PATCH(sqlc-autopilot-model): per-autopilot model override (JEH-1310).
+-- Same UPDATE-after-create pattern as SetAutopilotScope so the upstream
+-- CreateAutopilot signature stays untouched. Passing model = '' clears the
+-- override (NULL in DB), reverting to the agent's default model.
+-- =====================
+
+-- name: SetAutopilotModel :exec
+UPDATE autopilot
+SET model      = NULLIF(sqlc.arg('model')::text, ''),
+    updated_at = now()
+WHERE id = sqlc.arg('id')::uuid;
+
+-- name: SetAgentTaskModelOverride :exec
+-- Applied immediately after the autopilot dispatcher creates an agent_task_queue
+-- row when the source autopilot carries a model override. NULL/empty means the
+-- daemon falls back to agent.model (then env, then CLI default) at run time.
+UPDATE agent_task_queue
+SET model_override = NULLIF(sqlc.arg('model_override')::text, '')
+WHERE id = sqlc.arg('id')::uuid;

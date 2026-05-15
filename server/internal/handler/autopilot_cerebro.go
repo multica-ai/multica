@@ -5,11 +5,15 @@
 package handler
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/access"
+	// CEREBRO-PATCH(autopilot-model-import): per-autopilot model override (JEH-1310).
+	"github.com/multica-ai/multica/server/internal/cerebro/autopilotmodel"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -141,6 +145,58 @@ func (h *Handler) cerebroApplyScopeOnCreate(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		// Edge case: SetScope succeeded but the row vanished (concurrent delete).
 		writeError(w, http.StatusInternalServerError, "autopilot vanished after scope update")
+		return autopilot, false
+	}
+	return updated, true
+}
+
+// cerebroApplyModelOnCreate validates and persists the optional model column
+// after CreateAutopilot. Same UPDATE-after-create pattern as cerebroApplyScopeOnCreate
+// (JEH-1310). Returns the reloaded row when the override is applied; the
+// untouched input row when the request omits the field.
+func (h *Handler) cerebroApplyModelOnCreate(w http.ResponseWriter, r *http.Request, autopilot db.Autopilot, req *CreateAutopilotRequest) (db.Autopilot, bool) {
+	if req.Model == nil {
+		return autopilot, true
+	}
+	if err := autopilotmodel.SetOnAutopilot(r.Context(), h.Queries, autopilot.ID, *req.Model); err != nil {
+		if errors.Is(err, autopilotmodel.ErrUnknownModel) {
+			writeError(w, http.StatusBadRequest, err.Error())
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to apply autopilot model")
+		}
+		return autopilot, false
+	}
+	updated, err := h.Queries.GetAutopilot(r.Context(), autopilot.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "autopilot vanished after model update")
+		return autopilot, false
+	}
+	return updated, true
+}
+
+// cerebroApplyModelOnUpdate persists the model column when the PATCH body
+// includes a "model" key (rawFields is the same map UpdateAutopilot already
+// builds to distinguish present-but-null from absent). Sending {"model": null}
+// or {"model": ""} clears the override; omitting the key leaves it alone.
+func (h *Handler) cerebroApplyModelOnUpdate(w http.ResponseWriter, r *http.Request, autopilot db.Autopilot, req *UpdateAutopilotRequest, rawFields map[string]json.RawMessage) (db.Autopilot, bool) {
+	if _, present := rawFields["model"]; !present {
+		return autopilot, true
+	}
+	model := ""
+	if req.Model != nil {
+		model = *req.Model
+	}
+	if err := autopilotmodel.SetOnAutopilot(r.Context(), h.Queries, autopilot.ID, model); err != nil {
+		if errors.Is(err, autopilotmodel.ErrUnknownModel) {
+			writeError(w, http.StatusBadRequest, err.Error())
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to apply autopilot model")
+		}
+		return autopilot, false
+	}
+	updated, err := h.Queries.GetAutopilot(r.Context(), autopilot.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "autopilot vanished after model update")
 		return autopilot, false
 	}
 	return updated, true

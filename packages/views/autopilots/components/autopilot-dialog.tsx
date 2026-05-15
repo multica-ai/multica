@@ -49,6 +49,8 @@ import type {
 import { TitleEditor, ContentEditor } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AgentPicker } from "./pickers/agent-picker";
+// CEREBRO-PATCH(autopilot-model-section-import): per-autopilot model override (JEH-1310).
+import { CerebroAutopilotModelSection } from "./cerebro-autopilot-model-section";
 import {
   getDefaultTriggerConfig,
   getLocalTimezone,
@@ -68,6 +70,8 @@ export interface AutopilotInitial {
   description: string;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
+  // CEREBRO-PATCH(autopilot-model-initial): seed model picker on edit (JEH-1310).
+  model?: string | null;
 }
 
 export type AutopilotDialogProps =
@@ -250,6 +254,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [executionMode, setExecutionMode] = useState<AutopilotExecutionMode>(
     initial.execution_mode ?? "create_issue",
   );
+  // CEREBRO-PATCH(autopilot-model-state): per-autopilot model override (JEH-1310).
+  const [modelOverride, setModelOverride] = useState<string | null>(initial.model ?? null);
 
   const initialCfg: TriggerConfig = (() => {
     if (isCreate) {
@@ -301,6 +307,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           description: description.trim() || undefined,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          // CEREBRO-PATCH(autopilot-model-create-submit): include model override (JEH-1310).
+          ...(modelOverride ? { model: modelOverride } : {}),
         });
         let scheduleOk = true;
         try {
@@ -323,6 +331,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           description: description.trim() || null,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          // CEREBRO-PATCH(autopilot-model-update-submit): include model override; null clears (JEH-1310).
+          model: modelOverride,
         });
         let scheduleOk = true;
         if (scheduleDirty && !schedulePillDisabled) {
@@ -485,6 +495,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             />
 
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
+
+            {/* CEREBRO-PATCH(autopilot-model-section-render): model override picker (JEH-1310). */}
+            <CerebroAutopilotModelSection value={modelOverride} onChange={setModelOverride} />
 
             <ScheduleSection
               config={triggerConfig}

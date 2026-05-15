@@ -565,3 +565,30 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `sidebar-configure-reorder` | packages/views/layout/app-sidebar.tsx | ~15 | JEH-1296 — configure group reordered: Agents, Runtimes, Autopilot, then WorkflowsNavItem (feature-flagged, inline after autopilots), Skills, Settings. |
 | `sidebar-notification-badge` | packages/views/layout/app-sidebar.tsx | ~30 | JEH-1296 — removes standalone Notifications footer link; moves Notifications into user-avatar Popover (with Bell icon + count + Clear); adds grey count badge overlaid on avatar in top-right corner. |
 | `i18n-sidebar-1296` | packages/views/locales/en/layout.json<br>packages/views/locales/zh-Hans/layout.json | 6 | JEH-1296 — adds `new_message`, `notifications`, `notifications_clear` keys to sidebar locale section. |
+| `autopilot-model-import` | server/internal/handler/autopilot_cerebro.go | 2 | JEH-1310 — import `cerebro/autopilotmodel` so the autopilot create/update handlers can persist the per-autopilot model override. |
+| `autopilot-model-response` | server/internal/handler/autopilot.go | 2 | JEH-1310 — surface the per-autopilot model override on `AutopilotResponse` so the UI/CLI can render and round-trip it. |
+| `autopilot-model-response-field` | server/internal/handler/autopilot.go | 2 | JEH-1310 — map `db.Autopilot.Model` into the response struct. |
+| `autopilot-model-create-req` | server/internal/handler/autopilot.go | 2 | JEH-1310 — accept optional `model` field on `CreateAutopilotRequest`. Empty / missing → agent default. |
+| `autopilot-model-update-req` | server/internal/handler/autopilot.go | 2 | JEH-1310 — accept optional `model` field on `UpdateAutopilotRequest`. Explicit `null` / `""` clears the override. |
+| `autopilot-model-create` | server/internal/handler/autopilot.go | 5 | JEH-1310 — UPDATE-after-CreateAutopilot to set the model override, same pattern as `cerebroApplyScopeOnCreate`. |
+| `autopilot-model-update` | server/internal/handler/autopilot.go | 5 | JEH-1310 — apply the model override after UpdateAutopilot. |
+| `daemon-task-model-override` | server/internal/daemon/types.go | 4 | JEH-1310 — `ModelOverride` field on the daemon-side `Task` struct, populated from `agent_task_queue.model_override` by the claim endpoint. |
+| `daemon-task-model-override-tier` | server/internal/daemon/daemon.go | 4 | JEH-1310 — task-level override is the first tier in model resolution; wins over `agent.Model` and the daemon env var. |
+| `daemon-current-model-env` | server/internal/daemon/daemon.go | 4 | JEH-1310 Phase 2(a) — expose the resolved model to the spawned agent as `MULTICA_CURRENT_MODEL` so it can self-report. |
+| `agent-task-model-override` | server/internal/handler/agent.go | 2 | JEH-1310 — `ModelOverride` field on the API claim response (`AgentTaskResponse`). |
+| `agent-task-model-override-field` | server/internal/handler/agent.go | 2 | JEH-1310 — populate `ModelOverride` from `db.AgentTaskQueue.ModelOverride`. |
+| `autopilot-model-dispatch-create-issue` | server/internal/service/autopilot.go | 4 | JEH-1310 — propagate `autopilot.model` to the just-created task at create_issue dispatch. |
+| `autopilot-model-dispatch-run-only` | server/internal/service/autopilot.go | 4 | JEH-1310 — same propagation on the run_only dispatch path. |
+| `sqlc-autopilot-model` | server/pkg/db/queries/autopilot.sql | 16 | JEH-1310 — `SetAutopilotModel` and `SetAgentTaskModelOverride` queries. Same UPDATE-after-create pattern as `SetAutopilotScope` so the upstream `CreateAutopilot` / `CreateAgentTask` signatures stay untouched. |
+| `autopilot-model-cli` | server/cmd/multica/cerebro_autopilot_model.go | 60 | JEH-1310 — net-new fork file: `--model` flag wiring for `multica autopilot create/update`, reusing `autopilotmodel.Validate`. |
+| `autopilot-model-cli-create-body` | server/cmd/multica/cmd_autopilot.go | 4 | JEH-1310 — attach `model` to create request body, mirrors scope-cli pattern. |
+| `autopilot-model-cli-update-body` | server/cmd/multica/cmd_autopilot.go | 4 | JEH-1310 — attach `model` to update request body. |
+| `execenv-current-model-doc` | server/internal/daemon/execenv/runtime_config.go | 2 | JEH-1310 Phase 2(a) — document `MULTICA_CURRENT_MODEL` in the runtime brief so agents know they can read their own model. |
+| `autopilot-model-section` | packages/views/autopilots/components/cerebro-autopilot-model-section.tsx | 86 | JEH-1310 — net-new fork sibling component: model picker UI for the autopilot dialog, with Anthropic-only registry mirrored from the server side. |
+| `autopilot-model-section-import` | packages/views/autopilots/components/autopilot-dialog.tsx | 2 | JEH-1310 — import the cerebro model section sibling. |
+| `autopilot-model-initial` | packages/views/autopilots/components/autopilot-dialog.tsx | 2 | JEH-1310 — `model` field on `AutopilotInitial`. |
+| `autopilot-model-state` | packages/views/autopilots/components/autopilot-dialog.tsx | 2 | JEH-1310 — local state for the picker. |
+| `autopilot-model-create-submit` | packages/views/autopilots/components/autopilot-dialog.tsx | 2 | JEH-1310 — include `model` on create submission when non-null. |
+| `autopilot-model-update-submit` | packages/views/autopilots/components/autopilot-dialog.tsx | 2 | JEH-1310 — include `model` on update submission; explicit `null` clears the override. |
+| `autopilot-model-section-render` | packages/views/autopilots/components/autopilot-dialog.tsx | 2 | JEH-1310 — render the section between OutputMode and Schedule. |
+| `autopilot-model-edit-seed` | packages/views/autopilots/components/autopilot-detail-page.tsx | 2 | JEH-1310 — pass the persisted `model` through to the edit dialog so the picker shows the current value. |

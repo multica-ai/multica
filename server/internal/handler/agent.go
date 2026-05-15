@@ -214,6 +214,8 @@ type AgentTaskResponse struct {
 	// CEREBRO-PATCH(persona-spawn-subject): JEH-1080 — the human user the agent is acting on behalf of, plus that user's group memberships at claim time.
 	PersonaSpawnUserID   string   `json:"persona_spawn_user_id,omitempty"`
 	PersonaSpawnGroupIDs []string `json:"persona_spawn_group_ids,omitempty"`
+	// CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
+	ModelOverride string `json:"model_override,omitempty"`
 	// RuntimePersonaSandbox is the runtime-level persona sandbox upper
 // CEREBRO-PATCH(agent): persona integration additions.
 	// bound (E1). Empty = no upper bound, the agent's persona_sandbox
@@ -281,6 +283,8 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		ChatSessionID:  uuidToString(t.ChatSessionID),
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
 		Kind:           computeTaskKind(t),
+		// CEREBRO-PATCH(agent-task-model-override-field): surface per-task model override (JEH-1310).
+		ModelOverride: t.ModelOverride.String,
 	}
 }
 

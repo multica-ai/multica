@@ -111,6 +111,16 @@ type AgentTaskQueue struct {
 	TriggerSummary    pgtype.Text        `json:"trigger_summary"`
 	ForceFreshSession bool               `json:"force_fresh_session"`
 	Title             pgtype.Text        `json:"title"`
+	ModelOverride     pgtype.Text        `json:"model_override"`
+}
+
+type AgentToolGrant struct {
+	ID         pgtype.UUID        `json:"id"`
+	AgentID    pgtype.UUID        `json:"agent_id"`
+	ToolName   string             `json:"tool_name"`
+	ConfigJson []byte             `json:"config_json"`
+	Enabled    bool               `json:"enabled"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
 type Artifact struct {
@@ -176,6 +186,7 @@ type Autopilot struct {
 	Scope              string             `json:"scope"`
 	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
 	GroupID            pgtype.UUID        `json:"group_id"`
+	Model              pgtype.Text        `json:"model"`
 }
 
 type AutopilotRun struct {

@@ -2059,17 +2059,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = task.Agent.McpConfig
 	}
-	// Two-tier model resolution: an explicit agent.model wins,
-	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
-	// both are empty we deliberately pass "" through — each
-	// backend omits `--model` from the CLI invocation, so the
-	// provider picks its own default (Claude Code's shipped
-	// default, codex app-server's account-scoped default, etc.).
-	// Baking a Go-side "recommended default" here is how the
-	// cursor regression happened — static guesses drift from
-	// whatever the upstream CLI actually accepts.
+	// Three-tier model resolution: explicit task.ModelOverride wins (set by
+	// the autopilot dispatcher per JEH-1310), then agent.model, then the
+	// daemon-wide MULTICA_<PROVIDER>_MODEL env var. If all are empty we
+	// deliberately pass "" through — each backend omits `--model` from the
+	// CLI invocation, so the provider picks its own default (Claude Code's
+	// shipped default, codex app-server's account-scoped default, etc.).
+	// Baking a Go-side "recommended default" here is how the cursor
+	// regression happened — static guesses drift from whatever the upstream
+	// CLI actually accepts.
 	model := ""
-	if task.Agent != nil && task.Agent.Model != "" {
+	// CEREBRO-PATCH(daemon-task-model-override-tier): per-task override wins (JEH-1310).
+	if task.ModelOverride != "" {
+		model = task.ModelOverride
+	}
+	if model == "" && task.Agent != nil && task.Agent.Model != "" {
 		model = task.Agent.Model
 	}
 	if model == "" {
@@ -2084,6 +2088,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExtraArgs:                 extraArgs,
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
+	}
+	// CEREBRO-PATCH(daemon-current-model-env): expose resolved model to the agent (JEH-1310 Phase 2a).
+	if model != "" {
+		agentEnv["MULTICA_CURRENT_MODEL"] = model
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:

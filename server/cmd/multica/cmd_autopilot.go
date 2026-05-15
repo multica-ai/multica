@@ -307,6 +307,10 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 	if err := cerebroAutopilotCreateScopeBody(ctx, client, cmd, body); err != nil {
 		return err
 	}
+	// CEREBRO-PATCH(autopilot-model-cli-create-body): add model field to create body (JEH-1310).
+	if err := cerebroAutopilotCreateModelBody(cmd, body); err != nil {
+		return err
+	}
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/autopilots", body, &result); err != nil {
@@ -385,6 +389,10 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 	}
 	// CEREBRO-PATCH(autopilot-scope-cli-update-body): add scope fields to update body.
 	if err := cerebroAutopilotUpdateScopeBody(ctx, client, cmd, body); err != nil {
+		return err
+	}
+	// CEREBRO-PATCH(autopilot-model-cli-update-body): add model field to update body (JEH-1310).
+	if err := cerebroAutopilotUpdateModelBody(cmd, body); err != nil {
 		return err
 	}
 

@@ -4,6 +4,7 @@
 // consumer (apps/web, apps/desktop, packages/views, packages/cerebro-*).
 
 import type {} from "@multica/core/types/agent";
+import type {} from "@multica/core/types/autopilot";
 
 // JEH-848 runtime pause/unpause fields on the upstream RuntimeDevice
 // interface. Server adds the columns via 9016_cerebro_runtime_pause and
@@ -25,6 +26,21 @@ declare module "@multica/core/types/agent" {
      * "konto ukendt — daemon har ikke rapporteret endnu".
      */
     current_account_id?: string | null;
+  }
+}
+
+// JEH-1310: per-autopilot model override. Server adds the column via
+// 9029_cerebro_autopilot_model and surfaces it on AutopilotResponse. Field is
+// nullable end-to-end ("" === null === fall back to the agent default).
+declare module "@multica/core/types/autopilot" {
+  interface Autopilot {
+    model?: string | null;
+  }
+  interface CreateAutopilotRequest {
+    model?: string;
+  }
+  interface UpdateAutopilotRequest {
+    model?: string | null;
   }
 }
 
