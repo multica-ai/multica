@@ -23,6 +23,13 @@ import (
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
+// LivenessChecker is a subset of handler.LivenessStore used by TaskService
+// to verify runtime liveness without importing the handler package.
+type LivenessChecker interface {
+	Available() bool
+	IsAliveBatch(ctx context.Context, runtimeIDs []string) (alive map[string]bool, ok bool)
+}
+
 type TaskService struct {
 	Queries   *db.Queries
 	TxStarter TxStarter
@@ -36,6 +43,13 @@ type TaskService struct {
 	// goes through the DB. Wired in router.go from the shared Redis
 	// client.
 	EmptyClaim *EmptyClaimCache
+	// Liveness provides real-time heartbeat verification for runtimes.
+	// Used by the global RequeueExpiredClaimLeases backstop to confirm
+	// a runtime is truly alive before requeuing its expired leases.
+	// When nil or unavailable, global requeue is skipped entirely
+	// (the preflight self-requeue in ClaimTaskForRuntime handles live
+	// runtimes).
+	Liveness LivenessChecker
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
@@ -852,6 +866,15 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	}()
 
 	runtimeKey := util.UUIDToString(runtimeID)
+
+	// Preflight: requeue this runtime's own expired leases BEFORE the
+	// empty-cache fast-path. The runtime is actively claiming so it's
+	// provably alive — safe to requeue without any heartbeat/liveness
+	// check. Must run first because lease expiry is time-driven and
+	// won't bump the empty cache on its own; without this, an expired
+	// lease would be invisible behind a stale empty verdict.
+	s.RequeueExpiredClaimLeasesForRuntime(ctx, runtimeID)
+
 	if s.EmptyClaim.IsEmpty(ctx, runtimeKey) {
 		outcome = "empty_cache_hit"
 		return nil, nil
@@ -864,11 +887,6 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	// otherwise stall the just-queued task until the empty key's TTL
 	// expired.
 	preSelectVersion := s.EmptyClaim.CurrentVersion(ctx, runtimeKey)
-
-	// Preflight: requeue this runtime's own expired leases. The runtime
-	// is actively claiming so it's provably alive — safe to requeue
-	// without any heartbeat/liveness check.
-	s.RequeueExpiredClaimLeasesForRuntime(ctx, runtimeID)
 
 	t0 := time.Now()
 	tasks, err := s.Queries.ListQueuedClaimCandidatesByRuntime(ctx, runtimeID)
@@ -1002,31 +1020,58 @@ func startAgentTaskRowToQueue(r db.StartAgentTaskWithClaimTokenRow) db.AgentTask
 	}
 }
 
-// RequeueExpiredClaimLeases moves dispatched tasks whose claim lease has
-// expired back to 'queued' and sends wakeup notifications so they can be
-// re-claimed. Only requeues tasks whose runtime has a fresh heartbeat
-// (last_seen_at within staleThresholdSecs). Returns the number of tasks requeued.
+// RequeueExpiredClaimLeases is the global backstop that requeues dispatched
+// tasks whose claim lease has expired. Only requeues tasks for runtimes
+// confirmed alive via LivenessStore (Redis heartbeat). When LivenessStore is
+// unavailable, skips entirely — the preflight self-requeue in
+// ClaimTaskForRuntime handles live runtimes, and the offline sweeper will
+// eventually fail tasks on dead ones.
 func (s *TaskService) RequeueExpiredClaimLeases(ctx context.Context, staleThresholdSecs float64) int {
-	requeued, err := s.Queries.RequeueExpiredClaimLeases(ctx, staleThresholdSecs, RequeueMaxPerTick)
+	if s.Liveness == nil || !s.Liveness.Available() {
+		// No reliable liveness signal — skip global requeue.
+		// The preflight in ClaimTaskForRuntime handles live runtimes.
+		return 0
+	}
+
+	runtimeIDs, err := s.Queries.ListRuntimesWithExpiredClaimLeases(ctx)
 	if err != nil {
-		slog.Warn("requeue expired claim leases failed", "error", err)
+		slog.Warn("list runtimes with expired claim leases failed", "error", err)
 		return 0
 	}
-	if len(requeued) == 0 {
+	if len(runtimeIDs) == 0 {
 		return 0
 	}
-	slog.Info("requeued expired claim leases", "count", len(requeued))
-	for _, task := range requeued {
-		s.notifyTaskAvailable(task)
+
+	// Convert to string IDs for liveness check.
+	idStrs := make([]string, len(runtimeIDs))
+	for i, id := range runtimeIDs {
+		idStrs[i] = util.UUIDToString(id)
 	}
-	return len(requeued)
+
+	alive, ok := s.Liveness.IsAliveBatch(ctx, idStrs)
+	if !ok {
+		// Liveness backend errored — skip to avoid requeuing to dead runtimes.
+		slog.Warn("liveness check failed for expired claim leases, skipping global requeue")
+		return 0
+	}
+
+	total := 0
+	for i, id := range runtimeIDs {
+		if alive[idStrs[i]] {
+			total += s.RequeueExpiredClaimLeasesForRuntime(ctx, id)
+		}
+	}
+	return total
 }
 
 // RequeueExpiredClaimLeasesForRuntime requeues this runtime's own expired
 // leases as a preflight step before claiming. Safe because the runtime is
 // actively proving liveness by calling ClaimTask.
 func (s *TaskService) RequeueExpiredClaimLeasesForRuntime(ctx context.Context, runtimeID pgtype.UUID) int {
-	requeued, err := s.Queries.RequeueExpiredClaimLeasesForRuntime(ctx, runtimeID, RequeueMaxPerTick)
+	requeued, err := s.Queries.RequeueExpiredClaimLeasesForRuntime(ctx, db.RequeueExpiredClaimLeasesForRuntimeParams{
+		RuntimeID:  runtimeID,
+		MaxPerTick: RequeueMaxPerTick,
+	})
 	if err != nil {
 		slog.Warn("requeue expired claim leases for runtime failed", "error", err)
 		return 0

@@ -669,3 +669,14 @@ WHERE t.id = e.id
   AND t.claim_expires_at IS NOT NULL
   AND t.claim_expires_at < now()
 RETURNING t.*;
+
+-- name: ListRuntimesWithExpiredClaimLeases :many
+-- Returns distinct runtime IDs that have at least one dispatched task with an
+-- expired claim lease. Used by the global backstop to check liveness before
+-- requeuing.
+SELECT DISTINCT atq.runtime_id
+FROM agent_task_queue atq
+WHERE atq.status = 'dispatched'
+  AND atq.claim_expires_at IS NOT NULL
+  AND atq.claim_expires_at < now()
+  AND atq.runtime_id IS NOT NULL;
