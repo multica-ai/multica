@@ -2098,7 +2098,8 @@ func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *te
 	}
 	if content != "Done." {
 		t.Fatalf("synthesized comment content = %q, want Done.", content)
-
+	}
+}
 
 func TestFailTask_CommentTriggered_CreatesSystemCommentUnderTrigger(t *testing.T) {
 	if testHandler == nil {
@@ -2166,10 +2167,10 @@ func TestFailTask_CommentTriggered_CreatesSystemCommentUnderTrigger(t *testing.T
 		t.Fatalf("read failed task: %v", err)
 	}
 	if status != "failed" {
-		t.Fatalf("expected task status failed, got %%q", status)
+		t.Fatalf("expected task status failed, got %q", status)
 	}
 	if storedError != failMsg {
-		t.Fatalf("expected task error %%q, got %%q", failMsg, storedError)
+		t.Fatalf("expected task error %q, got %q", failMsg, storedError)
 	}
 
 	var commentContent, commentType, parentID string
@@ -2183,15 +2184,13 @@ func TestFailTask_CommentTriggered_CreatesSystemCommentUnderTrigger(t *testing.T
 		t.Fatalf("read generated system comment: %v", err)
 	}
 	if commentType != "system" {
-		t.Fatalf("expected comment type system, got %%q", commentType)
+		t.Fatalf("expected comment type system, got %q", commentType)
 	}
 	if commentContent != failMsg {
-		t.Fatalf("expected comment content %%q, got %%q", failMsg, commentContent)
+		t.Fatalf("expected comment content %q, got %q", failMsg, commentContent)
 	}
 	if parentID != triggerCommentID {
-		t.Fatalf("expected parent_id %%q, got %%q", triggerCommentID, parentID)
-	}
-}
+		t.Fatalf("expected parent_id %q, got %q", triggerCommentID, parentID)
 	}
 }
 
