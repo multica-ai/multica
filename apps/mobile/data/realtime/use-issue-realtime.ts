@@ -50,13 +50,13 @@ import { useWSClient } from "./realtime-provider";
 import {
   addCommentReaction,
   addIssueReaction,
+  appendTimelineEntry,
   clearIssueDetail,
   commentToTimelineEntry,
   patchIssueDetail,
   patchIssueLabels,
   patchMyIssuesList,
   patchTimelineEntry,
-  prependTimelineEntry,
   removeCommentReaction,
   removeFromMyIssuesList,
   removeIssueReaction,
@@ -117,7 +117,7 @@ export function useIssueRealtime(
       ws.on("comment:created", (p) => {
         const payload = p as CommentCreatedPayload;
         if (payload.comment.issue_id !== issueId) return;
-        prependTimelineEntry(
+        appendTimelineEntry(
           qc,
           wsId,
           issueId,
@@ -149,7 +149,7 @@ export function useIssueRealtime(
       ws.on("activity:created", (p) => {
         const payload = p as ActivityCreatedPayload;
         if (payload.issue_id !== issueId) return;
-        prependTimelineEntry(qc, wsId, issueId, payload.entry);
+        appendTimelineEntry(qc, wsId, issueId, payload.entry);
       }),
 
       // ----- Comment reactions -----

@@ -1,23 +1,19 @@
 /**
  * The scrolling timeline. ASC chronological — oldest at top, newest near the
- * bottom (above the composer). Pull-to-refresh refetches issue + timeline;
- * scrolling toward the top while older history exists triggers
- * `fetchNextPage` (we use a non-inverted FlatList, so "older" lives above).
+ * bottom (above the composer). Pull-to-refresh refetches issue + timeline.
+ *
+ * Backend returns the full timeline in one shot (server-side pagination
+ * was dropped in #2322 — p99 ~30 entries per issue, cursor walking only
+ * created bugs at reply-thread boundaries). The previous "Pull to load
+ * older" UX and top-edge `fetchOlder` trigger are gone.
  *
  * Uses native FlatList (mobile baseline doesn't include FlashList — see
  * apps/mobile/CLAUDE.md "Tech-stack baseline"). For the issue volumes the
  * product targets, FlatList is fine.
  */
-import { useCallback, useMemo, useRef } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  RefreshControl,
-  View,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-} from "react-native";
-import type { Issue, TimelineEntry, TimelinePage } from "@multica/core/types";
+import { useMemo } from "react";
+import { ActivityIndicator, FlatList, RefreshControl, View } from "react-native";
+import type { Issue, TimelineEntry } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { IssueHeaderCard } from "./issue-header-card";
 import { IssueDescription } from "./issue-description";
@@ -29,11 +25,8 @@ import { buildTimelineRows, type TimelineRow } from "@/lib/timeline-thread";
 
 interface Props {
   issue: Issue;
-  pages: TimelinePage[] | undefined;
+  entries: TimelineEntry[] | undefined;
   timelineLoading: boolean;
-  hasMoreOlder: boolean;
-  isFetchingOlder: boolean;
-  fetchOlder: () => void;
   refreshing: boolean;
   onRefresh: () => void;
   /** Long-press → Reply on a comment bubbles up via this callback. The
@@ -41,55 +34,24 @@ interface Props {
   onReplyTo: (commentId: string, name: string) => void;
 }
 
-const NEAR_TOP_THRESHOLD = 120;
-
 export function TimelineList({
   issue,
-  pages,
+  entries,
   timelineLoading,
-  hasMoreOlder,
-  isFetchingOlder,
-  fetchOlder,
   refreshing,
   onRefresh,
   onReplyTo,
 }: Props) {
-  // Server pages are DESC (newest first). Concatenate then reverse → ASC,
-  // matching how web's useIssueTimeline shapes its consumer view
-  // (packages/views/issues/hooks/use-issue-timeline.ts:106). Pipeline:
+  // Server already returns ASC oldest-first. Pipeline:
   //   1. coalesceTimeline → merge consecutive identical activities
   //   2. buildTimelineRows → reorder so replies sit adjacent to their parent
   //      and tag each reply with `replyTo` for the card to render the
   //      "↪ Replying to" header + thread-line border. This is the mobile
   //      flat-list interpretation of web's recursive reply tree.
   const data = useMemo<TimelineRow[]>(() => {
-    if (!pages) return [];
-    const flat: TimelineEntry[] = [];
-    for (const page of pages) {
-      for (const entry of page.entries) flat.push(entry);
-    }
-    flat.reverse();
-    return buildTimelineRows(coalesceTimeline(flat));
-  }, [pages]);
-
-  // Manual top-detection for "older" pagination. FlatList only ships a
-  // bottom-anchored `onEndReached`; here we want the inverse, so we watch
-  // contentOffset against the threshold and fire once per crossing.
-  const firingRef = useRef(false);
-  const onScroll = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const y = e.nativeEvent.contentOffset.y;
-      if (y < NEAR_TOP_THRESHOLD) {
-        if (!firingRef.current && hasMoreOlder && !isFetchingOlder) {
-          firingRef.current = true;
-          fetchOlder();
-        }
-      } else {
-        firingRef.current = false;
-      }
-    },
-    [hasMoreOlder, isFetchingOlder, fetchOlder],
-  );
+    if (!entries) return [];
+    return buildTimelineRows(coalesceTimeline(entries));
+  }, [entries]);
 
   const ListHeader = (
     <View>
@@ -101,18 +63,7 @@ export function TimelineList({
           Activity
         </Text>
       </View>
-      {hasMoreOlder ? (
-        <View className="py-3 items-center">
-          {isFetchingOlder ? (
-            <ActivityIndicator size="small" />
-          ) : (
-            <Text className="text-xs text-muted-foreground">
-              Pull to load older
-            </Text>
-          )}
-        </View>
-      ) : null}
-      {timelineLoading && (!pages || pages.length === 0) ? (
+      {timelineLoading && (!entries || entries.length === 0) ? (
         <View className="py-6 items-center">
           <ActivityIndicator />
         </View>
@@ -137,8 +88,6 @@ export function TimelineList({
           <ActivityRow entry={item.entry} />
         )
       }
-      onScroll={onScroll}
-      scrollEventThrottle={64}
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
       }

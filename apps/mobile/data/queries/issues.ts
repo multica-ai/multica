@@ -6,15 +6,9 @@
  * sit under the `issues/<wsId>` prefix — WS handlers can invalidate the
  * whole subtree with one call when needed.
  */
-import {
-  infiniteQueryOptions,
-  queryOptions,
-} from "@tanstack/react-query";
-import type { TimelinePage } from "@multica/core/types";
+import { queryOptions } from "@tanstack/react-query";
 import { api } from "@/data/api";
 import { issueKeys } from "./issue-keys";
-
-type TimelineCursor = { mode: "before"; cursor: string } | null;
 
 export { issueKeys } from "./issue-keys";
 
@@ -47,24 +41,14 @@ export const issueDetailOptions = (wsId: string | null, id: string) =>
     enabled: !!wsId && !!id,
   });
 
-export const issueTimelineInfiniteOptions = (
-  wsId: string | null,
-  id: string,
-) =>
-  infiniteQueryOptions<
-    TimelinePage,
-    Error,
-    { pages: TimelinePage[]; pageParams: TimelineCursor[] },
-    readonly unknown[],
-    TimelineCursor
-  >({
+/**
+ * Single query over the full issue timeline (ASC, oldest first). Mirrors
+ * web's `issueTimelineOptions` post-#2322 — server returns the whole list
+ * in one shot, client-side pagination was deleted.
+ */
+export const issueTimelineOptions = (wsId: string | null, id: string) =>
+  queryOptions({
     queryKey: issueKeys.timeline(wsId, id),
-    queryFn: ({ pageParam, signal }) =>
-      api.listTimeline(id, pageParam, undefined, { signal }),
-    initialPageParam: null,
-    getNextPageParam: (lastPage) =>
-      lastPage.has_more_before && lastPage.next_cursor
-        ? { mode: "before" as const, cursor: lastPage.next_cursor }
-        : undefined,
+    queryFn: ({ signal }) => api.listTimeline(id, { signal }),
     enabled: !!wsId && !!id,
   });

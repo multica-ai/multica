@@ -16,8 +16,8 @@
  *
  * Cache shapes (the design contract here):
  *   - Issue detail:    Issue                                  (keyed by detail(wsId, id))
- *   - Issue timeline:  { pages: TimelinePage[], pageParams }  (keyed by timeline(wsId, id))
- *                      Pages are DESC newest-first; new entries prepend to the FIRST page.
+ *   - Issue timeline:  TimelineEntry[]                        (keyed by timeline(wsId, id))
+ *                      ASC oldest-first; new entries append to the end.
  *   - My Issues list:  Issue[]                                (keyed by myList(wsId, scope, filter))
  *                      Multiple list caches per wsId (one per scope/filter combo).
  *                      Patch ALL of them via setQueriesData on myAll(wsId).
@@ -33,11 +33,9 @@ import type {
   Label,
   Reaction,
   TimelineEntry,
-  TimelinePage,
 } from "@multica/core/types";
 import { issueKeys } from "@/data/queries/issue-keys";
 
-type InfiniteTimeline = { pages: TimelinePage[]; pageParams: unknown[] };
 type TimelinePredicate = (entry: TimelineEntry) => boolean;
 type TimelineMutate = (entry: TimelineEntry) => TimelineEntry;
 
@@ -65,30 +63,25 @@ export function clearIssueDetail(
 }
 
 // =====================================================
-// Issue timeline (infinite query of pages)
+// Issue timeline (flat TimelineEntry[], ASC oldest-first)
 // =====================================================
 
-export function prependTimelineEntry(
+export function appendTimelineEntry(
   qc: QueryClient,
   wsId: string,
   issueId: string,
   entry: TimelineEntry,
 ) {
-  qc.setQueryData<InfiniteTimeline>(
+  qc.setQueryData<TimelineEntry[]>(
     issueKeys.timeline(wsId, issueId),
     (old) => {
-      if (!old || old.pages.length === 0) return old;
-      // Pages are DESC newest-first; first page holds the most recent.
+      if (!old) return old;
       // Skip if the entry is already present — backend can re-emit on
       // reconnect or two clients can echo the same comment.
-      const [first, ...rest] = old.pages;
-      if (first.entries.some((e) => e.id === entry.id && e.type === entry.type)) {
+      if (old.some((e) => e.id === entry.id && e.type === entry.type)) {
         return old;
       }
-      return {
-        ...old,
-        pages: [{ ...first, entries: [entry, ...first.entries] }, ...rest],
-      };
+      return [...old, entry];
     },
   );
 }
@@ -100,18 +93,9 @@ export function patchTimelineEntry(
   predicate: TimelinePredicate,
   mutate: TimelineMutate,
 ) {
-  qc.setQueryData<InfiniteTimeline>(
+  qc.setQueryData<TimelineEntry[]>(
     issueKeys.timeline(wsId, issueId),
-    (old) => {
-      if (!old) return old;
-      return {
-        ...old,
-        pages: old.pages.map((p) => ({
-          ...p,
-          entries: p.entries.map((e) => (predicate(e) ? mutate(e) : e)),
-        })),
-      };
-    },
+    (old) => (old ? old.map((e) => (predicate(e) ? mutate(e) : e)) : old),
   );
 }
 
@@ -121,18 +105,9 @@ export function removeTimelineEntry(
   issueId: string,
   predicate: TimelinePredicate,
 ) {
-  qc.setQueryData<InfiniteTimeline>(
+  qc.setQueryData<TimelineEntry[]>(
     issueKeys.timeline(wsId, issueId),
-    (old) => {
-      if (!old) return old;
-      return {
-        ...old,
-        pages: old.pages.map((p) => ({
-          ...p,
-          entries: p.entries.filter((e) => !predicate(e)),
-        })),
-      };
-    },
+    (old) => (old ? old.filter((e) => !predicate(e)) : old),
   );
 }
 

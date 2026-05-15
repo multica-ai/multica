@@ -37,7 +37,7 @@ import type {
   ProjectResource,
   Reaction,
   SendChatMessageResponse,
-  TimelinePage,
+  TimelineEntry,
   UpdateIssueRequest,
   UpdateProjectRequest,
   User,
@@ -45,9 +45,9 @@ import type {
 } from "@multica/core/types";
 import {
   EMPTY_LIST_ISSUES_RESPONSE,
-  EMPTY_TIMELINE_PAGE,
+  EMPTY_TIMELINE_ENTRIES,
   ListIssuesResponseSchema,
-  TimelinePageSchema,
+  TimelineEntriesSchema,
 } from "@multica/core/api/schemas";
 import {
   AttachmentSchema,
@@ -358,26 +358,26 @@ class ApiClient {
     });
   }
 
-  // V1 only walks "latest → before" (oldest direction). `after` / `around`
-  // are not yet exposed because mobile v1 has no WS push and no notification
-  // deep-link landing target. Mirror of packages/core/api/client.ts
-  // restricted to that subset.
+  // Timeline returns the full ASC entry list in one shot — server-side
+  // pagination was dropped in #2322 (p99 ~30 entries per issue, cursors
+  // were pure overhead and split reply threads at page boundaries).
+  // Call WITHOUT pagination params: the legacy `limit/before/after/around`
+  // path returns the old wrapped shape for back-compat, which mobile must
+  // NOT trigger. See server/internal/handler/activity.go:60-69.
   async listTimeline(
     issueId: string,
-    cursor?: { mode: "before"; cursor: string } | null,
-    limit = 50,
     opts?: { signal?: AbortSignal },
-  ): Promise<TimelinePage> {
-    const p = new URLSearchParams();
-    p.set("limit", String(limit));
-    if (cursor?.mode === "before") p.set("before", cursor.cursor);
+  ): Promise<TimelineEntry[]> {
     const raw = await this.fetch<unknown>(
-      `/api/issues/${issueId}/timeline?${p.toString()}`,
+      `/api/issues/${issueId}/timeline`,
       { signal: opts?.signal },
     );
-    return parseWithFallback(raw, TimelinePageSchema, EMPTY_TIMELINE_PAGE, {
-      endpoint: "GET /api/issues/:id/timeline",
-    });
+    return parseWithFallback(
+      raw,
+      TimelineEntriesSchema,
+      EMPTY_TIMELINE_ENTRIES,
+      { endpoint: "GET /api/issues/:id/timeline" },
+    );
   }
 
   async createComment(

@@ -1,16 +1,14 @@
 /**
  * Comment creation mutation. Mirrors the optimistic + invalidate pattern of
- * apps/mobile/data/mutations/inbox.ts:17 — but on the timeline infinite-query
- * cache shape `{ pages: TimelinePage[]; pageParams: ... }` instead of a flat
- * list.
+ * apps/mobile/data/mutations/inbox.ts:17 — operates on the flat
+ * `TimelineEntry[]` timeline cache (ASC, oldest first; server-side
+ * pagination was dropped in #2322).
  *
  * Optimistic strategy:
  *   - Cancel timeline refetches.
  *   - Snapshot the current cache.
- *   - Prepend a synthetic comment-typed TimelineEntry to the FIRST page (the
- *     newest page, since timeline pages are DESC newest-first). The screen
- *     reverses the flattened pages for ASC display, so a prepend-on-first-page
- *     surfaces at the bottom of the visible timeline (newest position).
+ *   - Append a synthetic comment-typed TimelineEntry to the end of the list
+ *     (newest position, since the array is ASC).
  *   - On error: roll back to the snapshot.
  *   - On settled: invalidate so the server's real comment row replaces the
  *     synthetic one (real id, real created_at).
@@ -23,18 +21,12 @@ import type {
   Label,
   Reaction,
   TimelineEntry,
-  TimelinePage,
   UpdateIssueRequest,
 } from "@multica/core/types";
 import { api } from "@/data/api";
 import { issueKeys } from "@/data/queries/issues";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
-
-type InfiniteData = {
-  pages: TimelinePage[];
-  pageParams: unknown[];
-};
 
 export type ToggleCommentReactionVars = {
   commentId: string;
@@ -68,7 +60,7 @@ export function useCreateComment(issueId: string) {
     onMutate: async ({ content, parentId }) => {
       const key = issueKeys.timeline(wsId, issueId);
       await qc.cancelQueries({ queryKey: key });
-      const prev = qc.getQueryData<InfiniteData>(key);
+      const prev = qc.getQueryData<TimelineEntry[]>(key);
       if (!userId) return { prev, key };
 
       const optimistic: TimelineEntry = {
@@ -85,33 +77,10 @@ export function useCreateComment(issueId: string) {
         attachments: [],
       };
 
-      qc.setQueryData<InfiniteData>(key, (old) => {
-        if (!old || old.pages.length === 0) {
-          return {
-            pages: [
-              {
-                entries: [optimistic],
-                next_cursor: null,
-                prev_cursor: null,
-                has_more_before: false,
-                has_more_after: false,
-              },
-            ],
-            pageParams: [null],
-          };
-        }
-        // Prepend to the first (newest) page. Flattened pages are
-        // reversed in the screen for ASC display, so prepend here =
-        // appears at the bottom (newest) on screen.
-        const [first, ...rest] = old.pages;
-        return {
-          ...old,
-          pages: [
-            { ...first!, entries: [optimistic, ...first!.entries] },
-            ...rest,
-          ],
-        };
-      });
+      // ASC list: new comment goes to the end (newest position on screen).
+      qc.setQueryData<TimelineEntry[]>(key, (old) =>
+        old ? [...old, optimistic] : [optimistic],
+      );
 
       return { prev, key };
     },
@@ -162,36 +131,30 @@ export function useToggleCommentReaction(issueId: string) {
     onMutate: async ({ commentId, emoji, existing }) => {
       const key = issueKeys.timeline(wsId, issueId);
       await qc.cancelQueries({ queryKey: key });
-      const prev = qc.getQueryData<InfiniteData>(key);
+      const prev = qc.getQueryData<TimelineEntry[]>(key);
       if (!userId) return { prev, key };
 
-      qc.setQueryData<InfiniteData>(key, (old) => {
+      qc.setQueryData<TimelineEntry[]>(key, (old) => {
         if (!old) return old;
-        return {
-          ...old,
-          pages: old.pages.map((page) => ({
-            ...page,
-            entries: page.entries.map((entry) => {
-              if (entry.id !== commentId) return entry;
-              const reactions = entry.reactions ?? [];
-              if (existing) {
-                return {
-                  ...entry,
-                  reactions: reactions.filter((r) => r.id !== existing.id),
-                };
-              }
-              const optimistic: Reaction = {
-                id: `optimistic-${emoji}-${Date.now()}`,
-                comment_id: commentId,
-                actor_type: "member",
-                actor_id: userId,
-                emoji,
-                created_at: new Date().toISOString(),
-              };
-              return { ...entry, reactions: [...reactions, optimistic] };
-            }),
-          })),
-        };
+        return old.map((entry) => {
+          if (entry.id !== commentId) return entry;
+          const reactions = entry.reactions ?? [];
+          if (existing) {
+            return {
+              ...entry,
+              reactions: reactions.filter((r) => r.id !== existing.id),
+            };
+          }
+          const optimistic: Reaction = {
+            id: `optimistic-${emoji}-${Date.now()}`,
+            comment_id: commentId,
+            actor_type: "member",
+            actor_id: userId,
+            emoji,
+            created_at: new Date().toISOString(),
+          };
+          return { ...entry, reactions: [...reactions, optimistic] };
+        });
       });
       return { prev, key };
     },

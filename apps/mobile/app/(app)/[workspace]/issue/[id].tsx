@@ -19,7 +19,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useHeaderHeight } from "@react-navigation/elements";
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { TimelineList } from "@/components/issue/timeline-list";
@@ -27,7 +27,7 @@ import { CommentComposer } from "@/components/issue/comment-composer";
 import {
   issueDetailOptions,
   issueKeys,
-  issueTimelineInfiniteOptions,
+  issueTimelineOptions,
 } from "@/data/queries/issues";
 import { useCreateComment } from "@/data/mutations/issues";
 import { useIssueRealtime } from "@/data/realtime/use-issue-realtime";
@@ -46,9 +46,7 @@ export default function IssueDetail() {
   const headerHeight = useHeaderHeight();
 
   const detail = useQuery(issueDetailOptions(wsId, id));
-  const timeline = useInfiniteQuery(
-    issueTimelineInfiniteOptions(wsId, id),
-  );
+  const timeline = useQuery(issueTimelineOptions(wsId, id));
   const createComment = useCreateComment(id);
 
   // Subscribe to per-issue WS events: status/priority/assignee/label
@@ -132,11 +130,8 @@ export default function IssueDetail() {
           <View className="flex-1">
             <TimelineList
               issue={issue}
-              pages={timeline.data?.pages}
+              entries={timeline.data}
               timelineLoading={timeline.isLoading}
-              hasMoreOlder={timeline.hasNextPage}
-              isFetchingOlder={timeline.isFetchingNextPage}
-              fetchOlder={() => timeline.fetchNextPage()}
               refreshing={detail.isRefetching || timeline.isRefetching}
               onRefresh={onRefresh}
               onReplyTo={onReplyTo}
