@@ -17,8 +17,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
-	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -316,7 +316,7 @@ func main() {
 	}
 
 	// Start background sweeper to mark stale runtimes as offline.
-	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
+	go runRuntimeSweeper(sweepCtx, pool, queries, liveness, taskSvc, bus)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runNotificationDeliveryDispatcher(sweepCtx, queries, service.NewEmailService())

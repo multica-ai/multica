@@ -1282,8 +1282,8 @@ func TestListCommentsExcludesSoftDeletedRows(t *testing.T) {
 	assertOnlyActiveComment("/api/issues/" + softDelIssue.ID + "/comments")
 
 	w = assertOnlyActiveComment("/api/issues/" + softDelIssue.ID + "/comments?limit=10&offset=0")
-	if total := w.Header().Get("X-Total-Count"); total != "1" {
-		t.Fatalf("paginated ListComments: expected X-Total-Count 1, got %q", total)
+	if total := w.Header().Get("X-Total-Count"); total != "" {
+		t.Fatalf("ListComments should ignore removed pagination headers, got X-Total-Count %q", total)
 	}
 
 	since := time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
@@ -1392,7 +1392,6 @@ func TestUpdateAgentMcpConfigObjectUpdatesValue(t *testing.T) {
 	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"new"}`)
 }
 
-
 // TestRetryAgentComment_SystemCommentFallbackToTask verifies that retrying a
 // system comment (no parent_id) recovers the trigger_comment_id from the most
 // recent task for the same agent+issue.
@@ -1478,8 +1477,6 @@ func TestRetryAgentComment_SystemCommentFallbackToTask(t *testing.T) {
 		t.Fatalf("expected trigger_comment_id %q, got %q", memberCommentID, gotTriggerCommentID)
 	}
 }
-
-
 
 func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
 	w := httptest.NewRecorder()

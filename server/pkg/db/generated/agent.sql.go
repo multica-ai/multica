@@ -56,7 +56,7 @@ const archiveAgentsByRuntime = `-- name: ArchiveAgentsByRuntime :many
 UPDATE agent
 SET archived_at = now(), archived_by = $1, updated_at = now()
 WHERE runtime_id = ANY($2::uuid[]) AND archived_at IS NULL
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending
 `
 
 type ArchiveAgentsByRuntimeParams struct {
@@ -99,6 +99,7 @@ func (q *Queries) ArchiveAgentsByRuntime(ctx context.Context, arg ArchiveAgentsB
 			&i.CustomArgs,
 			&i.McpConfig,
 			&i.Model,
+			&i.CustomEnvCopiedPending,
 		); err != nil {
 			return nil, err
 		}
@@ -714,8 +715,8 @@ INSERT INTO agent_task_queue (
     trigger_summary, force_fresh_session
 )
 VALUES (
-    $1, $2, $3, 'queued', $4, $5, $6,
-    $7, $8, $9,
+    $1, $2, $3, 'queued', $4, $8, $9,
+    $5, $6, $7,
     $10,
     COALESCE($11::boolean, FALSE)
 )
@@ -727,11 +728,11 @@ type CreateAgentTaskParams struct {
 	RuntimeID         pgtype.UUID `json:"runtime_id"`
 	IssueID           pgtype.UUID `json:"issue_id"`
 	Priority          int32       `json:"priority"`
-	TriggerCommentID  pgtype.UUID `json:"trigger_comment_id"`
-	Context           []byte      `json:"context"`
 	TriggerSource     pgtype.Text `json:"trigger_source"`
 	TriggerActorType  pgtype.Text `json:"trigger_actor_type"`
 	TriggerActorID    pgtype.UUID `json:"trigger_actor_id"`
+	TriggerCommentID  pgtype.UUID `json:"trigger_comment_id"`
+	Context           []byte      `json:"context"`
 	TriggerSummary    pgtype.Text `json:"trigger_summary"`
 	ForceFreshSession pgtype.Bool `json:"force_fresh_session"`
 }
@@ -742,11 +743,11 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.RuntimeID,
 		arg.IssueID,
 		arg.Priority,
-		arg.TriggerCommentID,
-		arg.Context,
 		arg.TriggerSource,
 		arg.TriggerActorType,
 		arg.TriggerActorID,
+		arg.TriggerCommentID,
+		arg.Context,
 		arg.TriggerSummary,
 		arg.ForceFreshSession,
 	)
@@ -935,6 +936,29 @@ type ExpireStaleQueuedTasksParams struct {
 	MaxPerTick int32   `json:"max_per_tick"`
 }
 
+// Fails tasks that have been sitting in 'queued' for longer than the TTL.
+// This is the cleanup arm of the MUL-1899 "queued backlog" fix: even with the
+// new dispatch-time admission gate that refuses to enqueue when the runtime
+// is offline, we still need to drain the historical 87k+ doomed rows and
+// handle edge cases where a runtime goes offline AFTER a task is already
+// queued (the admission check protects new enqueues, not in-flight queue
+// depth).
+//
+// Concurrency safety: the daemon's claim path may race with this sweeper to
+// transition the same row out of 'queued'. We protect against that two
+// ways:
+//  1. The CTE selects victims with FOR UPDATE SKIP LOCKED so a row that is
+//     currently being claimed (or otherwise locked) is skipped — no lock
+//     contention with the dispatch path, and we won't queue up behind it.
+//  2. The outer UPDATE re-checks status='queued' AND the TTL predicate at
+//     apply time. If a daemon claimed the row between selection and update
+//     (e.g. lock released after the claim transaction commits), the row is
+//     already 'dispatched'/'running' and the WHERE clause filters it out
+//     so we cannot clobber an in-flight task.
+//
+// Capped via LIMIT inside the CTE so a single sweep tick cannot monopolise
+// the DB when the backlog is large — the sweeper drains the rest on
+// subsequent ticks.
 func (q *Queries) ExpireStaleQueuedTasks(ctx context.Context, arg ExpireStaleQueuedTasksParams) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, expireStaleQueuedTasks, arg.TtlSecs, arg.MaxPerTick)
 	if err != nil {
@@ -1238,7 +1262,11 @@ SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2
   AND (
     status = 'completed'
-    OR (status = 'failed' AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message'))
+    OR (
+      status = 'failed'
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request')
+      AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
+    )
   )
   AND session_id IS NOT NULL
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
@@ -1257,18 +1285,35 @@ type GetLastTaskSessionRow struct {
 }
 
 // Returns the session_id and work_dir from the most recent task for a given
-// (agent_id, issue_id) pair, used for session resumption. We accept both
-// 'completed' and 'failed' tasks: a failed task may have established a real
-// agent session before crashing (orphaned by a daemon restart, runtime offline,
-// or sweeper timeout), and the daemon pins the resume pointer mid-flight via
-// UpdateAgentTaskSession. Without this, an auto-retry / manual rerun of a
-// mid-run failure would silently start a fresh conversation and lose the
-// in-flight context — exactly what MUL-1128's B branch is meant to fix.
+// (agent_id, issue_id) pair, used for session resumption on the auto-retry
+// path. We accept both 'completed' and 'failed' tasks: a failed task may
+// have established a real agent session before crashing (orphaned by a
+// daemon restart, runtime offline, or sweeper timeout), and the daemon pins
+// the resume pointer mid-flight via UpdateAgentTaskSession. Without this,
+// an auto-retry of a mid-run failure would silently start a fresh
+// conversation and lose the in-flight context — exactly what MUL-1128's B
+// branch is meant to fix.
 //
-// Tasks that ended in a known "poisoned" terminal state are excluded so
-// a rerun does not inherit the bad session. The daemon classifies these
-// failures (iteration_limit, agent_fallback_message) when it detects the
-// agent emitted a fallback marker instead of a real result.
+// Manual rerun (TaskService.RerunIssue) does NOT take this path: it sets
+// force_fresh_session=true on the new task, and the daemon claim handler
+// skips this lookup entirely. The user already judged the prior output bad;
+// resuming the same conversation would replay a poisoned state.
+//
+// Tasks that ended in a known "poisoned" terminal state are also excluded
+// here so even auto-retry does not inherit the bad session. The daemon
+// classifies these failures (iteration_limit, agent_fallback_message,
+// api_invalid_request) when it detects either an agent fallback marker in
+// the output or an upstream API 400 that means the conversation history
+// itself is unprocessable (oversized image, malformed base64, etc.).
+//
+// The error-text ILIKE clause is defense-in-depth for the api_invalid_request
+// shape: a legacy row tagged 'agent_error' (pre-MUL-1921), a deploy-window
+// row that the old code wrote between migration and rollout, or a future
+// error format that escapes the daemon classifier all still get filtered
+// here as long as the canonical Anthropic 400 marker is present in the
+// error text. Migration 079 backfills the failure_reason column itself,
+// so observability stays accurate; this clause guarantees session resume
+// never picks up a bad session even when failure_reason hasn't caught up.
 func (q *Queries) GetLastTaskSession(ctx context.Context, arg GetLastTaskSessionParams) (GetLastTaskSessionRow, error) {
 	row := q.db.QueryRow(ctx, getLastTaskSession, arg.AgentID, arg.IssueID)
 	var i GetLastTaskSessionRow
@@ -1452,6 +1497,11 @@ WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
 ORDER BY created_at DESC
 `
 
+// Backs the issue-detail "agent live" banner. Includes 'queued' so the
+// banner shows up the moment a task is enqueued — not only after a runtime
+// claims it. The queued window can be long when the runtime is offline or
+// busy on a prior task, and a silent UI during that window looks like the
+// platform never received the trigger.
 func (q *Queries) ListActiveTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, listActiveTasksByIssue, issueID)
 	if err != nil {

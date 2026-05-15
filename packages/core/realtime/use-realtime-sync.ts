@@ -596,7 +596,7 @@ export function useRealtimeSync(
     const unsubTaskMessage = ws.on("task:message", (p) => {
       const payload = p as TaskMessagePayload;
       qc.setQueryData<TaskMessagePayload[]>(
-        ["task-messages", payload.task_id],
+        issueKeys.taskMessages(payload.task_id),
         (old = []) => {
           if (old.some((m) => m.seq === payload.seq)) return old;
           return [...old, payload].sort((a, b) => a.seq - b.seq);

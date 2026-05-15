@@ -203,6 +203,12 @@ func (m *mockDBTX) QueryRow(_ context.Context, sql string, args ...interface{}) 
 			return nil
 		})
 	}
+	if strings.Contains(sql, "-- name: HasSquadLeaderNoActionEvaluationForTask") {
+		return scanFuncRow(func(dest ...any) error {
+			*(dest[0].(*bool)) = false
+			return nil
+		})
+	}
 	if strings.Contains(sql, "-- name: CreateComment") {
 		return scanFuncRow(func(dest ...any) error {
 			comment := db.Comment{
@@ -443,7 +449,7 @@ func TestCompleteTask_FallbackCommentIsTopLevel(t *testing.T) {
 	triggerCommentID := testUUID(3)
 	workspaceID := testUUID(4)
 	startedAt := pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true}
-	result, err := json.Marshal(protocol.TaskCompletedPayload{Output: "done"})
+	result, err := json.Marshal(protocol.TaskCompletedPayload{Output: "completed with a visible summary"})
 	if err != nil {
 		t.Fatalf("marshal result: %v", err)
 	}

@@ -39,7 +39,8 @@ export const issueKeys = {
    *  every per-issue list, regardless of which issue is currently mounted. */
   tasksAll: () => ["issues", "tasks"] as const,
   taskRuns: (issueId: string) => ["issues", "task-runs", issueId] as const,
-  taskMessages: (taskId: string) => ["issues", "task-messages", taskId] as const,
+  /** Per-task execution messages. Shared with chat and realtime WS writes. */
+  taskMessages: (taskId: string) => ["task-messages", taskId] as const,
 };
 
 export type MyIssuesFilter = Pick<

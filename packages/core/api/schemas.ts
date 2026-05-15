@@ -22,12 +22,12 @@ import type {
 //     existing UI code already coerces them.
 //   - Arrays default to `[]` so a missing `reactions` / `attachments` /
 //     `entries` field doesn't take the page down.
-//   - Every object schema ends with `.loose()` so unknown server-side
-//     fields pass through unchanged. zod 4's `.object()` defaults to STRIP,
+//   - Every object schema ends with `.passthrough()` so unknown server-side
+//     fields pass through unchanged. zod's `.object()` defaults to STRIP,
 //     which would silently delete fields the schema didn't explicitly list
 //     — fine while the TS type doesn't claim them, but the moment a future
 //     PR adds a TS field without updating the schema, the cast `as T` lies
-//     and the field shows up as `undefined` at runtime. `.loose()` removes
+//     and the field shows up as `undefined` at runtime. `.passthrough()` removes
 //     that synchronisation hazard.
 //
 // These schemas are deliberately not typed as `z.ZodType<TimelineEntry>` /
@@ -51,7 +51,7 @@ const ReactionSchema = z.object({
 // into the fallback `[]`.
 const AttachmentSchema = z.object({
   id: z.string(),
-}).loose();
+}).passthrough();
 
 // Standalone attachment lookup (`GET /api/attachments/{id}`) is the source of
 // truth for click-time download URLs. The two fields the download flow opens
@@ -65,7 +65,7 @@ export const AttachmentResponseSchema = z.object({
   filename: z.string(),
   chat_session_id: z.string().nullable().optional(),
   chat_message_id: z.string().nullable().optional(),
-}).loose();
+}).passthrough();
 
 export const EMPTY_ATTACHMENT: Attachment = {
   id: "",
@@ -84,11 +84,11 @@ export const EMPTY_ATTACHMENT: Attachment = {
   created_at: "",
 };
 
-// All object schemas use `.loose()` so unknown server-side fields pass
-// through unchanged. zod 4's `.object()` defaults to STRIP, which would
+// All object schemas use `.passthrough()` so unknown server-side fields pass
+// through unchanged. zod's `.object()` defaults to STRIP, which would
 // silently drop new fields and surface as a "field neither showed up in
 // the UI" mystery the next time the TS type adopted them but the schema
-// wasn't updated in lock-step. `.loose()` removes that synchronisation
+// wasn't updated in lock-step. `.passthrough()` removes that synchronisation
 // hazard — the schema validates the shape it knows about and leaves the
 // rest alone.
 const TimelineEntrySchema = z.object({
@@ -96,6 +96,7 @@ const TimelineEntrySchema = z.object({
   id: z.string(),
   actor_type: z.string(),
   actor_id: z.string(),
+  actor_display_name: z.string().nullable().optional(),
   created_at: z.string(),
   action: z.string().optional(),
   details: z.record(z.string(), z.unknown()).optional(),
@@ -106,7 +107,7 @@ const TimelineEntrySchema = z.object({
   reactions: z.array(ReactionSchema).optional(),
   attachments: z.array(AttachmentSchema).optional(),
   coalesced_count: z.number().optional(),
-}).loose();
+}).passthrough();
 
 // /timeline returns a flat array of TimelineEntry, oldest first. The
 // previously cursor-paginated wrapper was removed (#1929) — at observed data
@@ -120,6 +121,7 @@ export const CommentSchema = z.object({
   issue_id: z.string(),
   author_type: z.string(),
   author_id: z.string(),
+  author_display_name: z.string().nullable().optional(),
   content: z.string(),
   type: z.string(),
   parent_id: z.string().nullable(),
@@ -127,7 +129,7 @@ export const CommentSchema = z.object({
   attachments: z.array(AttachmentSchema).default([]),
   created_at: z.string(),
   updated_at: z.string(),
-}).loose();
+}).passthrough();
 
 export const CommentsListSchema = z.array(CommentSchema);
 
@@ -152,12 +154,12 @@ const IssueSchema = z.object({
   labels: z.array(z.unknown()).optional(),
   created_at: z.string(),
   updated_at: z.string(),
-}).loose();
+}).passthrough();
 
 export const ListIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
   total: z.number().default(0),
-}).loose();
+}).passthrough();
 
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
   issues: [],
@@ -170,13 +172,13 @@ const SubscriberSchema = z.object({
   user_id: z.string(),
   reason: z.string(),
   created_at: z.string(),
-}).loose();
+}).passthrough();
 
 export const SubscribersListSchema = z.array(SubscriberSchema);
 
 export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
-}).loose();
+}).passthrough();
 
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas
@@ -196,7 +198,7 @@ const DashboardUsageDailySchema = z.object({
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
   task_count: z.number().default(0),
-}).loose();
+}).passthrough();
 
 export const DashboardUsageDailyListSchema = z.array(DashboardUsageDailySchema);
 
@@ -208,7 +210,7 @@ const DashboardUsageByAgentSchema = z.object({
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
   task_count: z.number().default(0),
-}).loose();
+}).passthrough();
 
 export const DashboardUsageByAgentListSchema = z.array(DashboardUsageByAgentSchema);
 
@@ -217,7 +219,7 @@ const DashboardAgentRunTimeSchema = z.object({
   total_seconds: z.number().default(0),
   task_count: z.number().default(0),
   failed_count: z.number().default(0),
-}).loose();
+}).passthrough();
 
 export const DashboardAgentRunTimeListSchema = z.array(DashboardAgentRunTimeSchema);
 
@@ -227,7 +229,7 @@ export const DashboardAgentRunTimeListSchema = z.array(DashboardAgentRunTimeSche
 // reaches these endpoints, and a future server change to the template shape
 // would white-screen older installed builds (#2192 pattern) without these
 // parsers. Lenient by the same rules as IssueSchema above: arrays default to
-// `[]`, optional fields stay optional, `.loose()` lets unknown fields pass
+// `[]`, optional fields stay optional, `.passthrough()` lets unknown fields pass
 // through unchanged.
 // ---------------------------------------------------------------------------
 
@@ -235,7 +237,7 @@ const AgentTemplateSkillRefSchema = z.object({
   source_url: z.string(),
   cached_name: z.string().default(""),
   cached_description: z.string().default(""),
-}).loose();
+}).passthrough();
 
 const AgentTemplateSummarySchemaBase = z.object({
   slug: z.string(),
@@ -248,7 +250,7 @@ const AgentTemplateSummarySchemaBase = z.object({
   // and `.map(...)`, both of which crash on `undefined`. The most common
   // future drift (field renamed / wrapped) lands here.
   skills: z.array(AgentTemplateSkillRefSchema).default([]),
-}).loose();
+}).passthrough();
 
 export const AgentTemplateSummarySchema = AgentTemplateSummarySchemaBase;
 
@@ -258,7 +260,7 @@ export const AgentTemplateSummarySchema = AgentTemplateSummarySchemaBase;
 export const AgentTemplateSummaryListSchema = z.union([
   z.array(AgentTemplateSummarySchemaBase),
   z.object({ templates: z.array(AgentTemplateSummarySchemaBase).default([]) })
-    .loose()
+    .passthrough()
     .transform((v) => v.templates),
 ]);
 
@@ -268,7 +270,7 @@ export const AgentTemplateSchema = AgentTemplateSummarySchemaBase.extend({
   // Detail-only field. Default "" so a malformed detail still renders the
   // header + skill list; the user just sees an empty Instructions block.
   instructions: z.string().default(""),
-}).loose();
+}).passthrough();
 
 // Used as the parse fallback for `GET /api/agent-templates/:slug`. Slug comes
 // from the URL, so we round-trip the requested one back into the fallback
@@ -288,13 +290,13 @@ export const EMPTY_AGENT_TEMPLATE_DETAIL: AgentTemplate = {
 // optional-chains the rest.
 const MinimalAgentSchema = z.object({
   id: z.string(),
-}).loose();
+}).passthrough();
 
 export const CreateAgentFromTemplateResponseSchema = z.object({
   agent: MinimalAgentSchema,
   imported_skill_ids: z.array(z.string()).default([]),
   reused_skill_ids: z.array(z.string()).default([]),
-}).loose();
+}).passthrough();
 
 // Fallback when the success response fails to parse. The agent server-side
 // has likely been created already, so we can't pretend nothing happened —

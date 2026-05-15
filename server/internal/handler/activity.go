@@ -16,9 +16,10 @@ type TimelineEntry struct {
 	Type string `json:"type"` // "activity" or "comment"
 	ID   string `json:"id"`
 
-	ActorType string `json:"actor_type"`
-	ActorID   string `json:"actor_id"`
-	CreatedAt string `json:"created_at"`
+	ActorType        string  `json:"actor_type"`
+	ActorID          string  `json:"actor_id"`
+	ActorDisplayName *string `json:"actor_display_name,omitempty"`
+	CreatedAt        string  `json:"created_at"`
 
 	// Activity-only fields
 	Action  *string         `json:"action,omitempty"`
@@ -166,6 +167,7 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 	}
 	reactions := h.groupReactions(r, ids)
 	attachments := h.groupAttachments(r, ids)
+	displayNames := h.localCLICommentDisplayNames(r.Context(), ids)
 
 	out := make([]TimelineEntry, len(comments))
 	for i, c := range comments {
@@ -174,20 +176,21 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 		updatedAt := timestampToString(c.UpdatedAt)
 		cid := uuidToString(c.ID)
 		out[i] = TimelineEntry{
-			Type:           "comment",
-			ID:             cid,
-			ActorType:      c.AuthorType,
-			ActorID:        uuidToString(c.AuthorID),
-			Content:        &content,
-			CommentType:    &commentType,
-			ParentID:       uuidToPtr(c.ParentID),
-			CreatedAt:      timestampToString(c.CreatedAt),
-			UpdatedAt:      &updatedAt,
-			Reactions:      reactions[cid],
-			Attachments:    attachments[cid],
-			ResolvedAt:     timestampToPtr(c.ResolvedAt),
-			ResolvedByType: textToPtr(c.ResolvedByType),
-			ResolvedByID:   uuidToPtr(c.ResolvedByID),
+			Type:             "comment",
+			ID:               cid,
+			ActorType:        c.AuthorType,
+			ActorID:          uuidToString(c.AuthorID),
+			ActorDisplayName: displayNames[cid],
+			Content:          &content,
+			CommentType:      &commentType,
+			ParentID:         uuidToPtr(c.ParentID),
+			CreatedAt:        timestampToString(c.CreatedAt),
+			UpdatedAt:        &updatedAt,
+			Reactions:        reactions[cid],
+			Attachments:      attachments[cid],
+			ResolvedAt:       timestampToPtr(c.ResolvedAt),
+			ResolvedByType:   textToPtr(c.ResolvedByType),
+			ResolvedByID:     uuidToPtr(c.ResolvedByID),
 		}
 	}
 	return out

@@ -19,6 +19,7 @@ export interface TimelineEntry {
   id: string;
   actor_type: string;
   actor_id: string;
+  actor_display_name?: string | null;
   created_at: string;
   // Activity fields
   action?: string;
@@ -36,4 +37,3 @@ export interface TimelineEntry {
   /** Set by frontend coalescing when consecutive identical activities are merged. */
   coalesced_count?: number;
 }
-

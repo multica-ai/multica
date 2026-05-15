@@ -16,7 +16,7 @@ UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE (runtime_id = ANY($1::uuid[]) OR agent_id = ANY($2::uuid[]))
   AND status IN ('queued', 'dispatched', 'running')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_source, trigger_actor_type, trigger_actor_id, trigger_summary, force_fresh_session
 `
 
 type CancelAgentTasksByRuntimeOrAgentParams struct {
@@ -70,6 +70,9 @@ func (q *Queries) CancelAgentTasksByRuntimeOrAgent(ctx context.Context, arg Canc
 			&i.MaxAttempts,
 			&i.ParentTaskID,
 			&i.FailureReason,
+			&i.TriggerSource,
+			&i.TriggerActorType,
+			&i.TriggerActorID,
 			&i.TriggerSummary,
 			&i.ForceFreshSession,
 		); err != nil {
