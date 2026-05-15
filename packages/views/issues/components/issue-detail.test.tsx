@@ -676,6 +676,20 @@ describe("IssueDetail (shared)", () => {
         );
       });
     });
+
+    it("hides the Latest pill while the highlighted comment is active", async () => {
+      renderIssueDetailWithHighlight("comment-2");
+
+      await waitFor(() => {
+        expect(scrollIntoViewSpy).toHaveBeenCalled();
+      });
+
+      const latestButton = screen.getByRole("button", { name: "Latest" });
+      await waitFor(() => {
+        expect(latestButton).toHaveClass("opacity-0");
+        expect(latestButton).toHaveClass("pointer-events-none");
+      });
+    });
   });
 
   it("sends empty description when editor is cleared", async () => {

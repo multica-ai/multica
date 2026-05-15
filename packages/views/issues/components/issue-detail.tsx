@@ -1883,12 +1883,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </div>
         </div>
         <JumpToLatestButton
-          visible={!isAtBottom && timeline.length > 0}
+          visible={!highlightedId && !isAtBottom && timeline.length > 0}
           onClick={() => scrollToBottom()}
           label="Latest"
           // CEREBRO-PATCH(issue-detail-latest-pill-top-right): JEH-1143 — pin
           // pill to top-right (under PageHeader) so it stops fighting the
           // comment/reply composer for the bottom-right corner on mobile.
+          // CEREBRO-PATCH(issue-detail-latest-hide-on-highlight): JEH-1143 —
+          // hide while inbox→comment highlight is active; that highlight is
+          // the blue top element, not a persistent panel with a stable height.
           className="top-3 bottom-auto"
         />
         </div>
