@@ -26,6 +26,20 @@ import (
 // server refresh.
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
 
+// taskRunner executes a single agent task and returns the result.
+// Extracted as an interface so tests can inject a fake without spawning real
+// agent processes, while keeping test scaffolding out of the production struct.
+type taskRunner interface {
+	run(ctx context.Context, task Task, provider string, slot int, log *slog.Logger) (TaskResult, error)
+}
+
+// taskRunnerFunc adapts a plain function to the taskRunner interface.
+type taskRunnerFunc func(context.Context, Task, string, int, *slog.Logger) (TaskResult, error)
+
+func (f taskRunnerFunc) run(ctx context.Context, task Task, provider string, slot int, log *slog.Logger) (TaskResult, error) {
+	return f(ctx, task, provider, slot, log)
+}
+
 var (
 	isBrewInstall        = cli.IsBrewInstall
 	getBrewPrefix        = cli.GetBrewPrefix
@@ -107,6 +121,9 @@ type Daemon struct {
 	// goroutine can race against t.TempDir cleanup, leaving a partially
 	// deleted bare clone and an unrelated `not empty` cleanup failure.
 	bgSyncs sync.WaitGroup
+
+	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
+	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
 }
 
 // New creates a new Daemon instance.
@@ -116,7 +133,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
-	return &Daemon{
+	d := &Daemon{
 		cfg:                       cfg,
 		client:                    client,
 		repoCache:                 repocache.New(cacheRoot, logger),
@@ -130,7 +147,10 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		runtimeGoneInflight:       make(map[string]struct{}),
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
+		cancelPollInterval:        5 * time.Second,
 	}
+	d.runner = taskRunnerFunc(d.runTask)
+	return d
 }
 
 // setAgentVersion records the detected CLI version for an agent provider so
@@ -1848,7 +1868,14 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
-	cancelledByPoll := d.watchTaskCancellation(runCtx, task.ID, 5*time.Second, taskLog)
+	// Poll interval is d.cancelPollInterval (5s in production, reduced in tests
+	// via direct field override). Guard against zero so a misconfigured daemon
+	// doesn't panic time.NewTicker.
+	pollInterval := d.cancelPollInterval
+	if pollInterval == 0 {
+		pollInterval = 5 * time.Second
+	}
+	cancelledByPoll := d.watchTaskCancellation(runCtx, task.ID, pollInterval, taskLog)
 	go func() {
 		select {
 		case <-cancelledByPoll:
@@ -1857,7 +1884,18 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		}
 	}()
 
-	result, err := d.runTask(runCtx, task, provider, slot, taskLog)
+	result, err := d.runner.run(runCtx, task, provider, slot, taskLog)
+
+	// Report usage before any early return — the agent accumulates tokens
+	// whether the task completes, errors, or is cancelled mid-run by the poll
+	// goroutine. Both claude.go and codex.go populate result.Usage even when
+	// runCtx is cancelled, so dropping this on the cancelled path silently
+	// under-reports billing.
+	if len(result.Usage) > 0 {
+		if usageErr := d.client.ReportTaskUsage(ctx, task.ID, result.Usage); usageErr != nil {
+			taskLog.Warn("report task usage failed", "error", usageErr)
+		}
+	}
 
 	// Check if we were cancelled by the polling goroutine.
 	select {
@@ -1886,13 +1924,6 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	if status, err := d.client.GetTaskStatus(ctx, task.ID); shouldInterruptAgent(status, err) {
 		taskLog.Info("task cancelled during execution, discarding result", "status", status, "error", err)
 		return
-	}
-
-	// Report usage independently so it's captured even for failed/blocked tasks.
-	if len(result.Usage) > 0 {
-		if err := d.client.ReportTaskUsage(ctx, task.ID, result.Usage); err != nil {
-			taskLog.Warn("report task usage failed", "error", err)
-		}
 	}
 
 	d.reportTaskResult(ctx, task.ID, result, taskLog)
