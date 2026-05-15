@@ -135,6 +135,66 @@ func TestProjectResourceLifecycle(t *testing.T) {
 	}
 }
 
+func TestValidateGithubRepoRefAcceptsGitURLForms(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "https",
+			raw:  `{"url":"https://github.com/multica-ai/multica"}`,
+		},
+		{
+			name: "ssh URL",
+			raw:  `{"url":"ssh://git@git.synology.inc/vincentt/opencli-syno-sites.git"}`,
+		},
+		{
+			name: "scp style SSH",
+			raw:  `{"url":"git@git.synology.inc:vincentt/opencli-syno-sites.git"}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := validateGithubRepoRef(json.RawMessage(tc.raw)); err != nil {
+				t.Fatalf("validateGithubRepoRef() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateGithubRepoRefRejectsInvalidGitURLs(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "empty URL",
+			raw:  `{"url":""}`,
+		},
+		{
+			name: "non git URL",
+			raw:  `{"url":"not a url"}`,
+		},
+		{
+			name: "file URL",
+			raw:  `{"url":"file:///etc/passwd"}`,
+		},
+		{
+			name: "malformed scp style",
+			raw:  `{"url":"git@git.synology.inc:"}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := validateGithubRepoRef(json.RawMessage(tc.raw)); err == nil {
+				t.Fatal("validateGithubRepoRef() error = nil, want error")
+			}
+		})
+	}
+}
+
 func TestCreateProjectAttachesResources(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
@@ -341,4 +401,3 @@ func TestCreateProjectRollsBackOnInvalidResource(t *testing.T) {
 		}
 	}
 }
-

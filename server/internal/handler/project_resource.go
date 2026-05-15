@@ -71,8 +71,8 @@ func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (
 }
 
 type githubRepoRef struct {
-	URL                string `json:"url"`
-	DefaultBranchHint  string `json:"default_branch_hint,omitempty"`
+	URL               string `json:"url"`
+	DefaultBranchHint string `json:"default_branch_hint,omitempty"`
 }
 
 func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
@@ -84,8 +84,8 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 	if payload.URL == "" {
 		return nil, errors.New("github_repo: url is required")
 	}
-	if u, err := url.Parse(payload.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return nil, errors.New("github_repo: url must be a valid http(s) URL")
+	if !isValidGitRepoURL(payload.URL) {
+		return nil, errors.New("github_repo: url must be a valid git URL")
 	}
 	payload.DefaultBranchHint = strings.TrimSpace(payload.DefaultBranchHint)
 	out, err := json.Marshal(payload)
@@ -93,6 +93,42 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func isValidGitRepoURL(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.ContainsAny(raw, " \t\r\n") {
+		return false
+	}
+
+	if u, err := url.Parse(raw); err == nil && u.Host != "" {
+		switch u.Scheme {
+		case "http", "https", "ssh":
+			return true
+		}
+	}
+
+	return isSCPStyleGitURL(raw)
+}
+
+func isSCPStyleGitURL(raw string) bool {
+	at := strings.Index(raw, "@")
+	if at <= 0 || at == len(raw)-1 {
+		return false
+	}
+
+	rest := raw[at+1:]
+	colon := strings.Index(rest, ":")
+	if colon <= 0 || colon == len(rest)-1 {
+		return false
+	}
+
+	host := rest[:colon]
+	pathPart := rest[colon+1:]
+	if strings.Contains(host, "/") || strings.HasPrefix(pathPart, "/") {
+		return false
+	}
+	return true
 }
 
 // loadProjectForResource resolves the project, enforces workspace ownership,
