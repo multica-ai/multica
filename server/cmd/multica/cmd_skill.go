@@ -54,7 +54,7 @@ var skillDeleteCmd = &cobra.Command{
 
 var skillImportCmd = &cobra.Command{
 	Use:   "import",
-	Short: "Import a skill from a URL (clawhub.ai, skills.sh, or github.com)",
+	Short: "Import a skill from a URL (clawhub.ai, skills.sh, github.com, or gitee.com)",
 	RunE:  runSkillImport,
 }
 
